@@ -5,6 +5,7 @@ from faker import Faker
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--admin-email', required=True)
+parser.add_argument('--port', default=8000)
 args = parser.parse_args()
 
 # ========================================================================================================================
@@ -13,7 +14,7 @@ class AdminTester:
 
     # get bearer token
     print("logging in admin user")
-    r = requests.post('http://localhost:8000/adminapi/login/', json={
+    r = requests.post(f'http://localhost:{args.port}/adminapi/login/', json={
         'email': adminuseremail, 'password': 'password'
     })
     resp = r.json()
@@ -25,7 +26,7 @@ class AdminTester:
 
   def adminget(self, endpoint):
     print(f"GET /adminapi/{endpoint}")
-    r = requests.get(f'http://localhost:8000/adminapi/{endpoint}', headers=self.adminheaders)
+    r = requests.get(f'http://localhost:{args.port}/adminapi/{endpoint}', headers=self.adminheaders)
     try:
       print(r.json())
       return r.json()
@@ -34,7 +35,7 @@ class AdminTester:
 
   def adminpost(self, endpoint, **kwargs):
     print(f"POST /adminapi/{endpoint}")
-    r = requests.post(f'http://localhost:8000/adminapi/{endpoint}', headers=self.adminheaders, json=kwargs.get('json'))
+    r = requests.post(f'http://localhost:{args.port}/adminapi/{endpoint}', headers=self.adminheaders, json=kwargs.get('json'))
     try:
       print(r.json())
       return r.json()
@@ -49,7 +50,7 @@ class ClientTester:
 
   def clientget(self, endpoint):
     print(f"GET /api/{endpoint}")
-    r = requests.get(f'http://localhost:8000/api/{endpoint}', headers=self.clientheaders)
+    r = requests.get(f'http://localhost:{args.port}/api/{endpoint}', headers=self.clientheaders)
     try:
       print(r.json())
       return r.json()
@@ -58,7 +59,7 @@ class ClientTester:
 
   def clientpost(self, endpoint, **kwargs):
     print(f"POST /api/{endpoint}")
-    r = requests.post(f'http://localhost:8000/api/{endpoint}', headers=self.clientheaders, json=kwargs.get('json'))
+    r = requests.post(f'http://localhost:{args.port}/api/{endpoint}', headers=self.clientheaders, json=kwargs.get('json'))
     try:
       print(r.json())
       return r.json()
