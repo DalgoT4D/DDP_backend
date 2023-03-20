@@ -26,6 +26,8 @@ def checkenv():
 
   if not valid:
     return False
+  
+  return True
 
 if not checkenv():
   sys.exit(0)
@@ -46,8 +48,8 @@ for cmd in [
   # f"CREATE USER {dbuser} WITH PASSWORD '{dbpassword}'",
   # f"ALTER USER {dbuser} CREATEDB",
 
-  f"DROP DATABASE {dbname}"
-  f"CREATE DATABASE {dbname}"
+  f"DROP DATABASE IF EXISTS {dbname}",
+  f"CREATE DATABASE {dbname}",
   f"GRANT ALL PRIVILEGES on DATABASE {dbname} TO {dbuser}"
 ]:
   print(cmd)
