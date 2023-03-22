@@ -8,8 +8,6 @@ from typing import List
 
 from .ddplogger import logger
 from .auth import LoginData, ClientAuthBearer
-from .airbyteutils import AirbyteCreate, AirbyteWorkspace, ClientAirbyte, AirbyteSourceCreate, AirbyteDestinationCreate
-from .airbyteutils import AirbyteConnectionCreate
 
 clientapi = NinjaAPI()
 # http://127.0.0.1:8000/api/docs
@@ -17,6 +15,11 @@ clientapi = NinjaAPI()
 from .clientuser import ClientUser, ClientUserCreate, ClientUserUpdate, ClientUserResponse
 from .clientuser import InvitationSchema, Invitation, AcceptInvitationSchema
 from .clientorg import ClientOrg, ClientOrgSchema
+
+from .airbyteschemas import AirbyteWorkspaceCreate, AirbyteWorkspace
+from .airbyteschemas import AirbyteSourceCreate, AirbyteDestinationCreate, AirbyteConnectionCreate
+
+from . import airbyteapi
 
 # ====================================================================================================
 @clientapi.get("/currentuser", auth=ClientAuthBearer(), response=ClientUserResponse)
@@ -125,24 +128,37 @@ def acceptinvite(request, payload: AcceptInvitationSchema):
   return clientuser
   
 # ====================================================================================================
+@clientapi.post('/airbyte/detatchworkspace/', auth=ClientAuthBearer())
+def airbyte_detatchworkspace(request):
+  user = request.auth
+  if user.clientorg is None:
+    raise HttpError(400, "create an organization first")
+  if user.clientorg.airbyte_workspace_id is None:
+    raise HttpError(400, "org already has no workspace")
+  
+  user.clientorg.airbyte_workspace_id = None
+  user.clientorg.save()
+
+  return {"success": 1}
+
+# ====================================================================================================
 @clientapi.post('/airbyte/createworkspace/', response=AirbyteWorkspace, auth=ClientAuthBearer())
-def airbyte_createworkspace(request, payload: AirbyteCreate):
+def airbyte_createworkspace(request, payload: AirbyteWorkspaceCreate):
   user = request.auth
   if user.clientorg is None:
     raise HttpError(400, "create an organization first")
   if user.clientorg.airbyte_workspace_id is not None:
     raise HttpError(400, "org already has a workspace")
 
-  clientairbyte = ClientAirbyte()
-  clientairbyte.createworkspace(payload.name)
+  workspace = airbyteapi.createworkspace(payload.name)
 
-  user.clientorg.airbyte_workspace_id = clientairbyte.workspace_id
+  user.clientorg.airbyte_workspace_id = workspace['workspaceId']
   user.clientorg.save()
 
   return AirbyteWorkspace(
-    name=clientairbyte.workspace['name'],
-    workspaceId=clientairbyte.workspace['workspaceId'],
-    initialSetupComplete=clientairbyte.workspace['initialSetupComplete']
+    name=workspace['name'],
+    workspaceId=workspace['workspaceId'],
+    initialSetupComplete=workspace['initialSetupComplete']
   )
 
 # ====================================================================================================
@@ -154,8 +170,7 @@ def airbyte_getsources(request):
   if user.clientorg.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  clientairbyte = ClientAirbyte(user.clientorg.airbyte_workspace_id)
-  r = clientairbyte.getsourcedefinitions()
+  r = airbyteapi.getsourcedefinitions(user.clientorg.airbyte_workspace_id)
   logger.debug(r)
   return r
 
@@ -167,8 +182,7 @@ def airbyte_getsourcedefinitionspecification(request, sourcedef_id):
   if user.clientorg.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  clientairbyte = ClientAirbyte(user.clientorg.airbyte_workspace_id)
-  r = clientairbyte.getsourcedefinitionspecification(sourcedef_id)
+  r = airbyteapi.getsourcedefinitionspecification(user.clientorg.airbyte_workspace_id, sourcedef_id)
   logger.debug(r)
   return r
 
@@ -180,10 +194,9 @@ def airbyte_createsource(request, payload: AirbyteSourceCreate):
   if user.clientorg.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  clientairbyte = ClientAirbyte(user.clientorg.airbyte_workspace_id)
-  source_id = clientairbyte.createsource(payload.name, payload.sourcedef_id, payload.config)
-  logger.info("created source having id " + source_id)
-  return {'source_id': source_id}
+  source = airbyteapi.createsource(user.clientorg.airbyte_workspace_id, payload.name, payload.sourcedef_id, payload.config)
+  logger.info("created source having id " + source['sourceId'])
+  return {'source_id': source['sourceId']}
 
 @clientapi.post('/airbyte/checksource/{source_id}/', auth=ClientAuthBearer())
 def airbyte_checksource(request, source_id):
@@ -193,8 +206,7 @@ def airbyte_checksource(request, source_id):
   if user.clientorg.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  clientairbyte = ClientAirbyte(user.clientorg.airbyte_workspace_id)
-  r = clientairbyte.checksourceconnection(source_id)
+  r = airbyteapi.checksourceconnection(user.clientorg.airbyte_workspace_id, source_id)
   logger.debug(r)
   return r
 
@@ -206,8 +218,7 @@ def airbyte_getsources(request):
   if user.clientorg.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  clientairbyte = ClientAirbyte(user.clientorg.airbyte_workspace_id)
-  r = clientairbyte.getsources()
+  r = airbyteapi.getsources(user.clientorg.airbyte_workspace_id)
   logger.debug(r)
   return r
 
@@ -219,8 +230,7 @@ def airbyte_getsources(request, source_id):
   if user.clientorg.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  clientairbyte = ClientAirbyte(user.clientorg.airbyte_workspace_id)
-  r = clientairbyte.getsource(source_id)
+  r = airbyteapi.getsource(user.clientorg.airbyte_workspace_id, source_id)
   logger.debug(r)
   return r
 
@@ -232,8 +242,7 @@ def airbyte_getsourceschemacatalog(request, source_id):
   if user.clientorg.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  clientairbyte = ClientAirbyte(user.clientorg.airbyte_workspace_id)
-  r = clientairbyte.getsourceschemacatalog(source_id)
+  r = airbyteapi.getsourceschemacatalog(user.clientorg.airbyte_workspace_id, source_id)
   logger.debug(r)
   return r
 
@@ -246,8 +255,7 @@ def airbyte_getdestinations(request):
   if user.clientorg.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  clientairbyte = ClientAirbyte(user.clientorg.airbyte_workspace_id)
-  r = clientairbyte.getdestinationdefinitions()
+  r = airbyteapi.getdestinationdefinitions(user.clientorg.airbyte_workspace_id)
   logger.debug(r)
   return r
 
@@ -259,8 +267,7 @@ def airbyte_getdestinationdefinitionspecification(request, destinationdef_id):
   if user.clientorg.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  clientairbyte = ClientAirbyte(user.clientorg.airbyte_workspace_id)
-  r = clientairbyte.getdestinationdefinitionspecification(destinationdef_id)
+  r = airbyteapi.getdestinationdefinitionspecification(user.clientorg.airbyte_workspace_id, destinationdef_id)
   logger.debug(r)
   return r
 
@@ -272,10 +279,9 @@ def airbyte_createsource(request, payload: AirbyteDestinationCreate):
   if user.clientorg.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  clientairbyte = ClientAirbyte(user.clientorg.airbyte_workspace_id)
-  destination_id = clientairbyte.createdestination(payload.name, payload.destinationdef_id, payload.config)
-  logger.info("created destination having id " + destination_id)
-  return {'destination_id': destination_id}
+  destination = airbyteapi.createdestination(user.clientorg.airbyte_workspace_id, payload.name, payload.destinationdef_id, payload.config)
+  logger.info("created destination having id " + destination['destinationId'])
+  return {'destination_id': destination['destinationId']}
 
 @clientapi.post('/airbyte/checkdestination/{destination_id}/', auth=ClientAuthBearer())
 def airbyte_checkdestination(request, destination_id):
@@ -285,8 +291,7 @@ def airbyte_checkdestination(request, destination_id):
   if user.clientorg.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  clientairbyte = ClientAirbyte(user.clientorg.airbyte_workspace_id)
-  r = clientairbyte.checkdestinationconnection(destination_id)
+  r = airbyteapi.checkdestinationconnection(user.clientorg.airbyte_workspace_id, destination_id)
   logger.debug(r)
   return r
 
@@ -298,8 +303,7 @@ def airbyte_getdestinations(request):
   if user.clientorg.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  clientairbyte = ClientAirbyte(user.clientorg.airbyte_workspace_id)
-  r = clientairbyte.getdestinations()
+  r = airbyteapi.getdestinations(user.clientorg.airbyte_workspace_id)
   logger.debug(r)
   return r
 
@@ -311,8 +315,7 @@ def airbyte_getdestinations(request, destination_id):
   if user.clientorg.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  clientairbyte = ClientAirbyte(user.clientorg.airbyte_workspace_id)
-  r = clientairbyte.getdestination(destination_id)
+  r = airbyteapi.getdestination(user.clientorg.airbyte_workspace_id, destination_id)
   logger.debug(r)
   return r
 
@@ -324,8 +327,7 @@ def airbyte_getconnections(request):
   if user.clientorg.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  clientairbyte = ClientAirbyte(user.clientorg.airbyte_workspace_id)
-  r = clientairbyte.getconnections()
+  r = airbyteapi.getconnections(user.clientorg.airbyte_workspace_id)
   logger.debug(r)
   return r
 
@@ -337,8 +339,7 @@ def airbyte_getconnections(request, connection_id):
   if user.clientorg.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  clientairbyte = ClientAirbyte(user.clientorg.airbyte_workspace_id)
-  r = clientairbyte.getconnection(connection_id)
+  r = airbyteapi.getconnection(user.clientorg.airbyte_workspace_id, connection_id)
   logger.debug(r)
   return r
 
@@ -353,7 +354,16 @@ def airbyte_createconnection(request, payload: AirbyteConnectionCreate):
   if len(payload.streamnames) == 0:
     raise HttpError(400, "must specify stream names")
 
-  clientairbyte = ClientAirbyte(user.clientorg.airbyte_workspace_id)
-  r = clientairbyte.createconnection(payload)
+  r = airbyteapi.createconnection(user.clientorg.airbyte_workspace_id, payload)
   logger.debug(r)
   return r
+
+@clientapi.post('/airbyte/syncconnection/{connection_id}/', auth=ClientAuthBearer())
+def airbyte_syncconnection(request, connection_id):
+  user = request.auth
+  if user.clientorg is None:
+    raise HttpError(400, "create an organization first")
+  if user.clientorg.airbyte_workspace_id is None:
+    raise HttpError(400, "create an airbyte workspace first")
+  
+  airbyteapi.syncconnection(user.clientorg.airbyte_workspace_id, connection_id)
