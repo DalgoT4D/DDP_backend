@@ -8,10 +8,13 @@ from . import airbyteschemas
 
 # ====================================================================================================
 def abreq(endpoint, req=None):
-  root = os.getenv('AIRBYTE_API_URL')
-  token = os.getenv('AIRBYTE_API_TOKEN')
+  abhost = os.getenv('AIRBYTE_SERVER_HOST')
+  abport = os.getenv('AIRBYTE_SERVER_PORT')
+  abver  = os.getenv('AIRBYTE_SERVER_APIVER')
+  token  = os.getenv('AIRBYTE_API_TOKEN')
+
   r = requests.post(
-    f"{root}/{endpoint}",
+    f"http://{abhost}:{abport}/api/{abver}/{endpoint}",
     headers={'Authorization': f"Basic {token}"},
     json=req
   )
