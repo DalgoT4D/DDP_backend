@@ -12,6 +12,19 @@ class PrefectDbtCoreSetup(Schema):
   env: dict
   commands: list
 
+class DbtProfile(Schema):
+  name: str
+  target: str
+  target_configs_type: str
+  target_configs_schema: str
+
+class DbtCredentialsPostgres(Schema):
+  host: str
+  port: str
+  username: str
+  password: str
+  database: str
+
 class PrefectShellSetup(Schema):
   blockname: str
   commands: list

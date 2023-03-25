@@ -1,10 +1,11 @@
 import os
 import requests
+from typing import Union
 
 from dotenv import load_dotenv
 load_dotenv()
 
-from .prefectschemas import PrefectDbtCoreSetup, PrefectShellSetup
+from .prefectschemas import PrefectDbtCoreSetup, PrefectShellSetup, DbtProfile, DbtCredentialsPostgres
 
 # =====================================================================================================================
 # prefect block names
@@ -119,9 +120,30 @@ def delete_shell_block(blockid):
   return prefectdelete(f"block_documents/{blockid}")
 
 # =====================================================================================================================
-def create_dbtcore_block(dbtcore: PrefectDbtCoreSetup):
+def create_dbtcore_block(dbtcore: PrefectDbtCoreSetup, profile: DbtProfile, credentials: Union[DbtCredentialsPostgres, None]):
   dbtcore_blocktype_id = get_blocktype(DBTCORE)['id']
   dbtcore_blockschematype_id = get_blockschematype(DBTCORE, dbtcore_blocktype_id)['id']
+
+  dbt_cli_profile = {
+    "name": profile.name, 
+    "target": profile.target,
+    "target_configs": {
+      "type": profile.target_configs_type, 
+      "schema": profile.target_configs_schema,
+      "credentials": None
+    }
+  }
+  if profile.target_configs_type == 'postgres':
+    dbt_cli_profile["target_configs"]["credentials"] = {
+      "driver": "postgresql+psycopg2",
+      "host": credentials.host,
+      "port": credentials.port,
+      "username": credentials.username, 
+      "password": credentials.password,
+      "database": credentials.database, 
+    }
+  else:
+    raise Exception(f"unrecognized target_configs_type {profile.target_configs_type}")
 
   r = prefectpost(f'block_documents/', {
     "name": dbtcore.blockname,
@@ -132,6 +154,7 @@ def create_dbtcore_block(dbtcore: PrefectDbtCoreSetup):
       "project_dir": dbtcore.project_dir,
       "working_dir": dbtcore.working_dir,
       "env": dbtcore.env,
+      "dbt_cli_profile": dbt_cli_profile,
       "commands": dbtcore.commands
     },
     "is_anonymous": False
@@ -141,3 +164,17 @@ def create_dbtcore_block(dbtcore: PrefectDbtCoreSetup):
 def delete_dbtcore_block(blockid):
   return prefectdelete(f"block_documents/{blockid}")
 
+# =====================================================================================================================
+from prefect import flow
+from prefect_airbyte import AirbyteConnection
+from prefect_airbyte.flows import run_connection_sync
+from prefect_dbt.cli.commands import DbtCoreOperation
+@flow
+def run_airbyte_connection_prefect_flow(blockname):
+  airbyte_connection = AirbyteConnection.load(blockname)
+  return run_connection_sync(airbyte_connection)
+
+@flow
+def run_dbtcore_prefect_flow(blockname):
+  dbt_op = DbtCoreOperation.load(blockname)
+  dbt_op.run()

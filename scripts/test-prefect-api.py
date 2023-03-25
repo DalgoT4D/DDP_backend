@@ -8,10 +8,11 @@ import argparse
 import json
 from ddpui import prefectapi, prefectschemas
 
+from dotenv import load_dotenv
+load_dotenv()
+
 parser = argparse.ArgumentParser()
 args = parser.parse_args()
-
-
 
 # == airbyte ==
 x = prefectapi.get_blocktype(prefectapi.AIRBYTESERVER)
@@ -106,15 +107,45 @@ if x:
 else:
   print(f"no dbt core block named {dbt_blockname}, creating")
 
+DBT_DIR = os.getenv('TESTING_DBT_DIR')
+DBT_TARGET = os.getenv('TESTING_DBT_TARGET')
+DBT_PROFILE = os.getenv('TESTING_DBT_PROFILE')
+DBT_TARGETCONFIGS_TYPE = os.getenv('TESTING_DBT_TARGETCONFIGS_TYPE')
+DBT_TARGETCONFIGS_SCHEMA = os.getenv('TESTING_DBT_TARGETCONFIGS_SCHEMA')
+DBT_CREDENTIALS_USERNAME = os.getenv('TESTING_DBT_CREDENTIALS_USERNAME')
+DBT_CREDENTIALS_PASSWORD = os.getenv('TESTING_DBT_CREDENTIALS_PASSWORD')
+DBT_CREDENTIALS_DATABASE = os.getenv('TESTING_DBT_CREDENTIALS_DATABASE')
+DBT_CREDENTIALS_HOST = os.getenv('TESTING_DBT_CREDENTIALS_HOST')
+
+if os.path.exists(f"{DBT_DIR}/profiles/profiles.yml"):
+  os.remove(f"{DBT_DIR}/profiles/profiles.yml")
+
 blockdata = prefectschemas.PrefectDbtCoreSetup(
   blockname=dbt_blockname,
-  profiles_dir="PROFILES_DIR",
-  project_dir="PROJECT_DIR",
-  working_dir="WORKING_DIR",
-  env={"VAR":"VAL"},
-  commands=["cmd1", "cmd2"]
+  profiles_dir=f"{DBT_DIR}/profiles/",
+  project_dir=DBT_DIR,
+  working_dir=DBT_DIR,
+  env={},
+  commands=[
+    f"dbt run --target {DBT_TARGET}"
+  ]
 )
-prefectapi.create_dbtcore_block(blockdata)
+
+dbtprofile = prefectschemas.DbtProfile(
+  name=DBT_PROFILE,
+  target=DBT_TARGET,
+  target_configs_type=DBT_TARGETCONFIGS_TYPE,
+  target_configs_schema=DBT_TARGETCONFIGS_SCHEMA,
+)
+dbtcredentials = prefectschemas.DbtCredentialsPostgres(
+  username=DBT_CREDENTIALS_USERNAME,
+  password=DBT_CREDENTIALS_PASSWORD,
+  database=DBT_CREDENTIALS_DATABASE,
+  host=DBT_CREDENTIALS_HOST,
+  port=5432
+)
+
+prefectapi.create_dbtcore_block(blockdata, dbtprofile, dbtcredentials)
 
 x = prefectapi.get_block(prefectapi.DBTCORE, dbt_blockname)
 if x:
@@ -123,6 +154,9 @@ if x:
   print("  profiles_dir= " + x['data']['profiles_dir'])
   print("  project_dir= " + x['data']['project_dir'])
   print("  commands= " + json.dumps(x['data']['commands']))
+
+  print("running block")
+  prefectapi.run_dbtcore_prefect_flow(dbt_blockname)
 
 else:
   raise Exception(f"no dbt core block named {dbt_blockname}")
@@ -135,4 +169,5 @@ if x:
 else:
   print(f"deletion success: no dbt core block named {dbt_blockname}")
 
-
+if os.path.exists(f"{DBT_DIR}/profiles/profiles.yml"):
+  os.remove(f"{DBT_DIR}/profiles/profiles.yml")
