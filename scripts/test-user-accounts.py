@@ -2,6 +2,7 @@ import requests
 import argparse
 import sys
 from faker import Faker
+from testclient import ClientTester
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--admin-email', required=True)
@@ -42,38 +43,6 @@ class AdminTester:
     except Exception:
       print(r.text)
 
-
-# ========================================================================================================================
-class ClientTester:
-  def __init__(self):
-    self.clientheaders = None
-
-  def clientget(self, endpoint):
-    print(f"GET /api/{endpoint}")
-    r = requests.get(f'http://localhost:{args.port}/api/{endpoint}', headers=self.clientheaders)
-    try:
-      print(r.json())
-      return r.json()
-    except Exception:
-      print(r.text)
-
-  def clientpost(self, endpoint, **kwargs):
-    print(f"POST /api/{endpoint}")
-    r = requests.post(f'http://localhost:{args.port}/api/{endpoint}', headers=self.clientheaders, json=kwargs.get('json'))
-    try:
-      print(r.json())
-      return r.json()
-    except Exception:
-      print(r.text)
-
-  def login(self, email, password):
-    r = self.clientpost('login/', json={'email': email, 'password': password})
-    if 'token' not in r:
-      print(r)
-      return
-    self.clientheaders = {'Authorization': f"Bearer {r['token']}"}
-
-
 # ========================================================================================================================
 if __name__ == '__main__':
 
@@ -82,7 +51,7 @@ if __name__ == '__main__':
 
   admintester = AdminTester(args.admin_email)
 
-  clientusertester = ClientTester()
+  clientusertester = ClientTester(args.port)
   clientuser = clientusertester.clientpost(
     'createuser/', json={'email': faker.email()}
   )
@@ -97,7 +66,7 @@ if __name__ == '__main__':
     'user/invite/', json={'invited_email': faker.email()}
   )
 
-  clientuser2tester = ClientTester()
+  clientuser2tester = ClientTester(args.port)
   clientuser2tester.clientget(f"user/getinvitedetails/{invitation['invite_code']}")
 
   clientuser2 = clientuser2tester.clientpost('user/acceptinvite/', json={'invite_code': invitation['invite_code'], 'password': 'password'})
