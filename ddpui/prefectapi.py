@@ -6,12 +6,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from .prefectschemas import PrefectDbtCoreSetup, PrefectShellSetup, DbtProfile, DbtCredentialsPostgres
+from .prefectschemas import PrefectAirbyteConnectionSetup
 
 # =====================================================================================================================
 # prefect block names
-AIRBYTESERVER = 'airbyte server'
-SHELLOPERATION = 'shell operation'
-DBTCORE = 'dbt core'
+AIRBYTESERVER = 'Airbyte Server'
+AIRBYTECONNECTION = 'Airbyte Connection'
+SHELLOPERATION = 'Shell Operation'
+DBTCORE = 'dbt Core Operation'
 
 # =====================================================================================================================
 def prefectget(endpoint):
@@ -96,6 +98,32 @@ def create_airbyteserver_block(blockname):
   return r
 
 def delete_airbyteserver_block(blockid):
+  return prefectdelete(f"block_documents/{blockid}")
+
+# =====================================================================================================================
+def create_airbyteconnection_block(conninfo: PrefectAirbyteConnectionSetup):
+
+  airbyte_connection_blocktype_id = get_blocktype(AIRBYTECONNECTION)['id']
+  airbyte_connection_blockschematype_id = get_blockschematype(AIRBYTECONNECTION, airbyte_connection_blocktype_id)['id']
+
+  serverblock = get_block(AIRBYTESERVER, conninfo.serverblockname)
+  if serverblock is None:
+    raise Exception(f"could not find {AIRBYTESERVER} block called {conninfo.serverblockname}")
+
+  r = prefectpost(f'block_documents/', {
+    "name": conninfo.connectionblockname,
+    "block_type_id": airbyte_connection_blocktype_id,
+    "block_schema_id": airbyte_connection_blockschematype_id,
+    "data": {
+      'airbyte_server': serverblock['id'],
+      'connection_id': conninfo.connection_id,
+    },
+    "is_anonymous": False
+  })
+  return r
+
+
+def delete_airbyteconnection_block(blockid):
   return prefectdelete(f"block_documents/{blockid}")
 
 # =====================================================================================================================

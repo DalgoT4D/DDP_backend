@@ -4,6 +4,11 @@ class PrefectAirbyteSync(Schema):
   flowname: str
   connection_id: str
   
+class PrefectAirbyteConnectionSetup(Schema):
+  serverblockname: str
+  connectionblockname: str
+  connection_id: str
+
 class PrefectDbtCoreSetup(Schema):
   blockname: str
   profiles_dir: str

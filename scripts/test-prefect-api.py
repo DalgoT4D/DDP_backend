@@ -37,6 +37,30 @@ if x:
 else:
   raise Exception(f"no airbyte server block named {airbyte_blockname}")
 
+# create a connection block referencing this server block
+airbyte_connection_blockname = 'abconn-unittest'
+connection_block_data = prefectschemas.PrefectAirbyteConnectionSetup(
+  serverblockname=airbyte_blockname,
+  connectionblockname=airbyte_connection_blockname,
+  connection_id='fake-conn-id'
+)
+prefectapi.create_airbyteconnection_block(connection_block_data)
+x = prefectapi.get_block(prefectapi.AIRBYTECONNECTION, airbyte_connection_blockname)
+if x:
+  print(f"creation success: found airbyte connection block {airbyte_connection_blockname}")
+else:
+  raise Exception(f"no airbyte connection block named {airbyte_connection_blockname}")
+
+prefectapi.delete_airbyteconnection_block(x['id'])
+
+x = prefectapi.get_block(prefectapi.AIRBYTECONNECTION, airbyte_connection_blockname)
+if x:
+  raise Exception(f"found airbyte connection block {airbyte_connection_blockname} after deletion")
+else:
+  print(f"deletion success: no airbyte connection block named {airbyte_connection_blockname}")
+
+# clean up the server block
+x = prefectapi.get_block(prefectapi.AIRBYTESERVER, airbyte_blockname)
 prefectapi.delete_airbyteserver_block(x['id'])
 
 x = prefectapi.get_block(prefectapi.AIRBYTESERVER, airbyte_blockname)
@@ -44,7 +68,6 @@ if x:
   raise Exception(f"found airbyte server block {airbyte_blockname} after deletion")
 else:
   print(f"deletion success: no airbyte server block named {airbyte_blockname}")
-
 
 
 # == shell ==
