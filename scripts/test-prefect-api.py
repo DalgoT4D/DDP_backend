@@ -130,7 +130,8 @@ if x:
 else:
   print(f"no dbt core block named {dbt_blockname}, creating")
 
-DBT_DIR = os.getenv('TESTING_DBT_DIR')
+DBT_BINARY = os.getenv('TESTING_DBT_BINARY')
+DBT_PROJECT_DIR = os.getenv('TESTING_DBT_PROJECT_DIR')
 DBT_TARGET = os.getenv('TESTING_DBT_TARGET')
 DBT_PROFILE = os.getenv('TESTING_DBT_PROFILE')
 DBT_TARGETCONFIGS_TYPE = os.getenv('TESTING_DBT_TARGETCONFIGS_TYPE')
@@ -140,17 +141,17 @@ DBT_CREDENTIALS_PASSWORD = os.getenv('TESTING_DBT_CREDENTIALS_PASSWORD')
 DBT_CREDENTIALS_DATABASE = os.getenv('TESTING_DBT_CREDENTIALS_DATABASE')
 DBT_CREDENTIALS_HOST = os.getenv('TESTING_DBT_CREDENTIALS_HOST')
 
-if os.path.exists(f"{DBT_DIR}/profiles/profiles.yml"):
-  os.remove(f"{DBT_DIR}/profiles/profiles.yml")
+if os.path.exists(f"{DBT_PROJECT_DIR}/profiles/profiles.yml"):
+  os.remove(f"{DBT_PROJECT_DIR}/profiles/profiles.yml")
 
 blockdata = prefectschemas.PrefectDbtCoreSetup(
   blockname=dbt_blockname,
-  profiles_dir=f"{DBT_DIR}/profiles/",
-  project_dir=DBT_DIR,
-  working_dir=DBT_DIR,
+  profiles_dir=f"{DBT_PROJECT_DIR}/profiles/",
+  project_dir=DBT_PROJECT_DIR,
+  working_dir=DBT_PROJECT_DIR,
   env={},
   commands=[
-    f"dbt run --target {DBT_TARGET}"
+    f"{DBT_BINARY} run --target {DBT_TARGET}"
   ]
 )
 
@@ -192,5 +193,5 @@ if x:
 else:
   print(f"deletion success: no dbt core block named {dbt_blockname}")
 
-if os.path.exists(f"{DBT_DIR}/profiles/profiles.yml"):
-  os.remove(f"{DBT_DIR}/profiles/profiles.yml")
+if os.path.exists(f"{DBT_PROJECT_DIR}/profiles/profiles.yml"):
+  os.remove(f"{DBT_PROJECT_DIR}/profiles/profiles.yml")
