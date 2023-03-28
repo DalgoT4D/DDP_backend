@@ -1,8 +1,10 @@
 from ninja import Schema
 
 class PrefectAirbyteSync(Schema):
-  flowname: str
-  connection_id: str
+  blockname: str
+  
+class PrefectDbtCore(Schema):
+  blockname: str
   
 class PrefectAirbyteConnectionSetup(Schema):
   serverblockname: str

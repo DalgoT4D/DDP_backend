@@ -1,10 +1,16 @@
+import os
 from ninja import NinjaAPI
 from ninja.errors import HttpError
 from datetime import datetime
 from .timezone import IST
 from uuid import uuid4
-
+import requests
+from pathlib import Path
+import shutil
 from typing import List
+from django.utils.text import slugify
+import subprocess
+import shlex
 
 from .ddplogger import logger
 from .auth import LoginData, ClientAuthBearer
@@ -14,12 +20,14 @@ clientapi = NinjaAPI()
 
 from .clientuser import ClientUser, ClientUserCreate, ClientUserUpdate, ClientUserResponse
 from .clientuser import InvitationSchema, Invitation, AcceptInvitationSchema
-from .clientorg import ClientOrg, ClientOrgSchema
+from .clientorg import ClientOrg, ClientOrgSchema, ClientDbt, ClientDbtSchema
 
 from .airbyteschemas import AirbyteWorkspaceCreate, AirbyteWorkspace
 from .airbyteschemas import AirbyteSourceCreate, AirbyteDestinationCreate, AirbyteConnectionCreate
 
-from . import airbyteapi
+from . import airbyteapi, prefectapi
+
+from .prefectschemas import PrefectAirbyteSync, PrefectDbtCore
 
 # ====================================================================================================
 @clientapi.get("/currentuser", auth=ClientAuthBearer(), response=ClientUserResponse)
@@ -79,6 +87,7 @@ def createclient(request, payload: ClientOrgSchema):
   if clientorg:
     raise HttpError(400, "client org already exists")
   clientorg = ClientOrg.objects.create(**payload.dict())
+  clientorg.slug = slugify(clientorg.name)
   user.clientorg = clientorg
   user.save()
   return clientorg
@@ -174,6 +183,7 @@ def airbyte_getsources(request):
   logger.debug(r)
   return r
 
+# ====================================================================================================
 @clientapi.get('/airbyte/getsourcedefinitionspecification/{sourcedef_id}', auth=ClientAuthBearer())
 def airbyte_getsourcedefinitionspecification(request, sourcedef_id):
   user = request.auth
@@ -186,6 +196,7 @@ def airbyte_getsourcedefinitionspecification(request, sourcedef_id):
   logger.debug(r)
   return r
 
+# ====================================================================================================
 @clientapi.post('/airbyte/createsource/', auth=ClientAuthBearer())
 def airbyte_createsource(request, payload: AirbyteSourceCreate):
   user = request.auth
@@ -198,6 +209,7 @@ def airbyte_createsource(request, payload: AirbyteSourceCreate):
   logger.info("created source having id " + source['sourceId'])
   return {'source_id': source['sourceId']}
 
+# ====================================================================================================
 @clientapi.post('/airbyte/checksource/{source_id}/', auth=ClientAuthBearer())
 def airbyte_checksource(request, source_id):
   user = request.auth
@@ -210,6 +222,7 @@ def airbyte_checksource(request, source_id):
   logger.debug(r)
   return r
 
+# ====================================================================================================
 @clientapi.get('/airbyte/getsources', auth=ClientAuthBearer())
 def airbyte_getsources(request):
   user = request.auth
@@ -222,6 +235,7 @@ def airbyte_getsources(request):
   logger.debug(r)
   return r
 
+# ====================================================================================================
 @clientapi.get('/airbyte/getsource/{source_id}', auth=ClientAuthBearer())
 def airbyte_getsources(request, source_id):
   user = request.auth
@@ -234,6 +248,7 @@ def airbyte_getsources(request, source_id):
   logger.debug(r)
   return r
 
+# ====================================================================================================
 @clientapi.get('/airbyte/getsourceschemacatalog/{source_id}', auth=ClientAuthBearer())
 def airbyte_getsourceschemacatalog(request, source_id):
   user = request.auth
@@ -246,7 +261,7 @@ def airbyte_getsourceschemacatalog(request, source_id):
   logger.debug(r)
   return r
 
-# =======
+# ====================================================================================================
 @clientapi.get('/airbyte/getdestinationdefinitions', auth=ClientAuthBearer())
 def airbyte_getdestinations(request):
   user = request.auth
@@ -259,6 +274,7 @@ def airbyte_getdestinations(request):
   logger.debug(r)
   return r
 
+# ====================================================================================================
 @clientapi.get('/airbyte/getdestinationdefinitionspecification/{destinationdef_id}', auth=ClientAuthBearer())
 def airbyte_getdestinationdefinitionspecification(request, destinationdef_id):
   user = request.auth
@@ -271,6 +287,7 @@ def airbyte_getdestinationdefinitionspecification(request, destinationdef_id):
   logger.debug(r)
   return r
 
+# ====================================================================================================
 @clientapi.post('/airbyte/createdestination/', auth=ClientAuthBearer())
 def airbyte_createsource(request, payload: AirbyteDestinationCreate):
   user = request.auth
@@ -283,6 +300,7 @@ def airbyte_createsource(request, payload: AirbyteDestinationCreate):
   logger.info("created destination having id " + destination['destinationId'])
   return {'destination_id': destination['destinationId']}
 
+# ====================================================================================================
 @clientapi.post('/airbyte/checkdestination/{destination_id}/', auth=ClientAuthBearer())
 def airbyte_checkdestination(request, destination_id):
   user = request.auth
@@ -295,6 +313,7 @@ def airbyte_checkdestination(request, destination_id):
   logger.debug(r)
   return r
 
+# ====================================================================================================
 @clientapi.get('/airbyte/getdestinations', auth=ClientAuthBearer())
 def airbyte_getdestinations(request):
   user = request.auth
@@ -307,6 +326,7 @@ def airbyte_getdestinations(request):
   logger.debug(r)
   return r
 
+# ====================================================================================================
 @clientapi.get('/airbyte/getdestination/{destination_id}', auth=ClientAuthBearer())
 def airbyte_getdestinations(request, destination_id):
   user = request.auth
@@ -319,6 +339,7 @@ def airbyte_getdestinations(request, destination_id):
   logger.debug(r)
   return r
 
+# ====================================================================================================
 @clientapi.get('/airbyte/getconnections', auth=ClientAuthBearer())
 def airbyte_getconnections(request):
   user = request.auth
@@ -331,6 +352,7 @@ def airbyte_getconnections(request):
   logger.debug(r)
   return r
 
+# ====================================================================================================
 @clientapi.get('/airbyte/getconnection/{connection_id}', auth=ClientAuthBearer())
 def airbyte_getconnections(request, connection_id):
   user = request.auth
@@ -343,6 +365,7 @@ def airbyte_getconnections(request, connection_id):
   logger.debug(r)
   return r
 
+# ====================================================================================================
 @clientapi.post('/airbyte/createconnection/', auth=ClientAuthBearer())
 def airbyte_createconnection(request, payload: AirbyteConnectionCreate):
   user = request.auth
@@ -358,6 +381,7 @@ def airbyte_createconnection(request, payload: AirbyteConnectionCreate):
   logger.debug(r)
   return r
 
+# ====================================================================================================
 @clientapi.post('/airbyte/syncconnection/{connection_id}/', auth=ClientAuthBearer())
 def airbyte_syncconnection(request, connection_id):
   user = request.auth
@@ -367,3 +391,102 @@ def airbyte_syncconnection(request, connection_id):
     raise HttpError(400, "create an airbyte workspace first")
   
   airbyteapi.syncconnection(user.clientorg.airbyte_workspace_id, connection_id)
+
+# ====================================================================================================
+@clientapi.post('/dbt/create/', auth=ClientAuthBearer())
+def dbt_create(request, payload: ClientDbtSchema):
+  user = request.auth
+  if user.clientorg is None:
+    raise HttpError(400, "create an organization first")
+  if user.clientorg.dbt is not None:
+    raise HttpError(400, "dbt is already configured for this client")
+  
+  if user.clientorg.slug is None:
+    user.clientorg.slug = slugify(user.clientorg.name)
+    user.clientorg.save()
+
+  # this client'a dbt setup happens here
+  project_dir = Path(os.getenv('CLIENTDBT_ROOT')) / user.clientorg.slug
+  if project_dir.exists():
+    shutil.rmtree(str(project_dir))
+  project_dir.mkdir()
+
+  def runcmd(cmd, cwd):
+    return subprocess.Popen(shlex.split(cmd), cwd=str(cwd))
+
+  # clone the client's dbt repo
+  p = runcmd("git clone " + payload.gitrepo_url, project_dir)
+  if p.wait() != 0:
+    raise HttpError(500, "git clone failed")
+
+  # install a dbt venv
+  p = runcmd("python -m venv venv", project_dir)
+  if p.wait() != 0:
+    raise HttpError(500, "make venv failed")
+  pip = project_dir / "venv/bin/pip"
+  p = runcmd(f"{pip} install --upgrade pip", project_dir)
+  if p.wait() != 0:
+    raise HttpError(500, "pip --upgrade failed")
+  # install dbt in the new env
+  p = runcmd(f"{pip} install dbt-core=={payload.dbtversion}", project_dir)
+  if p.wait() != 0:
+    raise HttpError(500, f"pip install dbt-core=={payload.dbtversion} failed")
+
+  dbt = ClientDbt(
+    gitrepo_url=payload.gitrepo_url,
+    project_dir=str(project_dir),
+    dbtversion=payload.dbtversion,
+    targetname=payload.targetname,
+    targettype=payload.targettype,
+    targetschema=payload.targetschema,
+    host=payload.host,
+    port=payload.port,
+    username=payload.username,
+    password=payload.password, # todo: encrypt with kms
+    database=payload.database,
+  )
+  dbt.save()
+  user.clientorg.dbt = dbt
+  user.clientorg.save()
+
+  return {"success": 1}
+
+# ====================================================================================================
+@clientapi.post('/dbt/delete/', auth=ClientAuthBearer(), response=ClientUserResponse)
+def dbt_delete(request):
+  user = request.auth
+  if user.clientorg is None:
+    raise HttpError(400, "create an organization first")
+  if user.clientorg.dbt is None:
+    raise HttpError(400, "dbt is not configured for this client")
+  
+  dbt = user.clientorg.dbt
+  user.clientorg.dbt = None
+  user.clientorg.save()
+
+  shutil.rmtree(dbt.project_dir)
+  dbt.delete()
+
+  return user
+
+# ====================================================================================================
+@clientapi.post('/prefect/createairbytesyncjob/', auth=ClientAuthBearer())
+def create_prefect_flow_to_run_airbyte_sync(request, payload: PrefectAirbyteSync):
+  user = request.auth
+  if user.clientorg is None:
+    raise HttpError(400, "create an organization first")
+  if user.clientorg.airbyte_workspace_id is None:
+    raise HttpError(400, "create an airbyte workspace first")
+
+  return prefectapi.run_airbyte_connection_prefect_flow(payload.blockname)
+
+# ====================================================================================================
+@clientapi.post('/prefect/createdbtcorejob/', auth=ClientAuthBearer())
+def create_prefect_flow_to_run_dbtcore(request, payload: PrefectDbtCore):
+  user = request.auth
+  if user.clientorg is None:
+    raise HttpError(400, "create an organization first")
+  if user.clientorg.airbyte_workspace_id is None:
+    raise HttpError(400, "create an airbyte workspace first")
+
+  return prefectapi.run_dbtcore_prefect_flow(payload.blockname)
