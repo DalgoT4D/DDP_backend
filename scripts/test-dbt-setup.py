@@ -20,9 +20,10 @@ DBT_CREDENTIALS_USERNAME = os.getenv('TESTING_DBT_CREDENTIALS_USERNAME')
 DBT_CREDENTIALS_PASSWORD = os.getenv('TESTING_DBT_CREDENTIALS_PASSWORD')
 DBT_CREDENTIALS_DATABASE = os.getenv('TESTING_DBT_CREDENTIALS_DATABASE')
 DBT_CREDENTIALS_HOST = os.getenv('TESTING_DBT_CREDENTIALS_HOST')
+DBT_TEST_REPO = os.getenv('TESTING_DBT_TEST_REPO')
 
 r = tester.clientpost('dbt/create/', json={
-  'gitrepo_url': "https://github.com/DevDataPlatform/dbt_basictest.git",
+  'gitrepo_url': DBT_TEST_REPO,
   'dbtversion': "1.4.5",
   'targetname': "dev",
   'targettype': DBT_TARGETCONFIGS_TYPE,
