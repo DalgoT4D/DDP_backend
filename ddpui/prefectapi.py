@@ -5,6 +5,11 @@ from typing import Union
 from dotenv import load_dotenv
 load_dotenv()
 
+from prefect import flow
+from prefect_airbyte import AirbyteConnection
+from prefect_airbyte.flows import run_connection_sync
+from prefect_dbt.cli.commands import DbtCoreOperation
+
 from .prefectschemas import PrefectDbtCoreSetup, PrefectShellSetup, DbtProfile, DbtCredentialsPostgres
 from .prefectschemas import PrefectAirbyteConnectionSetup
 
@@ -193,10 +198,6 @@ def delete_dbtcore_block(blockid):
   return prefectdelete(f"block_documents/{blockid}")
 
 # =====================================================================================================================
-from prefect import flow
-from prefect_airbyte import AirbyteConnection
-from prefect_airbyte.flows import run_connection_sync
-from prefect_dbt.cli.commands import DbtCoreOperation
 @flow
 def run_airbyte_connection_prefect_flow(blockname):
   airbyte_connection = AirbyteConnection.load(blockname)
