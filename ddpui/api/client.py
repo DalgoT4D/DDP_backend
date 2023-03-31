@@ -570,7 +570,7 @@ def get_prefect_dbtrun_blocks(request):
 
 # ====================================================================================================
 @clientapi.delete('/prefect/dbtrunblock/{block_id}', auth=UserAuthBearer())
-def create_prefect_block_dbtrun(request, block_id):
+def delete_prefect_block_dbtrun(request, block_id):
   user = request.auth
   if user.org is None:
     raise HttpError(400, "create an organization first")
@@ -624,7 +624,7 @@ def create_prefect_block_dbttest(request, payload: PrefectDbtRun):
 
 # ====================================================================================================
 @clientapi.delete('/prefect/dbttestblock/{block_id}', auth=UserAuthBearer())
-def create_prefect_block_dbttest(request, block_id):
+def delete_prefect_block_dbttest(request, block_id):
   user = request.auth
   if user.org is None:
     raise HttpError(400, "create an organization first")
