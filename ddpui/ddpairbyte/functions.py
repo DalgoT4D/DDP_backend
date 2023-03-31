@@ -4,14 +4,17 @@ import requests
 from dotenv import load_dotenv
 load_dotenv()
 
-from . import airbyteschemas
+from ddpui.ddpairbyte import schemas
 
 # ====================================================================================================
 def abreq(endpoint, req=None):
-  root = os.getenv('AIRBYTE_API_URL')
-  token = os.getenv('AIRBYTE_API_TOKEN')
+  abhost = os.getenv('AIRBYTE_SERVER_HOST')
+  abport = os.getenv('AIRBYTE_SERVER_PORT')
+  abver  = os.getenv('AIRBYTE_SERVER_APIVER')
+  token  = os.getenv('AIRBYTE_API_TOKEN')
+
   r = requests.post(
-    f"{root}/{endpoint}",
+    f"http://{abhost}:{abport}/api/{abver}/{endpoint}",
     headers={'Authorization': f"Basic {token}"},
     json=req
   )
@@ -173,7 +176,7 @@ def getconnection(workspace_id, connection_id):
   return r
 
 # ====================================================================================================
-def createconnection(workspace_id, connection_info: airbyteschemas.AirbyteConnectionCreate):
+def createconnection(workspace_id, connection_info: schemas.AirbyteConnectionCreate):
 
   if len(connection_info.streamnames) == 0:
     raise Exception("must specify stream names")

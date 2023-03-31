@@ -1,6 +1,6 @@
 import logging
 import sys
-from . import settings
+from ddpui import settings
 
 logger = logging.getLogger('ddpui')
 logger.setLevel(logging.INFO)

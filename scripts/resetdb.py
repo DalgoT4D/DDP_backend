@@ -40,7 +40,7 @@ dbname = os.getenv('DBNAME')
 dbuser = os.getenv('DBUSER')
 dbpassword = os.getenv('DBPASSWORD')
 
-conn = psycopg2.connect(host=dbhost, user=dbadminuser, password=dbadminpassword)
+conn = psycopg2.connect(host=dbhost, user=dbadminuser, password=dbadminpassword, database='postgres')
 conn.autocommit = True
 cursor = conn.cursor()
 

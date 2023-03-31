@@ -3,12 +3,12 @@ from ninja.errors import HttpError
 
 from typing import List
 
-from .ddplogger import logger
-from .auth import AdminAuthBearer, LoginData
-from .clientorg import ClientOrg, ClientOrgSchema
+from ddpui.utils.ddplogger import logger
+from ddpui.auth import AdminAuthBearer, LoginData
+from ddpui.models.org import Org, OrgSchema
 
-from .clientuser import ClientUser, ClientUserResponse, ClientUserUpdate
-from .adminuser import AdminUser, AdminUserResponse
+from ddpui.models.orguser import OrgUser, OrgUserResponse, OrgUserUpdate
+from ddpui.models.adminuser import AdminUser, AdminUserResponse
 
 adminapi = NinjaAPI(urls_namespace='admin')
 
@@ -29,42 +29,42 @@ def getadminuser(request):
   return request.auth
 
 # ====================================================================================================
-@adminapi.get("/users", response=List[ClientUserResponse], auth=AdminAuthBearer())
-def users(request, clientorg: str = None):
+@adminapi.get("/users", response=List[OrgUserResponse], auth=AdminAuthBearer())
+def users(request, org: str = None):
   assert(request.auth)
-  q = ClientUser.objects.filter(active=True)
-  if clientorg:
-    q = q.filter(clientorg__name=clientorg)
+  q = OrgUser.objects.filter(active=True)
+  if org:
+    q = q.filter(org__name=org)
   return q
 
 # ====================================================================================================
-@adminapi.post("/updateuser/{clientuserid}", response=ClientUserResponse, auth=AdminAuthBearer())
-def updateuser(request, clientuserid: int, payload: ClientUserUpdate):
+@adminapi.post("/updateuser/{orguserid}", response=OrgUserResponse, auth=AdminAuthBearer())
+def updateuser(request, orguserid: int, payload: OrgUserUpdate):
   assert(request.auth)
-  user = ClientUser.objects.filter(id=clientuserid).first()
+  user = OrgUser.objects.filter(id=orguserid).first()
   if user is None:
     raise HttpError(400, "no such user id")
   if payload.email:
     user.email = payload.email
   if payload.active is not None:
     user.active = payload.active
-  if payload.clientorg:
-    clientorg = ClientOrg.objects.filter(name=payload.clientorg.name).first()
-    user.clientorg = clientorg
+  if payload.org:
+    org = Org.objects.filter(name=payload.org.name).first()
+    user.org = org
   user.save()
   logger.info(f"updated user {user.email}")
   return user
 
 # ====================================================================================================
 @adminapi.post("/deleteorg/", auth=AdminAuthBearer())
-def updateuser(request, payload: ClientOrgSchema):
+def updateuser(request, payload: OrgSchema):
   if request.headers.get('X-DDP-Confirmation') != 'yes':
     raise HttpError(400, "missing x-confirmation header")
-  clientorg = ClientOrg.objects.filter(name=payload.name).first()
-  if clientorg:
-    for clientuser in ClientUser.objects.filter(clientorg=clientorg):
-      logger.warn(f"deleting {clientorg.name} user {clientuser.email}")
-      clientuser.delete()
-    clientorg.delete()
-    logger.warn(f"deleting {clientorg.name}")
+  org = Org.objects.filter(name=payload.name).first()
+  if org:
+    for orguser in OrgUser.objects.filter(org=org):
+      logger.warn(f"deleting {org.name} user {orguser.email}")
+      orguser.delete()
+    org.delete()
+    logger.warn(f"deleting {org.name}")
   return {"success": 1}
