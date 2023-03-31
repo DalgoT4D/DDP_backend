@@ -6,12 +6,12 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("ddpui", "0003_clientdbt_remove_clientorg_dbt_repo_url_and_more"),
+        ("ddpui", "0003_clientdbt_remove_org_dbt_repo_url_and_more"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name="clientorg",
+            model_name="org",
             name="slug",
             field=models.CharField(max_length=20, null=True),
         ),

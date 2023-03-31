@@ -1,7 +1,7 @@
 # from django.contrib import admin
 from django.urls import path
-from .clientapi import clientapi
-from .adminapi import adminapi
+from ddpui.api.client import clientapi
+from ddpui.api.admin import adminapi
 
 urlpatterns = [
     # can enable if we want to use the django-admin app

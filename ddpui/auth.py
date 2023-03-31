@@ -2,14 +2,14 @@ from ninja import Schema
 from ninja.security import HttpBearer
 from ninja.errors import HttpError
 
-from .clientuser import ClientUser
-from .adminuser import AdminUser
+from ddpui.models.orguser import OrgUser
+from ddpui.models.adminuser import AdminUser
 
 class LoginData(Schema):
   email: str
   password: str
 
-def STUB_lookup_client_user_by_token(token):
+def STUB_lookup_org_user_by_token(token):
   user = None
   if token.find('fake-auth-token:') == 0:
     token = token[len('fake-auth-token:'):]
@@ -17,7 +17,7 @@ def STUB_lookup_client_user_by_token(token):
       userid = int(token)
     except ValueError:
       raise HttpError(400, "invalid token")
-    user = ClientUser.objects.filter(id=userid).first()
+    user = OrgUser.objects.filter(id=userid).first()
   if user is None:
     raise HttpError(400, "invalid token")
   return user
@@ -36,9 +36,9 @@ def STUB_lookup_admin_user_by_token(token):
   return user
 
 
-class ClientAuthBearer(HttpBearer):
+class UserAuthBearer(HttpBearer):
   def authenticate(self, request, token):
-    user = STUB_lookup_client_user_by_token(token)
+    user = STUB_lookup_org_user_by_token(token)
     return user
 
 class AdminAuthBearer(HttpBearer):

@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 
-from ddpui.adminuser import AdminUser
+from ddpui.models.adminuser import AdminUser
 
 class Command(BaseCommand):
   help = 'Creates a platform administrator'

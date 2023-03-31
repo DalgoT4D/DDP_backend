@@ -2,7 +2,7 @@ import requests
 import argparse
 import sys
 from faker import Faker
-from testclient import ClientTester
+from testclient import TestClient
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--admin-email', required=True)
@@ -51,29 +51,29 @@ if __name__ == '__main__':
 
   admintester = AdminTester(args.admin_email)
 
-  clientusertester = ClientTester(args.port)
-  clientuser = clientusertester.clientpost(
+  orgusertester = TestClient(args.port)
+  orguser = orgusertester.clientpost(
     'createuser/', json={'email': faker.email()}
   )
 
-  clientusertester.login(clientuser['email'], 'password')
+  orgusertester.login(orguser['email'], 'password')
 
-  clientorg = clientusertester.clientpost('client/create/', json={'name': faker.company()})
+  org = orgusertester.clientpost('client/create/', json={'name': faker.company()})
   
-  clientusertester.clientget('currentuser')
+  orgusertester.clientget('currentuser')
 
-  invitation = clientusertester.clientpost(
+  invitation = orgusertester.clientpost(
     'user/invite/', json={'invited_email': faker.email()}
   )
 
-  clientuser2tester = ClientTester(args.port)
-  clientuser2tester.clientget(f"user/getinvitedetails/{invitation['invite_code']}")
+  orguser2tester = TestClient(args.port)
+  orguser2tester.clientget(f"user/getinvitedetails/{invitation['invite_code']}")
 
-  clientuser2 = clientuser2tester.clientpost('user/acceptinvite/', json={'invite_code': invitation['invite_code'], 'password': 'password'})
+  orguser2 = orguser2tester.clientpost('user/acceptinvite/', json={'invite_code': invitation['invite_code'], 'password': 'password'})
 
-  clientuser2tester.login(clientuser2['email'], 'password')
-  clientuser2tester.clientget('currentuser')
+  orguser2tester.login(orguser2['email'], 'password')
+  orguser2tester.clientget('currentuser')
 
   # cleanup
   admintester.adminheaders['x-ddp-confirmation'] = 'yes'
-  admintester.adminpost('deleteorg/', json={'name': clientorg['name']})
+  admintester.adminpost('deleteorg/', json={'name': org['name']})

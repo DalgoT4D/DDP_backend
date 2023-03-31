@@ -6,7 +6,8 @@ django.setup()
 
 import argparse
 import json
-from ddpui import prefectapi, prefectschemas
+from ddpui.ddpprefect import functions as prefectapi
+from ddpui.ddpprefect import schemas as prefectschemas
 
 from dotenv import load_dotenv
 load_dotenv()

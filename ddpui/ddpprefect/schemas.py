@@ -37,3 +37,16 @@ class PrefectShellSetup(Schema):
   commands: list
   working_dir: str
   env: dict
+
+class OrgDbtSchema(Schema):
+  profile: DbtProfile
+  credentials: DbtCredentialsPostgres # todo can this be a union
+
+  gitrepo_url: str
+  dbtversion: str
+
+class PrefectDbtRun(Schema):
+  profile: DbtProfile
+  credentials: DbtCredentialsPostgres # todo can this be a union
+  
+  dbt_blockname: str

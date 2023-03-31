@@ -12,7 +12,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.CreateModel(
-            name="ClientDbt",
+            name="OrgDbt",
             fields=[
                 (
                     "id",
@@ -37,11 +37,11 @@ class Migration(migrations.Migration):
             ],
         ),
         migrations.RemoveField(
-            model_name="clientorg",
+            model_name="org",
             name="dbt_repo_url",
         ),
         migrations.AddField(
-            model_name="clientorg",
+            model_name="org",
             name="dbt",
             field=models.ForeignKey(
                 null=True,

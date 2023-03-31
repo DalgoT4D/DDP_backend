@@ -1,6 +1,6 @@
 import requests
 
-class ClientTester:
+class TestClient:
   def __init__(self, port):
     self.clientheaders = None
     self.port = port
@@ -20,6 +20,14 @@ class ClientTester:
     try:
       print(r.json())
       return r.json()
+    except Exception:
+      print(r.text)
+
+  def clientdelete(self, endpoint, **kwargs):
+    print(f"DELETE /api/{endpoint}")
+    r = requests.delete(f'http://localhost:{self.port}/api/{endpoint}', headers=self.clientheaders)
+    try:
+      r.raise_for_status()
     except Exception:
       print(r.text)
 
