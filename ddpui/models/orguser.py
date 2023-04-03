@@ -2,7 +2,7 @@ from django.db import models
 from datetime import datetime
 from ninja import ModelSchema, Schema
 
-from ddpui.models.org import Org, OrgSchema
+from ddpui.models.Org import Org, OrgSchema
 
 # ====================================================================================================
 class OrgUser(models.Model):

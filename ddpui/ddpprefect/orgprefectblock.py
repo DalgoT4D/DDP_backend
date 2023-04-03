@@ -1,6 +1,6 @@
 from django.db import models
 from ninja import ModelSchema, Schema
-from ddpui.models.org import Org
+from ddpui.models.Org import Org
 
 # ====================================================================================================
 class OrgPrefectBlock(models.Model):
