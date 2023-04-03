@@ -29,7 +29,7 @@ def getAdminUser(request):
   return request.auth
 
 # ====================================================================================================
-@adminapi.get("/users", response=List[OrgUserResponse], auth=AdminAuthBearer())
+@adminapi.get("/organizations", response=List[OrgUserResponse], auth=AdminAuthBearer())
 def getUsers(request, org: str = None):
   assert(request.auth)
   q = OrgUser.objects.filter(active=True)
@@ -38,7 +38,7 @@ def getUsers(request, org: str = None):
   return q
 
 # ====================================================================================================
-@adminapi.put("/users/{orguserid}", response=OrgUserResponse, auth=AdminAuthBearer())
+@adminapi.put("/organizations/{orguserid}", response=OrgUserResponse, auth=AdminAuthBearer())
 def putUser(request, orguserid: int, payload: OrgUserUpdate):
   assert(request.auth)
   user = OrgUser.objects.filter(id=orguserid).first()
@@ -56,7 +56,7 @@ def putUser(request, orguserid: int, payload: OrgUserUpdate):
   return user
 
 # ====================================================================================================
-@adminapi.delete("/users/", auth=AdminAuthBearer())
+@adminapi.delete("/organizations/", auth=AdminAuthBearer())
 def deleteUser(request, payload: OrgSchema):
   if request.headers.get('X-DDP-Confirmation') != 'yes':
     raise HttpError(400, "missing x-confirmation header")
