@@ -34,6 +34,12 @@ Django application for the DDP platform's management backend. Exposes API endpoi
         <mark>getUsers</mark>
     -   Eg handler for a login api would look like <mark>postLogin</mark>
 
+### Variables and Classes naming
+
+-   Variable names should follow snake_case convention. Eg org_user_id, user_id etc. Names like targettype, targetschema etc. are unacceptable.
+
+-   Classes Name for models, services, middlewares should follow CamelCase Format. For eg OrgUserSchema, OrgPrefectBlock etc.
+
 ## Setup instructions
 
 -   `pip install -r requirements.txt`
