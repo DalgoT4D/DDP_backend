@@ -14,7 +14,7 @@ adminapi = NinjaAPI(urls_namespace='admin')
 
 # ====================================================================================================
 @adminapi.post("/login/")
-def login(request, payload: LoginData):
+def postLogin(request, payload: LoginData):
   if payload.password == 'password':
     user = AdminUser.objects.filter(email=payload.email).first()
     if user:
@@ -25,12 +25,12 @@ def login(request, payload: LoginData):
 
 # ====================================================================================================
 @adminapi.get('/getadminuser', response=AdminUserResponse, auth=AdminAuthBearer())
-def getadminuser(request):
+def getAdminUser(request):
   return request.auth
 
 # ====================================================================================================
 @adminapi.get("/users", response=List[OrgUserResponse], auth=AdminAuthBearer())
-def users(request, org: str = None):
+def getUsers(request, org: str = None):
   assert(request.auth)
   q = OrgUser.objects.filter(active=True)
   if org:
@@ -38,8 +38,8 @@ def users(request, org: str = None):
   return q
 
 # ====================================================================================================
-@adminapi.post("/updateuser/{orguserid}", response=OrgUserResponse, auth=AdminAuthBearer())
-def updateuser(request, orguserid: int, payload: OrgUserUpdate):
+@adminapi.put("/users/{orguserid}", response=OrgUserResponse, auth=AdminAuthBearer())
+def putUser(request, orguserid: int, payload: OrgUserUpdate):
   assert(request.auth)
   user = OrgUser.objects.filter(id=orguserid).first()
   if user is None:
@@ -56,8 +56,8 @@ def updateuser(request, orguserid: int, payload: OrgUserUpdate):
   return user
 
 # ====================================================================================================
-@adminapi.post("/deleteorg/", auth=AdminAuthBearer())
-def updateuser(request, payload: OrgSchema):
+@adminapi.delete("/users/", auth=AdminAuthBearer())
+def deleteUser(request, payload: OrgSchema):
   if request.headers.get('X-DDP-Confirmation') != 'yes':
     raise HttpError(400, "missing x-confirmation header")
   org = Org.objects.filter(name=payload.name).first()
