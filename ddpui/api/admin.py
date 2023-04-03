@@ -14,7 +14,7 @@ adminapi = NinjaAPI(urls_namespace='admin')
 
 # ====================================================================================================
 @adminapi.post("/login/")
-def login(request, payload: LoginData):
+def postLogin(request, payload: LoginData):
   if payload.password == 'password':
     user = AdminUser.objects.filter(email=payload.email).first()
     if user:
@@ -25,21 +25,21 @@ def login(request, payload: LoginData):
 
 # ====================================================================================================
 @adminapi.get('/getadminuser', response=AdminUserResponse, auth=AdminAuthBearer())
-def getadminuser(request):
+def getAdminUser(request):
   return request.auth
 
 # ====================================================================================================
-@adminapi.get("/users", response=List[OrgUserResponse], auth=AdminAuthBearer())
-def users(request, org: str = None):
+@adminapi.get("/organizations/users", response=List[OrgUserResponse], auth=AdminAuthBearer())
+def getOrganizationUsers(request, org: str = None):
   assert(request.auth)
-  q = OrgUser.objects.filter(active=True)
+  query = OrgUser.objects.filter(active=True)
   if org:
-    q = q.filter(org__name=org)
-  return q
+    query = query.filter(org__name=org)
+  return query
 
 # ====================================================================================================
-@adminapi.post("/updateuser/{orguserid}", response=OrgUserResponse, auth=AdminAuthBearer())
-def updateuser(request, orguserid: int, payload: OrgUserUpdate):
+@adminapi.put("/organizations/users/{orguserid}", response=OrgUserResponse, auth=AdminAuthBearer())
+def putOrganizationUser(request, orguserid: int, payload: OrgUserUpdate):
   assert(request.auth)
   user = OrgUser.objects.filter(id=orguserid).first()
   if user is None:
@@ -56,8 +56,8 @@ def updateuser(request, orguserid: int, payload: OrgUserUpdate):
   return user
 
 # ====================================================================================================
-@adminapi.post("/deleteorg/", auth=AdminAuthBearer())
-def updateuser(request, payload: OrgSchema):
+@adminapi.delete("/organizations/", auth=AdminAuthBearer())
+def deleteOrganization(request, payload: OrgSchema):
   if request.headers.get('X-DDP-Confirmation') != 'yes':
     raise HttpError(400, "missing x-confirmation header")
   org = Org.objects.filter(name=payload.name).first()
