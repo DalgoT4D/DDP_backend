@@ -21,6 +21,7 @@ Django application for the DDP platform's management backend. Exposes API endpoi
     -   POST <mark>/api/users/</mark>
     -   PUT <mark>/api/users/:user_id</mark>
     -   DELETE <mark>/api/users/:user_id</mark>
+-   Route parameteres should be named in snake_case as shown above.
 
 ### Api handlers / controller functions naming
 
