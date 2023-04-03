@@ -10,7 +10,7 @@ import subprocess
 import shlex
 from django.utils.text import slugify
 
-from ddpui.utils.timezone import IST
+from ddpui.utils.Timezone import IST
 from ddpui.utils.DdpLogger import logger
 from ddpui.auth import LoginData, UserAuthBearer
 
