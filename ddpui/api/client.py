@@ -105,15 +105,15 @@ def postOrganization(request, payload: OrgSchema):
 def postOrganizationUserInvite(request, payload: InvitationSchema):
   if request.auth.org is None:
     raise HttpError(400, "an associated organization is required")
-  x = Invitation.objects.filter(invited_email=payload.invited_email).first()
-  if x:
-    logger.error(f"{payload.invited_email} has already been invited by {x.invited_by} on {x.invited_on.strftime('%Y-%m-%d')}")
+  invitation = Invitation.objects.filter(invited_email=payload.invited_email).first()
+  if invitation:
+    logger.error(f"{payload.invited_email} has already been invited by {invitation.invited_by} on {invitation.invited_on.strftime('%Y-%m-%d')}")
     raise HttpError(400, f'{payload.invited_email} has already been invited')
 
   payload.invited_by = OrgUserResponse(email=request.auth.email, org=request.auth.org, active=request.auth.active)
   payload.invited_on = datetime.now(IST)
   payload.invite_code = str(uuid4())
-  x = Invitation.objects.create(
+  invitation = Invitation.objects.create(
     invited_email=payload.invited_email,
     invited_by=request.auth,
     invited_on=payload.invited_on,
@@ -127,21 +127,21 @@ def postOrganizationUserInvite(request, payload: InvitationSchema):
 # a password, then click a button POSTing to this endpoint
 @clientapi.get('/organizations/users/invite/{invite_code}', response=InvitationSchema)
 def getOrganizationUserInvite(request, invite_code):
-  x = Invitation.objects.filter(invite_code=invite_code).first()
-  if x is None:
+  invitation = Invitation.objects.filter(invite_code=invite_code).first()
+  if invitation is None:
     raise HttpError(400, "invalid invite code")
-  return InvitationSchema.from_invitation(x)
+  return InvitationSchema.from_invitation(invitation)
 
 # ====================================================================================================
 @clientapi.post('/organizations/users/invite/accept/', response=OrgUserResponse)
 def postOrganizationUserAcceptInvite(request, payload: AcceptInvitationSchema):
-  x = Invitation.objects.filter(invite_code=payload.invite_code).first()
-  if x is None:
+  invitation = Invitation.objects.filter(invite_code=payload.invite_code).first()
+  if invitation is None:
     raise HttpError(400, "invalid invite code")
-  orguser = OrgUser.objects.filter(email=x.invited_email, org=x.invited_by.org).first()
+  orguser = OrgUser.objects.filter(email=invitation.invited_email, org=invitation.invited_by.org).first()
   if not orguser:
-    logger.info(f"creating invited user {x.invited_email} for {x.invited_by.org.name}")
-    orguser = OrgUser.objects.create(email=x.invited_email, org=x.invited_by.org)
+    logger.info(f"creating invited user {invitation.invited_email} for {invitation.invited_by.org.name}")
+    orguser = OrgUser.objects.create(email=invitation.invited_email, org=invitation.invited_by.org)
   return orguser
   
 # ====================================================================================================
@@ -187,9 +187,9 @@ def getAirbyteSourceDefinitions(request):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  r = functions.getsourcedefinitions(user.org.airbyte_workspace_id)
-  logger.debug(r)
-  return r
+  res = functions.getsourcedefinitions(user.org.airbyte_workspace_id)
+  logger.debug(res)
+  return res
 
 # ====================================================================================================
 @clientapi.get('/airbyte/source_definitions/{sourcedef_id}/specifications', auth=UserAuthBearer())
@@ -200,9 +200,9 @@ def getAirbyteSourceDefinitionSpecifications(request, sourcedef_id):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  r = functions.getsourcedefinitionspecification(user.org.airbyte_workspace_id, sourcedef_id)
-  logger.debug(r)
-  return r
+  res = functions.getsourcedefinitionspecification(user.org.airbyte_workspace_id, sourcedef_id)
+  logger.debug(res)
+  return res
 
 # ====================================================================================================
 @clientapi.post('/airbyte/sources/', auth=UserAuthBearer())
@@ -226,9 +226,9 @@ def postAirbyteCheckSource(request, source_id):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  r = functions.checksourceconnection(user.org.airbyte_workspace_id, source_id)
-  logger.debug(r)
-  return r
+  res = functions.checksourceconnection(user.org.airbyte_workspace_id, source_id)
+  logger.debug(res)
+  return res
 
 # ====================================================================================================
 @clientapi.get('/airbyte/sources', auth=UserAuthBearer())
@@ -239,9 +239,9 @@ def getAirbyteSources(request):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  r = functions.getsources(user.org.airbyte_workspace_id)
-  logger.debug(r)
-  return r
+  res = functions.getsources(user.org.airbyte_workspace_id)
+  logger.debug(res)
+  return res
 
 # ====================================================================================================
 @clientapi.get('/airbyte/sources/{source_id}', auth=UserAuthBearer())
@@ -252,9 +252,9 @@ def getAirbyteSource(request, source_id):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  r = functions.getsource(user.org.airbyte_workspace_id, source_id)
-  logger.debug(r)
-  return r
+  res = functions.getsource(user.org.airbyte_workspace_id, source_id)
+  logger.debug(res)
+  return res
 
 # ====================================================================================================
 @clientapi.get('/airbyte/sources/{source_id}/schema_catalog', auth=UserAuthBearer())
@@ -265,9 +265,9 @@ def getAirbyteSourceSchemaCatalog(request, source_id):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  r = functions.getsourceschemacatalog(user.org.airbyte_workspace_id, source_id)
-  logger.debug(r)
-  return r
+  res = functions.getsourceschemacatalog(user.org.airbyte_workspace_id, source_id)
+  logger.debug(res)
+  return res
 
 # ====================================================================================================
 @clientapi.get('/airbyte/destination_definitions', auth=UserAuthBearer())
@@ -278,9 +278,9 @@ def getAirbyteDestinationDefinitions(request):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  r = functions.getdestinationdefinitions(user.org.airbyte_workspace_id)
-  logger.debug(r)
-  return r
+  res = functions.getdestinationdefinitions(user.org.airbyte_workspace_id)
+  logger.debug(res)
+  return res
 
 # ====================================================================================================
 @clientapi.get('/airbyte/destination_definitions/{destinationdef_id}/specifications/', auth=UserAuthBearer())
@@ -291,9 +291,9 @@ def getAirbyteDestinationDefinitionSpecifications(request, destinationdef_id):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  r = functions.getdestinationdefinitionspecification(user.org.airbyte_workspace_id, destinationdef_id)
-  logger.debug(r)
-  return r
+  res = functions.getdestinationdefinitionspecification(user.org.airbyte_workspace_id, destinationdef_id)
+  logger.debug(res)
+  return res
 
 # ====================================================================================================
 @clientapi.post('/airbyte/destinations/', auth=UserAuthBearer())
@@ -317,9 +317,9 @@ def postAirbyteCheckDestination(request, destination_id):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  r = functions.checkdestinationconnection(user.org.airbyte_workspace_id, destination_id)
-  logger.debug(r)
-  return r
+  res = functions.checkdestinationconnection(user.org.airbyte_workspace_id, destination_id)
+  logger.debug(res)
+  return res
 
 # ====================================================================================================
 @clientapi.get('/airbyte/destinations', auth=UserAuthBearer())
@@ -330,9 +330,9 @@ def getAirbyteDestinations(request):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  r = functions.getdestinations(user.org.airbyte_workspace_id)
-  logger.debug(r)
-  return r
+  res = functions.getdestinations(user.org.airbyte_workspace_id)
+  logger.debug(res)
+  return res
 
 # ====================================================================================================
 @clientapi.get('/airbyte/destinations/{destination_id}', auth=UserAuthBearer())
@@ -343,9 +343,9 @@ def getAirbyteDestination(request, destination_id):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  r = functions.getdestination(user.org.airbyte_workspace_id, destination_id)
-  logger.debug(r)
-  return r
+  res = functions.getdestination(user.org.airbyte_workspace_id, destination_id)
+  logger.debug(res)
+  return res
 
 # ====================================================================================================
 @clientapi.get('/airbyte/connections', auth=UserAuthBearer())
@@ -356,9 +356,9 @@ def getAirbyteConnections(request):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  r = functions.getconnections(user.org.airbyte_workspace_id)
-  logger.debug(r)
-  return r
+  res = functions.getconnections(user.org.airbyte_workspace_id)
+  logger.debug(res)
+  return res
 
 # ====================================================================================================
 @clientapi.get('/airbyte/connections/{connection_id}', auth=UserAuthBearer())
@@ -369,9 +369,9 @@ def getAirbyteConnection(request, connection_id):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  r = functions.getconnection(user.org.airbyte_workspace_id, connection_id)
-  logger.debug(r)
-  return r
+  res = functions.getconnection(user.org.airbyte_workspace_id, connection_id)
+  logger.debug(res)
+  return res
 
 # ====================================================================================================
 @clientapi.post('/airbyte/connections/', auth=UserAuthBearer())
@@ -385,9 +385,9 @@ def postAirbyteConnection(request, payload: AirbyteConnectionCreate):
   if len(payload.streamnames) == 0:
     raise HttpError(400, "must specify stream names")
 
-  r = functions.createconnection(user.org.airbyte_workspace_id, payload)
-  logger.debug(r)
-  return r
+  res = functions.createconnection(user.org.airbyte_workspace_id, payload)
+  logger.debug(res)
+  return res
 
 # ====================================================================================================
 @clientapi.post('/airbyte/connections/{connection_id}/sync/', auth=UserAuthBearer())
@@ -420,24 +420,24 @@ def postDbtWorkspace(request, payload: OrgDbtSchema):
   project_dir.mkdir()
 
   # clone the client's dbt repo into "dbtrepo/" under the project_dir
-  p = runcmd(f"git clone {payload.gitrepo_url} dbtrepo", project_dir)
-  if p.wait() != 0:
+  process = runcmd(f"git clone {payload.gitrepo_url} dbtrepo", project_dir)
+  if process.wait() != 0:
     raise HttpError(500, "git clone failed")
 
   # install a dbt venv
-  p = runcmd("python -m venv venv", project_dir)
-  if p.wait() != 0:
+  process = runcmd("python -m venv venv", project_dir)
+  if process.wait() != 0:
     raise HttpError(500, "make venv failed")
   pip = project_dir / "venv/bin/pip"
-  p = runcmd(f"{pip} install --upgrade pip", project_dir)
-  if p.wait() != 0:
+  process = runcmd(f"{pip} install --upgrade pip", project_dir)
+  if process.wait() != 0:
     raise HttpError(500, "pip --upgrade failed")
   # install dbt in the new env
-  p = runcmd(f"{pip} install dbt-core=={payload.dbtversion}", project_dir)
-  if p.wait() != 0:
+  process = runcmd(f"{pip} install dbt-core=={payload.dbtversion}", project_dir)
+  if process.wait() != 0:
     raise HttpError(500, f"pip install dbt-core=={payload.dbtversion} failed")
-  p = runcmd(f"{pip} install dbt-postgres==1.4.5", project_dir)
-  if p.wait() != 0:
+  process = runcmd(f"{pip} install dbt-postgres==1.4.5", project_dir)
+  if process.wait() != 0:
     raise HttpError(500, f"pip install dbt-postgres==1.4.5 failed")
 
   dbt = OrgDbt(
@@ -490,8 +490,8 @@ def postDbtGitPull(request):
   if not os.path.exists(project_dir):
     raise HttpError(400, "create the dbt env first")
 
-  p = runcmd("git pull", project_dir / "dbtrepo")
-  if p.wait() != 0:
+  process = runcmd("git pull", project_dir / "dbtrepo")
+  if process.wait() != 0:
     raise HttpError(500, f"git pull failed in {str(project_dir / 'dbtrepo')}")
   
   return {'success': True}
@@ -525,14 +525,14 @@ def postPrefectDbtCoreBlock(request, payload: PrefectDbtRun):
   if user.org.dbt is None:
     raise HttpError(400, "create a dbt workspace first")
 
-  dbtenvdir = Path(os.getenv('CLIENTDBT_ROOT')) / user.org.slug
-  if not os.path.exists(dbtenvdir):
+  dbt_env_dir = Path(os.getenv('CLIENTDBT_ROOT')) / user.org.slug
+  if not os.path.exists(dbt_env_dir):
     raise HttpError(400, "create the dbt env first")
   
-  dbt_binary = str(dbtenvdir / "venv/bin/dbt")
-  project_dir = str(dbtenvdir / "dbtrepo")
+  dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
+  project_dir = str(dbt_env_dir / "dbtrepo")
 
-  blockdata = PrefectDbtCoreSetup(
+  block_data = PrefectDbtCoreSetup(
     blockname=payload.dbt_blockname,
     profiles_dir=f"{project_dir}/profiles/",
     project_dir=project_dir,
@@ -543,7 +543,7 @@ def postPrefectDbtCoreBlock(request, payload: PrefectDbtRun):
     ]
   )
 
-  block = functions.create_dbtcore_block(blockdata, payload.profile, payload.credentials)
+  block = functions.create_dbtcore_block(block_data, payload.profile, payload.credentials)
 
   cpb = OrgPrefectBlock(
     org=user.org, 
@@ -599,7 +599,7 @@ def postPrefectDbtTestBlock(request, payload: PrefectDbtRun):
   project_dir = project_dir / "dbtrepo"
   dbt_binary = project_dir / "venv/bin/dbt"
 
-  blockdata = PrefectDbtCoreSetup(
+  block_data = PrefectDbtCoreSetup(
     blockname=payload.dbt_blockname,
     profiles_dir=f"{project_dir}/profiles/",
     project_dir=project_dir,
@@ -610,7 +610,7 @@ def postPrefectDbtTestBlock(request, payload: PrefectDbtRun):
     ]
   )
 
-  block = functions.create_dbtcore_block(blockdata, payload.profile, payload.credentials)
+  block = functions.create_dbtcore_block(block_data, payload.profile, payload.credentials)
 
   cpb = OrgPrefectBlock(
     org=user.org, 

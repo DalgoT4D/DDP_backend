@@ -40,6 +40,8 @@ Django application for the DDP platform's management backend. Exposes API endpoi
 
 -   Classes Name for models, services, middlewares should follow CamelCase Format. For eg OrgUserSchema, OrgPrefectBlock etc.
 
+-   Make sure the names are meaningful. Avoid using variable names like 'x' , 'a' etc.
+
 ## Setup instructions
 
 -   `pip install -r requirements.txt`

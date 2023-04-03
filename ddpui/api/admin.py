@@ -32,10 +32,10 @@ def getAdminUser(request):
 @adminapi.get("/organizations/users", response=List[OrgUserResponse], auth=AdminAuthBearer())
 def getOrganizationUsers(request, org: str = None):
   assert(request.auth)
-  q = OrgUser.objects.filter(active=True)
+  query = OrgUser.objects.filter(active=True)
   if org:
-    q = q.filter(org__name=org)
-  return q
+    query = query.filter(org__name=org)
+  return query
 
 # ====================================================================================================
 @adminapi.put("/organizations/users/{orguserid}", response=OrgUserResponse, auth=AdminAuthBearer())
