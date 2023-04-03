@@ -10,8 +10,8 @@ from prefect_airbyte import AirbyteConnection
 from prefect_airbyte.flows import run_connection_sync
 from prefect_dbt.cli.commands import DbtCoreOperation
 
-from ddpui.ddpprefect.schemas import PrefectDbtCoreSetup, PrefectShellSetup, PrefectAirbyteConnectionSetup
-from ddpui.ddpprefect.schemas import DbtProfile, DbtCredentialsPostgres
+from ddpui.ddpprefect.Schemas import PrefectDbtCoreSetup, PrefectShellSetup, PrefectAirbyteConnectionSetup
+from ddpui.ddpprefect.Schemas import DbtProfile, DbtCredentialsPostgres
 
 # =====================================================================================================================
 # prefect block names

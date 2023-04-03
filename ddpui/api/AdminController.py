@@ -3,12 +3,12 @@ from ninja.errors import HttpError
 
 from typing import List
 
-from ddpui.utils.ddplogger import logger
+from ddpui.utils.DdpLogger import logger
 from ddpui.auth import AdminAuthBearer, LoginData
-from ddpui.models.org import Org, OrgSchema
+from ddpui.models.Org import Org, OrgSchema
 
-from ddpui.models.orguser import OrgUser, OrgUserResponse, OrgUserUpdate
-from ddpui.models.adminuser import AdminUser, AdminUserResponse
+from ddpui.models.OrgUser import OrgUser, OrgUserResponse, OrgUserUpdate
+from ddpui.models.AdminUser import AdminUser, AdminUserResponse
 
 adminapi = NinjaAPI(urls_namespace='admin')
 

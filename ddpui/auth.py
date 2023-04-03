@@ -2,8 +2,8 @@ from ninja import Schema
 from ninja.security import HttpBearer
 from ninja.errors import HttpError
 
-from ddpui.models.orguser import OrgUser
-from ddpui.models.adminuser import AdminUser
+from ddpui.models.OrgUser import OrgUser
+from ddpui.models.AdminUser import AdminUser
 
 class LoginData(Schema):
   email: str

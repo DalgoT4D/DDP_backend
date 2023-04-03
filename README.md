@@ -42,6 +42,14 @@ Django application for the DDP platform's management backend. Exposes API endpoi
 
 -   Make sure the names are meaningful. Avoid using variable names like 'x' , 'a' etc.
 
+### Folder and file naming
+
+-   Files that have models, services, custom modules, utils, controllers should be named using CamelCasing. For eg AdminController.py, AirbyteService.py, DdpLogger.py etc.
+
+-   Other Files than above should be named using small case letters (snake_case should be used if it improves the readability).
+
+-   All folders are named using small case letters (snake_case should be used if it improves the readability).
+
 ## Setup instructions
 
 -   `pip install -r requirements.txt`

@@ -4,7 +4,7 @@ import requests
 from dotenv import load_dotenv
 load_dotenv()
 
-from ddpui.ddpairbyte import schemas
+from ddpui.ddpairbyte import Schemas
 
 # ====================================================================================================
 def abreq(endpoint, req=None):
@@ -176,7 +176,7 @@ def getconnection(workspace_id, connection_id):
   return r
 
 # ====================================================================================================
-def createconnection(workspace_id, connection_info: schemas.AirbyteConnectionCreate):
+def createconnection(workspace_id, connection_info: Schemas.AirbyteConnectionCreate):
 
   if len(connection_info.streamnames) == 0:
     raise Exception("must specify stream names")
