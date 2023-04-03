@@ -167,7 +167,7 @@ def postAirbyteWorkspace(request, payload: AirbyteWorkspaceCreate):
   if user.org.airbyte_workspace_id is not None:
     raise HttpError(400, "org already has a workspace")
 
-  workspace = AirbyteService.createworkspace(payload.name)
+  workspace = AirbyteService.createWorkspace(payload.name)
 
   user.org.airbyte_workspace_id = workspace['workspaceId']
   user.org.save()
@@ -187,7 +187,7 @@ def getAirbyteSourceDefinitions(request):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  res = AirbyteService.getsourcedefinitions(user.org.airbyte_workspace_id)
+  res = AirbyteService.getSourceDefinitions(user.org.airbyte_workspace_id)
   logger.debug(res)
   return res
 
@@ -200,7 +200,7 @@ def getAirbyteSourceDefinitionSpecifications(request, sourcedef_id):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  res = AirbyteService.getsourcedefinitionspecification(user.org.airbyte_workspace_id, sourcedef_id)
+  res = AirbyteService.getSourceDefinitionSpecification(user.org.airbyte_workspace_id, sourcedef_id)
   logger.debug(res)
   return res
 
@@ -213,7 +213,7 @@ def postAirbyteSource(request, payload: AirbyteSourceCreate):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  source = AirbyteService.createsource(user.org.airbyte_workspace_id, payload.name, payload.sourcedef_id, payload.config)
+  source = AirbyteService.createSource(user.org.airbyte_workspace_id, payload.name, payload.sourcedef_id, payload.config)
   logger.info("created source having id " + source['sourceId'])
   return {'source_id': source['sourceId']}
 
@@ -226,7 +226,7 @@ def postAirbyteCheckSource(request, source_id):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  res = AirbyteService.checksourceconnection(user.org.airbyte_workspace_id, source_id)
+  res = AirbyteService.checkSourceConnection(user.org.airbyte_workspace_id, source_id)
   logger.debug(res)
   return res
 
@@ -239,7 +239,7 @@ def getAirbyteSources(request):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  res = AirbyteService.getsources(user.org.airbyte_workspace_id)
+  res = AirbyteService.getSources(user.org.airbyte_workspace_id)
   logger.debug(res)
   return res
 
@@ -252,7 +252,7 @@ def getAirbyteSource(request, source_id):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  res = AirbyteService.getsource(user.org.airbyte_workspace_id, source_id)
+  res = AirbyteService.getSource(user.org.airbyte_workspace_id, source_id)
   logger.debug(res)
   return res
 
@@ -265,7 +265,7 @@ def getAirbyteSourceSchemaCatalog(request, source_id):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  res = AirbyteService.getsourceschemacatalog(user.org.airbyte_workspace_id, source_id)
+  res = AirbyteService.getSourceSchemaCatalog(user.org.airbyte_workspace_id, source_id)
   logger.debug(res)
   return res
 
@@ -278,7 +278,7 @@ def getAirbyteDestinationDefinitions(request):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  res = AirbyteService.getdestinationdefinitions(user.org.airbyte_workspace_id)
+  res = AirbyteService.getDestinationDefinitions(user.org.airbyte_workspace_id)
   logger.debug(res)
   return res
 
@@ -291,7 +291,7 @@ def getAirbyteDestinationDefinitionSpecifications(request, destinationdef_id):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  res = AirbyteService.getdestinationdefinitionspecification(user.org.airbyte_workspace_id, destinationdef_id)
+  res = AirbyteService.getDestinationDefinitionSpecification(user.org.airbyte_workspace_id, destinationdef_id)
   logger.debug(res)
   return res
 
@@ -304,7 +304,7 @@ def postAirbyteDestination(request, payload: AirbyteDestinationCreate):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  destination = AirbyteService.createdestination(user.org.airbyte_workspace_id, payload.name, payload.destinationdef_id, payload.config)
+  destination = AirbyteService.createDestination(user.org.airbyte_workspace_id, payload.name, payload.destinationdef_id, payload.config)
   logger.info("created destination having id " + destination['destinationId'])
   return {'destination_id': destination['destinationId']}
 
@@ -317,7 +317,7 @@ def postAirbyteCheckDestination(request, destination_id):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  res = AirbyteService.checkdestinationconnection(user.org.airbyte_workspace_id, destination_id)
+  res = AirbyteService.checkDestinationConnection(user.org.airbyte_workspace_id, destination_id)
   logger.debug(res)
   return res
 
@@ -330,7 +330,7 @@ def getAirbyteDestinations(request):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  res = AirbyteService.getdestinations(user.org.airbyte_workspace_id)
+  res = AirbyteService.getDestinations(user.org.airbyte_workspace_id)
   logger.debug(res)
   return res
 
@@ -343,7 +343,7 @@ def getAirbyteDestination(request, destination_id):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  res = AirbyteService.getdestination(user.org.airbyte_workspace_id, destination_id)
+  res = AirbyteService.getDestination(user.org.airbyte_workspace_id, destination_id)
   logger.debug(res)
   return res
 
@@ -356,7 +356,7 @@ def getAirbyteConnections(request):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  res = AirbyteService.getconnections(user.org.airbyte_workspace_id)
+  res = AirbyteService.getConnections(user.org.airbyte_workspace_id)
   logger.debug(res)
   return res
 
@@ -369,7 +369,7 @@ def getAirbyteConnection(request, connection_id):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  res = AirbyteService.getconnection(user.org.airbyte_workspace_id, connection_id)
+  res = AirbyteService.getConnection(user.org.airbyte_workspace_id, connection_id)
   logger.debug(res)
   return res
 
@@ -385,7 +385,7 @@ def postAirbyteConnection(request, payload: AirbyteConnectionCreate):
   if len(payload.streamnames) == 0:
     raise HttpError(400, "must specify stream names")
 
-  res = AirbyteService.createconnection(user.org.airbyte_workspace_id, payload)
+  res = AirbyteService.createConnection(user.org.airbyte_workspace_id, payload)
   logger.debug(res)
   return res
 
@@ -398,7 +398,7 @@ def postAirbyteSyncConnection(request, connection_id):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
   
-  AirbyteService.syncconnection(user.org.airbyte_workspace_id, connection_id)
+  AirbyteService.syncConnection(user.org.airbyte_workspace_id, connection_id)
 
 # ====================================================================================================
 @clientapi.post('/dbt/workspace/', auth=UserAuthBearer())
@@ -505,7 +505,7 @@ def postPrefectAirbyteSyncFlow(request, payload: PrefectAirbyteSync):
   if user.org.airbyte_workspace_id is None:
     raise HttpError(400, "create an airbyte workspace first")
 
-  return AirbyteService.run_airbyte_connection_prefect_flow(payload.blockname)
+  return PrefectService.run_airbyte_connection_prefect_flow(payload.blockname)
 
 # ====================================================================================================
 @clientapi.post('/prefect/flows/dbt_run/', auth=UserAuthBearer())
@@ -514,7 +514,7 @@ def postPrefectDbtCoreRunFlow(request, payload: PrefectDbtCore):
   if user.org is None:
     raise HttpError(400, "create an organization first")
 
-  return AirbyteService.run_dbtcore_prefect_flow(payload.blockname)
+  return PrefectService.run_dbtcore_prefect_flow(payload.blockname)
 
 # ======================================  ==============================================================
 @clientapi.post('/prefect/blocks/dbt_run/', auth=UserAuthBearer())
@@ -543,7 +543,7 @@ def postPrefectDbtCoreBlock(request, payload: PrefectDbtRun):
     ]
   )
 
-  block = AirbyteService.create_dbtcore_block(block_data, payload.profile, payload.credentials)
+  block = PrefectService.createDbtCoreBlock(block_data, payload.profile, payload.credentials)
 
   cpb = OrgPrefectBlock(
     org=user.org, 
@@ -576,7 +576,7 @@ def deletePrefectDbtRunBlock(request, block_id):
     raise HttpError(400, "create an organization first")
   # don't bother checking for user.org.dbt
 
-  AirbyteService.delete_dbtcore_block(block_id)
+  PrefectService.deleteDbtCoreBlock(block_id)
   cpb = OrgPrefectBlock.objects.filter(org=user.org, blockid=block_id).first()
   if cpb:
     cpb.delete()
@@ -610,7 +610,7 @@ def postPrefectDbtTestBlock(request, payload: PrefectDbtRun):
     ]
   )
 
-  block = AirbyteService.create_dbtcore_block(block_data, payload.profile, payload.credentials)
+  block = PrefectService.createDbtCoreBlock(block_data, payload.profile, payload.credentials)
 
   cpb = OrgPrefectBlock(
     org=user.org, 
@@ -630,7 +630,7 @@ def deletePrefectDbtTestBlock(request, block_id):
     raise HttpError(400, "create an organization first")
   # don't bother checking for user.org.dbt
   
-  AirbyteService.delete_dbtcore_block(block_id)
+  PrefectService.deleteDbtCoreBlock(block_id)
   cpb = OrgPrefectBlock.objects.filter(org=user.org, blockid=block_id).first()
   if cpb:
     cpb.delete()

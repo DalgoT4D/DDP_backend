@@ -21,33 +21,33 @@ SHELLOPERATION = 'Shell Operation'
 DBTCORE = 'dbt Core Operation'
 
 # =====================================================================================================================
-def prefectget(endpoint):
+def prefectGet(endpoint):
   root = os.getenv('PREFECT_API_URL')
   r = requests.get(f"{root}/{endpoint}")
   r.raise_for_status()
   return r.json()
 
-def prefectpost(endpoint, json):
+def prefectPost(endpoint, json):
   root = os.getenv('PREFECT_API_URL')
   r = requests.post(f"{root}/{endpoint}", json=json)
   r.raise_for_status()
   return r.json()
 
-def prefectpatch(endpoint, json):
+def prefectPatch(endpoint, json):
   root = os.getenv('PREFECT_API_URL')
   r = requests.patch(f"{root}/{endpoint}", json=json)
   r.raise_for_status()
   return r.json()
 
-def prefectdelete(endpoint):
+def prefectDelete(endpoint):
   root = os.getenv('PREFECT_API_URL')
   r = requests.delete(f"{root}/{endpoint}")
   r.raise_for_status()
   return
 
 # =====================================================================================================================
-def get_blocktype(querystr):
-  r = prefectpost('block_types/filter', 
+def getBlockType(querystr):
+  r = prefectPost('block_types/filter', 
     {"block_types": {"name": {"like_": querystr},}}
   )
   if len(r) != 1:
@@ -55,10 +55,10 @@ def get_blocktype(querystr):
   blocktype = r[0]
   return blocktype
 
-def get_blockschematype(querystr, blocktypeid=None):
+def getBlockSchemaType(querystr, blocktypeid=None):
   if blocktypeid is None:
-    blocktypeid = get_blocktype(querystr)['id']
-  r = prefectpost('block_schemas/filter', 
+    blocktypeid = getBlockType(querystr)['id']
+  r = prefectPost('block_schemas/filter', 
     {"block_schemas": {"operator": "and_", "block_type_id": {"any_": [blocktypeid]}}}
   )
   if len(r) != 1:
@@ -66,9 +66,9 @@ def get_blockschematype(querystr, blocktypeid=None):
   blockschematype = r[0]
   return blockschematype
 
-def get_block(blocktype, blockname):
-  blocktype_id = get_blocktype(blocktype)['id']
-  r = prefectpost('block_documents/filter', 
+def getBlock(blocktype, blockname):
+  blocktype_id = getBlockType(blocktype)['id']
+  r = prefectPost('block_documents/filter', 
     {"block_documents": {
       "operator": "and_", 
       "block_type_id": {"any_": [blocktype_id]},
@@ -83,11 +83,11 @@ def get_block(blocktype, blockname):
   return block
 
 # =====================================================================================================================
-def create_airbyteserver_block(blockname):
-  airbyte_server_blocktype_id = get_blocktype(AIRBYTESERVER)['id']
-  airbyte_server_blockschematype_id = get_blockschematype(AIRBYTESERVER, airbyte_server_blocktype_id)['id']
+def createAirbyteserverBlock(blockname):
+  airbyte_server_blocktype_id = getBlockType(AIRBYTESERVER)['id']
+  airbyte_server_blockschematype_id = getBlockSchemaType(AIRBYTESERVER, airbyte_server_blocktype_id)['id']
 
-  r = prefectpost(f'block_documents/', {
+  r = prefectPost(f'block_documents/', {
     "name": blockname,
     "block_type_id": airbyte_server_blocktype_id,
     "block_schema_id": airbyte_server_blockschematype_id,
@@ -102,20 +102,20 @@ def create_airbyteserver_block(blockname):
   })
   return r
 
-def delete_airbyteserver_block(blockid):
-  return prefectdelete(f"block_documents/{blockid}")
+def deleteAirbyteserverBlock(blockid):
+  return prefectDelete(f"block_documents/{blockid}")
 
 # =====================================================================================================================
-def create_airbyteconnection_block(conninfo: PrefectAirbyteConnectionSetup):
+def createAirbyteConnectionBlock(conninfo: PrefectAirbyteConnectionSetup):
 
-  airbyte_connection_blocktype_id = get_blocktype(AIRBYTECONNECTION)['id']
-  airbyte_connection_blockschematype_id = get_blockschematype(AIRBYTECONNECTION, airbyte_connection_blocktype_id)['id']
+  airbyte_connection_blocktype_id = getBlockType(AIRBYTECONNECTION)['id']
+  airbyte_connection_blockschematype_id = getBlockSchemaType(AIRBYTECONNECTION, airbyte_connection_blocktype_id)['id']
 
-  serverblock = get_block(AIRBYTESERVER, conninfo.serverblockname)
+  serverblock = getBlock(AIRBYTESERVER, conninfo.serverblockname)
   if serverblock is None:
     raise Exception(f"could not find {AIRBYTESERVER} block called {conninfo.serverblockname}")
 
-  r = prefectpost(f'block_documents/', {
+  r = prefectPost(f'block_documents/', {
     "name": conninfo.connectionblockname,
     "block_type_id": airbyte_connection_blocktype_id,
     "block_schema_id": airbyte_connection_blockschematype_id,
@@ -129,14 +129,14 @@ def create_airbyteconnection_block(conninfo: PrefectAirbyteConnectionSetup):
 
 
 def delete_airbyteconnection_block(blockid):
-  return prefectdelete(f"block_documents/{blockid}")
+  return prefectDelete(f"block_documents/{blockid}")
 
 # =====================================================================================================================
-def create_shell_block(shell: PrefectShellSetup):
-  shell_blocktype_id = get_blocktype(SHELLOPERATION)['id']
-  shell_blockschematype_id = get_blockschematype(SHELLOPERATION, shell_blocktype_id)['id']
+def createShellBlock(shell: PrefectShellSetup):
+  shell_blocktype_id = getBlockType(SHELLOPERATION)['id']
+  shell_blockschematype_id = getBlockSchemaType(SHELLOPERATION, shell_blocktype_id)['id']
 
-  r = prefectpost(f'block_documents/', {
+  r = prefectPost(f'block_documents/', {
     "name": shell.blockname,
     "block_type_id": shell_blocktype_id,
     "block_schema_id": shell_blockschematype_id,
@@ -150,12 +150,12 @@ def create_shell_block(shell: PrefectShellSetup):
   return r
 
 def delete_shell_block(blockid):
-  return prefectdelete(f"block_documents/{blockid}")
+  return prefectDelete(f"block_documents/{blockid}")
 
 # =====================================================================================================================
-def create_dbtcore_block(dbtcore: PrefectDbtCoreSetup, profile: DbtProfile, credentials: Union[DbtCredentialsPostgres, None]):
-  dbtcore_blocktype_id = get_blocktype(DBTCORE)['id']
-  dbtcore_blockschematype_id = get_blockschematype(DBTCORE, dbtcore_blocktype_id)['id']
+def createDbtCoreBlock(dbtcore: PrefectDbtCoreSetup, profile: DbtProfile, credentials: Union[DbtCredentialsPostgres, None]):
+  dbtcore_blocktype_id = getBlockType(DBTCORE)['id']
+  dbtcore_blockschematype_id = getBlockSchemaType(DBTCORE, dbtcore_blocktype_id)['id']
 
   dbt_cli_profile = {
     "name": profile.name, 
@@ -178,7 +178,7 @@ def create_dbtcore_block(dbtcore: PrefectDbtCoreSetup, profile: DbtProfile, cred
   else:
     raise Exception(f"unrecognized target_configs_type {profile.target_configs_type}")
 
-  r = prefectpost(f'block_documents/', {
+  r = prefectPost(f'block_documents/', {
     "name": dbtcore.blockname,
     "block_type_id": dbtcore_blocktype_id,
     "block_schema_id": dbtcore_blockschematype_id,
@@ -194,8 +194,8 @@ def create_dbtcore_block(dbtcore: PrefectDbtCoreSetup, profile: DbtProfile, cred
   })
   return r
 
-def delete_dbtcore_block(blockid):
-  return prefectdelete(f"block_documents/{blockid}")
+def deleteDbtCoreBlock(blockid):
+  return prefectDelete(f"block_documents/{blockid}")
 
 # =====================================================================================================================
 @flow

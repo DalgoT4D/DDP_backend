@@ -21,26 +21,26 @@ def abreq(endpoint, req=None):
   return r.json()
 
 # ====================================================================================================
-def get_workspaces():
+def getWorkspaces():
   return abreq('workspaces/list')
 
 # ====================================================================================================
-def get_workspace(workspace_id):
+def getWorkspace(workspace_id):
   return abreq('workspaces/get', {"workspaceId": workspace_id})
 
 # ====================================================================================================
-def setworkspacename(workspace_id, name):
+def setWorkspaceName(workspace_id, name):
   abreq('workspaces/update_name', {'workspaceId': workspace_id, 'name': name})
 
 # ====================================================================================================
-def createworkspace(name):
+def createWorkspace(name):
   r = abreq('workspaces/create', {"name": name})
   if 'workspaceId' not in r:
     raise Exception(r)
   return r
 
 # ====================================================================================================
-def getsourcedefinitions(workspace_id, **kwargs):
+def getSourceDefinitions(workspace_id, **kwargs):
   r = abreq(
     'source_definitions/list_for_workspace', 
     {'workspaceId': workspace_id}
@@ -50,7 +50,7 @@ def getsourcedefinitions(workspace_id, **kwargs):
   return r['sourceDefinitions']
 
 # ====================================================================================================
-def getsourcedefinitionspecification(workspace_id, sourcedef_id):
+def getSourceDefinitionSpecification(workspace_id, sourcedef_id):
   r = abreq('source_definition_specifications/get', {
     'sourceDefinitionId': sourcedef_id, 
     'workspaceId': workspace_id
@@ -60,21 +60,21 @@ def getsourcedefinitionspecification(workspace_id, sourcedef_id):
   return r['connectionSpecification']
 
 # ====================================================================================================
-def getsources(workspace_id):
+def getSources(workspace_id):
   r = abreq('sources/list', {"workspaceId": workspace_id})
   if 'sources' not in r:
     raise Exception(r)
   return r['sources']
 
 # ====================================================================================================
-def getsource(workspace_id, source_id):
+def getSource(workspace_id, source_id):
   r = abreq('sources/get', {"sourceId": source_id})
   if 'sourceId' not in r:
     raise Exception(r)
   return r
 
 # ====================================================================================================
-def createsource(workspace_id, name, sourcedef_id, config):
+def createSource(workspace_id, name, sourcedef_id, config):
   r = abreq('sources/create', {
     "workspaceId": workspace_id,
     "name": name,
@@ -86,7 +86,7 @@ def createsource(workspace_id, name, sourcedef_id, config):
   return r
 
 # ====================================================================================================
-def checksourceconnection(workspace_id, source_id):
+def checkSourceConnection(workspace_id, source_id):
   r = abreq('sources/check_connection', {'sourceId': source_id})
   # {
   #   'status': 'succeeded',
@@ -104,14 +104,14 @@ def checksourceconnection(workspace_id, source_id):
   return r
 
 # ====================================================================================================
-def getsourceschemacatalog(workspace_id, source_id):
+def getSourceSchemaCatalog(workspace_id, source_id):
   r = abreq('sources/discover_schema', {'sourceId': source_id})
   if 'catalog' not in r:
     raise Exception(r)
   return r
 
 # ====================================================================================================
-def getdestinationdefinitions(workspace_id, **kwargs):
+def getDestinationDefinitions(workspace_id, **kwargs):
   r = abreq(
     'destination_definitions/list_for_workspace', 
     {'workspaceId': workspace_id}
@@ -121,7 +121,7 @@ def getdestinationdefinitions(workspace_id, **kwargs):
   return r['destinationDefinitions']
 
 # ====================================================================================================
-def getdestinationdefinitionspecification(workspace_id, destinationdef_id):
+def getDestinationDefinitionSpecification(workspace_id, destinationdef_id):
   r = abreq('destination_definition_specifications/get', {
     'destinationDefinitionId': destinationdef_id, 
     'workspaceId': workspace_id
@@ -131,21 +131,21 @@ def getdestinationdefinitionspecification(workspace_id, destinationdef_id):
   return r['connectionSpecification']
 
 # ====================================================================================================
-def getdestinations(workspace_id):
+def getDestinations(workspace_id):
   r = abreq('destinations/list', {"workspaceId": workspace_id})
   if 'destinations' not in r:
     raise Exception(r)
   return r['destinations']
 
 # ====================================================================================================
-def getdestination(workspace_id, destination_id):
+def getDestination(workspace_id, destination_id):
   r = abreq('destinations/get', {"destinationId": destination_id})
   if 'destinationId' not in r:
     raise Exception(r)
   return r
 
 # ====================================================================================================
-def createdestination(workspace_id, name, destinationdef_id, config):
+def createDestination(workspace_id, name, destinationdef_id, config):
   r = abreq('destinations/create', {
     "workspaceId": workspace_id,
     "name": name,
@@ -157,26 +157,26 @@ def createdestination(workspace_id, name, destinationdef_id, config):
   return r
 
 # ====================================================================================================
-def checkdestinationconnection(workspace_id, destination_id):
+def checkDestinationConnection(workspace_id, destination_id):
   r = abreq('destinations/check_connection', {'destinationId': destination_id})
   return r
 
 # ====================================================================================================
-def getconnections(workspace_id):
+def getConnections(workspace_id):
   r = abreq('connections/list', {"workspaceId": workspace_id})
   if 'connections' not in r:
     raise Exception(r)
   return r['connections']
 
 # ====================================================================================================
-def getconnection(workspace_id, connection_id):
+def getConnection(workspace_id, connection_id):
   r = abreq('connections/get', {"connectionId": connection_id})
   if 'connectionId' not in r:
     raise Exception(r)
   return r
 
 # ====================================================================================================
-def createconnection(workspace_id, connection_info: Schemas.AirbyteConnectionCreate):
+def createConnection(workspace_id, connection_info: Schemas.AirbyteConnectionCreate):
 
   if len(connection_info.streamnames) == 0:
     raise Exception("must specify stream names")
@@ -226,6 +226,6 @@ def createconnection(workspace_id, connection_info: Schemas.AirbyteConnectionCre
   return r
 
 # ====================================================================================================
-def syncconnection(workspace_id, connection_id):
+def syncConnection(workspace_id, connection_id):
   r = abreq('connections/sync', {'connectionId': connection_id})
   return r
