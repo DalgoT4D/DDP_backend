@@ -47,7 +47,7 @@ connection_block_data = prefectschemas.PrefectAirbyteConnectionSetup(
     connectionblockname=airbyte_connection_blockname,
     connection_id="fake-conn-id",
 )
-prefectapi.create_airbyteconnection_block(connection_block_data)
+prefectapi.create_airbyte_connection_block(connection_block_data)
 x = prefectapi.get_block(prefectapi.AIRBYTECONNECTION, airbyte_connection_blockname)
 if x:
     print(
@@ -56,7 +56,7 @@ if x:
 else:
     raise Exception(f"no airbyte connection block named {airbyte_connection_blockname}")
 
-prefectapi.delete_airbyteconnection_block(x["id"])
+prefectapi.delete_airbyte_connection_block(x["id"])
 
 x = prefectapi.get_block(prefectapi.AIRBYTECONNECTION, airbyte_connection_blockname)
 if x:
@@ -70,7 +70,7 @@ else:
 
 # clean up the server block
 x = prefectapi.get_block(prefectapi.AIRBYTESERVER, airbyte_blockname)
-prefectapi.delete_airbyteserver_block(x["id"])
+prefectapi.delete_airbyte_server_block(x["id"])
 
 x = prefectapi.get_block(prefectapi.AIRBYTESERVER, airbyte_blockname)
 if x:
@@ -80,10 +80,10 @@ else:
 
 
 # == shell ==
-x = prefectapi.get_blocktype(prefectapi.SHELLOPERATION)
+x = prefectapi.get_block_type(prefectapi.SHELLOPERATION)
 print("shell operation block type = " + x["id"])
 
-x = prefectapi.get_blockschematype(prefectapi.SHELLOPERATION)
+x = prefectapi.get_blockschema_type(prefectapi.SHELLOPERATION)
 print("shell operation block schema type = " + x["id"])
 
 shellop_blockname = "shellop-unittest"
@@ -120,17 +120,17 @@ else:
 
 
 # == dbt ==
-x = prefectapi.get_blocktype(prefectapi.DBTCORE)
+x = prefectapi.get_block_type(prefectapi.DBTCORE)
 print("dbt core block type = " + x["id"])
 
-x = prefectapi.get_blockschematype(prefectapi.DBTCORE)
+x = prefectapi.get_block_schema_type(prefectapi.DBTCORE)
 print("dbt core block schema type = " + x["id"])
 
 dbt_blockname = "dbt-unittest"
 x = prefectapi.get_block(prefectapi.DBTCORE, dbt_blockname)
 if x:
     print(f"found dbt core block {dbt_blockname}, deleting")
-    prefectapi.delete_dbtcore_block(x["id"])
+    prefectapi.delete_dbt_core_block(x["id"])
 else:
     print(f"no dbt core block named {dbt_blockname}, creating")
 
@@ -171,7 +171,7 @@ dbtcredentials = prefectschemas.DbtCredentialsPostgres(
     port=5432,
 )
 
-prefectapi.create_dbtcore_block(blockdata, dbtprofile, dbtcredentials)
+prefectapi.create_dbt_core_block(blockdata, dbtprofile, dbtcredentials)
 
 x = prefectapi.get_block(prefectapi.DBTCORE, dbt_blockname)
 if x:
@@ -187,7 +187,7 @@ if x:
 else:
     raise Exception(f"no dbt core block named {dbt_blockname}")
 
-prefectapi.delete_dbtcore_block(x["id"])
+prefectapi.delete_dbt_core_block(x["id"])
 
 x = prefectapi.get_block(prefectapi.DBTCORE, dbt_blockname)
 if x:

@@ -177,7 +177,7 @@ def create_airbyte_connection_block(conninfo: PrefectAirbyteConnectionSetup):
     return res
 
 
-def delete_airbyteconnection_block(blockid):
+def delete_airbyte_connection_block(blockid):
     """Docstring"""
     return prefect_delete(f"block_documents/{blockid}")
 
