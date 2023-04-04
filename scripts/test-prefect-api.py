@@ -18,105 +18,105 @@ parser = argparse.ArgumentParser()
 args = parser.parse_args()
 
 # == airbyte ==
-x = prefectapi.get_blocktype(prefectapi.AIRBYTESERVER)
+x = prefectapi.get_block_type(prefectapi.AIRBYTESERVER)
 print("airbyte server block type = " + x["id"])
 
-x = prefectapi.get_blockschematype(prefectapi.AIRBYTESERVER)
+x = prefectapi.get_block_schema_type(prefectapi.AIRBYTESERVER)
 print("airbyte server block schema type = " + x["id"])
 
-airbyte_blockname = "absrvr-unittest"
-x = prefectapi.get_block(prefectapi.AIRBYTESERVER, airbyte_blockname)
+AIRBYTE_BLOCKNAME = "absrvr-unittest"
+x = prefectapi.get_block(prefectapi.AIRBYTESERVER, AIRBYTE_BLOCKNAME)
 if x:
-    print(f"found airbyte server block {airbyte_blockname}, deleting")
-    prefectapi.delete_airbyteserver_block(x["id"])
+    print(f"found airbyte server block {AIRBYTE_BLOCKNAME}, deleting")
+    prefectapi.delete_airbyte_server_block(x["id"])
 else:
-    print(f"no airbyte server block named {airbyte_blockname}, creating")
+    print(f"no airbyte server block named {AIRBYTE_BLOCKNAME}, creating")
 
-prefectapi.create_airbyteserver_block(airbyte_blockname)
+prefectapi.create_airbyte_server_block(AIRBYTE_BLOCKNAME)
 
-x = prefectapi.get_block(prefectapi.AIRBYTESERVER, airbyte_blockname)
+x = prefectapi.get_block(prefectapi.AIRBYTESERVER, AIRBYTE_BLOCKNAME)
 if x:
-    print(f"creation success: found airbyte server block {airbyte_blockname}")
+    print(f"creation success: found airbyte server block {AIRBYTE_BLOCKNAME}")
 else:
-    raise Exception(f"no airbyte server block named {airbyte_blockname}")
+    raise Exception(f"no airbyte server block named {AIRBYTE_BLOCKNAME}")
 
 # create a connection block referencing this server block
-airbyte_connection_blockname = "abconn-unittest"
+AIRBYTE_CONNECTION_BLOCKNAME = "abconn-unittest"
 connection_block_data = prefectschemas.PrefectAirbyteConnectionSetup(
-    serverblockname=airbyte_blockname,
-    connectionblockname=airbyte_connection_blockname,
+    serverblockname=AIRBYTE_BLOCKNAME,
+    connectionblockname=AIRBYTE_CONNECTION_BLOCKNAME,
     connection_id="fake-conn-id",
 )
 prefectapi.create_airbyte_connection_block(connection_block_data)
-x = prefectapi.get_block(prefectapi.AIRBYTECONNECTION, airbyte_connection_blockname)
+x = prefectapi.get_block(prefectapi.AIRBYTECONNECTION, AIRBYTE_CONNECTION_BLOCKNAME)
 if x:
     print(
-        f"creation success: found airbyte connection block {airbyte_connection_blockname}"
+        f"creation success: found airbyte connection block {AIRBYTE_CONNECTION_BLOCKNAME}"
     )
 else:
-    raise Exception(f"no airbyte connection block named {airbyte_connection_blockname}")
+    raise Exception(f"no airbyte connection block named {AIRBYTE_CONNECTION_BLOCKNAME}")
 
 prefectapi.delete_airbyte_connection_block(x["id"])
 
-x = prefectapi.get_block(prefectapi.AIRBYTECONNECTION, airbyte_connection_blockname)
+x = prefectapi.get_block(prefectapi.AIRBYTECONNECTION, AIRBYTE_CONNECTION_BLOCKNAME)
 if x:
     raise Exception(
-        f"found airbyte connection block {airbyte_connection_blockname} after deletion"
+        f"found airbyte connection block {AIRBYTE_CONNECTION_BLOCKNAME} after deletion"
     )
 else:
     print(
-        f"deletion success: no airbyte connection block named {airbyte_connection_blockname}"
+        f"deletion success: no airbyte connection block named {AIRBYTE_CONNECTION_BLOCKNAME}"
     )
 
 # clean up the server block
-x = prefectapi.get_block(prefectapi.AIRBYTESERVER, airbyte_blockname)
+x = prefectapi.get_block(prefectapi.AIRBYTESERVER, AIRBYTE_BLOCKNAME)
 prefectapi.delete_airbyte_server_block(x["id"])
 
-x = prefectapi.get_block(prefectapi.AIRBYTESERVER, airbyte_blockname)
+x = prefectapi.get_block(prefectapi.AIRBYTESERVER, AIRBYTE_BLOCKNAME)
 if x:
-    raise Exception(f"found airbyte server block {airbyte_blockname} after deletion")
+    raise Exception(f"found airbyte server block {AIRBYTE_BLOCKNAME} after deletion")
 else:
-    print(f"deletion success: no airbyte server block named {airbyte_blockname}")
+    print(f"deletion success: no airbyte server block named {AIRBYTE_BLOCKNAME}")
 
 
 # == shell ==
 x = prefectapi.get_block_type(prefectapi.SHELLOPERATION)
 print("shell operation block type = " + x["id"])
 
-x = prefectapi.get_blockschema_type(prefectapi.SHELLOPERATION)
+x = prefectapi.get_block_schema_type(prefectapi.SHELLOPERATION)
 print("shell operation block schema type = " + x["id"])
 
-shellop_blockname = "shellop-unittest"
-x = prefectapi.get_block(prefectapi.SHELLOPERATION, shellop_blockname)
+SHELLOP_BLOCKNAME = "shellop-unittest"
+x = prefectapi.get_block(prefectapi.SHELLOPERATION, SHELLOP_BLOCKNAME)
 if x:
-    print(f"found shell operation block {shellop_blockname}, deleting")
+    print(f"found shell operation block {SHELLOP_BLOCKNAME}, deleting")
     prefectapi.delete_shell_block(x["id"])
 else:
-    print(f"no shell operation block named {shellop_blockname}, creating")
+    print(f"no shell operation block named {SHELLOP_BLOCKNAME}, creating")
 
 shellop_blockdata = prefectschemas.PrefectShellSetup(
-    blockname=shellop_blockname,
+    blockname=SHELLOP_BLOCKNAME,
     working_dir="WORKING_DIR",
     env={"VAR": "VAL"},
     commands=["shellcmd1", "shellcmd2"],
 )
 prefectapi.create_shell_block(shellop_blockdata)
 
-x = prefectapi.get_block(prefectapi.SHELLOPERATION, shellop_blockname)
+x = prefectapi.get_block(prefectapi.SHELLOPERATION, SHELLOP_BLOCKNAME)
 if x:
-    print(f"creation success: found shell operation block {shellop_blockname}")
+    print(f"creation success: found shell operation block {SHELLOP_BLOCKNAME}")
     print("  working_dir= " + x["data"]["working_dir"])
     print("  commands= " + json.dumps(x["data"]["commands"]))
 else:
-    raise Exception(f"no shell operation block named {shellop_blockname}")
+    raise Exception(f"no shell operation block named {SHELLOP_BLOCKNAME}")
 
 prefectapi.delete_shell_block(x["id"])
 
-x = prefectapi.get_block(prefectapi.SHELLOPERATION, shellop_blockname)
+x = prefectapi.get_block(prefectapi.SHELLOPERATION, SHELLOP_BLOCKNAME)
 if x:
-    raise Exception(f"found shell operation block {shellop_blockname} after deletion")
+    raise Exception(f"found shell operation block {SHELLOP_BLOCKNAME} after deletion")
 else:
-    print(f"deletion success: no shell operation block named {shellop_blockname}")
+    print(f"deletion success: no shell operation block named {SHELLOP_BLOCKNAME}")
 
 
 # == dbt ==
@@ -126,13 +126,13 @@ print("dbt core block type = " + x["id"])
 x = prefectapi.get_block_schema_type(prefectapi.DBTCORE)
 print("dbt core block schema type = " + x["id"])
 
-dbt_blockname = "dbt-unittest"
-x = prefectapi.get_block(prefectapi.DBTCORE, dbt_blockname)
+DBT_BLOCKNAME = "dbt-unittest"
+x = prefectapi.get_block(prefectapi.DBTCORE, DBT_BLOCKNAME)
 if x:
-    print(f"found dbt core block {dbt_blockname}, deleting")
+    print(f"found dbt core block {DBT_BLOCKNAME}, deleting")
     prefectapi.delete_dbt_core_block(x["id"])
 else:
-    print(f"no dbt core block named {dbt_blockname}, creating")
+    print(f"no dbt core block named {DBT_BLOCKNAME}, creating")
 
 DBT_BINARY = os.getenv("TESTING_DBT_BINARY")
 DBT_PROJECT_DIR = os.getenv("TESTING_DBT_PROJECT_DIR")
@@ -149,7 +149,7 @@ if os.path.exists(f"{DBT_PROJECT_DIR}/profiles/profiles.yml"):
     os.remove(f"{DBT_PROJECT_DIR}/profiles/profiles.yml")
 
 blockdata = prefectschemas.PrefectDbtCoreSetup(
-    blockname=dbt_blockname,
+    blockname=DBT_BLOCKNAME,
     profiles_dir=f"{DBT_PROJECT_DIR}/profiles/",
     project_dir=DBT_PROJECT_DIR,
     working_dir=DBT_PROJECT_DIR,
@@ -173,27 +173,27 @@ dbtcredentials = prefectschemas.DbtCredentialsPostgres(
 
 prefectapi.create_dbt_core_block(blockdata, dbtprofile, dbtcredentials)
 
-x = prefectapi.get_block(prefectapi.DBTCORE, dbt_blockname)
+x = prefectapi.get_block(prefectapi.DBTCORE, DBT_BLOCKNAME)
 if x:
-    print(f"creation success: found dbt core block {dbt_blockname}")
+    print(f"creation success: found dbt core block {DBT_BLOCKNAME}")
     print("  working_dir= " + x["data"]["working_dir"])
     print("  profiles_dir= " + x["data"]["profiles_dir"])
     print("  project_dir= " + x["data"]["project_dir"])
     print("  commands= " + json.dumps(x["data"]["commands"]))
 
     print("running block")
-    prefectapi.run_dbtcore_prefect_flow(dbt_blockname)
+    prefectapi.run_dbtcore_prefect_flow(DBT_BLOCKNAME)
 
 else:
-    raise Exception(f"no dbt core block named {dbt_blockname}")
+    raise Exception(f"no dbt core block named {DBT_BLOCKNAME}")
 
 prefectapi.delete_dbt_core_block(x["id"])
 
-x = prefectapi.get_block(prefectapi.DBTCORE, dbt_blockname)
+x = prefectapi.get_block(prefectapi.DBTCORE, DBT_BLOCKNAME)
 if x:
-    raise Exception(f"found dbt core block {dbt_blockname} after deletion")
+    raise Exception(f"found dbt core block {DBT_BLOCKNAME} after deletion")
 else:
-    print(f"deletion success: no dbt core block named {dbt_blockname}")
+    print(f"deletion success: no dbt core block named {DBT_BLOCKNAME}")
 
 if os.path.exists(f"{DBT_PROJECT_DIR}/profiles/profiles.yml"):
     os.remove(f"{DBT_PROJECT_DIR}/profiles/profiles.yml")
