@@ -1,0 +1,21 @@
+[MAIN]
+
+
+[MESSAGES CONTROL]
+
+disable=
+    missing-module-docstring,
+    broad-exception-raised,
+    broad-exception-caught,
+    too-few-public-methods,
+    logging-not-lazy,
+    logging-fstring-interpolation,
+
+
+[FORMAT]
+
+max-line-length=150
+
+[TYPECHECK]
+
+generated-members=objects
