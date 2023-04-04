@@ -23,32 +23,28 @@ Django application for the DDP platform's management backend. Exposes API endpoi
     -   DELETE <mark>/api/users/:user_id</mark>
 -   Route parameteres should be named in snake_case as shown above.
 
-### Api handlers / controller functions naming
+### Code style
 
--   Handlers would be named in <mark>lowerCamelCase</mark> fashion where the lower case word would represent the api end point followed by the resource/feature/functionality that the api is implementing. Plural name should be used depending on the api.
-    -   Eg handler for an api to create User would look like
-        <mark>postUser</mark>
-    -   Eg handler for an api to create OrganizationClient would look like
-        <mark>postOrganizationClient</mark>
-    -   Eg handler for an api to fetch all Users would look like
-        <mark>getUsers</mark>
-    -   Eg handler for a login api would look like <mark>postLogin</mark>
+-   `Pep8` has been used to standardized variable names, classes, module names etc.
+-   `Pylint` is the linting tool used to analyze the code as per Pep8 style.
+-   `Black` is used as the code formatter.
 
-### Variables and Classes naming
+### Setting up your vscode env
 
--   Variable names should follow snake_case convention. Eg org_user_id, user_id etc. Names like targettype, targetschema etc. are unacceptable.
+-   Recommended IDE is VsCode.
+-   Install the pylint extension in vscode and enable it.
+-   Set the default format provider in vscode as `black`
+-   Update the vscode settings.json as follows<br>
+    `    {
+"editor.defaultFormatter": null,
+"python.linting.enabled": true,
+"python.formatting.provider": "black",
+"editor.formatOnSave": true
+}`
 
--   Classes Name for models, services, middlewares should follow CamelCase Format. For eg OrgUserSchema, OrgPrefectBlock etc.
+### Running pylint
 
--   Make sure the names are meaningful. Avoid using variable names like 'x' , 'a' etc.
-
-### Folder and file naming
-
--   Files that have models, services, custom modules, utils, controllers should be named using CamelCasing. For eg AdminController.py, AirbyteService.py, DdpLogger.py etc.
-
--   Other Files than above should be named using small case letters (snake_case should be used if it improves the readability).
-
--   All folders are named using small case letters (snake_case should be used if it improves the readability).
+-   In your virtual environment run `pylint ddpui/`
 
 ## Setup instructions
 
