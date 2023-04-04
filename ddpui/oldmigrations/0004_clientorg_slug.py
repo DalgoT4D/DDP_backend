@@ -4,7 +4,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("ddpui", "0003_clientdbt_remove_org_dbt_repo_url_and_more"),
     ]
