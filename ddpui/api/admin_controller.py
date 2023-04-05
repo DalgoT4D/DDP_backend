@@ -47,7 +47,7 @@ def post_login(request):
     return token
 
 
-@adminapi.get("/getadminuser", response=AdminUserResponse, auth=AdminAuthBearer())
+@adminapi.get("/getadminuser", response=AdminUserResponse, auth=AuthBearer())
 def get_admin_user(request):
     """return the admin user who made this request"""
     return AdminUserResponse(
@@ -56,10 +56,8 @@ def get_admin_user(request):
     )
 
 
-@adminapi.get(
-    "/organizations/users", response=List[OrgUserResponse], auth=AdminAuthBearer()
-)
-def get_organization_users(request, org: str = None):
+@adminapi.get("/organizations/users", response=List[OrgUserResponse], auth=AuthBearer())
+def get_organization_users(request, orgname: str = None):
     """Fetch all organization users"""
     assert request.auth
     query = OrgUser.objects.filter(user__is_active=True)
