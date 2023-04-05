@@ -17,25 +17,25 @@ adminapi = NinjaAPI(urls_namespace="admin")
 
 @adminapi.exception_handler(ValidationError)
 def ninja_validation_error_handler(request, exc):
-    """Docstring"""
+    """Handle any ninja validation errors raised in the apis"""
     return Response({"error": exc.errors}, status=422)
 
 
 @adminapi.exception_handler(PydanticValidationError)
 def pydantic_validation_error_handler(request, exc: PydanticValidationError):
-    """Docstring"""
+    """Handle any pydantic errors raised in the apis"""
     return Response({"error": exc.errors()}, status=422)
 
 
 @adminapi.exception_handler(HttpError)
 def ninja_http_error_handler(request, exc: HttpError):
-    """Docstring"""
+    """Handle any http errors raised in the apis"""
     return Response({"error": " ".join(exc.args)}, status=exc.status_code)
 
 
 @adminapi.exception_handler(Exception)
 def ninja_default_error_handler(request, exc: Exception):
-    """Docstring"""
+    """Handle any other exception raised in the apis"""
     return Response({"error": " ".join(exc.args)}, status=500)
 
 
@@ -53,7 +53,7 @@ def post_login(request, payload: LoginData):
 
 @adminapi.get("/getadminuser", response=AdminUserResponse, auth=AdminAuthBearer())
 def get_admin_user(request):
-    """Docstring"""
+    """Fetch the current admin logged in user"""
     return request.auth
 
 
@@ -61,7 +61,7 @@ def get_admin_user(request):
     "/organizations/users", response=List[OrgUserResponse], auth=AdminAuthBearer()
 )
 def get_organization_users(request, org: str = None):
-    """Docstring"""
+    """Fetch all organization users"""
     assert request.auth
     query = OrgUser.objects.filter(active=True)
     if org:
@@ -73,7 +73,7 @@ def get_organization_users(request, org: str = None):
     "/organizations/users/{orguserid}", response=OrgUserResponse, auth=AdminAuthBearer()
 )
 def put_organization_user(request, orguserid: int, payload: OrgUserUpdate):
-    """Docstring"""
+    """Edit an organization user"""
     assert request.auth
     user = OrgUser.objects.filter(id=orguserid).first()
     if user is None:
@@ -92,7 +92,7 @@ def put_organization_user(request, orguserid: int, payload: OrgUserUpdate):
 
 @adminapi.delete("/organizations/", auth=AdminAuthBearer())
 def delete_organization(request, payload: OrgSchema):
-    """Docstring"""
+    """Delete an organization"""
     if request.headers.get("X-DDP-Confirmation") != "yes":
         raise HttpError(400, "missing x-confirmation header")
     org = Org.objects.filter(name=payload.name).first()

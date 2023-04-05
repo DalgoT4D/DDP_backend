@@ -26,7 +26,7 @@ DBTCORE = "dbt Core Operation"
 
 
 def prefect_get(endpoint):
-    """Docstring"""
+    """GET request to prefect server"""
     root = os.getenv("PREFECT_API_URL")
     res = requests.get(f"{root}/{endpoint}")
     res.raise_for_status()
@@ -34,7 +34,7 @@ def prefect_get(endpoint):
 
 
 def prefect_post(endpoint, json):
-    """Docstring"""
+    """POST request to prefect server"""
     root = os.getenv("PREFECT_API_URL")
     res = requests.post(f"{root}/{endpoint}", json=json)
     res.raise_for_status()
@@ -42,7 +42,7 @@ def prefect_post(endpoint, json):
 
 
 def prefect_patch(endpoint, json):
-    """Docstring"""
+    """PATCH request to prefect server"""
     root = os.getenv("PREFECT_API_URL")
     res = requests.patch(f"{root}/{endpoint}", json=json)
     res.raise_for_status()
@@ -50,7 +50,7 @@ def prefect_patch(endpoint, json):
 
 
 def prefect_delete(endpoint):
-    """Docstring"""
+    """DELETE request to prefect server"""
     root = os.getenv("PREFECT_API_URL")
     res = requests.delete(f"{root}/{endpoint}")
     res.raise_for_status()
@@ -58,7 +58,7 @@ def prefect_delete(endpoint):
 
 
 def get_block_type(querystr):
-    """Docstring"""
+    """Fetch prefect block type"""
     res = prefect_post(
         "block_types/filter",
         {
@@ -76,7 +76,7 @@ def get_block_type(querystr):
 
 
 def get_block_schema_type(querystr, blocktypeid=None):
-    """Docstring"""
+    """Fetch prefect block type schema"""
     if blocktypeid is None:
         blocktypeid = get_block_type(querystr)["id"]
     res = prefect_post(
@@ -97,7 +97,7 @@ def get_block_schema_type(querystr, blocktypeid=None):
 
 
 def get_block(blocktype, blockname):
-    """Docstring"""
+    """Fetch prefect block"""
     blocktype_id = get_block_type(blocktype)["id"]
     res = prefect_post(
         "block_documents/filter",
@@ -118,7 +118,7 @@ def get_block(blocktype, blockname):
 
 
 def create_airbyte_server_block(blockname):
-    """Docstring"""
+    """Create airbyte server block in prefect"""
     airbyte_server_blocktype_id = get_block_type(AIRBYTESERVER)["id"]
     airbyte_server_blockschematype_id = get_block_schema_type(
         AIRBYTESERVER, airbyte_server_blocktype_id
@@ -144,12 +144,12 @@ def create_airbyte_server_block(blockname):
 
 
 def delete_airbyte_server_block(blockid):
-    """Docstring"""
+    """Delete airbyte server block"""
     return prefect_delete(f"block_documents/{blockid}")
 
 
 def create_airbyte_connection_block(conninfo: PrefectAirbyteConnectionSetup):
-    """Docstring"""
+    """Create airbyte connection block"""
     airbyte_connection_blocktype_id = get_block_type(AIRBYTECONNECTION)["id"]
     airbyte_connection_blockschematype_id = get_block_schema_type(
         AIRBYTECONNECTION, airbyte_connection_blocktype_id
@@ -178,12 +178,12 @@ def create_airbyte_connection_block(conninfo: PrefectAirbyteConnectionSetup):
 
 
 def delete_airbyte_connection_block(blockid):
-    """Docstring"""
+    """Delete airbyte connection block in prefect"""
     return prefect_delete(f"block_documents/{blockid}")
 
 
 def create_shell_block(shell: PrefectShellSetup):
-    """Docstring"""
+    """Create a prefect shell block"""
     shell_blocktype_id = get_block_type(SHELLOPERATION)["id"]
     shell_blockschematype_id = get_block_schema_type(
         SHELLOPERATION, shell_blocktype_id
@@ -207,7 +207,7 @@ def create_shell_block(shell: PrefectShellSetup):
 
 
 def delete_shell_block(blockid):
-    """Docstring"""
+    """Delete a prefect shell block"""
     return prefect_delete(f"block_documents/{blockid}")
 
 
@@ -216,7 +216,7 @@ def create_dbt_core_block(
     profile: DbtProfile,
     credentials: Union[DbtCredentialsPostgres, None],
 ):
-    """Docstring"""
+    """Create a dbt core block in prefect"""
     dbtcore_blocktype_id = get_block_type(DBTCORE)["id"]
     dbtcore_blockschematype_id = get_block_schema_type(DBTCORE, dbtcore_blocktype_id)[
         "id"
@@ -266,19 +266,19 @@ def create_dbt_core_block(
 
 
 def delete_dbt_core_block(blockid):
-    """Docstring"""
+    """Delete a dbt core block in prefect"""
     return prefect_delete(f"block_documents/{blockid}")
 
 
 @flow
 def run_airbyte_connection_prefect_flow(blockname):
-    """Docstring"""
+    """Prefect flow to run airbyte connection"""
     airbyte_connection = AirbyteConnection.load(blockname)
     return run_connection_sync(airbyte_connection)
 
 
 @flow
 def run_dbtcore_prefect_flow(blockname):
-    """Docstring"""
+    """Prefect flow to run dbt"""
     dbt_op = DbtCoreOperation.load(blockname)
     dbt_op.run()

@@ -46,42 +46,42 @@ clientapi = NinjaAPI()
 
 @clientapi.exception_handler(ValidationError)
 def ninja_validation_error_handler(request, exc):
-    """Docstring"""
+    """Handle any ninja validation errors raised in the apis"""
     return Response({"error": exc.errors}, status=422)
 
 
 @clientapi.exception_handler(PydanticValidationError)
 def pydantic_validation_error_handler(request, exc: PydanticValidationError):
-    """Docstring"""
+    """Handle any pydantic errors raised in the apis"""
     return Response({"error": exc.errors()}, status=422)
 
 
 @clientapi.exception_handler(HttpError)
 def ninja_http_error_handler(request, exc: HttpError):
-    """Docstring"""
+    """Handle any http errors raised in the apis"""
     return Response({"error": " ".join(exc.args)}, status=exc.status_code)
 
 
 @clientapi.exception_handler(Exception)
 def ninja_default_error_handler(request, exc: Exception):
-    """Docstring"""
+    """Handle any other exception raised in the apis"""
     return Response({"error": " ".join(exc.args)}, status=500)
 
 
 def runcmd(cmd, cwd):
-    """Docstring"""
+    """Execute a child program in a new process"""
     return subprocess.Popen(shlex.split(cmd), cwd=str(cwd))
 
 
 @clientapi.get("/currentuser", auth=UserAuthBearer(), response=OrgUserResponse)
 def get_current_user(request):
-    """Docstring"""
+    """Fetch the current logged in user"""
     return request.auth
 
 
 @clientapi.post("/organizations/users", response=OrgUserResponse)
 def post_organization_user(request, payload: OrgUserCreate):
-    """Docstring"""
+    """Create an organization user"""
     if OrgUser.objects.filter(email=payload.email).exists():
         raise HttpError(400, f"user having email {payload.email} exists")
     user = OrgUser.objects.create(**payload.dict())
@@ -91,7 +91,7 @@ def post_organization_user(request, payload: OrgUserCreate):
 
 @clientapi.post("/login/")
 def post_login(request, payload: LoginData):
-    """Docstring"""
+    """Login a client"""
     print(payload)
     if payload.password == "password":
         user = OrgUser.objects.filter(email=payload.email).first()
@@ -106,7 +106,7 @@ def post_login(request, payload: LoginData):
     "/organizations/users", response=List[OrgUserResponse], auth=UserAuthBearer()
 )
 def get_organization_users(request):
-    """Docstring"""
+    """Fetch organization users"""
     assert request.auth
     user = request.auth
     if user.org is None:
@@ -116,7 +116,7 @@ def get_organization_users(request):
 
 @clientapi.put("/organizations/users", response=OrgUserResponse, auth=UserAuthBearer())
 def put_organization_user(request, payload: OrgUserUpdate):
-    """Docstring"""
+    """Update an organization user"""
     assert request.auth
     user = request.auth
     if payload.email:
@@ -130,7 +130,7 @@ def put_organization_user(request, payload: OrgUserUpdate):
 
 @clientapi.post("/organizations/", response=OrgSchema, auth=UserAuthBearer())
 def post_organization(request, payload: OrgSchema):
-    """Docstring"""
+    """Create an organization"""
     logger.info(payload)
     user = request.auth
     if user.org:
@@ -149,7 +149,7 @@ def post_organization(request, payload: OrgSchema):
     "/organizations/users/invite/", response=InvitationSchema, auth=UserAuthBearer()
 )
 def post_organization_user_invite(request, payload: InvitationSchema):
-    """Docstring"""
+    """Send an invitation to a user to join platform"""
     if request.auth.org is None:
         raise HttpError(400, "an associated organization is required")
     invitation = Invitation.objects.filter(invited_email=payload.invited_email).first()
@@ -179,7 +179,7 @@ def post_organization_user_invite(request, payload: InvitationSchema):
 # a password, then click a button POSTing to this endpoint
 @clientapi.get("/organizations/users/invite/{invite_code}", response=InvitationSchema)
 def get_organization_user_invite(request, invite_code):
-    """Docstring"""
+    """Fetch the invite sent to user with a particular invite code"""
     invitation = Invitation.objects.filter(invite_code=invite_code).first()
     if invitation is None:
         raise HttpError(400, "invalid invite code")
@@ -188,7 +188,7 @@ def get_organization_user_invite(request, invite_code):
 
 @clientapi.post("/organizations/users/invite/accept/", response=OrgUserResponse)
 def post_organization_user_accept_invite(request, payload: AcceptInvitationSchema):
-    """Docstring"""
+    """User accepting the invite sent with a valid invite code"""
     invitation = Invitation.objects.filter(invite_code=payload.invite_code).first()
     if invitation is None:
         raise HttpError(400, "invalid invite code")
@@ -207,7 +207,7 @@ def post_organization_user_accept_invite(request, payload: AcceptInvitationSchem
 
 @clientapi.post("/airbyte/workspace/detatch", auth=UserAuthBearer())
 def post_airbyte_detatch_workspace(request):
-    """Docstring"""
+    """Detach airbyte workspace from organization"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -222,7 +222,7 @@ def post_airbyte_detatch_workspace(request):
 
 @clientapi.post("/airbyte/workspace/", response=AirbyteWorkspace, auth=UserAuthBearer())
 def post_airbyte_workspace(request, payload: AirbyteWorkspaceCreate):
-    """Docstring"""
+    """Create an airbyte workspace"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -243,7 +243,7 @@ def post_airbyte_workspace(request, payload: AirbyteWorkspaceCreate):
 
 @clientapi.get("/airbyte/source_definitions", auth=UserAuthBearer())
 def get_airbyte_source_definitions(request):
-    """Docstring"""
+    """Fetch airbyte source definitions in the user organization workspace"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -259,7 +259,7 @@ def get_airbyte_source_definitions(request):
     "/airbyte/source_definitions/{sourcedef_id}/specifications", auth=UserAuthBearer()
 )
 def get_airbyte_source_definition_specifications(request, sourcedef_id):
-    """Docstring"""
+    """Fetch definition specifications for a particular source definition in the user organization workspace"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -275,7 +275,7 @@ def get_airbyte_source_definition_specifications(request, sourcedef_id):
 
 @clientapi.post("/airbyte/sources/", auth=UserAuthBearer())
 def post_airbyte_source(request, payload: AirbyteSourceCreate):
-    """Docstring"""
+    """Create airbyte source in the user organization workspace"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -294,7 +294,7 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
 
 @clientapi.post("/airbyte/sources/{source_id}/check", auth=UserAuthBearer())
 def post_airbyte_check_source(request, source_id):
-    """Docstring"""
+    """Test the source connection in the user organization workspace"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -310,7 +310,7 @@ def post_airbyte_check_source(request, source_id):
 
 @clientapi.get("/airbyte/sources", auth=UserAuthBearer())
 def get_airbyte_sources(request):
-    """Docstring"""
+    """Fetch all airbyte sources in the user organization workspace"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -324,7 +324,7 @@ def get_airbyte_sources(request):
 
 @clientapi.get("/airbyte/sources/{source_id}", auth=UserAuthBearer())
 def get_airbyte_source(request, source_id):
-    """Docstring"""
+    """Fetch a single airbyte source in the user organization workspace"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -338,7 +338,7 @@ def get_airbyte_source(request, source_id):
 
 @clientapi.get("/airbyte/sources/{source_id}/schema_catalog", auth=UserAuthBearer())
 def get_airbyte_source_schema_catalog(request, source_id):
-    """Docstring"""
+    """Fetch schema catalog for a source in the user organization workspace"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -354,7 +354,7 @@ def get_airbyte_source_schema_catalog(request, source_id):
 
 @clientapi.get("/airbyte/destination_definitions", auth=UserAuthBearer())
 def get_airbyte_destination_definitions(request):
-    """Docstring"""
+    """Fetch destination definitions in the user organization workspace"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -371,7 +371,7 @@ def get_airbyte_destination_definitions(request):
     auth=UserAuthBearer(),
 )
 def get_airbyte_destination_definition_specifications(request, destinationdef_id):
-    """Docstring"""
+    """Fetch specifications for a destination definition in the user organization workspace"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -387,7 +387,7 @@ def get_airbyte_destination_definition_specifications(request, destinationdef_id
 
 @clientapi.post("/airbyte/destinations/", auth=UserAuthBearer())
 def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
-    """Docstring"""
+    """Create an airbyte destination in the user organization workspace"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -406,7 +406,7 @@ def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
 
 @clientapi.post("/airbyte/destinations/{destination_id}/check", auth=UserAuthBearer())
 def post_airbyte_check_destination(request, destination_id):
-    """Docstring"""
+    """Test connection to destination in the user organization workspace"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -422,7 +422,7 @@ def post_airbyte_check_destination(request, destination_id):
 
 @clientapi.get("/airbyte/destinations", auth=UserAuthBearer())
 def get_airbyte_destinations(request):
-    """Docstring"""
+    """Fetch all airbyte destinations in the user organization workspace"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -436,7 +436,7 @@ def get_airbyte_destinations(request):
 
 @clientapi.get("/airbyte/destinations/{destination_id}", auth=UserAuthBearer())
 def get_airbyte_destination(request, destination_id):
-    """Docstring"""
+    """Fetch an airbyte destination in the user organization workspace"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -450,7 +450,7 @@ def get_airbyte_destination(request, destination_id):
 
 @clientapi.get("/airbyte/connections", auth=UserAuthBearer())
 def get_airbyte_connections(request):
-    """Docstring"""
+    """Fetch all airbyte connections in the user organization workspace"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -464,7 +464,7 @@ def get_airbyte_connections(request):
 
 @clientapi.get("/airbyte/connections/{connection_id}", auth=UserAuthBearer())
 def get_airbyte_connection(request, connection_id):
-    """Docstring"""
+    """Fetch a connection in the user organization workspace"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -478,7 +478,7 @@ def get_airbyte_connection(request, connection_id):
 
 @clientapi.post("/airbyte/connections/", auth=UserAuthBearer())
 def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
-    """Docstring"""
+    """Create an airbyte connection in the user organization workspace"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -495,7 +495,7 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
 
 @clientapi.post("/airbyte/connections/{connection_id}/sync/", auth=UserAuthBearer())
 def post_airbyte_sync_connection(request, connection_id):
-    """Docstring"""
+    """Sync an airbyte connection in the uer organization workspace"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -507,7 +507,7 @@ def post_airbyte_sync_connection(request, connection_id):
 
 @clientapi.post("/dbt/workspace/", auth=UserAuthBearer())
 def post_dbt_workspace(request, payload: OrgDbtSchema):
-    """Docstring"""
+    """Setup the client git repo and install a virtual env inside it to run dbt"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -567,7 +567,7 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
 
 @clientapi.delete("/dbt/workspace/", auth=UserAuthBearer(), response=OrgUserResponse)
 def dbt_delete(request):
-    """Docstring"""
+    """Delete the dbt workspace and project repo created"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -586,7 +586,7 @@ def dbt_delete(request):
 
 @clientapi.post("/dbt/git_pull/", auth=UserAuthBearer())
 def post_dbt_git_pull(request):
-    """Docstring"""
+    """Pull the dbt repo from github for the organization"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -606,7 +606,7 @@ def post_dbt_git_pull(request):
 
 @clientapi.post("/prefect/flows/airbyte_sync/", auth=UserAuthBearer())
 def post_prefect_airbyte_sync_flow(request, payload: PrefectAirbyteSync):
-    """Docstring"""
+    """Run airbyte sync flow in prefect"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -618,7 +618,7 @@ def post_prefect_airbyte_sync_flow(request, payload: PrefectAirbyteSync):
 
 @clientapi.post("/prefect/flows/dbt_run/", auth=UserAuthBearer())
 def post_prefect_dbt_core_run_flow(request, payload: PrefectDbtCore):
-    """Docstring"""
+    """Run dbt flow in prefect"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -628,7 +628,7 @@ def post_prefect_dbt_core_run_flow(request, payload: PrefectDbtCore):
 
 @clientapi.post("/prefect/blocks/dbt_run/", auth=UserAuthBearer())
 def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
-    """Docstring"""
+    """Create prefect dbt core block"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -668,7 +668,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
 
 @clientapi.get("/prefect/blocks/dbt_run/", auth=UserAuthBearer())
 def get_prefect_dbt_run_blocks(request):
-    """Docstring"""
+    """Fetch all prefect dbt run blocks for an organization"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -687,7 +687,7 @@ def get_prefect_dbt_run_blocks(request):
 
 @clientapi.delete("/prefect/blocks/dbt_run/{block_id}", auth=UserAuthBearer())
 def delete_prefect_dbt_run_block(request, block_id):
-    """Docstring"""
+    """Delete prefect dbt run block for an organization"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -703,7 +703,7 @@ def delete_prefect_dbt_run_block(request, block_id):
 
 @clientapi.post("/prefect/blocks/dbt_test/", auth=UserAuthBearer())
 def post_prefect_dbt_test_block(request, payload: PrefectDbtRun):
-    """Docstring"""
+    """Create prefect dbt test block for an organization"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
@@ -743,7 +743,7 @@ def post_prefect_dbt_test_block(request, payload: PrefectDbtRun):
 
 @clientapi.delete("/prefect/blocks/dbt_test/{block_id}", auth=UserAuthBearer())
 def delete_prefect_dbt_test_block(request, block_id):
-    """Docstring"""
+    """Delete dbt test block for an organization"""
     user = request.auth
     if user.org is None:
         raise HttpError(400, "create an organization first")
