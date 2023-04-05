@@ -54,7 +54,7 @@ def prefect_delete(endpoint):
     root = os.getenv("PREFECT_API_URL")
     res = requests.delete(f"{root}/{endpoint}")
     res.raise_for_status()
-    return res.json()
+    return
 
 
 def get_block_type(querystr):
