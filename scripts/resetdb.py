@@ -3,6 +3,7 @@ import sys
 import argparse
 from time import sleep
 import psycopg2
+from dotenv import load_dotenv
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--yes-really", action="store_true")
@@ -12,13 +13,10 @@ if not args.yes_really:
     parser.print_usage()
     sys.exit(0)
 
-# ================================================================================
-from dotenv import load_dotenv
 
 load_dotenv()
 
 
-# ================================================================================
 def checkenv():
     """Docstring"""
     valid = True

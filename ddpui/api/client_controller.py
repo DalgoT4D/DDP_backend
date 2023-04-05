@@ -37,7 +37,6 @@ from ddpui.ddpprefect.schema import (
 
 from ddpui.ddpprefect.org_prefect_block import OrgPrefectBlock
 
-a = {"a": "b", "c": "d"}
 
 clientapi = NinjaAPI()
 # http://127.0.0.1:8000/api/docs
