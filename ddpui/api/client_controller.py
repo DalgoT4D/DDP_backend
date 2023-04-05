@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import List
 from datetime import datetime
 from ninja import NinjaAPI
-from ninja.errors import HttpError
+from ninja.errors import HttpError, ValidationError
+from ninja.responses import Response
+from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from django.utils.text import slugify
 
 from ddpui.utils.timezone import IST
@@ -40,6 +42,30 @@ from ddpui.ddpprefect.org_prefect_block import OrgPrefectBlock
 
 clientapi = NinjaAPI()
 # http://127.0.0.1:8000/api/docs
+
+
+@clientapi.exception_handler(ValidationError)
+def ninja_validation_error_handler(request, exc):
+    """Docstring"""
+    return Response({"error": exc.errors}, status=422)
+
+
+@clientapi.exception_handler(PydanticValidationError)
+def pydantic_validation_error_handler(request, exc: PydanticValidationError):
+    """Docstring"""
+    return Response({"error": exc.errors()}, status=422)
+
+
+@clientapi.exception_handler(HttpError)
+def ninja_http_error_handler(request, exc: HttpError):
+    """Docstring"""
+    return Response({"error": " ".join(exc.args)}, status=exc.status_code)
+
+
+@clientapi.exception_handler(Exception)
+def ninja_default_error_handler(request, exc: Exception):
+    """Docstring"""
+    return Response({"error": " ".join(exc.args)}, status=500)
 
 
 def runcmd(cmd, cwd):
