@@ -9,10 +9,12 @@ from datetime import datetime
 from ninja import NinjaAPI
 from ninja.errors import HttpError
 from django.utils.text import slugify
+from django.contrib.auth.models import User
+from rest_framework.authtoken import views
 
 from ddpui.utils.timezone import IST
 from ddpui.utils.ddp_logger import logger
-from ddpui.auth import LoginData, UserAuthBearer
+from ddpui.auth import AuthBearer
 
 from ddpui.models.org_user import OrgUser, OrgUserCreate, OrgUserUpdate, OrgUserResponse
 from ddpui.models.org_user import InvitationSchema, Invitation, AcceptInvitationSchema
@@ -37,91 +39,101 @@ from ddpui.ddpprefect.schema import (
 
 from ddpui.ddpprefect.org_prefect_block import OrgPrefectBlock
 
-a = {"a": "b", "c": "d"}
-
 clientapi = NinjaAPI()
 # http://127.0.0.1:8000/api/docs
 
 
 def runcmd(cmd, cwd):
-    """Docstring"""
+    """runs a shell command in a specified working directory"""
     return subprocess.Popen(shlex.split(cmd), cwd=str(cwd))
 
 
-@clientapi.get("/currentuser", auth=UserAuthBearer(), response=OrgUserResponse)
+@clientapi.get("/currentuser", response=OrgUserResponse, auth=AuthBearer())
 def get_current_user(request):
-    """Docstring"""
-    return request.auth
+    """return the OrgUser making this request"""
+    orguser = OrgUser.objects.filter(user=request.user).first()
+    if orguser is not None:
+        return OrgUserResponse.from_orguser(orguser)
+    raise HttpError(400, "requestor is not an OrgUser")
 
 
-@clientapi.post("/organizations/users", response=OrgUserResponse)
-def post_organization_user(request, payload: OrgUserCreate):
-    """Docstring"""
-    if OrgUser.objects.filter(email=payload.email).exists():
+@clientapi.post("/organizations/users/", response=OrgUserResponse)
+def post_organization_user(
+    request, payload: OrgUserCreate
+):  # pylint: disable=unused-argument
+    """creates a new OrgUser having specified email + password. no Org is created or attached at this time"""
+    if OrgUser.objects.filter(user__email=payload.email).exists():
         raise HttpError(400, f"user having email {payload.email} exists")
-    user = OrgUser.objects.create(**payload.dict())
-    logger.info(f"created user {payload.email}")
-    return user
+    user = User.objects.create_user(
+        username=payload.email, email=payload.email, password=payload.password
+    )
+    orguser = OrgUser.objects.create(user=user)
+    logger.info(f"created user {orguser.user.email}")
+    return OrgUserResponse.from_orguser(orguser)
 
 
 @clientapi.post("/login/")
-def post_login(request, payload: LoginData):
-    """Docstring"""
-    print(payload)
-    if payload.password == "password":
-        user = OrgUser.objects.filter(email=payload.email).first()
-        if user:
-            token = f"fake-auth-token:{user.id}"
-            logger.info("returning auth token " + token)
-            return {"token": token}
-    raise HttpError(400, "login denied")
+def post_login(request):
+    """Uses the username and password in the request to return an auth token"""
+    token = views.obtain_auth_token(request)
+    return token
 
 
 @clientapi.get(
-    "/organizations/users", response=List[OrgUserResponse], auth=UserAuthBearer()
+    "/organizations/users", response=List[OrgUserResponse], auth=AuthBearer()
 )
 def get_organization_users(request):
-    """Docstring"""
-    assert request.auth
-    user = request.auth
-    if user.org is None:
+    """list all OrgUsers in the requestor's org. this will be used by admin OrgUsers once we implement roles"""
+    orguser = OrgUser.objects.filter(user=request.user).first()
+    if orguser is None:
+        raise HttpError(400, "no orguser")
+    if orguser.org is None:
         raise HttpError(400, "no associated org")
-    return OrgUser.objects.filter(org=user.org)
+    query = OrgUser.objects.filter(org=orguser.org)
+    return [
+        OrgUserResponse(email=orguser.user.email, active=orguser.user.is_active)
+        for orguser in query
+    ]
 
 
-@clientapi.put("/organizations/users", response=OrgUserResponse, auth=UserAuthBearer())
+@clientapi.put("/organizations/users", response=OrgUserResponse, auth=AuthBearer())
 def put_organization_user(request, payload: OrgUserUpdate):
-    """Docstring"""
+    """update an OrgUser"""
     assert request.auth
-    user = request.auth
+    orguser = OrgUser.objects.filter(user=request.user).first()
+    if orguser is None:
+        raise HttpError(400, "no orguser")
+
     if payload.email:
-        user.email = payload.email
+        orguser.user.email = payload.email
     if payload.active is not None:
-        user.active = payload.active
-    user.save()
-    logger.info(f"updated user {user.email}")
-    return user
+        orguser.user.is_active = payload.active
+    orguser.user.save()
+
+    logger.info(f"updated user {orguser.user.email}")
+    return OrgUserResponse(email=orguser.user.email, active=orguser.user.is_active)
 
 
-@clientapi.post("/organizations/", response=OrgSchema, auth=UserAuthBearer())
+@clientapi.post("/organizations/", response=OrgSchema, auth=AuthBearer())
 def post_organization(request, payload: OrgSchema):
-    """Docstring"""
-    logger.info(payload)
-    user = request.auth
-    if user.org:
-        raise HttpError(400, "user already has an associated client")
+    """creates a new org and attaches it to the requestor"""
+    orguser = OrgUser.objects.filter(user=request.user).first()
+    if orguser is None:
+        raise HttpError(400, "no orguser")
+    if orguser.org:
+        raise HttpError(400, "orguser already has an associated org")
     org = Org.objects.filter(name=payload.name).first()
     if org:
         raise HttpError(400, "client org already exists")
     org = Org.objects.create(**payload.dict())
     org.slug = slugify(org.name)
-    user.org = org
-    user.save()
-    return org
+    orguser.org = org
+    orguser.save()
+    return OrgUserResponse(email=orguser.user.email, active=orguser.user.is_active)
 
 
 @clientapi.post(
-    "/organizations/users/invite/", response=InvitationSchema, auth=UserAuthBearer()
+    "/organizations/users/invite/", response=InvitationSchema, auth=AuthBearer()
 )
 def post_organization_user_invite(request, payload: InvitationSchema):
     """Docstring"""
@@ -152,7 +164,11 @@ def post_organization_user_invite(request, payload: InvitationSchema):
 # the invitee will get a hyperlink via email, clicking will take them to \
 # the UI where they will choose
 # a password, then click a button POSTing to this endpoint
-@clientapi.get("/organizations/users/invite/{invite_code}", response=InvitationSchema)
+@clientapi.get(
+    "/organizations/users/invite/{invite_code}",
+    response=InvitationSchema,
+    auth=AuthBearer(),
+)
 def get_organization_user_invite(request, invite_code):
     """Docstring"""
     invitation = Invitation.objects.filter(invite_code=invite_code).first()
@@ -161,7 +177,9 @@ def get_organization_user_invite(request, invite_code):
     return InvitationSchema.from_invitation(invitation)
 
 
-@clientapi.post("/organizations/users/invite/accept/", response=OrgUserResponse)
+@clientapi.post(
+    "/organizations/users/invite/accept/", response=OrgUserResponse, auth=AuthBearer()
+)
 def post_organization_user_accept_invite(request, payload: AcceptInvitationSchema):
     """Docstring"""
     invitation = Invitation.objects.filter(invite_code=payload.invite_code).first()
@@ -180,7 +198,7 @@ def post_organization_user_accept_invite(request, payload: AcceptInvitationSchem
     return orguser
 
 
-@clientapi.post("/airbyte/workspace/detatch", auth=UserAuthBearer())
+@clientapi.post("/airbyte/workspace/detatch", auth=AuthBearer())
 def post_airbyte_detatch_workspace(request):
     """Docstring"""
     user = request.auth
@@ -195,7 +213,7 @@ def post_airbyte_detatch_workspace(request):
     return {"success": 1}
 
 
-@clientapi.post("/airbyte/workspace/", response=AirbyteWorkspace, auth=UserAuthBearer())
+@clientapi.post("/airbyte/workspace/", response=AirbyteWorkspace, auth=AuthBearer())
 def post_airbyte_workspace(request, payload: AirbyteWorkspaceCreate):
     """Docstring"""
     user = request.auth
@@ -216,7 +234,7 @@ def post_airbyte_workspace(request, payload: AirbyteWorkspaceCreate):
     )
 
 
-@clientapi.get("/airbyte/source_definitions", auth=UserAuthBearer())
+@clientapi.get("/airbyte/source_definitions", auth=AuthBearer())
 def get_airbyte_source_definitions(request):
     """Docstring"""
     user = request.auth
@@ -231,7 +249,7 @@ def get_airbyte_source_definitions(request):
 
 
 @clientapi.get(
-    "/airbyte/source_definitions/{sourcedef_id}/specifications", auth=UserAuthBearer()
+    "/airbyte/source_definitions/{sourcedef_id}/specifications", auth=AuthBearer()
 )
 def get_airbyte_source_definition_specifications(request, sourcedef_id):
     """Docstring"""
@@ -248,7 +266,7 @@ def get_airbyte_source_definition_specifications(request, sourcedef_id):
     return res
 
 
-@clientapi.post("/airbyte/sources/", auth=UserAuthBearer())
+@clientapi.post("/airbyte/sources/", auth=AuthBearer())
 def post_airbyte_source(request, payload: AirbyteSourceCreate):
     """Docstring"""
     user = request.auth
@@ -267,7 +285,7 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
     return {"source_id": source["sourceId"]}
 
 
-@clientapi.post("/airbyte/sources/{source_id}/check", auth=UserAuthBearer())
+@clientapi.post("/airbyte/sources/{source_id}/check", auth=AuthBearer())
 def post_airbyte_check_source(request, source_id):
     """Docstring"""
     user = request.auth
@@ -283,7 +301,7 @@ def post_airbyte_check_source(request, source_id):
     return res
 
 
-@clientapi.get("/airbyte/sources", auth=UserAuthBearer())
+@clientapi.get("/airbyte/sources", auth=AuthBearer())
 def get_airbyte_sources(request):
     """Docstring"""
     user = request.auth
@@ -297,7 +315,7 @@ def get_airbyte_sources(request):
     return res
 
 
-@clientapi.get("/airbyte/sources/{source_id}", auth=UserAuthBearer())
+@clientapi.get("/airbyte/sources/{source_id}", auth=AuthBearer())
 def get_airbyte_source(request, source_id):
     """Docstring"""
     user = request.auth
@@ -311,7 +329,7 @@ def get_airbyte_source(request, source_id):
     return res
 
 
-@clientapi.get("/airbyte/sources/{source_id}/schema_catalog", auth=UserAuthBearer())
+@clientapi.get("/airbyte/sources/{source_id}/schema_catalog", auth=AuthBearer())
 def get_airbyte_source_schema_catalog(request, source_id):
     """Docstring"""
     user = request.auth
@@ -327,7 +345,7 @@ def get_airbyte_source_schema_catalog(request, source_id):
     return res
 
 
-@clientapi.get("/airbyte/destination_definitions", auth=UserAuthBearer())
+@clientapi.get("/airbyte/destination_definitions", auth=AuthBearer())
 def get_airbyte_destination_definitions(request):
     """Docstring"""
     user = request.auth
@@ -343,7 +361,7 @@ def get_airbyte_destination_definitions(request):
 
 @clientapi.get(
     "/airbyte/destination_definitions/{destinationdef_id}/specifications/",
-    auth=UserAuthBearer(),
+    auth=AuthBearer(),
 )
 def get_airbyte_destination_definition_specifications(request, destinationdef_id):
     """Docstring"""
@@ -360,7 +378,7 @@ def get_airbyte_destination_definition_specifications(request, destinationdef_id
     return res
 
 
-@clientapi.post("/airbyte/destinations/", auth=UserAuthBearer())
+@clientapi.post("/airbyte/destinations/", auth=AuthBearer())
 def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
     """Docstring"""
     user = request.auth
@@ -379,7 +397,7 @@ def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
     return {"destination_id": destination["destinationId"]}
 
 
-@clientapi.post("/airbyte/destinations/{destination_id}/check", auth=UserAuthBearer())
+@clientapi.post("/airbyte/destinations/{destination_id}/check", auth=AuthBearer())
 def post_airbyte_check_destination(request, destination_id):
     """Docstring"""
     user = request.auth
@@ -395,7 +413,7 @@ def post_airbyte_check_destination(request, destination_id):
     return res
 
 
-@clientapi.get("/airbyte/destinations", auth=UserAuthBearer())
+@clientapi.get("/airbyte/destinations", auth=AuthBearer())
 def get_airbyte_destinations(request):
     """Docstring"""
     user = request.auth
@@ -409,7 +427,7 @@ def get_airbyte_destinations(request):
     return res
 
 
-@clientapi.get("/airbyte/destinations/{destination_id}", auth=UserAuthBearer())
+@clientapi.get("/airbyte/destinations/{destination_id}", auth=AuthBearer())
 def get_airbyte_destination(request, destination_id):
     """Docstring"""
     user = request.auth
@@ -423,7 +441,7 @@ def get_airbyte_destination(request, destination_id):
     return res
 
 
-@clientapi.get("/airbyte/connections", auth=UserAuthBearer())
+@clientapi.get("/airbyte/connections", auth=AuthBearer())
 def get_airbyte_connections(request):
     """Docstring"""
     user = request.auth
@@ -437,7 +455,7 @@ def get_airbyte_connections(request):
     return res
 
 
-@clientapi.get("/airbyte/connections/{connection_id}", auth=UserAuthBearer())
+@clientapi.get("/airbyte/connections/{connection_id}", auth=AuthBearer())
 def get_airbyte_connection(request, connection_id):
     """Docstring"""
     user = request.auth
@@ -451,7 +469,7 @@ def get_airbyte_connection(request, connection_id):
     return res
 
 
-@clientapi.post("/airbyte/connections/", auth=UserAuthBearer())
+@clientapi.post("/airbyte/connections/", auth=AuthBearer())
 def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
     """Docstring"""
     user = request.auth
@@ -468,7 +486,7 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
     return res
 
 
-@clientapi.post("/airbyte/connections/{connection_id}/sync/", auth=UserAuthBearer())
+@clientapi.post("/airbyte/connections/{connection_id}/sync/", auth=AuthBearer())
 def post_airbyte_sync_connection(request, connection_id):
     """Docstring"""
     user = request.auth
@@ -480,7 +498,7 @@ def post_airbyte_sync_connection(request, connection_id):
     airbyte_service.sync_connection(user.org.airbyte_workspace_id, connection_id)
 
 
-@clientapi.post("/dbt/workspace/", auth=UserAuthBearer())
+@clientapi.post("/dbt/workspace/", auth=AuthBearer())
 def post_dbt_workspace(request, payload: OrgDbtSchema):
     """Docstring"""
     user = request.auth
@@ -540,7 +558,7 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
     return {"success": 1}
 
 
-@clientapi.delete("/dbt/workspace/", auth=UserAuthBearer(), response=OrgUserResponse)
+@clientapi.delete("/dbt/workspace/", response=OrgUserResponse, auth=AuthBearer())
 def dbt_delete(request):
     """Docstring"""
     user = request.auth
@@ -559,7 +577,7 @@ def dbt_delete(request):
     return user
 
 
-@clientapi.post("/dbt/git_pull/", auth=UserAuthBearer())
+@clientapi.post("/dbt/git_pull/", auth=AuthBearer())
 def post_dbt_git_pull(request):
     """Docstring"""
     user = request.auth
@@ -579,7 +597,7 @@ def post_dbt_git_pull(request):
     return {"success": True}
 
 
-@clientapi.post("/prefect/flows/airbyte_sync/", auth=UserAuthBearer())
+@clientapi.post("/prefect/flows/airbyte_sync/", auth=AuthBearer())
 def post_prefect_airbyte_sync_flow(request, payload: PrefectAirbyteSync):
     """Docstring"""
     user = request.auth
@@ -591,7 +609,7 @@ def post_prefect_airbyte_sync_flow(request, payload: PrefectAirbyteSync):
     return prefect_service.run_airbyte_connection_prefect_flow(payload.blockname)
 
 
-@clientapi.post("/prefect/flows/dbt_run/", auth=UserAuthBearer())
+@clientapi.post("/prefect/flows/dbt_run/", auth=AuthBearer())
 def post_prefect_dbt_core_run_flow(request, payload: PrefectDbtCore):
     """Docstring"""
     user = request.auth
@@ -601,7 +619,7 @@ def post_prefect_dbt_core_run_flow(request, payload: PrefectDbtCore):
     return prefect_service.run_dbtcore_prefect_flow(payload.blockname)
 
 
-@clientapi.post("/prefect/blocks/dbt_run/", auth=UserAuthBearer())
+@clientapi.post("/prefect/blocks/dbt_run/", auth=AuthBearer())
 def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
     """Docstring"""
     user = request.auth
@@ -641,7 +659,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
     return block
 
 
-@clientapi.get("/prefect/blocks/dbt_run/", auth=UserAuthBearer())
+@clientapi.get("/prefect/blocks/dbt_run/", auth=AuthBearer())
 def get_prefect_dbt_run_blocks(request):
     """Docstring"""
     user = request.auth
@@ -660,7 +678,7 @@ def get_prefect_dbt_run_blocks(request):
     ]
 
 
-@clientapi.delete("/prefect/blocks/dbt_run/{block_id}", auth=UserAuthBearer())
+@clientapi.delete("/prefect/blocks/dbt_run/{block_id}", auth=AuthBearer())
 def delete_prefect_dbt_run_block(request, block_id):
     """Docstring"""
     user = request.auth
@@ -676,7 +694,7 @@ def delete_prefect_dbt_run_block(request, block_id):
     return {"success": 1}
 
 
-@clientapi.post("/prefect/blocks/dbt_test/", auth=UserAuthBearer())
+@clientapi.post("/prefect/blocks/dbt_test/", auth=AuthBearer())
 def post_prefect_dbt_test_block(request, payload: PrefectDbtRun):
     """Docstring"""
     user = request.auth
@@ -716,7 +734,7 @@ def post_prefect_dbt_test_block(request, payload: PrefectDbtRun):
     return block
 
 
-@clientapi.delete("/prefect/blocks/dbt_test/{block_id}", auth=UserAuthBearer())
+@clientapi.delete("/prefect/blocks/dbt_test/{block_id}", auth=AuthBearer())
 def delete_prefect_dbt_test_block(request, block_id):
     """Docstring"""
     user = request.auth

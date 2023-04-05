@@ -3,38 +3,36 @@ from django.db import models
 from ninja import ModelSchema, Schema
 
 from ddpui.models.org import Org, OrgSchema
+from django.contrib.auth.models import User
 
 
 class OrgUser(models.Model):
-    """Docstring"""
+    """a user from a client NGO"""
 
-    active = models.BooleanField(default=True)
-    email = models.CharField(max_length=50, null=True, unique=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
     org = models.ForeignKey(Org, on_delete=models.CASCADE, null=True)
+    # todo: add role
 
     def __str__(self):
-        return str(self.email)
+        return self.user.email  # pylint: disable=no-member
 
 
-class OrgUserCreate(ModelSchema):
-    """Docstring"""
+class OrgUserCreate(Schema):
+    """payload to create a new OrgUser"""
 
-    class Config:
-        """Docstring"""
-
-        model = OrgUser
-        model_fields = ["email"]
+    email: str
+    password: str
 
 
 class OrgUserUpdate(Schema):
-    """Docstring"""
+    """payload to update an existing OrgUser"""
 
     email: str = None
     active: bool = None
 
 
 class OrgUserResponse(Schema):
-    """Docstring"""
+    """structure for returning an OrgUser in an http response"""
 
     email: str
     org: OrgSchema = None
@@ -42,9 +40,9 @@ class OrgUserResponse(Schema):
 
     @staticmethod
     def from_orguser(orguser: OrgUser):
-        """Docstring"""
+        """helper to turn an OrgUser into an OrgUserResponse"""
         return OrgUserResponse(
-            email=orguser.email, org=orguser.org, active=orguser.active
+            email=orguser.user.email, org=orguser.org, active=orguser.user.is_active
         )
 
 
@@ -70,7 +68,7 @@ class InvitationSchema(Schema):
         """Docstring"""
         return InvitationSchema(
             invited_email=invitation.invited_email,
-            invited_by=OrgUserResponse.from_clientuser(invitation.invited_by),
+            invited_by=OrgUserResponse.from_orguser(invitation.invited_by),
             invited_on=invitation.invited_on,
             invite_code=invitation.invite_code,
         )
