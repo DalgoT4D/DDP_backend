@@ -19,3 +19,7 @@ max-line-length=150
 [TYPECHECK]
 
 generated-members=objects
+
+[MASTER]
+
+extension-pkg-allow-list=pydantic

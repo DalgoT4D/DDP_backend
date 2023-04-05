@@ -1,7 +1,9 @@
 from typing import List
 from ninja import NinjaAPI
 from ninja.errors import HttpError
-
+from ninja.errors import ValidationError
+from ninja.responses import Response
+from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from rest_framework.authtoken import views
 
 from ddpui.utils.ddp_logger import logger
@@ -14,6 +16,30 @@ from ddpui.models.admin_user import AdminUserResponse
 adminapi = NinjaAPI(urls_namespace="admin")
 
 
+@adminapi.exception_handler(ValidationError)
+def ninja_validation_error_handler(request, exc):
+    """Docstring"""
+    return Response({"error": exc.errors}, status=422)
+
+
+@adminapi.exception_handler(PydanticValidationError)
+def pydantic_validation_error_handler(request, exc: PydanticValidationError):
+    """Docstring"""
+    return Response({"error": exc.errors()}, status=422)
+
+
+@adminapi.exception_handler(HttpError)
+def ninja_http_error_handler(request, exc: HttpError):
+    """Docstring"""
+    return Response({"error": " ".join(exc.args)}, status=exc.status_code)
+
+
+@adminapi.exception_handler(Exception)
+def ninja_default_error_handler(request, exc: Exception):
+    """Docstring"""
+    return Response({"error": " ".join(exc.args)}, status=500)
+
+
 @adminapi.post("/login/")
 def post_login(request):
     """Uses the username and password in the request to return an auth token"""
@@ -21,7 +47,7 @@ def post_login(request):
     return token
 
 
-@adminapi.get("/getadminuser", response=AdminUserResponse, auth=AuthBearer())
+@adminapi.get("/getadminuser", response=AdminUserResponse, auth=AdminAuthBearer())
 def get_admin_user(request):
     """return the admin user who made this request"""
     return AdminUserResponse(
@@ -30,9 +56,11 @@ def get_admin_user(request):
     )
 
 
-@adminapi.get("/organizations/users", response=List[OrgUserResponse], auth=AuthBearer())
-def get_organization_users(request, orgname: str = None):
-    """return all active orgusers in the database, optionally filtering by orgname"""
+@adminapi.get(
+    "/organizations/users", response=List[OrgUserResponse], auth=AdminAuthBearer()
+)
+def get_organization_users(request, org: str = None):
+    """Docstring"""
     assert request.auth
     query = OrgUser.objects.filter(user__is_active=True)
     if orgname:
