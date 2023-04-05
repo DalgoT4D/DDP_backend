@@ -8,7 +8,7 @@ load_dotenv()
 
 
 def abreq(endpoint, req=None):
-    """Docstring"""
+    """Request to the airbyte server"""
     abhost = os.getenv("AIRBYTE_SERVER_HOST")
     abport = os.getenv("AIRBYTE_SERVER_PORT")
     abver = os.getenv("AIRBYTE_SERVER_APIVER")
@@ -23,22 +23,22 @@ def abreq(endpoint, req=None):
 
 
 def get_workspaces():
-    """Docstring"""
+    """Fetch all workspaces in airbyte server"""
     return abreq("workspaces/list")
 
 
 def get_workspace(workspace_id):
-    """Docstring"""
+    """Fetch a workspace in airbyte server"""
     return abreq("workspaces/get", {"workspaceId": workspace_id})
 
 
 def set_workspace_name(workspace_id, name):
-    """Docstring"""
+    """Set workspace name in airbyte server"""
     abreq("workspaces/update_name", {"workspaceId": workspace_id, "name": name})
 
 
 def create_workspace(name):
-    """Docstring"""
+    """Create a workspace in airbyte server"""
     res = abreq("workspaces/create", {"name": name})
     if "workspaceId" not in res:
         raise Exception(res)
@@ -46,7 +46,7 @@ def create_workspace(name):
 
 
 def get_source_definitions(workspace_id, **kwargs):
-    """Docstring"""
+    """Fetch source definitions for an airbyte workspace"""
     res = abreq("source_definitions/list_for_workspace", {"workspaceId": workspace_id})
     if "sourceDefinitions" not in res:
         raise Exception(res)
@@ -54,7 +54,7 @@ def get_source_definitions(workspace_id, **kwargs):
 
 
 def get_source_definition_specification(workspace_id, sourcedef_id):
-    """Docstring"""
+    """Fetch source definition specification for a source in an airbyte workspace"""
     res = abreq(
         "source_definition_specifications/get",
         {"sourceDefinitionId": sourcedef_id, "workspaceId": workspace_id},
@@ -65,7 +65,7 @@ def get_source_definition_specification(workspace_id, sourcedef_id):
 
 
 def get_sources(workspace_id):
-    """Docstring"""
+    """Fetch all sources in an airbyte workspace"""
     res = abreq("sources/list", {"workspaceId": workspace_id})
     if "sources" not in res:
         raise Exception(res)
@@ -73,7 +73,7 @@ def get_sources(workspace_id):
 
 
 def get_source(workspace_id, source_id):
-    """Docstring"""
+    """Fetch a source in an airbyte workspace"""
     res = abreq("sources/get", {"sourceId": source_id})
     if "sourceId" not in res:
         raise Exception(res)
@@ -81,7 +81,7 @@ def get_source(workspace_id, source_id):
 
 
 def create_source(workspace_id, name, sourcedef_id, config):
-    """Docstring"""
+    """Create source in an airbyte workspace"""
     res = abreq(
         "sources/create",
         {
@@ -97,7 +97,7 @@ def create_source(workspace_id, name, sourcedef_id, config):
 
 
 def check_source_connection(workspace_id, source_id):
-    """Docstring"""
+    """Test a source connection in an airbyte workspace"""
     res = abreq("sources/check_connection", {"sourceId": source_id})
     # {
     #   'status': 'succeeded',
@@ -116,7 +116,7 @@ def check_source_connection(workspace_id, source_id):
 
 
 def get_source_schema_catalog(workspace_id, source_id):
-    """Docstring"""
+    """Fetch source schema catalog for a source in an airbyte workspace"""
     res = abreq("sources/discover_schema", {"sourceId": source_id})
     if "catalog" not in res:
         raise Exception(res)
@@ -124,7 +124,7 @@ def get_source_schema_catalog(workspace_id, source_id):
 
 
 def get_destination_definitions(workspace_id, **kwargs):
-    """Docstring"""
+    """Fetch destination definitions in an airbyte workspace"""
     res = abreq(
         "destination_definitions/list_for_workspace", {"workspaceId": workspace_id}
     )
@@ -134,7 +134,7 @@ def get_destination_definitions(workspace_id, **kwargs):
 
 
 def get_destination_definition_specification(workspace_id, destinationdef_id):
-    """Docstring"""
+    """Fetch destination definition specification for a destination in a workspace"""
     res = abreq(
         "destination_definition_specifications/get",
         {"destinationDefinitionId": destinationdef_id, "workspaceId": workspace_id},
@@ -145,7 +145,7 @@ def get_destination_definition_specification(workspace_id, destinationdef_id):
 
 
 def get_destinations(workspace_id):
-    """Docstring"""
+    """Fetch all desintations in an airbyte workspace"""
     res = abreq("destinations/list", {"workspaceId": workspace_id})
     if "destinations" not in res:
         raise Exception(res)
@@ -153,7 +153,7 @@ def get_destinations(workspace_id):
 
 
 def get_destination(workspace_id, destination_id):
-    """Docstring"""
+    """Fetch a destination in an airbyte workspace"""
     res = abreq("destinations/get", {"destinationId": destination_id})
     if "destinationId" not in res:
         raise Exception(res)
@@ -161,7 +161,7 @@ def get_destination(workspace_id, destination_id):
 
 
 def create_destination(workspace_id, name, destinationdef_id, config):
-    """Docstring"""
+    """Create destination in an airbyte workspace"""
     res = abreq(
         "destinations/create",
         {
@@ -177,13 +177,13 @@ def create_destination(workspace_id, name, destinationdef_id, config):
 
 
 def check_destination_connection(workspace_id, destination_id):
-    """Docstring"""
+    """Test connection to a destination in an airbyte workspace"""
     res = abreq("destinations/check_connection", {"destinationId": destination_id})
     return res
 
 
 def get_connections(workspace_id):
-    """Docstring"""
+    """Fetch all connections of an airbyte workspace"""
     res = abreq("connections/list", {"workspaceId": workspace_id})
     if "connections" not in res:
         raise Exception(res)
@@ -191,7 +191,7 @@ def get_connections(workspace_id):
 
 
 def get_connection(workspace_id, connection_id):
-    """Docstring"""
+    """Fetch a connection of an airbyte workspace"""
     res = abreq("connections/get", {"connectionId": connection_id})
     if "connectionId" not in res:
         raise Exception(res)
@@ -199,7 +199,7 @@ def get_connection(workspace_id, connection_id):
 
 
 def create_connection(workspace_id, connection_info: schema.AirbyteConnectionCreate):
-    """Docstring"""
+    """Create a connection in an airbyte workspace"""
     if len(connection_info.streamnames) == 0:
         raise Exception("must specify stream names")
 
@@ -249,6 +249,6 @@ def create_connection(workspace_id, connection_info: schema.AirbyteConnectionCre
 
 
 def sync_connection(workspace_id, connection_id):
-    """Docstring"""
+    """Sync a connection in an airbyte workspace"""
     res = abreq("connections/sync", {"connectionId": connection_id})
     return res
