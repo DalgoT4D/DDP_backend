@@ -25,7 +25,7 @@ DBT_CREDENTIALS_HOST = os.getenv("TESTING_DBT_CREDENTIALS_HOST")
 DBT_TEST_REPO = os.getenv("TESTING_DBT_TEST_REPO")
 
 r = tester.clientpost(
-    "dbt/createworkspace/",
+    "dbt/workspace/",
     json={
         "gitrepo_url": DBT_TEST_REPO,
         "dbtversion": "1.4.5",
@@ -47,4 +47,4 @@ r = tester.clientpost(
 
 print(r)
 
-tester.clientpost("dbt/deleteworkspace/")
+tester.clientdelete("dbt/workspace/")
