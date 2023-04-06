@@ -41,7 +41,7 @@ class TestClient:
             print(r.text)
 
     def login(self, email, password):
-        r = self.clientpost("login/", json={"email": email, "password": password})
+        r = self.clientpost("login/", json={"username": email, "password": password})
         if "token" not in r:
             print(r)
             return
