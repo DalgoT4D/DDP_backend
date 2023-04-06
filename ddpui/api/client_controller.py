@@ -10,9 +10,6 @@ from ninja import NinjaAPI
 from ninja.errors import HttpError, ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
-from ninja.errors import HttpError, ValidationError
-from ninja.responses import Response
-from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from django.utils.text import slugify
 from django.contrib.auth.models import User
 from rest_framework.authtoken import views
