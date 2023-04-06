@@ -3,6 +3,9 @@ from ninja.security import HttpBearer
 from rest_framework.authentication import TokenAuthentication
 from rest_framework.authtoken.models import Token
 
+from ddpui.models.org_user import OrgUser
+from ddpui.models.admin_user import AdminUser
+
 
 class AuthBearer(HttpBearer):
     """ninja middleware to look up a user from an auth token"""
@@ -11,6 +14,8 @@ class AuthBearer(HttpBearer):
         tokenrecord = Token.objects.filter(key=token).first()
         if tokenrecord:
             request.user = tokenrecord.user
+            request.orguser = OrgUser.objects.filter(user=request.user).first()
+            request.adminuser = AdminUser.objects.filter(user=request.user).first()
             return request.user
         return None
 

@@ -60,6 +60,8 @@ def get_admin_user(request):
 def get_organization_users(request, orgname: str = None):
     """Fetch all organization users"""
     assert request.auth
+    if request.adminuser is None:
+        raise HttpError(400, "unauthorized")
     query = OrgUser.objects.filter(user__is_active=True)
     if orgname:
         query = query.filter(org__name=orgname)
@@ -75,6 +77,8 @@ def get_organization_users(request, orgname: str = None):
 def put_organization_user(request, orguserid: int, payload: OrgUserUpdate):
     """update attributes of an orguser (or of the linked django user)"""
     assert request.auth
+    if request.adminuser is None:
+        raise HttpError(400, "unauthorized")
     orguser = OrgUser.objects.filter(id=orguserid).first()
     if orguser is None:
         raise HttpError(400, "no such orguser id")
@@ -91,6 +95,8 @@ def put_organization_user(request, orguserid: int, payload: OrgUserUpdate):
 @adminapi.delete("/organizations/", auth=AuthBearer())
 def delete_organization(request, payload: OrgSchema):
     """delete an organization and all associated org users"""
+    if request.adminuser is None:
+        raise HttpError(400, "unauthorized")
     if request.headers.get("X-DDP-Confirmation") != "yes":
         raise HttpError(400, "missing x-confirmation header")
     org = Org.objects.filter(name=payload.name).first()
