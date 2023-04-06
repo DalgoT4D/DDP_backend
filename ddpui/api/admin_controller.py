@@ -19,13 +19,11 @@ adminapi = NinjaAPI(urls_namespace="admin")
 @adminapi.exception_handler(ValidationError)
 def ninja_validation_error_handler(request, exc):
     """Handle any ninja validation errors raised in the apis"""
-    """Handle any ninja validation errors raised in the apis"""
     return Response({"error": exc.errors}, status=422)
 
 
 @adminapi.exception_handler(PydanticValidationError)
 def pydantic_validation_error_handler(request, exc: PydanticValidationError):
-    """Handle any pydantic errors raised in the apis"""
     """Handle any pydantic errors raised in the apis"""
     return Response({"error": exc.errors()}, status=422)
 
@@ -33,13 +31,11 @@ def pydantic_validation_error_handler(request, exc: PydanticValidationError):
 @adminapi.exception_handler(HttpError)
 def ninja_http_error_handler(request, exc: HttpError):
     """Handle any http errors raised in the apis"""
-    """Handle any http errors raised in the apis"""
     return Response({"error": " ".join(exc.args)}, status=exc.status_code)
 
 
 @adminapi.exception_handler(Exception)
 def ninja_default_error_handler(request, exc: Exception):
-    """Handle any other exception raised in the apis"""
     """Handle any other exception raised in the apis"""
     return Response({"error": " ".join(exc.args)}, status=500)
 
