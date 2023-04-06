@@ -1,19 +1,16 @@
 from django.db import models
-from ninja import ModelSchema
+from ninja import Schema
+from django.contrib.auth.models import User
 
 
 class AdminUser(models.Model):
     """Docstring"""
 
-    active = models.BooleanField(default=True)
-    email = models.CharField(max_length=50, null=True, unique=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
 
 
-class AdminUserResponse(ModelSchema):
+class AdminUserResponse(Schema):
     """Docstring"""
 
-    class Config:
-        """Docstring"""
-
-        model = AdminUser
-        model_fields = ["email", "active"]
+    email: str
+    active: str

@@ -1,5 +1,6 @@
 from django.core.management.base import BaseCommand
 
+from django.contrib.auth.models import User
 from ddpui.models.admin_user import AdminUser
 
 
@@ -15,11 +16,14 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         """Docstring"""
-        user = AdminUser.objects.filter(email=options["email"]).first()
-        if user:
-            print(f"user account exists having id {user.id}")
+        adminuser = AdminUser.objects.filter(user__username=options["email"]).first()
+        if adminuser:
+            print(f"user account exists having userid {adminuser.user.id}")
         else:
-            user = AdminUser.objects.create(email=options["email"], active=True)
-            print(
-                f"created admin user with email {user.email}, password currently ignored"
+            user = User.objects.create_user(
+                username=options["email"],
+                email=options["email"],
+                password=options["password"],
             )
+            adminuser = AdminUser.objects.create(user=user)
+            print(f"created admin user with email {adminuser.user.email}")
