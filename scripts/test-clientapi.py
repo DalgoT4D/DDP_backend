@@ -1,5 +1,4 @@
 import os
-import requests
 
 from dotenv import load_dotenv
 
@@ -23,10 +22,10 @@ DBT_CREDENTIALS_DATABASE = os.getenv("TESTING_DBT_CREDENTIALS_DATABASE")
 DBT_CREDENTIALS_HOST = os.getenv("TESTING_DBT_CREDENTIALS_HOST")
 DBT_TEST_REPO = os.getenv("TESTING_DBT_TEST_REPO")
 
-if False:
-    tester.clientpost("dbt/deleteworkspace/")
+if True:
+    tester.clientdelete("dbt/workspace/")
     r = tester.clientpost(
-        "dbt/createworkspace/",
+        "dbt/workspace/",
         json={
             "gitrepo_url": DBT_TEST_REPO,
             "dbtversion": "1.4.5",
@@ -44,15 +43,16 @@ if False:
                 "database": DBT_CREDENTIALS_DATABASE,
             },
         },
+        timeout=30,
     )
 
-if False:
-    tester.clientpost("dbt/git-pull/")
+if True:
+    tester.clientpost("dbt/git_pull/")
 
 r = tester.clientpost(
-    "prefect/createdbtrunblock/",
+    "prefect/blocks/dbt_run/",
     json={
-        "dbt_blockname": "test-blockname",
+        "dbt_blockname": "test-blockname-1",
         "profile": {
             "name": DBT_PROFILE,
             "target": "dev",
@@ -67,9 +67,12 @@ r = tester.clientpost(
             "database": DBT_CREDENTIALS_DATABASE,
         },
     },
+    timeout=60,
 )
 block_id = r["id"]
 
-tester.clientpost("prefect/createdbtcorejob/", json={"blockname": "test-blockname"})
+tester.clientpost(
+    "prefect/flows/dbt_run/", json={"blockname": "test-blockname-1"}, timeout=60
+)
 
-# tester.clientdelete(f"prefect/dbtrunblock/{block_id}")
+tester.clientdelete(f"prefect/blocks/dbt_run/{block_id}")
