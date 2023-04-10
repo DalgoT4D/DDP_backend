@@ -21,7 +21,7 @@ from ddpui.auth import AuthBearer
 from ddpui.models.org_user import OrgUser, OrgUserCreate, OrgUserUpdate, OrgUserResponse
 from ddpui.models.org_user import InvitationSchema, Invitation, AcceptInvitationSchema
 from ddpui.models.org import Org, OrgSchema, OrgDbt
-from ddpui.ddpairbyte.schema import AirbyteWorkspaceCreate, AirbyteWorkspace
+from ddpui.ddpairbyte.schema import AirbyteDestinationUpdate, AirbyteSourceUpdate, AirbyteWorkspaceCreate, AirbyteWorkspace
 from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
     AirbyteDestinationCreate,
@@ -327,6 +327,23 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
     logger.info("created source having id " + source["sourceId"])
     return {"source_id": source["sourceId"]}
 
+@clientapi.put("/airbyte/sources/{source_id}", auth=AuthBearer())
+def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
+    """Update airbyte source in the user organization workspace"""
+    orguser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    source = airbyte_service.update_source(
+        source_id,
+        payload.name,
+        payload.config,
+    )
+    logger.info("updated source having id " + source["sourceId"])
+    return {"source_id": source["sourceId"]}
+
 
 @clientapi.post("/airbyte/sources/{source_id}/check/", auth=AuthBearer())
 def post_airbyte_check_source(request, source_id):
@@ -437,6 +454,23 @@ def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
         payload.config,
     )
     logger.info("created destination having id " + destination["destinationId"])
+    return {"destination_id": destination["destinationId"]}
+
+@clientapi.put("/airbyte/destinations/{destination_id}/", auth=AuthBearer())
+def put_airbyte_destination(request, destination_id: str, payload: AirbyteDestinationUpdate):
+    """Update an airbyte destination in the user organization workspace"""
+    orguser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    destination = airbyte_service.update_destination(
+        destination_id,
+        payload.name,
+        payload.config,
+    )
+    logger.info("updated destination having id " + destination["destinationId"])
     return {"destination_id": destination["destinationId"]}
 
 
