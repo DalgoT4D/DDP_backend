@@ -46,6 +46,16 @@ class AirbyteConnectionCreate(Schema):
     streamnames: list
 
 
+class AirbyteConnectionUpdate(Schema):
+    """Docstring"""
+
+    connection_id: str
+    name: Optional[str] = None
+    source_id: Optional[str] = None
+    destination_id: Optional[str] = None
+    streamnames: Optional[list] = None
+
+
 # response schemas
 class AirbyteWorkspace(Schema):
     """Docstring"""

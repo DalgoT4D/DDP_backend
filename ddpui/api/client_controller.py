@@ -21,7 +21,7 @@ from ddpui.auth import AuthBearer
 from ddpui.models.org_user import OrgUser, OrgUserCreate, OrgUserUpdate, OrgUserResponse
 from ddpui.models.org_user import InvitationSchema, Invitation, AcceptInvitationSchema
 from ddpui.models.org import Org, OrgSchema, OrgDbt
-from ddpui.ddpairbyte.schema import AirbyteDestinationUpdate, AirbyteSourceUpdate, AirbyteWorkspaceCreate, AirbyteWorkspace
+from ddpui.ddpairbyte.schema import AirbyteConnectionUpdate, AirbyteDestinationUpdate, AirbyteSourceUpdate, AirbyteWorkspaceCreate, AirbyteWorkspace
 from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
     AirbyteDestinationCreate,
@@ -563,6 +563,22 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
         raise HttpError(400, "must specify stream names")
 
     res = airbyte_service.create_connection(orguser.org.airbyte_workspace_id, payload)
+    logger.debug(res)
+    return res
+
+@clientapi.put("/airbyte/connections/{connection_id}", auth=AuthBearer())
+def put_airbyte_connection(request, connection_id, payload: AirbyteConnectionUpdate):
+    """Update an airbyte connection in the user organization workspace"""
+    orguser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    if len(payload.streamnames) == 0:
+        raise HttpError(400, "must specify stream names")
+
+    res = airbyte_service.update_connection(orguser.org.airbyte_workspace_id, connection_id, payload)
     logger.debug(res)
     return res
 

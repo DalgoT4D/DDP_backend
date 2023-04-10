@@ -273,6 +273,64 @@ def create_connection(workspace_id, connection_info: schema.AirbyteConnectionCre
         raise Exception(res)
     return res
 
+def update_connection(workspace_id, connection_id, connection_info: schema.AirbyteConnectionUpdate):
+    """Update a connection of an airbyte workspace"""
+    if len(connection_info.streamnames) == 0:
+        raise Exception("must specify stream names")
+
+    sourceschemacatalog = get_source_schema_catalog(
+        workspace_id, connection_info.source_id
+    )
+
+    payload = {
+        "connectionId": connection_id,
+        "sourceId": connection_info.source_id,
+        "destinationId": connection_info.destination_id,
+        "sourceCatalogId": sourceschemacatalog["catalogId"],
+        "syncCatalog": {
+            "streams": [
+                # <== we're going to put the stream configs in here in the next step below
+            ]
+        },
+        "prefix": "",
+        "namespaceDefinition": "destination",
+        "namespaceFormat": "${SOURCE_NAMESPACE}",
+        "nonBreakingChangesPreference": "ignore",
+        "scheduleType": "manual",
+        "geography": "auto",
+        "name": connection_info.name,
+        "operations": [
+            {
+                "name": "Normalization",
+                "workspaceId": workspace_id,
+                "operatorConfiguration": {
+                    "operatorType": "normalization",
+                    "normalization": {"option": "basic"},
+                },
+            }
+        ],
+    }
+
+    # one stream per table
+    for schema_cat in sourceschemacatalog["catalog"]["streams"]:
+        if schema_cat["stream"]["name"] in connection_info.streamnames:
+            # set schema_cat['config']['syncMode'] from schema_cat['stream']['supportedSyncModes'] here
+            payload["syncCatalog"]["streams"].append(schema_cat)
+
+    res = abreq("connections/update", payload)
+    if "connectionId" not in res:
+        raise Exception(res)
+    return res
+
+
+def delete_connection(workspace_id, connection_id):
+    """Delete a connection of an airbyte workspace"""
+    res = abreq("connections/delete", {"connectionId": connection_id})
+    if "status" not in res or res["status"] != "SUCCEEDED":
+        raise Exception(res)
+    return res
+
+
 
 def sync_connection(workspace_id, connection_id):
     """Sync a connection in an airbyte workspace"""
