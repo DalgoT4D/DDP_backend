@@ -3,6 +3,7 @@ import os
 import requests
 from dotenv import load_dotenv
 from ddpui.ddpairbyte import schema
+from ddpui.utils.ab_logger import logger
 
 load_dotenv()
 
@@ -14,11 +15,14 @@ def abreq(endpoint, req=None):
     abver = os.getenv("AIRBYTE_SERVER_APIVER")
     token = os.getenv("AIRBYTE_API_TOKEN")
 
+    logger.info("Making request to Airbyte server: %s", endpoint)
+
     res = requests.post(
         f"http://{abhost}:{abport}/api/{abver}/{endpoint}",
         headers={"Authorization": f"Basic {token}"},
         json=req,
     )
+    logger.info("Response from Airbyte server: %s", res.text)
     res.raise_for_status()
     return res.json()
 
