@@ -14,3 +14,11 @@ class AdminUserResponse(Schema):
 
     email: str
     active: str
+
+    @staticmethod
+    def fromadminuser(adminuser):
+        """helper"""
+        return AdminUserResponse(
+            email=adminuser.user.email,
+            active=adminuser.user.is_active,
+        )

@@ -1,9 +1,25 @@
 from datetime import datetime
+from enum import IntEnum
+
 from django.db import models
-from ninja import ModelSchema, Schema
+from django.contrib.auth.models import User
+
+from ninja import Schema
 
 from ddpui.models.org import Org, OrgSchema
-from django.contrib.auth.models import User
+
+
+class OrgUserRole(IntEnum):
+    """an enum for roles assignable to org-users"""
+
+    REPORT_VIEWER = 1
+    PIPELINE_MANAGER = 2
+    ACCOUNT_MANAGER = 3
+
+    @classmethod
+    def choices(cls):
+        """django model definition needs an iterable for `choices`"""
+        return [(key.value, key.name) for key in cls]
 
 
 class OrgUser(models.Model):
@@ -11,7 +27,9 @@ class OrgUser(models.Model):
 
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     org = models.ForeignKey(Org, on_delete=models.CASCADE, null=True)
-    # todo: add role
+    role = models.IntegerField(
+        choices=OrgUserRole.choices(), default=OrgUserRole.REPORT_VIEWER
+    )
 
     def __str__(self):
         return self.user.email  # pylint: disable=no-member
@@ -22,13 +40,16 @@ class OrgUserCreate(Schema):
 
     email: str
     password: str
+    role: str = None
 
 
 class OrgUserUpdate(Schema):
     """payload to update an existing OrgUser"""
 
+    toupdate_email: str
     email: str = None
     active: bool = None
+    role: str = None
 
 
 class OrgUserResponse(Schema):
@@ -37,12 +58,16 @@ class OrgUserResponse(Schema):
     email: str
     org: OrgSchema = None
     active: bool
+    role: int
 
     @staticmethod
     def from_orguser(orguser: OrgUser):
         """helper to turn an OrgUser into an OrgUserResponse"""
         return OrgUserResponse(
-            email=orguser.user.email, org=orguser.org, active=orguser.user.is_active
+            email=orguser.user.email,
+            org=orguser.org,
+            active=orguser.user.is_active,
+            role=orguser.role,
         )
 
 
@@ -50,6 +75,9 @@ class Invitation(models.Model):
     """Docstring"""
 
     invited_email = models.CharField(max_length=50)
+    invited_role = models.IntegerField(
+        choices=OrgUserRole.choices(), default=OrgUserRole.REPORT_VIEWER
+    )
     invited_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE)
     invited_on = models.DateTimeField()
     invite_code = models.CharField(max_length=36)
@@ -59,6 +87,7 @@ class InvitationSchema(Schema):
     """Docstring"""
 
     invited_email: str
+    invited_role: int
     invited_by: OrgUserResponse = None
     invited_on: datetime = None
     invite_code: str = None
@@ -68,6 +97,7 @@ class InvitationSchema(Schema):
         """Docstring"""
         return InvitationSchema(
             invited_email=invitation.invited_email,
+            invited_role=invitation.invited_role,
             invited_by=OrgUserResponse.from_orguser(invitation.invited_by),
             invited_on=invitation.invited_on,
             invite_code=invitation.invite_code,
