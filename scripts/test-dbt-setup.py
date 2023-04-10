@@ -43,6 +43,7 @@ r = tester.clientpost(
             "database": DBT_CREDENTIALS_DATABASE,
         },
     },
+    timeout=30,
 )
 
 print(r)
