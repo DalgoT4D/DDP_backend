@@ -29,9 +29,8 @@ SECRET_KEY = os.getenv("DJANGOSECRET")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["localhost"]
+ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 
-LOGFILE = BASE_DIR / "ddpui/logs/ddpui.log"
 
 # Application definition
 
