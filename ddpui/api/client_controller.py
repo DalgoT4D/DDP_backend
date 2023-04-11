@@ -16,6 +16,7 @@ from rest_framework.authtoken import views
 
 from ddpui.utils.timezone import IST
 from ddpui.utils.ddp_logger import logger
+from ddpui.utils.kms_encrypt_decrypt import encrypt_dict
 from ddpui import auth
 
 from ddpui.models.org_user import (
@@ -586,7 +587,6 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
     process = runcmd(f"{pip} install dbt-postgres==1.4.5", project_dir)
     if process.wait() != 0:
         raise HttpError(500, "pip install dbt-postgres==1.4.5 failed")
-
     dbt = OrgDbt(
         gitrepo_url=payload.gitrepo_url,
         project_dir=str(project_dir),
@@ -594,11 +594,7 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
         targetname=payload.profile.target,
         targettype=payload.profile.target_configs_type,
         targetschema=payload.profile.target_configs_schema,
-        host=payload.credentials.host,
-        port=payload.credentials.port,
-        username=payload.credentials.username,
-        password=payload.credentials.password,  # todo: encrypt with kms
-        database=payload.credentials.database,
+        credentials=encrypt_dict(dict(payload.credentials)),
     )
     dbt.save()
     orguser.org.dbt = dbt

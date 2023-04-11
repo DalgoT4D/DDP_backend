@@ -12,12 +12,8 @@ class OrgDbt(models.Model):
     targettype = models.CharField(max_length=10)
     targetschema = models.CharField(max_length=10)
 
-    # connection to target warehouse
-    host = models.CharField(max_length=100)
-    port = models.CharField(max_length=5)
-    username = models.CharField(max_length=100)
-    password = models.CharField(max_length=100)  # encrypted
-    database = models.CharField(max_length=50)
+    # credentials to target warehouse
+    credentials = models.TextField(null=True)
 
 
 class Org(models.Model):
