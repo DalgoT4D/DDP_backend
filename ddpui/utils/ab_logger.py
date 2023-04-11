@@ -1,10 +1,9 @@
 import logging
 import sys
 from logging.handlers import RotatingFileHandler
+from ddpui import settings
 
-from ddpui.settings import BASE_DIR
-
-LOG_DIR = BASE_DIR / "ddpui/logs/airbyte.log"
+LOGFILE = settings.BASE_DIR / "ddpui/logs/airbyte.log"
 logger = logging.getLogger("airbyte")
 logger.setLevel(logging.INFO)
 
@@ -16,7 +15,7 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 # log to file
-handler = RotatingFileHandler(LOG_DIR, maxBytes=1000000, backupCount=5)
+handler = RotatingFileHandler(LOGFILE)
 handler.setLevel(logging.INFO)
 formatter = logging.Formatter("%(levelname)s - %(asctime)s - %(name)s - %(message)s")
 handler.setFormatter(formatter)
