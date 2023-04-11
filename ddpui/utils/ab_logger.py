@@ -3,18 +3,9 @@ import sys
 from logging.handlers import RotatingFileHandler
 from ddpui import settings
 
-LOGFILE = settings.BASE_DIR / "ddpui/logs/ddpui.log"
-logger = logging.getLogger("ddpui")
+LOGFILE = settings.BASE_DIR / "ddpui/logs/airbyte.log"
+logger = logging.getLogger("airbyte")
 logger.setLevel(logging.INFO)
-# log to aws cw - requires aws credentials
-
-# from cloudwatch import cloudwatch
-# from datetime import datetime
-# handler = cloudwatch.CloudwatchHandler(log_group=f"ddpui.{datetime.today().strftime('%Y-%m-%d')}")
-# handler.setLevel(logging.INFO)
-# formatter = logging.Formatter('%(asctime)s : %(levelname)s - %(message)s')
-# handler.setFormatter(formatter)
-# logger.addHandler(handler)
 
 # log to stdout
 handler = logging.StreamHandler(sys.stdout)
@@ -23,7 +14,7 @@ formatter = logging.Formatter("%(levelname)s - %(asctime)s - %(name)s - %(messag
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-
+# log to file
 handler = RotatingFileHandler(LOGFILE)
 handler.setLevel(logging.INFO)
 formatter = logging.Formatter("%(levelname)s - %(asctime)s - %(name)s - %(message)s")
