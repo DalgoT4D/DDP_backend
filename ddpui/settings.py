@@ -31,8 +31,6 @@ DEBUG = True
 
 ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 
-LOG_DIR = BASE_DIR / "ddpui/logs"
-LOGFILE = BASE_DIR / "ddpui/logs/ddpui.log"
 
 # Application definition
 

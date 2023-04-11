@@ -351,7 +351,7 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
     logger.info("created source having id " + source["sourceId"])
     return {"source_id": source["sourceId"]}
 
-@clientapi.put("/airbyte/sources/{source_id}", auth=AuthBearer())
+@clientapi.put("/airbyte/sources/{source_id}", auth=auth.CanManagePipelines())
 def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
     """Update airbyte source in the user organization workspace"""
     orguser = request.orguser
@@ -468,7 +468,7 @@ def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
     logger.info("created destination having id " + destination["destinationId"])
     return {"destination_id": destination["destinationId"]}
 
-@clientapi.put("/airbyte/destinations/{destination_id}/", auth=AuthBearer())
+@clientapi.put("/airbyte/destinations/{destination_id}/", auth=auth.CanManagePipelines())
 def put_airbyte_destination(request, destination_id: str, payload: AirbyteDestinationUpdate):
     """Update an airbyte destination in the user organization workspace"""
     orguser = request.orguser
@@ -568,7 +568,7 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
     logger.debug(res)
     return res
 
-@clientapi.put("/airbyte/connections/{connection_id}", auth=AuthBearer())
+@clientapi.put("/airbyte/connections/{connection_id}", auth=auth.CanManagePipelines())
 def put_airbyte_connection(request, connection_id, payload: AirbyteConnectionUpdate):
     """Update an airbyte connection in the user organization workspace"""
     orguser = request.orguser

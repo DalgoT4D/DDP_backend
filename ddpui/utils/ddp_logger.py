@@ -3,6 +3,7 @@ import sys
 from logging.handlers import RotatingFileHandler
 from ddpui import settings
 
+LOGFILE = settings.BASE_DIR / "ddpui/logs/ddpui.log"
 logger = logging.getLogger("ddpui")
 logger.setLevel(logging.INFO)
 # log to aws cw - requires aws credentials
@@ -23,7 +24,7 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 
-handler = RotatingFileHandler(settings.LOGFILE)
+handler = RotatingFileHandler(LOGFILE)
 handler.setLevel(logging.INFO)
 formatter = logging.Formatter("%(levelname)s - %(asctime)s - %(name)s - %(message)s")
 handler.setFormatter(formatter)
