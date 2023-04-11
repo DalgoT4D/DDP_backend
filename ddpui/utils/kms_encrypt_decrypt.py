@@ -2,7 +2,7 @@ import os
 import json
 import base64
 import boto3
-from botocore.exceptions import ClientError
+
 
 aws_access_key_id = os.getenv("AWS_ACCESS_KEY_ID")
 aws_secret_access_key = os.getenv("AWS_SECRET_ACCESS_KEY")
@@ -30,13 +30,13 @@ def encrypt_dict(data):
             KeyId=kms_key_id,
             Plaintext=data,
         )
-    except ClientError as cli_err:
-        raise f"Couldn't encrypt the text : {cli_err.response['Error']['Message']}"
-    else:
-        if isinstance(res, dict) is False or "CiphertextBlob" not in res:
-            raise Exception("Something went wrong with the encryption")
+    except Exception as err:
+        raise Exception(f"Couldn't encrypt the text : {err}") from err
 
-        return base64.b64encode(res["CiphertextBlob"])
+    if isinstance(res, dict) is False or "CiphertextBlob" not in res:
+        raise Exception("Something went wrong with the encryption")
+
+    return base64.b64encode(res["CiphertextBlob"]).decode()
 
 
 def decrypt_dict(encoded_text):
@@ -46,10 +46,10 @@ def decrypt_dict(encoded_text):
 
     try:
         res = kms_client.decrypt(KeyId=kms_key_id, CiphertextBlob=cipher_text)
-    except ClientError as cli_err:
-        raise f"Couldn't decrypt the text : {cli_err.response['Error']['Message']}"
-    else:
-        if isinstance(res, dict) is False or "Plaintext" not in res:
-            raise Exception("Something went wrong with the encryption")
+    except Exception as err:
+        raise Exception(f"Couldn't decrypt the text : {err}") from err
 
-        return json.loads(res["Plaintext"])
+    if isinstance(res, dict) is False or "Plaintext" not in res:
+        raise Exception("Something went wrong with the encryption")
+
+    return json.loads(res["Plaintext"])
