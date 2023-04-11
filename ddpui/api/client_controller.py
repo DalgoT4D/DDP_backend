@@ -27,7 +27,7 @@ from ddpui.models.org_user import (
 )
 from ddpui.models.org_user import InvitationSchema, Invitation, AcceptInvitationSchema
 from ddpui.models.org import Org, OrgSchema, OrgDbt
-from ddpui.ddpairbyte.schema import AirbyteWorkspaceCreate, AirbyteWorkspace
+from ddpui.ddpairbyte.schema import AirbyteConnectionUpdate, AirbyteDestinationUpdate, AirbyteSourceUpdate, AirbyteWorkspaceCreate, AirbyteWorkspace
 from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
     AirbyteDestinationCreate,
@@ -351,6 +351,23 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
     logger.info("created source having id " + source["sourceId"])
     return {"source_id": source["sourceId"]}
 
+@clientapi.put("/airbyte/sources/{source_id}", auth=auth.CanManagePipelines())
+def update_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
+    """Update airbyte source in the user organization workspace"""
+    orguser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    source = airbyte_service.update_source(
+        source_id,
+        payload.name,
+        payload.config,
+    )
+    logger.info("updated source having id " + source["sourceId"])
+    return {"source_id": source["sourceId"]}
+
 
 @clientapi.post("/airbyte/sources/{source_id}/check/", auth=auth.CanManagePipelines())
 def post_airbyte_check_source(request, source_id):
@@ -451,6 +468,23 @@ def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
     logger.info("created destination having id " + destination["destinationId"])
     return {"destination_id": destination["destinationId"]}
 
+@clientapi.put("/airbyte/destinations/{destination_id}/", auth=auth.CanManagePipelines())
+def update_airbyte_destination(request, destination_id: str, payload: AirbyteDestinationUpdate):
+    """Update an airbyte destination in the user organization workspace"""
+    orguser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    destination = airbyte_service.update_destination(
+        destination_id,
+        payload.name,
+        payload.config,
+    )
+    logger.info("updated destination having id " + destination["destinationId"])
+    return {"destination_id": destination["destinationId"]}
+
 
 @clientapi.post(
     "/airbyte/destinations/{destination_id}/check/", auth=auth.CanManagePipelines()
@@ -531,6 +565,22 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
         raise HttpError(400, "must specify stream names")
 
     res = airbyte_service.create_connection(orguser.org.airbyte_workspace_id, payload)
+    logger.debug(res)
+    return res
+
+@clientapi.put("/airbyte/connections/{connection_id}", auth=auth.CanManagePipelines())
+def update_airbyte_connection(request, connection_id, payload: AirbyteConnectionUpdate):
+    """Update an airbyte connection in the user organization workspace"""
+    orguser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    if len(payload.streamnames) == 0:
+        raise HttpError(400, "must specify stream names")
+
+    res = airbyte_service.update_connection(orguser.org.airbyte_workspace_id, connection_id, payload)
     logger.debug(res)
     return res
 

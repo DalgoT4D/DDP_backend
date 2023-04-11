@@ -1,6 +1,6 @@
+import logging
 import os
 import requests
-
 from dotenv import load_dotenv
 from ddpui.ddpairbyte import schema
 
@@ -19,6 +19,7 @@ def abreq(endpoint, req=None):
         headers={"Authorization": f"Basic {token}"},
         json=req,
     )
+    res.raise_for_status()
     return res.json()
 
 
@@ -92,7 +93,19 @@ def create_source(workspace_id, name, sourcedef_id, config):
         },
     )
     if "sourceId" not in res:
-        raise Exception(res)
+        raise Exception('Failed to create source')
+    return res
+
+def update_source(source_id, name=None, config=None):
+    """Update source in an airbyte workspace"""
+    data = {"sourceId": source_id}
+    if name is not None:
+        data["name"] = name
+    if config is not None:
+        data["connectionConfiguration"] = config
+    res = abreq("sources/update", data)
+    if "sourceId" not in res:
+        raise Exception('Failed to update source')
     return res
 
 
@@ -119,7 +132,7 @@ def get_source_schema_catalog(workspace_id, source_id):
     """Fetch source schema catalog for a source in an airbyte workspace"""
     res = abreq("sources/discover_schema", {"sourceId": source_id})
     if "catalog" not in res:
-        raise Exception(res)
+        raise Exception('Failed to get source schema catalogs')
     return res
 
 
@@ -129,7 +142,7 @@ def get_destination_definitions(workspace_id, **kwargs):
         "destination_definitions/list_for_workspace", {"workspaceId": workspace_id}
     )
     if "destinationDefinitions" not in res:
-        raise Exception(res)
+        raise Exception('Failed to get destination definitions')
     return res["destinationDefinitions"]
 
 
@@ -140,7 +153,7 @@ def get_destination_definition_specification(workspace_id, destinationdef_id):
         {"destinationDefinitionId": destinationdef_id, "workspaceId": workspace_id},
     )
     if "connectionSpecification" not in res:
-        raise Exception(res)
+        raise Exception('Failed to get destination definition specification')
     return res["connectionSpecification"]
 
 
@@ -148,7 +161,7 @@ def get_destinations(workspace_id):
     """Fetch all desintations in an airbyte workspace"""
     res = abreq("destinations/list", {"workspaceId": workspace_id})
     if "destinations" not in res:
-        raise Exception(res)
+        raise Exception('Failed to get destinations')
     return res["destinations"]
 
 
@@ -156,7 +169,7 @@ def get_destination(workspace_id, destination_id):
     """Fetch a destination in an airbyte workspace"""
     res = abreq("destinations/get", {"destinationId": destination_id})
     if "destinationId" not in res:
-        raise Exception(res)
+        raise Exception('Failed to get destination')
     return res
 
 
@@ -173,6 +186,19 @@ def create_destination(workspace_id, name, destinationdef_id, config):
     )
     if "destinationId" not in res:
         raise Exception(res)
+    return res
+
+
+def update_destination(destination_id, name=None, config=None):
+    """Update a destination in an airbyte workspace"""
+    data = {"destinationId": destination_id}
+    if name is not None:
+        data["name"] = name
+    if config is not None:
+        data["connectionConfiguration"] = config
+    res = abreq("destinations/update", data)
+    if "destinationId" not in res:
+        raise Exception(f"Failed to update destination {destination_id}: {res}")
     return res
 
 
@@ -246,6 +272,64 @@ def create_connection(workspace_id, connection_info: schema.AirbyteConnectionCre
     if "connectionId" not in res:
         raise Exception(res)
     return res
+
+def update_connection(workspace_id, connection_id, connection_info: schema.AirbyteConnectionUpdate):
+    """Update a connection of an airbyte workspace"""
+    if len(connection_info.streamnames) == 0:
+        raise Exception("must specify stream names")
+
+    sourceschemacatalog = get_source_schema_catalog(
+        workspace_id, connection_info.source_id
+    )
+
+    payload = {
+        "connectionId": connection_id,
+        "sourceId": connection_info.source_id,
+        "destinationId": connection_info.destination_id,
+        "sourceCatalogId": sourceschemacatalog["catalogId"],
+        "syncCatalog": {
+            "streams": [
+                # <== we're going to put the stream configs in here in the next step below
+            ]
+        },
+        "prefix": "",
+        "namespaceDefinition": "destination",
+        "namespaceFormat": "${SOURCE_NAMESPACE}",
+        "nonBreakingChangesPreference": "ignore",
+        "scheduleType": "manual",
+        "geography": "auto",
+        "name": connection_info.name,
+        "operations": [
+            {
+                "name": "Normalization",
+                "workspaceId": workspace_id,
+                "operatorConfiguration": {
+                    "operatorType": "normalization",
+                    "normalization": {"option": "basic"},
+                },
+            }
+        ],
+    }
+
+    # one stream per table
+    for schema_cat in sourceschemacatalog["catalog"]["streams"]:
+        if schema_cat["stream"]["name"] in connection_info.streamnames:
+            # set schema_cat['config']['syncMode'] from schema_cat['stream']['supportedSyncModes'] here
+            payload["syncCatalog"]["streams"].append(schema_cat)
+
+    res = abreq("connections/update", payload)
+    if "connectionId" not in res:
+        raise Exception(res)
+    return res
+
+
+def delete_connection(workspace_id, connection_id):
+    """Delete a connection of an airbyte workspace"""
+    res = abreq("connections/delete", {"connectionId": connection_id})
+    if "status" not in res or res["status"] != "SUCCEEDED":
+        raise Exception(res)
+    return res
+
 
 
 def sync_connection(workspace_id, connection_id):
