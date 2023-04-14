@@ -27,7 +27,13 @@ from ddpui.models.org_user import (
 )
 from ddpui.models.org_user import InvitationSchema, Invitation, AcceptInvitationSchema
 from ddpui.models.org import Org, OrgSchema, OrgDbt
-from ddpui.ddpairbyte.schema import AirbyteConnectionUpdate, AirbyteDestinationUpdate, AirbyteSourceUpdate, AirbyteWorkspaceCreate, AirbyteWorkspace
+from ddpui.ddpairbyte.schema import (
+    AirbyteConnectionUpdate,
+    AirbyteDestinationUpdate,
+    AirbyteSourceUpdate,
+    AirbyteWorkspaceCreate,
+    AirbyteWorkspace,
+)
 from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
     AirbyteDestinationCreate,
@@ -282,6 +288,18 @@ def post_airbyte_detach_workspace(request):
     orguser.org.airbyte_workspace_id = None
     orguser.org.save()
 
+    ddp_prefect_airbyteserverblock = OrgPrefectBlock.objects.filter(
+        org=orguser.org, blocktype=prefect_service.AIRBYTESERVER
+    ).first()
+    if ddp_prefect_airbyteserverblock:
+        # todo: delete the prefect AirbyteServer block
+        # delete all prefect airbyteconnection blocks fo this org
+        for prefect_connection_block in OrgPrefectBlock.objects.filter(
+            org=orguser.org, blocktype=prefect_service.AIRBYTECONNECTION
+        ):
+            prefect_connection_block.delete()
+        ddp_prefect_airbyteserverblock.delete()
+
     return {"success": 1}
 
 
@@ -298,6 +316,27 @@ def post_airbyte_workspace(request, payload: AirbyteWorkspaceCreate):
 
     orguser.org.airbyte_workspace_id = workspace["workspaceId"]
     orguser.org.save()
+
+    prefect_airbyteserverblock = prefect_service.get_block(
+        prefect_service.AIRBYTESERVER, orguser.org.slug
+    )
+    if prefect_airbyteserverblock is None:
+        prefect_airbyteserverblock = prefect_service.create_airbyte_server_block(
+            orguser.org.slug
+        )
+        logger.info(prefect_airbyteserverblock)
+
+    if not OrgPrefectBlock.objects.filter(
+        org=orguser.org, blocktype=prefect_service.AIRBYTESERVER
+    ).exists():
+        ddp_prefect_airbyteserverblock = OrgPrefectBlock(
+            org=orguser.org,
+            blocktype=prefect_service.AIRBYTESERVER,
+            blockid=prefect_airbyteserverblock["id"],
+            blockname=prefect_airbyteserverblock["name"],
+            displayname=f"{orguser.org.slug}-{prefect_service.AIRBYTESERVER}",
+        )
+        ddp_prefect_airbyteserverblock.save()
 
     return AirbyteWorkspace(
         name=workspace["name"],
@@ -350,6 +389,7 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
     )
     logger.info("created source having id " + source["sourceId"])
     return {"source_id": source["sourceId"]}
+
 
 @clientapi.put("/airbyte/sources/{source_id}", auth=auth.CanManagePipelines())
 def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
@@ -468,8 +508,13 @@ def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
     logger.info("created destination having id " + destination["destinationId"])
     return {"destination_id": destination["destinationId"]}
 
-@clientapi.put("/airbyte/destinations/{destination_id}/", auth=auth.CanManagePipelines())
-def put_airbyte_destination(request, destination_id: str, payload: AirbyteDestinationUpdate):
+
+@clientapi.put(
+    "/airbyte/destinations/{destination_id}/", auth=auth.CanManagePipelines()
+)
+def put_airbyte_destination(
+    request, destination_id: str, payload: AirbyteDestinationUpdate
+):
     """Update an airbyte destination in the user organization workspace"""
     orguser = request.orguser
     if orguser.org is None:
@@ -565,8 +610,45 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
         raise HttpError(400, "must specify stream names")
 
     res = airbyte_service.create_connection(orguser.org.airbyte_workspace_id, payload)
+
+    ddp_prefect_airbyteserverblock = OrgPrefectBlock.objects.filter(
+        org=orguser.org,
+        blocktype=prefect_service.AIRBYTESERVER,
+    ).first()
+    if ddp_prefect_airbyteserverblock is None:
+        raise Exception(
+            f"{orguser.org.slug} has no {prefect_service.AIRBYTESERVER} block in OrgPrefectBlock"
+        )
+
+    nameindex = 1
+    while True:
+        try:
+            prefect_connection_block = prefect_service.create_airbyte_connection_block(
+                prefect_service.PrefectAirbyteConnectionSetup(
+                    serverblockname=ddp_prefect_airbyteserverblock.blockname,
+                    connectionblockname=f"{orguser.org.slug}-{slugify(payload.name)}-{nameindex}",
+                    connection_id=res["id"],
+                )
+            )
+            break
+        except Exception:
+            nameindex += 1
+
+    logger.info(prefect_connection_block)
+
+    # create a prefect AirbyteConnection block
+    connection_block = OrgPrefectBlock(
+        org=orguser.org,
+        blocktype=prefect_service.AIRBYTECONNECTION,
+        blockid=prefect_connection_block["id"],
+        blockname=prefect_connection_block["name"],
+        displayname=payload.name,
+    )
+    connection_block.save()
+
     logger.debug(res)
     return res
+
 
 @clientapi.put("/airbyte/connections/{connection_id}", auth=auth.CanManagePipelines())
 def put_airbyte_connection(request, connection_id, payload: AirbyteConnectionUpdate):
@@ -580,9 +662,15 @@ def put_airbyte_connection(request, connection_id, payload: AirbyteConnectionUpd
     if len(payload.streamnames) == 0:
         raise HttpError(400, "must specify stream names")
 
-    res = airbyte_service.update_connection(orguser.org.airbyte_workspace_id, connection_id, payload)
+    res = airbyte_service.update_connection(
+        orguser.org.airbyte_workspace_id, connection_id, payload
+    )
     logger.debug(res)
     return res
+
+
+# when you add DELETE make sure to delete the corresponding prefect block and the OrgPrefectBlock row
+# todo
 
 
 @clientapi.post(
@@ -746,6 +834,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
         blocktype=block["block_type"]["name"],
         blockid=block["id"],
         blockname=block["name"],
+        # todo displayname
     )
     cpb.save()
 
@@ -798,7 +887,7 @@ def post_prefect_dbt_test_block(request, payload: PrefectDbtRun):
     dbt_binary = project_dir / "venv/bin/dbt"
 
     block_data = PrefectDbtCoreSetup(
-        blockname=payload.dbt_blockname,
+        blockname=payload.dbt_blockname,  # we will generate this block name <org>-dbt-<test|run|docs>
         profiles_dir=f"{project_dir}/profiles/",
         project_dir=project_dir,
         working_dir=project_dir,
@@ -815,6 +904,7 @@ def post_prefect_dbt_test_block(request, payload: PrefectDbtRun):
         blocktype=block["block_type"]["name"],
         blockid=block["id"],
         blockname=block["name"],
+        # todo
     )
     cpb.save()
 
