@@ -50,7 +50,7 @@ def ninja_default_error_handler(
     return Response({"error": " ".join(exc.args)}, status=500)
 
 
-@prefectapi.post("/prefect/flows/airbyte_sync/", auth=auth.CanManagePipelines())
+@prefectapi.post("/flows/airbyte_sync/", auth=auth.CanManagePipelines())
 def post_prefect_airbyte_sync_flow(request, payload: PrefectAirbyteSync):
     """Run airbyte sync flow in prefect"""
     orguser = request.orguser
@@ -60,7 +60,7 @@ def post_prefect_airbyte_sync_flow(request, payload: PrefectAirbyteSync):
     return prefect_service.run_airbyte_connection_prefect_flow(payload.blockname)
 
 
-@prefectapi.post("/prefect/flows/dbt_run/", auth=auth.CanManagePipelines())
+@prefectapi.post("/flows/dbt_run/", auth=auth.CanManagePipelines())
 def post_prefect_dbt_core_run_flow(
     request, payload: PrefectDbtCore
 ):  # pylint: disable=unused-argument
@@ -68,7 +68,7 @@ def post_prefect_dbt_core_run_flow(
     return prefect_service.run_dbtcore_prefect_flow(payload.blockname)
 
 
-@prefectapi.post("/prefect/blocks/dbt_run/", auth=auth.CanManagePipelines())
+@prefectapi.post("/blocks/dbt_run/", auth=auth.CanManagePipelines())
 def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
     """Create prefect dbt core block"""
     orguser = request.orguser
@@ -106,7 +106,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
     return block
 
 
-@prefectapi.get("/prefect/blocks/dbt_run/", auth=auth.CanManagePipelines())
+@prefectapi.get("/blocks/dbt_run/", auth=auth.CanManagePipelines())
 def get_prefect_dbt_run_blocks(request):
     """Fetch all prefect dbt run blocks for an organization"""
     orguser = request.orguser
@@ -123,7 +123,7 @@ def get_prefect_dbt_run_blocks(request):
     ]
 
 
-@prefectapi.delete("/prefect/blocks/dbt_run/{block_id}", auth=auth.CanManagePipelines())
+@prefectapi.delete("/blocks/dbt_run/{block_id}", auth=auth.CanManagePipelines())
 def delete_prefect_dbt_run_block(request, block_id):
     """Delete prefect dbt run block for an organization"""
     orguser = request.orguser
@@ -137,7 +137,7 @@ def delete_prefect_dbt_run_block(request, block_id):
     return {"success": 1}
 
 
-@prefectapi.post("/prefect/blocks/dbt_test/", auth=auth.CanManagePipelines())
+@prefectapi.post("/blocks/dbt_test/", auth=auth.CanManagePipelines())
 def post_prefect_dbt_test_block(request, payload: PrefectDbtRun):
     """Create prefect dbt test block for an organization"""
     orguser = request.orguser
@@ -175,9 +175,7 @@ def post_prefect_dbt_test_block(request, payload: PrefectDbtRun):
     return block
 
 
-@prefectapi.delete(
-    "/prefect/blocks/dbt_test/{block_id}", auth=auth.CanManagePipelines()
-)
+@prefectapi.delete("/blocks/dbt_test/{block_id}", auth=auth.CanManagePipelines())
 def delete_prefect_dbt_test_block(request, block_id):
     """Delete dbt test block for an organization"""
     orguser = request.orguser

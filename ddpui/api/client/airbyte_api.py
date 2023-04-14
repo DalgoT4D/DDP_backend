@@ -50,7 +50,7 @@ def ninja_default_error_handler(
     return Response({"error": " ".join(exc.args)}, status=500)
 
 
-@airbyteapi.post("/airbyte/workspace/detach/", auth=auth.CanManagePipelines())
+@airbyteapi.post("/workspace/detach/", auth=auth.CanManagePipelines())
 def post_airbyte_detach_workspace(request):
     """Detach airbyte workspace from organization"""
     orguser = request.orguser
@@ -66,7 +66,7 @@ def post_airbyte_detach_workspace(request):
 
 
 @airbyteapi.post(
-    "/airbyte/workspace/", response=AirbyteWorkspace, auth=auth.CanManagePipelines()
+    "/workspace/", response=AirbyteWorkspace, auth=auth.CanManagePipelines()
 )
 def post_airbyte_workspace(request, payload: AirbyteWorkspaceCreate):
     """Create an airbyte workspace"""
@@ -86,7 +86,7 @@ def post_airbyte_workspace(request, payload: AirbyteWorkspaceCreate):
     )
 
 
-@airbyteapi.get("/airbyte/source_definitions", auth=auth.CanManagePipelines())
+@airbyteapi.get("/source_definitions", auth=auth.CanManagePipelines())
 def get_airbyte_source_definitions(request):
     """Fetch airbyte source definitions in the user organization workspace"""
     orguser = request.orguser
@@ -99,7 +99,7 @@ def get_airbyte_source_definitions(request):
 
 
 @airbyteapi.get(
-    "/airbyte/source_definitions/{sourcedef_id}/specifications",
+    "/source_definitions/{sourcedef_id}/specifications",
     auth=auth.CanManagePipelines(),
 )
 def get_airbyte_source_definition_specifications(request, sourcedef_id):
@@ -115,7 +115,7 @@ def get_airbyte_source_definition_specifications(request, sourcedef_id):
     return res
 
 
-@airbyteapi.post("/airbyte/sources/", auth=auth.CanManagePipelines())
+@airbyteapi.post("/sources/", auth=auth.CanManagePipelines())
 def post_airbyte_source(request, payload: AirbyteSourceCreate):
     """Create airbyte source in the user organization workspace"""
     orguser = request.orguser
@@ -132,7 +132,7 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
     return {"source_id": source["sourceId"]}
 
 
-@airbyteapi.put("/airbyte/sources/{source_id}", auth=auth.CanManagePipelines())
+@airbyteapi.put("/sources/{source_id}", auth=auth.CanManagePipelines())
 def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
     """Update airbyte source in the user organization workspace"""
     orguser = request.orguser
@@ -150,7 +150,7 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
     return {"source_id": source["sourceId"]}
 
 
-@airbyteapi.post("/airbyte/sources/{source_id}/check/", auth=auth.CanManagePipelines())
+@airbyteapi.post("/sources/{source_id}/check/", auth=auth.CanManagePipelines())
 def post_airbyte_check_source(request, source_id):
     """Test the source connection in the user organization workspace"""
     orguser = request.orguser
@@ -164,7 +164,7 @@ def post_airbyte_check_source(request, source_id):
     return res
 
 
-@airbyteapi.get("/airbyte/sources", auth=auth.CanManagePipelines())
+@airbyteapi.get("/sources", auth=auth.CanManagePipelines())
 def get_airbyte_sources(request):
     """Fetch all airbyte sources in the user organization workspace"""
     orguser = request.orguser
@@ -176,7 +176,7 @@ def get_airbyte_sources(request):
     return res
 
 
-@airbyteapi.get("/airbyte/sources/{source_id}", auth=auth.CanManagePipelines())
+@airbyteapi.get("/sources/{source_id}", auth=auth.CanManagePipelines())
 def get_airbyte_source(request, source_id):
     """Fetch a single airbyte source in the user organization workspace"""
     orguser = request.orguser
@@ -188,9 +188,7 @@ def get_airbyte_source(request, source_id):
     return res
 
 
-@airbyteapi.get(
-    "/airbyte/sources/{source_id}/schema_catalog", auth=auth.CanManagePipelines()
-)
+@airbyteapi.get("/sources/{source_id}/schema_catalog", auth=auth.CanManagePipelines())
 def get_airbyte_source_schema_catalog(request, source_id):
     """Fetch schema catalog for a source in the user organization workspace"""
     orguser = request.orguser
@@ -204,7 +202,7 @@ def get_airbyte_source_schema_catalog(request, source_id):
     return res
 
 
-@airbyteapi.get("/airbyte/destination_definitions", auth=auth.CanManagePipelines())
+@airbyteapi.get("/destination_definitions", auth=auth.CanManagePipelines())
 def get_airbyte_destination_definitions(request):
     """Fetch destination definitions in the user organization workspace"""
     orguser = request.orguser
@@ -217,7 +215,7 @@ def get_airbyte_destination_definitions(request):
 
 
 @airbyteapi.get(
-    "/airbyte/destination_definitions/{destinationdef_id}/specifications",
+    "/destination_definitions/{destinationdef_id}/specifications",
     auth=auth.CanManagePipelines(),
 )
 def get_airbyte_destination_definition_specifications(request, destinationdef_id):
@@ -233,7 +231,7 @@ def get_airbyte_destination_definition_specifications(request, destinationdef_id
     return res
 
 
-@airbyteapi.post("/airbyte/destinations/", auth=auth.CanManagePipelines())
+@airbyteapi.post("/destinations/", auth=auth.CanManagePipelines())
 def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
     """Create an airbyte destination in the user organization workspace"""
     orguser = request.orguser
@@ -250,9 +248,7 @@ def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
     return {"destination_id": destination["destinationId"]}
 
 
-@airbyteapi.put(
-    "/airbyte/destinations/{destination_id}/", auth=auth.CanManagePipelines()
-)
+@airbyteapi.put("/destinations/{destination_id}/", auth=auth.CanManagePipelines())
 def put_airbyte_destination(
     request, destination_id: str, payload: AirbyteDestinationUpdate
 ):
@@ -273,7 +269,7 @@ def put_airbyte_destination(
 
 
 @airbyteapi.post(
-    "/airbyte/destinations/{destination_id}/check/", auth=auth.CanManagePipelines()
+    "/destinations/{destination_id}/check/", auth=auth.CanManagePipelines()
 )
 def post_airbyte_check_destination(request, destination_id):
     """Test connection to destination in the user organization workspace"""
@@ -288,7 +284,7 @@ def post_airbyte_check_destination(request, destination_id):
     return res
 
 
-@airbyteapi.get("/airbyte/destinations", auth=auth.CanManagePipelines())
+@airbyteapi.get("/destinations", auth=auth.CanManagePipelines())
 def get_airbyte_destinations(request):
     """Fetch all airbyte destinations in the user organization workspace"""
     orguser = request.orguser
@@ -300,9 +296,7 @@ def get_airbyte_destinations(request):
     return res
 
 
-@airbyteapi.get(
-    "/airbyte/destinations/{destination_id}", auth=auth.CanManagePipelines()
-)
+@airbyteapi.get("/destinations/{destination_id}", auth=auth.CanManagePipelines())
 def get_airbyte_destination(request, destination_id):
     """Fetch an airbyte destination in the user organization workspace"""
     orguser = request.orguser
@@ -316,7 +310,7 @@ def get_airbyte_destination(request, destination_id):
     return res
 
 
-@airbyteapi.get("/airbyte/connections", auth=auth.CanManagePipelines())
+@airbyteapi.get("/connections", auth=auth.CanManagePipelines())
 def get_airbyte_connections(request):
     """Fetch all airbyte connections in the user organization workspace"""
     orguser = request.orguser
@@ -328,7 +322,7 @@ def get_airbyte_connections(request):
     return res
 
 
-@airbyteapi.get("/airbyte/connections/{connection_id}", auth=auth.CanManagePipelines())
+@airbyteapi.get("/connections/{connection_id}", auth=auth.CanManagePipelines())
 def get_airbyte_connection(request, connection_id):
     """Fetch a connection in the user organization workspace"""
     orguser = request.orguser
@@ -342,7 +336,7 @@ def get_airbyte_connection(request, connection_id):
     return res
 
 
-@airbyteapi.post("/airbyte/connections/", auth=auth.CanManagePipelines())
+@airbyteapi.post("/connections/", auth=auth.CanManagePipelines())
 def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
     """Create an airbyte connection in the user organization workspace"""
     orguser = request.orguser
@@ -357,7 +351,7 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
     return res
 
 
-@airbyteapi.put("/airbyte/connections/{connection_id}", auth=auth.CanManagePipelines())
+@airbyteapi.put("/connections/{connection_id}", auth=auth.CanManagePipelines())
 def put_airbyte_connection(request, connection_id, payload: AirbyteConnectionUpdate):
     """Update an airbyte connection in the user organization workspace"""
     orguser = request.orguser
@@ -376,9 +370,7 @@ def put_airbyte_connection(request, connection_id, payload: AirbyteConnectionUpd
     return res
 
 
-@airbyteapi.post(
-    "/airbyte/connections/{connection_id}/sync/", auth=auth.CanManagePipelines()
-)
+@airbyteapi.post("/connections/{connection_id}/sync/", auth=auth.CanManagePipelines())
 def post_airbyte_sync_connection(request, connection_id):
     """Sync an airbyte connection in the uer organization workspace"""
     orguser = request.orguser

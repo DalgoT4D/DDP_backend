@@ -47,7 +47,7 @@ def ninja_default_error_handler(
     return Response({"error": " ".join(exc.args)}, status=500)
 
 
-@dbtapi.post("/dbt/workspace/", auth=auth.CanManagePipelines())
+@dbtapi.post("/workspace/", auth=auth.CanManagePipelines())
 def post_dbt_workspace(request, payload: OrgDbtSchema):
     """Setup the client git repo and install a virtual env inside it to run dbt"""
     orguser = request.orguser
@@ -105,9 +105,7 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
     return {"success": 1}
 
 
-@dbtapi.delete(
-    "/dbt/workspace/", response=OrgUserResponse, auth=auth.CanManagePipelines()
-)
+@dbtapi.delete("/workspace/", response=OrgUserResponse, auth=auth.CanManagePipelines())
 def dbt_delete(request):
     """Delete the dbt workspace and project repo created"""
     orguser = request.orguser
@@ -126,7 +124,7 @@ def dbt_delete(request):
     return OrgUserResponse.from_orguser(orguser)
 
 
-@dbtapi.post("/dbt/git_pull/", auth=auth.CanManagePipelines())
+@dbtapi.post("/git_pull/", auth=auth.CanManagePipelines())
 def post_dbt_git_pull(request):
     """Pull the dbt repo from github for the organization"""
     orguser = request.orguser
