@@ -24,6 +24,8 @@ AIRBYTECONNECTION = "Airbyte Connection"
 SHELLOPERATION = "Shell Operation"
 DBTCORE = "dbt Core Operation"
 
+# ddp block types
+
 
 def prefect_get(endpoint):
     """GET request to prefect server"""
@@ -143,6 +145,12 @@ def create_airbyte_server_block(blockname):
     return res
 
 
+# todo
+def update_airbyte_server_block(blockname):
+    """Update the airbyte server block with a particular block name"""
+    return {}
+
+
 def delete_airbyte_server_block(blockid):
     """Delete airbyte server block"""
     return prefect_delete(f"block_documents/{blockid}")
@@ -175,6 +183,12 @@ def create_airbyte_connection_block(conninfo: PrefectAirbyteConnectionSetup):
         },
     )
     return res
+
+
+# todo
+def update_airbyte_connection_block(blockname):
+    """Update the airbyte server block with a particular block name"""
+    return {}
 
 
 def delete_airbyte_connection_block(blockid):

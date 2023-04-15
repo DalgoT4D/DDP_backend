@@ -3,6 +3,7 @@ from ninja.errors import HttpError, ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
+from django.utils.text import slugify
 from ddpui import auth
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import (
@@ -19,7 +20,6 @@ from ddpui.ddpprefect import prefect_service
 from ddpui.ddpprefect.org_prefect_block import OrgPrefectBlock
 from ddpui.utils.ddp_logger import logger
 
-from django.utils.text import slugify
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
 
@@ -66,17 +66,24 @@ def post_airbyte_detach_workspace(request):
     orguser.org.airbyte_workspace_id = None
     orguser.org.save()
 
-    ddp_prefect_airbyteserverblock = OrgPrefectBlock.objects.filter(
+    org_airbyte_server_block = OrgPrefectBlock.objects.filter(
         org=orguser.org, blocktype=prefect_service.AIRBYTESERVER
     ).first()
-    if ddp_prefect_airbyteserverblock:
-        # todo: delete the prefect AirbyteServer block
+
+    if org_airbyte_server_block:
+        # delete the prefect AirbyteServer block
+        prefect_service.delete_airbyte_server_block(org_airbyte_server_block.blockid)
+
         # delete all prefect airbyteconnection blocks fo this org
-        for prefect_connection_block in OrgPrefectBlock.objects.filter(
+        for org_airbyte_connection_block in OrgPrefectBlock.objects.filter(
             org=orguser.org, blocktype=prefect_service.AIRBYTECONNECTION
         ):
-            prefect_connection_block.delete()
-        ddp_prefect_airbyteserverblock.delete()
+            prefect_service.delete_airbyte_connection_block(
+                org_airbyte_connection_block.blockid
+            )
+            org_airbyte_connection_block.delete()
+
+        org_airbyte_server_block.delete()
 
     return {"success": 1}
 
@@ -95,26 +102,30 @@ def post_airbyte_workspace(request, payload: AirbyteWorkspaceCreate):
     orguser.org.airbyte_workspace_id = workspace["workspaceId"]
     orguser.org.save()
 
-    prefect_airbyteserverblock = prefect_service.get_block(
-        prefect_service.AIRBYTESERVER, orguser.org.slug
+    # Airbyte server block details
+    block_name = f"{orguser.org.slug}-{slugify(prefect_service.AIRBYTESERVER)}"
+    display_name = payload.name
+
+    airbyte_server_block = prefect_service.get_block(
+        prefect_service.AIRBYTESERVER, block_name
     )
-    if prefect_airbyteserverblock is None:
-        prefect_airbyteserverblock = prefect_service.create_airbyte_server_block(
-            orguser.org.slug
-        )
-        logger.info(prefect_airbyteserverblock)
+    if airbyte_server_block is None:
+        airbyte_server_block = prefect_service.create_airbyte_server_block(block_name)
+        logger.info(airbyte_server_block)
+
+    # todo: update the server block if already present. Create a function in prefect service
 
     if not OrgPrefectBlock.objects.filter(
         org=orguser.org, blocktype=prefect_service.AIRBYTESERVER
     ).exists():
-        ddp_prefect_airbyteserverblock = OrgPrefectBlock(
+        org_airbyte_server_block = OrgPrefectBlock(
             org=orguser.org,
             blocktype=prefect_service.AIRBYTESERVER,
-            blockid=prefect_airbyteserverblock["id"],
-            blockname=prefect_airbyteserverblock["name"],
-            displayname=f"{orguser.org.slug}-{prefect_service.AIRBYTESERVER}",
+            blockid=airbyte_server_block["id"],
+            blockname=airbyte_server_block["name"],
+            displayname=display_name,
         )
-        ddp_prefect_airbyteserverblock.save()
+        org_airbyte_server_block.save()
 
     return AirbyteWorkspace(
         name=workspace["name"],
@@ -385,38 +396,45 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
 
     res = airbyte_service.create_connection(orguser.org.airbyte_workspace_id, payload)
 
-    ddp_prefect_airbyteserverblock = OrgPrefectBlock.objects.filter(
+    org_airbyte_server_block = OrgPrefectBlock.objects.filter(
         org=orguser.org,
         blocktype=prefect_service.AIRBYTESERVER,
     ).first()
-    if ddp_prefect_airbyteserverblock is None:
+    if org_airbyte_server_block is None:
         raise Exception(
             f"{orguser.org.slug} has no {prefect_service.AIRBYTESERVER} block in OrgPrefectBlock"
         )
 
-    nameindex = 1
-    while True:
-        try:
-            prefect_connection_block = prefect_service.create_airbyte_connection_block(
-                prefect_service.PrefectAirbyteConnectionSetup(
-                    serverblockname=ddp_prefect_airbyteserverblock.blockname,
-                    connectionblockname=f"{orguser.org.slug}-{slugify(payload.name)}-{nameindex}",
-                    connection_id=res["id"],
-                )
-            )
-            break
-        except Exception:
-            nameindex += 1
+    connection_name = f"{airbyte_service.get_source(orguser.org.airbyte_workspace_id, payload.source_id)['sourceName']}-{airbyte_service.get_destination(orguser.org.airbyte_workspace_id, payload.destination_id)['destinationName']}"
+    base_block_name = f"{orguser.org.slug}-{slugify(connection_name)}"
+    # todo: make sure all prefect blocks are being fetched for a particular type
+    prefect_airbyte_connection_blocks = prefect_service.get_block(
+        prefect_service.AIRBYTECONNECTION, ""
+    )
+    block_name = base_block_name
+    name_index = 0
+    while block_name in prefect_airbyte_connection_blocks:
+        name_index += 1
+        block_name = base_block_name + f"-{name_index}"
+    display_name = payload.name
 
-    logger.info(prefect_connection_block)
+    airbyte_connection_block = prefect_service.create_airbyte_connection_block(
+        prefect_service.PrefectAirbyteConnectionSetup(
+            serverblockname=org_airbyte_server_block.blockname,
+            connectionblockname=block_name,
+            connection_id=res["id"],
+        )
+    )
+
+    logger.info(airbyte_connection_block)
 
     # create a prefect AirbyteConnection block
     connection_block = OrgPrefectBlock(
         org=orguser.org,
         blocktype=prefect_service.AIRBYTECONNECTION,
-        blockid=prefect_connection_block["id"],
-        blockname=prefect_connection_block["name"],
-        displayname=payload.name,
+        blockid=airbyte_connection_block["id"],
+        blockname=airbyte_connection_block["name"],
+        displayname=display_name,
     )
     connection_block.save()
 
@@ -443,8 +461,26 @@ def put_airbyte_connection(request, connection_id, payload: AirbyteConnectionUpd
     return res
 
 
-# when you add DELETE make sure to delete the corresponding prefect block and the OrgPrefectBlock row
-# todo
+@airbyteapi.delete("/connections/{connection_id}", auth=auth.CanManagePipelines())
+def delete_airbyte_connection(request, connection_id):
+    """Update an airbyte connection in the user organization workspace"""
+    orguser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    res = airbyte_service.delete_connection(
+        orguser.org.airbyte_workspace_id, connection_id
+    )
+    # delete the prefect airbyteconnection block
+    # todo: There is not way to know the blockid of this connection. How will we delete ? Might have to change the schema a bit
+    org_airbyte_connection_block = OrgPrefectBlock.objects.filter(
+        org=orguser.org, blocktype=prefect_service.AIRBYTECONNECTION
+    )
+    org_airbyte_connection_block.delete()
+    logger.debug(res)
+    return res
 
 
 @airbyteapi.post("/connections/{connection_id}/sync/", auth=auth.CanManagePipelines())

@@ -161,6 +161,7 @@ def post_organization(request, payload: OrgSchema):
         raise HttpError(400, "client org already exists")
     org = Org.objects.create(**payload.dict())
     org.slug = slugify(org.name)
+    org.save()
     orguser.org = org
     orguser.save()
     logger.info(f"{orguser.user.email} created new org {org.name}")
