@@ -15,7 +15,11 @@ from ddpui.ddpairbyte.schema import (
     AirbyteWorkspace,
     AirbyteWorkspaceCreate,
 )
+from ddpui.ddpprefect import prefect_service
+from ddpui.ddpprefect.org_prefect_block import OrgPrefectBlock
 from ddpui.utils.ddp_logger import logger
+
+from django.utils.text import slugify
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
 
@@ -62,6 +66,18 @@ def post_airbyte_detach_workspace(request):
     orguser.org.airbyte_workspace_id = None
     orguser.org.save()
 
+    ddp_prefect_airbyteserverblock = OrgPrefectBlock.objects.filter(
+        org=orguser.org, blocktype=prefect_service.AIRBYTESERVER
+    ).first()
+    if ddp_prefect_airbyteserverblock:
+        # todo: delete the prefect AirbyteServer block
+        # delete all prefect airbyteconnection blocks fo this org
+        for prefect_connection_block in OrgPrefectBlock.objects.filter(
+            org=orguser.org, blocktype=prefect_service.AIRBYTECONNECTION
+        ):
+            prefect_connection_block.delete()
+        ddp_prefect_airbyteserverblock.delete()
+
     return {"success": 1}
 
 
@@ -78,6 +94,27 @@ def post_airbyte_workspace(request, payload: AirbyteWorkspaceCreate):
 
     orguser.org.airbyte_workspace_id = workspace["workspaceId"]
     orguser.org.save()
+
+    prefect_airbyteserverblock = prefect_service.get_block(
+        prefect_service.AIRBYTESERVER, orguser.org.slug
+    )
+    if prefect_airbyteserverblock is None:
+        prefect_airbyteserverblock = prefect_service.create_airbyte_server_block(
+            orguser.org.slug
+        )
+        logger.info(prefect_airbyteserverblock)
+
+    if not OrgPrefectBlock.objects.filter(
+        org=orguser.org, blocktype=prefect_service.AIRBYTESERVER
+    ).exists():
+        ddp_prefect_airbyteserverblock = OrgPrefectBlock(
+            org=orguser.org,
+            blocktype=prefect_service.AIRBYTESERVER,
+            blockid=prefect_airbyteserverblock["id"],
+            blockname=prefect_airbyteserverblock["name"],
+            displayname=f"{orguser.org.slug}-{prefect_service.AIRBYTESERVER}",
+        )
+        ddp_prefect_airbyteserverblock.save()
 
     return AirbyteWorkspace(
         name=workspace["name"],
@@ -347,6 +384,42 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
         raise HttpError(400, "must specify stream names")
 
     res = airbyte_service.create_connection(orguser.org.airbyte_workspace_id, payload)
+
+    ddp_prefect_airbyteserverblock = OrgPrefectBlock.objects.filter(
+        org=orguser.org,
+        blocktype=prefect_service.AIRBYTESERVER,
+    ).first()
+    if ddp_prefect_airbyteserverblock is None:
+        raise Exception(
+            f"{orguser.org.slug} has no {prefect_service.AIRBYTESERVER} block in OrgPrefectBlock"
+        )
+
+    nameindex = 1
+    while True:
+        try:
+            prefect_connection_block = prefect_service.create_airbyte_connection_block(
+                prefect_service.PrefectAirbyteConnectionSetup(
+                    serverblockname=ddp_prefect_airbyteserverblock.blockname,
+                    connectionblockname=f"{orguser.org.slug}-{slugify(payload.name)}-{nameindex}",
+                    connection_id=res["id"],
+                )
+            )
+            break
+        except Exception:
+            nameindex += 1
+
+    logger.info(prefect_connection_block)
+
+    # create a prefect AirbyteConnection block
+    connection_block = OrgPrefectBlock(
+        org=orguser.org,
+        blocktype=prefect_service.AIRBYTECONNECTION,
+        blockid=prefect_connection_block["id"],
+        blockname=prefect_connection_block["name"],
+        displayname=payload.name,
+    )
+    connection_block.save()
+
     logger.debug(res)
     return res
 
@@ -368,6 +441,10 @@ def put_airbyte_connection(request, connection_id, payload: AirbyteConnectionUpd
     )
     logger.debug(res)
     return res
+
+
+# when you add DELETE make sure to delete the corresponding prefect block and the OrgPrefectBlock row
+# todo
 
 
 @airbyteapi.post("/connections/{connection_id}/sync/", auth=auth.CanManagePipelines())

@@ -100,6 +100,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
         blocktype=block["block_type"]["name"],
         blockid=block["id"],
         blockname=block["name"],
+        # todo displayname
     )
     cpb.save()
 
@@ -152,7 +153,7 @@ def post_prefect_dbt_test_block(request, payload: PrefectDbtRun):
     dbt_binary = project_dir / "venv/bin/dbt"
 
     block_data = PrefectDbtCoreSetup(
-        blockname=payload.dbt_blockname,
+        blockname=payload.dbt_blockname,  # we will generate this block name <org>-dbt-<test|run|docs>
         profiles_dir=f"{project_dir}/profiles/",
         project_dir=project_dir,
         working_dir=project_dir,
@@ -169,6 +170,7 @@ def post_prefect_dbt_test_block(request, payload: PrefectDbtRun):
         blocktype=block["block_type"]["name"],
         blockid=block["id"],
         blockname=block["name"],
+        # todo displayblockname
     )
     cpb.save()
 
