@@ -407,22 +407,25 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
 
     connection_name = f"{airbyte_service.get_source(orguser.org.airbyte_workspace_id, payload.source_id)['sourceName']}-{airbyte_service.get_destination(orguser.org.airbyte_workspace_id, payload.destination_id)['destinationName']}"
     base_block_name = f"{orguser.org.slug}-{slugify(connection_name)}"
-    # todo: make sure all prefect blocks are being fetched for a particular type
-    prefect_airbyte_connection_blocks = prefect_service.get_block(
-        prefect_service.AIRBYTECONNECTION, ""
+    # fetch all prefect blocks are being fetched for a particular type
+    prefect_airbyte_connection_blocks = prefect_service.get_blocks(
+        prefect_service.AIRBYTECONNECTION, f"{orguser.org.slug}"
     )
+    prefect_airbyte_connection_block_names = [
+        blk["name"] for blk in prefect_airbyte_connection_blocks
+    ]
+    display_name = payload.name
     block_name = base_block_name
     name_index = 0
-    while block_name in prefect_airbyte_connection_blocks:
+    while block_name in prefect_airbyte_connection_block_names:
         name_index += 1
         block_name = base_block_name + f"-{name_index}"
-    display_name = payload.name
 
     airbyte_connection_block = prefect_service.create_airbyte_connection_block(
         prefect_service.PrefectAirbyteConnectionSetup(
             serverblockname=org_airbyte_server_block.blockname,
             connectionblockname=block_name,
-            connection_id=res["id"],
+            connection_id=res["connectionId"],
         )
     )
 
@@ -474,7 +477,7 @@ def delete_airbyte_connection(request, connection_id):
         orguser.org.airbyte_workspace_id, connection_id
     )
     # delete the prefect airbyteconnection block
-    # todo: There is not way to know the blockid of this connection. How will we delete ? Might have to change the schema a bit
+    # todo: There is no way to know the blockid of this connection. How will we delete ? Might have to change the schema a bit
     org_airbyte_connection_block = OrgPrefectBlock.objects.filter(
         org=orguser.org, blocktype=prefect_service.AIRBYTECONNECTION
     )
