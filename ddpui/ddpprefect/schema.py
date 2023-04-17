@@ -76,3 +76,18 @@ class PrefectDbtRun(Schema):
     credentials: DbtCredentialsPostgres  # todo can this be a union
 
     dbt_blockname: str
+
+
+class PrefectAirbyteConnectionBlockSchema(Schema):
+    """Return necessary details of connection block in prefect, airbyte and your database"""
+
+    name: str
+    blockId: str
+    blockName: str
+    blockData: dict
+    connectionId: str
+    sourceId: str
+    destinationId: str
+    sourceCatalogId: str
+    syncCatalog: dict
+    status: str
