@@ -365,21 +365,70 @@ def get_airbyte_connections(request):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    res = airbyte_service.get_connections(orguser.org.airbyte_workspace_id)
+    org_prefect_blocks = OrgPrefectBlock.objects.filter(
+        org=orguser.org,
+        blocktype=prefect_service.AIRBYTECONNECTION,
+    ).all()
+
+    res = []
+
+    for org_block in org_prefect_blocks:
+        # fetch prefect block
+        prefect_block = prefect_service.get_block_by_id(org_block.blockid)
+        # fetch airbyte connection
+        airbyte_conn = airbyte_service.get_connection(
+            orguser.org.airbyte_workspace_id, prefect_block["data"]["connection_id"]
+        )
+        res.append(
+            {
+                "name": org_block.displayname,
+                "blockId": prefect_block["id"],
+                "blockName": prefect_block["name"],
+                "blockData": prefect_block["data"],
+                "connectionId": airbyte_conn["connectionId"],
+                "sourceId": airbyte_conn["sourceId"],
+                "destinationId": airbyte_conn["destinationId"],
+                "sourceCatalogId": airbyte_conn["sourceCatalogId"],
+                "syncCatalog": airbyte_conn["syncCatalog"],
+                "status": airbyte_conn["status"],
+            }
+        )
+
     logger.debug(res)
     return res
 
 
-@airbyteapi.get("/connections/{connection_id}", auth=auth.CanManagePipelines())
-def get_airbyte_connection(request, connection_id):
+@airbyteapi.get("/connections/{connection_block_id}", auth=auth.CanManagePipelines())
+def get_airbyte_connection(request, connection_block_id):
     """Fetch a connection in the user organization workspace"""
     orguser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    res = airbyte_service.get_connection(
-        orguser.org.airbyte_workspace_id, connection_id
+    org_block = OrgPrefectBlock.objects.filter(
+        org=orguser.org,
+        blockid=connection_block_id,
+    ).first()
+
+    # fetch prefect block
+    prefect_block = prefect_service.get_block_by_id(connection_block_id)
+    # fetch airbyte connection
+    airbyte_conn = airbyte_service.get_connection(
+        orguser.org.airbyte_workspace_id, prefect_block["data"]["connection_id"]
     )
+    res = {
+        "name": org_block.displayname,
+        "blockId": prefect_block["id"],
+        "blockName": prefect_block["name"],
+        "blockData": prefect_block["data"],
+        "connectionId": airbyte_conn["connectionId"],
+        "sourceId": airbyte_conn["sourceId"],
+        "destinationId": airbyte_conn["destinationId"],
+        "sourceCatalogId": airbyte_conn["sourceCatalogId"],
+        "syncCatalog": airbyte_conn["syncCatalog"],
+        "status": airbyte_conn["status"],
+    }
+
     logger.debug(res)
     return res
 
