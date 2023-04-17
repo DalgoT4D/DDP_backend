@@ -8,7 +8,7 @@ from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
-from ddpui.ddpprefect.org_prefect_block import OrgPrefectBlock
+from ddpui.models.org import OrgPrefectBlock
 from ddpui.ddpprefect.schema import (
     PrefectAirbyteSync,  # DbtProfile,
     PrefectDbtCore,

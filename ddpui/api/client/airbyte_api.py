@@ -18,7 +18,7 @@ from ddpui.ddpairbyte.schema import (
 )
 from ddpui.ddpprefect.schema import PrefectAirbyteConnectionBlockSchema
 from ddpui.ddpprefect import prefect_service
-from ddpui.ddpprefect.org_prefect_block import OrgPrefectBlock
+from ddpui.models.org import OrgPrefectBlock
 from ddpui.utils.ddp_logger import logger
 
 
