@@ -2,7 +2,7 @@ name: Python package
 
 on:
   pull_request:
-    branches: [unit_tests]
+    branches: [unit_tests_for_airbyte_service]
 
 jobs:
   build:
