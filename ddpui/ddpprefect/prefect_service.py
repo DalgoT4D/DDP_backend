@@ -119,6 +119,14 @@ def get_block(blocktype, blockname):
     return block
 
 
+def get_block_by_id(block_id):
+    """Fetch prefect block by id"""
+    block = prefect_get(
+        f"block_documents/{block_id}",
+    )
+    return block
+
+
 def get_blocks(blocktype, blockname=""):
     """Fetch prefect blocks"""
     blocktype_id = get_block_type(blocktype)["id"]
