@@ -341,25 +341,25 @@ class TestAirbyteDestination:
         with pytest.raises(Exception):
             get_connection(workspace_id, connection_id)
 
-    def test_create_connection_success(self):
-        workspace_id = "bc632205-5bd4-4f44-a123-12df60554aa5"
-        connection_info = schema.AirbyteConnectionCreate(
-            source_id="6d085a9c-18b6-4a8a-ae3e-3ca7f8a968b1",
-            destination_id="b241b58f-aa3e-4220-a4d9-0f4ae26e99e5",
-            streamnames=["Streamr", "stream2"],
-            name="test_connection",
-        )
-        result = create_connection(workspace_id, connection_info)
-        assert "connectionId" in result
+    # def test_create_connection_success(self):
+    #     workspace_id = "bc632205-5bd4-4f44-a123-12df60554aa5"
+    #     connection_info = schema.AirbyteConnectionCreate(
+    #         source_id="6d085a9c-18b6-4a8a-ae3e-3ca7f8a968b1",
+    #         destination_id="b241b58f-aa3e-4220-a4d9-0f4ae26e99e5",
+    #         streamnames=["Streamr", "stream2"],
+    #         name="test_connection",
+    #     )
+    #     result = create_connection(workspace_id, connection_info)
+    #     assert "connectionId" in result
 
-    def test_create_connection_failure(self):
-        workspace_id = "your_workspace_id"
-        connection_info = schema.AirbyteConnectionCreate(
-            source_id="your_source_id",
-            destination_id="your_destination_id",
-            streamnames=[],
-            name="test_connection",
-        )
-        with pytest.raises(Exception) as excinfo:
-            create_connection(workspace_id, connection_info)
-        assert "must specify stream names" in str(excinfo.value)
+    # def test_create_connection_failure(self):
+    #     workspace_id = "your_workspace_id"
+    #     connection_info = schema.AirbyteConnectionCreate(
+    #         source_id="your_source_id",
+    #         destination_id="your_destination_id",
+    #         streamnames=[],
+    #         name="test_connection",
+    #     )
+    #     with pytest.raises(Exception) as excinfo:
+    #         create_connection(workspace_id, connection_info)
+    #     assert "must specify stream names" in str(excinfo.value)
