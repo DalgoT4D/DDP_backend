@@ -497,6 +497,7 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
 @airbyteapi.put("/connections/{connection_id}", auth=auth.CanManagePipelines())
 def put_airbyte_connection(request, connection_id, payload: AirbyteConnectionUpdate):
     """Update an airbyte connection in the user organization workspace"""
+    return {"error": "deprecated"}
     orguser = request.orguser
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
@@ -513,8 +514,8 @@ def put_airbyte_connection(request, connection_id, payload: AirbyteConnectionUpd
     return res
 
 
-@airbyteapi.delete("/connections/{connection_id}", auth=auth.CanManagePipelines())
-def delete_airbyte_connection(request, connection_id):
+@airbyteapi.delete("/connections/{connection_block_id}", auth=auth.CanManagePipelines())
+def delete_airbyte_connection(request, connection_block_id):
     """Update an airbyte connection in the user organization workspace"""
     orguser = request.orguser
     if orguser.org is None:
@@ -522,20 +523,32 @@ def delete_airbyte_connection(request, connection_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
+    prefect_block = prefect_service.get_block_by_id(connection_block_id)
+    # delete prefect block
+    logger.debug("deleting prefect block")
+    res = prefect_service.delete_airbyte_connection_block(connection_block_id)
+    logger.debug(res)
+
+    # delete airbyte connection
+    logger.debug("deleting airbyte block")
     res = airbyte_service.delete_connection(
-        orguser.org.airbyte_workspace_id, connection_id
+        orguser.org.airbyte_workspace_id, prefect_block["data"]["connection_id"]
     )
-    # delete the prefect airbyteconnection block
-    # todo: There is no way to know the blockid of this connection. How will we delete ? Might have to change the schema a bit
+    logger.debug(res)
+
+    # delete the org prefect airbyteconnection block
+    logger.debug("deleting org prefect block")
     org_airbyte_connection_block = OrgPrefectBlock.objects.filter(
-        org=orguser.org, blocktype=prefect_service.AIRBYTECONNECTION
+        org=orguser.org, blockid=connection_block_id
     )
     org_airbyte_connection_block.delete()
     logger.debug(res)
     return res
 
 
-@airbyteapi.post("/connections/{connection_id}/sync/", auth=auth.CanManagePipelines())
+@airbyteapi.post(
+    "/connections/{connection_block_id}/sync/", auth=auth.CanManagePipelines()
+)
 def post_airbyte_sync_connection(request, connection_id):
     """Sync an airbyte connection in the uer organization workspace"""
     orguser = request.orguser
