@@ -24,7 +24,9 @@ def abreq(endpoint, req=None):
     )
     logger.info("Response from Airbyte server: %s", res.text)
     res.raise_for_status()
-    return res.json()
+    if "application/json" in res.headers.get("Content-Type", ""):
+        return res.json()
+    return {}
 
 
 def get_workspaces():
@@ -334,8 +336,6 @@ def update_connection(
 def delete_connection(workspace_id, connection_id):
     """Delete a connection of an airbyte workspace"""
     res = abreq("connections/delete", {"connectionId": connection_id})
-    if "status" not in res or res["status"] != "SUCCEEDED":
-        raise Exception(res)
     return res
 
 
