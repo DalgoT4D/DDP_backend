@@ -186,21 +186,21 @@ def create_airbyte_connection_block(conninfo: PrefectAirbyteConnectionSetup):
         AIRBYTECONNECTION, airbyte_connection_blocktype_id
     )["id"]
 
-    serverblock = get_block(AIRBYTESERVER, conninfo.serverblockname)
+    serverblock = get_block(AIRBYTESERVER, conninfo.serverBlockName)
     if serverblock is None:
         raise Exception(
-            f"could not find {AIRBYTESERVER} block called {conninfo.serverblockname}"
+            f"could not find {AIRBYTESERVER} block called {conninfo.serverBlockName}"
         )
 
     res = prefect_post(
         "block_documents/",
         {
-            "name": conninfo.connectionblockname,
+            "name": conninfo.connectionBlockName,
             "block_type_id": airbyte_connection_blocktype_id,
             "block_schema_id": airbyte_connection_blockschematype_id,
             "data": {
                 "airbyte_server": {"$ref": {"block_document_id": serverblock["id"]}},
-                "connection_id": conninfo.connection_id,
+                "connection_id": conninfo.connectionId,
             },
             "is_anonymous": False,
         },

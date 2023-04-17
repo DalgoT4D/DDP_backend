@@ -83,7 +83,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
     project_dir = str(dbt_env_dir / "dbtrepo")
 
     block_data = PrefectDbtCoreSetup(
-        blockname=payload.dbt_blockname,
+        block_name=payload.dbtBlockName,
         profiles_dir=f"{project_dir}/profiles/",
         project_dir=project_dir,
         working_dir=project_dir,
@@ -97,9 +97,9 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
 
     cpb = OrgPrefectBlock(
         org=orguser.org,
-        blocktype=block["block_type"]["name"],
-        blockid=block["id"],
-        blockname=block["name"],
+        block_type=block["block_type"]["name"],
+        block_id=block["id"],
+        block_name=block["name"],
         # todo displayname
     )
     cpb.save()
@@ -114,12 +114,12 @@ def get_prefect_dbt_run_blocks(request):
 
     return [
         {
-            "blocktype": x.blocktype,
-            "blockid": x.blockid,
-            "blockname": x.blockname,
+            "blockType": prefect_block.block_type,
+            "blockId": prefect_block.block_id,
+            "blockName": prefect_block.block_name,
         }
-        for x in OrgPrefectBlock.objects.filter(
-            org=orguser.org, blocktype=prefect_service.DBTCORE
+        for prefect_block in OrgPrefectBlock.objects.filter(
+            org=orguser.org, block_type=prefect_service.DBTCORE
         )
     ]
 
@@ -153,7 +153,7 @@ def post_prefect_dbt_test_block(request, payload: PrefectDbtRun):
     dbt_binary = project_dir / "venv/bin/dbt"
 
     block_data = PrefectDbtCoreSetup(
-        blockname=payload.dbt_blockname,  # we will generate this block name <org>-dbt-<test|run|docs>
+        blockname=payload.dbtBlockName,  # we will generate this block name <org>-dbt-<test|run|docs>
         profiles_dir=f"{project_dir}/profiles/",
         project_dir=project_dir,
         working_dir=project_dir,
@@ -167,9 +167,9 @@ def post_prefect_dbt_test_block(request, payload: PrefectDbtRun):
 
     cpb = OrgPrefectBlock(
         org=orguser.org,
-        blocktype=block["block_type"]["name"],
-        blockid=block["id"],
-        blockname=block["name"],
+        block_type=block["block_type"]["name"],
+        block_id=block["id"],
+        block_name=block["name"],
         # todo displayblockname
     )
     cpb.save()
@@ -184,7 +184,7 @@ def delete_prefect_dbt_test_block(request, block_id):
     # don't bother checking for orguser.org.dbt
 
     prefect_service.delete_dbt_core_block(block_id)
-    cpb = OrgPrefectBlock.objects.filter(org=orguser.org, blockid=block_id).first()
+    cpb = OrgPrefectBlock.objects.filter(org=orguser.org, block_id=block_id).first()
     if cpb:
         cpb.delete()
 

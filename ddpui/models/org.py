@@ -41,7 +41,7 @@ class OrgPrefectBlock(models.Model):
     display_name = models.CharField(max_length=100, null=True)
 
     def __str__(self) -> str:
-        return f"{self.org.name} {self.blocktype} {self.blockname}"
+        return f"{self.org.name} {self.block_type} {self.block_name}"
 
 
 class OrgSchema(Schema):

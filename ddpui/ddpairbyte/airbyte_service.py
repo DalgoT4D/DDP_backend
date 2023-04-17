@@ -233,16 +233,16 @@ def get_connection(workspace_id, connection_id):
 
 def create_connection(workspace_id, connection_info: schema.AirbyteConnectionCreate):
     """Create a connection in an airbyte workspace"""
-    if len(connection_info.streamnames) == 0:
+    if len(connection_info.streamNames) == 0:
         raise Exception("must specify stream names")
 
     sourceschemacatalog = get_source_schema_catalog(
-        workspace_id, connection_info.source_id
+        workspace_id, connection_info.sourceId
     )
 
     payload = {
-        "sourceId": connection_info.source_id,
-        "destinationId": connection_info.destination_id,
+        "sourceId": connection_info.sourceId,
+        "destinationId": connection_info.destinationId,
         "sourceCatalogId": sourceschemacatalog["catalogId"],
         "syncCatalog": {
             "streams": [
@@ -271,7 +271,7 @@ def create_connection(workspace_id, connection_info: schema.AirbyteConnectionCre
 
     # one stream per table
     for schema_cat in sourceschemacatalog["catalog"]["streams"]:
-        if schema_cat["stream"]["name"] in connection_info.streamnames:
+        if schema_cat["stream"]["name"] in connection_info.streamNames:
             # set schema_cat['config']['syncMode'] from schema_cat['stream']['supportedSyncModes'] here
             payload["syncCatalog"]["streams"].append(schema_cat)
 
