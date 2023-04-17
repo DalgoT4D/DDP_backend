@@ -11,52 +11,23 @@ from ddpui.ddpairbyte.airbyte_service import *
 
 
 class TestAbreq:
+
     @patch("requests.post")
     def test_abreq(self, mock_post):
-        test_data = [
-            (
-                "sources/create",
-                {
-                    "workspaceId": "test_workspace_id",
-                    "name": "string",
-                    "sourceDefinitionId": "test_source_definition_id",
-                    "connectionConfiguration": {"user": "charles"},
-                },
-                {
-                    "sourceDefinitionId": None,
-                    "sourceId": None,
-                    "workspaceId": None,
-                    "connectionConfiguration": {"user": None},
-                    "name": None,
-                    "sourceName": None,
-                    "icon": None,
-                },
-                {
-                    "sourceDefinitionId": "test_source_definition_id",
-                    "sourceId": "test_source_id",
-                    "workspaceId": "test_workspace_id",
-                    "connectionConfiguration": {"user": "charles"},
-                    "name": "string",
-                    "sourceName": "string",
-                    "icon": "string",
-                },
-            ),
-        ]
+        abhost = os.getenv("AIRBYTE_SERVER_HOST")
+        abport = os.getenv("AIRBYTE_SERVER_PORT")
+        abver = os.getenv("AIRBYTE_SERVER_APIVER")
+        token = os.getenv("AIRBYTE_API_TOKEN")
 
-        def assert_dict_contains_keys(data, expected_keys, error_msg):
-            """
-            Check if a dictionary contains the expected keys.
-            """
-            for key in expected_keys:
-                assert key in data, error_msg
-                if isinstance(expected_keys[key], dict):
-                    assert_dict_contains_keys(data[key], expected_keys[key], error_msg)
+        mock_post.return_value.json.return_value = {"key": "value"}
+        res = abreq("source_definitions/list_for_workspace", {"test": "data"})
 
-        for endpoint, data, expected_keys, response in test_data:
-            mock_post.return_value = MagicMock(json=MagicMock(return_value=response))
-            res = abreq(endpoint, data)
-            error_msg = f"Assertion failed for endpoint: {endpoint}, data: {data}, expected_keys: {expected_keys}"
-            assert_dict_contains_keys(res, expected_keys, error_msg)
+        assert res == {"key": "value"}
+        mock_post.assert_called_with(
+            f"http://{abhost}:{abport}/api/{abver}/source_definitions/list_for_workspace",
+            headers={"Authorization": f"Basic {token}"},
+            json={"test": "data"},
+        )
 
     @patch("requests.post")
     def test_abreq_failure(self, mock_post):
@@ -100,7 +71,8 @@ class TestWorkspace:
         mock_abreq.return_value = {"workspace": {"id": "workspace-id"}}
         set_workspace_name("workspace-id", "ngo1")
         mock_abreq.assert_called_with(
-            "workspaces/update_name", {"workspaceId": "workspace-id", "name": "ngo1"}
+            "workspaces/update_name",
+            {"workspaceId": "workspace-id", "name": "ngo1"}
         )
 
     @patch("ddpui.ddpairbyte.airbyte_service.abreq")
@@ -112,11 +84,10 @@ class TestWorkspace:
 
 
 class TestAirbyteSource:
+
     @patch("ddpui.ddpairbyte.airbyte_service.abreq")
     def test_get_source_definitions_success(self, mock_abreq):
-        mock_abreq.return_value = {
-            "sourceDefinitions": [{"id": "ngo1"}, {"id": "source2"}]
-        }
+        mock_abreq.return_value = {"sourceDefinitions": [{"id": "ngo1"}, {"id": "source2"}]}
 
         res = get_source_definitions("workspace_id")
         assert res == [{"id": "ngo1"}, {"id": "source2"}]
@@ -154,9 +125,7 @@ class TestAirbyteSource:
 
     @patch("ddpui.ddpairbyte.airbyte_service.abreq")
     def test_get_sources_success(self, mock_abreq):
-        mock_res = {
-            "sources": [{"sourceId": "test_source", "sourceName": "test_source_name"}]
-        }
+        mock_res = {"sources": [{"sourceId": "test_source", "sourceName": "test_source_name"}]}
         mock_abreq.return_value = mock_res
         res = get_sources("workspace_id")
         assert res == [{"sourceId": "test_source", "sourceName": "test_source_name"}]
@@ -193,26 +162,24 @@ class TestAirbyteSource:
         mock_abreq.return_value = {"error": "error message"}
 
         with pytest.raises(Exception) as e:
-            create_source(
-                "workspace_id", "source_name", "sourcedef_id", {"key": "value"}
-            )
+            create_source("workspace_id", "source_name", "sourcedef_id", {"key": "value"})
 
-        assert str(e.value) == "Failed to create source"
+        assert str(e.value) == 'Failed to create source'
 
     @patch("ddpui.ddpairbyte.airbyte_service.abreq")
     def test_get_source_schema_catalog_success(self, mock_abreq):
-        mock_res = {"catalog": "sample_catalog"}
+        mock_res = {'catalog': 'sample_catalog'}
         mock_abreq.return_value = mock_res
-        res = get_source_schema_catalog("sample_workspace_id", "sample_source_id")
-        assert res["catalog"] == "sample_catalog"
+        res = get_source_schema_catalog('sample_workspace_id', 'sample_source_id')
+        assert res['catalog'] == 'sample_catalog'
 
     @patch("ddpui.ddpairbyte.airbyte_service.abreq")
     def test_get_source_schema_catalog_failure(self, mock_abreq):
-        mock_res = {"error": "error message"}
+        mock_res = {'error': 'error message'}
         mock_abreq.return_value = mock_res
         with pytest.raises(Exception) as excinfo:
-            get_source_schema_catalog("sample_workspace_id", "sample_source_id")
-        assert str(excinfo.value) == "Failed to get source schema catalogs"
+            get_source_schema_catalog('sample_workspace_id', 'sample_source_id')
+        assert str(excinfo.value) == 'Failed to get source schema catalogs'
 
 
 # class TestAirbyteConnection:
@@ -233,59 +200,52 @@ class TestAirbyteSource:
 
 
 class TestAirbyteDestination:
+
     @patch("ddpui.ddpairbyte.airbyte_service.abreq")
     def test_get_destination_definitions_success(self, mock_abreq):
-        mock_abreq.return_value = {
-            "destinationDefinitions": "sample_destination_definitions"
-        }
-        res = get_destination_definitions("sample_workspace_id")
+        mock_abreq.return_value = {"destinationDefinitions": "sample_destination_definitions"}
+        res = get_destination_definitions('sample_workspace_id')
         assert res == "sample_destination_definitions"
 
     @patch("ddpui.ddpairbyte.airbyte_service.abreq")
     def test_get_destination_definitions_failure(self, mock_abreq):
-        mock_abreq.return_value = {"error": "error message"}
+        mock_abreq.return_value = {'error': 'error message'}
         with pytest.raises(Exception) as excinfo:
-            get_destination_definitions("sample_workspace_id")
-        assert str(excinfo.value) == "Failed to get destination definitions"
+            get_destination_definitions('sample_workspace_id')
+        assert str(excinfo.value) == 'Failed to get destination definitions'
 
     @patch("ddpui.ddpairbyte.airbyte_service.abreq")
     def test_get_destination_definition_specification_success(self, mock_abreq):
         mock_abreq.return_value = {"connectionSpecification": {"key": "value"}}
-        res = get_destination_definition_specification(
-            "workspace1", "destination_defi_id"
-        )
+        res = get_destination_definition_specification('workspace1', 'destination_defi_id')
         assert res == {"key": "value"}
 
     @patch("ddpui.ddpairbyte.airbyte_service.abreq")
     def test_get_destination_definition_specification_failure(self, mock_abreq):
-        mock_abreq.return_value = {"error": "error message"}
+        mock_abreq.return_value = {'error': 'error message'}
         with pytest.raises(Exception) as excinfo:
-            get_destination_definition_specification(
-                "sample_workspace_id", "sample_destinationdef_id"
-            )
-        assert (
-            str(excinfo.value) == "Failed to get destination definition specification"
-        )
+            get_destination_definition_specification('sample_workspace_id', 'sample_destinationdef_id')
+        assert str(excinfo.value) == 'Failed to get destination definition specification'
 
     @patch("ddpui.ddpairbyte.airbyte_service.abreq")
     def test_get_destinations_success(self, mock_abreq):
-        mock_abreq.return_value = {"destinations": "sample_destinations"}
-        res = get_destinations("sample_workspace_id")
+        mock_abreq.return_value={"destinations": "sample_destinations"}
+        res = get_destinations('sample_workspace_id')
         assert res == "sample_destinations"
 
     @patch("ddpui.ddpairbyte.airbyte_service.abreq")
     def test_get_destinations_failure(self, mock_abreq):
-        mock_abreq.return_value = {"error": "error message"}
+        mock_abreq.return_value={'error': 'error message'}
         with pytest.raises(Exception) as excinfo:
-            get_destinations("sample_workspace_id")
-        assert str(excinfo.value) == "Failed to get destinations"
+            get_destinations('sample_workspace_id')
+        assert str(excinfo.value) == 'Failed to get destinations'
 
     @patch("ddpui.ddpairbyte.airbyte_service.abreq")
     def test_create_destination_success(self, mock_abreq):
-        mock_abreq.return_value = {"destinationId": "test_id"}
-        config = {"key": "value"}
-        res = create_destination("test_workspace", "test_name", "test_destdef", config)
-        assert res["destinationId"] == "test_id"
+        mock_abreq.return_value = {'destinationId': 'test_id'}
+        config = {'key': 'value'}
+        res = create_destination('test_workspace', 'test_name', 'test_destdef', config)
+        assert res['destinationId'] == 'test_id'
 
     @patch("ddpui.ddpairbyte.airbyte_service.abreq")
     def test_create_destination_failure(self, mock_abreq):
@@ -293,7 +253,7 @@ class TestAirbyteDestination:
         config = {"key": "value"}
 
         with pytest.raises(Exception):
-            create_destination("test_workspace", "test_name", "test_destdef", config)
+                create_destination('test_workspace', 'test_name', 'test_destdef', config)
 
     @patch("ddpui.ddpairbyte.airbyte_service.abreq")
     def test_check_destination_connection(self, mock_abreq):
@@ -339,7 +299,7 @@ class TestAirbyteDestination:
         connection_id = "test_connection_id"
 
         with pytest.raises(Exception):
-            get_connection(workspace_id, connection_id)
+                get_connection(workspace_id, connection_id)
 
     def test_create_connection_success(self):
         workspace_id = "bc632205-5bd4-4f44-a123-12df60554aa5"
@@ -347,7 +307,7 @@ class TestAirbyteDestination:
             source_id="6d085a9c-18b6-4a8a-ae3e-3ca7f8a968b1",
             destination_id="b241b58f-aa3e-4220-a4d9-0f4ae26e99e5",
             streamnames=["Streamr", "stream2"],
-            name="test_connection",
+            name="test_connection"
         )
         result = create_connection(workspace_id, connection_info)
         assert "connectionId" in result
@@ -358,8 +318,11 @@ class TestAirbyteDestination:
             source_id="your_source_id",
             destination_id="your_destination_id",
             streamnames=[],
-            name="test_connection",
+            name="test_connection"
         )
         with pytest.raises(Exception) as excinfo:
             create_connection(workspace_id, connection_info)
         assert "must specify stream names" in str(excinfo.value)
+
+
+        
