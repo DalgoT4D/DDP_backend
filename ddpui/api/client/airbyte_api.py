@@ -73,14 +73,14 @@ def post_airbyte_detach_workspace(request):
 
     if org_airbyte_server_block:
         # delete the prefect AirbyteServer block
-        prefect_service.delete_airbyte_server_block(org_airbyte_server_block.blockid)
+        prefect_service.delete_airbyte_server_block(org_airbyte_server_block.block_id)
 
         # delete all prefect airbyteconnection blocks fo this org
         for org_airbyte_connection_block in OrgPrefectBlock.objects.filter(
             org=orguser.org, blocktype=prefect_service.AIRBYTECONNECTION
         ):
             prefect_service.delete_airbyte_connection_block(
-                org_airbyte_connection_block.blockid
+                org_airbyte_connection_block.block_id
             )
             org_airbyte_connection_block.delete()
 
