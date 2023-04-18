@@ -7,18 +7,16 @@ class OrgDbt(models.Model):
 
     gitrepo_url = models.CharField(max_length=100)
     gitrepo_access_token_secret = models.CharField(max_length=100, null=True)
+
     project_dir = models.CharField(max_length=200)
     dbt_version = models.CharField(max_length=10)
+
     target_name = models.CharField(max_length=10)
     target_type = models.CharField(max_length=10)
     target_schema = models.CharField(max_length=10)
 
     # connection to target warehouse
-    host = models.CharField(max_length=100)
-    port = models.CharField(max_length=5)
-    username = models.CharField(max_length=100)
-    password = models.CharField(max_length=100)  # encrypted
-    database = models.CharField(max_length=50)
+    credentials = models.CharField(max_length=200, null=True)
 
 
 class Org(models.Model):

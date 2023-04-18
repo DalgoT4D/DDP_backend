@@ -1,6 +1,7 @@
 import os
 import shutil
 from pathlib import Path
+import json
 
 from django.utils.text import slugify
 from ninja import NinjaAPI
@@ -90,9 +91,28 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
     process = runcmd(f"{pip} install dbt-core=={payload.dbtVersion}", project_dir)
     if process.wait() != 0:
         raise HttpError(500, f"pip install dbt-core=={payload.dbtVersion} failed")
-    process = runcmd(f"{pip} install dbt-postgres==1.4.5", project_dir)
-    if process.wait() != 0:
-        raise HttpError(500, "pip install dbt-postgres==1.4.5 failed")
+
+    if payload.profile.target_configs_type == "postgres":
+        process = runcmd(f"{pip} install dbt-postgres==1.4.5", project_dir)
+        if process.wait() != 0:
+            raise HttpError(500, "pip install dbt-postgres==1.4.5 failed")
+        credentials = json.dumps(
+            {
+                "host": payload.credentials.host,
+                "port": payload.credentials.port,
+                "username": payload.credentials.username,
+                "password": payload.credentials.password,
+                "database": payload.credentials.database,
+            }
+        )
+    elif payload.profile.target_configs_type == "bigquery":
+        process = runcmd(f"{pip} install dbt-bigquery==1.4.3", project_dir)
+        if process.wait() != 0:
+            raise HttpError(500, "pip install dbt-bigquery==1.4.3 failed")
+        credentials = ""
+
+    else:
+        raise Exception("what warehouse is this")
 
     dbt = OrgDbt(
         gitrepo_url=payload.gitrepoUrl,
@@ -101,11 +121,7 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
         target_name=payload.profile.target,
         target_type=payload.profile.target_configs_type,
         target_schema=payload.profile.target_configs_schema,
-        host=payload.credentials.host,
-        port=payload.credentials.port,
-        username=payload.credentials.username,
-        password=payload.credentials.password,
-        database=payload.credentials.database,
+        credentials=credentials,
     )
     dbt.save()
     orguser.org.dbt = dbt
