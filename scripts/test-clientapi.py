@@ -54,7 +54,6 @@ if True:
 r = tester.clientpost(
     "prefect/blocks/dbt/",
     json={
-        "dbtBlockName": "test-blockname-3",
         "profile": {
             "name": DBT_PROFILE,
             "target": "dev",
@@ -71,10 +70,10 @@ r = tester.clientpost(
     },
     timeout=60,
 )
-block_id = r["id"]
+print(r)
 
-tester.clientpost(
-    "prefect/flows/dbt/", json={"blockName": "test-blockname-3"}, timeout=60
-)
+# tester.clientpost(
+#     "prefect/flows/dbt/", json={"blockName": "test-blockname-4"}, timeout=60
+# )
 
-tester.clientdelete(f"prefect/blocks/dbt/")
+tester.clientdelete("prefect/blocks/dbt/")
