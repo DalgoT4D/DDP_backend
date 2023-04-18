@@ -66,6 +66,7 @@ class OrgDbtSchema(Schema):
     profile: DbtProfile
     credentials: DbtCredentialsPostgres  # todo can this be a union
     gitrepoUrl: str
+    gitrepoAccessToken: str
     dbtVersion: str
 
 
