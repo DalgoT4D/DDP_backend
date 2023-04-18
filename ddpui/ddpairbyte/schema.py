@@ -35,9 +35,9 @@ class AirbyteDestinationCreate(Schema):
 class AirbyteDestinationUpdate(Schema):
     """Schema for updating an Airbyte destination"""
 
-    destinationId: str
-    name: Optional[str] = None
-    config: Optional[dict] = None
+    name: str
+    destinationDefId: str
+    config: dict
 
 
 class AirbyteConnectionCreate(Schema):
