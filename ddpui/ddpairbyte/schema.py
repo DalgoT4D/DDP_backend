@@ -13,7 +13,7 @@ class AirbyteSourceCreate(Schema):
     """Docstring"""
 
     name: str
-    sourcedef_id: str
+    sourceDefId: str
     config: dict
 
 
@@ -23,37 +23,40 @@ class AirbyteSourceUpdate(Schema):
     name: str
     config: dict
 
+
 class AirbyteDestinationCreate(Schema):
     """Docstring"""
 
     name: str
-    destinationdef_id: str
+    destinationDefId: str
     config: dict
+
 
 class AirbyteDestinationUpdate(Schema):
     """Schema for updating an Airbyte destination"""
 
-    destination_id: str
+    destinationId: str
     name: Optional[str] = None
     config: Optional[dict] = None
-    
+
+
 class AirbyteConnectionCreate(Schema):
     """Docstring"""
 
     name: str
-    source_id: str
-    destination_id: str
-    streamnames: list
+    sourceId: str
+    destinationId: str
+    streamNames: list
 
 
 class AirbyteConnectionUpdate(Schema):
     """Docstring"""
 
-    connection_id: str
+    connectionId: str
     name: Optional[str] = None
-    source_id: Optional[str] = None
-    destination_id: Optional[str] = None
-    streamnames: Optional[list] = None
+    sourceId: Optional[str] = None
+    destinationId: Optional[str] = None
+    streamNames: Optional[list] = None
 
 
 # response schemas

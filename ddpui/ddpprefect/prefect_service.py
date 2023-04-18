@@ -24,6 +24,8 @@ AIRBYTECONNECTION = "Airbyte Connection"
 SHELLOPERATION = "Shell Operation"
 DBTCORE = "dbt Core Operation"
 
+# ddp block types
+
 
 def prefect_get(endpoint):
     """GET request to prefect server"""
@@ -117,6 +119,29 @@ def get_block(blocktype, blockname):
     return block
 
 
+def get_block_by_id(block_id):
+    """Fetch prefect block by id"""
+    block = prefect_get(
+        f"block_documents/{block_id}",
+    )
+    return block
+
+
+def get_blocks(blocktype, blockname=""):
+    """Fetch prefect blocks"""
+    blocktype_id = get_block_type(blocktype)["id"]
+    query = {
+        "block_documents": {
+            "operator": "and_",
+            "block_type_id": {"any_": [blocktype_id]},
+        }
+    }
+    if len(blockname) > 0:
+        query["block_documents"]["name"] = {"any_": [blockname]}
+    res = prefect_post("block_documents/filter", query)
+    return res
+
+
 def create_airbyte_server_block(blockname):
     """Create airbyte server block in prefect"""
     airbyte_server_blocktype_id = get_block_type(AIRBYTESERVER)["id"]
@@ -143,6 +168,12 @@ def create_airbyte_server_block(blockname):
     return res
 
 
+# todo
+def update_airbyte_server_block(blockname):
+    """Update the airbyte server block with a particular block name"""
+    return {}
+
+
 def delete_airbyte_server_block(blockid):
     """Delete airbyte server block"""
     return prefect_delete(f"block_documents/{blockid}")
@@ -155,26 +186,33 @@ def create_airbyte_connection_block(conninfo: PrefectAirbyteConnectionSetup):
         AIRBYTECONNECTION, airbyte_connection_blocktype_id
     )["id"]
 
-    serverblock = get_block(AIRBYTESERVER, conninfo.serverblockname)
+    serverblock = get_block(AIRBYTESERVER, conninfo.serverBlockName)
     if serverblock is None:
         raise Exception(
-            f"could not find {AIRBYTESERVER} block called {conninfo.serverblockname}"
+            f"could not find {AIRBYTESERVER} block called {conninfo.serverBlockName}"
         )
 
     res = prefect_post(
         "block_documents/",
         {
-            "name": conninfo.connectionblockname,
+            "name": conninfo.connectionBlockName,
             "block_type_id": airbyte_connection_blocktype_id,
             "block_schema_id": airbyte_connection_blockschematype_id,
             "data": {
-                "airbyte_server": serverblock["id"],
-                "connection_id": conninfo.connection_id,
+                "airbyte_server": {"$ref": {"block_document_id": serverblock["id"]}},
+                "connection_id": conninfo.connectionId,
             },
             "is_anonymous": False,
         },
     )
+
     return res
+
+
+# todo
+def update_airbyte_connection_block(blockname):
+    """Update the airbyte server block with a particular block name"""
+    return {}
 
 
 def delete_airbyte_connection_block(blockid):

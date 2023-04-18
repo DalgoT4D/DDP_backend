@@ -4,27 +4,27 @@ from ninja import Schema
 class PrefectAirbyteSync(Schema):
     """Docstring"""
 
-    blockname: str
+    blockName: str
 
 
 class PrefectDbtCore(Schema):
     """Docstring"""
 
-    blockname: str
+    blockName: str
 
 
 class PrefectAirbyteConnectionSetup(Schema):
     """Docstring"""
 
-    serverblockname: str
-    connectionblockname: str
-    connection_id: str
+    serverBlockName: str
+    connectionBlockName: str
+    connectionId: str
 
 
 class PrefectDbtCoreSetup(Schema):
     """Docstring"""
 
-    blockname: str
+    block_name: str
     profiles_dir: str
     project_dir: str
     working_dir: str
@@ -56,7 +56,7 @@ class PrefectShellSetup(Schema):
 
     blockname: str
     commands: list
-    working_dir: str
+    workingDir: str
     env: dict
 
 
@@ -65,8 +65,8 @@ class OrgDbtSchema(Schema):
 
     profile: DbtProfile
     credentials: DbtCredentialsPostgres  # todo can this be a union
-    gitrepo_url: str
-    dbtversion: str
+    gitrepoUrl: str
+    dbtVersion: str
 
 
 class PrefectDbtRun(Schema):
@@ -75,4 +75,19 @@ class PrefectDbtRun(Schema):
     profile: DbtProfile
     credentials: DbtCredentialsPostgres  # todo can this be a union
 
-    dbt_blockname: str
+    dbtBlockName: str
+
+
+class PrefectAirbyteConnectionBlockSchema(Schema):
+    """Return necessary details of connection block in prefect, airbyte and your database"""
+
+    name: str
+    blockId: str
+    blockName: str
+    blockData: dict
+    connectionId: str
+    sourceId: str
+    destinationId: str
+    sourceCatalogId: str
+    syncCatalog: dict
+    status: str
