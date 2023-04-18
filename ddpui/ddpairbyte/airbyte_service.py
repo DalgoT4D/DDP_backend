@@ -97,8 +97,9 @@ def create_source(workspace_id, name, sourcedef_id, config):
         },
     )
     if "sourceId" not in res:
-        raise Exception('Failed to create source')
+        raise Exception("Failed to create source")
     return res
+
 
 def update_source(source_id, name=None, config=None):
     """Update source in an airbyte workspace"""
@@ -109,7 +110,7 @@ def update_source(source_id, name=None, config=None):
         data["connectionConfiguration"] = config
     res = abreq("sources/update", data)
     if "sourceId" not in res:
-        raise Exception('Failed to update source')
+        raise Exception("Failed to update source")
     return res
 
 
@@ -136,7 +137,7 @@ def get_source_schema_catalog(workspace_id, source_id):
     """Fetch source schema catalog for a source in an airbyte workspace"""
     res = abreq("sources/discover_schema", {"sourceId": source_id})
     if "catalog" not in res:
-        raise Exception('Failed to get source schema catalogs')
+        raise Exception("Failed to get source schema catalogs")
     return res
 
 
@@ -146,7 +147,7 @@ def get_destination_definitions(workspace_id, **kwargs):
         "destination_definitions/list_for_workspace", {"workspaceId": workspace_id}
     )
     if "destinationDefinitions" not in res:
-        raise Exception('Failed to get destination definitions')
+        raise Exception("Failed to get destination definitions")
     return res["destinationDefinitions"]
 
 
@@ -157,7 +158,7 @@ def get_destination_definition_specification(workspace_id, destinationdef_id):
         {"destinationDefinitionId": destinationdef_id, "workspaceId": workspace_id},
     )
     if "connectionSpecification" not in res:
-        raise Exception('Failed to get destination definition specification')
+        raise Exception("Failed to get destination definition specification")
     return res["connectionSpecification"]
 
 
@@ -165,7 +166,7 @@ def get_destinations(workspace_id):
     """Fetch all desintations in an airbyte workspace"""
     res = abreq("destinations/list", {"workspaceId": workspace_id})
     if "destinations" not in res:
-        raise Exception('Failed to get destinations')
+        raise Exception("Failed to get destinations")
     return res["destinations"]
 
 
@@ -173,7 +174,7 @@ def get_destination(workspace_id, destination_id):
     """Fetch a destination in an airbyte workspace"""
     res = abreq("destinations/get", {"destinationId": destination_id})
     if "destinationId" not in res:
-        raise Exception('Failed to get destination')
+        raise Exception("Failed to get destination")
     return res
 
 
@@ -277,7 +278,10 @@ def create_connection(workspace_id, connection_info: schema.AirbyteConnectionCre
         raise Exception(res)
     return res
 
-def update_connection(workspace_id, connection_id, connection_info: schema.AirbyteConnectionUpdate):
+
+def update_connection(
+    workspace_id, connection_id, connection_info: schema.AirbyteConnectionUpdate
+):
     """Update a connection of an airbyte workspace"""
     if len(connection_info.streamnames) == 0:
         raise Exception("must specify stream names")
@@ -333,7 +337,6 @@ def delete_connection(workspace_id, connection_id):
     if "status" not in res or res["status"] != "SUCCEEDED":
         raise Exception(res)
     return res
-
 
 
 def sync_connection(workspace_id, connection_id):
