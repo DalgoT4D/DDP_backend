@@ -21,6 +21,7 @@ DBT_CREDENTIALS_PASSWORD = os.getenv("TESTING_DBT_CREDENTIALS_PASSWORD")
 DBT_CREDENTIALS_DATABASE = os.getenv("TESTING_DBT_CREDENTIALS_DATABASE")
 DBT_CREDENTIALS_HOST = os.getenv("TESTING_DBT_CREDENTIALS_HOST")
 DBT_TEST_REPO = os.getenv("TESTING_DBT_TEST_REPO")
+DBT_TEST_REPO_ACCESSTOKEN = os.getenv("TESTING_DBT_TEST_REPO_ACCESSTOKEN")
 
 if True:
     tester.clientdelete("dbt/workspace/")
@@ -28,6 +29,7 @@ if True:
         "dbt/workspace/",
         json={
             "gitrepoUrl": DBT_TEST_REPO,
+            "gitrepoAccessToken": DBT_TEST_REPO_ACCESSTOKEN,
             "dbtVersion": "1.4.5",
             "profile": {
                 "name": DBT_PROFILE,
