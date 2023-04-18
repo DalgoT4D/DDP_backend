@@ -1,8 +1,8 @@
+from typing import List
 from ninja import NinjaAPI
 from ninja.errors import HttpError, ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
-
 from django.utils.text import slugify
 from ddpui import auth
 from ddpui.ddpairbyte import airbyte_service
@@ -362,7 +362,7 @@ def get_airbyte_destination(request, destination_id):
 @airbyteapi.get(
     "/connections",
     auth=auth.CanManagePipelines(),
-    response=list[PrefectAirbyteConnectionBlockSchema],
+    response=List[PrefectAirbyteConnectionBlockSchema],
 )
 def get_airbyte_connections(request):
     """Fetch all airbyte connections in the user organization workspace"""
@@ -525,20 +525,20 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
 def put_airbyte_connection(request, connection_id, payload: AirbyteConnectionUpdate):
     """Update an airbyte connection in the user organization workspace"""
     return {"error": "deprecated"}
-    orguser = request.orguser
-    if orguser.org is None:
-        raise HttpError(400, "create an organization first")
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
+    # orguser = request.orguser
+    # if orguser.org is None:
+    #     raise HttpError(400, "create an organization first")
+    # if orguser.org.airbyte_workspace_id is None:
+    #     raise HttpError(400, "create an airbyte workspace first")
 
-    if len(payload.streamnames) == 0:
-        raise HttpError(400, "must specify stream names")
+    # if len(payload.streamnames) == 0:
+    #     raise HttpError(400, "must specify stream names")
 
-    res = airbyte_service.update_connection(
-        orguser.org.airbyte_workspace_id, connection_id, payload
-    )
-    logger.debug(res)
-    return res
+    # res = airbyte_service.update_connection(
+    #     orguser.org.airbyte_workspace_id, connection_id, payload
+    # )
+    # logger.debug(res)
+    # return res
 
 
 @airbyteapi.delete("/connections/{connection_block_id}", auth=auth.CanManagePipelines())

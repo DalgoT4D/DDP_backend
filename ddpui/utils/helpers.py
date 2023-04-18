@@ -1,6 +1,7 @@
 import shlex
 import subprocess
 from typing import Union
+from typing import List
 import humps
 
 
@@ -9,7 +10,7 @@ def runcmd(cmd, cwd):
     return subprocess.Popen(shlex.split(cmd), cwd=str(cwd))
 
 
-def api_res_camel_case(api_res: Union[list[dict], dict, str]):
+def api_res_camel_case(api_res: Union[List[dict], dict, str]):
     """Convert strings and dictionary keys to camel case"""
     if isinstance(api_res, str):
         return humps.camelize(api_res)
