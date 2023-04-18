@@ -572,7 +572,7 @@ def delete_airbyte_connection(request, connection_block_id):
 @airbyteapi.post(
     "/connections/{connection_block_id}/sync/", auth=auth.CanManagePipelines()
 )
-def post_airbyte_sync_connection(request, connection_block_id):
+def post_airbyte_sync_connection(request, connection_id):
     """Sync an airbyte connection in the uer organization workspace"""
     orguser = request.orguser
     if orguser.org.airbyte_workspace_id is None:

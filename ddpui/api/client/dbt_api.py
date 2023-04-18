@@ -13,7 +13,6 @@ from ddpui.ddpprefect.schema import OrgDbtSchema
 from ddpui.models.org import OrgDbt
 from ddpui.models.org_user import OrgUserResponse
 from ddpui.utils.helpers import runcmd
-from ddpui.utils import secretsmanager
 
 dbtapi = NinjaAPI(urls_namespace="dbt")
 
@@ -66,15 +65,7 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
     project_dir.mkdir()
 
     # clone the client's dbt repo into "dbtrepo/" under the project_dir
-    # if we have an access token with the "contents" and "metadata" permissions then
-    #   git clone https://oauth2:[TOKEN]@github.com/[REPO-OWNER]/[REPO-NAME]
-    if payload.gitrepoAccessToken is not None:
-        gitrepo_url = payload.gitrepoUrl.replace(
-            "github.com", "oauth2:" + payload.gitrepoAccessToken + "@github.com"
-        )
-        process = runcmd(f"git clone {gitrepo_url} dbtrepo", project_dir)
-    else:
-        process = runcmd(f"git clone {payload.gitrepoUrl} dbtrepo", project_dir)
+    process = runcmd(f"git clone {payload.gitrepoUrl} dbtrepo", project_dir)
     if process.wait() != 0:
         raise HttpError(500, "git clone failed")
 
@@ -111,10 +102,6 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
     orguser.org.dbt = dbt
     orguser.org.save()
 
-    if payload.gitrepoAccessToken is not None:
-        secretsmanager.delete_github_token(orguser.org)
-        secretsmanager.save_github_token(orguser.org, payload.gitrepoAccessToken)
-
     return {"success": 1}
 
 
@@ -133,8 +120,6 @@ def dbt_delete(request):
 
     shutil.rmtree(dbt.project_dir)
     dbt.delete()
-
-    secretsmanager.delete_github_token(orguser.org)
 
     return OrgUserResponse.from_orguser(orguser)
 
