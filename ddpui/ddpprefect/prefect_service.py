@@ -3,10 +3,6 @@ from typing import Union
 import requests
 
 from dotenv import load_dotenv
-from prefect import flow
-from prefect_airbyte import AirbyteConnection
-from prefect_airbyte.flows import run_connection_sync
-from prefect_dbt.cli.commands import DbtCoreOperation
 from ddpui.ddpprefect.schema import (
     PrefectDbtCoreSetup,
     PrefectShellSetup,
@@ -306,17 +302,3 @@ def create_dbt_core_block(
 def delete_dbt_core_block(blockid):
     """Delete a dbt core block in prefect"""
     return prefect_delete(f"block_documents/{blockid}")
-
-
-@flow
-def run_airbyte_connection_prefect_flow(blockname):
-    """Prefect flow to run airbyte connection"""
-    airbyte_connection = AirbyteConnection.load(blockname)
-    return run_connection_sync(airbyte_connection)
-
-
-@flow
-def run_dbtcore_prefect_flow(blockname):
-    """Prefect flow to run dbt"""
-    dbt_op = DbtCoreOperation.load(blockname)
-    dbt_op.run()

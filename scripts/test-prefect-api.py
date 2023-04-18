@@ -182,7 +182,7 @@ if x:
     print("  commands= " + json.dumps(x["data"]["commands"]))
 
     print("running block")
-    prefectapi.run_dbtcore_prefect_flow(DBT_BLOCKNAME)
+    prefectapi.manual_dbt_core_flow(DBT_BLOCKNAME)
 
 else:
     raise Exception(f"no dbt core block named {DBT_BLOCKNAME}")

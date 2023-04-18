@@ -581,9 +581,9 @@ def post_airbyte_sync_connection(request, connection_block_id):
     org_prefect_connection_block = OrgPrefectBlock.objects.filter(
         org=orguser.org, block_id=connection_block_id
     ).first()
-  
-    assert (org_prefect_connection_block)
 
-    return prefect_service.run_airbyte_connection_prefect_flow(
+    assert org_prefect_connection_block
+
+    return prefect_service.manual_airbyte_connection_flow(
         org_prefect_connection_block.block_name
     )

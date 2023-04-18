@@ -1,3 +1,4 @@
+from typing import Optional
 from ninja import Schema
 
 
@@ -92,3 +93,18 @@ class PrefectAirbyteConnectionBlockSchema(Schema):
     sourceCatalogId: str
     syncCatalog: dict
     status: str
+
+
+class PrefectFlowAirbyteConnection(Schema):
+    """Validate the airbyte connection object in flow/pipeline create"""
+
+    id: str
+    seq: int
+
+
+class PrefectFlowCreateSchema(Schema):
+    """Validate the create flow api payload"""
+
+    name: str
+    connectionBlockIds: list[PrefectFlowAirbyteConnection]
+    dbtTransform: Optional[str]

@@ -14,6 +14,7 @@ from ddpui.ddpprefect.schema import (
     PrefectDbtCore,
     PrefectDbtCoreSetup,
     PrefectDbtRun,
+    PrefectFlowCreateSchema,
 )
 
 prefectapi = NinjaAPI(urls_namespace="prefect")
@@ -51,6 +52,14 @@ def ninja_default_error_handler(
     # return Response({"error": " ".join(exc.args)}, status=500)
 
 
+@prefectapi.post("/flows/", auth=auth.CanManagePipelines())
+def post_prefect_airbyte_sync_flow(request, payload: PrefectFlowCreateSchema):
+    """Run airbyte sync flow in prefect"""
+    orguser = request.orguser
+
+    return {"success": 1}
+
+
 @prefectapi.post("/flows/airbyte_sync/", auth=auth.CanManagePipelines())
 def post_prefect_airbyte_sync_flow(request, payload: PrefectAirbyteSync):
     """Run airbyte sync flow in prefect"""
@@ -58,7 +67,7 @@ def post_prefect_airbyte_sync_flow(request, payload: PrefectAirbyteSync):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    return prefect_service.run_airbyte_connection_prefect_flow(payload.blockName)
+    return prefect_service.manual_airbyte_connection_flow(payload.blockName)
 
 
 @prefectapi.post("/flows/dbt_run/", auth=auth.CanManagePipelines())
@@ -66,7 +75,7 @@ def post_prefect_dbt_core_run_flow(
     request, payload: PrefectDbtCore
 ):  # pylint: disable=unused-argument
     """Run dbt flow in prefect"""
-    return prefect_service.run_dbtcore_prefect_flow(payload.blockName)
+    return prefect_service.manual_dbt_core_flow(payload.blockName)
 
 
 @prefectapi.post("/blocks/dbt_run/", auth=auth.CanManagePipelines())
