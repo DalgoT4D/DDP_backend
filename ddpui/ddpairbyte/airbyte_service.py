@@ -196,14 +196,17 @@ def create_destination(workspace_id, name, destinationdef_id, config):
     return res
 
 
-def update_destination(destination_id, name=None, config=None):
+def update_destination(destination_id, name, config, destination_def_id):
     """Update a destination in an airbyte workspace"""
-    data = {"destinationId": destination_id}
-    if name is not None:
-        data["name"] = name
-    if config is not None:
-        data["connectionConfiguration"] = config
-    res = abreq("destinations/update", data)
+    res = abreq(
+        "destinations/update",
+        {
+            "destinationId": destination_id,
+            "name": name,
+            "connectionConfiguration": config,
+            "destinationDefinitionId": destination_def_id,
+        },
+    )
     if "destinationId" not in res:
         raise Exception(f"Failed to update destination {destination_id}: {res}")
     return res
