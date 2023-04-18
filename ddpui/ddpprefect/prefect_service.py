@@ -299,6 +299,6 @@ def create_dbt_core_block(
     return res
 
 
-def delete_dbt_core_block(blockid):
+def delete_dbt_core_block(block_id):
     """Delete a dbt core block in prefect"""
-    return prefect_delete(f"block_documents/{blockid}")
+    return prefect_delete(f"block_documents/{block_id}")
