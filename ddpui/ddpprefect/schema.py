@@ -1,3 +1,4 @@
+from typing import Optional
 from ninja import Schema
 
 
@@ -66,7 +67,7 @@ class OrgDbtSchema(Schema):
     profile: DbtProfile
     credentials: DbtCredentialsPostgres  # todo can this be a union
     gitrepoUrl: str
-    gitrepoAccessToken: str
+    gitrepoAccessToken: Optional[str]
     dbtVersion: str
 
 
@@ -75,8 +76,6 @@ class PrefectDbtRun(Schema):
 
     profile: DbtProfile
     credentials: DbtCredentialsPostgres  # todo can this be a union
-
-    dbtBlockName: str
 
 
 class PrefectAirbyteConnectionBlockSchema(Schema):
