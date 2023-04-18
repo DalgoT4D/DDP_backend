@@ -40,6 +40,7 @@ class OrgPrefectBlock(models.Model):
         max_length=100, unique=True
     )  # use blockname to distinguish between different dbt commands
     display_name = models.CharField(max_length=100, null=True)
+    seq = models.SmallIntegerField(null=True)
 
     def __str__(self) -> str:
         return f"{self.org.name} {self.block_type} {self.block_name}"

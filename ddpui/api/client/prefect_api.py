@@ -4,6 +4,7 @@ from pathlib import Path
 from ninja import NinjaAPI
 from ninja.errors import HttpError, ValidationError
 from ninja.responses import Response
+from django.utils.text import slugify
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from ddpui import auth
@@ -69,7 +70,7 @@ def post_prefect_dbt_core_run_flow(
     return prefect_service.run_dbtcore_prefect_flow(payload.blockName)
 
 
-@prefectapi.post("/blocks/dbt_run/", auth=auth.CanManagePipelines())
+@prefectapi.post("/blocks/dbt/", auth=auth.CanManagePipelines())
 def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
     """Create prefect dbt core block"""
     orguser = request.orguser
@@ -83,32 +84,42 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
     dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
     project_dir = str(dbt_env_dir / "dbtrepo")
 
-    block_data = PrefectDbtCoreSetup(
-        block_name=payload.dbtBlockName,
-        profiles_dir=f"{project_dir}/profiles/",
-        project_dir=project_dir,
-        working_dir=project_dir,
-        env={},
-        commands=[f"{dbt_binary} run --target {payload.profile.target}"],
-    )
+    blocks = []
 
-    block = prefect_service.create_dbt_core_block(
-        block_data, payload.profile, payload.credentials
-    )
+    for command in ["docs generate", "run", "test"]:
+        block_name = f"{orguser.org.slug}-{slugify(command)}"
 
-    cpb = OrgPrefectBlock(
-        org=orguser.org,
-        block_type=block["block_type"]["name"],
-        block_id=block["id"],
-        block_name=block["name"],
-        # todo displayname
-    )
-    cpb.save()
+        blocks.append(
+            PrefectDbtCoreSetup(
+                block_name=block_name,
+                profiles_dir=f"{project_dir}/profiles/",
+                project_dir=project_dir,
+                working_dir=project_dir,
+                env={},
+                commands=[f"{dbt_binary} {command} --target {payload.profile.target}"],
+            )
+        )
 
-    return block
+    for i, block_data in enumerate(blocks):
+        block = prefect_service.create_dbt_core_block(
+            block_data, payload.profile, payload.credentials
+        )
+
+        cpb = OrgPrefectBlock(
+            org=orguser.org,
+            block_type=block["block_type"]["name"],
+            block_id=block["id"],
+            block_name=block["name"],
+            display_name=block["name"],
+            seq=i,
+        )
+
+        cpb.save()
+
+    return {"success": 1}
 
 
-@prefectapi.get("/blocks/dbt_run/", auth=auth.CanManagePipelines())
+@prefectapi.get("/blocks/dbt/", auth=auth.CanManagePipelines())
 def get_prefect_dbt_run_blocks(request):
     """Fetch all prefect dbt run blocks for an organization"""
     orguser = request.orguser
@@ -125,68 +136,21 @@ def get_prefect_dbt_run_blocks(request):
     ]
 
 
-@prefectapi.delete("/blocks/dbt_run/{block_id}", auth=auth.CanManagePipelines())
-def delete_prefect_dbt_run_block(request, block_id):
+@prefectapi.delete("/blocks/dbt/", auth=auth.CanManagePipelines())
+def delete_prefect_dbt_run_block(request):
     """Delete prefect dbt run block for an organization"""
     orguser = request.orguser
-    # don't bother checking for orguser.org.dbt
 
-    prefect_service.delete_dbt_core_block(block_id)
-    cpb = OrgPrefectBlock.objects.filter(org=orguser.org, block_id=block_id).first()
-    if cpb:
-        cpb.delete()
+    # blocks = prefect_service.get_blocks(prefect_service.DBTCORE, orguser.org.slug)
+    org_dbt_blocks = OrgPrefectBlock.objects.filter(
+        org=orguser.org, block_type=prefect_service.DBTCORE
+    ).all()
 
-    return {"success": 1}
+    for dbt_block in org_dbt_blocks:
+        # Delete block in prefect
+        prefect_service.delete_dbt_core_block(dbt_block.block_id)
 
-
-@prefectapi.post("/blocks/dbt_test/", auth=auth.CanManagePipelines())
-def post_prefect_dbt_test_block(request, payload: PrefectDbtRun):
-    """Create prefect dbt test block for an organization"""
-    orguser = request.orguser
-    if orguser.org.dbt is None:
-        raise HttpError(400, "create a dbt workspace first")
-
-    project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / orguser.org.slug
-    if not os.path.exists(project_dir):
-        raise HttpError(400, "create the dbt env first")
-
-    project_dir = project_dir / "dbtrepo"
-    dbt_binary = project_dir / "venv/bin/dbt"
-
-    block_data = PrefectDbtCoreSetup(
-        blockname=payload.dbtBlockName,  # we will generate this block name <org>-dbt-<test|run|docs>
-        profiles_dir=f"{project_dir}/profiles/",
-        project_dir=project_dir,
-        working_dir=project_dir,
-        env={},
-        commands=[f"{dbt_binary} test --target {payload.target}"],
-    )
-
-    block = prefect_service.create_dbt_core_block(
-        block_data, payload.profile, payload.credentials
-    )
-
-    cpb = OrgPrefectBlock(
-        org=orguser.org,
-        block_type=block["block_type"]["name"],
-        block_id=block["id"],
-        block_name=block["name"],
-        # todo displayblockname
-    )
-    cpb.save()
-
-    return block
-
-
-@prefectapi.delete("/blocks/dbt_test/{block_id}", auth=auth.CanManagePipelines())
-def delete_prefect_dbt_test_block(request, block_id):
-    """Delete dbt test block for an organization"""
-    orguser = request.orguser
-    # don't bother checking for orguser.org.dbt
-
-    prefect_service.delete_dbt_core_block(block_id)
-    cpb = OrgPrefectBlock.objects.filter(org=orguser.org, block_id=block_id).first()
-    if cpb:
-        cpb.delete()
+        # Delete block row from database
+        dbt_block.delete()
 
     return {"success": 1}
