@@ -16,6 +16,7 @@ from ddpui.ddpprefect.schema import (
     PrefectDbtCoreSetup,
     PrefectDbtRun,
 )
+from ddpui.utils.ddp_logger import logger
 
 prefectapi = NinjaAPI(urls_namespace="prefect")
 # http://127.0.0.1:8000/api/docs
@@ -144,7 +145,11 @@ def delete_prefect_dbt_run_block(request):
 
     for dbt_block in org_dbt_blocks:
         # Delete block in prefect
-        prefect_service.delete_dbt_core_block(dbt_block.block_id)
+        try:
+            prefect_service.delete_dbt_core_block(dbt_block.block_id)
+        except Exception as error:
+            logger.error(error)
+            # may have deleted the block via the prefect ui, continue
 
         # Delete block row from database
         dbt_block.delete()
