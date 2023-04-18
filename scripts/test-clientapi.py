@@ -27,8 +27,8 @@ if True:
     r = tester.clientpost(
         "dbt/workspace/",
         json={
-            "gitrepo_url": DBT_TEST_REPO,
-            "dbtversion": "1.4.5",
+            "gitrepoUrl": DBT_TEST_REPO,
+            "dbtVersion": "1.4.5",
             "profile": {
                 "name": DBT_PROFILE,
                 "target": "dev",
@@ -52,7 +52,7 @@ if True:
 r = tester.clientpost(
     "prefect/blocks/dbt_run/",
     json={
-        "dbt_blockname": "test-blockname-1",
+        "dbtBlockName": "test-blockname-3",
         "profile": {
             "name": DBT_PROFILE,
             "target": "dev",
@@ -72,7 +72,7 @@ r = tester.clientpost(
 block_id = r["id"]
 
 tester.clientpost(
-    "prefect/flows/dbt_run/", json={"blockname": "test-blockname-1"}, timeout=60
+    "prefect/flows/dbt_run/", json={"blockName": "test-blockname-3"}, timeout=60
 )
 
 tester.clientdelete(f"prefect/blocks/dbt_run/{block_id}")

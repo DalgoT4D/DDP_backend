@@ -286,7 +286,7 @@ def create_dbt_core_block(
     res = prefect_post(
         "block_documents/",
         {
-            "name": dbtcore.blockname,
+            "name": dbtcore.block_name,
             "block_type_id": dbtcore_blocktype_id,
             "block_schema_id": dbtcore_blockschematype_id,
             "data": {

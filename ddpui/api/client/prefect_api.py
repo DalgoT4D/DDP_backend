@@ -47,7 +47,8 @@ def ninja_default_error_handler(
     request, exc: Exception
 ):  # pylint: disable=unused-argument
     """Handle any other exception raised in the apis"""
-    return Response({"error": " ".join(exc.args)}, status=500)
+    raise exc
+    # return Response({"error": " ".join(exc.args)}, status=500)
 
 
 @prefectapi.post("/flows/airbyte_sync/", auth=auth.CanManagePipelines())
@@ -57,7 +58,7 @@ def post_prefect_airbyte_sync_flow(request, payload: PrefectAirbyteSync):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    return prefect_service.run_airbyte_connection_prefect_flow(payload.blockname)
+    return prefect_service.run_airbyte_connection_prefect_flow(payload.blockName)
 
 
 @prefectapi.post("/flows/dbt_run/", auth=auth.CanManagePipelines())
@@ -65,7 +66,7 @@ def post_prefect_dbt_core_run_flow(
     request, payload: PrefectDbtCore
 ):  # pylint: disable=unused-argument
     """Run dbt flow in prefect"""
-    return prefect_service.run_dbtcore_prefect_flow(payload.blockname)
+    return prefect_service.run_dbtcore_prefect_flow(payload.blockName)
 
 
 @prefectapi.post("/blocks/dbt_run/", auth=auth.CanManagePipelines())
@@ -131,7 +132,7 @@ def delete_prefect_dbt_run_block(request, block_id):
     # don't bother checking for orguser.org.dbt
 
     prefect_service.delete_dbt_core_block(block_id)
-    cpb = OrgPrefectBlock.objects.filter(org=orguser.org, blockid=block_id).first()
+    cpb = OrgPrefectBlock.objects.filter(org=orguser.org, block_id=block_id).first()
     if cpb:
         cpb.delete()
 

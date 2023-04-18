@@ -65,7 +65,7 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
     project_dir.mkdir()
 
     # clone the client's dbt repo into "dbtrepo/" under the project_dir
-    process = runcmd(f"git clone {payload.gitrepo_url} dbtrepo", project_dir)
+    process = runcmd(f"git clone {payload.gitrepoUrl} dbtrepo", project_dir)
     if process.wait() != 0:
         raise HttpError(500, "git clone failed")
 
@@ -78,17 +78,17 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
     if process.wait() != 0:
         raise HttpError(500, "pip --upgrade failed")
     # install dbt in the new env
-    process = runcmd(f"{pip} install dbt-core=={payload.dbtversion}", project_dir)
+    process = runcmd(f"{pip} install dbt-core=={payload.dbtVersion}", project_dir)
     if process.wait() != 0:
-        raise HttpError(500, f"pip install dbt-core=={payload.dbtversion} failed")
+        raise HttpError(500, f"pip install dbt-core=={payload.dbtVersion} failed")
     process = runcmd(f"{pip} install dbt-postgres==1.4.5", project_dir)
     if process.wait() != 0:
         raise HttpError(500, "pip install dbt-postgres==1.4.5 failed")
 
     dbt = OrgDbt(
-        gitrepo_url=payload.gitrepo_url,
+        gitrepo_url=payload.gitrepoUrl,
         project_dir=str(project_dir),
-        dbt_version=payload.dbtversion,
+        dbt_version=payload.dbtVersion,
         target_name=payload.profile.target,
         target_type=payload.profile.target_configs_type,
         target_schema=payload.profile.target_configs_schema,
