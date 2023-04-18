@@ -15,9 +15,6 @@ class OrgDbt(models.Model):
     target_type = models.CharField(max_length=10)
     target_schema = models.CharField(max_length=10)
 
-    # connection to target warehouse
-    credentials = models.CharField(max_length=200, null=True)
-
 
 class Org(models.Model):
     """Docstring"""
@@ -49,3 +46,18 @@ class OrgSchema(Schema):
 
     name: str
     airbyte_workspace_id: str = None
+
+
+class OrgWarehouse(models.Model):
+    """A data warehouse for an org. Typically we expect exactly one"""
+
+    wtype = models.CharField(max_length=25)  # postgres, bigquery
+    credentials = models.CharField(max_length=200)
+    org = models.ForeignKey(Org, on_delete=models.CASCADE)
+
+
+class OrgWarehouseSchema(Schema):
+    """payload to register an organization's data warehouse"""
+
+    wtype: str
+    credentials: dict
