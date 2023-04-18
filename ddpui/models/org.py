@@ -6,7 +6,6 @@ class OrgDbt(models.Model):
     """Docstring"""
 
     gitrepo_url = models.CharField(max_length=100)
-    gitrepo_access_token_secret = models.CharField(max_length=100, null=True)
     project_dir = models.CharField(max_length=200)
     dbt_version = models.CharField(max_length=10)
     target_name = models.CharField(max_length=10)
