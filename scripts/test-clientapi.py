@@ -52,7 +52,7 @@ if True:
     tester.clientpost("dbt/git_pull/")
 
 r = tester.clientpost(
-    "prefect/blocks/dbt_run/",
+    "prefect/blocks/dbt/",
     json={
         "dbtBlockName": "test-blockname-3",
         "profile": {
@@ -74,7 +74,7 @@ r = tester.clientpost(
 block_id = r["id"]
 
 tester.clientpost(
-    "prefect/flows/dbt_run/", json={"blockName": "test-blockname-3"}, timeout=60
+    "prefect/flows/dbt/", json={"blockName": "test-blockname-3"}, timeout=60
 )
 
-tester.clientdelete(f"prefect/blocks/dbt_run/{block_id}")
+tester.clientdelete(f"prefect/blocks/dbt/")

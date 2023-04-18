@@ -84,37 +84,33 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
     dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
     project_dir = str(dbt_env_dir / "dbtrepo")
 
-    blocks = []
-
+    sequence_number = 0
     for command in ["docs generate", "run", "test"]:
         block_name = f"{orguser.org.slug}-{slugify(command)}"
 
-        blocks.append(
-            PrefectDbtCoreSetup(
-                block_name=block_name,
-                profiles_dir=f"{project_dir}/profiles/",
-                project_dir=project_dir,
-                working_dir=project_dir,
-                env={},
-                commands=[f"{dbt_binary} {command} --target {payload.profile.target}"],
-            )
+        block_data = PrefectDbtCoreSetup(
+            block_name=block_name,
+            profiles_dir=f"{project_dir}/profiles/",
+            project_dir=project_dir,
+            working_dir=project_dir,
+            env={},
+            commands=[f"{dbt_binary} {command} --target {payload.profile.target}"],
         )
 
-    for i, block_data in enumerate(blocks):
         block = prefect_service.create_dbt_core_block(
             block_data, payload.profile, payload.credentials
         )
 
-        cpb = OrgPrefectBlock(
+        coreprefectblock = OrgPrefectBlock(
             org=orguser.org,
             block_type=block["block_type"]["name"],
             block_id=block["id"],
             block_name=block["name"],
             display_name=block["name"],
-            seq=i,
+            seq=sequence_number,
         )
 
-        cpb.save()
+        coreprefectblock.save()
 
     return {"success": 1}
 
