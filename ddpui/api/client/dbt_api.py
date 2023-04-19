@@ -11,7 +11,7 @@ from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from ddpui import auth
 from ddpui.ddpprefect.schema import OrgDbtSchema
-from ddpui.models.org import OrgDbt
+from ddpui.models.org import OrgDbt, OrgWarehouse
 from ddpui.models.org_user import OrgUserResponse
 from ddpui.utils.helpers import runcmd
 from ddpui.utils import secretsmanager
@@ -50,11 +50,17 @@ def ninja_default_error_handler(
 
 
 @dbtapi.post("/workspace/", auth=auth.CanManagePipelines())
-def post_dbt_workspace(request, payload: OrgDbtSchema):
+def post_dbt_workspace(
+    request, payload: OrgDbtSchema
+):  # pylint: disable=too-many-branches
     """Setup the client git repo and install a virtual env inside it to run dbt"""
     orguser = request.orguser
     if orguser.org.dbt is not None:
         raise HttpError(400, "dbt is already configured for this client")
+
+    warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if warehouse is None:
+        raise HttpError(400, "need to set up a warehouse first")
 
     if orguser.org.slug is None:
         orguser.org.slug = slugify(orguser.org.name)
@@ -92,24 +98,15 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
     if process.wait() != 0:
         raise HttpError(500, f"pip install dbt-core=={payload.dbtVersion} failed")
 
-    if payload.profile.target_configs_type == "postgres":
+    if warehouse.wtype == "postgres":
         process = runcmd(f"{pip} install dbt-postgres==1.4.5", project_dir)
         if process.wait() != 0:
             raise HttpError(500, "pip install dbt-postgres==1.4.5 failed")
-        credentials = json.dumps(
-            {
-                "host": payload.credentials.host,
-                "port": payload.credentials.port,
-                "username": payload.credentials.username,
-                "password": payload.credentials.password,
-                "database": payload.credentials.database,
-            }
-        )
-    elif payload.profile.target_configs_type == "bigquery":
+
+    elif warehouse.wtype == "bigquery":
         process = runcmd(f"{pip} install dbt-bigquery==1.4.3", project_dir)
         if process.wait() != 0:
             raise HttpError(500, "pip install dbt-bigquery==1.4.3 failed")
-        credentials = ""
 
     else:
         raise Exception("what warehouse is this")
@@ -119,9 +116,8 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
         project_dir=str(project_dir),
         dbt_version=payload.dbtVersion,
         target_name=payload.profile.target,
-        target_type=payload.profile.target_configs_type,
+        target_type=warehouse.wtype,
         target_schema=payload.profile.target_configs_schema,
-        credentials=credentials,
     )
     dbt.save()
     orguser.org.dbt = dbt

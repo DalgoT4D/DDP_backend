@@ -9,7 +9,7 @@ from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
-from ddpui.models.org import OrgPrefectBlock
+from ddpui.models.org import OrgPrefectBlock, OrgWarehouse
 from ddpui.ddpprefect.schema import (
     PrefectAirbyteSync,  # DbtProfile,
     PrefectDbtCore,
@@ -17,6 +17,7 @@ from ddpui.ddpprefect.schema import (
     PrefectDbtRun,
 )
 from ddpui.utils.ddp_logger import logger
+from ddpui.utils import secretsmanager
 
 prefectapi = NinjaAPI(urls_namespace="prefect")
 # http://127.0.0.1:8000/api/docs
@@ -78,6 +79,11 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
     if orguser.org.dbt is None:
         raise HttpError(400, "create a dbt workspace first")
 
+    warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if warehouse is None:
+        raise HttpError(400, "need to set up a warehouse first")
+    credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
+
     dbt_env_dir = Path(os.getenv("CLIENTDBT_ROOT")) / orguser.org.slug
     if not os.path.exists(dbt_env_dir):
         raise HttpError(400, "create the dbt env first")
@@ -99,7 +105,10 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
         )
 
         block = prefect_service.create_dbt_core_block(
-            block_data, payload.profile, payload.credentials
+            block_data,
+            payload.profile,
+            warehouse.wtype,
+            credentials,
         )
 
         coreprefectblock = OrgPrefectBlock(

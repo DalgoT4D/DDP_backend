@@ -1,5 +1,4 @@
 import os
-from typing import Union
 import requests
 
 from dotenv import load_dotenv
@@ -12,7 +11,7 @@ from ddpui.ddpprefect.schema import (
     PrefectShellSetup,
     PrefectAirbyteConnectionSetup,
 )
-from ddpui.ddpprefect.schema import DbtProfile, DbtCredentialsPostgres
+from ddpui.ddpprefect.schema import DbtProfile
 
 
 load_dotenv()
@@ -249,39 +248,44 @@ def delete_shell_block(blockid):
     return prefect_delete(f"block_documents/{blockid}")
 
 
+def _create_dbt_cli_profile_credentials(wtype, credentials):
+    if wtype == "postgres":
+        return {
+            "driver": "postgresql+psycopg2",
+            "host": credentials["host"],
+            "port": credentials["port"],
+            "username": credentials["username"],
+            "password": credentials["password"],
+            "database": credentials["database"],
+        }
+    if wtype == "bigquery":
+        return {
+            "service_account_info": credentials,
+        }
+    raise Exception(f"unrecognized target_configs_type {wtype}")
+
+
+def _create_dbt_cli_profile(profile: DbtProfile, wtype: str, credentials: dict):
+    """credentials are decrypted by now"""
+    return {
+        "name": profile.name,
+        "target": profile.target,
+        "target_configs": {
+            "type": wtype,
+            "schema": profile.target_configs_schema,
+            "credentials": _create_dbt_cli_profile_credentials(wtype, credentials),
+        },
+    }
+
+
 def create_dbt_core_block(
-    dbtcore: PrefectDbtCoreSetup,
-    profile: DbtProfile,
-    credentials: Union[DbtCredentialsPostgres, None],
+    dbtcore: PrefectDbtCoreSetup, profile: DbtProfile, wtype: str, credentials: dict
 ):
     """Create a dbt core block in prefect"""
     dbtcore_blocktype_id = get_block_type(DBTCORE)["id"]
     dbtcore_blockschematype_id = get_block_schema_type(DBTCORE, dbtcore_blocktype_id)[
         "id"
     ]
-
-    dbt_cli_profile = {
-        "name": profile.name,
-        "target": profile.target,
-        "target_configs": {
-            "type": profile.target_configs_type,
-            "schema": profile.target_configs_schema,
-            "credentials": None,
-        },
-    }
-    if profile.target_configs_type == "postgres":
-        dbt_cli_profile["target_configs"]["credentials"] = {
-            "driver": "postgresql+psycopg2",
-            "host": credentials.host,
-            "port": credentials.port,
-            "username": credentials.username,
-            "password": credentials.password,
-            "database": credentials.database,
-        }
-    else:
-        raise Exception(
-            f"unrecognized target_configs_type {profile.target_configs_type}"
-        )
 
     res = prefect_post(
         "block_documents/",
@@ -294,7 +298,7 @@ def create_dbt_core_block(
                 "project_dir": dbtcore.project_dir,
                 "working_dir": dbtcore.working_dir,
                 "env": dbtcore.env,
-                "dbt_cli_profile": dbt_cli_profile,
+                "dbt_cli_profile": _create_dbt_cli_profile(profile, wtype, credentials),
                 "commands": dbtcore.commands,
             },
             "is_anonymous": False,
