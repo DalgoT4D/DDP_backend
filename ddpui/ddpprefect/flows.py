@@ -19,13 +19,21 @@ def manual_dbt_core_flow(blockname):
 
 
 @flow
-def schedule_deployment_flow(flow: Flow):
+def deployment_schedule_flow(airbyte_blocks: list, dbt_blocks: list):
     """A general flow function that will help us create deployments"""
-    for airbyte in flow.airbytes:
-        airbyte.sync()
 
-    flow.dbt.pull_dbt_repo()
-    flow.dbt.dbt_deps()
-    flow.dbt.dbt_source_snapshot_freshness()
-    flow.dbt.dbt_run()
-    flow.dbt.dbt_test()
+    # sort the dbt blocks by seq
+    dbt_blocks.sort(key=lambda blk: blk["seq"])
+
+    # sort the airbyte blocks by seq
+    airbyte_blocks.sort(key=lambda blk: blk["seq"])
+
+    # run airbyte blocks
+    for block in airbyte_blocks:
+        airbyte_connection = AirbyteConnection.load(block["blockName"])
+        run_connection_sync(airbyte_connection)
+
+    # run dbt blocks
+    for block in dbt_blocks:
+        dbt_op = DbtCoreOperation.load(block["blockName"])
+        dbt_op.run()

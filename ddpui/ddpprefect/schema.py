@@ -96,7 +96,7 @@ class PrefectAirbyteConnectionBlockSchema(Schema):
 class PrefectFlowAirbyteConnection(Schema):
     """Validate the airbyte connection object in flow/pipeline create"""
 
-    id: str
+    blockName: str
     seq: int
 
 
@@ -104,5 +104,6 @@ class PrefectFlowCreateSchema(Schema):
     """Validate the create flow api payload"""
 
     name: str
-    connectionBlockIds: list[PrefectFlowAirbyteConnection]
-    dbtTransform: Optional[str]
+    connectionBlocks: list[PrefectFlowAirbyteConnection]
+    dbtTransform: str
+    cron: str
