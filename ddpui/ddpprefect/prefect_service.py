@@ -89,10 +89,7 @@ def get_block_schema_type(querystr, blocktypeid=None):
             }
         },
     )
-    if len(res) != 1:
-        raise Exception(
-            f'Expected exactly one prefect block schema for query "{blocktypeid}", received {len(res)} instead'
-        )
+    res.sort(key=lambda x: x["created"], reverse=True)
     blockschematype = res[0]
     return blockschematype
 
