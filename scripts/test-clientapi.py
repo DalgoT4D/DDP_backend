@@ -80,7 +80,6 @@ r = tester.clientpost(
         "profile": {
             "name": DBT_PROFILE,
             "target": "dev",
-            "target_configs_type": WAREHOUSETYPE,
             "target_configs_schema": DBT_TARGETCONFIGS_SCHEMA,
         },
     },
@@ -88,6 +87,8 @@ r = tester.clientpost(
 )
 print(r)
 
-tester.clientpost("prefect/flows/dbt_run/", json={"blockName": "ngo4-test"}, timeout=60)
+tester.clientpost(
+    "prefect/flows/dbt_run/", json={"blockName": r['block_name']}, timeout=60
+)
 
 # tester.clientdelete("prefect/blocks/dbt/")
