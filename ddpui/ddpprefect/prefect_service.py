@@ -2,10 +2,7 @@ import os
 import requests
 
 from dotenv import load_dotenv
-from prefect import flow
-from prefect_airbyte import AirbyteConnection
-from prefect_airbyte.flows import run_connection_sync
-from prefect_dbt.cli.commands import DbtCoreOperation
+
 from ddpui.ddpprefect.schema import (
     PrefectDbtCoreSetup,
     PrefectShellSetup,
@@ -16,308 +13,153 @@ from ddpui.ddpprefect.schema import DbtProfile
 
 load_dotenv()
 
-
+PREFECT_PROXY_API_URL = os.getenv("PREFECT_PROXY_API_URL")
 # prefect block names
 AIRBYTESERVER = "Airbyte Server"
 AIRBYTECONNECTION = "Airbyte Connection"
 SHELLOPERATION = "Shell Operation"
 DBTCORE = "dbt Core Operation"
 
-# ddp block types
+# ================================================================================================
+def get_airbyte_server_block_id(blockname) -> str | None:
+    """get the block_id for the server block having this name"""
+    response = requests.get(f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/server/{blockname}", timeout=30)
+    response.raise_for_status()
+    return response.json()['block_id']
 
 
-def prefect_get(endpoint):
-    """GET request to prefect server"""
-    root = os.getenv("PREFECT_API_URL")
-    res = requests.get(f"{root}/{endpoint}")
-    res.raise_for_status()
-    return res.json()
-
-
-def prefect_post(endpoint, json):
-    """POST request to prefect server"""
-    root = os.getenv("PREFECT_API_URL")
-    res = requests.post(f"{root}/{endpoint}", json=json)
-    res.raise_for_status()
-    return res.json()
-
-
-def prefect_patch(endpoint, json):
-    """PATCH request to prefect server"""
-    root = os.getenv("PREFECT_API_URL")
-    res = requests.patch(f"{root}/{endpoint}", json=json)
-    res.raise_for_status()
-    return res.json()
-
-
-def prefect_delete(endpoint):
-    """DELETE request to prefect server"""
-    root = os.getenv("PREFECT_API_URL")
-    res = requests.delete(f"{root}/{endpoint}")
-    res.raise_for_status()
-    return
-
-
-def get_block_type(querystr):
-    """Fetch prefect block type"""
-    res = prefect_post(
-        "block_types/filter",
-        {
-            "block_types": {
-                "name": {"like_": querystr},
-            }
-        },
-    )
-    if len(res) != 1:
-        raise Exception(
-            f'Expected exactly one prefect block type for query "{querystr}", received {len(res)} instead'
-        )
-    blocktype = res[0]
-    return blocktype
-
-
-def get_block_schema_type(querystr, blocktypeid=None):
-    """Fetch prefect block type schema"""
-    if blocktypeid is None:
-        blocktypeid = get_block_type(querystr)["id"]
-    res = prefect_post(
-        "block_schemas/filter",
-        {
-            "block_schemas": {
-                "operator": "and_",
-                "block_type_id": {"any_": [blocktypeid]},
-            }
-        },
-    )
-    res.sort(key=lambda x: x["created"], reverse=True)
-    blockschematype = res[0]
-    return blockschematype
-
-
-def get_block(blocktype, blockname):
-    """Fetch prefect block"""
-    blocktype_id = get_block_type(blocktype)["id"]
-    res = prefect_post(
-        "block_documents/filter",
-        {
-            "block_documents": {
-                "operator": "and_",
-                "block_type_id": {"any_": [blocktype_id]},
-                "name": {"any_": [blockname]},
-            }
-        },
-    )
-    if len(res) > 1:
-        raise Exception(f"Expected at most one {blocktype} block named {blockname}")
-    if len(res) == 0:
-        return None
-    block = res[0]
-    return block
-
-
-def get_block_by_id(block_id):
-    """Fetch prefect block by id"""
-    block = prefect_get(
-        f"block_documents/{block_id}",
-    )
-    return block
-
-
-def get_blocks(blocktype, blockname=""):
-    """Fetch prefect blocks"""
-    blocktype_id = get_block_type(blocktype)["id"]
-    query = {
-        "block_documents": {
-            "operator": "and_",
-            "block_type_id": {"any_": [blocktype_id]},
-        }
-    }
-    if len(blockname) > 0:
-        query["block_documents"]["name"] = {"any_": [blockname]}
-    res = prefect_post("block_documents/filter", query)
-    return res
-
-
-def create_airbyte_server_block(blockname):
+def create_airbyte_server_block(blockname) -> str:
     """Create airbyte server block in prefect"""
-    airbyte_server_blocktype_id = get_block_type(AIRBYTESERVER)["id"]
-    airbyte_server_blockschematype_id = get_block_schema_type(
-        AIRBYTESERVER, airbyte_server_blocktype_id
-    )["id"]
 
-    res = prefect_post(
-        "block_documents/",
-        {
-            "name": blockname,
-            "block_type_id": airbyte_server_blocktype_id,
-            "block_schema_id": airbyte_server_blockschematype_id,
-            "data": {
-                # 'username': ,
-                # 'password': ,
-                "server_host": os.getenv("AIRBYTE_SERVER_HOST"),
-                "server_port": os.getenv("AIRBYTE_SERVER_PORT"),
-                "api_version": os.getenv("AIRBYTE_SERVER_APIVER"),
-            },
-            "is_anonymous": False,
-        },
-    )
-    return res
+    response = requests.post(f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/server/", timeout=30, json={
+        "blockName": blockname,
+        "serverHost": os.getenv("AIRBYTE_SERVER_HOST"),
+        "serverPort": os.getenv("AIRBYTE_SERVER_PORT"),
+        "apiVersion": os.getenv("AIRBYTE_SERVER_APIVER"),
+    })
+    response.raise_for_status()
+    return response.json()['block_id']
 
 
-# todo
 def update_airbyte_server_block(blockname):
-    """Update the airbyte server block with a particular block name"""
-    return {}
+    """We don't update server blocks"""
+    raise Exception("not implemented")
 
 
-def delete_airbyte_server_block(blockid):
+def delete_airbyte_server_block(block_id):
     """Delete airbyte server block"""
-    return prefect_delete(f"block_documents/{blockid}")
+    requests.delete(f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=30)
 
 
-def create_airbyte_connection_block(conninfo: PrefectAirbyteConnectionSetup):
+# ================================================================================================
+def get_airbyte_connection_block_id(blockname) -> str | None:
+    """get the block_id for the connection block having this name"""
+    response = requests.get(f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/connection/{blockname}", timeout=30)
+    response.raise_for_status()
+    return response.json()['block_id']
+
+
+def create_airbyte_connection_block(
+    conninfo: PrefectAirbyteConnectionSetup,
+) -> str:
     """Create airbyte connection block"""
-    airbyte_connection_blocktype_id = get_block_type(AIRBYTECONNECTION)["id"]
-    airbyte_connection_blockschematype_id = get_block_schema_type(
-        AIRBYTECONNECTION, airbyte_connection_blocktype_id
-    )["id"]
 
-    serverblock = get_block(AIRBYTESERVER, conninfo.serverBlockName)
-    if serverblock is None:
-        raise Exception(
-            f"could not find {AIRBYTESERVER} block called {conninfo.serverBlockName}"
-        )
-
-    res = prefect_post(
-        "block_documents/",
-        {
-            "name": conninfo.connectionBlockName,
-            "block_type_id": airbyte_connection_blocktype_id,
-            "block_schema_id": airbyte_connection_blockschematype_id,
-            "data": {
-                "airbyte_server": {"$ref": {"block_document_id": serverblock["id"]}},
-                "connection_id": conninfo.connectionId,
-            },
-            "is_anonymous": False,
-        },
-    )
-
-    return res
+    response = requests.post(f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/connection/", timeout=30, json={
+        "serverBlockName": conninfo.serverBlockName,
+        "connectionId": conninfo.connectionId,
+        "connectionBlockName": conninfo.connectionBlockName,
+    })
+    response.raise_for_status()
+    return response.json()['block_id']
 
 
-# todo
 def update_airbyte_connection_block(blockname):
-    """Update the airbyte server block with a particular block name"""
-    return {}
+    """We don't update connection blocks"""
+    raise Exception("not implemented")
 
 
-def delete_airbyte_connection_block(blockid):
+def delete_airbyte_connection_block(block_id):
     """Delete airbyte connection block in prefect"""
-    return prefect_delete(f"block_documents/{blockid}")
+    requests.delete(f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=30)
+
+
+# ================================================================================================
+def get_shell_block_id(blockname) -> str | None:
+    """get the block_id for the shell block having this name"""
+    response = requests.get(f"{PREFECT_PROXY_API_URL}/proxy/blocks/shell/{blockname}", timeout=30)
+    response.raise_for_status()
+    return response.json()['block_id']
 
 
 def create_shell_block(shell: PrefectShellSetup):
     """Create a prefect shell block"""
-    shell_blocktype_id = get_block_type(SHELLOPERATION)["id"]
-    shell_blockschematype_id = get_block_schema_type(
-        SHELLOPERATION, shell_blocktype_id
-    )["id"]
 
-    res = prefect_post(
-        "block_documents/",
-        {
-            "name": shell.blockname,
-            "block_type_id": shell_blocktype_id,
-            "block_schema_id": shell_blockschematype_id,
-            "data": {
-                "working_dir": shell.working_dir,
-                "env": shell.env,
-                "commands": shell.commands,
-            },
-            "is_anonymous": False,
-        },
-    )
-    return res
+    response = requests.post(f"{PREFECT_PROXY_API_URL}/proxy/blocks/shell/", timeout=30, json={
+        "blockName": shell.blockname,
+        "commands": shell.commands, 
+        "env": shell.env, 
+        "workingDir": shell.workingDir,
+    })
+    response.raise_for_status()
+    return response.json()['block_id']
 
 
-def delete_shell_block(blockid):
+
+def delete_shell_block(block_id):
     """Delete a prefect shell block"""
-    return prefect_delete(f"block_documents/{blockid}")
+    requests.delete(f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=30)
 
 
-def _create_dbt_cli_profile_credentials(wtype, credentials):
-    if wtype == "postgres":
-        return {
-            "driver": "postgresql+psycopg2",
-            "host": credentials["host"],
-            "port": credentials["port"],
-            "username": credentials["username"],
-            "password": credentials["password"],
-            "database": credentials["database"],
-        }
-    if wtype == "bigquery":
-        return {
-            "service_account_info": credentials,
-        }
-    raise Exception(f"unrecognized target_configs_type {wtype}")
-
-
-def _create_dbt_cli_profile(profile: DbtProfile, wtype: str, credentials: dict):
-    """credentials are decrypted by now"""
-    return {
-        "name": profile.name,
-        "target": profile.target,
-        "target_configs": {
-            "type": wtype,
-            "schema": profile.target_configs_schema,
-            "credentials": _create_dbt_cli_profile_credentials(wtype, credentials),
-        },
-    }
+# ================================================================================================
+def get_dbtcore_block_id(blockname) -> str | None:
+    """get the block_id for the dbtcore block having this name"""
+    response = requests.get(f"{PREFECT_PROXY_API_URL}/proxy/blocks/dbtcore/{blockname}", timeout=30)
+    response.raise_for_status()
+    return response.json()['block_id']
 
 
 def create_dbt_core_block(
     dbtcore: PrefectDbtCoreSetup, profile: DbtProfile, wtype: str, credentials: dict
 ):
     """Create a dbt core block in prefect"""
-    dbtcore_blocktype_id = get_block_type(DBTCORE)["id"]
-    dbtcore_blockschematype_id = get_block_schema_type(DBTCORE, dbtcore_blocktype_id)[
-        "id"
-    ]
 
-    res = prefect_post(
-        "block_documents/",
-        {
-            "name": dbtcore.block_name,
-            "block_type_id": dbtcore_blocktype_id,
-            "block_schema_id": dbtcore_blockschematype_id,
-            "data": {
-                "profiles_dir": dbtcore.profiles_dir,
-                "project_dir": dbtcore.project_dir,
-                "working_dir": dbtcore.working_dir,
-                "env": dbtcore.env,
-                "dbt_cli_profile": _create_dbt_cli_profile(profile, wtype, credentials),
-                "commands": dbtcore.commands,
-            },
-            "is_anonymous": False,
+    response = requests.post(f"{PREFECT_PROXY_API_URL}/proxy/blocks/dbtcore/", timeout=30, json={
+        "blockName": dbtcore.block_name,
+        "profile": {
+            "name": profile.name,
+            "target": profile.target,
+            "target_configs_schema": profile.target_configs_schema,
         },
-    )
-    return res
+        "wtype": wtype,
+        "credentials": credentials,
+
+        "commands": dbtcore.commands,
+        "env": dbtcore.env,
+        "working_dir": dbtcore.working_dir,
+        "profiles_dir": dbtcore.profiles_dir,
+        "project_dir": dbtcore.project_dir
+
+    })
+    response.raise_for_status()
+    return response.json()['block_id']
 
 
 def delete_dbt_core_block(block_id):
     """Delete a dbt core block in prefect"""
-    return prefect_delete(f"block_documents/{block_id}")
+    requests.delete(f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=30)
 
 
-@flow
+# ================================================================================================
 def run_airbyte_connection_prefect_flow(blockname):
-    """Prefect flow to run airbyte connection"""
-    airbyte_connection = AirbyteConnection.load(blockname)
-    return run_connection_sync(airbyte_connection)
+    """run an airbyte connection sync"""
+    response = requests.post(f"{PREFECT_PROXY_API_URL}/proxy/flows/airbyte/connection/sync/", timeout=30, json={
+        "blockName": blockname
+    })
+    return response.json()
 
-
-@flow
 def run_dbtcore_prefect_flow(blockname):
-    """Prefect flow to run dbt"""
-    dbt_op = DbtCoreOperation.load(blockname)
-    dbt_op.run()
+    """run a dbt block sync"""
+    response = requests.post(f"{PREFECT_PROXY_API_URL}/proxy/flows/dbtcore/run/", timeout=30, json={
+        "blockName": blockname
+    })
+    return response.json()
