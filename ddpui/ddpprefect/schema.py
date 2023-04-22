@@ -91,3 +91,19 @@ class PrefectAirbyteConnectionBlockSchema(Schema):
     sourceCatalogId: str
     syncCatalog: dict
     status: str
+
+
+class PrefectFlowAirbyteConnection(Schema):
+    """Validate the airbyte connection object in flow/pipeline create"""
+
+    blockName: str
+    seq: int
+
+
+class PrefectFlowCreateSchema(Schema):
+    """Validate the create flow api payload"""
+
+    name: str
+    connectionBlocks: list[PrefectFlowAirbyteConnection]
+    dbtTransform: str
+    cron: str
