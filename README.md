@@ -48,6 +48,18 @@ Django application for the DDP platform's management backend. Exposes API endpoi
 
 ## Setup instructions
 
+-   `pyenv local 3.10`
+
+-   `pyenv exec python -m venv venv`
+
+-   `source venv/bin/activate`
+
+-   `pip install --upgrade pip`
+
 -   `pip install -r requirements.txt`
 
 -   create .env from .env.template
+
+-   `python manage.py migrate`
+
+-   `python manage.py runserver`
