@@ -11,7 +11,6 @@ from ddpui.ddpprefect.schema import (
     PrefectShellSetup,
     PrefectAirbyteConnectionSetup,
     DbtProfile,
-    DbtCredentialsPostgres,
 )
 from ddpui.ddpprefect import (
     AIRBYTECONNECTION,
