@@ -41,7 +41,7 @@ class OrgPrefectBlock(models.Model):
         return f"{self.org.name} {self.block_type} {self.block_name}"
 
 
-class OrgFlow(models.Model):
+class OrgDataFlow(models.Model):
     """This contains the deployment id of an organization to schedule flows/pipelines"""
 
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
