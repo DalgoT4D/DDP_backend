@@ -2,11 +2,24 @@ import os
 import requests
 
 from dotenv import load_dotenv
-
+from prefect import flow
+from prefect_airbyte import AirbyteConnection
+from prefect_airbyte.flows import run_connection_sync
+from prefect_dbt.cli.commands import DbtCoreOperation
 from ddpui.ddpprefect.schema import (
     PrefectDbtCoreSetup,
     PrefectShellSetup,
     PrefectAirbyteConnectionSetup,
+    DbtProfile,
+    DbtCredentialsPostgres,
+)
+from ddpui.ddpprefect import (
+    AIRBYTECONNECTION,
+    AIRBYTESERVER,
+    SHELLOPERATION,
+    DBTCORE,
+    FLOW_RUN_COMPLETED,
+    FLOW_RUN_FAILED,
 )
 from ddpui.ddpprefect.schema import DbtProfile
 
@@ -149,17 +162,63 @@ def delete_dbt_core_block(block_id):
     requests.delete(f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=30)
 
 
-# ================================================================================================
-def run_airbyte_connection_prefect_flow(blockname):
-    """run an airbyte connection sync"""
-    response = requests.post(f"{PREFECT_PROXY_API_URL}/proxy/flows/airbyte/connection/sync/", timeout=30, json={
-        "blockName": blockname
-    })
-    return response.json()
+# Flows and deployments
+def get_flow_runs_by_deployment_id(deployment_id, limit=None):
+    """Fetch flow runs of a deployment that are FAILED/COMPLETED sorted desc by start time of each run"""
+    query = {
+        "sort": "START_TIME_DESC",
+        "deployments": {"id": {"any_": [deployment_id]}},
+        "flow_runs": {
+            "operator": "and_",
+            "state": {"type": {"any_": [FLOW_RUN_COMPLETED, FLOW_RUN_FAILED]}},
+        },
+    }
 
-def run_dbtcore_prefect_flow(blockname):
-    """run a dbt block sync"""
-    response = requests.post(f"{PREFECT_PROXY_API_URL}/proxy/flows/dbtcore/run/", timeout=30, json={
-        "blockName": blockname
-    })
-    return response.json()
+    if limit:
+        query["limit"] = limit
+
+    filtered_res = []
+
+    for flow_run in prefect_post("flow_runs/filter", query):
+        filtered_res.append(
+            {
+                "tags": flow_run["tags"],
+                "startTime": flow_run["start_time"],
+                "status": flow_run["state"]["type"],
+            }
+        )
+
+    return filtered_res
+
+
+def get_last_flow_run_by_deployment_id(deployment_id):
+    """Fetch flow runs of a deployment that are FAILED/COMPLETED sorted desc by start time of each run"""
+
+    res = get_flow_runs_by_deployment_id(deployment_id, limit=1)
+
+    if len(res) > 0:
+        return res[0]
+
+    return None
+
+
+def get_deployments_by_org_slug(org_slug):
+    """Fetch all deployments by org slug"""
+    res = prefect_post(
+        "deployments/filter",
+        {"deployments": {"tags": {"all_": [org_slug]}}},
+    )
+
+    filtered_res = []
+
+    for deployment in res:
+        filtered_res.append(
+            {
+                "name": deployment["name"],
+                "id": deployment["id"],
+                "tags": deployment["tags"],
+                "cron": deployment["schedule"]["cron"],
+            }
+        )
+
+    return filtered_res

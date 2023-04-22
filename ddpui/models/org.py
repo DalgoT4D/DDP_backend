@@ -41,6 +41,15 @@ class OrgPrefectBlock(models.Model):
         return f"{self.org.name} {self.block_type} {self.block_name}"
 
 
+class OrgFlow(models.Model):
+    """This contains the deployment id of an organization to schedule flows/pipelines"""
+
+    org = models.ForeignKey(Org, on_delete=models.CASCADE)
+    name = models.CharField(max_length=100)
+    deployment_id = models.CharField(max_length=36, unique=True)
+    cron = models.CharField(max_length=36, unique=True)
+
+
 class OrgSchema(Schema):
     """Docstring"""
 
