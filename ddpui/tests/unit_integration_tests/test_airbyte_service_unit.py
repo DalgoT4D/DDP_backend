@@ -293,7 +293,7 @@ class TestAirbyteDestination:
                 workspace_id=test_workspace_id,
                 destination_id="603cb3a1-d232-45cd-98a5-4312d6243c2c",
             )
-            breakpoint()
+            # breakpoint()
             GetDestinationTestResponse(**res)
         except ValidationError as e:
             raise ValueError(f"Response validation failed: {e.errors()}")
