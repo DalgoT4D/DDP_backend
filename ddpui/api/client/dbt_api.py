@@ -1,7 +1,6 @@
 import os
 import shutil
 from pathlib import Path
-import json
 
 from django.utils.text import slugify
 from ninja import NinjaAPI
