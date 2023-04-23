@@ -48,10 +48,15 @@ def delete_airbyte_server_block(block_id):
 # ================================================================================================
 def get_airbyte_connection_block_id(blockname) -> str | None:
     """get the block_id for the connection block having this name"""
-    response = requests.get(f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/connection/{blockname}", timeout=30)
+    response = requests.get(f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/connection/byblockname/{blockname}", timeout=30)
     response.raise_for_status()
     return response.json()['block_id']
 
+def get_airbyte_connection_block_by_id(block_id: str):
+    """look up a prefect airbyte-connection block by id"""
+    response = requests.get(f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/connection/byblockid/{block_id}", timeout=30)
+    response.raise_for_status()
+    return response.json()
 
 def create_airbyte_connection_block(
     conninfo: PrefectAirbyteConnectionSetup,
