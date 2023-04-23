@@ -2,35 +2,17 @@ import os
 import requests
 
 from dotenv import load_dotenv
-from prefect import flow
-from prefect_airbyte import AirbyteConnection
-from prefect_airbyte.flows import run_connection_sync
-from prefect_dbt.cli.commands import DbtCoreOperation
 from ddpui.ddpprefect.schema import (
     PrefectDbtCoreSetup,
     PrefectShellSetup,
     PrefectAirbyteConnectionSetup,
     DbtProfile,
+    PrefectDataFlowCreateSchema2,
 )
-from ddpui.ddpprefect import (
-    AIRBYTECONNECTION,
-    AIRBYTESERVER,
-    SHELLOPERATION,
-    DBTCORE,
-    FLOW_RUN_COMPLETED,
-    FLOW_RUN_FAILED,
-)
-from ddpui.ddpprefect.schema import DbtProfile
-
 
 load_dotenv()
 
 PREFECT_PROXY_API_URL = os.getenv("PREFECT_PROXY_API_URL")
-# prefect block names
-AIRBYTESERVER = "Airbyte Server"
-AIRBYTECONNECTION = "Airbyte Connection"
-SHELLOPERATION = "Shell Operation"
-DBTCORE = "dbt Core Operation"
 
 # ================================================================================================
 def get_airbyte_server_block_id(blockname) -> str | None:
@@ -116,7 +98,6 @@ def create_shell_block(shell: PrefectShellSetup):
     return response.json()['block_id']
 
 
-
 def delete_shell_block(block_id):
     """Delete a prefect shell block"""
     requests.delete(f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=30)
@@ -161,63 +142,62 @@ def delete_dbt_core_block(block_id):
     requests.delete(f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=30)
 
 
+# ================================================================================================
+def run_airbyte_connection_sync(block_name: str):
+    """initiates an airbyte connection sync"""
+    res = requests.post(f"{PREFECT_PROXY_API_URL}/proxy/flows/airbyte/connection/sync/", timeout=30, json={
+        "blockName": block_name
+    })
+    res.raise_for_status()
+    return res.json()
+
+
+def run_dbt_core_sync(block_name: str):
+    """initiates a dbt job sync"""
+    res = requests.post(f"{PREFECT_PROXY_API_URL}/proxy/flows/dbtcore/run/", timeout=30, json={
+        "blockName": block_name
+    })
+    res.raise_for_status()
+    return res.json()
+
+
+def create_dataflow(payload: PrefectDataFlowCreateSchema2):
+    """create a prefect deployment out of a flow and a cron schedule"""
+    res = requests.post(f"{PREFECT_PROXY_API_URL}/proxy/deployments/", timeout=30, json={
+        "flow_name": payload.flow_name,
+        "deployment_name": payload.deployment_name,
+        "org_slug": payload.orgslug,
+        "connection_blocks": payload.connection_blocks,
+        "dbt_blocks": payload.dbt_blocks,
+        "cron": payload.cron
+    })
+    res.raise_for_status()
+    return res.json()
+
+
 # Flows and deployments
 def get_flow_runs_by_deployment_id(deployment_id, limit=None):
-    """Fetch flow runs of a deployment that are FAILED/COMPLETED sorted desc by start time of each run"""
-    query = {
-        "sort": "START_TIME_DESC",
-        "deployments": {"id": {"any_": [deployment_id]}},
-        "flow_runs": {
-            "operator": "and_",
-            "state": {"type": {"any_": [FLOW_RUN_COMPLETED, FLOW_RUN_FAILED]}},
-        },
-    }
-
-    if limit:
-        query["limit"] = limit
-
-    filtered_res = []
-
-    for flow_run in prefect_post("flow_runs/filter", query):
-        filtered_res.append(
-            {
-                "tags": flow_run["tags"],
-                "startTime": flow_run["start_time"],
-                "status": flow_run["state"]["type"],
-            }
-        )
-
-    return filtered_res
+    """Fetch flow runs of a deployment that are FAILED/COMPLETED sorted by descending start time of each run"""
+    res = requests.get(f"{PREFECT_PROXY_API_URL}/proxy/flow_runs", timeout=30, params={
+        "deployment_id": deployment_id,
+        "limit": limit
+    })
+    res.raise_for_status()
+    return res.json()['flow_runs']
 
 
 def get_last_flow_run_by_deployment_id(deployment_id):
-    """Fetch flow runs of a deployment that are FAILED/COMPLETED sorted desc by start time of each run"""
-
+    """Fetch most recent flow run of a deployment that is FAILED/COMPLETED"""
     res = get_flow_runs_by_deployment_id(deployment_id, limit=1)
-
     if len(res) > 0:
         return res[0]
-
     return None
 
 
 def get_deployments_by_org_slug(org_slug):
     """Fetch all deployments by org slug"""
-    res = prefect_post(
-        "deployments/filter",
-        {"deployments": {"tags": {"all_": [org_slug]}}},
-    )
-
-    filtered_res = []
-
-    for deployment in res:
-        filtered_res.append(
-            {
-                "name": deployment["name"],
-                "id": deployment["id"],
-                "tags": deployment["tags"],
-                "cron": deployment["schedule"]["cron"],
-            }
-        )
-
-    return filtered_res
+    res = requests.get(f"{PREFECT_PROXY_API_URL}/proxy/deployments", timeout=30, params={
+        "org_slug": org_slug,
+    })
+    res.raise_for_status()
+    return res.json()['flow_runs']

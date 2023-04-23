@@ -88,10 +88,19 @@ class PrefectFlowAirbyteConnection(Schema):
     seq: int
 
 
-class PrefectFlowCreateSchema(Schema):
-    """Validate the create flow api payload"""
+class PrefectDataFlowCreateSchema(Schema):
+    """Payload sent by the frontend to create a dataflow"""
 
     name: str
     connectionBlocks: list[PrefectFlowAirbyteConnection]
     dbtTransform: str
+    cron: str
+
+class PrefectDataFlowCreateSchema2(Schema):
+    """Payload to be sent to the prefect-proxy"""
+    deployment_name: str
+    flow_name: str
+    orgslug: str
+    connection_blocks: list
+    dbt_blocks: list
     cron: str
