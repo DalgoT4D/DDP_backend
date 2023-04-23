@@ -17,7 +17,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteWorkspaceCreate,
 )
 
-from ddpui.ddpprefect.flows import manual_airbyte_connection_flow
+from ddpui.ddpprefect.prefect_service import run_airbyte_connection_sync
 from ddpui.ddpprefect.schema import PrefectAirbyteConnectionBlockSchema
 
 from ddpui.ddpprefect import (
@@ -597,4 +597,4 @@ def post_airbyte_sync_connection(request, connection_block_id):
 
     assert org_prefect_connection_block
 
-    return manual_airbyte_connection_flow(org_prefect_connection_block.block_name)
+    return run_airbyte_connection_sync(org_prefect_connection_block.block_name)
