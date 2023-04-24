@@ -11,7 +11,7 @@ from ddpui import auth
 from ddpui.ddpprefect import prefect_service
 
 from ddpui.ddpprefect import DBTCORE
-from ddpui.models.org import OrgPrefectBlock, OrgWarehouse
+from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
 from ddpui.ddpprefect.schema import (
     PrefectAirbyteSync,
     PrefectDbtCore,
@@ -59,7 +59,7 @@ def ninja_default_error_handler(
     # return Response({"error": " ".join(exc.args)}, status=500)
 
 
-@prefectapi.post("/dataflows/", auth=auth.CanManagePipelines())
+@prefectapi.post("/flows/", auth=auth.CanManagePipelines())
 def post_prefect_dataflow(request, payload: PrefectDataFlowCreateSchema):
     """Create a prefect deployment i.e. a ddp dataflow"""
     orguser = request.orguser
@@ -85,34 +85,74 @@ def post_prefect_dataflow(request, payload: PrefectDataFlowCreateSchema):
     deployment_name = "-".join(name_components + ["deployment"])
     flow_name = "-".join(name_components + ["flow"])
 
-    result = prefect_service.create_dataflow(
+    res = prefect_service.create_dataflow(
         PrefectDataFlowCreateSchema2(
             deployment_name=deployment_name,
             flow_name=flow_name,
             orgslug=orguser.org.slug,
             connection_blocks=payload.connectionBlocks,
             dbt_blocks=dbt_blocks,
-            cron=payload.cron
+            cron=payload.cron,
         )
     )
 
-    return {"success": 1, "result": result}
+    org_data_flow = OrgDataFlow.objects.create(
+        org=orguser.org,
+        name=res["deployment"]["name"],
+        deployment_id=res["deployment"]["id"],
+        cron=payload.cron,
+    )
+
+    return {
+        "deploymentId": org_data_flow.deployment_id,
+        "name": org_data_flow.name,
+        "cron": org_data_flow.cron,
+    }
 
 
 @prefectapi.get("/flows/", auth=auth.CanManagePipelines())
-def get_prefect_flows(request):
+def get_prefect_dataflows(request):
     """Fetch all flows/pipelines created in an organization"""
     orguser = request.orguser
 
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
 
-    deployments = prefect_service.get_deployments_by_org_slug(orguser.org.slug)
+    org_deployment_ids = [
+        flow.deployment_id for flow in OrgDataFlow.objects.filter(org=orguser.org).all()
+    ]
+
+    deployments = prefect_service.get_filtered_deployments(
+        org_slug=orguser.org.slug, deployment_ids=org_deployment_ids
+    )
 
     for deployment in deployments:
-        deployment['lastRun'] = prefect_service.get_last_flow_run_by_deployment_id(deployment['id'])
+        deployment["lastRun"] = prefect_service.get_last_flow_run_by_deployment_id(
+            deployment["deploymentId"]
+        )
 
     return deployments
+
+
+@prefectapi.delete("/flows/{deployment_id}", auth=auth.CanManagePipelines())
+def delete_prefect_dataflow(request, deployment_id):
+    """Delete a prefect deployment along with its org data flow"""
+    orguser = request.orguser
+
+    if orguser.org is None:
+        raise HttpError(400, "register an organization first")
+
+    prefect_service.delete_deployment_by_id(deployment_id)
+
+    # remove the org data flow
+    org_data_flow = OrgDataFlow.objects.filter(
+        org=orguser.org, deployment_id=deployment_id
+    ).first()
+
+    if org_data_flow:
+        org_data_flow.delete()
+
+    return {"success": 1}
 
 
 @prefectapi.post("/flows/airbyte_sync/", auth=auth.CanManagePipelines())
