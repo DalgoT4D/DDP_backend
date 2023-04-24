@@ -11,7 +11,7 @@ from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from rest_framework.authtoken import views
 
 from ddpui import auth
-from ddpui.models.org import Org, OrgSchema
+from ddpui.models.org import Org, OrgSchema, OrgWarehouse, OrgWarehouseSchema
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
     Invitation,
@@ -24,6 +24,7 @@ from ddpui.models.org_user import (
 )
 from ddpui.utils.ddp_logger import logger
 from ddpui.utils.timezone import IST
+from ddpui.utils import secretsmanager
 
 user_org_api = NinjaAPI(urls_namespace="userorg")
 # http://127.0.0.1:8000/api/docs
@@ -166,6 +167,26 @@ def post_organization(request, payload: OrgSchema):
     orguser.save()
     logger.info(f"{orguser.user.email} created new org {org.name}")
     return OrgSchema(name=org.name, airbyte_workspace_id=None)
+
+
+@user_org_api.post("/organizations/warehouse/", auth=auth.CanManagePipelines())
+def post_organization_warehouse(request, payload: OrgWarehouseSchema):
+    """registers a data warehouse for the org"""
+    orguser = request.orguser
+    if payload.wtype not in ["postgres", "bigquery"]:
+        raise HttpError(400, "unrecognized warehouse type " + payload.wtype)
+
+    warehouse = OrgWarehouse(org=orguser.org, wtype=payload.wtype, credentials="")
+    secretsmanager.save_warehouse_credentials(warehouse, payload.credentials)
+    return {"success": 1}
+
+
+@user_org_api.delete("/organizations/warehouses/", auth=auth.CanManagePipelines())
+def delete_organization_warehouses(request):
+    """deletes all (references to) data warehouses for the org"""
+    orguser = request.orguser
+    for warehouse in OrgWarehouse.objects.filter(org=orguser.org):
+        warehouse.delete()
 
 
 @user_org_api.post(

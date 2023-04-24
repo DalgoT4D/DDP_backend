@@ -3,19 +3,19 @@ from ninja import Schema
 
 
 class PrefectAirbyteSync(Schema):
-    """Docstring"""
+    """request payload to trigger an airbyte sync in prefect by specifying the prefect blockname"""
 
     blockName: str
 
 
 class PrefectDbtCore(Schema):
-    """Docstring"""
+    """request payload to trigger a dbt core op flow in prefect by specifying the prefect blockname"""
 
     blockName: str
 
 
 class PrefectAirbyteConnectionSetup(Schema):
-    """Docstring"""
+    """create an airbyte connection block in prefect after creating the connection in airbyte"""
 
     serverBlockName: str
     connectionBlockName: str
@@ -38,18 +38,8 @@ class DbtProfile(Schema):
 
     name: str
     target: str
-    target_configs_type: str
+    # target_configs_type: this is now orgwarehouse.wtype
     target_configs_schema: str
-
-
-class DbtCredentialsPostgres(Schema):
-    """Docstring"""
-
-    host: str
-    port: str
-    username: str
-    password: str
-    database: str
 
 
 class PrefectShellSetup(Schema):
@@ -65,7 +55,6 @@ class OrgDbtSchema(Schema):
     """Docstring"""
 
     profile: DbtProfile
-    credentials: DbtCredentialsPostgres  # todo can this be a union
     gitrepoUrl: str
     gitrepoAccessToken: Optional[str]
     dbtVersion: str
@@ -75,7 +64,6 @@ class PrefectDbtRun(Schema):
     """Docstring"""
 
     profile: DbtProfile
-    credentials: DbtCredentialsPostgres  # todo can this be a union
 
 
 class PrefectAirbyteConnectionBlockSchema(Schema):
@@ -100,10 +88,19 @@ class PrefectFlowAirbyteConnection(Schema):
     seq: int
 
 
-class PrefectFlowCreateSchema(Schema):
-    """Validate the create flow api payload"""
+class PrefectDataFlowCreateSchema(Schema):
+    """Payload sent by the frontend to create a dataflow"""
 
     name: str
     connectionBlocks: list[PrefectFlowAirbyteConnection]
     dbtTransform: str
+    cron: str
+
+class PrefectDataFlowCreateSchema2(Schema):
+    """Payload to be sent to the prefect-proxy"""
+    deployment_name: str
+    flow_name: str
+    orgslug: str
+    connection_blocks: list
+    dbt_blocks: list
     cron: str

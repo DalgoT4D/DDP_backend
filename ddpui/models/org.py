@@ -7,18 +7,13 @@ class OrgDbt(models.Model):
 
     gitrepo_url = models.CharField(max_length=100)
     gitrepo_access_token_secret = models.CharField(max_length=100, null=True)
+
     project_dir = models.CharField(max_length=200)
     dbt_version = models.CharField(max_length=10)
+
     target_name = models.CharField(max_length=10)
     target_type = models.CharField(max_length=10)
     target_schema = models.CharField(max_length=10)
-
-    # connection to target warehouse
-    host = models.CharField(max_length=100)
-    port = models.CharField(max_length=5)
-    username = models.CharField(max_length=100)
-    password = models.CharField(max_length=100)  # encrypted
-    database = models.CharField(max_length=50)
 
 
 class Org(models.Model):
@@ -46,7 +41,7 @@ class OrgPrefectBlock(models.Model):
         return f"{self.org.name} {self.block_type} {self.block_name}"
 
 
-class OrgFlow(models.Model):
+class OrgDataFlow(models.Model):
     """This contains the deployment id of an organization to schedule flows/pipelines"""
 
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
@@ -60,3 +55,18 @@ class OrgSchema(Schema):
 
     name: str
     airbyte_workspace_id: str = None
+
+
+class OrgWarehouse(models.Model):
+    """A data warehouse for an org. Typically we expect exactly one"""
+
+    wtype = models.CharField(max_length=25)  # postgres, bigquery
+    credentials = models.CharField(max_length=200)
+    org = models.ForeignKey(Org, on_delete=models.CASCADE)
+
+
+class OrgWarehouseSchema(Schema):
+    """payload to register an organization's data warehouse"""
+
+    wtype: str
+    credentials: dict

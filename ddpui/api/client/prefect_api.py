@@ -1,7 +1,5 @@
 import os
 from pathlib import Path
-import asyncio
-from asgiref.sync import sync_to_async
 
 from ninja import NinjaAPI
 from ninja.errors import HttpError, ValidationError
@@ -9,32 +7,25 @@ from ninja.responses import Response
 from django.utils.text import slugify
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
-from prefect.deployments import Deployment
-from prefect.server.schemas.schedules import CronSchedule
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
 
 from ddpui.ddpprefect import DBTCORE
-from ddpui.models.org import OrgPrefectBlock
+from ddpui.models.org import OrgPrefectBlock, OrgWarehouse
 from ddpui.ddpprefect.schema import (
-    PrefectAirbyteSync,  # DbtProfile,
+    PrefectAirbyteSync,
     PrefectDbtCore,
     PrefectDbtCoreSetup,
     PrefectDbtRun,
-    PrefectFlowCreateSchema,
+    PrefectDataFlowCreateSchema,
+    PrefectDataFlowCreateSchema2,
 )
 
-from ddpui.ddpprefect.flows import (
-    manual_dbt_core_flow,
-    manual_airbyte_connection_flow,
-    deployment_schedule_flow,
-)
 from ddpui.utils.ddp_logger import logger
+from ddpui.utils import secretsmanager
 
 prefectapi = NinjaAPI(urls_namespace="prefect")
 # http://127.0.0.1:8000/api/docs
-
-os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 
 
 @prefectapi.exception_handler(ValidationError)
@@ -68,22 +59,20 @@ def ninja_default_error_handler(
     # return Response({"error": " ".join(exc.args)}, status=500)
 
 
-@prefectapi.post("/flows/", auth=auth.CanManagePipelines())
-async def post_prefect_flow(request, payload: PrefectFlowCreateSchema):
-    """Run airbyte sync flow in prefect"""
+@prefectapi.post("/dataflows/", auth=auth.CanManagePipelines())
+def post_prefect_dataflow(request, payload: PrefectDataFlowCreateSchema):
+    """Create a prefect deployment i.e. a ddp dataflow"""
     orguser = request.orguser
 
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
 
-    deployment_name = "deployment"
-    flow_name = "flow"
-    dbt_blocks = []
+    name_components = [orguser.org.slug]
 
     # check if pipeline has dbt transformation
+    dbt_blocks = []
     if payload.dbtTransform == "yes":
-        deployment_name = "dbt-" + deployment_name
-        flow_name = "dbt-" + flow_name
+        name_components.append("dbt")
         for dbt_block in OrgPrefectBlock.objects.filter(
             org=orguser.org, block_type=DBTCORE
         ):
@@ -91,26 +80,23 @@ async def post_prefect_flow(request, payload: PrefectFlowCreateSchema):
 
     # check if pipeline has airbyte syncs
     if len(payload.connectionBlocks) > 0:
-        deployment_name = "airbyte-" + deployment_name
-        flow_name = "airbyte-" + flow_name
+        name_components.append("airbyte")
 
-    deployment_name = orguser.org.slug + "-" + deployment_name
-    flow_name = orguser.org.slug + "-" + flow_name
+    deployment_name = "-".join(name_components + ["deployment"])
+    flow_name = "-".join(name_components + ["flow"])
 
-    deployment = await sync_to_async(Deployment.build_from_flow)(
-        flow=deployment_schedule_flow.with_options(name=flow_name),
-        name=deployment_name,
-        work_queue_name="ddp",
-        tags=[orguser.org.slug],
+    result = prefect_service.create_dataflow(
+        PrefectDataFlowCreateSchema2(
+            deployment_name=deployment_name,
+            flow_name=flow_name,
+            orgslug=orguser.org.slug,
+            connection_blocks=payload.connectionBlocks,
+            dbt_blocks=dbt_blocks,
+            cron=payload.cron
+        )
     )
-    deployment.parameters = {
-        "airbyte_blocks": payload.connectionBlocks,
-        "dbt_blocks": dbt_blocks,
-    }
-    deployment.schedule = CronSchedule(cron=payload.cron)
-    await sync_to_async(deployment.apply)()
 
-    return {"success": 1}
+    return {"success": 1, "result": result}
 
 
 @prefectapi.get("/flows/", auth=auth.CanManagePipelines())
@@ -136,7 +122,7 @@ def post_prefect_airbyte_sync_flow(request, payload: PrefectAirbyteSync):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    return manual_airbyte_connection_flow(payload.blockName)
+    return prefect_service.run_airbyte_connection_sync(payload.blockName)
 
 
 @prefectapi.post("/flows/dbt_run/", auth=auth.CanManagePipelines())
@@ -144,7 +130,7 @@ def post_prefect_dbt_core_run_flow(
     request, payload: PrefectDbtCore
 ):  # pylint: disable=unused-argument
     """Run dbt flow in prefect"""
-    return manual_dbt_core_flow(payload.blockName)
+    return prefect_service.run_dbt_core_sync(payload.blockName)
 
 
 @prefectapi.post("/blocks/dbt/", auth=auth.CanManagePipelines())
@@ -153,6 +139,11 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
     orguser = request.orguser
     if orguser.org.dbt is None:
         raise HttpError(400, "create a dbt workspace first")
+
+    warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if warehouse is None:
+        raise HttpError(400, "need to set up a warehouse first")
+    credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
 
     dbt_env_dir = Path(os.getenv("CLIENTDBT_ROOT")) / orguser.org.slug
     if not os.path.exists(dbt_env_dir):
@@ -174,22 +165,25 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
             commands=[f"{dbt_binary} {command} --target {payload.profile.target}"],
         )
 
-        block = prefect_service.create_dbt_core_block(
-            block_data, payload.profile, payload.credentials
+        block_id = prefect_service.create_dbt_core_block(
+            block_data,
+            payload.profile,
+            warehouse.wtype,
+            credentials,
         )
 
         coreprefectblock = OrgPrefectBlock(
             org=orguser.org,
-            block_type=block["block_type"]["name"],
-            block_id=block["id"],
-            block_name=block["name"],
-            display_name=block["name"],
+            block_type=DBTCORE,
+            block_id=block_id,
+            block_name=block_name,
+            display_name=block_name,
             seq=sequence_number,
         )
 
         coreprefectblock.save()
 
-    return {"success": 1}
+    return {"success": 1, "block_name": block_name}
 
 
 @prefectapi.get("/blocks/dbt/", auth=auth.CanManagePipelines())
