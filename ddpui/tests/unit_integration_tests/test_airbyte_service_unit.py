@@ -15,7 +15,7 @@ class TestWorkspace:
     workspace_id = None
 
     def test_a_create_workspace(self):
-        payload = {"name": "workspace1"}
+        payload = {"name": "test_workspace"}
 
         try:
             CreateWorkspaceTestPayload(**payload)
