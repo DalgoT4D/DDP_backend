@@ -2,9 +2,9 @@ name: Python package
 
 on:
   push:
-    branches: [unit_tests_for_airbyte_service]
+    branches: [automate_tests]
   pull_request:
-    branches: [unit_tests_for_airbyte_service]
+    branches: [automate_tests]
 
 jobs:
   build:
