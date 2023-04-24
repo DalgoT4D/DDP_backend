@@ -21,6 +21,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Create logs directory
         run: mkdir -p ddpui/logs
+      - name: Set environment variables
+        run: |
+          echo "AIRBYTE_SERVER_HOST=${{ secrets.AIRBYTE_SERVER_HOST }}" >> $GITHUB_ENV
+          echo "AIRBYTE_SERVER_PORT=${{ secrets.AIRBYTE_SERVER_PORT }}" >> $GITHUB_ENV
+          echo "AIRBYTE_SERVER_APIVER=${{ secrets.AIRBYTE_SERVER_APIVER }}" >> $GITHUB_ENV
+          echo "AIRBYTE_API_TOKEN=${{ secrets.AIRBYTE_API_TOKEN }}" >> $GITHUB_ENV
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
