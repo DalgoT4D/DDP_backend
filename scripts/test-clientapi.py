@@ -1,5 +1,7 @@
 import os
 import json
+from time import sleep
+from faker import Faker
 
 from dotenv import load_dotenv
 
@@ -22,11 +24,20 @@ DBT_BIGQUERY_SERVICE_ACCOUNT_CREDSFILE = os.getenv(
 DBT_TEST_REPO = os.getenv("TESTING_DBT_TEST_REPO")
 DBT_TEST_REPO_ACCESSTOKEN = os.getenv("TESTING_DBT_TEST_REPO_ACCESSTOKEN")
 
+faker = Faker('en-IN')
 tester = TestClient(8002)
-
-tester.login("user1@ddp", "password")
+email = faker.email()
+password = faker.password()
+tester.clientpost("organizations/users/", json={
+    'email': email,
+    'password': password
+})
+tester.login(email, password)
 tester.clientget("currentuser")
-tester.clientdelete("organizations/warehouses/")
+tester.clientpost('organizations/', json={
+    "name": faker.company()[:20],
+})
+# tester.clientdelete("organizations/warehouses/")
 
 credentials = None
 if WAREHOUSETYPE == "postgres":
@@ -68,6 +79,20 @@ if True:
         },
         timeout=30,
     )
+    task_id = r['task_id']
+    while True:
+        sleep(2)
+        resp = tester.clientget('tasks/' + task_id)
+        if 'progress' not in resp:
+            continue
+        progress = resp['progress']
+        laststatus = None
+        for step in progress:
+            print(step)
+            laststatus = step['status']
+        if laststatus in ['failed', 'completed']:
+            break
+        print("=" * 40)
 
 if True:
     tester.clientpost("dbt/git_pull/")
