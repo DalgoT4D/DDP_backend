@@ -1,8 +1,9 @@
 from typing import List
 from ninja import NinjaAPI
-from ninja.errors import HttpError, ValidationError
-from ninja.responses import Response
-from pydantic.error_wrappers import ValidationError as PydanticValidationError
+from ninja.errors import HttpError
+# from ninja.errors import ValidationError
+# from ninja.responses import Response
+# from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from django.utils.text import slugify
 from ddpui import auth
 from ddpui.ddpairbyte import airbyte_service
