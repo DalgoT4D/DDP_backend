@@ -260,3 +260,12 @@ def delete_deployment_by_id(deployment_id):
     )
     res.raise_for_status()
     return {"success": 1}
+
+def get_flow_run_logs(flow_run_id):
+    """retreive the logs from a flow-run from prefect"""
+    res = requests.get(
+        f"{PREFECT_PROXY_API_URL}/proxy/flow_runs/logs/{flow_run_id}",
+        timeout=30,   
+    )
+    res.raise_for_status()
+    return {"logs": res.json()}
