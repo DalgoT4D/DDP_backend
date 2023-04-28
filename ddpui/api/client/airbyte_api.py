@@ -1,8 +1,9 @@
 from typing import List
 from ninja import NinjaAPI
-from ninja.errors import HttpError, ValidationError
-from ninja.responses import Response
-from pydantic.error_wrappers import ValidationError as PydanticValidationError
+from ninja.errors import HttpError
+# from ninja.errors import ValidationError
+# from ninja.responses import Response
+# from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from django.utils.text import slugify
 from ddpui import auth
 from ddpui.ddpairbyte import airbyte_service
@@ -31,34 +32,34 @@ from ddpui.utils.ddp_logger import logger
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
 
 
-@airbyteapi.exception_handler(ValidationError)
-def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
-    """Handle any ninja validation errors raised in the apis"""
-    return Response({"error": exc.errors}, status=422)
+# @airbyteapi.exception_handler(ValidationError)
+# def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
+#     """Handle any ninja validation errors raised in the apis"""
+#     return Response({"error": exc.errors}, status=422)
 
 
-@airbyteapi.exception_handler(PydanticValidationError)
-def pydantic_validation_error_handler(
-    request, exc: PydanticValidationError
-):  # pylint: disable=unused-argument
-    """Handle any pydantic errors raised in the apis"""
-    return Response({"error": exc.errors()}, status=422)
+# @airbyteapi.exception_handler(PydanticValidationError)
+# def pydantic_validation_error_handler(
+#     request, exc: PydanticValidationError
+# ):  # pylint: disable=unused-argument
+#     """Handle any pydantic errors raised in the apis"""
+#     return Response({"error": exc.errors()}, status=422)
 
 
-@airbyteapi.exception_handler(HttpError)
-def ninja_http_error_handler(
-    request, exc: HttpError
-):  # pylint: disable=unused-argument
-    """Handle any http errors raised in the apis"""
-    return Response({"error": " ".join(exc.args)}, status=exc.status_code)
+# @airbyteapi.exception_handler(HttpError)
+# def ninja_http_error_handler(
+#     request, exc: HttpError
+# ):  # pylint: disable=unused-argument
+#     """Handle any http errors raised in the apis"""
+#     return Response({"error": " ".join(exc.args)}, status=exc.status_code)
 
 
-@airbyteapi.exception_handler(Exception)
-def ninja_default_error_handler(
-    request, exc: Exception
-):  # pylint: disable=unused-argument
-    """Handle any other exception raised in the apis"""
-    return Response({"error": " ".join(exc.args)}, status=500)
+# @airbyteapi.exception_handler(Exception)
+# def ninja_default_error_handler(
+#     request, exc: Exception
+# ):  # pylint: disable=unused-argument
+#     """Handle any other exception raised in the apis"""
+#     return Response({"error": " ".join(exc.args)}, status=500)
 
 
 @airbyteapi.post("/workspace/detach/", auth=auth.CanManagePipelines())
@@ -480,10 +481,10 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
     destination_name = airbyte_service.get_destination(orguser.org.airbyte_workspace_id, payload.destinationId)['destinationName']
     connection_name = f"{source_name}-{destination_name}"
     base_block_name = f"{orguser.org.slug}-{slugify(connection_name)}"
-    
+
     # fetch all prefect blocks are being fetched for a particular type
     prefect_airbyte_connection_block_names = []
-    for orgprefectblock in OrgPrefectBlock.objects.filter(org=orguser.org, blocktype=AIRBYTECONNECTION):
+    for orgprefectblock in OrgPrefectBlock.objects.filter(org=orguser.org, block_type=AIRBYTECONNECTION):
         block = prefect_service.get_airbyte_connection_block_by_id(orgprefectblock.block_id)
         prefect_airbyte_connection_block_names.append(block["name"])
 
@@ -494,13 +495,14 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
         name_index += 1
         block_name = base_block_name + f"-{name_index}"
 
-    airbyte_connection_block = prefect_service.create_airbyte_connection_block(
+    airbyte_connection_block_id = prefect_service.create_airbyte_connection_block(
         prefect_service.PrefectAirbyteConnectionSetup(
             serverBlockName=org_airbyte_server_block.block_name,
             connectionBlockName=block_name,
             connectionId=airbyte_conn["connectionId"],
         )
     )
+    airbyte_connection_block = prefect_service.get_airbyte_connection_block_by_id(airbyte_connection_block_id)
 
     logger.info(airbyte_connection_block)
 

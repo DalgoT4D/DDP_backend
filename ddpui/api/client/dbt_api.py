@@ -3,9 +3,10 @@ import shutil
 from pathlib import Path
 
 from ninja import NinjaAPI
-from ninja.errors import HttpError, ValidationError
-from ninja.responses import Response
-from pydantic.error_wrappers import ValidationError as PydanticValidationError
+from ninja.errors import HttpError
+# from ninja.errors import ValidationError
+# from ninja.responses import Response
+# from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from ddpui import auth
 from ddpui.ddpprefect.schema import OrgDbtSchema
@@ -17,40 +18,40 @@ from ddpui.celeryworkers.tasks import setup_dbtworkspace
 dbtapi = NinjaAPI(urls_namespace="dbt")
 
 
-@dbtapi.exception_handler(ValidationError)
-def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
-    """Handle any ninja validation errors raised in the apis"""
-    return Response({"error": exc.errors}, status=422)
+# @dbtapi.exception_handler(ValidationError)
+# def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
+#     """Handle any ninja validation errors raised in the apis"""
+#     return Response({"error": exc.errors}, status=422)
 
 
-@dbtapi.exception_handler(PydanticValidationError)
-def pydantic_validation_error_handler(
-    request, exc: PydanticValidationError
-):  # pylint: disable=unused-argument
-    """Handle any pydantic errors raised in the apis"""
-    return Response({"error": exc.errors()}, status=422)
+# @dbtapi.exception_handler(PydanticValidationError)
+# def pydantic_validation_error_handler(
+#     request, exc: PydanticValidationError
+# ):  # pylint: disable=unused-argument
+#     """Handle any pydantic errors raised in the apis"""
+#     return Response({"error": exc.errors()}, status=422)
 
 
-@dbtapi.exception_handler(HttpError)
-def ninja_http_error_handler(
-    request, exc: HttpError
-):  # pylint: disable=unused-argument
-    """Handle any http errors raised in the apis"""
-    return Response({"error": " ".join(exc.args)}, status=exc.status_code)
+# @dbtapi.exception_handler(HttpError)
+# def ninja_http_error_handler(
+#     request, exc: HttpError
+# ):  # pylint: disable=unused-argument
+#     """Handle any http errors raised in the apis"""
+#     return Response({"error": " ".join(exc.args)}, status=exc.status_code)
 
 
-@dbtapi.exception_handler(Exception)
-def ninja_default_error_handler(
-    request, exc: Exception
-):  # pylint: disable=unused-argument
-    """Handle any other exception raised in the apis"""
-    return Response({"error": " ".join(exc.args)}, status=500)
+# @dbtapi.exception_handler(Exception)
+# def ninja_default_error_handler(
+#     request, exc: Exception
+# ):  # pylint: disable=unused-argument
+#     """Handle any other exception raised in the apis"""
+#     return Response({"error": " ".join(exc.args)}, status=500)
 
 
 @dbtapi.post("/workspace/", auth=auth.CanManagePipelines())
 def post_dbt_workspace(
     request, payload: OrgDbtSchema
-):  # pylint: disable=too-many-branches
+):
     """Setup the client git repo and install a virtual env inside it to run dbt"""
     orguser = request.orguser
     org = orguser.org

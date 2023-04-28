@@ -1,4 +1,3 @@
-import logging
 import os
 import requests
 from dotenv import load_dotenv
@@ -21,6 +20,7 @@ def abreq(endpoint, req=None):
         f"http://{abhost}:{abport}/api/{abver}/{endpoint}",
         headers={"Authorization": f"Basic {token}"},
         json=req,
+        timeout=30
     )
     logger.info("Response from Airbyte server: %s", res.text)
     res.raise_for_status()

@@ -22,7 +22,7 @@ class Org(models.Model):
     name = models.CharField(max_length=50)
     slug = models.CharField(max_length=20, null=True)
     airbyte_workspace_id = models.CharField(max_length=36, null=True)
-    dbt = models.ForeignKey(OrgDbt, on_delete=models.CASCADE, null=True)
+    dbt = models.ForeignKey(OrgDbt, on_delete=models.SET_NULL, null=True)
 
 
 class OrgPrefectBlock(models.Model):
