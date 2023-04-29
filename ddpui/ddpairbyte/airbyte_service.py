@@ -89,6 +89,21 @@ def get_source(workspace_id, source_id):
 
 def create_source(workspace_id, name, sourcedef_id, config):
     """Create source in an airbyte workspace"""
+
+    # validate against the source schema, type casting where necessary
+    connection_specification = get_source_definition_specification(workspace_id, sourcedef_id)['properties']
+    for parameter_key in config:
+        parameter_desc = connection_specification.get(parameter_key)
+
+        if parameter_desc:
+            parameter_type = parameter_desc['type']
+
+            if parameter_type == 'string':
+                config[parameter_key] = str(config[parameter_key])
+
+            elif parameter_type == 'integer':
+                config[parameter_key] = int(config[parameter_key])
+
     res = abreq(
         "sources/create",
         {
@@ -182,6 +197,21 @@ def get_destination(workspace_id, destination_id):
 
 def create_destination(workspace_id, name, destinationdef_id, config):
     """Create destination in an airbyte workspace"""
+
+    # validate against the destination schema, type casting where necessary
+    connection_specification = get_destination_definition_specification(workspace_id, destinationdef_id)['properties']
+    for parameter_key in config:
+        parameter_desc = connection_specification.get(parameter_key)
+
+        if parameter_desc:
+            parameter_type = parameter_desc['type']
+
+            if parameter_type == 'string':
+                config[parameter_key] = str(config[parameter_key])
+
+            elif parameter_type == 'integer':
+                config[parameter_key] = int(config[parameter_key])
+
     res = abreq(
         "destinations/create",
         {
