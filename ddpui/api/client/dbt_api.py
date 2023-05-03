@@ -86,6 +86,19 @@ def dbt_delete(request):
     return OrgUserResponse.from_orguser(orguser)
 
 
+@dbtapi.get("/dbt_workspace", auth=auth.CanManagePipelines())
+def get_dbt_workspace(request):
+    """return details of the dbt workspace for this org"""
+    orguser = request.orguser
+    if orguser.org.dbt is None:
+        return {"error": "no dbt workspace has been configured"}
+
+    return {
+        "gitrepo_url": orguser.org.dbt.gitrepo_url,
+        "target_name": orguser.org.dbt.target_name,
+        "target_schema": orguser.org.dbt.target_schema,
+    }
+
 @dbtapi.post("/git_pull/", auth=auth.CanManagePipelines())
 def post_dbt_git_pull(request):
     """Pull the dbt repo from github for the organization"""
