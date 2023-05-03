@@ -268,8 +268,9 @@ def get_airbyte_destination_definitions(request):
         raise HttpError(400, "create an airbyte workspace first")
 
     res = airbyte_service.get_destination_definitions(orguser.org.airbyte_workspace_id)
-    logger.debug(res)
-    return res
+    filtered_res = [destdef for destdef in res if destdef['name'] in ['BigQuery', 'Postgres']]
+    logger.debug(filtered_res)
+    return filtered_res
 
 
 @airbyteapi.get(
