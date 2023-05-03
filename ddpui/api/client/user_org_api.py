@@ -25,6 +25,7 @@ from ddpui.models.org_user import (
 from ddpui.utils.ddp_logger import logger
 from ddpui.utils.timezone import IST
 from ddpui.utils import secretsmanager
+from ddpui.ddpairbyte import airbytehelpers
 
 user_org_api = NinjaAPI(urls_namespace="userorg")
 # http://127.0.0.1:8000/api/docs
@@ -161,12 +162,13 @@ def post_organization(request, payload: OrgSchema):
     if org:
         raise HttpError(400, "client org already exists")
     org = Org.objects.create(**payload.dict())
-    org.slug = slugify(org.name)
+    org.slug = slugify(org.name)[:20]
     org.save()
     orguser.org = org
     orguser.save()
     logger.info(f"{orguser.user.email} created new org {org.name}")
-    return OrgSchema(name=org.name, airbyte_workspace_id=None)
+    new_workspace = airbytehelpers.setup_airbyte_workspace(org.slug, org)
+    return OrgSchema(name=org.name, airbyte_workspace_id=new_workspace.workspaceId)
 
 
 @user_org_api.post("/organizations/warehouse/", auth=auth.CanManagePipelines())
