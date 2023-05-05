@@ -6,6 +6,7 @@ from ddpui.ddpprefect import AIRBYTESERVER
 from ddpui.models.org import OrgPrefectBlock
 from ddpui.utils.ddp_logger import logger
 
+
 def setup_airbyte_workspace(wsname, org) -> AirbyteWorkspace:
     """creates an airbyte workspace and attaches it to the org
     also creates an airbyte server block in prefect if there isn't one already
@@ -22,18 +23,14 @@ def setup_airbyte_workspace(wsname, org) -> AirbyteWorkspace:
     block_name = f"{org.slug}-{slugify(AIRBYTESERVER)}"
     display_name = wsname
 
-    airbyte_server_block_id = prefect_service.get_airbyte_server_block_id(
-        block_name
-    )
+    airbyte_server_block_id = prefect_service.get_airbyte_server_block_id(block_name)
     if airbyte_server_block_id is None:
         airbyte_server_block_id = prefect_service.create_airbyte_server_block(
             block_name
         )
-        logger.info(airbyte_server_block_id)
+        logger.info(f"Created Airbyte server block with ID {airbyte_server_block_id}")
 
-    if not OrgPrefectBlock.objects.filter(
-        org=org, block_type=AIRBYTESERVER
-    ).exists():
+    if not OrgPrefectBlock.objects.filter(org=org, block_type=AIRBYTESERVER).exists():
         org_airbyte_server_block = OrgPrefectBlock(
             org=org,
             block_type=AIRBYTESERVER,
