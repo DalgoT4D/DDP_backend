@@ -1,3 +1,4 @@
+import os
 from typing import List
 from ninja import NinjaAPI
 from ninja.errors import HttpError
@@ -231,6 +232,9 @@ def get_airbyte_destination_definitions(request):
         raise HttpError(400, "create an airbyte workspace first")
 
     res = airbyte_service.get_destination_definitions(orguser.org.airbyte_workspace_id)
+    allowed_destinations = os.getenv('AIRBYTE_DESTINATION_TYPES')
+    if allowed_destinations:
+        res = [destdef for destdef in res if destdef['name'] in allowed_destinations.split(',')]
     logger.debug(res)
     return res
 
