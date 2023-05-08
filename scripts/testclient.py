@@ -4,9 +4,10 @@ import requests
 class TestClient:
     """http client for api/ endpoints"""
 
-    def __init__(self, port):
+    def __init__(self, port, **kwargs):
         self.clientheaders = None
         self.port = port
+        self.verbose = kwargs.get("verbose")
 
     def login(self, email, password):
         """Login"""
@@ -24,7 +25,8 @@ class TestClient:
             timeout=10,
         )
         try:
-            print(req.json())
+            if self.verbose:
+                print(req.json())
             return req.json()
         except Exception:
             print(req.text)
@@ -40,7 +42,8 @@ class TestClient:
             json=kwargs.get("json"),
         )
         try:
-            print(req.json())
+            if self.verbose:
+                print(req.json())
             return req.json()
         except Exception:
             print(req.text)
