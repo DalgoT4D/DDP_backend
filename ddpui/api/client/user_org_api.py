@@ -5,9 +5,11 @@ from uuid import uuid4
 from django.contrib.auth.models import User
 from django.utils.text import slugify
 from ninja import NinjaAPI
-from ninja.errors import HttpError, ValidationError
-from ninja.responses import Response
-from pydantic.error_wrappers import ValidationError as PydanticValidationError
+from ninja.errors import HttpError
+
+# from ninja.errors import ValidationError
+# from ninja.responses import Response
+# from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from rest_framework.authtoken import views
 
 from ddpui import auth
@@ -26,6 +28,7 @@ from ddpui.utils.ddp_logger import logger
 from ddpui.utils.timezone import IST
 from ddpui.utils import secretsmanager
 from ddpui.ddpairbyte import airbytehelpers
+from ddpui.ddpairbyte import airbyte_service
 
 user_org_api = NinjaAPI(urls_namespace="userorg")
 # http://127.0.0.1:8000/api/docs
@@ -108,10 +111,7 @@ def get_organization_users(request):
     if orguser.org is None:
         raise HttpError(400, "no associated org")
     query = OrgUser.objects.filter(org=orguser.org)
-    return [
-        OrgUserResponse.from_orguser(orguser)
-        for orguser in query
-    ]
+    return [OrgUserResponse.from_orguser(orguser) for orguser in query]
 
 
 @user_org_api.put(
@@ -178,8 +178,20 @@ def post_organization_warehouse(request, payload: OrgWarehouseSchema):
     if payload.wtype not in ["postgres", "bigquery"]:
         raise HttpError(400, "unrecognized warehouse type " + payload.wtype)
 
+    destination = airbyte_service.create_destination(
+        orguser.org.airbyte_workspace_id,
+        f"{payload.wtype}-warehouse",
+        payload.destinationDefId,
+        payload.airbyteConfig,
+    )
+    logger.info("created destination having id " + destination["destinationId"])
+
     warehouse = OrgWarehouse(org=orguser.org, wtype=payload.wtype, credentials="")
-    secretsmanager.save_warehouse_credentials(warehouse, payload.credentials)
+    credentials_lookupkey = secretsmanager.save_warehouse_credentials(
+        warehouse, payload.dbtCredentials
+    )
+    warehouse.credentials = credentials_lookupkey
+    warehouse.save()
     return {"success": 1}
 
 
@@ -190,6 +202,7 @@ def delete_organization_warehouses(request):
     for warehouse in OrgWarehouse.objects.filter(org=orguser.org):
         warehouse.delete()
 
+
 @user_org_api.get("/organizations/warehouses", auth=auth.CanManagePipelines())
 def get_organizations_warehouses(request):
     """returns all warehouses associated with this org"""
@@ -199,7 +212,6 @@ def get_organizations_warehouses(request):
         for warehouse in OrgWarehouse.objects.filter(org=orguser.org)
     ]
     return {"warehouses": warehouses}
-
 
 
 @user_org_api.post(

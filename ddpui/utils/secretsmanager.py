@@ -66,8 +66,7 @@ def save_warehouse_credentials(warehouse, credentials: dict):
     logger.info(
         "saved warehouse credentials in secrets manager under name=" + response["Name"]
     )
-    warehouse.credentials = secret_name
-    warehouse.save()
+    return secret_name
 
 
 def retrieve_warehouse_credentials(warehouse) -> dict | None:
