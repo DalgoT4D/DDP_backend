@@ -69,4 +69,6 @@ class OrgWarehouseSchema(Schema):
     """payload to register an organization's data warehouse"""
 
     wtype: str
-    credentials: dict
+    destinationDefId: str
+    airbyteConfig: dict
+    dbtCredentials: dict
