@@ -20,7 +20,7 @@ def abreq(endpoint, req=None):
         f"http://{abhost}:{abport}/api/{abver}/{endpoint}",
         headers={"Authorization": f"Basic {token}"},
         json=req,
-        timeout=30
+        timeout=30,
     )
     logger.info("Response from Airbyte server: %s", res.text)
     res.raise_for_status()
@@ -52,7 +52,7 @@ def create_workspace(name):
     return res
 
 
-def get_source_definitions(workspace_id, **kwargs):
+def get_source_definitions(workspace_id, **kwargs):  # pylint: disable=unused-argument
     """Fetch source definitions for an airbyte workspace"""
     res = abreq("source_definitions/list_for_workspace", {"workspaceId": workspace_id})
     if "sourceDefinitions" not in res:
@@ -79,7 +79,7 @@ def get_sources(workspace_id):
     return res["sources"]
 
 
-def get_source(workspace_id, source_id):
+def get_source(workspace_id, source_id):  # pylint: disable=unused-argument
     """Fetch a source in an airbyte workspace"""
     res = abreq("sources/get", {"sourceId": source_id})
     if "sourceId" not in res:
@@ -116,7 +116,7 @@ def update_source(source_id, name=None, config=None):
     return res
 
 
-def check_source_connection(workspace_id, source_id):
+def check_source_connection(workspace_id, source_id):  # pylint: disable=unused-argument
     """Test a source connection in an airbyte workspace"""
     res = abreq("sources/check_connection", {"sourceId": source_id})
     # {
@@ -135,7 +135,9 @@ def check_source_connection(workspace_id, source_id):
     return res
 
 
-def get_source_schema_catalog(workspace_id, source_id):
+def get_source_schema_catalog(
+    workspace_id, source_id
+):  # pylint: disable=unused-argument
     """Fetch source schema catalog for a source in an airbyte workspace"""
     res = abreq("sources/discover_schema", {"sourceId": source_id})
     if "catalog" not in res:
@@ -143,7 +145,9 @@ def get_source_schema_catalog(workspace_id, source_id):
     return res
 
 
-def get_destination_definitions(workspace_id, **kwargs):
+def get_destination_definitions(
+    workspace_id, **kwargs
+):  # pylint: disable=unused-argument
     """Fetch destination definitions in an airbyte workspace"""
     res = abreq(
         "destination_definitions/list_for_workspace", {"workspaceId": workspace_id}
@@ -172,7 +176,7 @@ def get_destinations(workspace_id):
     return res["destinations"]
 
 
-def get_destination(workspace_id, destination_id):
+def get_destination(workspace_id, destination_id):  # pylint: disable=unused-argument
     """Fetch a destination in an airbyte workspace"""
     res = abreq("destinations/get", {"destinationId": destination_id})
     if "destinationId" not in res:
@@ -212,7 +216,9 @@ def update_destination(destination_id, name, config, destination_def_id):
     return res
 
 
-def check_destination_connection(workspace_id, destination_id):
+def check_destination_connection(
+    workspace_id, destination_id
+):  # pylint: disable=unused-argument
     """Test connection to a destination in an airbyte workspace"""
     res = abreq("destinations/check_connection", {"destinationId": destination_id})
     return res
@@ -226,7 +232,7 @@ def get_connections(workspace_id):
     return res["connections"]
 
 
-def get_connection(workspace_id, connection_id):
+def get_connection(workspace_id, connection_id):  # pylint: disable=unused-argument
     """Fetch a connection of an airbyte workspace"""
     res = abreq("connections/get", {"connectionId": connection_id})
     if "connectionId" not in res:
@@ -253,14 +259,16 @@ def create_connection(workspace_id, connection_info: schema.AirbyteConnectionCre
             ]
         },
         "status": "active",
-        "prefix": "",
+        "prefix": "_raw_",
         "namespaceDefinition": "destination",
         "namespaceFormat": "${SOURCE_NAMESPACE}",
         "nonBreakingChangesPreference": "ignore",
         "scheduleType": "manual",
         "geography": "auto",
         "name": connection_info.name,
-        "operations": [
+    }
+    if connection_info.normalize:
+        payload["operations"] = [
             {
                 "name": "Normalization",
                 "workspaceId": workspace_id,
@@ -269,8 +277,8 @@ def create_connection(workspace_id, connection_info: schema.AirbyteConnectionCre
                     "normalization": {"option": "basic"},
                 },
             }
-        ],
-    }
+        ]
+        payload["prefix"] = "_normalized_"
 
     # one stream per table
     for schema_cat in sourceschemacatalog["catalog"]["streams"]:
@@ -336,13 +344,13 @@ def update_connection(
     return res
 
 
-def delete_connection(workspace_id, connection_id):
+def delete_connection(workspace_id, connection_id):  # pylint: disable=unused-argument
     """Delete a connection of an airbyte workspace"""
     res = abreq("connections/delete", {"connectionId": connection_id})
     return res
 
 
-def sync_connection(workspace_id, connection_id):
+def sync_connection(workspace_id, connection_id):  # pylint: disable=unused-argument
     """Sync a connection in an airbyte workspace"""
     res = abreq("connections/sync", {"connectionId": connection_id})
     return res
