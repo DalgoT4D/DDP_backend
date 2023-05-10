@@ -267,6 +267,9 @@ def create_connection(workspace_id, connection_info: schema.AirbyteConnectionCre
         "geography": "auto",
         "name": connection_info.name,
     }
+    if connection_info.destinationSchema:
+        payload["namespaceDefinition"] = "customformat"
+        payload["namespaceFormat"] = connection_info.destinationSchema
     if connection_info.normalize:
         payload["operations"] = [
             {
