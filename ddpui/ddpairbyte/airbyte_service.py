@@ -259,7 +259,7 @@ def create_connection(workspace_id, connection_info: schema.AirbyteConnectionCre
             ]
         },
         "status": "active",
-        "prefix": "_raw_",
+        "prefix": "",
         "namespaceDefinition": "destination",
         "namespaceFormat": "${SOURCE_NAMESPACE}",
         "nonBreakingChangesPreference": "ignore",
