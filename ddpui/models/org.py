@@ -72,4 +72,3 @@ class OrgWarehouseSchema(Schema):
     wtype: str
     destinationDefId: str
     airbyteConfig: dict
-    dbtCredentials: dict

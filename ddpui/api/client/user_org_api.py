@@ -186,6 +186,20 @@ def post_organization_warehouse(request, payload: OrgWarehouseSchema):
     )
     logger.info("created destination having id " + destination["destinationId"])
 
+    # prepare the dbt credentials from airbyteConfig
+    dbtCredenials = None
+    if payload.wtype == 'postgres':
+        dbtCredenials = {
+            "host": payload.airbyteConfig['host'],
+            "port": payload.airbyteConfig['port'],
+            "username": payload.airbyteConfig['username'],
+            "password": payload.airbyteConfig['password'],
+            "database": payload.airbyteConfig['database'],
+        }
+
+    if payload.wtype == 'bigquery':
+        dbtCredenials = payload.airbyteConfig['credentials_json']
+
     warehouse = OrgWarehouse(
         org=orguser.org,
         wtype=payload.wtype,
@@ -193,7 +207,7 @@ def post_organization_warehouse(request, payload: OrgWarehouseSchema):
         airbyte_destination_id=destination["destinationId"],
     )
     credentials_lookupkey = secretsmanager.save_warehouse_credentials(
-        warehouse, payload.dbtCredentials
+        warehouse, dbtCredenials
     )
     warehouse.credentials = credentials_lookupkey
     warehouse.save()
