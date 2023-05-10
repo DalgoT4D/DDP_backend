@@ -2,7 +2,7 @@ import os
 import argparse
 import sys
 import django
-from ddpui.ddpairbyte import airbyte_service
+from ddpui.ddpairbyte import airbyte_service, schema
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
@@ -77,7 +77,9 @@ else:
     # print("connection test passed")
 
     print("getting catalog for source schema...")
-    r = airbyte_service.get_source_schema_catalog(args.workspace_id, source["sourceId"])
+    source_schema_catalog = airbyte_service.get_source_schema_catalog(
+        args.workspace_id, source["sourceId"]
+    )
     print("...success")
 
     print("getting destination definitions")
@@ -93,20 +95,26 @@ else:
     print("fetching destinations")
     r = airbyte_service.get_destinations(args.workspace_id)
     print(f"fetched {len(r)} destinations")
-    destination = airbyte_service.get_destination(args.workspace_id, r[0]["destinationId"])
-    assert destination == r[0]
 
-    print("creating destination connection")
-    r = airbyte_service.create_destination(
-        args.workspace_id,
-        "dest-local-csv",
-        "8be1cf83-fde1-477f-a4ad-318d23c9f3c6",
-        {"destination_path": "/tmp"},
-    )
-    print(r["name"], r["destinationId"])
+    if len(r) == 0:
+        print("creating destination connection")
+        r = airbyte_service.create_destination(
+            args.workspace_id,
+            "dest-local-csv",
+            "8be1cf83-fde1-477f-a4ad-318d23c9f3c6",
+            {"destination_path": "/tmp"},
+        )
+        print(r["name"], r["destinationId"])
+        destination = airbyte_service.get_destination(
+            args.workspace_id, r["destinationId"]
+        )
+        assert destination == r
+    else:
+        destination = r[0]
+
     print("checking connection to destination")
     check_result = airbyte_service.check_destination_connection(
-        args.workspace_id, r["destinationId"]
+        args.workspace_id, destination["destinationId"]
     )
     if check_result.get("status") != "succeeded":
         print(check_result)
@@ -116,8 +124,28 @@ else:
     r = airbyte_service.get_connections(args.workspace_id)
     print(f"found {len(r)} connections")
 
-    if len(r) > 0:
+    # fetch the source catalog, select a stream and create a connection
+
+    for conn in r:
         print("verifying that we can get the destination directly...")
-        connection = airbyte_service.get_connection(args.workspace_id, r[0]["connectionId"])
-        assert connection == r[0]
-        print("...success")
+        connection = airbyte_service.get_connection(
+            args.workspace_id, conn["connectionId"]
+        )
+        assert connection == conn
+        print("...success. deleting this connection now")
+        airbyte_service.delete_connection(args.workspace_id, connection["connectionId"])
+
+    print("creating a new connection")
+    connection_info = schema.AirbyteConnectionCreate(
+        name="conn",
+        sourceId=source["sourceId"],
+        destinationId=destination["destinationId"],
+        streamNames=[
+            x["stream"]["name"] for x in source_schema_catalog["catalog"]["streams"]
+        ],
+    )
+    result = airbyte_service.create_connection(args.workspace_id, connection_info)
+    print(result)
+
+    print("syncing the new connection")
+    airbyte_service.sync_connection(args.workspace_id, result["connectionId"])

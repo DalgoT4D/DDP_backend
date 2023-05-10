@@ -47,6 +47,7 @@ class AirbyteConnectionCreate(Schema):
     sourceId: str
     destinationId: str
     streamNames: list
+    normalize: bool = False
 
 
 class AirbyteConnectionUpdate(Schema):
