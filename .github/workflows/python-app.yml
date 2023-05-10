@@ -5,9 +5,9 @@ name: Python application
 
 on:
   push:
-    branches: [ "feature/codecov" ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ "feature/codecov" ]
+    branches: [ "main" ]
 
 permissions:
   contents: read
