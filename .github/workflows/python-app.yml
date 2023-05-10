@@ -28,7 +28,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
     - name: Create logs directory
-        run: mkdir -p ddpui/logs
+      run: mkdir -p ddpui/logs
     - name: Run unit test
       run: coverage run -m pytest && coverage report && coverage xml
     - name: Upload coverage reports to codecov
