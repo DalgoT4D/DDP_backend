@@ -186,7 +186,12 @@ def post_organization_warehouse(request, payload: OrgWarehouseSchema):
     )
     logger.info("created destination having id " + destination["destinationId"])
 
-    warehouse = OrgWarehouse(org=orguser.org, wtype=payload.wtype, credentials="")
+    warehouse = OrgWarehouse(
+        org=orguser.org,
+        wtype=payload.wtype,
+        credentials="",
+        airbyte_destination_id=destination["destinationId"],
+    )
     credentials_lookupkey = secretsmanager.save_warehouse_credentials(
         warehouse, payload.dbtCredentials
     )
