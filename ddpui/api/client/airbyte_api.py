@@ -578,3 +578,10 @@ def post_airbyte_sync_connection(request, connection_block_id):
     assert org_prefect_connection_block
 
     return run_airbyte_connection_sync(org_prefect_connection_block.block_name)
+    # {
+    #     "created_at": "2023-05-10T14:25:42+00:00",
+    #     "job_status": "succeeded",
+    #     "job_id": 77,
+    #     "records_synced": 20799,
+    #     "updated_at": "2023-05-10T14:25:58+00:00"
+    # }
