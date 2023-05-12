@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import List
 from uuid import uuid4
+import json
 
 from django.contrib.auth.models import User
 from django.utils.text import slugify
@@ -98,7 +99,15 @@ def post_organization_user(
 @user_org_api.post("/login/")
 def post_login(request):
     """Uses the username and password in the request to return an auth token"""
+    request_obj = json.loads(request.body)
     token = views.obtain_auth_token(request)
+    if "token" in token.data:
+        org = None
+        orguser = OrgUser.objects.filter(user__email=request_obj["username"]).first()
+        if orguser.org is not None:
+            org = orguser.org.name
+        return {"token": token.data["token"], "org": org}
+
     return token
 
 
@@ -188,17 +197,17 @@ def post_organization_warehouse(request, payload: OrgWarehouseSchema):
 
     # prepare the dbt credentials from airbyteConfig
     dbtCredenials = None
-    if payload.wtype == 'postgres':
+    if payload.wtype == "postgres":
         dbtCredenials = {
-            "host": payload.airbyteConfig['host'],
-            "port": payload.airbyteConfig['port'],
-            "username": payload.airbyteConfig['username'],
-            "password": payload.airbyteConfig['password'],
-            "database": payload.airbyteConfig['database'],
+            "host": payload.airbyteConfig["host"],
+            "port": payload.airbyteConfig["port"],
+            "username": payload.airbyteConfig["username"],
+            "password": payload.airbyteConfig["password"],
+            "database": payload.airbyteConfig["database"],
         }
 
-    if payload.wtype == 'bigquery':
-        dbtCredenials = payload.airbyteConfig['credentials_json']
+    if payload.wtype == "bigquery":
+        dbtCredenials = payload.airbyteConfig["credentials_json"]
 
     warehouse = OrgWarehouse(
         org=orguser.org,
