@@ -448,7 +448,15 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
         raise HttpError(400, "warehouse has no airbyte_destination_id")
     payload.destinationId = warehouse.airbyte_destination_id
 
-    airbyte_conn = airbyte_service.create_connection(org.airbyte_workspace_id, payload)
+    if warehouse.airbyte_norm_op_id is None:
+        warehouse.airbyte_norm_op_id = airbyte_service.create_normalization_operation(
+            org.airbyte_workspace_id
+        )
+        warehouse.save()
+
+    airbyte_conn = airbyte_service.create_connection(
+        org.airbyte_workspace_id, warehouse.airbyte_norm_op_id, payload
+    )
 
     org_airbyte_server_block = OrgPrefectBlock.objects.filter(
         org=org,

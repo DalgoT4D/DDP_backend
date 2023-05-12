@@ -243,7 +243,25 @@ def get_connection(workspace_id, connection_id):  # pylint: disable=unused-argum
     return res
 
 
-def create_connection(workspace_id, connection_info: schema.AirbyteConnectionCreate):
+def create_normalization_operation(workspace_id) -> str:
+    """create a normalization operation for this airbyte workspace"""
+    response = abreq(
+        "/operations/create",
+        {
+            "workspaceId": workspace_id,
+            "name": "op-normalize",
+            "operatorConfiguration": {
+                "operatorType": "normalization",
+                "normalization": {"option": "basic"},
+            },
+        },
+    )
+    return response["operationId"]
+
+
+def create_connection(
+    workspace_id, airbyte_norm_op_id, connection_info: schema.AirbyteConnectionCreate
+):
     """Create a connection in an airbyte workspace"""
     if len(connection_info.streamNames) == 0:
         raise Exception("must specify stream names")
@@ -272,18 +290,9 @@ def create_connection(workspace_id, connection_info: schema.AirbyteConnectionCre
     if connection_info.destinationSchema:
         payload["namespaceDefinition"] = "customformat"
         payload["namespaceFormat"] = connection_info.destinationSchema
+
     if connection_info.normalize:
-        payload["operations"] = [
-            {
-                "name": "Normalization",
-                "workspaceId": workspace_id,
-                "operatorConfiguration": {
-                    "operatorType": "normalization",
-                    "normalization": {"option": "basic"},
-                },
-            }
-        ]
-        payload["prefix"] = "_normalized_"
+        payload["operationIds"] = [airbyte_norm_op_id]
 
     # one stream per table
     for schema_cat in sourceschemacatalog["catalog"]["streams"]:

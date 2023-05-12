@@ -64,6 +64,7 @@ class OrgWarehouse(models.Model):
     credentials = models.CharField(max_length=200)
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     airbyte_destination_id = models.TextField(max_length=36, null=True)
+    airbyte_norm_op_id = models.TextField(max_length=36, null=True)
 
 
 class OrgWarehouseSchema(Schema):
