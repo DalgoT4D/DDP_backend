@@ -13,7 +13,7 @@ class OrgDbt(models.Model):
 
     target_name = models.CharField(max_length=10)
     target_type = models.CharField(max_length=10)
-    target_schema = models.CharField(max_length=10)
+    target_schema = models.CharField(max_length=50)
 
 
 class Org(models.Model):
