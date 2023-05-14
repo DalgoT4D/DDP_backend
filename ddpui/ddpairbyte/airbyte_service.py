@@ -1,8 +1,10 @@
 import os
+import json
 import requests
 from dotenv import load_dotenv
 from ddpui.ddpairbyte import schema
 from ddpui.utils.ab_logger import logger
+from ddpui.utils.helpers import remove_nested_attribute
 
 load_dotenv()
 
@@ -22,7 +24,12 @@ def abreq(endpoint, req=None):
         json=req,
         timeout=30,
     )
-    logger.info("Response from Airbyte server: %s", res.text)
+    try:
+        result_obj = remove_nested_attribute(res.json(), "icon")
+        logger.info("Response from Airbyte server:")
+        logger.info(json.dumps(result_obj, indent=2))
+    except ValueError:
+        logger.info("Response from Airbyte server: %s", res.text)
     res.raise_for_status()
     if "application/json" in res.headers.get("Content-Type", ""):
         return res.json()
