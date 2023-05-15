@@ -110,7 +110,7 @@ def post_login(request):
             "token": token.data["token"],
             "org": org,
             "email": str(orguser),
-            "role": orguser.role,
+            "role": OrgUserRole(orguser.role).name,
             "active": orguser.user.is_active,
         }
 
