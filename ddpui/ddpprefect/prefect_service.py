@@ -6,8 +6,10 @@ from ddpui.ddpprefect.schema import (
     PrefectDbtCoreSetup,
     PrefectShellSetup,
     PrefectAirbyteConnectionSetup,
+    PrefectAirbyteSync,
     DbtProfile,
     PrefectDataFlowCreateSchema2,
+    PrefectDbtCore,
 )
 
 load_dotenv()
@@ -177,23 +179,23 @@ def delete_dbt_core_block(block_id):
 
 
 # ================================================================================================
-def run_airbyte_connection_sync(block_name: str):
+def run_airbyte_connection_sync(run_flow: PrefectAirbyteSync):
     """initiates an airbyte connection sync"""
     res = requests.post(
         f"{PREFECT_PROXY_API_URL}/proxy/flows/airbyte/connection/sync/",
         timeout=30,
-        json={"blockName": block_name},
+        json=run_flow.to_json(),
     )
     res.raise_for_status()
     return res.json()
 
 
-def run_dbt_core_sync(block_name: str):
+def run_dbt_core_sync(run_flow: PrefectDbtCore):
     """initiates a dbt job sync"""
     res = requests.post(
         f"{PREFECT_PROXY_API_URL}/proxy/flows/dbtcore/run/",
         timeout=30,
-        json={"blockName": block_name},
+        json=run_flow.to_json(),
     )
     res.raise_for_status()
     return res.json()
