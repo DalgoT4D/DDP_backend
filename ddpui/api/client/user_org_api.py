@@ -106,7 +106,13 @@ def post_login(request):
         orguser = OrgUser.objects.filter(user__email=request_obj["username"]).first()
         if orguser.org is not None:
             org = orguser.org.name
-        return {"token": token.data["token"], "org": org}
+        return {
+            "token": token.data["token"],
+            "org": org,
+            "email": str(orguser),
+            "role": OrgUserRole(orguser.role).name,
+            "active": orguser.user.is_active,
+        }
 
     return token
 
