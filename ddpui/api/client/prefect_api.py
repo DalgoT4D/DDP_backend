@@ -273,6 +273,8 @@ def delete_prefect_dbt_run_block(request):
 
 
 @prefectapi.get("/flow_runs/{flow_run_id}/logs", auth=auth.CanManagePipelines())
-def get_flow_runs_logs(request, flow_run_id):  # pylint: disable=unused-argument
+def get_flow_runs_logs(
+    request, flow_run_id, offset: int = 0
+):  # pylint: disable=unused-argument
     """return the logs from a flow-run"""
-    return prefect_service.get_flow_run_logs(flow_run_id)
+    return prefect_service.get_flow_run_logs(flow_run_id, offset)
