@@ -155,7 +155,7 @@ def create_dbt_core_block(
             "blockName": dbtcore.block_name,
             "profile": {
                 "name": profile.name,
-                "target": profile.target,
+                "target": profile.target_configs_schema,
                 "target_configs_schema": profile.target_configs_schema,
             },
             "wtype": wtype,
