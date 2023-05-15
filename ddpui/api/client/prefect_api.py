@@ -195,6 +195,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
     dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
     project_dir = str(dbt_env_dir / "dbtrepo")
 
+    block_names = []
     sequence_number = 0
     for command in ["docs generate", "run", "test"]:
         block_name = f"{orguser.org.slug}-{slugify(command)}"
@@ -225,8 +226,9 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
         )
 
         coreprefectblock.save()
+        block_names.append(block_name)
 
-    return {"success": 1, "block_name": block_name}
+    return {"success": 1, "block_names": block_names}
 
 
 @prefectapi.get("/blocks/dbt/", auth=auth.CanManagePipelines())

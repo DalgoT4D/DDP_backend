@@ -146,7 +146,7 @@ r = tester.clientpost(
 print(r)
 
 tester.clientpost(
-    "prefect/flows/dbt_run/", json={"blockName": r["block_name"]}, timeout=60
+    "prefect/flows/dbt_run/", json={"blockName": r["block_names"][0]}, timeout=60
 )
 
 # tester.clientdelete("prefect/blocks/dbt/")
