@@ -168,7 +168,7 @@ def create_dbt_core_block(
         },
     )
     response.raise_for_status()
-    return response.json()["block_id"]
+    return response.json()
 
 
 def delete_dbt_core_block(block_id):

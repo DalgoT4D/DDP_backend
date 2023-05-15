@@ -217,10 +217,12 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
             project_dir=project_dir,
             working_dir=project_dir,
             env={},
-            commands=[f"{dbt_binary} {command} --target {payload.profile.target}"],
+            commands=[
+                f"{dbt_binary} {command} --target {payload.profile.target_configs_schema}"
+            ],
         )
 
-        block_id = prefect_service.create_dbt_core_block(
+        block_response = prefect_service.create_dbt_core_block(
             block_data,
             payload.profile,
             warehouse.wtype,
@@ -230,14 +232,14 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
         coreprefectblock = OrgPrefectBlock(
             org=orguser.org,
             block_type=DBTCORE,
-            block_id=block_id,
-            block_name=block_name,
+            block_id=block_response["block_id"],
+            block_name=block_response["block_name"],
             display_name=block_name,
             seq=sequence_number,
         )
 
         coreprefectblock.save()
-        block_names.append(block_name)
+        block_names.append(block_response["block_name"])
 
     return {"success": 1, "block_names": block_names}
 
