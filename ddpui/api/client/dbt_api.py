@@ -4,6 +4,7 @@ from pathlib import Path
 
 from ninja import NinjaAPI
 from ninja.errors import HttpError
+
 # from ninja.errors import ValidationError
 # from ninja.responses import Response
 # from pydantic.error_wrappers import ValidationError as PydanticValidationError
@@ -49,9 +50,7 @@ dbtapi = NinjaAPI(urls_namespace="dbt")
 
 
 @dbtapi.post("/workspace/", auth=auth.CanManagePipelines())
-def post_dbt_workspace(
-    request, payload: OrgDbtSchema
-):
+def post_dbt_workspace(request, payload: OrgDbtSchema):
     """Setup the client git repo and install a virtual env inside it to run dbt"""
     orguser = request.orguser
     org = orguser.org
@@ -95,9 +94,10 @@ def get_dbt_workspace(request):
 
     return {
         "gitrepo_url": orguser.org.dbt.gitrepo_url,
-        "target_name": orguser.org.dbt.target_name,
-        "target_schema": orguser.org.dbt.target_schema,
+        "target_type": orguser.org.dbt.target_type,
+        "default_schema": orguser.org.dbt.default_schema,
     }
+
 
 @dbtapi.post("/git_pull/", auth=auth.CanManagePipelines())
 def post_dbt_git_pull(request):

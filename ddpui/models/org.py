@@ -11,9 +11,8 @@ class OrgDbt(models.Model):
     project_dir = models.CharField(max_length=200)
     dbt_version = models.CharField(max_length=10)
 
-    target_name = models.CharField(max_length=10)
     target_type = models.CharField(max_length=10)
-    target_schema = models.CharField(max_length=50)
+    default_schema = models.CharField(max_length=50)
 
 
 class Org(models.Model):
@@ -46,8 +45,9 @@ class OrgDataFlow(models.Model):
 
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     name = models.CharField(max_length=100)
-    deployment_id = models.CharField(max_length=36, unique=True)
-    cron = models.CharField(max_length=36, unique=True)
+    deployment_id = models.CharField(max_length=36, unique=True, null=True)
+    cron = models.CharField(max_length=36, unique=True, null=True)
+    flow_id = models.CharField(max_length=36, unique=True, null=True)
 
 
 class OrgSchema(Schema):
