@@ -37,7 +37,6 @@ class DbtProfile(Schema):
     """Docstring"""
 
     name: str
-    target: str
     # target_configs_type: this is now orgwarehouse.wtype
     target_configs_schema: str
 
@@ -96,8 +95,10 @@ class PrefectDataFlowCreateSchema(Schema):
     dbtTransform: str
     cron: str
 
+
 class PrefectDataFlowCreateSchema2(Schema):
     """Payload to be sent to the prefect-proxy"""
+
     deployment_name: str
     flow_name: str
     orgslug: str

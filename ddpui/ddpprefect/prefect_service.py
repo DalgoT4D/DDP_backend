@@ -155,7 +155,7 @@ def create_dbt_core_block(
             "blockName": dbtcore.block_name,
             "profile": {
                 "name": profile.name,
-                "target": profile.target,
+                "target": profile.target_configs_schema,
                 "target_configs_schema": profile.target_configs_schema,
             },
             "wtype": wtype,
@@ -168,7 +168,7 @@ def create_dbt_core_block(
         },
     )
     response.raise_for_status()
-    return response.json()["block_id"]
+    return response.json()
 
 
 def delete_dbt_core_block(block_id):

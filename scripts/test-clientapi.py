@@ -137,7 +137,6 @@ r = tester.clientpost(
     json={
         "profile": {
             "name": DBT_PROFILE,
-            "target": "dev",
             "target_configs_schema": DBT_TARGETCONFIGS_SCHEMA,
         },
     },
