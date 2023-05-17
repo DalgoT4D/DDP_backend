@@ -179,10 +179,10 @@ def post_organization(request, payload: OrgSchema):
     org = Org.objects.create(**payload.dict())
     org.slug = slugify(org.name)[:20]
     org.save()
-    orguser.org = org
-    orguser.save()
     logger.info(f"{orguser.user.email} created new org {org.name}")
     new_workspace = airbytehelpers.setup_airbyte_workspace(org.slug, org)
+    orguser.org = org
+    orguser.save()
     return OrgSchema(name=org.name, airbyte_workspace_id=new_workspace.workspaceId)
 
 
