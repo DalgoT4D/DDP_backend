@@ -57,7 +57,6 @@ class DbtProfile(Schema):
     """Docstring"""
 
     name: str
-    target: str
     # target_configs_type: this is now orgwarehouse.wtype
     target_configs_schema: str
 
