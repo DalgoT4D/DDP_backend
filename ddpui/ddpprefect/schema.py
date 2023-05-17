@@ -6,12 +6,32 @@ class PrefectAirbyteSync(Schema):
     """request payload to trigger an airbyte sync in prefect by specifying the prefect blockname"""
 
     blockName: str
+    flowName: str = None
+    flowRunName: str = None
+
+    def to_json(self):
+        """JSON serialization"""
+        return {
+            "blockName": self.blockName,
+            "flowName": self.flowName,
+            "flowRunName": self.flowRunName,
+        }
 
 
 class PrefectDbtCore(Schema):
     """request payload to trigger a dbt core op flow in prefect by specifying the prefect blockname"""
 
     blockName: str
+    flowName: str = None
+    flowRunName: str = None
+
+    def to_json(self):
+        """JSON serialization"""
+        return {
+            "blockName": self.blockName,
+            "flowName": self.flowName,
+            "flowRunName": self.flowRunName,
+        }
 
 
 class PrefectAirbyteConnectionSetup(Schema):

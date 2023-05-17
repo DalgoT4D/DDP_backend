@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from datetime import datetime
 
 from ninja import NinjaAPI
 from ninja.errors import HttpError
@@ -26,6 +27,7 @@ from ddpui.ddpprefect.schema import (
 
 from ddpui.utils.ddp_logger import logger
 from ddpui.utils import secretsmanager
+from ddpui.utils import timezone
 
 prefectapi = NinjaAPI(urls_namespace="prefect")
 # http://127.0.0.1:8000/api/docs
@@ -165,7 +167,12 @@ def post_prefect_airbyte_sync_flow(request, payload: PrefectAirbyteSync):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    return prefect_service.run_airbyte_connection_sync(payload.blockName)
+    if payload.flowName is None:
+        payload.flowName = f"{orguser.org.name}-airbytesync"
+    if payload.flowRunName is None:
+        now = timezone.as_ist(datetime.now())
+        payload.flowRunName = f"{now.isoformat()}"
+    return prefect_service.run_airbyte_connection_sync(payload)
 
 
 @prefectapi.post("/flows/dbt_run/", auth=auth.CanManagePipelines())
@@ -173,7 +180,22 @@ def post_prefect_dbt_core_run_flow(
     request, payload: PrefectDbtCore
 ):  # pylint: disable=unused-argument
     """Run dbt flow in prefect"""
-    return prefect_service.run_dbt_core_sync(payload.blockName)
+    orguser = request.orguser
+
+    dbt = orguser.org.dbt
+    profile_file = Path(dbt.project_dir) / "dbtrepo/profiles/profiles.yml"
+    if os.path.exists(profile_file):
+        os.unlink(profile_file)
+
+    if payload.flowName is None:
+        payload.flowName = f"{orguser.org.name}-airbytesync"
+    if payload.flowRunName is None:
+        now = timezone.as_ist(datetime.now())
+        payload.flowRunName = f"{now.isoformat()}"
+
+    # save into some table
+
+    return prefect_service.run_dbt_core_sync(payload)
 
 
 @prefectapi.post("/blocks/dbt/", auth=auth.CanManagePipelines())
