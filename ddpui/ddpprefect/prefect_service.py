@@ -146,7 +146,11 @@ def get_dbtcore_block_id(blockname) -> str | None:
 
 
 def create_dbt_core_block(
-    dbtcore: PrefectDbtCoreSetup, profile: DbtProfile, wtype: str, credentials: dict
+    dbtcore: PrefectDbtCoreSetup,
+    profile: DbtProfile,
+    target: str,
+    wtype: str,
+    credentials: dict,
 ):
     """Create a dbt core block in prefect"""
 
@@ -157,7 +161,7 @@ def create_dbt_core_block(
             "blockName": dbtcore.block_name,
             "profile": {
                 "name": profile.name,
-                "target": profile.target_configs_schema,
+                "target": target,
                 "target_configs_schema": profile.target_configs_schema,
             },
             "wtype": wtype,
