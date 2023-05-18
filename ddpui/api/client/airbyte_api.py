@@ -20,7 +20,10 @@ from ddpui.ddpairbyte.schema import (
 )
 
 from ddpui.ddpprefect.prefect_service import run_airbyte_connection_sync
-from ddpui.ddpprefect.schema import PrefectAirbyteConnectionBlockSchema
+from ddpui.ddpprefect.schema import (
+    PrefectAirbyteConnectionBlockSchema,
+    PrefectAirbyteSync,
+)
 
 from ddpui.ddpprefect import (
     AIRBYTESERVER,
@@ -583,7 +586,9 @@ def post_airbyte_sync_connection(request, connection_block_id):
 
     assert org_prefect_connection_block
 
-    return run_airbyte_connection_sync(org_prefect_connection_block.block_name)
+    return run_airbyte_connection_sync(
+        PrefectAirbyteSync(blockName=org_prefect_connection_block.block_name)
+    )
     # {
     #     "created_at": "2023-05-10T14:25:42+00:00",
     #     "job_status": "succeeded",
