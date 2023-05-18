@@ -12,9 +12,12 @@ from ninja.errors import HttpError
 from ddpui import auth
 from ddpui.ddpprefect.schema import OrgDbtSchema
 from ddpui.models.org_user import OrgUserResponse
+from ddpui.models.org import OrgPrefectBlock
 from ddpui.utils.helpers import runcmd
 from ddpui.utils import secretsmanager
 from ddpui.celeryworkers.tasks import setup_dbtworkspace
+from ddpui.ddpprefect import prefect_service
+from ddpui.ddpprefect import DBTCORE
 
 dbtapi = NinjaAPI(urls_namespace="dbt")
 
@@ -70,15 +73,18 @@ def dbt_delete(request):
     orguser = request.orguser
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
-    if orguser.org.dbt is None:
-        raise HttpError(400, "dbt is not configured for this client")
 
-    dbt = orguser.org.dbt
-    orguser.org.dbt = None
-    orguser.org.save()
+    if orguser.org.dbt:
+        dbt = orguser.org.dbt
+        orguser.org.dbt = None
+        orguser.org.save()
 
-    shutil.rmtree(dbt.project_dir)
-    dbt.delete()
+        shutil.rmtree(dbt.project_dir)
+        dbt.delete()
+
+    for dbtblock in OrgPrefectBlock.objects.filter(org=orguser.org, block_type=DBTCORE):
+        prefect_service.delete_dbt_core_block(dbtblock.block_id)
+        dbtblock.delete()
 
     secretsmanager.delete_github_token(orguser.org)
 
