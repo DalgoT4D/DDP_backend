@@ -45,6 +45,7 @@ class OrgDataFlow(models.Model):
 
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     name = models.CharField(max_length=100)
+    deployment_name = models.CharField(max_length=100, null=True)
     deployment_id = models.CharField(max_length=36, unique=True, null=True)
     cron = models.CharField(max_length=36, null=True)
     flow_id = models.CharField(max_length=36, unique=True, null=True)
