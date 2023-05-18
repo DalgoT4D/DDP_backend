@@ -222,7 +222,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
     dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
     project_dir = str(dbt_env_dir / "dbtrepo")
 
-    schema = (
+    target = (
         payload.profile.target_configs_schema
         if payload.profile.target_configs_schema
         else orguser.org.dbt.default_schema
@@ -231,7 +231,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
     block_names = []
     sequence_number = 0
     for command in ["docs generate", "run", "test"]:
-        block_name = f"{orguser.org.slug}-{slugify(payload.profile.name)}-{slugify(schema)}-{slugify(command)}"
+        block_name = f"{orguser.org.slug}-{slugify(payload.profile.name)}-{slugify(target)}-{slugify(command)}"
 
         block_data = PrefectDbtCoreSetup(
             block_name=block_name,
@@ -239,14 +239,13 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
             project_dir=project_dir,
             working_dir=project_dir,
             env={},
-            commands=[
-                f"{dbt_binary} {command} --target {payload.profile.target_configs_schema}"
-            ],
+            commands=[f"{dbt_binary} {command} --target {target}"],
         )
 
         block_response = prefect_service.create_dbt_core_block(
             block_data,
             payload.profile,
+            target,
             warehouse.wtype,
             credentials,
         )
