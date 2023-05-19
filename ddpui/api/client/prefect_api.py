@@ -177,6 +177,19 @@ def delete_prefect_dataflow(request, deployment_id):
     return {"success": 1}
 
 
+@prefectapi.post("/flows/{deployment_id}/flow_run", auth=auth.CanManagePipelines())
+def post_prefect_dataflow_quick_run(request, deployment_id):
+    """Delete a prefect deployment along with its org data flow"""
+    orguser = request.orguser
+
+    if orguser.org is None:
+        raise HttpError(400, "register an organization first")
+
+    res = prefect_service.create_deployment_flow_run(deployment_id)
+
+    return res
+
+
 @prefectapi.post("/flows/airbyte_sync/", auth=auth.CanManagePipelines())
 def post_prefect_airbyte_sync_flow(request, payload: PrefectAirbyteSync):
     """Run airbyte sync flow in prefect"""
