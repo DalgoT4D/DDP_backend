@@ -277,3 +277,14 @@ def get_flow_run_logs(flow_run_id, offset):
     )
     res.raise_for_status()
     return {"logs": res.json()}
+
+
+def create_deployment_flow_run(deployment_id):
+    """Proxy call to create a flow run for deployment.
+    This is like a quick check to see if deployment is running"""
+    res = requests.post(
+        f"{PREFECT_PROXY_API_URL}/proxy/deployments/{deployment_id}/flow_run",
+        timeout=30,
+    )
+    res.raise_for_status()
+    return res.json()
