@@ -1,0 +1,51 @@
+name: Python package
+
+on:
+  push:
+    branches: [add-workflow]
+  pull_request:
+    branches: [add-workflow]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10"]
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Create logs directory
+        run: mkdir -p ddpui/logs
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - name: Create known_hosts file
+        run: |
+          mkdir -p ~/.ssh
+          touch ~/.ssh/known_hosts
+      - name: Add remote host key to known_hosts
+        run: ssh-keyscan 15.206.88.75 >> ~/.ssh/known_hosts
+      - name: Set up port forwarding via SSH
+        run: |
+          eval `ssh-agent -s`
+          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
+          ssh -L 8000:localhost:8000 ddp@15.206.88.75 -f -N
+      - name: Test with pytest
+        env:
+          AIRBYTE_SERVER_HOST: localhost
+          AIRBYTE_SERVER_PORT: 8000
+          AIRBYTE_SERVER_APIVER: v1
+          AIRBYTE_API_TOKEN: ${{ secrets.AIRBYTE_API_TOKEN }}
+          DBHOST: ${{ secrets.DBHOST }}
+          DBNAME: ${{ secrets.DBNAME }}
+          DBUSER: ${{ secrets.DBUSER }}
+        run: |
+          pip install pytest
+          pip install pytest-cov
+          pytest ddpui/tests/unit_integration_tests/test_airbyte_service_unit.py --doctest-modules --junitxml=junit/test-results.xml --cov=com --cov-report=xml --cov-report=html
