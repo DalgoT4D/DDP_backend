@@ -74,6 +74,10 @@ def post_prefect_dataflow(request, payload: PrefectDataFlowCreateSchema):
 
     name_components = [orguser.org.slug]
 
+    # check if pipeline has airbyte syncs
+    if len(payload.connectionBlocks) > 0:
+        name_components.append("airbyte")
+
     # check if pipeline has dbt transformation
     dbt_blocks = []
     if payload.dbtTransform == "yes":
@@ -83,11 +87,19 @@ def post_prefect_dataflow(request, payload: PrefectDataFlowCreateSchema):
         ):
             dbt_blocks.append({"blockName": dbt_block.block_name, "seq": dbt_block.seq})
 
-    # check if pipeline has airbyte syncs
-    if len(payload.connectionBlocks) > 0:
-        name_components.append("airbyte")
+    # fetch all deployment names to compute a unique one
+    deployment_names = []
+    for orgdataflow in OrgDataFlow.objects.filter(org=orguser.org):
+        deployment_names.append(orgdataflow.deployment_name)
 
-    deployment_name = "-".join(name_components + ["deployment"])
+    # deployment name should be unique
+    name_index = 0
+    base_deployment_name = "-".join(name_components + ["deployment"])
+    deployment_name = base_deployment_name
+    while deployment_name in deployment_names:
+        name_index += 1
+        deployment_name = base_deployment_name + f"-{name_index}"
+
     flow_name = "-".join(name_components + ["flow"])
 
     res = prefect_service.create_dataflow(
