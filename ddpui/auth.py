@@ -54,11 +54,13 @@ def authenticate_org_user(request, token, allowed_roles, require_org):
             # print(
             #     f"{request.get_full_path()} role={orguser.role} require_org={require_org} org={orguser.org}"
             # )
-            if require_org is False or orguser.org is not None:
-                # print(f"orguser.role={orguser.role} allowed_roles={allowed_roles}")
-                if orguser.role in allowed_roles:
-                    request.orguser = orguser
-                    return request
+            if require_org and orguser.org is None:
+                raise HttpError(400, "register an organization first")
+
+            # print(f"orguser.role={orguser.role} allowed_roles={allowed_roles}")
+            if orguser.role in allowed_roles:
+                request.orguser = orguser
+                return request
     raise HttpError(400, UNAUTHORIZED)
 
 

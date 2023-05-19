@@ -180,13 +180,7 @@ def delete_prefect_dataflow(request, deployment_id):
 @prefectapi.post("/flows/{deployment_id}/flow_run", auth=auth.CanManagePipelines())
 def post_prefect_dataflow_quick_run(request, deployment_id):
     """Delete a prefect deployment along with its org data flow"""
-    orguser = request.orguser
-
-    if orguser.org is None:
-        raise HttpError(400, "register an organization first")
-
     res = prefect_service.create_deployment_flow_run(deployment_id)
-
     return res
 
 
