@@ -37,6 +37,11 @@ jobs:
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
           ssh -L 8000:localhost:8000 ddp@15.206.88.75 -f -N
       - name: Test with pytest
+        env:
+          AIRBYTE_SERVER_HOST: localhost
+          AIRBYTE_SERVER_PORT: 8000
+          AIRBYTE_SERVER_APIVER: v1
+          AIRBYTE_API_TOKEN: ${{ secrets.AIRBYTE_API_TOKEN }}
         run: |
           pip install pytest
           pip install pytest-cov
