@@ -74,6 +74,10 @@ def post_prefect_dataflow(request, payload: PrefectDataFlowCreateSchema):
 
     name_components = [orguser.org.slug]
 
+    # check if pipeline has airbyte syncs
+    if len(payload.connectionBlocks) > 0:
+        name_components.append("airbyte")
+
     # check if pipeline has dbt transformation
     dbt_blocks = []
     if payload.dbtTransform == "yes":
@@ -83,11 +87,19 @@ def post_prefect_dataflow(request, payload: PrefectDataFlowCreateSchema):
         ):
             dbt_blocks.append({"blockName": dbt_block.block_name, "seq": dbt_block.seq})
 
-    # check if pipeline has airbyte syncs
-    if len(payload.connectionBlocks) > 0:
-        name_components.append("airbyte")
+    # fetch all deployment names to compute a unique one
+    deployment_names = []
+    for orgdataflow in OrgDataFlow.objects.filter(org=orguser.org):
+        deployment_names.append(orgdataflow.deployment_name)
 
-    deployment_name = "-".join(name_components + ["deployment"])
+    # deployment name should be unique
+    name_index = 0
+    base_deployment_name = "-".join(name_components + ["deployment"])
+    deployment_name = base_deployment_name
+    while deployment_name in deployment_names:
+        name_index += 1
+        deployment_name = base_deployment_name + f"-{name_index}"
+
     flow_name = "-".join(name_components + ["flow"])
 
     res = prefect_service.create_dataflow(
@@ -103,7 +115,8 @@ def post_prefect_dataflow(request, payload: PrefectDataFlowCreateSchema):
 
     org_data_flow = OrgDataFlow.objects.create(
         org=orguser.org,
-        name=res["deployment"]["name"],
+        name=payload.name,
+        deployment_name=res["deployment"]["name"],
         deployment_id=res["deployment"]["id"],
         cron=payload.cron,
     )
@@ -123,20 +136,24 @@ def get_prefect_dataflows(request):
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
 
-    org_deployment_ids = [
-        flow.deployment_id for flow in OrgDataFlow.objects.filter(org=orguser.org).all()
-    ]
+    org_data_flows = OrgDataFlow.objects.filter(org=orguser.org).all()
 
-    deployments = prefect_service.get_filtered_deployments(
-        org_slug=orguser.org.slug, deployment_ids=org_deployment_ids
-    )
+    res = []
 
-    for deployment in deployments:
-        deployment["lastRun"] = prefect_service.get_last_flow_run_by_deployment_id(
-            deployment["deploymentId"]
+    for flow in org_data_flows:
+        res.append(
+            {
+                "name": flow.name,
+                "deploymentId": flow.deployment_id,
+                "cron": flow.cron,
+                "deploymentName": flow.deployment_name,
+                "lastRun": prefect_service.get_last_flow_run_by_deployment_id(
+                    flow.deployment_id
+                ),
+            }
         )
 
-    return deployments
+    return res
 
 
 @prefectapi.delete("/flows/{deployment_id}", auth=auth.CanManagePipelines())
