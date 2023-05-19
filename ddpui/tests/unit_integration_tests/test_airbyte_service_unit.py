@@ -252,7 +252,10 @@ def test_destination_id(test_workspace_id):
 
 class TestConnection:
     def test_a_create_connection(
-        self, test_workspace_id, test_source_id, test_destination_id
+        self,
+        test_workspace_id,
+        test_source_id,
+        test_destination_id,
     ):
         workspace_id = str(test_workspace_id)
         connection_info = schema.AirbyteConnectionCreate(
@@ -260,10 +263,14 @@ class TestConnection:
             destinationId=str(test_destination_id),
             name="Test Connection",
             streamNames=["companies"],
+            normalize=False,
         )
 
+        test_airbyte_norm_op_id = create_normalization_operation(test_workspace_id)
         try:
-            res = create_connection(workspace_id, connection_info)
+            res = create_connection(
+                workspace_id, test_airbyte_norm_op_id, connection_info
+            )
             CreateConnectionTestResponse(**res)
             TestConnection.connection_id = res["connectionId"]
         except ValidationError as e:
