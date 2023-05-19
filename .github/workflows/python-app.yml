@@ -25,6 +25,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - name: Set up port forwarding via SSH
+        run: |
+          eval `ssh-agent -s`
+          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
+          ssh -L 8000:localhost:8000 ddp@15.206.88.75 -f -N
       - name: Test with pytest
         run: |
           pip install pytest
