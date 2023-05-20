@@ -213,7 +213,7 @@ def post_organization_warehouse(request, payload: OrgWarehouseSchema):
         }
 
     if payload.wtype == "bigquery":
-        dbtCredenials = payload.airbyteConfig["credentials_json"]
+        dbtCredenials = json.loads(payload.airbyteConfig["credentials_json"])
 
     warehouse = OrgWarehouse(
         org=orguser.org,
