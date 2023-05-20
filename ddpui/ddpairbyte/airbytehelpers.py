@@ -23,8 +23,12 @@ def setup_airbyte_workspace(wsname, org) -> AirbyteWorkspace:
     block_name = f"{org.slug}-{slugify(AIRBYTESERVER)}"
     display_name = wsname
 
-    airbyte_server_block_id = prefect_service.get_airbyte_server_block_id(block_name)
-    if airbyte_server_block_id is None:
+    try:
+        airbyte_server_block_id = prefect_service.get_airbyte_server_block_id(
+            block_name
+        )
+        assert airbyte_server_block_id is not None
+    except Exception:
         airbyte_server_block_id = prefect_service.create_airbyte_server_block(
             block_name
         )
