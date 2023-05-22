@@ -4,12 +4,19 @@ from time import sleep
 from faker import Faker
 from uuid import uuid4
 import requests
-
+import argparse
 from dotenv import load_dotenv
+from testclient import TestClient
 
 load_dotenv(".env.test")
 
-from testclient import TestClient
+parser = argparse.ArgumentParser()
+parser.add_argument("-v", "--verbose", action="store_true")
+parser.add_argument(
+    "-p", "--port", required=True, help="port where app server is listening"
+)
+args = parser.parse_args()
+
 
 DBT_PROFILE = os.getenv("DBT_PROFILE")
 WAREHOUSETYPE = os.getenv("WAREHOUSETYPE")
@@ -29,7 +36,7 @@ DBT_TEST_REPO = os.getenv("DBT_TEST_REPO")
 DBT_TEST_REPO_ACCESSTOKEN = os.getenv("DBT_TEST_REPO_ACCESSTOKEN")
 
 faker = Faker("en-IN")
-tester = TestClient(8002, verbose=False)
+tester = TestClient(args.port, verbose=args.verbose)
 email = faker.email()
 password = faker.password()
 tester.clientpost("organizations/users/", json={"email": email, "password": password})
