@@ -2,6 +2,8 @@ import os
 import json
 from time import sleep
 from faker import Faker
+from uuid import uuid4
+import requests
 
 from dotenv import load_dotenv
 
@@ -144,8 +146,31 @@ r = tester.clientpost(
 )
 print(r)
 
+flow_run_name: str = str(uuid4())
 tester.clientpost(
-    "prefect/flows/dbt_run/", json={"blockName": r["block_names"][0]}, timeout=60
+    "prefect/flows/dbt_run/",
+    json={
+        "blockName": r["block_names"][0],
+        "flowRunName": flow_run_name,
+    },
+    timeout=60,
 )
+sleep(3)
+PREFECT_PROXY_API_URL = os.getenv("PREFECT_PROXY_API_URL")
+flow_run = requests.post(
+    f"{PREFECT_PROXY_API_URL}/proxy/flow_run/", json={"name": flow_run_name}, timeout=10
+).json()["flow_run"]
+print(flow_run)
+
+ntries: int = 0
+while ntries < 20:
+    sleep(1)
+    ntries += 1
+    r = requests.get(
+        f"{PREFECT_PROXY_API_URL}/proxy/flow_runs/logs/" + flow_run["id"], timeout=10
+    )
+    for log in r.json()["logs"]:
+        print(log["message"])
+    print("=" * 80)
 
 # tester.clientdelete("prefect/blocks/dbt/")
