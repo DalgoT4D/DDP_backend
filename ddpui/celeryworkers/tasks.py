@@ -89,7 +89,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     )
 
     # install a dbt venv
-    process = runcmd("python -m venv venv", project_dir)
+    process = runcmd("python3 -m venv venv", project_dir)
     if process.wait() != 0:
         taskprogress.add(
             {
