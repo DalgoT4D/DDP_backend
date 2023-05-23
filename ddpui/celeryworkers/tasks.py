@@ -64,16 +64,19 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
         gitrepo_url = payload["gitrepoUrl"].replace(
             "github.com", "oauth2:" + payload["gitrepoAccessToken"] + "@github.com"
         )
-        process = runcmd(f"git clone {gitrepo_url} dbtrepo", project_dir)
+        cmd = f"git clone {gitrepo_url} dbtrepo"
     else:
-        process = runcmd(f"git clone {payload['gitrepoUrl']} dbtrepo", project_dir)
+        cmd = f"git clone {payload['gitrepoUrl']} dbtrepo"
 
-    if process.wait() != 0:
+    try:
+        runcmd(cmd, project_dir)
+    except Exception as error:
         taskprogress.add(
             {
                 "stepnum": 3,
                 "numsteps": 8,
                 "message": "git clone failed",
+                "error": str(error),
                 "status": "failed",
             }
         )
@@ -89,13 +92,15 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     )
 
     # install a dbt venv
-    process = runcmd("python3 -m venv venv", project_dir)
-    if process.wait() != 0:
+    try:
+        runcmd("python3 -m venv venv", project_dir)
+    except Exception as error:
         taskprogress.add(
             {
                 "stepnum": 4,
                 "numsteps": 8,
                 "message": "make venv failed",
+                "error": str(error),
                 "status": "failed",
             }
         )
@@ -112,13 +117,15 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
 
     # upgrade pip
     pip = project_dir / "venv/bin/pip"
-    process = runcmd(f"{pip} install --upgrade pip", project_dir)
-    if process.wait() != 0:
+    try:
+        runcmd(f"{pip} install --upgrade pip", project_dir)
+    except Exception as error:
         taskprogress.add(
             {
                 "stepnum": 5,
                 "numsteps": 8,
                 "message": f"{pip} --upgrade failed",
+                "error": str(error),
                 "status": "failed",
             }
         )
@@ -134,13 +141,15 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     )
 
     # install dbt in the new env
-    process = runcmd(f"{pip} install dbt-core=={payload['dbtVersion']}", project_dir)
-    if process.wait() != 0:
+    try:
+        runcmd(f"{pip} install dbt-core=={payload['dbtVersion']}", project_dir)
+    except Exception as error:
         taskprogress.add(
             {
                 "stepnum": 6,
                 "numsteps": 8,
                 "message": "pip install dbt-core=={payload['dbtVersion']} failed",
+                "error": str(error),
                 "status": "failed",
             }
         )
@@ -156,13 +165,15 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     )
 
     if warehouse.wtype == "postgres":
-        process = runcmd(f"{pip} install dbt-postgres==1.4.5", project_dir)
-        if process.wait() != 0:
+        try:
+            runcmd(f"{pip} install dbt-postgres==1.4.5", project_dir)
+        except Exception as error:
             taskprogress.add(
                 {
                     "stepnum": 7,
                     "numsteps": 8,
                     "message": "pip install dbt-postgres==1.4.5 failed",
+                    "error": str(error),
                     "status": "failed",
                 }
             )
@@ -177,13 +188,15 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
         )
 
     elif warehouse.wtype == "bigquery":
-        process = runcmd(f"{pip} install dbt-bigquery==1.4.3", project_dir)
-        if process.wait() != 0:
+        try:
+            runcmd(f"{pip} install dbt-bigquery==1.4.3", project_dir)
+        except Exception as error:
             taskprogress.add(
                 {
                     "stepnum": 7,
                     "numsteps": 8,
                     "message": "pip install dbt-bigquery==1.4.3 failed",
+                    "error": str(error),
                     "status": "failed",
                 }
             )

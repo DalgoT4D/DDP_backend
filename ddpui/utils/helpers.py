@@ -7,7 +7,7 @@ import humps
 
 def runcmd(cmd, cwd):
     """runs a shell command in a specified working directory"""
-    return subprocess.Popen(shlex.split(cmd), cwd=str(cwd))
+    return subprocess.run(shlex.split(cmd), cwd=str(cwd), check=True)
 
 
 def api_res_camel_case(api_res: Union[List[dict], dict, str]):
