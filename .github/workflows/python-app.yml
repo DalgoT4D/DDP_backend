@@ -30,12 +30,12 @@ jobs:
           mkdir -p ~/.ssh
           touch ~/.ssh/known_hosts
       - name: Add remote host key to known_hosts
-        run: ssh-keyscan 15.206.88.75 >> ~/.ssh/known_hosts
+        run: ssh-keyscan 65.2.5.51 >> ~/.ssh/known_hosts
       - name: Set up port forwarding via SSH
         run: |
           eval `ssh-agent -s`
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh -L 8000:localhost:8000 ddp@15.206.88.75 -f -N
+          ssh -L 8000:localhost:8000 ddp@65.2.5.51 -f -N
       - name: Test with pytest
         env:
           AIRBYTE_SERVER_HOST: localhost
