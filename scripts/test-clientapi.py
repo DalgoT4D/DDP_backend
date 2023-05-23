@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 from time import sleep
 from faker import Faker
@@ -159,11 +160,31 @@ tester.clientpost(
     },
     timeout=60,
 )
-sleep(3)
+sleep(10)
 PREFECT_PROXY_API_URL = os.getenv("PREFECT_PROXY_API_URL")
-flow_run = requests.post(
-    f"{PREFECT_PROXY_API_URL}/proxy/flow_run/", json={"name": flow_run_name}, timeout=10
-).json()["flow_run"]
+nattempts: int = 0
+while nattempts < 10:
+    try:
+        response = requests.post(
+            f"{PREFECT_PROXY_API_URL}/proxy/flow_run/",
+            json={"name": flow_run_name},
+            timeout=10,
+        )
+    except Exception as error:
+        print(str(error))
+        nattempts += 1
+        sleep(3)
+
+if nattempts == 10:
+    sys.exit(1)
+
+try:
+    message = response.json()
+except ValueError:
+    print(response.text)
+    sys.exit(1)
+
+flow_run = message["flow_run"]
 print(flow_run)
 
 ntries: int = 0
