@@ -1,6 +1,7 @@
 import os
 import shutil
 from pathlib import Path
+from subprocess import CalledProcessError
 
 from django.utils.text import slugify
 from ddpui.celery import app
@@ -119,6 +120,18 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     pip = project_dir / "venv/bin/pip"
     try:
         runcmd(f"{pip} install --upgrade pip", project_dir)
+    except CalledProcessError as error:
+        if error.returncode != 120:
+            taskprogress.add(
+                {
+                    "stepnum": 5,
+                    "numsteps": 8,
+                    "message": f"{pip} --upgrade failed",
+                    "error": str(error),
+                    "status": "failed",
+                }
+            )
+            return
     except Exception as error:
         taskprogress.add(
             {
