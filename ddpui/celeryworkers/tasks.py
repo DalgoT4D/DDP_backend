@@ -118,7 +118,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
             {
                 "stepnum": 5,
                 "numsteps": 8,
-                "message": "pip --upgrade failed",
+                "message": f"{pip} --upgrade failed",
                 "status": "failed",
             }
         )
