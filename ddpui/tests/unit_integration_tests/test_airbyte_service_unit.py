@@ -304,3 +304,13 @@ class TestConnection:
             UpdateConnectionTestResponse(**res)
         except ValidationError as e:
             raise ValueError(f"Response validation failed: {e.errors()}")
+
+    def test_delete_connection(self, test_workspace_id):
+        workspace_id = test_workspace_id
+        connection_id = TestConnection.connection_id
+
+        try:
+            res = delete_connection(workspace_id, connection_id)
+            assert res == {}
+        except ValidationError as e:
+            raise ValueError(f"Response validation failed: {e.errors()}")
