@@ -131,3 +131,5 @@ dmypy.json
 
 # Vscode
 .vscode
+
+celeryworker.pid
