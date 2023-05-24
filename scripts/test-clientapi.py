@@ -158,30 +158,32 @@ tester.clientpost(
         "blockName": r["block_names"][0],
         "flowRunName": flow_run_name,
     },
-    timeout=60,
+    timeout=10,
 )
 sleep(10)
 PREFECT_PROXY_API_URL = os.getenv("PREFECT_PROXY_API_URL")
 nattempts: int = 0
 while nattempts < 10:
     try:
+        print(f"POST {PREFECT_PROXY_API_URL}/proxy/flow_run/ with name={flow_run_name}")
         response = requests.post(
             f"{PREFECT_PROXY_API_URL}/proxy/flow_run/",
             json={"name": flow_run_name},
-            timeout=10,
+            timeout=5,
         )
+        message = response.json()
+        print(message)
+        if "flow_run" in message:
+            break
+    except ValueError:
+        print(response.text)
+        sys.exit(1)
     except Exception as error:
         print(str(error))
         nattempts += 1
         sleep(3)
 
 if nattempts == 10:
-    sys.exit(1)
-
-try:
-    message = response.json()
-except ValueError:
-    print(response.text)
     sys.exit(1)
 
 flow_run = message["flow_run"]
