@@ -266,13 +266,17 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
             commands=[f"{dbt_binary} {command} --target {target}"],
         )
 
-        block_response = prefect_service.create_dbt_core_block(
-            block_data,
-            payload.profile,
-            target,
-            warehouse.wtype,
-            credentials,
-        )
+        try:
+            block_response = prefect_service.create_dbt_core_block(
+                block_data,
+                payload.profile,
+                target,
+                warehouse.wtype,
+                credentials,
+            )
+        except Exception as error:
+            logger.exception(error)
+            raise HttpError(400, str(error)) from error
 
         coreprefectblock = OrgPrefectBlock(
             org=orguser.org,
@@ -321,7 +325,7 @@ def delete_prefect_dbt_run_block(request):
         try:
             prefect_service.delete_dbt_core_block(dbt_block.block_id)
         except Exception as error:
-            logger.error(error)
+            logger.exception(error)
             # may have deleted the block via the prefect ui, continue
 
         # Delete block row from database

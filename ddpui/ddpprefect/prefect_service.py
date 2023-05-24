@@ -11,6 +11,7 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema2,
     PrefectDbtCore,
 )
+from ddpui.utils.ddp_logger import logger
 
 load_dotenv()
 
@@ -173,7 +174,11 @@ def create_dbt_core_block(
             "project_dir": dbtcore.project_dir,
         },
     )
-    response.raise_for_status()
+    try:
+        response.raise_for_status()
+    except Exception as error:
+        logger.exception(error)
+        raise Exception(response.text) from error
     return response.json()
 
 
