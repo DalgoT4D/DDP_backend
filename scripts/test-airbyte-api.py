@@ -1,6 +1,8 @@
 import os
 import argparse
 import sys
+
+sys.path.append("/home/runner/work/DDP_backend/DDP_backend")
 import django
 from ddpui.ddpairbyte import airbyte_service, schema
 
@@ -12,7 +14,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--port", default=8000)
 parser.add_argument("--workspace-id")
 args = parser.parse_args()
-# args.workspace_id = "enter_workspace_id"
+# args.workspace_id = "9fe828a3-3df6-463b-a0f0-44ae068e078b"
 
 # ========================================================================================================================
 if args.workspace_id is None:
