@@ -12,6 +12,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--port", default=8000)
 parser.add_argument("--workspace-id")
 args = parser.parse_args()
+# args.workspace_id = "enter_workspace_id"
 
 # ========================================================================================================================
 if args.workspace_id is None:
@@ -28,8 +29,129 @@ if args.workspace_id is None:
     airbyte_service.set_workspace_name(new_workspace["workspaceId"], newname)
 
     r = airbyte_service.get_workspace(new_workspace["workspaceId"])
+    workspace = new_workspace["workspaceId"]
     assert r["name"] == newname
     print("verified that name was changed")
+    print("=> fetching source definitions for workspace")
+    r = airbyte_service.get_source_definitions(workspace)
+    for sourcedef in r[:2]:
+        assert "sourceDefinitionId" in sourcedef
+        print(f'    {sourcedef["name"]} {sourcedef["dockerRepository"]}')
+        print("==> fetching source definition specification")
+        rr = airbyte_service.get_source_definition_specification(
+            workspace, sourcedef["sourceDefinitionId"]
+        )
+        print(f'    {rr["title"]} {rr["type"]}')
+        # break
+
+    print("=> fetching sources for workspace")
+    r = airbyte_service.get_sources(workspace)
+    for source in r:
+        print(source["name"], source["sourceId"])
+        print("verifying that we can get the source directly...")
+        osource = airbyte_service.get_source(workspace, source["sourceId"])
+        assert source == osource
+        print("...success")
+
+    #
+    print("creating a source to read a public csv from the web")
+    source = airbyte_service.create_source(
+        workspace,
+        "web-text-source",
+        "778daa7c-feaf-4db6-96f3-70fd645acc77",
+        {
+            "url": "https://storage.googleapis.com/covid19-open-data/v2/latest/epidemiology.csv",
+            "format": "csv",
+            "provider": {"storage": "HTTPS"},
+            "dataset_name": "covid19data",
+        },
+    )
+    assert "sourceId" in source
+    # print("checking connection to new source " + source['sourceId'])
+
+    # check_result = airbyte_service.checksourceconnection(workspace, source['sourceId'])
+    # if check_result.get('status') != 'succeeded':
+    #   print(check_result)
+    #   sys.exit(1)
+
+    # print("connection test passed")
+
+    print("getting catalog for source schema...")
+    source_schema_catalog = airbyte_service.get_source_schema_catalog(
+        workspace, source["sourceId"]
+    )
+    print("...success")
+
+    print("getting destination definitions")
+    r = airbyte_service.get_destination_definitions(workspace)
+    for destdef in r:
+        print(f"fetching spec for {destdef['name']}")
+        rr = airbyte_service.get_destination_definition_specification(
+            workspace, destdef["destinationDefinitionId"]
+        )
+        print(f"fetched spec: {rr['title']}")
+        break
+
+    print("fetching destinations")
+    r = airbyte_service.get_destinations(workspace)
+    print(f"fetched {len(r)} destinations")
+
+    if len(r) == 0:
+        print("creating destination connection")
+        r = airbyte_service.create_destination(
+            workspace,
+            "dest-local-csv",
+            "8be1cf83-fde1-477f-a4ad-318d23c9f3c6",
+            {"destination_path": "/tmp"},
+        )
+        print(r["name"], r["destinationId"])
+        destination = airbyte_service.get_destination(workspace, r["destinationId"])
+        assert destination == r
+    else:
+        destination = r[0]
+
+    print("checking connection to destination")
+    check_result = airbyte_service.check_destination_connection(
+        workspace, destination["destinationId"]
+    )
+    if check_result.get("status") != "succeeded":
+        print(check_result)
+        sys.exit(1)
+
+    print("fetching connections")
+    r = airbyte_service.get_connections(workspace)
+    print(f"found {len(r)} connections")
+
+    # fetch the source catalog, select a stream and create a connection
+
+    for conn in r:
+        print("verifying that we can get the destination directly...")
+        connection = airbyte_service.get_connection(workspace, conn["connectionId"])
+        assert connection == conn
+        print("...success. deleting this connection now")
+        airbyte_service.delete_connection(workspace, connection["connectionId"])
+
+    print("creating a new connection")
+    connection_info = schema.AirbyteConnectionCreate(
+        name="conn",
+        sourceId=source["sourceId"],
+        destinationId=destination["destinationId"],
+        streamNames=[
+            x["stream"]["name"] for x in source_schema_catalog["catalog"]["streams"]
+        ],
+    )
+    airbyte_norm_op_id = airbyte_service.create_normalization_operation(workspace)
+    result = airbyte_service.create_connection(
+        workspace, airbyte_norm_op_id, connection_info
+    )
+    print(result)
+
+    print("syncing the new connection")
+    airbyte_service.sync_connection(workspace, result["connectionId"])
+    print("new connection is synced")
+    print("connection_id: ", result["connectionId"])
+    print("source_id: ", result["sourceId"])
+    print("destination_id: ", result["destinationId"])
 
 else:
     print("=> fetching source definitions for workspace")
@@ -144,8 +266,14 @@ else:
             x["stream"]["name"] for x in source_schema_catalog["catalog"]["streams"]
         ],
     )
-    result = airbyte_service.create_connection(args.workspace_id, connection_info)
+    airbyte_norm_op_id = airbyte_service.create_normalization_operation(
+        args.workspace_id
+    )
+    result = airbyte_service.create_connection(
+        args.workspace_id, airbyte_norm_op_id, connection_info
+    )
     print(result)
 
     print("syncing the new connection")
     airbyte_service.sync_connection(args.workspace_id, result["connectionId"])
+    print("new connection is synced")
