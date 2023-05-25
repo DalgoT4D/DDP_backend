@@ -20,8 +20,8 @@ args = parser.parse_args()
 if args.workspace_id is None:
     r = airbyte_service.get_workspaces()
     assert isinstance(r, dict)
-    for workspace in r["workspaces"]:
-        print(workspace["workspaceId"], workspace["name"])
+    # for workspace in r["workspaces"]:
+    #     print(workspace["workspaceId"], workspace["name"])
 
     print("creating new workspace")
     new_workspace = airbyte_service.create_workspace("new-workspace")
