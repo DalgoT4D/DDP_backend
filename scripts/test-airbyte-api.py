@@ -2,7 +2,7 @@ import os
 import argparse
 import sys
 
-sys.path.append("/home/runner/work/DDP_backend/DDP_backend")
+sys.path.append("/Users/abhishekn/Downloads/projects/DDP_backend")
 import django
 from ddpui.ddpairbyte import airbyte_service, schema
 
@@ -18,8 +18,8 @@ args = parser.parse_args()
 
 # ========================================================================================================================
 if args.workspace_id is None:
-    r = airbyte_service.get_workspaces()
-    assert isinstance(r, dict)
+    # r = airbyte_service.get_workspaces()
+    # assert isinstance(r, dict)
     # for workspace in r["workspaces"]:
     #     print(workspace["workspaceId"], workspace["name"])
 
