@@ -2,7 +2,7 @@ import os
 import argparse
 import sys
 
-sys.path.append("/Users/abhishekn/Downloads/projects/DDP_backend")
+sys.path.append("/home/runner/work/DDP_backend/DDP_backend")
 import django
 from ddpui.ddpairbyte import airbyte_service, schema
 
