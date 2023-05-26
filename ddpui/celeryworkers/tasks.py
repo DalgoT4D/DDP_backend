@@ -10,7 +10,7 @@ from ddpui.utils.helpers import runcmd
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
 
-from utils.ddp_logger import logger
+from ddpui.utils.ddp_logger import logger
 
 
 @app.task(bind=True)
