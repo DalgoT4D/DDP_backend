@@ -160,7 +160,7 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
 
     task = check_airbyte_source_connection.delay(source["sourceId"])
 
-    return {"task_id": task.id}
+    return {"task_id": task.id, "sourceId": source["sourceId"]}
 
 
 @airbyteapi.put("/sources/{source_id}", auth=auth.CanManagePipelines())
