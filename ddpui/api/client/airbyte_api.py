@@ -18,7 +18,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteWorkspace,
     AirbyteWorkspaceCreate,
 )
-
+from ddpui.celeryworkers.tasks import check_airbyte_source_connection
 from ddpui.ddpprefect.prefect_service import run_airbyte_connection_sync
 from ddpui.ddpprefect.schema import (
     PrefectAirbyteConnectionBlockSchema,
@@ -183,11 +183,8 @@ def post_airbyte_check_source(request, source_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    res = airbyte_service.check_source_connection(
-        orguser.org.airbyte_workspace_id, source_id
-    )
-    logger.debug(res)
-    return res
+    task = check_airbyte_source_connection.delay(source_id)
+    return {"task_id": task.id}
 
 
 @airbyteapi.get("/sources", auth=auth.CanManagePipelines())
@@ -212,6 +209,18 @@ def get_airbyte_source(request, source_id):
     res = airbyte_service.get_source(orguser.org.airbyte_workspace_id, source_id)
     logger.debug(res)
     return res
+
+
+@airbyteapi.delete("/sources/{source_id}", auth=auth.CanManagePipelines())
+def delete_airbyte_source(request, source_id):
+    """Fetch a single airbyte source in the user organization workspace"""
+    orguser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    logger.info(f"deleted airbyte source {source_id}")
+    airbyte_service.delete_source(orguser.org.airbyte_workspace_id, source_id)
+    return {"success": 1}
 
 
 @airbyteapi.get("/sources/{source_id}/schema_catalog", auth=auth.CanManagePipelines())
