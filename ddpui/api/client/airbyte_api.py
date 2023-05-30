@@ -18,7 +18,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteWorkspace,
     AirbyteWorkspaceCreate,
 )
-
+from ddpui.celeryworkers.tasks import check_airbyte_source_connection
 from ddpui.ddpprefect.prefect_service import run_airbyte_connection_sync
 from ddpui.ddpprefect.schema import (
     PrefectAirbyteConnectionBlockSchema,
@@ -157,7 +157,10 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
         payload.config,
     )
     logger.info("created source having id " + source["sourceId"])
-    return {"sourceId": source["sourceId"]}
+
+    task = check_airbyte_source_connection.delay(source["sourceId"])
+
+    return {"task_id": task.id}
 
 
 @airbyteapi.put("/sources/{source_id}", auth=auth.CanManagePipelines())

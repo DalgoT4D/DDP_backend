@@ -9,6 +9,7 @@ from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.utils.helpers import runcmd
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
+from ddpui.ddpairbyte import airbyte_service
 
 from ddpui.utils.ddp_logger import logger
 
@@ -278,3 +279,54 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
         }
     )
     logger.info("set dbt workspace completed for org %s", org.name)
+
+
+@app.task(bind=True)
+def check_airbyte_source_connection(self, source_id: str):
+    """checks connectivity to an airbyte source"""
+
+    taskprogress = TaskProgress(self.request.id)
+    taskprogress.add(
+        {
+            "stepnum": 1,
+            "numsteps": 2,
+            "message": "started",
+            "status": "running",
+        }
+    )
+
+    try:
+        response = airbyte_service.check_source_connection(None, source_id)
+
+        if "failureReason" in response["jobInfo"]:
+            taskprogress.add(
+                {
+                    "stepnum": 1,
+                    "numsteps": 2,
+                    "message": response["jobInfo"]["failureReason"]["externalMessage"],
+                    "status": "failed",
+                    "logs": response["jobInfo"]["logs"]["logLines"],
+                }
+            )
+            logger.error(response["jobInfo"]["failureReason"]["externalMessage"])
+        else:
+            taskprogress.add(
+                {
+                    "stepnum": 1,
+                    "numsteps": 2,
+                    "message": response["message"],
+                    "status": "completed",
+                    "logs": response["jobInfo"]["logs"]["logLines"],
+                }
+            )
+            logger.info("check_airbyte_source_connection succeeded")
+    except Exception as error:
+        taskprogress.add(
+            {
+                "stepnum": 1,
+                "numsteps": 2,
+                "message": str(error),
+                "status": "failed",
+            }
+        )
+        logger.error("check_airbyte_source_connection failed")
