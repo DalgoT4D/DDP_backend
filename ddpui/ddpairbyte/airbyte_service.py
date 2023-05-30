@@ -30,7 +30,11 @@ def abreq(endpoint, req=None):
         logger.info(json.dumps(result_obj, indent=2))
     except ValueError:
         logger.info("Response from Airbyte server: %s", res.text)
-    res.raise_for_status()
+    try:
+        res.raise_for_status()
+    except Exception as error:
+        logger.exception(error)
+
     if "application/json" in res.headers.get("Content-Type", ""):
         return res.json()
     return {}
