@@ -157,10 +157,7 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
         payload.config,
     )
     logger.info("created source having id " + source["sourceId"])
-
-    task = check_airbyte_source_connection.delay(source["sourceId"])
-
-    return {"task_id": task.id, "sourceId": source["sourceId"]}
+    return {"sourceId": source["sourceId"]}
 
 
 @airbyteapi.put("/sources/{source_id}", auth=auth.CanManagePipelines())
@@ -186,11 +183,8 @@ def post_airbyte_check_source(request, source_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    res = airbyte_service.check_source_connection(
-        orguser.org.airbyte_workspace_id, source_id
-    )
-    logger.debug(res)
-    return res
+    task = check_airbyte_source_connection.delay(source_id)
+    return {"task_id": task.id}
 
 
 @airbyteapi.get("/sources", auth=auth.CanManagePipelines())
