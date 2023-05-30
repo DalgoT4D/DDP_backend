@@ -98,6 +98,12 @@ def get_source(workspace_id, source_id):  # pylint: disable=unused-argument
     return res
 
 
+def delete_source(workspace_id, source_id):  # pylint: disable=unused-argument
+    """Deletes a source in an airbyte workspace"""
+    res = abreq("sources/delete", {"sourceId": source_id})
+    return res
+
+
 def create_source(workspace_id, name, sourcedef_id, config):
     """Create source in an airbyte workspace"""
     res = abreq(

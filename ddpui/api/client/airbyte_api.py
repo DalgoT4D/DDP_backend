@@ -211,6 +211,18 @@ def get_airbyte_source(request, source_id):
     return res
 
 
+@airbyteapi.delete("/sources/{source_id}", auth=auth.CanManagePipelines())
+def delete_airbyte_source(request, source_id):
+    """Fetch a single airbyte source in the user organization workspace"""
+    orguser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    logger.info(f"deleted airbyte source {source_id}")
+    airbyte_service.delete_source(orguser.org.airbyte_workspace_id, source_id)
+    return {"success": 1}
+
+
 @airbyteapi.get("/sources/{source_id}/schema_catalog", auth=auth.CanManagePipelines())
 def get_airbyte_source_schema_catalog(request, source_id):
     """Fetch schema catalog for a source in the user organization workspace"""
