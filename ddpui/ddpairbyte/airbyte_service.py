@@ -385,3 +385,9 @@ def sync_connection(workspace_id, connection_id):  # pylint: disable=unused-argu
     """Sync a connection in an airbyte workspace"""
     res = abreq("connections/sync", {"connectionId": connection_id})
     return res
+
+
+def get_job_info(job_id: str):
+    """get debug info for an airbyte job"""
+    res = abreq("jobs/get_debug_info", {"id": job_id})
+    return res
