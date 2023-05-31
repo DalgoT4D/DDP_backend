@@ -610,3 +610,14 @@ def post_airbyte_sync_connection(request, connection_block_id):
     #     "records_synced": 20799,
     #     "updated_at": "2023-05-10T14:25:58+00:00"
     # }
+
+
+@airbyteapi.get("/jobs/{job_id}", auth=auth.CanManagePipelines())
+def get_job_status(request, job_id):
+    """get the job info from airbyte"""
+    result = airbyte_service.get_job_info(job_id)
+    logs = result["attempts"][-1]["logs"]["logLines"]
+    return {
+        "status": result["job"]["status"],
+        "logs": logs,
+    }
