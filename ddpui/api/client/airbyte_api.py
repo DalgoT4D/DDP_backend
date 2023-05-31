@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from typing import List
 from ninja import NinjaAPI
 from ninja.errors import HttpError
@@ -595,8 +596,12 @@ def post_airbyte_sync_connection(request, connection_block_id):
 
     assert org_prefect_connection_block
 
+    timenow = datetime.now().strftime("%Y-%m-%d.%H:%M:%S")
     return run_airbyte_connection_sync(
-        PrefectAirbyteSync(blockName=org_prefect_connection_block.block_name)
+        PrefectAirbyteSync(
+            blockName=org_prefect_connection_block.block_name,
+            flowRunName=f"manual-sync-{org.name}-{timenow}",
+        )
     )
     # {
     #     "created_at": "2023-05-10T14:25:42+00:00",
