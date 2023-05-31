@@ -297,6 +297,7 @@ def check_airbyte_source_connection(self, source_id: str):
 
     try:
         response = airbyte_service.check_source_connection(None, source_id)
+        logger.info(response)
 
         if "failureReason" in response["jobInfo"]:
             taskprogress.add(
@@ -314,7 +315,7 @@ def check_airbyte_source_connection(self, source_id: str):
                 {
                     "stepnum": 1,
                     "numsteps": 2,
-                    "message": response["message"],
+                    "message": response["status"],
                     "status": "completed",
                     "logs": response["jobInfo"]["logs"]["logLines"],
                 }
@@ -330,3 +331,4 @@ def check_airbyte_source_connection(self, source_id: str):
             }
         )
         logger.error("check_airbyte_source_connection failed")
+        logger.exception(error)
