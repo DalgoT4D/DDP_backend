@@ -24,6 +24,7 @@ from ddpui.ddpprefect.prefect_service import run_airbyte_connection_sync
 from ddpui.ddpprefect.schema import (
     PrefectAirbyteConnectionBlockSchema,
     PrefectAirbyteSync,
+    PrefectDataFlowCreateSchema2,
 )
 
 from ddpui.ddpprefect import (
@@ -31,7 +32,7 @@ from ddpui.ddpprefect import (
     AIRBYTECONNECTION,
 )
 from ddpui.ddpprefect import prefect_service
-from ddpui.models.org import OrgPrefectBlock, OrgWarehouse
+from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
 from ddpui.utils.ddp_logger import logger
 from ddpui.ddpairbyte import airbytehelpers
 
@@ -378,6 +379,9 @@ def get_airbyte_connections(request):
         airbyte_conn = airbyte_service.get_connection(
             orguser.org.airbyte_workspace_id, prefect_block["data"]["connection_id"]
         )
+        dataflow = OrgDataFlow.objects.filter(
+            org=orguser.org, connection_id=airbyte_conn["connectionId"]
+        ).first()
         res.append(
             {
                 "name": org_block.display_name,
@@ -390,10 +394,11 @@ def get_airbyte_connections(request):
                 "sourceCatalogId": airbyte_conn["sourceCatalogId"],
                 "syncCatalog": airbyte_conn["syncCatalog"],
                 "status": airbyte_conn["status"],
+                "deploymentId": dataflow.deployment_id if dataflow else None,
             }
         )
 
-    logger.debug(res)
+    logger.info(res)
     return res
 
 
@@ -422,6 +427,9 @@ def get_airbyte_connection(request, connection_block_id):
     airbyte_conn = airbyte_service.get_connection(
         orguser.org.airbyte_workspace_id, prefect_block["data"]["connection_id"]
     )
+    dataflow = OrgDataFlow.objects.filter(
+        org=orguser.org, connection_id=airbyte_conn["connectionId"]
+    ).first()
     res = {
         "name": org_block.display_name,
         "blockId": prefect_block["id"],
@@ -433,6 +441,7 @@ def get_airbyte_connection(request, connection_block_id):
         "sourceCatalogId": airbyte_conn["sourceCatalogId"],
         "syncCatalog": airbyte_conn["syncCatalog"],
         "status": airbyte_conn["status"],
+        "deploymentId": dataflow.deployment_id if dataflow else None,
     }
 
     logger.debug(res)
@@ -525,6 +534,23 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
     )
     connection_block.save()
 
+    dataflow = prefect_service.create_dataflow(
+        PrefectDataFlowCreateSchema2(
+            deployment_name=f"manual-sync-{block_name}",
+            flow_name=f"manual-sync-{block_name}",
+            orgslug=org.slug,
+            connection_blocks=[{"seq": 0, "blockName": block_name}],
+            dbt_blocks=[],
+        )
+    )
+    OrgDataFlow.objects.create(
+        org=orguser.org,
+        name=f"manual-sync-{block_name}",
+        deployment_name=dataflow["deployment"]["name"],
+        deployment_id=dataflow["deployment"]["id"],
+        connection_id=airbyte_conn["connectionId"],
+    )
+
     res = {
         "name": display_name,
         "blockId": airbyte_connection_block["id"],
@@ -536,6 +562,7 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
         "sourceCatalogId": airbyte_conn["sourceCatalogId"],
         "syncCatalog": airbyte_conn["syncCatalog"],
         "status": airbyte_conn["status"],
+        "deployment_id": dataflow["deployment"]["id"],
     }
     logger.debug(res)
     return res

@@ -124,4 +124,4 @@ class PrefectDataFlowCreateSchema2(Schema):
     orgslug: str
     connection_blocks: list
     dbt_blocks: list
-    cron: str
+    cron: str = None

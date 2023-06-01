@@ -48,7 +48,8 @@ class OrgDataFlow(models.Model):
     deployment_name = models.CharField(max_length=100, null=True)
     deployment_id = models.CharField(max_length=36, unique=True, null=True)
     cron = models.CharField(max_length=36, null=True)
-    flow_id = models.CharField(max_length=36, unique=True, null=True)
+    # and if the deployment is a manual airbyte-connection-sync, then we store the conn_id
+    connection_id = models.CharField(max_length=36, unique=True, null=True)
 
 
 class OrgSchema(Schema):
