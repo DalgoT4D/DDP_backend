@@ -21,6 +21,7 @@ from ddpui.ddpairbyte.schema import (
 )
 from ddpui.ddpprefect.prefect_service import run_airbyte_connection_sync
 from ddpui.ddpprefect.schema import (
+    PrefectFlowAirbyteConnection,
     PrefectAirbyteConnectionBlockSchema,
     PrefectAirbyteSync,
     PrefectDataFlowCreateSchema2,
@@ -543,7 +544,9 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
             deployment_name=f"manual-sync-{block_name}",
             flow_name=f"manual-sync-{block_name}",
             orgslug=org.slug,
-            connection_blocks=[{"seq": 0, "blockName": block_name}],
+            connection_blocks=[
+                PrefectFlowAirbyteConnection(seq=0, blockName=block_name)
+            ],
             dbt_blocks=[],
         )
     )
