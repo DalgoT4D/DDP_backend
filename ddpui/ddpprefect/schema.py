@@ -122,6 +122,6 @@ class PrefectDataFlowCreateSchema2(Schema):
     deployment_name: str
     flow_name: str
     orgslug: str
-    connection_blocks: list
+    connection_blocks: list[PrefectFlowAirbyteConnection]
     dbt_blocks: list
     cron: str

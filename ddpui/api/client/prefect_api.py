@@ -84,7 +84,7 @@ def post_prefect_dataflow(request, payload: PrefectDataFlowCreateSchema):
         name_components.append("dbt")
         for dbt_block in OrgPrefectBlock.objects.filter(
             org=orguser.org, block_type=DBTCORE
-        ):
+        ).order_by("seq"):
             dbt_blocks.append({"blockName": dbt_block.block_name, "seq": dbt_block.seq})
 
     # fetch all deployment names to compute a unique one
@@ -212,7 +212,7 @@ def post_prefect_dbt_core_run_flow(
         os.unlink(profile_file)
 
     if payload.flowName is None:
-        payload.flowName = f"{orguser.org.name}-airbytesync"
+        payload.flowName = f"{orguser.org.name}-dbt"
     if payload.flowRunName is None:
         now = timezone.as_ist(datetime.now())
         payload.flowRunName = f"{now.isoformat()}"
@@ -224,7 +224,9 @@ def post_prefect_dbt_core_run_flow(
 
 @prefectapi.post("/blocks/dbt/", auth=auth.CanManagePipelines())
 def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
-    """Create three prefect dbt core blocks:
+    """Create five prefect dbt core blocks:
+    - dbt clean
+    - dbt deps
     - dbt run
     - dbt test
     - dbt docs generate
@@ -253,8 +255,9 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
     )
 
     block_names = []
-    sequence_number = 0
-    for command in ["docs generate", "run", "test"]:
+    for sequence_number, command in enumerate(
+        ["clean", "deps", "run", "test", "docs generate"]
+    ):
         block_name = f"{orguser.org.slug}-{slugify(payload.profile.name)}-{slugify(target)}-{slugify(command)}"
 
         block_data = PrefectDbtCoreSetup(
