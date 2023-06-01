@@ -98,6 +98,7 @@ class PrefectAirbyteConnectionBlockSchema(Schema):
     sourceCatalogId: str
     syncCatalog: dict
     status: str
+    deploymentId: str = None
 
 
 class PrefectFlowAirbyteConnection(Schema):
