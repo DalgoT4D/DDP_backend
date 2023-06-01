@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from ddpui.ddpairbyte import schema
 from ddpui.utils.ab_logger import logger
 from ddpui.utils.helpers import remove_nested_attribute
+from ddpui.ddpairbyte.schema import AirbyteSourceCreate
 
 load_dotenv()
 
@@ -136,9 +137,16 @@ def update_source(source_id, name, config, sourcedef_id):
     return res
 
 
-def check_source_connection(workspace_id, source_id):  # pylint: disable=unused-argument
-    """Test a source connection in an airbyte workspace"""
-    res = abreq("sources/check_connection", {"sourceId": source_id})
+def check_source_connection(workspace_id, data: AirbyteSourceCreate):
+    """Test a potential source's connection in an airbyte workspace"""
+    res = abreq(
+        "scheduler/sources/check_connection",
+        {
+            "sourceDefinitionId": data.sourceDefId,
+            "connectionConfiguration": data.config,
+            "workspaceId": workspace_id,
+        },
+    )
     # {
     #   'status': 'succeeded',
     #   'jobInfo': {

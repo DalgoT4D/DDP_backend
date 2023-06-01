@@ -19,7 +19,6 @@ from ddpui.ddpairbyte.schema import (
     AirbyteWorkspace,
     AirbyteWorkspaceCreate,
 )
-from ddpui.celeryworkers.tasks import check_airbyte_source_connection
 from ddpui.ddpprefect.prefect_service import run_airbyte_connection_sync
 from ddpui.ddpprefect.schema import (
     PrefectAirbyteConnectionBlockSchema,
@@ -178,15 +177,20 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
     return {"sourceId": source["sourceId"]}
 
 
-@airbyteapi.post("/sources/{source_id}/check/", auth=auth.CanManagePipelines())
-def post_airbyte_check_source(request, source_id):
+@airbyteapi.post("/sources/check_connection/", auth=auth.CanManagePipelines())
+def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
     """Test the source connection in the user organization workspace"""
     orguser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    task = check_airbyte_source_connection.delay(source_id)
-    return {"task_id": task.id}
+    response = airbyte_service.check_source_connection(
+        orguser.org.airbyte_workspace_id, payload
+    )
+    return {
+        "status": "succeeded" if response["jobInfo"]["succeeded"] else "failed",
+        "logs": response["jobInfo"]["logs"]["logLines"],
+    }
 
 
 @airbyteapi.get("/sources", auth=auth.CanManagePipelines())
