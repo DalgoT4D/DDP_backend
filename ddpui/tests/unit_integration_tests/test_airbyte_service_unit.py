@@ -12,38 +12,46 @@ from pydantic import ValidationError
 
 
 class TestWorkspace:
+    """class which holds all the workspace tests"""
+
     workspace_id = None
 
-    def test_a_create_workspace(self):
+    def test_create_workspace(self):
+        """creates a workspace, checks airbyte response"""
         payload = {"name": "test_workspace"}
 
         try:
             CreateWorkspaceTestPayload(**payload)
-        except ValidationError as e:
-            raise ValueError(f"Field do not match in the payload: {e.errors()}")
+        except ValidationError as error:
+            raise ValueError(
+                f"Field do not match in the payload: {error.errors()}"
+            ) from error
 
         try:
             res = create_workspace(**payload)
             CreateWorkspaceTestResponse(**res)
             TestWorkspace.workspace_id = res["workspaceId"]
-        except ValidationError as e:
-            raise ValueError(f"Response validation failed: {e.errors()}")
+        except ValidationError as error:
+            raise ValueError(f"Response validation failed: {error.errors()}") from error
 
     def test_get_workspace(self):
+        """gets a workspace, checks airbyte response"""
         try:
             res = get_workspace(workspace_id=TestWorkspace.workspace_id)
             GetWorkspaceTestResponse(**res)
-        except ValidationError as e:
-            raise ValueError(f"Response validation failed: {e.errors()}")
+        except ValidationError as error:
+            raise ValueError(f"Response validation failed: {error.errors()}") from error
 
     def test_get_workspaces(self):
+        """gets all workspaces, checks airbyte response"""
         try:
             res = get_workspaces()
             GetWorkspacesTestResponse(**res)
-        except ValidationError as e:
-            raise ValueError(f"Response validation failed: {e.errors()}")
+        except ValidationError as error:
+            raise ValueError(f"Response validation failed: {error.errors()}") from error
 
     def test_set_workspace_name(self):
+        """sets workspace name, checks airbyte response"""
         new_name = "test"
 
         try:
@@ -51,73 +59,101 @@ class TestWorkspace:
                 workspace_id=TestWorkspace.workspace_id, name=new_name
             )
             SetWorkspaceTestResponse(**res)
-        except ValidationError as e:
-            raise ValueError(f"Response validation failed: {e.errors()}")
+        except ValidationError as error:
+            raise ValueError(f"Response validation failed: {error.errors()}") from error
 
 
 @pytest.fixture(scope="session")
 def test_workspace_id():
+    """workspace id of test workspace"""
     test_workspace = TestWorkspace()
-    test_workspace.test_a_create_workspace()
+    test_workspace.test_create_workspace()
     return test_workspace.workspace_id
 
 
 class TestAirbyteSource:
-    def test_a_create_source(self, test_workspace_id):
+    """class which holds all the source tests"""
+
+    source_config = {
+        "url": "https://storage.googleapis.com/covid19-open-data/v2/latest/epidemiology.csv",
+        "format": "csv",
+        "provider": {"storage": "HTTPS"},
+        "dataset_name": "covid19data",
+    }
+
+    def test_source_connection(self, test_workspace_id):
+        """tests connectivity to a source"""
         source_definitions = get_source_definitions(workspace_id=test_workspace_id)
         for source_definition in source_definitions:
             if source_definition["name"] == "File (CSV, JSON, Excel, Feather, Parquet)":
-                source_definition_id = source_definition["sourceDefinitionId"]
+                TestAirbyteSource.source_definition_id = source_definition[
+                    "sourceDefinitionId"
+                ]
                 break
 
+        try:
+            res = check_source_connection(
+                test_workspace_id,
+                AirbyteSourceCreate(
+                    name="unused",
+                    sourceDefId=TestAirbyteSource.source_definition_id,
+                    config=self.source_config,
+                ),
+            )
+            CheckSourceConnectionTestResponse(**res)
+        except ValidationError as error:
+            raise ValueError(f"Response validation failed: {error.errors()}") from error
+
+    def test_a_create_source(self, test_workspace_id):
+        """tests source creation"""
         payload = {
-            "sourcedef_id": source_definition_id,
-            "config": {
-                "url": "https://storage.googleapis.com/covid19-open-data/v2/latest/epidemiology.csv",
-                "format": "csv",
-                "provider": {"storage": "HTTPS"},
-                "dataset_name": "covid19data",
-            },
+            "sourcedef_id": TestAirbyteSource.source_definition_id,
+            "config": TestAirbyteSource.source_config,
             "workspace_id": str(test_workspace_id),
             "name": "source1",
         }
         try:
             CreateSourceTestPayload(**payload)
-        except ValidationError as e:
-            raise ValueError(f"Field do not match in payload: {e.errors()}")
+        except ValidationError as error:
+            raise ValueError(
+                f"Field do not match in payload: {error.errors()}"
+            ) from error
         try:
             res = create_source(**payload)
             CreateSourceTestResponse(**res)
             TestAirbyteSource.source_id = res["sourceId"]
-            TestAirbyteSource.source_definition_id = res["sourceDefinitionId"]
-        except ValidationError as e:
-            raise ValueError(f"Response validation failed: {e.errors()}")
+        except ValidationError as error:
+            raise ValueError(f"Response validation failed: {error.errors()}") from error
 
     def test_get_definitions(self, test_workspace_id):
+        """tests retrieval of source definitions"""
         try:
             res = get_source_definitions(workspace_id=test_workspace_id)
             GetSourceDefinitionsTestResponse(__root__=res)
-        except ValidationError as e:
-            raise ValueError(f"Response validation failed: {e.errors()}")
+        except ValidationError as error:
+            raise ValueError(f"Response validation failed: {error.errors()}") from error
 
     def test_get_source(self, test_workspace_id):
+        """tests retrieval of a single source"""
         try:
             res = get_source(
                 workspace_id=test_workspace_id,
                 source_id=TestAirbyteSource.source_id,
             )
             GetSourceTestResponse(**res)
-        except ValidationError as e:
-            raise ValueError(f"Response validation failed: {e.errors()}")
+        except ValidationError as error:
+            raise ValueError(f"Response validation failed: {error.errors()}") from error
 
     def test_get_sources(self, test_workspace_id):
+        """tests retrieval of all sources"""
         try:
             res = get_sources(workspace_id=test_workspace_id)
             GetSourcesTestResponse(sources=res)
-        except ValidationError as e:
-            raise ValueError(f"Response validation failed: {e.errors()}")
+        except ValidationError as error:
+            raise ValueError(f"Response validation failed: {error.errors()}") from error
 
     def test_update_source(self):
+        """tests updating a source"""
         payload = {
             "name": "source9",
             "sourcedef_id": TestAirbyteSource.source_definition_id,
@@ -131,24 +167,16 @@ class TestAirbyteSource:
         }
         try:
             UpdateSourceTestPayload(**payload)
-        except ValidationError as e:
-            raise ValueError(f"Field do not match in payload: {e.errors()}")
+        except ValidationError as error:
+            raise ValueError(
+                f"Field do not match in payload: {error.errors()}"
+            ) from error
 
         try:
             res = update_source(**payload)
             UpdateSourceTestResponse(**res)
-        except ValidationError as e:
-            raise ValueError(f"Response validation failed: {e.errors()}")
-
-    def test_check_source_connection(self, test_workspace_id):
-        workspace_id = test_workspace_id
-        source_id = TestAirbyteSource.source_id
-
-        try:
-            res = check_source_connection(workspace_id, source_id)
-            CheckSourceConnectionTestResponse(**res)
-        except ValidationError as e:
-            raise ValueError(f"Response validation failed: {e.errors()}")
+        except ValidationError as error:
+            raise ValueError(f"Response validation failed: {error.errors()}") from error
 
 
 @pytest.fixture(scope="session")
@@ -184,8 +212,10 @@ class TestAirbyteDestination:
         }
         try:
             CreateDestinationTestPayload(**payload)
-        except ValidationError as e:
-            raise ValueError(f"Field do not match in payload: {e.errors()}")
+        except ValidationError as error:
+            raise ValueError(
+                f"Field do not match in payload: {error.errors()}"
+            ) from error
 
         try:
             res = create_destination(**payload)
@@ -194,8 +224,8 @@ class TestAirbyteDestination:
             TestAirbyteDestination.destination_definition_id = res[
                 "destinationDefinitionId"
             ]
-        except ValidationError as e:
-            raise ValueError(f"Response validation failed: {e.errors()}")
+        except ValidationError as error:
+            raise ValueError(f"Response validation failed: {error.errors()}") from error
 
     def test_get_destination(self, test_workspace_id):
         try:
@@ -204,8 +234,8 @@ class TestAirbyteDestination:
                 destination_id=TestAirbyteDestination.destination_id,
             )
             GetDestinationTestResponse(**res)
-        except ValidationError as e:
-            raise ValueError(f"Response validation failed: {e.errors()}")
+        except ValidationError as error:
+            raise ValueError(f"Response validation failed: {error.errors()}") from error
 
     def test_update_destination(self):
         payload = {
@@ -223,14 +253,18 @@ class TestAirbyteDestination:
 
         try:
             UpdateDestinationTestPayload(**payload)
-        except ValidationError as e:
-            raise ValueError(f"Field do not match in payload: {e.errors()}")
+        except ValidationError as error:
+            raise ValueError(
+                f"Field do not match in payload: {error.errors()}"
+            ) from error
 
         try:
             res = update_destination(**payload)
             UpdateDestinationTestResponse(**res)
-        except ValidationError as e:
-            raise ValueError(f"Field do not match in resposne: {e.errors()}")
+        except ValidationError as error:
+            raise ValueError(
+                f"Field do not match in resposne: {error.errors()}"
+            ) from error
 
     def test_check_destination_connection(self, test_workspace_id):
         workspace_id = test_workspace_id
@@ -239,8 +273,8 @@ class TestAirbyteDestination:
         try:
             res = check_destination_connection(workspace_id, destination_id)
             CheckDestinationConnectionTestResponse(**res)
-        except ValidationError as e:
-            raise ValueError(f"Response validation failed: {e.errors()}")
+        except ValidationError as error:
+            raise ValueError(f"Response validation failed: {error.errors()}") from error
 
 
 @pytest.fixture(scope="session")
@@ -273,8 +307,8 @@ class TestConnection:
             )
             CreateConnectionTestResponse(**res)
             TestConnection.connection_id = res["connectionId"]
-        except ValidationError as e:
-            raise ValueError(f"Response validation failed: {e.errors()}")
+        except ValidationError as error:
+            raise ValueError(f"Response validation failed: {error.errors()}") from error
 
     def test_get_connection(self, test_workspace_id):
         workspace_id = test_workspace_id
@@ -283,8 +317,8 @@ class TestConnection:
         try:
             res = get_connection(workspace_id, connection_id)
             GetConnectionTestResponse(**res)
-        except ValidationError as e:
-            raise ValueError(f"Response validation failed: {e.errors()}")
+        except ValidationError as error:
+            raise ValueError(f"Response validation failed: {error.errors()}") from error
 
     def test_update_connection(
         self, test_workspace_id, test_source_id, test_destination_id
@@ -302,8 +336,8 @@ class TestConnection:
         try:
             res = update_connection(workspace_id, connection_id, connection_info)
             UpdateConnectionTestResponse(**res)
-        except ValidationError as e:
-            raise ValueError(f"Response validation failed: {e.errors()}")
+        except ValidationError as error:
+            raise ValueError(f"Response validation failed: {error.errors()}") from error
 
     def test_delete_connection(self, test_workspace_id):
         workspace_id = test_workspace_id
@@ -312,5 +346,5 @@ class TestConnection:
         try:
             res = delete_connection(workspace_id, connection_id)
             assert res == {}
-        except ValidationError as e:
-            raise ValueError(f"Response validation failed: {e.errors()}")
+        except ValidationError as error:
+            raise ValueError(f"Response validation failed: {error.errors()}") from error
