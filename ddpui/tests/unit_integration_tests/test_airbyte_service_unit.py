@@ -11,69 +11,6 @@ from ddpui.ddpairbyte.airbyte_service import *
 from pydantic import ValidationError
 
 
-
-
-class TestDeleteSource: 
-    def test_create_workspace(self):
-        """creates a workspace, checks airbyte response"""
-        payload = {"name": "test_workspace"}
-
-        try:
-            CreateWorkspaceTestPayload(**payload)
-        except ValidationError as error:
-            raise ValueError(
-                f"Field do not match in the payload: {error.errors()}"
-            ) from error
-
-        try:
-            res = create_workspace(**payload)
-            CreateWorkspaceTestResponse(**res)
-            TestWorkspace.workspace_id = res["workspaceId"]
-        except ValidationError as error:
-            raise ValueError(f"Response validation failed: {error.errors()}") from error 
-
-    def test_a_create_source(self, test_workspace_id):
-        source_definitions = get_source_definitions(workspace_id=test_workspace_id)
-        for source_definition in source_definitions:
-            if source_definition["name"] == "File (CSV, JSON, Excel, Feather, Parquet)":
-                source_definition_id = source_definition["sourceDefinitionId"]
-                break
-
-        payload = {
-            "sourcedef_id": source_definition_id,
-            "config": {
-                "url": "https://storage.googleapis.com/covid19-open-data/v2/latest/epidemiology.csv",
-                "format": "csv",
-                "provider": {"storage": "HTTPS"},
-                "dataset_name": "covid19data",
-            },
-            "workspace_id": str(test_workspace_id),
-            "name": "source1",
-        }
-        try:
-            CreateSourceTestPayload(**payload)
-        except ValidationError as e:
-            raise ValueError(f"Field do not match in payload: {e.errors()}")
-        try:
-            res = create_source(**payload)
-            CreateSourceTestResponse(**res)
-            TestAirbyteSource.source_id = res["sourceId"]
-            TestAirbyteSource.source_definition_id = res["sourceDefinitionId"]
-        except ValidationError as e:
-            raise ValueError(f"Response validation failed: {e.errors()}")   
-
-    def test_delete_source(self, test_workspace_id): 
-        """deleting a source"""
-        payload = {
-            "source_id": TestAirbyteSource.source_id,
-            "workspace_id": test_workspace_id
-        }
-        try: 
-            delete_source(**payload)
-        except ValidationError as error:
-            raise ValueError(f"Response validation failed: {error.errors()}") from error
-            
-
 class TestWorkspace:
     """class which holds all the workspace tests"""
 
@@ -240,7 +177,7 @@ class TestAirbyteSource:
             UpdateSourceTestResponse(**res)
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
-        
+
 
 @pytest.fixture(scope="session")
 def test_source_id(test_workspace_id):
