@@ -98,6 +98,7 @@ class PrefectAirbyteConnectionBlockSchema(Schema):
     sourceCatalogId: str
     syncCatalog: dict
     status: str
+    deploymentId: str = None
 
 
 class PrefectFlowAirbyteConnection(Schema):
@@ -124,4 +125,4 @@ class PrefectDataFlowCreateSchema2(Schema):
     orgslug: str
     connection_blocks: list
     dbt_blocks: list
-    cron: str
+    cron: str = None
