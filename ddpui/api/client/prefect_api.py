@@ -136,7 +136,9 @@ def get_prefect_dataflows(request):
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
 
-    org_data_flows = OrgDataFlow.objects.filter(org=orguser.org).all()
+    org_data_flows = (
+        OrgDataFlow.objects.filter(org=orguser.org).exclude(cron=None).all()
+    )
 
     res = []
 
