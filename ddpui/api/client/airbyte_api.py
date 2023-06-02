@@ -295,6 +295,22 @@ def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
     return {"destinationId": destination["destinationId"]}
 
 
+@airbyteapi.post("/destinations/check_connection/", auth=auth.CanManagePipelines())
+def post_airbyte_check_destination(request, payload: AirbyteDestinationCreate):
+    """Test connection to destination in the user organization workspace"""
+    orguser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    response = airbyte_service.check_destination_connection(
+        orguser.org.airbyte_workspace_id, payload
+    )
+    return {
+        "status": "succeeded" if response["jobInfo"]["succeeded"] else "failed",
+        "logs": response["jobInfo"]["logs"]["logLines"],
+    }
+
+
 @airbyteapi.put("/destinations/{destination_id}/", auth=auth.CanManagePipelines())
 def put_airbyte_destination(
     request, destination_id: str, payload: AirbyteDestinationUpdate
@@ -311,22 +327,6 @@ def put_airbyte_destination(
     )
     logger.info("updated destination having id " + destination["destinationId"])
     return {"destinationId": destination["destinationId"]}
-
-
-@airbyteapi.post(
-    "/destinations/{destination_id}/check/", auth=auth.CanManagePipelines()
-)
-def post_airbyte_check_destination(request, destination_id):
-    """Test connection to destination in the user organization workspace"""
-    orguser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    res = airbyte_service.check_destination_connection(
-        orguser.org.airbyte_workspace_id, destination_id
-    )
-    logger.debug(res)
-    return res
 
 
 @airbyteapi.get("/destinations", auth=auth.CanManagePipelines())

@@ -187,6 +187,14 @@ def test_source_id(test_workspace_id):
 
 
 class TestAirbyteDestination:
+    destination_config = {
+        "host": os.getenv("DBHOST"),
+        "port": 5432,
+        "database": os.getenv("DBNAME"),
+        "username": os.getenv("DBUSER"),
+        "schema": "staging",
+    }
+
     def test_a_create_destination(self, test_workspace_id):
         destination_definitions = get_destination_definitions(
             workspace_id=test_workspace_id
@@ -198,16 +206,11 @@ class TestAirbyteDestination:
                 ]
                 break
 
+        TestAirbyteDestination.destination_definition_id = destination_definition_id
         payload = {
             "name": "destination1",
-            "destinationdef_id": destination_definition_id,
-            "config": {
-                "host": os.getenv("DBHOST"),
-                "port": 5432,
-                "database": os.getenv("DBNAME"),
-                "username": os.getenv("DBUSER"),
-                "schema": "staging",
-            },
+            "destinationdef_id": TestAirbyteDestination.destination_definition_id,
+            "config": TestAirbyteDestination.destination_config,
             "workspace_id": str(test_workspace_id),
         }
         try:
@@ -268,10 +271,15 @@ class TestAirbyteDestination:
 
     def test_check_destination_connection(self, test_workspace_id):
         workspace_id = test_workspace_id
-        destination_id = TestAirbyteDestination.destination_id
-
         try:
-            res = check_destination_connection(workspace_id, destination_id)
+            res = check_destination_connection(
+                workspace_id,
+                AirbyteDestinationCreate(
+                    name="unused",
+                    destinationDefId=TestAirbyteDestination.destination_definition_id,
+                    config=TestAirbyteDestination.destination_config,
+                ),
+            )
             CheckDestinationConnectionTestResponse(**res)
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error

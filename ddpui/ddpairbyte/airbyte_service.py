@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from ddpui.ddpairbyte import schema
 from ddpui.utils.ab_logger import logger
 from ddpui.utils.helpers import remove_nested_attribute
-from ddpui.ddpairbyte.schema import AirbyteSourceCreate
+from ddpui.ddpairbyte.schema import AirbyteSourceCreate, AirbyteDestinationCreate
 
 load_dotenv()
 
@@ -244,11 +244,16 @@ def update_destination(destination_id, name, config, destinationdef_id):
     return res
 
 
-def check_destination_connection(
-    workspace_id, destination_id
-):  # pylint: disable=unused-argument
-    """Test connection to a destination in an airbyte workspace"""
-    res = abreq("destinations/check_connection", {"destinationId": destination_id})
+def check_destination_connection(workspace_id, data: AirbyteDestinationCreate):
+    """Test a potential destination's connection in an airbyte workspace"""
+    res = abreq(
+        "scheduler/destinations/check_connection",
+        {
+            "destinationDefinitionId": data.destinationDefId,
+            "connectionConfiguration": data.config,
+            "workspaceId": workspace_id,
+        },
+    )
     return res
 
 
