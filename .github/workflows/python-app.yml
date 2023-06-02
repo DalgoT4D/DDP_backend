@@ -51,3 +51,7 @@ jobs:
           pytest ddpui/tests/unit_integration_tests/test_airbyte_service.py --doctest-modules --junitxml=junit/test-results.xml --cov=com --cov-report=xml --cov-report=html
           cd ddpui/tests
           pytest --cov
+        - name: Upload coverage reports to codecov
+          uses: codecov/codecov-action@v3
+          with:
+            token: ${{ secrets.CODECOV_TOKEN }}

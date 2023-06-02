@@ -27,6 +27,7 @@ click-plugins==1.1.1
 click-repl==0.2.0
 cloudpickle==2.2.1
 cloudwatch==1.0.5
+codecov==2.1.13
 colorama==0.4.6
 coolname==2.2.0
 coverage==7.2.5
