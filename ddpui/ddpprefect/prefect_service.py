@@ -163,7 +163,7 @@ def create_dbt_core_block(
             "profile": {
                 "name": profile.name,
                 "target": target,
-                "target_configs_schema": profile.target_configs_schema,
+                "target_configs_schema": target,
             },
             "wtype": wtype,
             "credentials": credentials,
