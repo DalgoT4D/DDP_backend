@@ -49,5 +49,5 @@ jobs:
           pip install pytest
           pip install pytest-cov
           pytest ddpui/tests/unit_integration_tests/test_airbyte_service.py --doctest-modules --junitxml=junit/test-results.xml --cov=com --cov-report=xml --cov-report=html
-          cd tests
+          cd ddpui/tests
           pytest --cov
