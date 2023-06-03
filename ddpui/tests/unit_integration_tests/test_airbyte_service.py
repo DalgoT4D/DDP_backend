@@ -183,6 +183,23 @@ class TestAirbyteSource:
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
 
+    def test_get_source_schema_catalog(self, test_workspace_id):
+        """fetches the schema catalog for a source"""
+        try:
+            res = get_source_schema_catalog(
+                test_workspace_id, TestAirbyteSource.source_id
+            )
+            GetSourceSchemaCatalogTestResponse(catalog=res)
+        except ValidationError as error:
+            raise ValueError(f"Response validation failed: {error.errors()}") from error
+
+    def test_fail_to_get_source_schema_catalog(self, test_workspace_id):
+        """fetches the schema catalog for a source"""
+        try:
+            get_source_schema_catalog(test_workspace_id, "not-a-source-id")
+        except AirbyteError:
+            pass
+
     def test_get_source(self, test_workspace_id):
         """tests retrieval of a single source"""
         try:

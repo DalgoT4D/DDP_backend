@@ -67,6 +67,10 @@ class GetSourceDefinitionsTestResponse(Schema):
         extra = "allow"
 
 
+class GetSourceSchemaCatalogTestResponse(Schema):
+    catalog: dict
+
+
 class GetWorkspacesTestResponse(Schema):
     workspaces: List[GetWorkspaceTestResponse]
 

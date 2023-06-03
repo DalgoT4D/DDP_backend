@@ -176,11 +176,13 @@ def get_source_schema_catalog(
 ):  # pylint: disable=unused-argument
     """Fetch source schema catalog for a source in an airbyte workspace"""
     res = abreq("sources/discover_schema", {"sourceId": source_id})
-    if "catalog" not in res:
+    if "catalog" not in res and "jobInfo" in res:
         raise AirbyteError(
             "Failed to get source schema catalogs",
             res["jobInfo"]["failureReason"]["externalMessage"],
         )
+    if "catalog" not in res and "jobInfo" not in res:
+        raise AirbyteError("Failed to get source schema catalogs", res["message"])
     return res
 
 
