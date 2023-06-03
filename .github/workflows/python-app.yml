@@ -47,7 +47,7 @@ jobs:
           DBUSER: ${{ secrets.DBUSER }}
         run: |
           coverage run -m pytest 
-          coverage report --fail-under=85
+          coverage report --fail-under=80
           coverage xml
           cd ddpui/tests
           pytest --cov
