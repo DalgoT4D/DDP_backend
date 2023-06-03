@@ -46,7 +46,7 @@ jobs:
           DBNAME: ${{ secrets.DBNAME }}
           DBUSER: ${{ secrets.DBUSER }}
         run: |
-          coverage run -m pytest && coverage report --fail-under=75 && coverage xml
+          coverage run -m pytest && coverage report --fail-under=85 && coverage xml
           cd ddpui/tests
           pytest --cov
       - name: Upload coverage reports to codecov
