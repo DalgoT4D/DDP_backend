@@ -353,7 +353,7 @@ class TestConnection:
             sourceId=str(test_source_id),
             destinationId=str(test_destination_id),
             name="Test Connection",
-            streamNames=["companies"],
+            streams=[{"name": "companies"}],
             normalize=False,
         )
 
@@ -386,7 +386,7 @@ class TestConnection:
             sourceId=test_source_id,
             destinationId=test_destination_id,
             connectionId=TestConnection.connection_id,
-            streamNames=["companies"],
+            streams=[{"name": "companies"}],
             name="Test Connection",
         )
 

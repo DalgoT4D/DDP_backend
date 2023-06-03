@@ -10,6 +10,14 @@ from ddpui.ddpairbyte.schema import AirbyteSourceCreate, AirbyteDestinationCreat
 load_dotenv()
 
 
+class AirbyteError(Exception):
+    """exception class with two strings"""
+
+    def __init__(self, detail: str, errors: str):
+        super().__init__(detail)
+        self.errors = errors
+
+
 def abreq(endpoint, req=None):
     """Request to the airbyte server"""
     abhost = os.getenv("AIRBYTE_SERVER_HOST")
@@ -169,7 +177,10 @@ def get_source_schema_catalog(
     """Fetch source schema catalog for a source in an airbyte workspace"""
     res = abreq("sources/discover_schema", {"sourceId": source_id})
     if "catalog" not in res:
-        raise Exception("Failed to get source schema catalogs")
+        raise AirbyteError(
+            "Failed to get source schema catalogs",
+            res["jobInfo"]["failureReason"]["externalMessage"],
+        )
     return res
 
 
@@ -293,7 +304,7 @@ def create_connection(
     workspace_id, airbyte_norm_op_id, connection_info: schema.AirbyteConnectionCreate
 ):
     """Create a connection in an airbyte workspace"""
-    if len(connection_info.streamNames) == 0:
+    if len(connection_info.streams) == 0:
         raise Exception("must specify stream names")
 
     sourceschemacatalog = get_source_schema_catalog(
@@ -325,9 +336,18 @@ def create_connection(
         payload["operationIds"] = [airbyte_norm_op_id]
 
     # one stream per table
+    selected_streams = {x["name"]: x for x in connection_info.streams}
     for schema_cat in sourceschemacatalog["catalog"]["streams"]:
-        if schema_cat["stream"]["name"] in connection_info.streamNames:
+        stream_name = schema_cat["stream"]["name"]
+        if (
+            stream_name in selected_streams
+            and selected_streams[stream_name]["selected"]
+        ):
             # set schema_cat['config']['syncMode'] from schema_cat['stream']['supportedSyncModes'] here
+            schema_cat["config"]["syncMode"] = selected_streams[stream_name]["syncMode"]
+            schema_cat["config"]["destinationSyncMode"] = selected_streams[stream_name][
+                "destinationSyncMode"
+            ]
             payload["syncCatalog"]["streams"].append(schema_cat)
 
     res = abreq("connections/create", payload)
@@ -340,7 +360,7 @@ def update_connection(
     workspace_id, connection_id, connection_info: schema.AirbyteConnectionUpdate
 ):
     """Update a connection of an airbyte workspace"""
-    if len(connection_info.streamNames) == 0:
+    if len(connection_info.streams) == 0:
         raise Exception("must specify stream names")
 
     sourceschemacatalog = get_source_schema_catalog(
@@ -377,9 +397,22 @@ def update_connection(
     }
 
     # one stream per table
+    selected_streams = [{x["name"]: x} for x in connection_info.streams]
     for schema_cat in sourceschemacatalog["catalog"]["streams"]:
-        if schema_cat["stream"]["name"] in connection_info.streamNames:
+        stream_name = schema_cat["stream"]["name"]
+        if (
+            stream_name in selected_streams
+            and selected_streams[stream_name]["selected"]
+        ):
             # set schema_cat['config']['syncMode'] from schema_cat['stream']['supportedSyncModes'] here
+            schema_cat["config"]["syncMode"] = (
+                "incremental"
+                if selected_streams[stream_name]["incremental"]
+                else "full_refresh"
+            )
+            schema_cat["config"]["destinationSyncMode"] = selected_streams[stream_name][
+                "destinationSyncMode"
+            ]
             payload["syncCatalog"]["streams"].append(schema_cat)
 
     res = abreq("connections/update", payload)
