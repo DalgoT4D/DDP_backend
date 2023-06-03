@@ -46,9 +46,18 @@ jobs:
           DBNAME: ${{ secrets.DBNAME }}
           DBUSER: ${{ secrets.DBUSER }}
         run: |
-          coverage run -m pytest && coverage report --fail-under=85 && coverage xml
+          coverage run -m pytest 
+          coverage report --fail-under=85
+          coverage xml
           cd ddpui/tests
           pytest --cov
+      - name: Check coverage percentage
+        run: |
+          coverage_percentage=$(coverage report --show-missing | tail -n 1 | awk '{print $4}')
+          if (( $(echo "$coverage_percentage < 85" | bc -l) )); then
+            echo "Coverage percentage is below 85%"
+            exit 1
+          fi
       - name: Upload coverage reports to codecov
         uses: codecov/codecov-action@v3
         with:
