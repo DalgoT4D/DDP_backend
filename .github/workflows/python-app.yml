@@ -30,12 +30,12 @@ jobs:
           mkdir -p ~/.ssh
           touch ~/.ssh/known_hosts
       - name: Add remote host key to known_hosts
-        run: ssh-keyscan 65.2.5.51 >> ~/.ssh/known_hosts
+        run: ssh-keyscan ${{ secrets.SERVERIP }} >> ~/.ssh/known_hosts
       - name: Set up port forwarding via SSH
         run: |
           eval `ssh-agent -s`
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh -L 8000:localhost:8000 ddp@65.2.5.51 -f -N
+          ssh -L 8000:localhost:8000 ${{ secrets.SERVER }} -f -N
       - name: Test with pytest
         env:
           AIRBYTE_SERVER_HOST: localhost
@@ -46,10 +46,20 @@ jobs:
           DBNAME: ${{ secrets.DBNAME }}
           DBUSER: ${{ secrets.DBUSER }}
         run: |
-          coverage run -m pytest && coverage report && coverage xml
+          coverage run -m pytest 
+          coverage report --fail-under=80
+          coverage xml
           cd ddpui/tests
           pytest --cov
+      - name: Check coverage percentage
+        run: |
+          coverage_percentage=$(coverage report --show-missing | tail -n 1 | awk '{print $4}')
+          if (( $(echo "$coverage_percentage < 85" | bc -l) )); then
+            echo "Coverage percentage is below 85%"
+            exit 1
+          fi
       - name: Upload coverage reports to codecov
         uses: codecov/codecov-action@v3
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
