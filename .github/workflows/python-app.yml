@@ -60,6 +60,9 @@ jobs:
           fi
       - name: Upload coverage reports to codecov
         uses: codecov/codecov-action@v3
+        ignore:
+          - "*/tests/*"
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
+      
