@@ -140,11 +140,9 @@ else:
         name="conn",
         sourceId=source["sourceId"],
         destinationId=destination["destinationId"],
-        streamNames=[
-            x["stream"]["name"] for x in source_schema_catalog["catalog"]["streams"]
-        ],
+        streams=[x["stream"] for x in source_schema_catalog["catalog"]["streams"]],
     )
-    result = airbyte_service.create_connection(args.workspace_id, connection_info)
+    result = airbyte_service.create_connection(args.workspace_id, None, connection_info)
     print(result)
 
     print("syncing the new connection")

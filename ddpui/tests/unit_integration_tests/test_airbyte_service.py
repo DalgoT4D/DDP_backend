@@ -11,7 +11,7 @@ from ddpui.ddpairbyte.airbyte_service import *
 from pydantic import ValidationError
 
 
-class TestDeleteSource: 
+class TestDeleteSource:
     def test_create_workspace(self):
         """creates a workspace, checks airbyte response"""
         payload = {"name": "test_workspace"}
@@ -28,7 +28,7 @@ class TestDeleteSource:
             CreateWorkspaceTestResponse(**res)
             TestWorkspace.workspace_id = res["workspaceId"]
         except ValidationError as error:
-            raise ValueError(f"Response validation failed: {error.errors()}") from error 
+            raise ValueError(f"Response validation failed: {error.errors()}") from error
 
     def test_a_create_source(self, test_workspace_id):
         source_definitions = get_source_definitions(workspace_id=test_workspace_id)
@@ -58,7 +58,8 @@ class TestDeleteSource:
             TestAirbyteSource.source_id = res["sourceId"]
             TestAirbyteSource.source_definition_id = res["sourceDefinitionId"]
         except ValidationError as e:
-            raise ValueError(f"Response validation failed: {e.errors()}")   
+            raise ValueError(f"Response validation failed: {e.errors()}")
+
 
 class TestWorkspace:
     """class which holds all the workspace tests"""
@@ -181,6 +182,23 @@ class TestAirbyteSource:
             GetSourceDefinitionsTestResponse(__root__=res)
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
+
+    def test_get_source_schema_catalog(self, test_workspace_id):
+        """fetches the schema catalog for a source"""
+        try:
+            res = get_source_schema_catalog(
+                test_workspace_id, TestAirbyteSource.source_id
+            )
+            GetSourceSchemaCatalogTestResponse(catalog=res)
+        except ValidationError as error:
+            raise ValueError(f"Response validation failed: {error.errors()}") from error
+
+    def test_fail_to_get_source_schema_catalog(self, test_workspace_id):
+        """fetches the schema catalog for a source"""
+        try:
+            get_source_schema_catalog(test_workspace_id, "not-a-source-id")
+        except AirbyteError:
+            pass
 
     def test_get_source(self, test_workspace_id):
         """tests retrieval of a single source"""
@@ -353,7 +371,14 @@ class TestConnection:
             sourceId=str(test_source_id),
             destinationId=str(test_destination_id),
             name="Test Connection",
-            streamNames=["companies"],
+            streams=[
+                {
+                    "name": "covid19data",
+                    "selected": True,
+                    "syncMode": "full_refresh",
+                    "destinationSyncMode": "overwrite",
+                }
+            ],
             normalize=False,
         )
 
@@ -386,7 +411,7 @@ class TestConnection:
             sourceId=test_source_id,
             destinationId=test_destination_id,
             connectionId=TestConnection.connection_id,
-            streamNames=["companies"],
+            streams=[{"name": "companies"}],
             name="Test Connection",
         )
 
