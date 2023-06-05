@@ -51,8 +51,6 @@ jobs:
           coverage xml
           cd ddpui/tests
           pytest --cov
-        ignore:
-          - "*/tests/*"
       - name: Check coverage percentage
         run: |
           coverage_percentage=$(coverage report --show-missing | tail -n 1 | awk '{print $4}')
