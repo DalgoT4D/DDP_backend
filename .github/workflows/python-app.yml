@@ -46,7 +46,7 @@ jobs:
           DBNAME: ${{ secrets.DBNAME }}
           DBUSER: ${{ secrets.DBUSER }}
         run: |
-          coverage run -m pytest 
+          coverage run --omit '*/tests/*' -m pytest
           coverage report --fail-under=80
           coverage xml
           cd ddpui/tests
@@ -60,9 +60,8 @@ jobs:
           fi
       - name: Upload coverage reports to codecov
         uses: codecov/codecov-action@v3
-        ignore:
-          - "*/tests/*"
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
+      
       
