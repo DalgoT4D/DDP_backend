@@ -1,2 +1,7 @@
 [run]
-omit=*/tests/*
+omit =
+    /tests/
+    */init.py
+    */celery.py
+    */schema.py
+    */settings.py
