@@ -290,6 +290,8 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
             block_name=block_response["block_name"],
             display_name=block_name,
             seq=sequence_number,
+            command=slugify(command),
+            dbt_target_schema=target
         )
 
         coreprefectblock.save()
@@ -308,6 +310,8 @@ def get_prefect_dbt_run_blocks(request):
             "blockType": prefect_block.block_type,
             "blockId": prefect_block.block_id,
             "blockName": prefect_block.block_name,
+            "command": prefect_block.command,
+            "dbtTargetSchema": prefect_block.dbt_target_schema
         }
         for prefect_block in OrgPrefectBlock.objects.filter(
             org=orguser.org, block_type=DBTCORE
