@@ -200,7 +200,7 @@ def run_airbyte_connection_sync(run_flow: PrefectAirbyteSync):  # pragma: no cov
     """initiates an airbyte connection sync"""
     res = requests.post(
         f"{PREFECT_PROXY_API_URL}/proxy/flows/airbyte/connection/sync/",
-        timeout=30,
+        timeout=120,
         json=run_flow.to_json(),
     )
     res.raise_for_status()
@@ -211,7 +211,7 @@ def run_dbt_core_sync(run_flow: PrefectDbtCore):  # pragma: no cover
     """initiates a dbt job sync"""
     res = requests.post(
         f"{PREFECT_PROXY_API_URL}/proxy/flows/dbtcore/run/",
-        timeout=30,
+        timeout=120,
         json=run_flow.to_json(),
     )
     res.raise_for_status()
