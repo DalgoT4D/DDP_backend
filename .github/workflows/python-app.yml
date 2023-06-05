@@ -35,7 +35,7 @@ jobs:
         run: |
           eval `ssh-agent -s`
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh -L 8000:localhost:8000 ${{ secrets.SERVER }} -f -N
+          ssh -L 8000:localhost:8000 -L 8080:localhost:8080 ${{ secrets.SERVER }} -f -N
       - name: Test with pytest
         env:
           AIRBYTE_SERVER_HOST: localhost
@@ -45,6 +45,7 @@ jobs:
           DBHOST: ${{ secrets.DBHOST }}
           DBNAME: ${{ secrets.DBNAME }}
           DBUSER: ${{ secrets.DBUSER }}
+          PREFECT_PROXY_API_URL: http://localhost:8080/
         run: |
           coverage run -m pytest 
           coverage report --fail-under=80
