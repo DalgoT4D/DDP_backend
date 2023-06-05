@@ -46,11 +46,13 @@ jobs:
           DBNAME: ${{ secrets.DBNAME }}
           DBUSER: ${{ secrets.DBUSER }}
         run: |
-          coverage run --omit '*/tests/*' -m pytest
+          coverage run -m pytest 
           coverage report --fail-under=80
           coverage xml
           cd ddpui/tests
           pytest --cov
+        ignore:
+          - "*/tests/*"
       - name: Check coverage percentage
         run: |
           coverage_percentage=$(coverage report --show-missing | tail -n 1 | awk '{print $4}')
