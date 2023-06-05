@@ -6,7 +6,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from ddpui.tests.unit_integration_tests.test_airbyte_unit_schemas import *
+from ddpui.tests.helper.test_airbyte_unit_schemas import *
 from ddpui.ddpairbyte.airbyte_service import *
 from pydantic import ValidationError
 

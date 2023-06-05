@@ -4,4 +4,4 @@ omit=*/tests/*
      */celery.py
      */schema.py 
      */settings.py 
-     */utils/*
+
