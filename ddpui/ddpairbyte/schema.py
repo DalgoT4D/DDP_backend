@@ -48,7 +48,7 @@ class AirbyteConnectionCreate(Schema):
     sourceId: str
     destinationId: str = None
     destinationSchema: str = None
-    streamNames: list
+    streams: list
     normalize: bool = False
 
 
@@ -59,7 +59,7 @@ class AirbyteConnectionUpdate(Schema):
     name: Optional[str] = None
     sourceId: Optional[str] = None
     destinationId: Optional[str] = None
-    streamNames: Optional[list] = None
+    streams: Optional[list] = None
 
 
 # response schemas

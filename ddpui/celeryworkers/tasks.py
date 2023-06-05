@@ -168,6 +168,19 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     # install dbt in the new env
     try:
         runcmd(f"{pip} install dbt-core=={payload['dbtVersion']}", project_dir)
+    except CalledProcessError as error:
+        if error.returncode != 120:
+            taskprogress.add(
+                {
+                    "stepnum": 6,
+                    "numsteps": 8,
+                    "message": "pip install dbt-core=={payload['dbtVersion']} failed",
+                    "error": str(error),
+                    "status": "failed",
+                }
+            )
+            logger.exception(error)
+            return
     except Exception as error:
         taskprogress.add(
             {
@@ -194,6 +207,19 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     if warehouse.wtype == "postgres":
         try:
             runcmd(f"{pip} install dbt-postgres==1.4.5", project_dir)
+        except CalledProcessError as error:
+            if error.returncode != 120:
+                taskprogress.add(
+                    {
+                        "stepnum": 7,
+                        "numsteps": 8,
+                        "message": "pip install dbt-postgres==1.4.5 failed",
+                        "error": str(error),
+                        "status": "failed",
+                    }
+                )
+                logger.exception(error)
+                return
         except Exception as error:
             taskprogress.add(
                 {
@@ -219,6 +245,19 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     elif warehouse.wtype == "bigquery":
         try:
             runcmd(f"{pip} install dbt-bigquery==1.4.3", project_dir)
+        except CalledProcessError as error:
+            if error.returncode != 120:
+                taskprogress.add(
+                    {
+                        "stepnum": 7,
+                        "numsteps": 8,
+                        "message": "pip install dbt-bigquery==1.4.3 failed",
+                        "error": str(error),
+                        "status": "failed",
+                    }
+                )
+                logger.exception(error)
+                return
         except Exception as error:
             taskprogress.add(
                 {

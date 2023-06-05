@@ -237,11 +237,14 @@ def get_airbyte_source_schema_catalog(request, source_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    res = airbyte_service.get_source_schema_catalog(
-        orguser.org.airbyte_workspace_id, source_id
-    )
-    logger.debug(res)
-    return res
+    try:
+        res = airbyte_service.get_source_schema_catalog(
+            orguser.org.airbyte_workspace_id, source_id
+        )
+        logger.debug(res)
+        return res
+    except airbyte_service.AirbyteError as error:
+        raise HttpError(400, error.errors) from error
 
 
 @airbyteapi.get("/destination_definitions", auth=auth.CanManagePipelines())
@@ -465,7 +468,7 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
     if org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    if len(payload.streamNames) == 0:
+    if len(payload.streams) == 0:
         raise HttpError(400, "must specify stream names")
 
     warehouse = OrgWarehouse.objects.filter(org=org).first()
@@ -550,6 +553,13 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
             dbt_blocks=[],
         )
     )
+
+    existing_dataflow = OrgDataFlow.objects.filter(
+        deployment_id=dataflow["deployment"]["id"]
+    ).first()
+    if existing_dataflow:
+        existing_dataflow.delete()
+
     OrgDataFlow.objects.create(
         org=orguser.org,
         name=f"manual-sync-{block_name}",
