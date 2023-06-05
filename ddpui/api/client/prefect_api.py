@@ -290,7 +290,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
             block_name=block_response["block_name"],
             display_name=block_name,
             seq=sequence_number,
-            command=command,
+            command=slugify(command),
             dbt_target_schema=target
         )
 
