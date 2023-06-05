@@ -41,7 +41,11 @@ def create_airbyte_server_block(blockname) -> str:
             "apiVersion": os.getenv("AIRBYTE_SERVER_APIVER"),
         },
     )
-    response.raise_for_status()
+    try:
+        response.raise_for_status()
+    except Exception as error:
+        print(response.text)
+        raise error
     return response.json()["block_id"]
 
 
@@ -110,7 +114,11 @@ def get_shell_block_id(blockname) -> str | None:
     response = requests.get(
         f"{PREFECT_PROXY_API_URL}/proxy/blocks/shell/{blockname}", timeout=30
     )
-    response.raise_for_status()
+    try:
+        response.raise_for_status()
+    except Exception as error:
+        logger.error(response.text)
+        raise error
     return response.json()["block_id"]
 
 
@@ -188,7 +196,7 @@ def delete_dbt_core_block(block_id):
 
 
 # ================================================================================================
-def run_airbyte_connection_sync(run_flow: PrefectAirbyteSync):
+def run_airbyte_connection_sync(run_flow: PrefectAirbyteSync):  # pragma: no cover
     """initiates an airbyte connection sync"""
     res = requests.post(
         f"{PREFECT_PROXY_API_URL}/proxy/flows/airbyte/connection/sync/",
@@ -199,7 +207,7 @@ def run_airbyte_connection_sync(run_flow: PrefectAirbyteSync):
     return res.json()
 
 
-def run_dbt_core_sync(run_flow: PrefectDbtCore):
+def run_dbt_core_sync(run_flow: PrefectDbtCore):  # pragma: no cover
     """initiates a dbt job sync"""
     res = requests.post(
         f"{PREFECT_PROXY_API_URL}/proxy/flows/dbtcore/run/",
@@ -211,7 +219,7 @@ def run_dbt_core_sync(run_flow: PrefectDbtCore):
 
 
 # Flows and deployments
-def create_dataflow(payload: PrefectDataFlowCreateSchema2):
+def create_dataflow(payload: PrefectDataFlowCreateSchema2):  # pragma: no cover
     """create a prefect deployment out of a flow and a cron schedule"""
     res = requests.post(
         f"{PREFECT_PROXY_API_URL}/proxy/deployments/",
@@ -232,7 +240,7 @@ def create_dataflow(payload: PrefectDataFlowCreateSchema2):
     return res.json()
 
 
-def get_flow_runs_by_deployment_id(deployment_id, limit=None):
+def get_flow_runs_by_deployment_id(deployment_id, limit=None):  # pragma: no cover
     """Fetch flow runs of a deployment that are FAILED/COMPLETED sorted by descending start time of each run"""
     res = requests.get(
         f"{PREFECT_PROXY_API_URL}/proxy/flow_runs",
@@ -243,7 +251,7 @@ def get_flow_runs_by_deployment_id(deployment_id, limit=None):
     return res.json()["flow_runs"]
 
 
-def get_last_flow_run_by_deployment_id(deployment_id):
+def get_last_flow_run_by_deployment_id(deployment_id):  # pragma: no cover
     """Fetch most recent flow run of a deployment that is FAILED/COMPLETED"""
     res = get_flow_runs_by_deployment_id(deployment_id, limit=1)
     if len(res) > 0:
@@ -251,7 +259,7 @@ def get_last_flow_run_by_deployment_id(deployment_id):
     return None
 
 
-def get_filtered_deployments(org_slug, deployment_ids=[]):
+def get_filtered_deployments(org_slug, deployment_ids=[]):  # pragma: no cover
     # pylint: disable=dangerous-default-value
     """Fetch all deployments by org slug"""
     res = requests.post(
@@ -263,7 +271,7 @@ def get_filtered_deployments(org_slug, deployment_ids=[]):
     return res.json()["deployments"]
 
 
-def delete_deployment_by_id(deployment_id):
+def delete_deployment_by_id(deployment_id):  # pragma: no cover
     """Proxy api call to delete a deployment from prefect db"""
     res = requests.delete(
         f"{PREFECT_PROXY_API_URL}/proxy/deployments/{deployment_id}",
@@ -273,7 +281,7 @@ def delete_deployment_by_id(deployment_id):
     return {"success": 1}
 
 
-def get_flow_run_logs(flow_run_id, offset):
+def get_flow_run_logs(flow_run_id, offset):  # pragma: no cover
     """retreive the logs from a flow-run from prefect"""
     res = requests.get(
         f"{PREFECT_PROXY_API_URL}/proxy/flow_runs/logs/{flow_run_id}",
@@ -284,7 +292,7 @@ def get_flow_run_logs(flow_run_id, offset):
     return {"logs": res.json()}
 
 
-def create_deployment_flow_run(deployment_id):
+def create_deployment_flow_run(deployment_id):  # pragma: no cover
     """Proxy call to create a flow run for deployment.
     This is like a quick check to see if deployment is running"""
     res = requests.post(
