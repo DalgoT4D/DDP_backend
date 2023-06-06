@@ -3,12 +3,12 @@ import sys
 from logging.handlers import RotatingFileHandler
 from ddpui import settings
 
-logger = logging.getLogger("ddpui")
+logger = logging.getLogger("django")
 
 
 def setup_logger():
-    """setup the ddpui logger"""
-    logfilename = settings.BASE_DIR / "ddpui/logs/ddpui.log"
+    """sets up the django logger"""
+    logfilename = settings.BASE_DIR / "ddpui/logs/django.log"
     logger.setLevel(logging.INFO)
     # log to aws cw - requires aws credentials
 
