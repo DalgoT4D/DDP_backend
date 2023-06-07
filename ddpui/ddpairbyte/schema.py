@@ -22,7 +22,7 @@ class AirbyteSourceUpdate(Schema):
 
     name: str
     config: dict
-    sourcedef_id: str
+    sourceDefId: str
 
 
 class AirbyteDestinationCreate(Schema):

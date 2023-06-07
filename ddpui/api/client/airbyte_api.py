@@ -172,7 +172,7 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
         raise HttpError(400, "create an airbyte workspace first")
 
     source = airbyte_service.update_source(
-        source_id, payload.name, payload.config, payload.sourcedef_id
+        source_id, payload.name, payload.config, payload.sourceDefId
     )
     logger.info("updated source having id " + source["sourceId"])
     return {"sourceId": source["sourceId"]}
