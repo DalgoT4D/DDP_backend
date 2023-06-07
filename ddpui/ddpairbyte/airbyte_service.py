@@ -26,7 +26,6 @@ def abreq(endpoint, req=None):
     token = os.getenv("AIRBYTE_API_TOKEN")
 
     logger.info("Making request to Airbyte server: %s", endpoint)
-
     res = requests.post(
         f"http://{abhost}:{abport}/api/{abver}/{endpoint}",
         headers={"Authorization": f"Basic {token}"},
@@ -53,24 +52,41 @@ def get_workspaces():
     """Fetch all workspaces in airbyte server"""
     return abreq("workspaces/list")
 
+def get_workspace(workspace_id: str) -> dict:
+    """Fetch a workspace from the airbyte server"""
+    if not isinstance(workspace_id, str):
+        raise TypeError("workspace_id must be a string")
+    
+    try:
+        return abreq("workspaces/get", {"workspaceId": workspace_id})
+    except Exception as e:
+        raise RuntimeError(f"Error fetching workspace: {str(e)}")
 
-def get_workspace(workspace_id):
-    """Fetch a workspace in airbyte server"""
-    return abreq("workspaces/get", {"workspaceId": workspace_id})
+def set_workspace_name(workspace_id: str, name: str) -> dict:
+    """Set workspace name in the airbyte server"""
+    if not isinstance(workspace_id, str):
+        raise TypeError("Workspace ID must be a string")
+    
+    if not isinstance(name, str):
+        raise TypeError("Name must be a string")
+    
+    try:
+        return abreq("workspaces/update_name", {"workspaceId": workspace_id, "name": name})
+    except Exception as e:
+        raise RuntimeError(f"Error setting workspace name: {str(e)}")
 
+def create_workspace(name: str) -> dict:
+    """Create a workspace in the airbyte server"""
+    if not isinstance(name, str):
+        raise TypeError("Name must be a string")
 
-def set_workspace_name(workspace_id, name):
-    """Set workspace name in airbyte server"""
-    return abreq("workspaces/update_name", {"workspaceId": workspace_id, "name": name})
-
-
-def create_workspace(name):
-    """Create a workspace in airbyte server"""
-    res = abreq("workspaces/create", {"name": name})
-    if "workspaceId" not in res:
-        raise Exception(res)
-    return res
-
+    try:
+        res = abreq("workspaces/create", {"name": name})
+        if "workspaceId" not in res:
+            raise Exception(res)
+        return res
+    except Exception as e:
+        raise RuntimeError(f"Error creating workspace: {str(e)}")
 
 def get_source_definitions(workspace_id, **kwargs):  # pylint: disable=unused-argument
     """Fetch source definitions for an airbyte workspace"""

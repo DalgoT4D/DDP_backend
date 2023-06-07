@@ -11,6 +11,53 @@ from ddpui.ddpairbyte.airbyte_service import *
 from pydantic import ValidationError
 
 
+import pytest
+
+@pytest.fixture
+def valid_workspace_id():
+    return "123"
+
+@pytest.fixture
+def invalid_workspace_id():
+    return 123
+
+@pytest.fixture
+def valid_name():
+    return "Example Workspace"
+
+@pytest.fixture
+def invalid_name():
+    return 123
+
+def test_get_workspace_with_valid_workspace_id(valid_workspace_id):
+    result = get_workspace(valid_workspace_id)
+    assert isinstance(result, dict)
+
+def test_get_workspace_with_invalid_workspace_id(invalid_workspace_id):
+    with pytest.raises(TypeError):
+        get_workspace(invalid_workspace_id)
+
+def test_set_workspace_name_with_valid_parameters(valid_workspace_id, valid_name):
+    result = set_workspace_name(valid_workspace_id, valid_name)
+    assert isinstance(result, dict)
+
+def test_set_workspace_name_with_invalid_workspace_id(valid_name, invalid_workspace_id):
+    with pytest.raises(TypeError):
+        set_workspace_name(invalid_workspace_id, valid_name)
+
+def test_set_workspace_name_with_invalid_name(valid_workspace_id, invalid_name):
+    with pytest.raises(TypeError):
+        set_workspace_name(valid_workspace_id, invalid_name)
+
+def test_create_workspace_with_valid_name(valid_name):
+    result = create_workspace(valid_name)
+    assert isinstance(result, dict)
+
+def test_create_workspace_with_invalid_name(invalid_name):
+    with pytest.raises(TypeError):
+        create_workspace(invalid_name)
+
+        
 class TestDeleteSource:
     def test_create_workspace(self):
         """creates a workspace, checks airbyte response"""
