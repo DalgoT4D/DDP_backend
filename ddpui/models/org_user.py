@@ -40,6 +40,7 @@ class OrgUserCreate(Schema):
 
     email: str
     password: str
+    signupcode: str
     role: str = None
 
 
