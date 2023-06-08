@@ -36,10 +36,13 @@ DEBUG = False
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
-    "ec2-65-2-5-51.ap-south-1.compute.amazonaws.com",
+    "ddpapi.projecttech4dev.org",
 ]
 CORS_ALLOW_ALL_ORIGINS = False
-CORS_ORIGIN_WHITELIST = ("http://localhost:3000",)
+CORS_ORIGIN_WHITELIST = (
+    "http://localhost:3000",
+    "https://ddpui.projecttech4dev.org",
+)
 
 # Application definition
 
