@@ -18,6 +18,8 @@ from ddpui.ddpairbyte.schema import (
     AirbyteSourceUpdate,
     AirbyteWorkspace,
     AirbyteWorkspaceCreate,
+    AirbyteSourceUpdateCheckConnection,
+    AirbyteDestinationUpdateCheckConnection
 )
 from ddpui.ddpprefect.prefect_service import run_airbyte_connection_sync
 from ddpui.ddpprefect.schema import (
@@ -193,6 +195,21 @@ def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
         "logs": response["jobInfo"]["logs"]["logLines"],
     }
 
+@airbyteapi.post("/sources/{source_id}/check_connection_for_update/", auth=auth.CanManagePipelines())
+def post_airbyte_check_source_for_update(request, source_id: str, payload: AirbyteSourceUpdateCheckConnection):
+    """Test the source connection in the user organization workspace"""
+    orguser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    response = airbyte_service.check_source_connection_for_update(
+        source_id, payload
+    )
+    return {
+        "status": "succeeded" if response["jobInfo"]["succeeded"] else "failed",
+        "logs": response["jobInfo"]["logs"]["logLines"],
+    }
+
 
 @airbyteapi.get("/sources", auth=auth.CanManagePipelines())
 def get_airbyte_sources(request):
@@ -309,6 +326,22 @@ def post_airbyte_check_destination(request, payload: AirbyteDestinationCreate):
 
     response = airbyte_service.check_destination_connection(
         orguser.org.airbyte_workspace_id, payload
+    )
+    return {
+        "status": "succeeded" if response["jobInfo"]["succeeded"] else "failed",
+        "logs": response["jobInfo"]["logs"]["logLines"],
+    }
+
+
+@airbyteapi.post("/destinations/{destination_id}/check_connection_for_update/", auth=auth.CanManagePipelines())
+def post_airbyte_check_destination_for_update(request, destination_id: str, payload: AirbyteDestinationUpdateCheckConnection):
+    """Test connection to destination in the user organization workspace"""
+    orguser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    response = airbyte_service.check_destination_connection_for_update(
+        destination_id, payload
     )
     return {
         "status": "succeeded" if response["jobInfo"]["succeeded"] else "failed",
