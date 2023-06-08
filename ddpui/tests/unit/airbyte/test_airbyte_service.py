@@ -174,6 +174,20 @@ class TestAirbyteSource:
             TestAirbyteSource.source_id = res["sourceId"]
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
+        
+    def test_source_connection_for_update(self):
+        """tests connectivity to a source while editing"""
+        try:
+            res = check_source_connection_for_update(
+                TestAirbyteSource.source_id,
+                AirbyteSourceUpdateCheckConnection(
+                    name="unused",
+                    config=self.source_config,
+                ),
+            )
+            CheckSourceConnectionTestResponse(**res)
+        except ValidationError as error:
+            raise ValueError(f"Response validation failed: {error.errors()}") from error
 
     def test_get_definitions(self, test_workspace_id):
         """tests retrieval of source definitions"""
@@ -344,6 +358,19 @@ class TestAirbyteDestination:
                 AirbyteDestinationCreate(
                     name="unused",
                     destinationDefId=TestAirbyteDestination.destination_definition_id,
+                    config=TestAirbyteDestination.destination_config,
+                ),
+            )
+            CheckDestinationConnectionTestResponse(**res)
+        except ValidationError as error:
+            raise ValueError(f"Response validation failed: {error.errors()}") from error
+        
+    def test_check_destination_connection_for_update(self):
+        try:
+            res = check_destination_connection_for_update(
+                TestAirbyteDestination.destination_id,
+                AirbyteDestinationUpdateCheckConnection(
+                    name="unused",
                     config=TestAirbyteDestination.destination_config,
                 ),
             )
