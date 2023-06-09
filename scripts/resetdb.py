@@ -7,15 +7,14 @@ from dotenv import load_dotenv
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--yes-really", action="store_true")
+parser.add_argument("--yes-partially", action="store_true")
 args = parser.parse_args()
-
-if not args.yes_really:
-    parser.print_usage()
-    sys.exit(0)
-
 
 load_dotenv()
 
+if not args.yes_really and not args.yes_partially:
+    parser.print_usage()
+    sys.exit(0)
 
 def checkenv():
     """Docstring"""
@@ -55,15 +54,33 @@ conn = psycopg2.connect(
 conn.autocommit = True
 cursor = conn.cursor()
 
-for cmd in [
-    # f"CREATE USER {dbuser} WITH PASSWORD '{dbpassword}'",
-    # f"ALTER USER {dbuser} CREATEDB",
-    f"DROP DATABASE IF EXISTS {dbname}",
-    f"CREATE DATABASE {dbname}",
-    f"GRANT ALL PRIVILEGES on DATABASE {dbname} TO {dbuser}",
-]:
-    print(cmd)
-    cursor.execute(cmd)
-    sleep(1)
+if args.yes_really: # Full reset
+    print("Full reset of database")
+    for cmd in [
+        # f"CREATE USER {dbuser} WITH PASSWORD '{dbpassword}'",
+        # f"ALTER USER {dbuser} CREATEDB",
+        f"DROP DATABASE IF EXISTS {dbname}",
+        f"CREATE DATABASE {dbname}",
+        f"GRANT ALL PRIVILEGES on DATABASE {dbname} TO {dbuser}",
+    ]:
+        print(cmd)
+        cursor.execute(cmd)
+        sleep(1)
+
+if args.yes_partially: # Partial reset of some tables
+    print("Partial reset of database")
+    for cmd in [
+        "delete from ddpui_orgdataflow",
+        "delete from ddpui_orguser",
+        "delete from ddpui_orgwarehouse",
+        "delete from ddpui_orgprefectblock",
+        "delete from ddpui_org",
+        "delete from ddpui_orgdbt",
+        "delete from authtoken_token",
+        "delete from auth_user",
+    ]:
+        print(cmd)
+        cursor.execute(cmd)
+        sleep(1)
 
 conn.close()
