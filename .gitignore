@@ -133,3 +133,5 @@ dmypy.json
 .vscode
 
 celeryworker.pid
+
+secrets/
