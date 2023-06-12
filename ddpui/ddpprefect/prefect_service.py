@@ -75,7 +75,7 @@ def get_airbye_connection_blocks(block_names):
     response = requests.post(
         f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/connection/filter",
         timeout=30,
-        json={'block_names': block_names}
+        json={"block_names": block_names},
     )
     response.raise_for_status()
     return response.json()
@@ -118,17 +118,21 @@ def delete_airbyte_connection_block(block_id):
     """Delete airbyte connection block in prefect"""
     requests.delete(f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=30)
 
+
 def post_prefect_blocks_bulk_delete(block_ids: list):
     """Delete airbyte connection blocks in prefect corresponding the connection ids array passed"""
     response = requests.post(
-        f"{PREFECT_PROXY_API_URL}/proxy/blocks/bulk/delete/", timeout=30, json={'block_ids': block_ids}
+        f"{PREFECT_PROXY_API_URL}/proxy/blocks/bulk/delete/",
+        timeout=30,
+        json={"block_ids": block_ids},
     )
     try:
         response.raise_for_status()
     except Exception as error:
         logger.error(response.text)
         raise error
-    return None
+    return response.json()
+
 
 # ================================================================================================
 def get_shell_block_id(blockname) -> str | None:
