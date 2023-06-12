@@ -19,7 +19,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteWorkspace,
     AirbyteWorkspaceCreate,
     AirbyteSourceUpdateCheckConnection,
-    AirbyteDestinationUpdateCheckConnection
+    AirbyteDestinationUpdateCheckConnection,
 )
 from ddpui.ddpprefect.prefect_service import run_airbyte_connection_sync
 from ddpui.ddpprefect.schema import (
@@ -195,16 +195,19 @@ def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
         "logs": response["jobInfo"]["logs"]["logLines"],
     }
 
-@airbyteapi.post("/sources/{source_id}/check_connection_for_update/", auth=auth.CanManagePipelines())
-def post_airbyte_check_source_for_update(request, source_id: str, payload: AirbyteSourceUpdateCheckConnection):
+
+@airbyteapi.post(
+    "/sources/{source_id}/check_connection_for_update/", auth=auth.CanManagePipelines()
+)
+def post_airbyte_check_source_for_update(
+    request, source_id: str, payload: AirbyteSourceUpdateCheckConnection
+):
     """Test the source connection in the user organization workspace"""
     orguser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    response = airbyte_service.check_source_connection_for_update(
-        source_id, payload
-    )
+    response = airbyte_service.check_source_connection_for_update(source_id, payload)
     return {
         "status": "succeeded" if response["jobInfo"]["succeeded"] else "failed",
         "logs": response["jobInfo"]["logs"]["logLines"],
@@ -333,8 +336,13 @@ def post_airbyte_check_destination(request, payload: AirbyteDestinationCreate):
     }
 
 
-@airbyteapi.post("/destinations/{destination_id}/check_connection_for_update/", auth=auth.CanManagePipelines())
-def post_airbyte_check_destination_for_update(request, destination_id: str, payload: AirbyteDestinationUpdateCheckConnection):
+@airbyteapi.post(
+    "/destinations/{destination_id}/check_connection_for_update/",
+    auth=auth.CanManagePipelines(),
+)
+def post_airbyte_check_destination_for_update(
+    request, destination_id: str, payload: AirbyteDestinationUpdateCheckConnection
+):
     """Test connection to destination in the user organization workspace"""
     orguser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -505,6 +513,8 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
         raise HttpError(400, "must specify stream names")
 
     warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if warehouse is None:
+        raise HttpError(400, "need to set up a warehouse first")
     if warehouse.airbyte_destination_id is None:
         raise HttpError(400, "warehouse has no airbyte_destination_id")
     payload.destinationId = warehouse.airbyte_destination_id

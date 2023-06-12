@@ -248,7 +248,13 @@ def get_organizations_warehouses(request):
     """returns all warehouses associated with this org"""
     orguser = request.orguser
     warehouses = [
-        {"wtype": warehouse.wtype, "credentials": warehouse.credentials}
+        {
+            "wtype": warehouse.wtype,
+            # "credentials": warehouse.credentials,
+            "airbyte_destination": airbyte_service.get_destination(
+                orguser.org.airbyte_workspace_id, warehouse.airbyte_destination_id
+            ),
+        }
         for warehouse in OrgWarehouse.objects.filter(org=orguser.org)
     ]
     return {"warehouses": warehouses}
