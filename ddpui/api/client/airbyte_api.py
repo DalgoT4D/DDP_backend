@@ -1,6 +1,7 @@
 import os
 from datetime import datetime
 from typing import List
+from django.http import JsonResponse
 from ninja import NinjaAPI
 from ninja.errors import HttpError
 
@@ -111,9 +112,12 @@ def post_airbyte_workspace(request, payload: AirbyteWorkspaceCreate):
     """Create an airbyte workspace"""
     orguser = request.orguser
     if orguser.org.airbyte_workspace_id is not None:
-        raise HttpError(400, "org already has a workspace")
+        raise HttpError(status=400, detail="org already has a workspace")
 
-    return airbytehelpers.setup_airbyte_workspace(payload.name, orguser.org)
+    workspace = airbytehelpers.setup_airbyte_workspace(payload.name, orguser.org)
+
+    # Return JSONResponse with custom status code
+    return JsonResponse(workspace.dict(), status=200)
 
 
 @airbyteapi.get("/source_definitions", auth=auth.CanManagePipelines())
