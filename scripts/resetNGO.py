@@ -52,13 +52,13 @@ with open(args.file, 'r') as json_file:
 
 ngoClient = TestClient(args.port)
 
-# # signup
-# ngoClient.clientpost("organizations/users/", json={
-#         "email": ngoToBeRestored["email"], 
-#         "password": ngoToBeRestored["password"], 
-#         "signupcode": os.getenv("SIGNUPCODE")
-#     }
-# )
+# signup
+ngoClient.clientpost("organizations/users/", json={
+        "email": ngoToBeRestored["email"], 
+        "password": ngoToBeRestored["password"], 
+        "signupcode": os.getenv("SIGNUPCODE")
+    }
+)
 
 # login
 ngoClient.login(ngoToBeRestored["email"], ngoToBeRestored["password"])
@@ -71,56 +71,56 @@ ngoClient.clientpost(
     },
 )
 
-# # create warehouse
-# destination_definitions = ngoClient.clientget("airbyte/destination_definitions")
-# print(destination_definitions)
-# for destdef in destination_definitions:
-#     if destdef["name"] == ngoToBeRestored["warehouse"]["wtype"]:
-#         destinationDefinitionId = destdef["destinationDefinitionId"]
-#         ngoToBeRestored["warehouse"]["destinationDefId"] = destinationDefinitionId
-#         ngoToBeRestored["warehouse"]["wtype"] = ngoToBeRestored["warehouse"]["wtype"].lower()
+# create warehouse
+destination_definitions = ngoClient.clientget("airbyte/destination_definitions")
+print(destination_definitions)
+for destdef in destination_definitions:
+    if destdef["name"] == ngoToBeRestored["warehouse"]["wtype"]:
+        destinationDefinitionId = destdef["destinationDefinitionId"]
+        ngoToBeRestored["warehouse"]["destinationDefId"] = destinationDefinitionId
+        ngoToBeRestored["warehouse"]["wtype"] = ngoToBeRestored["warehouse"]["wtype"].lower()
 
-# ngoClient.clientpost(
-#     "organizations/warehouse/",
-#     json=ngoToBeRestored["warehouse"]
-# )
+ngoClient.clientpost(
+    "organizations/warehouse/",
+    json=ngoToBeRestored["warehouse"]
+)
 
-# # create sources
-# source_definitions = ngoClient.clientget("airbyte/source_definitions")
-# for src in ngoToBeRestored["sources"]:
-#     for sourceDef in source_definitions:
-#         sourceDefId = sourceDef["sourceDefinitionId"]
-#         if sourceDef["name"] == src['stype']:
-#             # add source
-#             ngoClient.clientpost(
-#                 "airbyte/sources/",
-#                 json={
-#                     "name": src["name"],
-#                     "sourceDefId": sourceDefId,
-#                     "config": src["config"]
-#                 }
-#             )
+# create sources
+source_definitions = ngoClient.clientget("airbyte/source_definitions")
+for src in ngoToBeRestored["sources"]:
+    for sourceDef in source_definitions:
+        sourceDefId = sourceDef["sourceDefinitionId"]
+        if sourceDef["name"] == src['stype']:
+            # add source
+            ngoClient.clientpost(
+                "airbyte/sources/",
+                json={
+                    "name": src["name"],
+                    "sourceDefId": sourceDefId,
+                    "config": src["config"]
+                }
+            )
 
-# # create connections between all sources to destinations
-# sources = ngoClient.clientget("airbyte/sources")
-# for i, src in enumerate(sources):
-#     connPayload = {
-#         'name': f'test-conn-{i}',
-#         'normalize': False,
-#         'sourceId': src["sourceId"],
-#         'streams': []
-#     }
+# create connections between all sources to destinations
+sources = ngoClient.clientget("airbyte/sources")
+for i, src in enumerate(sources):
+    connPayload = {
+        'name': f'test-conn-{i}',
+        'normalize': False,
+        'sourceId': src["sourceId"],
+        'streams': []
+    }
 
-#     schemaCatalog = ngoClient.clientget(f'airbyte/sources/{src["sourceId"]}/schema_catalog')
-#     for streamData in schemaCatalog['catalog']['streams']:
-#         streamPayload = {}
-#         streamPayload['selected'] = True
-#         streamPayload['name'] = streamData['stream']['name']
-#         streamPayload['supportsIncremental'] = False
-#         streamPayload['destinationSyncMode'] = 'append'
-#         streamPayload['syncMode'] = 'full_refresh'
-#         connPayload['streams'].append(streamPayload)
+    schemaCatalog = ngoClient.clientget(f'airbyte/sources/{src["sourceId"]}/schema_catalog')
+    for streamData in schemaCatalog['catalog']['streams']:
+        streamPayload = {}
+        streamPayload['selected'] = True
+        streamPayload['name'] = streamData['stream']['name']
+        streamPayload['supportsIncremental'] = False
+        streamPayload['destinationSyncMode'] = 'append'
+        streamPayload['syncMode'] = 'full_refresh'
+        connPayload['streams'].append(streamPayload)
 
-#     ngoClient.clientpost("airbyte/connections/", json=connPayload)
+    ngoClient.clientpost("airbyte/connections/", json=connPayload)
 
 # # create dbt workspace
