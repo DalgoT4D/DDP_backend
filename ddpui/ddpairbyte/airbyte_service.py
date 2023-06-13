@@ -1,7 +1,9 @@
 import os
 import json
+from typing import Dict, List
 import requests
 from dotenv import load_dotenv
+from ninja.errors import HttpError
 from ddpui.ddpairbyte import schema
 from ddpui.utils.ab_logger import logger
 from ddpui.utils.helpers import remove_nested_attribute
@@ -52,28 +54,33 @@ def get_workspaces():
     """Fetch all workspaces in airbyte server"""
     return abreq("workspaces/list")
 
+
 def get_workspace(workspace_id: str) -> dict:
     """Fetch a workspace from the airbyte server"""
     if not isinstance(workspace_id, str):
         raise TypeError("workspace_id must be a string")
-    
+
     try:
         return abreq("workspaces/get", {"workspaceId": workspace_id})
     except Exception as e:
         raise RuntimeError(f"Error fetching workspace: {str(e)}")
 
+
 def set_workspace_name(workspace_id: str, name: str) -> dict:
     """Set workspace name in the airbyte server"""
     if not isinstance(workspace_id, str):
         raise TypeError("Workspace ID must be a string")
-    
+
     if not isinstance(name, str):
         raise TypeError("Name must be a string")
-    
+
     try:
-        return abreq("workspaces/update_name", {"workspaceId": workspace_id, "name": name})
+        return abreq(
+            "workspaces/update_name", {"workspaceId": workspace_id, "name": name}
+        )
     except Exception as e:
         raise RuntimeError(f"Error setting workspace name: {str(e)}")
+
 
 def create_workspace(name: str) -> dict:
     """Create a workspace in the airbyte server"""
@@ -83,54 +90,104 @@ def create_workspace(name: str) -> dict:
     try:
         res = abreq("workspaces/create", {"name": name})
         if "workspaceId" not in res:
-            raise Exception(res)
+            logger.info("Workspace not created: %s", name)
+            raise HttpError(422, "workspace not created: %s", name)
         return res
+    except HttpError as e:
+        if e.status_code == 422:
+            raise HttpError(f"Invalid data provided: {str(e)}")
+        else:
+            raise HttpError(f"Error creating workspace: {str(e)}")
     except Exception as e:
-        raise RuntimeError(f"Error creating workspace: {str(e)}")
+        raise HttpError(f"Error creating workspace: {str(e)}")
 
-def get_source_definitions(workspace_id, **kwargs):  # pylint: disable=unused-argument
+
+def get_source_definitions(workspace_id: str, **kwargs) -> List[Dict]:
     """Fetch source definitions for an airbyte workspace"""
-    res = abreq("source_definitions/list_for_workspace", {"workspaceId": workspace_id})
-    if "sourceDefinitions" not in res:
-        raise Exception(res)
-    return res["sourceDefinitions"]
+    if not isinstance(workspace_id, str):
+        raise TypeError(f"Invalid workspace ID: {workspace_id}")
+
+    try:
+        res = abreq(
+            "source_definitions/list_for_workspace", {"workspaceId": workspace_id}
+        )
+        if "sourceDefinitions" not in res:
+            logger.info("Source definitions not found for workspace: %s", workspace_id)
+        return res["sourceDefinitions"]
+    except Exception as e:
+        raise RuntimeError(f"Error fetching source definitions: {str(e)}")
 
 
 def get_source_definition_specification(workspace_id, sourcedef_id):
     """Fetch source definition specification for a source in an airbyte workspace"""
+    if not isinstance(workspace_id, str):
+        raise TypeError(f"Invalid workspace ID: {workspace_id}")
+
+    if not isinstance(sourcedef_id, str):
+        raise TypeError(f"Invalid source definition ID: {sourcedef_id}")
+
     res = abreq(
         "source_definition_specifications/get",
         {"sourceDefinitionId": sourcedef_id, "workspaceId": workspace_id},
     )
     if "connectionSpecification" not in res:
-        raise Exception(res)
+        logger.info("Specification not found for source definition: %s", sourcedef_id)
+        raise HttpError(
+            404, "specification not found for source definition: %s", sourcedef_id
+        )
     return res["connectionSpecification"]
 
 
 def get_sources(workspace_id):
     """Fetch all sources in an airbyte workspace"""
+    if not isinstance(workspace_id, str):
+        raise TypeError(f"Invalid workspace ID: {workspace_id}")
+
     res = abreq("sources/list", {"workspaceId": workspace_id})
     if "sources" not in res:
-        raise Exception(res)
+        logger.info("Sources not found for workspace: %s", workspace_id)
+        raise HttpError(404, "sources not found for workspace: %s", workspace_id)
     return res["sources"]
 
 
 def get_source(workspace_id, source_id):  # pylint: disable=unused-argument
     """Fetch a source in an airbyte workspace"""
+    if not isinstance(workspace_id, str):
+        raise TypeError(f"Invalid workspace ID: {workspace_id}")
+
+    if not isinstance(source_id, str):
+        raise TypeError(f"Invalid source ID: {source_id}")
+
     res = abreq("sources/get", {"sourceId": source_id})
     if "sourceId" not in res:
-        raise Exception(res)
+        logger.info("Source not found: %s", source_id)
+        raise HttpError(404, "source not found : %s", source_id)
     return res
 
 
 def delete_source(workspace_id, source_id):  # pylint: disable=unused-argument
     """Deletes a source in an airbyte workspace"""
+    if not isinstance(workspace_id, str):
+        raise TypeError(f"Invalid workspace ID: {workspace_id}")
+
+    if not isinstance(source_id, str):
+        raise TypeError(f"Invalid workspace ID: {source_id}")
+
     res = abreq("sources/delete", {"sourceId": source_id})
     return res
 
 
 def create_source(workspace_id, name, sourcedef_id, config):
     """Create source in an airbyte workspace"""
+    if not isinstance(workspace_id, str):
+        raise TypeError("workspace_id must be a string")
+    if not isinstance(name, str):
+        raise TypeError("name must be a string")
+    if not isinstance(sourcedef_id, str):
+        raise TypeError("sourcedef_id must be a string")
+    if not isinstance(config, dict):
+        raise TypeError("config must be a dictionary")
+
     res = abreq(
         "sources/create",
         {
@@ -141,7 +198,8 @@ def create_source(workspace_id, name, sourcedef_id, config):
         },
     )
     if "sourceId" not in res:
-        raise Exception("Failed to create source")
+        logger.info("Failed to create source: %s", res)
+        raise HttpError(500, "failed to create source: %s", res)
     return res
 
 
@@ -157,7 +215,8 @@ def update_source(source_id, name, config, sourcedef_id):
         },
     )
     if "sourceId" not in res:
-        raise Exception(f"Failed to update source {source_id}: {res}")
+        logger.info("Failed to update source: %s", res)
+        raise HttpError(500, "failed to update source")
     return res
 
 
@@ -210,7 +269,8 @@ def get_destination_definitions(
         "destination_definitions/list_for_workspace", {"workspaceId": workspace_id}
     )
     if "destinationDefinitions" not in res:
-        raise Exception("Failed to get destination definitions")
+        logger.info("Destination definitions not found for workspace: %s", workspace_id)
+        raise HttpError(404, "destination definitions not found")
     return res["destinationDefinitions"]
 
 
@@ -221,7 +281,10 @@ def get_destination_definition_specification(workspace_id, destinationdef_id):
         {"destinationDefinitionId": destinationdef_id, "workspaceId": workspace_id},
     )
     if "connectionSpecification" not in res:
-        raise Exception("Failed to get destination definition specification")
+        logger.info(
+            "Specification not found for destination definition: %s", destinationdef_id
+        )
+        raise HttpError(404, "Failed to get destination definition specification")
     return res["connectionSpecification"]
 
 
@@ -229,7 +292,8 @@ def get_destinations(workspace_id):
     """Fetch all desintations in an airbyte workspace"""
     res = abreq("destinations/list", {"workspaceId": workspace_id})
     if "destinations" not in res:
-        raise Exception("Failed to get destinations")
+        logger.info("Destinations not found for workspace: %s", workspace_id)
+        raise HttpError(404, "destinations not found for this workspace")
     return res["destinations"]
 
 
@@ -237,7 +301,8 @@ def get_destination(workspace_id, destination_id):  # pylint: disable=unused-arg
     """Fetch a destination in an airbyte workspace"""
     res = abreq("destinations/get", {"destinationId": destination_id})
     if "destinationId" not in res:
-        raise Exception("Failed to get destination")
+        logger.info("Destination not found: %s", destination_id)
+        raise HttpError(404, "destination not found")
     return res
 
 
@@ -253,7 +318,8 @@ def create_destination(workspace_id, name, destinationdef_id, config):
         },
     )
     if "destinationId" not in res:
-        raise Exception(res)
+        logger.info("Failed to create destination: %s", res)
+        raise HttpError(500, "failed to create destination")
     return res
 
 
@@ -269,7 +335,8 @@ def update_destination(destination_id, name, config, destinationdef_id):
         },
     )
     if "destinationId" not in res:
-        raise Exception(f"Failed to update destination {destination_id}: {res}")
+        logger.info("Failed to update destination: %s", res)
+        raise HttpError(500, "failed to update destination")
     return res
 
 
@@ -290,7 +357,8 @@ def get_connections(workspace_id):
     """Fetch all connections of an airbyte workspace"""
     res = abreq("connections/list", {"workspaceId": workspace_id})
     if "connections" not in res:
-        raise Exception(res)
+        logger.info("Connections not found for workspace: %s", workspace_id)
+        raise HttpError(404, "connections not found for workspace: %s", workspace_id)
     return res["connections"]
 
 
@@ -298,7 +366,8 @@ def get_connection(workspace_id, connection_id):  # pylint: disable=unused-argum
     """Fetch a connection of an airbyte workspace"""
     res = abreq("connections/get", {"connectionId": connection_id})
     if "connectionId" not in res:
-        raise Exception(res)
+        logger.info("Connection not found: %s", connection_id)
+        raise HttpError(404, "connection not found: %s", connection_id)
     return res
 
 
@@ -323,7 +392,8 @@ def create_connection(
 ):
     """Create a connection in an airbyte workspace"""
     if len(connection_info.streams) == 0:
-        raise Exception("must specify stream names")
+        logger.info("must specify at least one stream")
+        raise HttpError(400, "must specify at least one stream")
 
     sourceschemacatalog = get_source_schema_catalog(
         workspace_id, connection_info.sourceId
@@ -370,7 +440,8 @@ def create_connection(
 
     res = abreq("connections/create", payload)
     if "connectionId" not in res:
-        raise Exception(res)
+        logger.info("Failed to create connection: %s", res)
+        raise HttpError(500, "failed to create connection: %s", res)
     return res
 
 
@@ -379,7 +450,8 @@ def update_connection(
 ):
     """Update a connection of an airbyte workspace"""
     if len(connection_info.streams) == 0:
-        raise Exception("must specify stream names")
+        logger.info("must specify at least one stream")
+        raise HttpError(400, "must specify at least one stream")
 
     sourceschemacatalog = get_source_schema_catalog(
         workspace_id, connection_info.sourceId
@@ -435,7 +507,8 @@ def update_connection(
 
     res = abreq("connections/update", payload)
     if "connectionId" not in res:
-        raise Exception(res)
+        logger.info("Failed to update connection: %s", res)
+        raise HttpError(500, "failed to update connection: %s", res)
     return res
 
 

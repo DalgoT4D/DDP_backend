@@ -112,11 +112,10 @@ def post_airbyte_workspace(request, payload: AirbyteWorkspaceCreate):
     """Create an airbyte workspace"""
     orguser = request.orguser
     if orguser.org.airbyte_workspace_id is not None:
-        raise HttpError(status=400, detail="org already has a workspace")
+        raise HttpError(400, "org already has a workspace")
 
     workspace = airbytehelpers.setup_airbyte_workspace(payload.name, orguser.org)
 
-    # Return JSONResponse with custom status code
     return JsonResponse(workspace.dict(), status=200)
 
 
