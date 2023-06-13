@@ -28,12 +28,17 @@ def abreq(endpoint, req=None):
     token = os.getenv("AIRBYTE_API_TOKEN")
 
     logger.info("Making request to Airbyte server: %s", endpoint)
-    res = requests.post(
-        f"http://{abhost}:{abport}/api/{abver}/{endpoint}",
-        headers={"Authorization": f"Basic {token}"},
-        json=req,
-        timeout=30,
-    )
+
+    try:
+        res = requests.post(
+            f"http://{abhost}:{abport}/api/{abver}/{endpoint}",
+            headers={"Authorization": f"Basic {token}"},
+            json=req,
+            timeout=30,
+        )
+    except requests.exceptions.ConnectionError as e:
+        logger.exception(e)
+        raise HttpError(500, "Error connecting to Airbyte server")
     try:
         result_obj = remove_nested_attribute(res.json(), "icon")
         logger.info("Response from Airbyte server:")
@@ -44,6 +49,7 @@ def abreq(endpoint, req=None):
         res.raise_for_status()
     except Exception as error:
         logger.exception(error)
+        raise HttpError(res.status_code, f"Something went wrong: {error.args}")
 
     if "application/json" in res.headers.get("Content-Type", ""):
         return res.json()
@@ -89,8 +95,8 @@ def create_workspace(name: str) -> dict:
 
     res = abreq("workspaces/create", {"name": name})
     if "workspaceId" not in res:
-        logger.info("Workspace not created: %s", name)
-        raise HttpError(422, "workspace not created")
+        logger.info("Workspace not created: %s")
+        raise HttpError(404, "workspace not created")
     return res
 
 
