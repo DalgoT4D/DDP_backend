@@ -1,5 +1,7 @@
 import os
+from unittest.mock import patch
 import django
+from pydantic import ValidationError
 import pytest
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
@@ -8,56 +10,146 @@ django.setup()
 
 from ddpui.tests.helper.test_airbyte_unit_schemas import *
 from ddpui.ddpairbyte.airbyte_service import *
-from pydantic import ValidationError
 
 
-import pytest
-
-@pytest.fixture
+@pytest.fixture(scope="module")
 def valid_workspace_id():
-    return "123"
+    result = create_workspace("Example Workspace")
+    workspace_id = result["workspaceId"]
+    return workspace_id
+
 
 @pytest.fixture
 def invalid_workspace_id():
     return 123
 
+
 @pytest.fixture
 def valid_name():
     return "Example Workspace"
 
+
 @pytest.fixture
 def invalid_name():
-    return 123
+    return
 
-def test_get_workspace_with_valid_workspace_id(valid_workspace_id):
-    result = get_workspace(valid_workspace_id)
+
+@pytest.fixture(scope="module")
+def valid_sourcedef_id(valid_workspace_id):
+    source_definitions = get_source_definitions(workspace_id=valid_workspace_id)
+
+    for source_definition in source_definitions:
+        if source_definition["name"] == "File (CSV, JSON, Excel, Feather, Parquet)":
+            source_definition_id = source_definition["sourceDefinitionId"]
+            break
+    return source_definition_id
+
+
+def mock_abreq(endpoint, data):
+    return {}
+
+
+def test_abreq_success():
+    endpoint = "workspaces/list"
+    result = abreq(endpoint)
     assert isinstance(result, dict)
+    assert "workspaces" in result
+    assert isinstance(result["workspaces"], list)
 
-def test_get_workspace_with_invalid_workspace_id(invalid_workspace_id):
-    with pytest.raises(TypeError):
-        get_workspace(invalid_workspace_id)
 
-def test_set_workspace_name_with_valid_parameters(valid_workspace_id, valid_name):
-    result = set_workspace_name(valid_workspace_id, valid_name)
-    assert isinstance(result, dict)
+def test_abreq_invalid_endpoint():
+    endpoint = "invalid_endpoint"
+    with pytest.raises(HttpError) as excinfo:
+        abreq(endpoint)
+    assert str(excinfo.value).startswith("Something went wrong: ('404 Client Error:")
 
-def test_set_workspace_name_with_invalid_workspace_id(valid_name, invalid_workspace_id):
-    with pytest.raises(TypeError):
-        set_workspace_name(invalid_workspace_id, valid_name)
 
-def test_set_workspace_name_with_invalid_name(valid_workspace_id, invalid_name):
-    with pytest.raises(TypeError):
-        set_workspace_name(valid_workspace_id, invalid_name)
+def test_abreq_invalid_request_data():
+    endpoint = "workspaces/create"
+    req = {"invalid_key": "invalid_value"}
+    with pytest.raises(HttpError) as excinfo:
+        abreq(endpoint, req)
+    assert str(excinfo.value).startswith("Something went wrong: ('500 Server Error:")
+
+
+def test_abreq_connection_error():
+    os.environ["AIRBYTE_SERVER_HOST"] = "invalid_host"
+    with pytest.raises(HttpError) as excinfo:
+        abreq("test_endpoint", {"test": "data"})
+
+    assert str(excinfo.value) == "Error connecting to Airbyte server"
+    os.environ["AIRBYTE_SERVER_HOST"] = "localhost"
+
+
+def test_get_workspaces_success():
+    result = get_workspaces()
+    assert isinstance(result, list)
+    assert all(isinstance(workspace, dict) for workspace in result)
+
 
 def test_create_workspace_with_valid_name(valid_name):
     result = create_workspace(valid_name)
+    assert "workspaceId" in result
     assert isinstance(result, dict)
 
-def test_create_workspace_with_invalid_name(invalid_name):
-    with pytest.raises(TypeError):
-        create_workspace(invalid_name)
 
-        
+def test_create_workspace_invalid_name():
+    with pytest.raises(TypeError) as excinfo:
+        create_workspace(123)
+    assert str(excinfo.value) == "Name must be a string"
+
+
+def test_create_workspace_failure():
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq", mock_abreq):
+        with pytest.raises(HttpError) as excinfo:
+            create_workspace("test_workspace")
+        assert str(excinfo.value) == "workspace not created"
+
+
+def test_get_workspace_success(valid_workspace_id):
+    result = get_workspace(valid_workspace_id)
+    assert "workspaceId" in result
+    assert isinstance(result, dict)
+
+
+def test_get_workspace_failure():
+    with pytest.raises(TypeError) as excinfo:
+        get_workspace(123)
+    assert str(excinfo.value) == "workspace_id must be a string"
+
+
+def test_get_workspace_with_invalid_workspace_id():
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq", mock_abreq):
+        with pytest.raises(HttpError) as excinfo:
+            get_workspace("test")
+        assert str(excinfo.value) == "workspace not found"
+
+
+def test_set_workspace_name_success(valid_workspace_id, valid_name):
+    result = set_workspace_name(valid_workspace_id, valid_name)
+    assert "workspaceId" in result
+    assert isinstance(result, dict)
+
+
+def test_set_workspace_name_failure():
+    with pytest.raises(TypeError) as excinfo:
+        set_workspace_name(123, "test_name")
+    assert str(excinfo.value) == "Workspace ID must be a string"
+
+
+def test_set_workspace_name_with_invalid_name():
+    with pytest.raises(TypeError) as excinfo:
+        set_workspace_name("123", 123)
+    assert str(excinfo.value) == "Name must be a string"
+
+
+def test_set_workspace_name_with_invalid_workspace_id():
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq", mock_abreq):
+        with pytest.raises(HttpError) as excinfo:
+            set_workspace_name("test", "test")
+    assert str(excinfo.value) == "workspace not found"
+
+
 class TestDeleteSource:
     def test_create_workspace(self):
         """creates a workspace, checks airbyte response"""

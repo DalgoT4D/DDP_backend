@@ -65,9 +65,6 @@ def get_workspaces():
     logger.info("Fetching workspaces from Airbyte server")
 
     res = abreq("workspaces/list")
-    if "workspaces" not in res:
-        logger.info("No workspaces found")
-        return []
     return res["workspaces"]
 
 
