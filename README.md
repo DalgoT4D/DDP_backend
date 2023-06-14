@@ -1,5 +1,7 @@
 ## DDP_backend
 
+[![Code coverage badge](https://img.shields.io/codecov/c/github/DevDataPlatform/DDP_backend/main.svg)](https://codecov.io/gh/DevDataPlatform/DDP_backend/branch/main)
+
 Django application for the DDP platform's management backend. Exposes API endpoints for the management frontend to communicate with, for the purposes of
 
 -   Onboarding an NGO client
