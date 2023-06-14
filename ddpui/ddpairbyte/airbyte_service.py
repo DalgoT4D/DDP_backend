@@ -22,6 +22,7 @@ class AirbyteError(Exception):
 
 def abreq(endpoint, req=None):
     """Request to the airbyte server"""
+
     abhost = os.getenv("AIRBYTE_SERVER_HOST")
     abport = os.getenv("AIRBYTE_SERVER_PORT")
     abver = os.getenv("AIRBYTE_SERVER_APIVER")
@@ -39,12 +40,14 @@ def abreq(endpoint, req=None):
     except requests.exceptions.ConnectionError as e:
         logger.exception(e)
         raise HttpError(500, "Error connecting to Airbyte server")
+
     try:
         result_obj = remove_nested_attribute(res.json(), "icon")
         logger.info("Response from Airbyte server:")
         logger.info(json.dumps(result_obj, indent=2))
     except ValueError:
         logger.info("Response from Airbyte server: %s", res.text)
+
     try:
         res.raise_for_status()
     except Exception as error:
@@ -58,66 +61,74 @@ def abreq(endpoint, req=None):
 
 def get_workspaces():
     """Fetch all workspaces in airbyte server"""
-    return abreq("workspaces/list")
+
+    logger.info("Fetching workspaces from Airbyte server")
+
+    res = abreq("workspaces/list")
+    if "workspaces" not in res:
+        logger.info("No workspaces found")
+        return []
+    return res["workspaces"]
 
 
 def get_workspace(workspace_id: str) -> dict:
     """Fetch a workspace from the airbyte server"""
+
     if not isinstance(workspace_id, str):
         raise TypeError("workspace_id must be a string")
 
-    try:
-        return abreq("workspaces/get", {"workspaceId": workspace_id})
-    except Exception as e:
-        raise RuntimeError(f"Error fetching workspace: {str(e)}")
+    res = abreq("workspaces/get", {"workspaceId": workspace_id})
+    if "workspaceId" not in res:
+        logger.info("Workspace not found: %s", workspace_id)
+        raise HttpError(404, "workspace not found")
+    return res
 
 
 def set_workspace_name(workspace_id: str, name: str) -> dict:
     """Set workspace name in the airbyte server"""
+
     if not isinstance(workspace_id, str):
         raise TypeError("Workspace ID must be a string")
 
     if not isinstance(name, str):
         raise TypeError("Name must be a string")
 
-    try:
-        return abreq(
-            "workspaces/update_name", {"workspaceId": workspace_id, "name": name}
-        )
-    except Exception as e:
-        raise RuntimeError(f"Error setting workspace name: {str(e)}")
+    res = abreq("workspaces/update_name", {"workspaceId": workspace_id, "name": name})
+    if "workspaceId" not in res:
+        logger.info("Workspace not found: %s", workspace_id)
+        raise HttpError(404, "workspace not found")
+    return res
 
 
 def create_workspace(name: str) -> dict:
     """Create a workspace in the airbyte server"""
+
     if not isinstance(name, str):
         raise TypeError("Name must be a string")
 
     res = abreq("workspaces/create", {"name": name})
     if "workspaceId" not in res:
-        logger.info("Workspace not created: %s")
-        raise HttpError(404, "workspace not created")
+        logger.info("Workspace not created: %s", name)
+        raise HttpError(500, "workspace not created")
     return res
 
 
 def get_source_definitions(workspace_id: str, **kwargs) -> List[Dict]:
     """Fetch source definitions for an airbyte workspace"""
+
     if not isinstance(workspace_id, str):
         raise TypeError(f"Invalid workspace ID: {workspace_id}")
 
-    try:
-        res = abreq(
-            "source_definitions/list_for_workspace", {"workspaceId": workspace_id}
-        )
-        if "sourceDefinitions" not in res:
-            logger.info("Source definitions not found for workspace: %s", workspace_id)
-        return res["sourceDefinitions"]
-    except Exception as e:
-        raise RuntimeError(f"Error fetching source definitions: {str(e)}")
+    res = abreq("source_definitions/list_for_workspace", {"workspaceId": workspace_id})
+    if "sourceDefinitions" not in res:
+        logger.info("Source definitions not found for workspace: %s", workspace_id)
+        raise HttpError(404, "source definitions not found for workspace")
+    return res["sourceDefinitions"]
 
 
 def get_source_definition_specification(workspace_id: str, sourcedef_id: str) -> dict:
     """Fetch source definition specification for a source in an airbyte workspace"""
+
     if not isinstance(workspace_id, str):
         raise TypeError(f"Invalid workspace ID: {workspace_id}")
 
@@ -128,28 +139,29 @@ def get_source_definition_specification(workspace_id: str, sourcedef_id: str) ->
         "source_definition_specifications/get",
         {"sourceDefinitionId": sourcedef_id, "workspaceId": workspace_id},
     )
+
     if "connectionSpecification" not in res:
         logger.info("Specification not found for source definition: %s", sourcedef_id)
-        raise HttpError(
-            404, "specification not found for source definition: %s", sourcedef_id
-        )
+        raise HttpError(404, "specification not found for source definition")
     return res["connectionSpecification"]
 
 
 def get_sources(workspace_id: str) -> List[Dict]:
     """Fetch all sources in an airbyte workspace"""
+
     if not isinstance(workspace_id, str):
         raise TypeError(f"Invalid workspace ID: {workspace_id}")
 
     res = abreq("sources/list", {"workspaceId": workspace_id})
     if "sources" not in res:
         logger.info("Sources not found for workspace: %s", workspace_id)
-        raise HttpError(404, "sources not found for workspace: %s", workspace_id)
+        raise HttpError(404, "sources not found for workspace")
     return res["sources"]
 
 
 def get_source(workspace_id: str, source_id: str) -> dict:
     """Fetch a source in an airbyte workspace"""
+
     if not isinstance(workspace_id, str):
         raise TypeError(f"Invalid workspace ID: {workspace_id}")
 
@@ -159,12 +171,13 @@ def get_source(workspace_id: str, source_id: str) -> dict:
     res = abreq("sources/get", {"sourceId": source_id})
     if "sourceId" not in res:
         logger.info("Source not found: %s", source_id)
-        raise HttpError(404, "source not found : %s", source_id)
+        raise HttpError(404, "source not found")
     return res
 
 
 def delete_source(workspace_id: str, source_id: str) -> dict:
     """Deletes a source in an airbyte workspace"""
+
     if not isinstance(workspace_id, str):
         raise TypeError(f"Invalid workspace ID: {workspace_id}")
 
@@ -172,6 +185,9 @@ def delete_source(workspace_id: str, source_id: str) -> dict:
         raise TypeError(f"Invalid workspace ID: {source_id}")
 
     res = abreq("sources/delete", {"sourceId": source_id})
+    if "sourceId" not in res:
+        logger.info("Source not found: %s", source_id)
+        raise HttpError(404, "source not found")
     return res
 
 
@@ -179,6 +195,7 @@ def create_source(
     workspace_id: str, name: str, sourcedef_id: str, config: dict
 ) -> dict:
     """Create source in an airbyte workspace"""
+
     if not isinstance(workspace_id, str):
         raise TypeError("workspace_id must be a string")
     if not isinstance(name, str):
@@ -199,7 +216,7 @@ def create_source(
     )
     if "sourceId" not in res:
         logger.info("Failed to create source: %s", res)
-        raise HttpError(500, "failed to create source: %s", res)
+        raise HttpError(500, "failed to create source")
     return res
 
 
@@ -232,6 +249,7 @@ def update_source(source_id: str, name: str, config: dict, sourcedef_id: str) ->
 
 def check_source_connection(workspace_id: str, data: AirbyteSourceCreate) -> dict:
     """Test a potential source's connection in an airbyte workspace"""
+
     if not isinstance(workspace_id, str):
         raise TypeError("workspace_id must be a string")
 
@@ -261,6 +279,7 @@ def check_source_connection(workspace_id: str, data: AirbyteSourceCreate) -> dic
 
 def get_source_schema_catalog(workspace_id: str, source_id: str) -> dict:
     """Fetch source schema catalog for a source in an airbyte workspace"""
+
     if not isinstance(workspace_id, str):
         raise TypeError("workspace_id must be a string")
     if not isinstance(source_id, str):
@@ -279,6 +298,7 @@ def get_source_schema_catalog(workspace_id: str, source_id: str) -> dict:
 
 def get_destination_definitions(workspace_id: str, **kwargs) -> dict:
     """Fetch destination definitions in an airbyte workspace"""
+
     if not isinstance(workspace_id, str):
         raise TypeError("workspace_id must be a string")
 
@@ -295,6 +315,7 @@ def get_destination_definition_specification(
     workspace_id: str, destinationdef_id: str
 ) -> dict:
     """Fetch destination definition specification for a destination in a workspace"""
+
     if not isinstance(workspace_id, str):
         raise TypeError("workspace_id must be a string")
     if not isinstance(destinationdef_id, str):
@@ -314,6 +335,7 @@ def get_destination_definition_specification(
 
 def get_destinations(workspace_id: str) -> dict:
     """Fetch all desintations in an airbyte workspace"""
+
     if not isinstance(workspace_id, str):
         raise TypeError("workspace_id must be a string")
 
@@ -326,6 +348,7 @@ def get_destinations(workspace_id: str) -> dict:
 
 def get_destination(workspace_id: str, destination_id: str) -> dict:
     """Fetch a destination in an airbyte workspace"""
+
     if not isinstance(workspace_id, str):
         raise TypeError("workspace_id must be a string")
     if not isinstance(destination_id, str):
@@ -342,6 +365,7 @@ def create_destination(
     workspace_id: str, name: str, destinationdef_id: str, config: dict
 ) -> dict:
     """Create destination in an airbyte workspace"""
+
     if not isinstance(workspace_id, str):
         raise TypeError("workspace_id must be a string")
     if not isinstance(name, str):
@@ -370,6 +394,7 @@ def update_destination(
     destination_id: str, name: str, config: dict, destinationdef_id: str
 ) -> dict:
     """Update a destination in an airbyte workspace"""
+
     if not isinstance(destination_id, str):
         raise TypeError("destination_id must be a string")
     if not isinstance(name, str):
@@ -398,6 +423,7 @@ def check_destination_connection(
     workspace_id: str, data: AirbyteDestinationCreate
 ) -> dict:
     """Test a potential destination's connection in an airbyte workspace"""
+
     if not isinstance(workspace_id, str):
         raise TypeError("workspace_id must be a string")
 
@@ -414,6 +440,7 @@ def check_destination_connection(
 
 def get_connections(workspace_id: str) -> dict:
     """Fetch all connections of an airbyte workspace"""
+
     if not isinstance(workspace_id, str):
         raise TypeError("workspace_id must be a string")
 
@@ -426,6 +453,7 @@ def get_connections(workspace_id: str) -> dict:
 
 def get_connection(workspace_id: str, connection_id: str) -> dict:
     """Fetch a connection of an airbyte workspace"""
+
     if not isinstance(workspace_id, str):
         raise TypeError("workspace_id must be a string")
 
@@ -438,6 +466,7 @@ def get_connection(workspace_id: str, connection_id: str) -> dict:
 
 def create_normalization_operation(workspace_id: str) -> str:
     """create a normalization operation for this airbyte workspace"""
+
     if not isinstance(workspace_id, str):
         raise TypeError("workspace_id must be a string")
 
@@ -463,6 +492,7 @@ def create_connection(
     connection_info: schema.AirbyteConnectionCreate,
 ) -> dict:
     """Create a connection in an airbyte workspace"""
+
     if not isinstance(workspace_id, str):
         raise TypeError("workspace_id must be a string")
     if not isinstance(airbyte_norm_op_id, str):
@@ -528,6 +558,7 @@ def update_connection(
     connection_info: schema.AirbyteConnectionUpdate,
 ) -> dict:
     """Update a connection of an airbyte workspace"""
+
     if not isinstance(workspace_id, str):
         raise TypeError("workspace_id must be a string")
     if not isinstance(connection_id, str):
@@ -597,6 +628,7 @@ def update_connection(
 
 def delete_connection(workspace_id: str, connection_id: str) -> dict:
     """Delete a connection of an airbyte workspace"""
+
     if not isinstance(workspace_id, str):
         raise TypeError("workspace_id must be a string")
     if not isinstance(connection_id, str):
@@ -609,6 +641,7 @@ def delete_connection(workspace_id: str, connection_id: str) -> dict:
 
 def sync_connection(workspace_id: str, connection_id: str) -> dict:
     """Sync a connection in an airbyte workspace"""
+
     if not isinstance(workspace_id, str):
         raise TypeError("workspace_id must be a string")
     if not isinstance(connection_id, str):
@@ -621,6 +654,7 @@ def sync_connection(workspace_id: str, connection_id: str) -> dict:
 
 def get_job_info(job_id: str) -> dict:
     """get debug info for an airbyte job"""
+
     if not isinstance(job_id, str):
         raise TypeError("job_id must be a string")
 
