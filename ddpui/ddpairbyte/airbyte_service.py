@@ -5,7 +5,12 @@ from dotenv import load_dotenv
 from ddpui.ddpairbyte import schema
 from ddpui.utils.ab_logger import logger
 from ddpui.utils.helpers import remove_nested_attribute
-from ddpui.ddpairbyte.schema import AirbyteSourceCreate, AirbyteDestinationCreate, AirbyteSourceUpdateCheckConnection, AirbyteDestinationUpdateCheckConnection
+from ddpui.ddpairbyte.schema import (
+    AirbyteSourceCreate,
+    AirbyteDestinationCreate,
+    AirbyteSourceUpdateCheckConnection,
+    AirbyteDestinationUpdateCheckConnection,
+)
 
 load_dotenv()
 
@@ -171,14 +176,16 @@ def check_source_connection(workspace_id, data: AirbyteSourceCreate):
     return res
 
 
-def check_source_connection_for_update(source_id: str, data: AirbyteSourceUpdateCheckConnection):
+def check_source_connection_for_update(
+    source_id: str, data: AirbyteSourceUpdateCheckConnection
+):
     """Test connection on a potential edit on source"""
     res = abreq(
         "sources/check_connection_for_update",
         {
             "sourceId": source_id,
             "connectionConfiguration": data.config,
-            "name": data.name
+            "name": data.name,
         },
     )
     # {
@@ -251,6 +258,12 @@ def get_destination(workspace_id, destination_id):  # pylint: disable=unused-arg
     return res
 
 
+def delete_destination(workspace_id, destination_id):  # pylint: disable=unused-argument
+    """Fetch a destination in an airbyte workspace"""
+    res = abreq("destinations/delete", {"destinationId": destination_id})
+    return res
+
+
 def create_destination(workspace_id, name, destinationdef_id, config):
     """Create destination in an airbyte workspace"""
     res = abreq(
@@ -296,7 +309,9 @@ def check_destination_connection(workspace_id, data: AirbyteDestinationCreate):
     return res
 
 
-def check_destination_connection_for_update(destination_id: str, data: AirbyteDestinationUpdateCheckConnection):
+def check_destination_connection_for_update(
+    destination_id: str, data: AirbyteDestinationUpdateCheckConnection
+):
     """Test a potential destination's connection in an airbyte workspace"""
     res = abreq(
         "destinations/check_connection_for_update",
