@@ -70,6 +70,17 @@ def get_airbyte_connection_block_id(blockname) -> str | None:
     return response.json()["block_id"]
 
 
+def get_airbye_connection_blocks(block_names):
+    """Filter out blocks by query params"""
+    response = requests.post(
+        f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/connection/filter",
+        timeout=30,
+        json={"block_names": block_names},
+    )
+    response.raise_for_status()
+    return response.json()
+
+
 def get_airbyte_connection_block_by_id(block_id: str):
     """look up a prefect airbyte-connection block by id"""
     response = requests.get(
@@ -106,6 +117,21 @@ def update_airbyte_connection_block(blockname):
 def delete_airbyte_connection_block(block_id):
     """Delete airbyte connection block in prefect"""
     requests.delete(f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=30)
+
+
+def post_prefect_blocks_bulk_delete(block_ids: list):
+    """Delete airbyte connection blocks in prefect corresponding the connection ids array passed"""
+    response = requests.post(
+        f"{PREFECT_PROXY_API_URL}/proxy/blocks/bulk/delete/",
+        timeout=30,
+        json={"block_ids": block_ids},
+    )
+    try:
+        response.raise_for_status()
+    except Exception as error:
+        logger.error(response.text)
+        raise error
+    return response.json()
 
 
 # ================================================================================================
