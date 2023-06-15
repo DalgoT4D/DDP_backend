@@ -77,6 +77,12 @@ def create_workspace(name):
     return res
 
 
+def delete_workspace(workspace_id: str):
+    """Deletes an airbyte workspace"""
+    res = abreq("workspaces/delete", {"workspaceId": workspace_id})
+    return res
+
+
 def get_source_definitions(workspace_id, **kwargs):  # pylint: disable=unused-argument
     """Fetch source definitions for an airbyte workspace"""
     res = abreq("source_definitions/list_for_workspace", {"workspaceId": workspace_id})
