@@ -80,19 +80,23 @@ class Command(BaseCommand):
             prefect_service.delete_airbyte_server_block(block.block_id)
             block.delete()
 
-        for connection in airbyte_service.get_connections(org.airbyte_workspace_id):
+        for connection in airbyte_service.get_connections(org.airbyte_workspace_id)[
+            "connections"
+        ]:
             print("deleting connection in Airbyte " + connection["connectionId"])
             airbyte_service.delete_connection(
                 org.airbyte_workspace_id, connection["connectionId"]
             )
 
-        for destination in airbyte_service.get_destinations(org.airbyte_workspace_id):
+        for destination in airbyte_service.get_destinations(org.airbyte_workspace_id)[
+            "destinations"
+        ]:
             print("deleting destination in Airbyte " + destination["destinationId"])
             airbyte_service.delete_destination(
                 org.airbyte_workspace_id, destination["destinationId"]
             )
 
-        for source in airbyte_service.get_sources(org.airbyte_workspace_id):
+        for source in airbyte_service.get_sources(org.airbyte_workspace_id)["sources"]:
             print("deleting source in Airbyte " + source["sourceId"])
             airbyte_service.delete_source(org.airbyte_workspace_id, source["sourceId"])
 
@@ -110,19 +114,28 @@ class Command(BaseCommand):
             orguser.user = None
             orguser.delete()
 
-    def handle(self, *args, **options):
-        """Docstring"""
-
-        org = Org.objects.filter(name=options["org_name"]).first()
-        if org is None:
-            print("no such org")
-            return
-
+    def delete_one_org(self, org: Org, yes_really: bool):
+        """delete one org"""
         print(f"OrgName: {org.name}   Airbyte workspace ID: {org.airbyte_workspace_id}")
-        if options["yes_really"]:
+        if yes_really:
             self.delete_prefect_deployments(org)
             self.delete_dbt_workspace(org)
-            self.delete_airbyte_workspace(org)
+            if org.airbyte_workspace_id:
+                self.delete_airbyte_workspace(org)
             self.delete_prefect_shell_blocks(org)
             self.delete_orgusers(org)
             org.delete()
+
+    def handle(self, *args, **options):
+        """Docstring"""
+
+        if options["org_name"] == "ALL":
+            for org in Org.objects.all():
+                self.delete_one_org(org, options["yes_really"])
+        else:
+            org = Org.objects.filter(name=options["org_name"]).first()
+            if org is None:
+                print("no such org")
+                return
+
+            self.delete_one_org(org, options["yes_really"])
