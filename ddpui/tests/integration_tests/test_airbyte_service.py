@@ -441,7 +441,7 @@ class TestConnection:
         self, test_workspace_id, test_source_id, test_destination_id
     ):
         workspace_id = test_workspace_id
-        connection_id = (TestConnection.connection_id,)
+        connection_id = TestConnection.connection_id
         connection_info = schema.AirbyteConnectionUpdate(
             sourceId=test_source_id,
             destinationId=test_destination_id,

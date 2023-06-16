@@ -70,7 +70,7 @@ def get_workspaces():
     if "workspaces" not in res:
         logger.error("No workspaces found")
         raise HttpError(404, "no workspaces found")
-    return res["workspaces"]
+    return res
 
 
 def get_workspace(workspace_id: str) -> dict:

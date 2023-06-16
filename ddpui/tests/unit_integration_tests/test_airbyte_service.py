@@ -110,7 +110,7 @@ def test_get_workspaces_success():
             "workspaces": [{"workspaceId": "1", "name": "Example Workspace"}]
         }
 
-        result = get_workspaces()
+        result = get_workspaces()["workspaces"]
         assert isinstance(result, list)
         assert all(isinstance(workspace, dict) for workspace in result)
 
