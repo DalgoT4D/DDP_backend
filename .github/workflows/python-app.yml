@@ -45,6 +45,7 @@ jobs:
           DBHOST: ${{ secrets.DBHOST }}
           DBNAME: ${{ secrets.DBNAME }}
           DBUSER: ${{ secrets.DBUSER }}
+          DBPASSWORD: ${{ secrets.DBPASSWORD }}
           PREFECT_PROXY_API_URL: http://localhost:8080
         run: |
           coverage run -m pytest 
