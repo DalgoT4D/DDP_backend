@@ -22,7 +22,13 @@ class AirbyteSourceUpdate(Schema):
 
     name: str
     config: dict
-    sourcedef_id: str
+    sourceDefId: str
+    
+class AirbyteSourceUpdateCheckConnection(Schema):
+    """Docstring"""
+
+    name: str
+    config: dict
 
 
 class AirbyteDestinationCreate(Schema):
@@ -38,6 +44,13 @@ class AirbyteDestinationUpdate(Schema):
 
     name: str
     destinationDefId: str
+    config: dict
+
+
+class AirbyteDestinationUpdateCheckConnection(Schema):
+    """Schema for updating an Airbyte destination"""
+
+    name: str
     config: dict
 
 

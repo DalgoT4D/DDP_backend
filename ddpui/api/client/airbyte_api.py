@@ -19,6 +19,8 @@ from ddpui.ddpairbyte.schema import (
     AirbyteSourceUpdate,
     AirbyteWorkspace,
     AirbyteWorkspaceCreate,
+    AirbyteSourceUpdateCheckConnection,
+    AirbyteDestinationUpdateCheckConnection,
 )
 from ddpui.ddpprefect.prefect_service import run_airbyte_connection_sync
 from ddpui.ddpprefect.schema import (
@@ -175,7 +177,7 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
         raise HttpError(400, "create an airbyte workspace first")
 
     source = airbyte_service.update_source(
-        source_id, payload.name, payload.config, payload.sourcedef_id
+        source_id, payload.name, payload.config, payload.sourceDefId
     )
     logger.info("updated source having id " + source["sourceId"])
     return {"sourceId": source["sourceId"]}
@@ -191,6 +193,24 @@ def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
     response = airbyte_service.check_source_connection(
         orguser.org.airbyte_workspace_id, payload
     )
+    return {
+        "status": "succeeded" if response["jobInfo"]["succeeded"] else "failed",
+        "logs": response["jobInfo"]["logs"]["logLines"],
+    }
+
+
+@airbyteapi.post(
+    "/sources/{source_id}/check_connection_for_update/", auth=auth.CanManagePipelines()
+)
+def post_airbyte_check_source_for_update(
+    request, source_id: str, payload: AirbyteSourceUpdateCheckConnection
+):
+    """Test the source connection in the user organization workspace"""
+    orguser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    response = airbyte_service.check_source_connection_for_update(source_id, payload)
     return {
         "status": "succeeded" if response["jobInfo"]["succeeded"] else "failed",
         "logs": response["jobInfo"]["logs"]["logLines"],
@@ -224,12 +244,49 @@ def get_airbyte_source(request, source_id):
 @airbyteapi.delete("/sources/{source_id}", auth=auth.CanManagePipelines())
 def delete_airbyte_source(request, source_id):
     """Fetch a single airbyte source in the user organization workspace"""
+    logger.info("deleting source started")
+
     orguser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    logger.info(f"deleted airbyte source {source_id}")
+    # Fetch all org prefect connection blocks
+    org_blocks = OrgPrefectBlock.objects.filter(
+        org=orguser.org,
+        block_type=AIRBYTECONNECTION,
+    ).all()
+
+    logger.info("fetched airbyte connections block of this org")
+
+    connections = airbyte_service.get_connections(orguser.org.airbyte_workspace_id)
+    connections_of_source = [conn["connectionId"] for conn in connections if conn["sourceId"] == source_id]
+
+    # delete the connection prefect blocks that has connections built on the source i.e. connections_of_source
+    prefect_conn_blocks = prefect_service.get_airbye_connection_blocks(block_names=[block.block_name for block in org_blocks])
+    logger.info("fetched prefect connection blocks based on the names stored in django orgprefectblocks")
+    delete_block_ids = []
+    for block in prefect_conn_blocks:
+        if block['connectionId'] in connections_of_source:
+            delete_block_ids.append(block['id'])
+
+    # delete the prefect conn blocks
+    prefect_service.post_prefect_blocks_bulk_delete(delete_block_ids)
+    logger.info("deleted prefect blocks")
+
+    # delete airbyte connection blocks in django orgprefectblock table
+    for block in OrgPrefectBlock.objects.filter(
+        org=orguser.org,
+        block_type=AIRBYTECONNECTION,
+        block_id__in=delete_block_ids
+
+    ).all():
+        block.delete()
+    logger.info("deleted airbyte connection blocks from django database")
+
+    # delete the source
     airbyte_service.delete_source(orguser.org.airbyte_workspace_id, source_id)
+    logger.info(f"deleted airbyte source {source_id}")
+
     return {"success": 1}
 
 
@@ -312,6 +369,27 @@ def post_airbyte_check_destination(request, payload: AirbyteDestinationCreate):
 
     response = airbyte_service.check_destination_connection(
         orguser.org.airbyte_workspace_id, payload
+    )
+    return {
+        "status": "succeeded" if response["jobInfo"]["succeeded"] else "failed",
+        "logs": response["jobInfo"]["logs"]["logLines"],
+    }
+
+
+@airbyteapi.post(
+    "/destinations/{destination_id}/check_connection_for_update/",
+    auth=auth.CanManagePipelines(),
+)
+def post_airbyte_check_destination_for_update(
+    request, destination_id: str, payload: AirbyteDestinationUpdateCheckConnection
+):
+    """Test connection to destination in the user organization workspace"""
+    orguser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    response = airbyte_service.check_destination_connection_for_update(
+        destination_id, payload
     )
     return {
         "status": "succeeded" if response["jobInfo"]["succeeded"] else "failed",
@@ -475,6 +553,8 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
         raise HttpError(400, "must specify stream names")
 
     warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if warehouse is None:
+        raise HttpError(400, "need to set up a warehouse first")
     if warehouse.airbyte_destination_id is None:
         raise HttpError(400, "warehouse has no airbyte_destination_id")
     payload.destinationId = warehouse.airbyte_destination_id

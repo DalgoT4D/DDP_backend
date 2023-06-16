@@ -7,7 +7,12 @@ from ninja.errors import HttpError
 from ddpui.ddpairbyte import schema
 from ddpui.utils.ab_logger import logger
 from ddpui.utils.helpers import remove_nested_attribute
-from ddpui.ddpairbyte.schema import AirbyteSourceCreate, AirbyteDestinationCreate
+from ddpui.ddpairbyte.schema import (
+    AirbyteSourceCreate,
+    AirbyteDestinationCreate,
+    AirbyteSourceUpdateCheckConnection,
+    AirbyteDestinationUpdateCheckConnection,
+)
 
 load_dotenv()
 
@@ -267,7 +272,37 @@ def check_source_connection(workspace_id: str, data: AirbyteSourceCreate) -> dic
     return res
 
 
-def get_source_schema_catalog(workspace_id: str, source_id: str) -> dict:
+def check_source_connection_for_update(
+    source_id: str, data: AirbyteSourceUpdateCheckConnection
+):
+    """Test connection on a potential edit on source"""
+    res = abreq(
+        "sources/check_connection_for_update",
+        {
+            "sourceId": source_id,
+            "connectionConfiguration": data.config,
+            "name": data.name,
+        },
+    )
+    # {
+    #   'status': 'succeeded',
+    #   'jobInfo': {
+    #     'id': 'ecd78210-5eaa-4a70-89ad-af1d9bc7c7f2',
+    #     'configType': 'check_connection_source',
+    #     'configId': 'Optional[decd338e-5647-4c0b-adf4-da0e75f5a750]',
+    #     'createdAt': 1678891375849,
+    #     'endedAt': 1678891403356,
+    #     'succeeded': True,
+    #     'connectorConfigurationUpdated': False,
+    #     'logs': {'logLines': [str]}
+    #   }
+    # }
+    return res
+
+
+def get_source_schema_catalog(
+    workspace_id: str, source_id: str
+) -> dict:  # pylint: disable=unused-argument
     """Fetch source schema catalog for a source in an airbyte workspace"""
 
     if not isinstance(workspace_id, str):
@@ -423,6 +458,21 @@ def check_destination_connection(
             "destinationDefinitionId": data.destinationDefId,
             "connectionConfiguration": data.config,
             "workspaceId": workspace_id,
+        },
+    )
+    return res
+
+
+def check_destination_connection_for_update(
+    destination_id: str, data: AirbyteDestinationUpdateCheckConnection
+):
+    """Test a potential destination's connection in an airbyte workspace"""
+    res = abreq(
+        "destinations/check_connection_for_update",
+        {
+            "destinationId": destination_id,
+            "connectionConfiguration": data.config,
+            "name": data.name,
         },
     )
     return res

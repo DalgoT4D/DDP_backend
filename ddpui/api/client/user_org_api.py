@@ -2,6 +2,8 @@ from datetime import datetime
 from typing import List
 from uuid import uuid4
 import json
+import os
+from dotenv import load_dotenv
 
 from django.contrib.auth.models import User
 from django.utils.text import slugify
@@ -34,6 +36,7 @@ from ddpui.ddpairbyte import airbyte_service
 user_org_api = NinjaAPI(urls_namespace="userorg")
 # http://127.0.0.1:8000/api/docs
 
+load_dotenv()
 
 # @user_org_api.exception_handler(ValidationError)
 # def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
@@ -82,6 +85,9 @@ def post_organization_user(
     creates a new OrgUser having specified email + password.
     no Org is created or attached at this time
     """
+    signupcode = payload.signupcode
+    if signupcode != os.getenv("SIGNUPCODE"):
+        raise HttpError(400, "That is not the right signup code")
     email = payload.email.lower().strip()
     if OrgUser.objects.filter(user__email=email).exists():
         raise HttpError(400, f"user having email {email} exists")
@@ -242,7 +248,13 @@ def get_organizations_warehouses(request):
     """returns all warehouses associated with this org"""
     orguser = request.orguser
     warehouses = [
-        {"wtype": warehouse.wtype, "credentials": warehouse.credentials}
+        {
+            "wtype": warehouse.wtype,
+            # "credentials": warehouse.credentials,
+            "airbyte_destination": airbyte_service.get_destination(
+                orguser.org.airbyte_workspace_id, warehouse.airbyte_destination_id
+            ),
+        }
         for warehouse in OrgWarehouse.objects.filter(org=orguser.org)
     ]
     return {"warehouses": warehouses}
