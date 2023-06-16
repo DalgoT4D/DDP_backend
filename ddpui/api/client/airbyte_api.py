@@ -1,7 +1,6 @@
 import os
 from datetime import datetime
 from typing import List
-from django.http import JsonResponse
 from ninja import NinjaAPI
 from ninja.errors import HttpError
 
@@ -118,7 +117,7 @@ def post_airbyte_workspace(request, payload: AirbyteWorkspaceCreate):
 
     workspace = airbytehelpers.setup_airbyte_workspace(payload.name, orguser.org)
 
-    return JsonResponse(workspace.dict(), status=200)
+    return workspace
 
 
 @airbyteapi.get("/source_definitions", auth=auth.CanManagePipelines())
@@ -259,15 +258,21 @@ def delete_airbyte_source(request, source_id):
     logger.info("fetched airbyte connections block of this org")
 
     connections = airbyte_service.get_connections(orguser.org.airbyte_workspace_id)
-    connections_of_source = [conn["connectionId"] for conn in connections if conn["sourceId"] == source_id]
+    connections_of_source = [
+        conn["connectionId"] for conn in connections if conn["sourceId"] == source_id
+    ]
 
     # delete the connection prefect blocks that has connections built on the source i.e. connections_of_source
-    prefect_conn_blocks = prefect_service.get_airbye_connection_blocks(block_names=[block.block_name for block in org_blocks])
-    logger.info("fetched prefect connection blocks based on the names stored in django orgprefectblocks")
+    prefect_conn_blocks = prefect_service.get_airbye_connection_blocks(
+        block_names=[block.block_name for block in org_blocks]
+    )
+    logger.info(
+        "fetched prefect connection blocks based on the names stored in django orgprefectblocks"
+    )
     delete_block_ids = []
     for block in prefect_conn_blocks:
-        if block['connectionId'] in connections_of_source:
-            delete_block_ids.append(block['id'])
+        if block["connectionId"] in connections_of_source:
+            delete_block_ids.append(block["id"])
 
     # delete the prefect conn blocks
     prefect_service.post_prefect_blocks_bulk_delete(delete_block_ids)
@@ -275,10 +280,7 @@ def delete_airbyte_source(request, source_id):
 
     # delete airbyte connection blocks in django orgprefectblock table
     for block in OrgPrefectBlock.objects.filter(
-        org=orguser.org,
-        block_type=AIRBYTECONNECTION,
-        block_id__in=delete_block_ids
-
+        org=orguser.org, block_type=AIRBYTECONNECTION, block_id__in=delete_block_ids
     ).all():
         block.delete()
     logger.info("deleted airbyte connection blocks from django database")
