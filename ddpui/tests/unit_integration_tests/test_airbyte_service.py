@@ -38,7 +38,9 @@ def invalid_name():
 
 @pytest.fixture(scope="module")
 def valid_sourcedef_id(valid_workspace_id):
-    source_definitions = get_source_definitions(workspace_id=valid_workspace_id)
+    source_definitions = get_source_definitions(workspace_id=valid_workspace_id)[
+        "sourceDefinitions"
+    ]
 
     for source_definition in source_definitions:
         if source_definition["name"] == "File (CSV, JSON, Excel, Feather, Parquet)":
@@ -74,12 +76,15 @@ def test_abreq_connection_error():
     endpoint = "my_endpoint"
 
     with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
-        mock_post.side_effect = requests.exceptions.ConnectionError()
+        mock_post.side_effect = requests.exceptions.ConnectionError(
+            "Error connecting to Airbyte server"
+        )
 
         with pytest.raises(HttpError) as excinfo:
             abreq(endpoint)
 
         assert excinfo.value.status_code == 500
+        print(excinfo)
         assert str(excinfo.value) == "Error connecting to Airbyte server"
 
 
@@ -229,7 +234,7 @@ def test_get_source_definitions_success():
                 {"sourceDefinitionId": "2", "name": "Example Source Definition 2"},
             ]
         }
-        result = get_source_definitions("test")
+        result = get_source_definitions("test")["sourceDefinitions"]
         assert isinstance(result, list)
 
 
@@ -239,14 +244,14 @@ def test_get_source_definitions_failure():
         mock_post.return_value.headers = {"Content-Type": "application/json"}
         mock_post.return_value.json.return_value = {"error": "Invalid request data"}
         with pytest.raises(HttpError) as excinfo:
-            get_source_definitions("test")
+            get_source_definitions("test")["sourceDefinitions"]
         assert excinfo.value.status_code == 404
-        assert str(excinfo.value) == "source definitions not found for workspace"
+        assert str(excinfo.value) == f"Source definitions not found for workspace: test"
 
 
 def test_get_source_definitions_with_invalid_workspace_id():
     with pytest.raises(HttpError) as excinfo:
-        get_source_definitions(123)
+        get_source_definitions(123)["sourceDefinitions"]
     assert str(excinfo.value) == "Invalid workspace ID"
 
 
@@ -257,7 +262,9 @@ def test_get_source_definition_specification_success():
 
     with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
         mock_abreq.return_value = {"connectionSpecification": expected_response}
-        result = get_source_definition_specification(workspace_id, sourcedef_id)
+        result = get_source_definition_specification(workspace_id, sourcedef_id)[
+            "connectionSpecification"
+        ]
 
     assert result == expected_response
     assert isinstance(result, dict)
@@ -271,7 +278,10 @@ def test_get_source_definition_specification_failure():
         with pytest.raises(HttpError) as excinfo:
             get_source_definition_specification("test", "1")
         assert excinfo.value.status_code == 404
-        assert str(excinfo.value) == "specification not found for source definition"
+        assert (
+            str(excinfo.value)
+            == "specification not found for source definition 1 in workspace test"
+        )
 
 
 def test_get_source_definition_specification_with_invalid_workspace_id():
@@ -294,8 +304,7 @@ def test_get_sources_success():
         mock_post.return_value.status_code = 200
         mock_post.return_value.headers = {"Content-Type": "application/json"}
         mock_post.return_value.json.return_value = expected_response
-        result = get_sources(workspace_id)
-
+        result = get_sources(workspace_id)["sources"]
         assert isinstance(result, list)
 
 
@@ -516,7 +525,7 @@ def test_check_source_connection_success():
         sourceDefId="my_sourcedef_id",
         config={"key": "value"},
     )
-    expected_response = {"status": "succeeded"}
+    expected_response = {"status": "succeeded", "jobInfo": {}}
 
     with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
         mock_post.return_value.status_code = 200

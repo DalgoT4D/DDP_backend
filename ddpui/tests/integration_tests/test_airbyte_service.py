@@ -31,7 +31,9 @@ class TestDeleteSource:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
 
     def test_a_create_source(self, test_workspace_id):
-        source_definitions = get_source_definitions(workspace_id=test_workspace_id)
+        source_definitions = get_source_definitions(workspace_id=test_workspace_id)[
+            "sourceDefinitions"
+        ]
         for source_definition in source_definitions:
             if source_definition["name"] == "File (CSV, JSON, Excel, Feather, Parquet)":
                 source_definition_id = source_definition["sourceDefinitionId"]
@@ -133,7 +135,9 @@ class TestAirbyteSource:
 
     def test_source_connection(self, test_workspace_id):
         """tests connectivity to a source"""
-        source_definitions = get_source_definitions(workspace_id=test_workspace_id)
+        source_definitions = get_source_definitions(workspace_id=test_workspace_id)[
+            "sourceDefinitions"
+        ]
         for source_definition in source_definitions:
             if source_definition["name"] == "File (CSV, JSON, Excel, Feather, Parquet)":
                 TestAirbyteSource.source_definition_id = source_definition[
@@ -174,7 +178,7 @@ class TestAirbyteSource:
             TestAirbyteSource.source_id = res["sourceId"]
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
-        
+
     def test_source_connection_for_update(self):
         """tests connectivity to a source while editing"""
         try:
@@ -192,7 +196,9 @@ class TestAirbyteSource:
     def test_get_definitions(self, test_workspace_id):
         """tests retrieval of source definitions"""
         try:
-            res = get_source_definitions(workspace_id=test_workspace_id)
+            res = get_source_definitions(workspace_id=test_workspace_id)[
+                "sourceDefinitions"
+            ]
             GetSourceDefinitionsTestResponse(__root__=res)
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
@@ -211,7 +217,7 @@ class TestAirbyteSource:
         """fetches the schema catalog for a source"""
         try:
             get_source_schema_catalog(test_workspace_id, "not-a-source-id")
-        except AirbyteError:
+        except HttpError:
             pass
 
     def test_get_source(self, test_workspace_id):
@@ -228,7 +234,7 @@ class TestAirbyteSource:
     def test_get_sources(self, test_workspace_id):
         """tests retrieval of all sources"""
         try:
-            res = get_sources(workspace_id=test_workspace_id)
+            res = get_sources(workspace_id=test_workspace_id)["sources"]
             GetSourcesTestResponse(sources=res)
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
@@ -279,7 +285,7 @@ class TestAirbyteDestination:
     def test_a_create_destination(self, test_workspace_id):
         destination_definitions = get_destination_definitions(
             workspace_id=test_workspace_id
-        )
+        )["destinationDefinitions"]
         for destination_definition in destination_definitions:
             if destination_definition["name"] == "Postgres":
                 destination_definition_id = destination_definition[
@@ -364,7 +370,7 @@ class TestAirbyteDestination:
             CheckDestinationConnectionTestResponse(**res)
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
-        
+
     def test_check_destination_connection_for_update(self):
         try:
             res = check_destination_connection_for_update(
@@ -409,7 +415,9 @@ class TestConnection:
             normalize=False,
         )
 
-        test_airbyte_norm_op_id = create_normalization_operation(test_workspace_id)
+        test_airbyte_norm_op_id = create_normalization_operation(test_workspace_id)[
+            "operationId"
+        ]
         try:
             res = create_connection(
                 workspace_id, test_airbyte_norm_op_id, connection_info

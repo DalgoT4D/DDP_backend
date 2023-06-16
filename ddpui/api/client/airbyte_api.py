@@ -5,7 +5,8 @@ from ninja import NinjaAPI
 from ninja.errors import HttpError
 
 # from ninja.errors import ValidationError
-# from ninja.responses import Response
+from ninja.responses import Response
+
 # from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from django.utils.text import slugify
 from ddpui import auth
@@ -56,12 +57,15 @@ airbyteapi = NinjaAPI(urls_namespace="airbyte")
 #     return Response({"error": exc.errors()}, status=422)
 
 
-# @airbyteapi.exception_handler(HttpError)
-# def ninja_http_error_handler(
-#     request, exc: HttpError
-# ):  # pylint: disable=unused-argument
-#     """Handle any http errors raised in the apis"""
-#     return Response({"error": " ".join(exc.args)}, status=exc.status_code)
+@airbyteapi.exception_handler(HttpError)
+def ninja_http_error_handler(
+    request, exc: HttpError
+):  # pylint: disable=unused-argument
+    """
+    Handle any http errors raised in the apis
+    TODO: should we put request.orguser.org.slug into the error message here
+    """
+    return Response({"error": " ".join(exc.args)}, status=exc.status_code)
 
 
 # @airbyteapi.exception_handler(Exception)
@@ -129,7 +133,7 @@ def get_airbyte_source_definitions(request):
 
     res = airbyte_service.get_source_definitions(orguser.org.airbyte_workspace_id)
     logger.debug(res)
-    return res
+    return res["sourceDefinitions"]
 
 
 @airbyteapi.get(
@@ -223,7 +227,7 @@ def get_airbyte_sources(request):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    res = airbyte_service.get_sources(orguser.org.airbyte_workspace_id)
+    res = airbyte_service.get_sources(orguser.org.airbyte_workspace_id)["sources"]
     logger.debug(res)
     return res
 
@@ -257,7 +261,9 @@ def delete_airbyte_source(request, source_id):
 
     logger.info("fetched airbyte connections block of this org")
 
-    connections = airbyte_service.get_connections(orguser.org.airbyte_workspace_id)
+    connections = airbyte_service.get_connections(orguser.org.airbyte_workspace_id)[
+        "connections"
+    ]
     connections_of_source = [
         conn["connectionId"] for conn in connections if conn["sourceId"] == source_id
     ]
@@ -299,14 +305,11 @@ def get_airbyte_source_schema_catalog(request, source_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    try:
-        res = airbyte_service.get_source_schema_catalog(
-            orguser.org.airbyte_workspace_id, source_id
-        )
-        logger.debug(res)
-        return res
-    except airbyte_service.AirbyteError as error:
-        raise HttpError(400, error.errors) from error
+    res = airbyte_service.get_source_schema_catalog(
+        orguser.org.airbyte_workspace_id, source_id
+    )
+    logger.debug(res)
+    return res
 
 
 @airbyteapi.get("/destination_definitions", auth=auth.CanManagePipelines())
@@ -316,7 +319,9 @@ def get_airbyte_destination_definitions(request):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    res = airbyte_service.get_destination_definitions(orguser.org.airbyte_workspace_id)
+    res = airbyte_service.get_destination_definitions(orguser.org.airbyte_workspace_id)[
+        "destinationDefinitions"
+    ]
     allowed_destinations = os.getenv("AIRBYTE_DESTINATION_TYPES")
     if allowed_destinations:
         res = [
@@ -340,7 +345,7 @@ def get_airbyte_destination_definition_specifications(request, destinationdef_id
 
     res = airbyte_service.get_destination_definition_specification(
         orguser.org.airbyte_workspace_id, destinationdef_id
-    )
+    )["connectionSpecification"]
     logger.debug(res)
     return res
 
@@ -424,7 +429,9 @@ def get_airbyte_destinations(request):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    res = airbyte_service.get_destinations(orguser.org.airbyte_workspace_id)
+    res = airbyte_service.get_destinations(orguser.org.airbyte_workspace_id)[
+        "destinations"
+    ]
     logger.debug(res)
     return res
 
@@ -564,7 +571,7 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
     if warehouse.airbyte_norm_op_id is None:
         warehouse.airbyte_norm_op_id = airbyte_service.create_normalization_operation(
             org.airbyte_workspace_id
-        )
+        )["operationId"]
         warehouse.save()
 
     airbyte_conn = airbyte_service.create_connection(
