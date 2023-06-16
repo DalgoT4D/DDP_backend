@@ -33,19 +33,19 @@ if args.workspace_id is None:
 
 else:
     print("=> fetching source definitions for workspace")
-    r = airbyte_service.get_source_definitions(args.workspace_id)
+    r = airbyte_service.get_source_definitions(args.workspace_id)["sourceDefinitions"]
     for sourcedef in r[:2]:
         assert "sourceDefinitionId" in sourcedef
         print(f'    {sourcedef["name"]} {sourcedef["dockerRepository"]}')
         print("==> fetching source definition specification")
         rr = airbyte_service.get_source_definition_specification(
             args.workspace_id, sourcedef["sourceDefinitionId"]
-        )
+        )["connectionSpecification"]
         print(f'    {rr["title"]} {rr["type"]}')
         # break
 
     print("=> fetching sources for workspace")
-    r = airbyte_service.get_sources(args.workspace_id)
+    r = airbyte_service.get_sources(args.workspace_id)["sources"]
     for source in r:
         print(source["name"], source["sourceId"])
         print("verifying that we can get the source directly...")
@@ -83,17 +83,19 @@ else:
     print("...success")
 
     print("getting destination definitions")
-    r = airbyte_service.get_destination_definitions(args.workspace_id)
+    r = airbyte_service.get_destination_definitions(args.workspace_id)[
+        "destinationDefinitions"
+    ]
     for destdef in r:
         print(f"fetching spec for {destdef['name']}")
         rr = airbyte_service.get_destination_definition_specification(
             args.workspace_id, destdef["destinationDefinitionId"]
-        )
+        )["connectionSpecification"]
         print(f"fetched spec: {rr['title']}")
         break
 
     print("fetching destinations")
-    r = airbyte_service.get_destinations(args.workspace_id)
+    r = airbyte_service.get_destinations(args.workspace_id)["destinations"]
     print(f"fetched {len(r)} destinations")
 
     if len(r) == 0:
@@ -121,7 +123,7 @@ else:
         sys.exit(1)
 
     print("fetching connections")
-    r = airbyte_service.get_connections(args.workspace_id)
+    r = airbyte_service.get_connections(args.workspace_id)["connections"]
     print(f"found {len(r)} connections")
 
     # fetch the source catalog, select a stream and create a connection

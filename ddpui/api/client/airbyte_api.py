@@ -5,7 +5,8 @@ from ninja import NinjaAPI
 from ninja.errors import HttpError
 
 # from ninja.errors import ValidationError
-# from ninja.responses import Response
+from ninja.responses import Response
+
 # from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from django.utils.text import slugify
 from ddpui import auth
@@ -56,12 +57,15 @@ airbyteapi = NinjaAPI(urls_namespace="airbyte")
 #     return Response({"error": exc.errors()}, status=422)
 
 
-# @airbyteapi.exception_handler(HttpError)
-# def ninja_http_error_handler(
-#     request, exc: HttpError
-# ):  # pylint: disable=unused-argument
-#     """Handle any http errors raised in the apis"""
-#     return Response({"error": " ".join(exc.args)}, status=exc.status_code)
+@airbyteapi.exception_handler(HttpError)
+def ninja_http_error_handler(
+    request, exc: HttpError
+):  # pylint: disable=unused-argument
+    """
+    Handle any http errors raised in the apis
+    TODO: should we put request.orguser.org.slug into the error message here
+    """
+    return Response({"error": " ".join(exc.args)}, status=exc.status_code)
 
 
 # @airbyteapi.exception_handler(Exception)
@@ -115,7 +119,9 @@ def post_airbyte_workspace(request, payload: AirbyteWorkspaceCreate):
     if orguser.org.airbyte_workspace_id is not None:
         raise HttpError(400, "org already has a workspace")
 
-    return airbytehelpers.setup_airbyte_workspace(payload.name, orguser.org)
+    workspace = airbytehelpers.setup_airbyte_workspace(payload.name, orguser.org)
+
+    return workspace
 
 
 @airbyteapi.get("/source_definitions", auth=auth.CanManagePipelines())
@@ -127,7 +133,7 @@ def get_airbyte_source_definitions(request):
 
     res = airbyte_service.get_source_definitions(orguser.org.airbyte_workspace_id)
     logger.debug(res)
-    return res
+    return res["sourceDefinitions"]
 
 
 @airbyteapi.get(
@@ -221,7 +227,7 @@ def get_airbyte_sources(request):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    res = airbyte_service.get_sources(orguser.org.airbyte_workspace_id)
+    res = airbyte_service.get_sources(orguser.org.airbyte_workspace_id)["sources"]
     logger.debug(res)
     return res
 
@@ -255,16 +261,24 @@ def delete_airbyte_source(request, source_id):
 
     logger.info("fetched airbyte connections block of this org")
 
-    connections = airbyte_service.get_connections(orguser.org.airbyte_workspace_id)
-    connections_of_source = [conn["connectionId"] for conn in connections if conn["sourceId"] == source_id]
+    connections = airbyte_service.get_connections(orguser.org.airbyte_workspace_id)[
+        "connections"
+    ]
+    connections_of_source = [
+        conn["connectionId"] for conn in connections if conn["sourceId"] == source_id
+    ]
 
     # delete the connection prefect blocks that has connections built on the source i.e. connections_of_source
-    prefect_conn_blocks = prefect_service.get_airbye_connection_blocks(block_names=[block.block_name for block in org_blocks])
-    logger.info("fetched prefect connection blocks based on the names stored in django orgprefectblocks")
+    prefect_conn_blocks = prefect_service.get_airbye_connection_blocks(
+        block_names=[block.block_name for block in org_blocks]
+    )
+    logger.info(
+        "fetched prefect connection blocks based on the names stored in django orgprefectblocks"
+    )
     delete_block_ids = []
     for block in prefect_conn_blocks:
-        if block['connectionId'] in connections_of_source:
-            delete_block_ids.append(block['id'])
+        if block["connectionId"] in connections_of_source:
+            delete_block_ids.append(block["id"])
 
     # delete the prefect conn blocks
     prefect_service.post_prefect_blocks_bulk_delete(delete_block_ids)
@@ -272,10 +286,7 @@ def delete_airbyte_source(request, source_id):
 
     # delete airbyte connection blocks in django orgprefectblock table
     for block in OrgPrefectBlock.objects.filter(
-        org=orguser.org,
-        block_type=AIRBYTECONNECTION,
-        block_id__in=delete_block_ids
-
+        org=orguser.org, block_type=AIRBYTECONNECTION, block_id__in=delete_block_ids
     ).all():
         block.delete()
     logger.info("deleted airbyte connection blocks from django database")
@@ -294,14 +305,11 @@ def get_airbyte_source_schema_catalog(request, source_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    try:
-        res = airbyte_service.get_source_schema_catalog(
-            orguser.org.airbyte_workspace_id, source_id
-        )
-        logger.debug(res)
-        return res
-    except airbyte_service.AirbyteError as error:
-        raise HttpError(400, error.errors) from error
+    res = airbyte_service.get_source_schema_catalog(
+        orguser.org.airbyte_workspace_id, source_id
+    )
+    logger.debug(res)
+    return res
 
 
 @airbyteapi.get("/destination_definitions", auth=auth.CanManagePipelines())
@@ -311,7 +319,9 @@ def get_airbyte_destination_definitions(request):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    res = airbyte_service.get_destination_definitions(orguser.org.airbyte_workspace_id)
+    res = airbyte_service.get_destination_definitions(orguser.org.airbyte_workspace_id)[
+        "destinationDefinitions"
+    ]
     allowed_destinations = os.getenv("AIRBYTE_DESTINATION_TYPES")
     if allowed_destinations:
         res = [
@@ -335,7 +345,7 @@ def get_airbyte_destination_definition_specifications(request, destinationdef_id
 
     res = airbyte_service.get_destination_definition_specification(
         orguser.org.airbyte_workspace_id, destinationdef_id
-    )
+    )["connectionSpecification"]
     logger.debug(res)
     return res
 
@@ -419,7 +429,9 @@ def get_airbyte_destinations(request):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    res = airbyte_service.get_destinations(orguser.org.airbyte_workspace_id)
+    res = airbyte_service.get_destinations(orguser.org.airbyte_workspace_id)[
+        "destinations"
+    ]
     logger.debug(res)
     return res
 
@@ -468,6 +480,16 @@ def get_airbyte_connections(request):
         dataflow = OrgDataFlow.objects.filter(
             org=orguser.org, connection_id=airbyte_conn["connectionId"]
         ).first()
+
+        # fetch the source and destination names
+        source_name = airbyte_service.get_source(
+            orguser.org.airbyte_workspace_id, airbyte_conn["sourceId"]
+        )["sourceName"]
+
+        destination_name = airbyte_service.get_destination(
+            orguser.org.airbyte_workspace_id, airbyte_conn["destinationId"]
+        )["destinationName"]
+
         res.append(
             {
                 "name": org_block.display_name,
@@ -475,12 +497,21 @@ def get_airbyte_connections(request):
                 "blockName": prefect_block["name"],
                 "blockData": prefect_block["data"],
                 "connectionId": airbyte_conn["connectionId"],
-                "sourceId": airbyte_conn["sourceId"],
-                "destinationId": airbyte_conn["destinationId"],
+                "source": {
+                    "id": airbyte_conn["sourceId"],
+                    "name": source_name
+                },
+                "destination": {
+                    "id": airbyte_conn["destinationId"],
+                    "name": destination_name
+                },
                 "sourceCatalogId": airbyte_conn["sourceCatalogId"],
                 "syncCatalog": airbyte_conn["syncCatalog"],
                 "status": airbyte_conn["status"],
                 "deploymentId": dataflow.deployment_id if dataflow else None,
+                "lastRun": prefect_service.get_last_flow_run_by_deployment_id(
+                    dataflow.deployment_id
+                ) if dataflow else None,
             }
         )
 
@@ -516,14 +547,30 @@ def get_airbyte_connection(request, connection_block_id):
     dataflow = OrgDataFlow.objects.filter(
         org=orguser.org, connection_id=airbyte_conn["connectionId"]
     ).first()
+
+    # fetch the source and destination names
+    source_name = airbyte_service.get_source(
+        orguser.org.airbyte_workspace_id, airbyte_conn["sourceId"]
+    )["sourceName"]
+
+    destination_name = airbyte_service.get_destination(
+        orguser.org.airbyte_workspace_id, airbyte_conn["destinationId"]
+    )["destinationName"]
+    
     res = {
         "name": org_block.display_name,
         "blockId": prefect_block["id"],
         "blockName": prefect_block["name"],
         "blockData": prefect_block["data"],
         "connectionId": airbyte_conn["connectionId"],
-        "sourceId": airbyte_conn["sourceId"],
-        "destinationId": airbyte_conn["destinationId"],
+        "source": {
+            "id": airbyte_conn["sourceId"],
+            "name": source_name
+        },
+        "destination": {
+            "id": airbyte_conn["destinationId"],
+            "name": destination_name
+        },
         "sourceCatalogId": airbyte_conn["sourceCatalogId"],
         "syncCatalog": airbyte_conn["syncCatalog"],
         "status": airbyte_conn["status"],
@@ -559,7 +606,7 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
     if warehouse.airbyte_norm_op_id is None:
         warehouse.airbyte_norm_op_id = airbyte_service.create_normalization_operation(
             org.airbyte_workspace_id
-        )
+        )["operationId"]
         warehouse.save()
 
     airbyte_conn = airbyte_service.create_connection(
@@ -654,8 +701,12 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
         "blockName": airbyte_connection_block["name"],
         "blockData": airbyte_connection_block["data"],
         "connectionId": airbyte_conn["connectionId"],
-        "sourceId": airbyte_conn["sourceId"],
-        "destinationId": airbyte_conn["destinationId"],
+        "source": {
+            "id": airbyte_conn["sourceId"]
+        },
+        "destination": {
+            "id": airbyte_conn["destinationId"],
+        },
         "sourceCatalogId": airbyte_conn["sourceCatalogId"],
         "syncCatalog": airbyte_conn["syncCatalog"],
         "status": airbyte_conn["status"],
@@ -705,7 +756,7 @@ def delete_airbyte_connection(request, connection_block_id):
 
 
 @airbyteapi.post(
-    "/connections/{connection_block_id}/sync/", auth=auth.CanManagePipelines()
+    "/connections/{connection_block_id}/sync/", auth=auth.CanManagePipelines(), deprecated=True
 )
 def post_airbyte_sync_connection(request, connection_block_id):
     """Sync an airbyte connection in the uer organization workspace"""
