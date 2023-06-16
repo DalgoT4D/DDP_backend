@@ -93,12 +93,13 @@ class PrefectAirbyteConnectionBlockSchema(Schema):
     blockName: str
     blockData: dict
     connectionId: str
-    sourceId: str
-    destinationId: str
+    source: dict
+    destination: dict
     sourceCatalogId: str
     syncCatalog: dict
     status: str
     deploymentId: str = None
+    lastRun: Optional[dict | None]
 
 
 class PrefectFlowAirbyteConnection(Schema):
