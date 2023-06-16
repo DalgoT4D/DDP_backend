@@ -113,19 +113,16 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         """Docstring"""
 
-        # org = Org.objects.filter(name=options["org_name"]).first()
-        # if org is None:
-        #     print("no such org")
-        #     return
+        org = Org.objects.filter(name=options["org_name"]).first()
+        if org is None:
+            print("no such org")
+            return
 
-        for org in Org.objects.all():
-            print(
-                f"OrgName: {org.name}   Airbyte workspace ID: {org.airbyte_workspace_id}"
-            )
-            if options["yes_really"]:
-                self.delete_prefect_deployments(org)
-                self.delete_dbt_workspace(org)
-                self.delete_airbyte_workspace(org)
-                self.delete_prefect_shell_blocks(org)
-                self.delete_orgusers(org)
-                org.delete()
+        print(f"OrgName: {org.name}   Airbyte workspace ID: {org.airbyte_workspace_id}")
+        if options["yes_really"]:
+            self.delete_prefect_deployments(org)
+            self.delete_dbt_workspace(org)
+            self.delete_airbyte_workspace(org)
+            self.delete_prefect_shell_blocks(org)
+            self.delete_orgusers(org)
+            org.delete()
