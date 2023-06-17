@@ -89,7 +89,9 @@ def post_organization_user(
     if signupcode != os.getenv("SIGNUPCODE"):
         raise HttpError(400, "That is not the right signup code")
     email = payload.email.lower().strip()
-    if OrgUser.objects.filter(user__email=email).exists():
+    if User.objects.filter(email=email).exists():
+        raise HttpError(400, f"user having email {email} exists")
+    if User.objects.filter(username=email).exists():
         raise HttpError(400, f"user having email {email} exists")
     user = User.objects.create_user(
         username=email, email=email, password=payload.password
