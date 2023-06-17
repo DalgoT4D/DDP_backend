@@ -105,6 +105,11 @@ def test_post_airbyte_detach_workspace_1(org_without_workspace):
     assert str(excinfo.value) == "org already has no workspace"
 
 
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    delete_airbyte_connection_block=Mock(),
+    delete_airbyte_server_block=Mock(),
+)
 def test_post_airbyte_detach_workspace_2(org_with_workspace):
     """tests /worksspace/detatch/"""
 
@@ -150,18 +155,6 @@ def test_post_airbyte_detach_workspace_2(org_with_workspace):
         ).count()
         == 3
     )
-
-    # @patch("ddpui.ddpprefect.prefect_service.delete_airbyte_server_block")
-    # def patched_delete_airbyte_server_block():
-    #     pass
-
-    @patch("ddpui.ddpprefect.prefect_service.delete_airbyte_connection_block")
-    def mock_delete_airbyte_connection_block():
-        pass
-
-    @patch("ddpui.ddpprefect.prefect_service.delete_airbyte_server_block")
-    def mock_delete_airbyte_server_block():
-        pass
 
     post_airbyte_detach_workspace(mock_request)
 
