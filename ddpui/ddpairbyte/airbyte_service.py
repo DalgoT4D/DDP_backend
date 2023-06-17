@@ -477,6 +477,10 @@ def check_destination_connection_for_update(
     destination_id: str, data: AirbyteDestinationUpdateCheckConnection
 ):
     """Test a potential destination's connection in an airbyte workspace"""
+
+    if not isinstance(destination_id, str):
+        raise HttpError(400, "destination_id must be a string")
+
     res = abreq(
         "destinations/check_connection_for_update",
         {

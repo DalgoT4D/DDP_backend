@@ -687,26 +687,6 @@ def test_get_source_schema_catalog_with_invalid_source_id():
         assert str(excinfo.value) == "source_id must be a string"
 
 
-def test_get_destination_definitions_failure_1():
-    with pytest.raises(HttpError) as excinfo:
-        get_destination_definitions(None)
-    assert str(excinfo.value) == "workspace_id must be a string"
-
-
-def test_get_destination_definitions_failure_2():
-    with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
-        mock_response = Mock(spec=requests.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {"Content-Type": "application/json"}
-        mock_response.json.return_value = {"not-the-right-key": ""}
-        mock_post.return_value = mock_response
-
-        with pytest.raises(HttpError) as excinfo:
-            get_destination_definitions("workspace-id")
-
-        assert str(excinfo.value) == "destination definitions not found"
-
-
 def test_get_destination_definitions_success():
     with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
         mock_response = Mock(spec=requests.Response)
@@ -722,33 +702,24 @@ def test_get_destination_definitions_success():
         assert response["destinationDefinitions"] == "theDestinationDefinitions"
 
 
-def test_get_destination_definition_specification_failure_1():
+def test_get_destination_definitions_failure_with_invalid_workspace_id():
     with pytest.raises(HttpError) as excinfo:
-        get_destination_definition_specification(1, "destinationdef_id")
+        get_destination_definitions(None)
     assert str(excinfo.value) == "workspace_id must be a string"
 
 
-def test_get_destination_definition_specification_failure_2():
-    with pytest.raises(HttpError) as excinfo:
-        get_destination_definition_specification("workspace_id", 1)
-    assert str(excinfo.value) == "destinationdef_id must be a string"
-
-
-def test_get_destination_definition_specification_failure_3():
+def test_get_destination_definitions_failure():
     with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
         mock_response = Mock(spec=requests.Response)
         mock_response.status_code = 200
         mock_response.headers = {"Content-Type": "application/json"}
-        mock_response.json.return_value = {"wrong-key": "theConnectionSpecification"}
+        mock_response.json.return_value = {"not-the-right-key": ""}
         mock_post.return_value = mock_response
-        with pytest.raises(HttpError) as excinfo:
-            get_destination_definition_specification(
-                "workspace-id", "destinationdef_id"
-            )
 
-        assert (
-            str(excinfo.value) == "Failed to get destination definition specification"
-        )
+        with pytest.raises(HttpError) as excinfo:
+            get_destination_definitions("workspace-id")
+
+        assert str(excinfo.value) == "destination definitions not found"
 
 
 def test_get_destination_definition_specification_success():
@@ -768,13 +739,19 @@ def test_get_destination_definition_specification_success():
         assert response["connectionSpecification"] == "theConnectionSpecification"
 
 
-def test_get_destinations_failure_1():
+def test_get_destination_definition_specification_with_invalid_workspace():
     with pytest.raises(HttpError) as excinfo:
-        get_destinations(1)
+        get_destination_definition_specification(1, "destinationdef_id")
     assert str(excinfo.value) == "workspace_id must be a string"
 
 
-def test_get_destinations_failure_2():
+def test_get_destination_definition_specification_with_invalid_destinationdef():
+    with pytest.raises(HttpError) as excinfo:
+        get_destination_definition_specification("workspace_id", 1)
+    assert str(excinfo.value) == "destinationdef_id must be a string"
+
+
+def test_get_destination_definition_specification_failure():
     with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
         mock_response = Mock(spec=requests.Response)
         mock_response.status_code = 200
@@ -782,9 +759,13 @@ def test_get_destinations_failure_2():
         mock_response.json.return_value = {"wrong-key": "theConnectionSpecification"}
         mock_post.return_value = mock_response
         with pytest.raises(HttpError) as excinfo:
-            get_destinations("workspace-id")
+            get_destination_definition_specification(
+                "workspace-id", "destinationdef_id"
+            )
 
-        assert str(excinfo.value) == "destinations not found for this workspace"
+        assert (
+            str(excinfo.value) == "Failed to get destination definition specification"
+        )
 
 
 def test_get_destinations_success():
@@ -800,19 +781,13 @@ def test_get_destinations_success():
         assert response["destinations"] == "the-destinations"
 
 
-def test_get_destination_failure_1():
+def test_get_destinations_with_invalid_workspace_id():
     with pytest.raises(HttpError) as excinfo:
-        get_destination(1, "destination_id")
+        get_destinations(1)
     assert str(excinfo.value) == "workspace_id must be a string"
 
 
-def test_get_destination_failure_2():
-    with pytest.raises(HttpError) as excinfo:
-        get_destination("workspace_id", 2)
-    assert str(excinfo.value) == "destination_id must be a string"
-
-
-def test_get_destination_failure_3():
+def test_get_destinations_failure():
     with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
         mock_response = Mock(spec=requests.Response)
         mock_response.status_code = 200
@@ -820,9 +795,9 @@ def test_get_destination_failure_3():
         mock_response.json.return_value = {"wrong-key": "theConnectionSpecification"}
         mock_post.return_value = mock_response
         with pytest.raises(HttpError) as excinfo:
-            get_destination("workspace-id", "destination_id")
+            get_destinations("workspace-id")
 
-        assert str(excinfo.value) == "destination not found"
+        assert str(excinfo.value) == "destinations not found for this workspace"
 
 
 def test_get_destination_success():
@@ -838,31 +813,19 @@ def test_get_destination_success():
         assert response["destinationId"] == "the-destination"
 
 
-def test_create_destination_failure_1():
+def test_get_destination_failure_with_invalid_workspace_id():
     with pytest.raises(HttpError) as excinfo:
-        create_destination(1, "name", "destinationdef_id", {})
+        get_destination(1, "destination_id")
     assert str(excinfo.value) == "workspace_id must be a string"
 
 
-def test_create_destination_failure_2():
+def test_get_destination_failure_with_invalid_destination_id():
     with pytest.raises(HttpError) as excinfo:
-        create_destination("workspace_id", 1, "destinationdef_id", {})
-    assert str(excinfo.value) == "name must be a string"
+        get_destination("workspace_id", 2)
+    assert str(excinfo.value) == "destination_id must be a string"
 
 
-def test_create_destination_failure_3():
-    with pytest.raises(HttpError) as excinfo:
-        create_destination("workspace_id", "name", 1, {})
-    assert str(excinfo.value) == "destinationdef_id must be a string"
-
-
-def test_create_destination_failure_4():
-    with pytest.raises(HttpError) as excinfo:
-        create_destination("workspace_id", "name", "destinationdef_id", 1)
-    assert str(excinfo.value) == "config must be a dict"
-
-
-def test_create_destination_failure_5():
+def test_get_destination_failure():
     with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
         mock_response = Mock(spec=requests.Response)
         mock_response.status_code = 200
@@ -870,9 +833,9 @@ def test_create_destination_failure_5():
         mock_response.json.return_value = {"wrong-key": "theConnectionSpecification"}
         mock_post.return_value = mock_response
         with pytest.raises(HttpError) as excinfo:
-            create_destination("workspace-id", "name", "destinationdef_id", {})
+            get_destination("workspace-id", "destination_id")
 
-        assert str(excinfo.value) == "failed to create destination"
+        assert str(excinfo.value) == "destination not found"
 
 
 def test_create_destination_success():
@@ -888,31 +851,31 @@ def test_create_destination_success():
         assert response["destinationId"] == "the-destination"
 
 
-def test_update_destination_failure_1():
+def test_create_destination_with_invalid_workspace_id():
     with pytest.raises(HttpError) as excinfo:
-        update_destination(1, "name", {}, "destinationdef_id")
-    assert str(excinfo.value) == "destination_id must be a string"
+        create_destination(1, "name", "destinationdef_id", {})
+    assert str(excinfo.value) == "workspace_id must be a string"
 
 
-def test_update_destination_failure_2():
+def test_create_destination_failure_with_invalid_name():
     with pytest.raises(HttpError) as excinfo:
-        update_destination("destination_id", 1, {}, "destinationdef_id")
+        create_destination("workspace_id", 1, "destinationdef_id", {})
     assert str(excinfo.value) == "name must be a string"
 
 
-def test_update_destination_failure_3():
+def test_create_destination_failure_with_invalid_destinationdef_id():
     with pytest.raises(HttpError) as excinfo:
-        update_destination("destination_id", "name", 1, "destinationdef_id")
-    assert str(excinfo.value) == "config must be a dict"
-
-
-def test_update_destination_failure_4():
-    with pytest.raises(HttpError) as excinfo:
-        update_destination("destination_id", "name", {}, 1)
+        create_destination("workspace_id", "name", 1, {})
     assert str(excinfo.value) == "destinationdef_id must be a string"
 
 
-def test_update_destination_failure_5():
+def test_create_destination_failure_with_invalid_config():
+    with pytest.raises(HttpError) as excinfo:
+        create_destination("workspace_id", "name", "destinationdef_id", 1)
+    assert str(excinfo.value) == "config must be a dict"
+
+
+def test_create_destination_failure():
     with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
         mock_response = Mock(spec=requests.Response)
         mock_response.status_code = 200
@@ -920,9 +883,9 @@ def test_update_destination_failure_5():
         mock_response.json.return_value = {"wrong-key": "theConnectionSpecification"}
         mock_post.return_value = mock_response
         with pytest.raises(HttpError) as excinfo:
-            update_destination("destination_id", "name", {}, "destinationdef_id")
+            create_destination("workspace-id", "name", "destinationdef_id", {})
 
-        assert str(excinfo.value) == "failed to update destination"
+        assert str(excinfo.value) == "failed to create destination"
 
 
 def test_update_destination_success():
@@ -938,19 +901,31 @@ def test_update_destination_success():
         assert response["destinationId"] == "the-destination"
 
 
-def test_check_destination_connection_failure_1():
-    payload = AirbyteDestinationCreate(
-        name="destinationname", destinationDefId="destinationdef-id", config={}
-    )
+def test_update_destination_failure_with_invalid_destination_id():
     with pytest.raises(HttpError) as excinfo:
-        check_destination_connection(1, payload)
-    assert str(excinfo.value) == "workspace_id must be a string"
+        update_destination(1, "name", {}, "destinationdef_id")
+    assert str(excinfo.value) == "destination_id must be a string"
 
 
-def test_check_destination_connection_failure_2():
-    payload = AirbyteDestinationCreate(
-        name="destinationname", destinationDefId="destinationdef-id", config={}
-    )
+def test_update_destination_failure_with_invalid_name():
+    with pytest.raises(HttpError) as excinfo:
+        update_destination("destination_id", 1, {}, "destinationdef_id")
+    assert str(excinfo.value) == "name must be a string"
+
+
+def test_update_destination_failure_with_invalid_config():
+    with pytest.raises(HttpError) as excinfo:
+        update_destination("destination_id", "name", 1, "destinationdef_id")
+    assert str(excinfo.value) == "config must be a dict"
+
+
+def test_update_destination_failure_with_invalid_destinationdef_id():
+    with pytest.raises(HttpError) as excinfo:
+        update_destination("destination_id", "name", {}, 1)
+    assert str(excinfo.value) == "destinationdef_id must be a string"
+
+
+def test_update_destination_failure():
     with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
         mock_response = Mock(spec=requests.Response)
         mock_response.status_code = 200
@@ -958,25 +933,9 @@ def test_check_destination_connection_failure_2():
         mock_response.json.return_value = {"wrong-key": "theConnectionSpecification"}
         mock_post.return_value = mock_response
         with pytest.raises(HttpError) as excinfo:
-            check_destination_connection("workspace_id", payload)
+            update_destination("destination_id", "name", {}, "destinationdef_id")
 
-        assert str(excinfo.value) == "failed to check destination connection"
-
-
-def test_check_destination_connection_failure_3():
-    payload = AirbyteDestinationCreate(
-        name="destinationname", destinationDefId="destinationdef-id", config={}
-    )
-    with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
-        mock_response = Mock(spec=requests.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {"Content-Type": "application/json"}
-        mock_response.json.return_value = {"jobInfo": {}, "status": "failed"}
-        mock_post.return_value = mock_response
-        with pytest.raises(HttpError) as excinfo:
-            check_destination_connection("workspace_id", payload)
-
-        assert str(excinfo.value) == "failed to check destination connection"
+        assert str(excinfo.value) == "failed to update destination"
 
 
 def test_check_destination_connection_success():
@@ -992,6 +951,67 @@ def test_check_destination_connection_success():
         response = check_destination_connection("workspace_id", payload)
 
         assert response["status"] == "succeeded"
+
+
+def test_check_destination_connection_with_invalid_workspace_id():
+    payload = AirbyteDestinationCreate(
+        name="destinationname", destinationDefId="destinationdef-id", config={}
+    )
+    with pytest.raises(HttpError) as excinfo:
+        check_destination_connection(1, payload)
+    assert str(excinfo.value) == "workspace_id must be a string"
+
+
+def test_check_destination_connection_failure_1():
+    payload = AirbyteDestinationCreate(
+        name="destinationname", destinationDefId="destinationdef-id", config={}
+    )
+    with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
+        mock_response = Mock(spec=requests.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"Content-Type": "application/json"}
+        mock_response.json.return_value = {"wrong-key": "theConnectionSpecification"}
+        mock_post.return_value = mock_response
+        with pytest.raises(HttpError) as excinfo:
+            check_destination_connection("workspace_id", payload)
+
+        assert str(excinfo.value) == "failed to check destination connection"
+
+
+def test_check_destination_connection_failure_2():
+    payload = AirbyteDestinationCreate(
+        name="destinationname", destinationDefId="destinationdef-id", config={}
+    )
+    with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
+        mock_response = Mock(spec=requests.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"Content-Type": "application/json"}
+        mock_response.json.return_value = {"jobInfo": {}, "status": "failed"}
+        mock_post.return_value = mock_response
+        with pytest.raises(HttpError) as excinfo:
+            check_destination_connection("workspace_id", payload)
+
+        assert str(excinfo.value) == "failed to check destination connection"
+
+
+def test_check_destination_connection_for_update_success():
+    payload = AirbyteDestinationUpdateCheckConnection(name="destinationname", config={})
+    with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
+        mock_response = Mock(spec=requests.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"Content-Type": "application/json"}
+        mock_response.json.return_value = {"jobInfo": {}, "status": "succeeded"}
+        mock_post.return_value = mock_response
+        response = check_destination_connection_for_update("destination_id", payload)
+
+        assert response["status"] == "succeeded"
+
+
+def test_check_destination_connection_for_update_with_invalid_destination_id():
+    payload = AirbyteDestinationUpdateCheckConnection(name="destinationname", config={})
+    with pytest.raises(HttpError) as excinfo:
+        check_destination_connection_for_update(1, payload)
+    assert str(excinfo.value) == "destination_id must be a string"
 
 
 def test_check_destination_connection_for_update_failure_1():
@@ -1020,16 +1040,3 @@ def test_check_destination_connection_for_update_failure_2():
             check_destination_connection_for_update("destination_id", payload)
 
         assert str(excinfo.value) == "failed to check destination connection"
-
-
-def test_check_destination_connection_for_update_success():
-    payload = AirbyteDestinationUpdateCheckConnection(name="destinationname", config={})
-    with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
-        mock_response = Mock(spec=requests.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {"Content-Type": "application/json"}
-        mock_response.json.return_value = {"jobInfo": {}, "status": "succeeded"}
-        mock_post.return_value = mock_response
-        response = check_destination_connection_for_update("destination_id", payload)
-
-        assert response["status"] == "succeeded"
