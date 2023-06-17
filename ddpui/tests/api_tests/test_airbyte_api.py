@@ -9,7 +9,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from ddpui.models.org import Org, OrgPrefectBlock, OrgDataFlow
+from ddpui.models.org import Org, OrgPrefectBlock, OrgDataFlow, OrgWarehouse
 from ddpui.api.client.airbyte_api import (
     post_airbyte_detach_workspace,
     post_airbyte_workspace,
@@ -33,8 +33,14 @@ from ddpui.api.client.airbyte_api import (
     get_airbyte_destination,
     get_airbyte_connections,
     get_airbyte_connection,
+    post_airbyte_connection,
+    put_airbyte_connection,
+    delete_airbyte_connection,
+    post_airbyte_sync_connection,
+    get_job_status,
 )
 from ddpui.ddpairbyte.schema import (
+    AirbyteWorkspace,
     AirbyteWorkspaceCreate,
     AirbyteSourceCreate,
     AirbyteSourceUpdate,
@@ -42,10 +48,12 @@ from ddpui.ddpairbyte.schema import (
     AirbyteDestinationCreate,
     AirbyteDestinationUpdateCheckConnection,
     AirbyteDestinationUpdate,
+    AirbyteConnectionCreate,
 )
 from ddpui import ddpprefect
 
 
+# ================================================================================
 @pytest.fixture
 def org_without_workspace():
     """a pytest fixture which creates an Org without an airbyte workspace"""
@@ -68,6 +76,7 @@ def org_with_workspace():
     org.delete()
 
 
+# ================================================================================
 def test_post_airbyte_detach_workspace_0():
     """tests /worksspace/detatch/"""
 
@@ -170,38 +179,55 @@ def test_post_airbyte_detach_workspace_2(org_with_workspace):
     )
 
 
-def test_post_airbyte_workspace():
+# ================================================================================
+def test_post_airbyte_workspace_0(org_with_workspace):
     """if the request passes the authentication check
     AND there are no airbyte server blocks for this org
     AND we can conenct to airbyte (or a mocked version of it)
     then post_airbyte_workspace must succeed
     """
-    test_org = Org.objects.create(airbyte_workspace_id=None, slug="test-org-slug")
 
     mock_orguser = Mock()
-    mock_orguser.org = test_org
+    mock_orguser.org = org_with_workspace
 
     mock_request = Mock()
     mock_request.orguser = mock_orguser
 
     testworkspacename = "Test Workspace"
     mock_payload = AirbyteWorkspaceCreate(name=testworkspacename)
+    with pytest.raises(HttpError) as excinfo:
+        post_airbyte_workspace(mock_request, mock_payload)
+    assert str(excinfo.value) == "org already has a workspace"
 
-    for serverblock in OrgPrefectBlock.objects.filter(
-        org=test_org, block_type=ddpprefect.AIRBYTESERVER
-    ):
-        serverblock.delete()
 
-    serverblock = OrgPrefectBlock.objects.filter(
-        block_name="test-org-slug-airbyte-server"
-    ).first()
-    if serverblock:
-        serverblock.delete()
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.setup_airbyte_workspace",
+    return_value=AirbyteWorkspace(
+        name="workspace-name",
+        workspaceId="workspaceId",
+        initialSetupComplete=True,
+    ),
+)
+def test_post_airbyte_workspace_1(setup_airbyte_workspace, org_without_workspace):
+    """if the request passes the authentication check
+    AND there are no airbyte server blocks for this org
+    AND we can conenct to airbyte (or a mocked version of it)
+    then post_airbyte_workspace must succeed
+    """
 
+    mock_orguser = Mock()
+    mock_orguser.org = org_without_workspace
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    testworkspacename = "workspace-name"
+    mock_payload = AirbyteWorkspaceCreate(name=testworkspacename)
     response = post_airbyte_workspace(mock_request, mock_payload)
     assert response.name == testworkspacename
 
 
+# ================================================================================
 def test_get_airbyte_source_definitions_0(org_without_workspace):
     """tests GET /source_definitions"""
 
@@ -235,6 +261,7 @@ def test_get_airbyte_source_definitions_1(org_with_workspace):
     assert len(result) == 3
 
 
+# ================================================================================
 def test_get_airbyte_source_definition_specifications_0(org_without_workspace):
     """tests GET /source_definitions"""
 
@@ -270,6 +297,7 @@ def test_get_airbyte_source_definition_specifications_1(org_with_workspace):
     assert result["srcdefspeec_key"] == "srcdefspeec_val"
 
 
+# ================================================================================
 def test_post_airbyte_source_0(org_without_workspace):
     """tests GET /source_definitions"""
 
@@ -309,6 +337,7 @@ def test_post_airbyte_source_1(org_with_workspace):
     assert source["sourceId"] == "fake-source-id"
 
 
+# ================================================================================
 def test_put_airbyte_source_0(org_without_workspace):
     """tests GET /source_definitions"""
 
@@ -348,6 +377,7 @@ def test_put_airbyte_source_1(org_with_workspace):
     assert source["sourceId"] == "fake-source-id"
 
 
+# ================================================================================
 def test_post_airbyte_check_source_0(org_without_workspace):
     """tests GET /source_definitions"""
 
@@ -410,6 +440,7 @@ def test_post_airbyte_check_source_2(org_with_workspace):
     assert len(result["logs"]) == 2
 
 
+# ================================================================================
 def test_post_airbyte_check_source_for_update_0(org_without_workspace):
     """tests GET /source_definitions"""
 
@@ -478,6 +509,7 @@ def test_post_airbyte_check_source_for_update_2(org_with_workspace):
     assert len(result["logs"]) == 2
 
 
+# ================================================================================
 def test_get_airbyte_sources_0(org_without_workspace):
     """tests GET /source_definitions"""
 
@@ -515,6 +547,7 @@ def test_get_airbyte_sources_1(org_with_workspace):
     assert len(result) == 3
 
 
+# ================================================================================
 def test_get_airbyte_source_0(org_without_workspace):
     """tests GET /source_definitions"""
 
@@ -548,6 +581,7 @@ def test_get_airbyte_source_1(org_with_workspace):
     assert result["fake-key"] == "fake-val"
 
 
+# ================================================================================
 def test_delete_airbyte_source_0(org_without_workspace):
     """tests GET /source_definitions"""
 
@@ -641,6 +675,7 @@ def test_delete_airbyte_source_2(org_with_workspace):
     assert result["success"] == 1
 
 
+# ================================================================================
 def test_get_airbyte_source_schema_catalog_0(org_without_workspace):
     """tests GET /source_definitions"""
 
@@ -674,6 +709,7 @@ def test_get_airbyte_source_schema_catalog_1(org_with_workspace):
     assert result["fake-key"] == "fake-val"
 
 
+# ================================================================================
 def test_get_airbyte_destination_definitions_0(org_without_workspace):
     """tests GET /source_definitions"""
 
@@ -709,6 +745,7 @@ def test_get_airbyte_destination_definitions_1(org_with_workspace):
     assert result[0]["name"] == "dest1"
 
 
+# ================================================================================
 def test_get_airbyte_destination_definition_specifications_0(org_without_workspace):
     """tests GET /source_definitions"""
 
@@ -747,6 +784,7 @@ def test_get_airbyte_destination_definition_specifications_1(org_with_workspace)
     assert result["fake-key"] == "fake-val"
 
 
+# ================================================================================
 def test_post_airbyte_destination_0(org_without_workspace):
     """tests GET /source_definitions"""
 
@@ -790,6 +828,7 @@ def test_post_airbyte_destination_1(org_with_workspace):
     assert result["destinationId"] == "fake-dest-id"
 
 
+# ================================================================================
 def test_post_airbyte_check_destination_0(org_without_workspace):
     """tests GET /source_definitions"""
 
@@ -858,6 +897,7 @@ def test_post_airbyte_check_destination_2(org_with_workspace):
     assert len(result["logs"]) == 4
 
 
+# ================================================================================
 def test_post_airbyte_check_destination_for_update_0(org_without_workspace):
     """tests GET /source_definitions"""
 
@@ -927,6 +967,7 @@ def test_post_airbyte_check_destination_for_update_2(org_with_workspace):
     assert len(result["logs"]) == 4
 
 
+# ================================================================================
 def test_put_airbyte_destination_0(org_without_workspace):
     """tests GET /source_definitions"""
 
@@ -970,6 +1011,7 @@ def test_put_airbyte_destination_1(org_with_workspace):
     assert result["destinationId"] == "fake-dest-id"
 
 
+# ================================================================================
 def test_get_airbyte_destinations_0(org_without_workspace):
     """tests GET /source_definitions"""
 
@@ -1003,17 +1045,13 @@ def test_get_airbyte_destinations_1(org_with_workspace):
     mock_request = Mock()
     mock_request.orguser = mock_orguser
 
-    payload = AirbyteDestinationUpdate(
-        name="fake-dest-name",
-        destinationDefId="fake-dest-def-id",
-        config={},
-    )
     result = get_airbyte_destinations(mock_request)
 
     assert len(result) == 1
     assert result[0]["fake-key"] == "fake-val"
 
 
+# ================================================================================
 def test_get_airbyte_destination_0(org_without_workspace):
     """tests GET /source_definitions"""
 
@@ -1047,6 +1085,7 @@ def test_get_airbyte_destination_1(org_with_workspace):
     assert result["fake-key"] == "fake-val"
 
 
+# ================================================================================
 def test_get_airbyte_connections_0(org_without_workspace):
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
@@ -1138,6 +1177,7 @@ def test_get_airbyte_connections_1(org_with_workspace):
     ).first().delete()
 
 
+# ================================================================================
 def test_get_airbyte_connection_0(org_without_workspace):
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
@@ -1226,3 +1266,373 @@ def test_get_airbyte_connection_1(org_with_workspace):
         connection_id="fake-connection-id-1",
         deployment_id="fake-deployment-id",
     ).first().delete()
+
+
+# ================================================================================
+def test_post_airbyte_connection_0(org_without_workspace):
+    mock_orguser = Mock()
+    mock_orguser.org = org_without_workspace
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    payload = AirbyteConnectionCreate(
+        name="conn-name",
+        sourceId="source-id",
+        destinationId="dest-id",
+        destinationSchema="dest-schema",
+        streams=["stream-1", "stream-2"],
+        normalize=False,
+    )
+    with pytest.raises(HttpError) as excinfo:
+        post_airbyte_connection(mock_request, payload)
+
+    assert str(excinfo.value) == "create an airbyte workspace first"
+
+
+def test_post_airbyte_connection_1(org_with_workspace):
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_workspace
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    payload = AirbyteConnectionCreate(
+        name="conn-name",
+        sourceId="source-id",
+        destinationId="dest-id",
+        destinationSchema="dest-schema",
+        streams=[],
+        normalize=False,
+    )
+    with pytest.raises(HttpError) as excinfo:
+        post_airbyte_connection(mock_request, payload)
+
+    assert str(excinfo.value) == "must specify stream names"
+
+
+def test_post_airbyte_connection_2(org_with_workspace):
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_workspace
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    payload = AirbyteConnectionCreate(
+        name="conn-name",
+        sourceId="source-id",
+        destinationId="dest-id",
+        destinationSchema="dest-schema",
+        streams=["stream_1", "stream_2"],
+        normalize=False,
+    )
+    with pytest.raises(HttpError) as excinfo:
+        post_airbyte_connection(mock_request, payload)
+
+    assert str(excinfo.value) == "need to set up a warehouse first"
+
+
+@pytest.fixture
+def warehouse_without_destination(org_with_workspace):
+    warehouse = OrgWarehouse.objects.create(org=org_with_workspace)
+    yield warehouse
+    warehouse.delete()
+
+
+@pytest.fixture
+def warehouse_with_destination(org_with_workspace):
+    warehouse = OrgWarehouse.objects.create(
+        org=org_with_workspace, airbyte_destination_id="destination-id"
+    )
+    yield warehouse
+    warehouse.delete()
+
+
+def test_post_airbyte_connection_3(org_with_workspace, warehouse_without_destination):
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_workspace
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    payload = AirbyteConnectionCreate(
+        name="conn-name",
+        sourceId="source-id",
+        destinationId="dest-id",
+        destinationSchema="dest-schema",
+        streams=["stream_1", "stream_2"],
+        normalize=False,
+    )
+    with pytest.raises(HttpError) as excinfo:
+        post_airbyte_connection(mock_request, payload)
+
+    assert str(excinfo.value) == "warehouse has no airbyte_destination_id"
+
+
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    create_normalization_operation=Mock(
+        return_value={"operationId": "fake-operation-id"}
+    ),
+    create_connection=Mock(
+        return_value={
+            "sourceId": "fake-source-id",
+            "destinationId": "fake-destination-id",
+            "connectionId": "fake-connection-id",
+            "sourceCatalogId": "fake-source-catalog-id",
+            "syncCatalog": "sync-catalog",
+            "status": "running",
+        }
+    ),
+)
+def test_post_airbyte_connection_4(org_with_workspace, warehouse_with_destination):
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_workspace
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    payload = AirbyteConnectionCreate(
+        name="conn-name",
+        sourceId="source-id",
+        destinationId="dest-id",
+        destinationSchema="dest-schema",
+        streams=["stream_1", "stream_2"],
+        normalize=False,
+    )
+    with pytest.raises(Exception) as excinfo:
+        post_airbyte_connection(mock_request, payload)
+    assert (
+        str(excinfo.value)
+        == "test-org-slug has no Airbyte Server block in OrgPrefectBlock"
+    )
+
+
+@pytest.fixture
+def airbyte_server_block(org_with_workspace):
+    block = OrgPrefectBlock.objects.create(
+        org=org_with_workspace,
+        block_type=ddpprefect.AIRBYTESERVER,
+        block_id="fake-serverblock-id",
+        block_name="fake ab server block",
+    )
+    yield block
+    block.delete()
+
+
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    create_normalization_operation=Mock(
+        return_value={"operationId": "fake-operation-id"}
+    ),
+    create_connection=Mock(
+        return_value={
+            "sourceId": "fake-source-id",
+            "destinationId": "fake-destination-id",
+            "connectionId": "fake-connection-id",
+            "sourceCatalogId": "fake-source-catalog-id",
+            "syncCatalog": "sync-catalog",
+            "status": "running",
+        }
+    ),
+    get_source=Mock(
+        return_value={"sourceName": "source-name"},
+    ),
+    get_destination=Mock(
+        return_value={"destinationName": "destination-name"},
+    ),
+)
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    get_airbyte_connection_block_by_id=Mock(
+        return_value={
+            "name": "airbyte-connection-block-name",
+            "id": "airbyte-connection-block-id",
+            "data": "block-data",
+        }
+    ),
+    create_airbyte_connection_block=Mock(return_value="fake-block_id"),
+    create_dataflow=Mock(
+        return_value={
+            "deployment": {"id": "fake-deployment-id", "name": "fake-deployment-name"}
+        }
+    ),
+)
+def test_post_airbyte_connection_5(
+    org_with_workspace, warehouse_with_destination, airbyte_server_block
+):
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_workspace
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    payload = AirbyteConnectionCreate(
+        name="conn-name",
+        sourceId="source-id",
+        destinationId="dest-id",
+        destinationSchema="dest-schema",
+        streams=["stream_1", "stream_2"],
+        normalize=False,
+    )
+
+    response = post_airbyte_connection(mock_request, payload)
+
+    # reload the warehouse from the database
+    warehouse_with_destination = OrgWarehouse.objects.filter(
+        org=org_with_workspace, airbyte_destination_id="destination-id"
+    ).first()
+    assert warehouse_with_destination.airbyte_norm_op_id is not None
+
+    assert response["name"] == "conn-name"
+    assert response["blockId"] == "airbyte-connection-block-id"
+    assert response["blockName"] == "airbyte-connection-block-name"
+    assert response["blockData"] == "block-data"
+    assert response["connectionId"] == "fake-connection-id"
+    assert response["source"]["id"] == "fake-source-id"
+    assert response["destination"]["id"] == "fake-destination-id"
+    assert response["sourceCatalogId"] == "fake-source-catalog-id"
+    assert response["status"] == "running"
+    assert response["deployment_id"] == "fake-deployment-id"
+
+
+# ================================================================================
+def test_put_airbyte_connection():
+    mock_request = Mock()
+
+    response = put_airbyte_connection(mock_request)
+    assert response["error"] == "deprecated"
+
+
+# ================================================================================
+def test_delete_airbyte_connection_0():
+    mock_orguser = Mock()
+    mock_orguser.org = None
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        delete_airbyte_connection(mock_request, "conn-block-id")
+
+    assert str(excinfo.value) == "create an organization first"
+
+
+def test_delete_airbyte_connection_1(org_without_workspace):
+    mock_orguser = Mock()
+    mock_orguser.org = org_without_workspace
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        delete_airbyte_connection(mock_request, "conn-block-id")
+
+    assert str(excinfo.value) == "create an airbyte workspace first"
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    get_airbyte_connection_block_by_id=Mock(
+        return_value={"data": {"connection_id": "connection-id"}}
+    ),
+    delete_airbyte_connection_block=Mock(),
+)
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    delete_connection=Mock(),
+)
+def test_delete_airbyte_connection_2(org_with_workspace):
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_workspace
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    OrgPrefectBlock.objects.create(
+        org=org_with_workspace,
+        block_type=ddpprefect.AIRBYTECONNECTION,
+        block_id="conn-block-id",
+        block_name="conn-block-name",
+    )
+    assert (
+        OrgPrefectBlock.objects.filter(
+            org=org_with_workspace,
+            block_type=ddpprefect.AIRBYTECONNECTION,
+            block_id="conn-block-id",
+            block_name="conn-block-name",
+        ).count()
+        == 1
+    )
+    response = delete_airbyte_connection(mock_request, "conn-block-id")
+    assert response["success"] == 1
+    assert (
+        OrgPrefectBlock.objects.filter(
+            org=org_with_workspace,
+            block_type=ddpprefect.AIRBYTECONNECTION,
+            block_id="conn-block-id",
+            block_name="conn-block-name",
+        ).count()
+        == 0
+    )
+
+
+# ================================================================================
+def test_post_airbyte_sync_connection_0(org_without_workspace):
+    mock_orguser = Mock()
+    mock_orguser.org = org_without_workspace
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        post_airbyte_sync_connection(mock_request, "conn-block-id")
+
+    assert str(excinfo.value) == "create an airbyte workspace first"
+
+
+@pytest.fixture
+def org_prefect_connection_block(org_with_workspace):
+    block = OrgPrefectBlock.objects.create(
+        org=org_with_workspace,
+        block_id="connection_block_id",
+        block_name="temp-conn-block-name",
+        block_type=ddpprefect.AIRBYTECONNECTION,
+    )
+    yield block
+    block.delete()
+
+
+@patch.multiple(
+    "ddpui.api.client.airbyte_api",
+    run_airbyte_connection_sync=Mock(return_value="retval"),
+)
+def test_post_airbyte_sync_connection_1(
+    org_with_workspace, org_prefect_connection_block
+):
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_workspace
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    response = post_airbyte_sync_connection(mock_request, "connection_block_id")
+    assert response == "retval"
+
+
+# ================================================================================
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    get_job_info=Mock(
+        return_value={
+            "attempts": [{"logs": {"logLines": [1, 2, 3]}}],
+            "job": {"status": "completed"},
+        }
+    ),
+)
+def test_get_job_status():
+    mock_request = Mock()
+
+    result = get_job_status(mock_request, "fake-job-id")
+    assert result["status"] == "completed"
+    assert len(result["logs"]) == 3
