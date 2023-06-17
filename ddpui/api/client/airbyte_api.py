@@ -480,6 +480,16 @@ def get_airbyte_connections(request):
         dataflow = OrgDataFlow.objects.filter(
             org=orguser.org, connection_id=airbyte_conn["connectionId"]
         ).first()
+
+        # fetch the source and destination names
+        source_name = airbyte_service.get_source(
+            orguser.org.airbyte_workspace_id, airbyte_conn["sourceId"]
+        )["sourceName"]
+
+        destination_name = airbyte_service.get_destination(
+            orguser.org.airbyte_workspace_id, airbyte_conn["destinationId"]
+        )["destinationName"]
+
         res.append(
             {
                 "name": org_block.display_name,
