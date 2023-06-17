@@ -77,7 +77,7 @@ def org_with_workspace():
 
 
 # ================================================================================
-def test_post_airbyte_detach_workspace_0():
+def test_post_airbyte_detach_workspace_without_org():
     """tests /worksspace/detatch/"""
 
     mock_orguser = Mock()
@@ -91,7 +91,7 @@ def test_post_airbyte_detach_workspace_0():
     assert str(excinfo.value) == "create an organization first"
 
 
-def test_post_airbyte_detach_workspace_1(org_without_workspace):
+def test_post_airbyte_detach_workspace_without_workspace(org_without_workspace):
     """tests /worksspace/detatch/"""
 
     mock_orguser = Mock()
@@ -110,7 +110,7 @@ def test_post_airbyte_detach_workspace_1(org_without_workspace):
     delete_airbyte_connection_block=Mock(),
     delete_airbyte_server_block=Mock(),
 )
-def test_post_airbyte_detach_workspace_2(org_with_workspace):
+def test_post_airbyte_detach_workspace_success(org_with_workspace):
     """tests /worksspace/detatch/"""
 
     mock_orguser = Mock()
@@ -173,7 +173,7 @@ def test_post_airbyte_detach_workspace_2(org_with_workspace):
 
 
 # ================================================================================
-def test_post_airbyte_workspace_0(org_with_workspace):
+def test_post_airbyte_workspace_with_workspace(org_with_workspace):
     """if the request passes the authentication check
     AND there are no airbyte server blocks for this org
     AND we can conenct to airbyte (or a mocked version of it)
@@ -201,7 +201,7 @@ def test_post_airbyte_workspace_0(org_with_workspace):
         initialSetupComplete=True,
     ),
 )
-def test_post_airbyte_workspace_1(setup_airbyte_workspace, org_without_workspace):
+def test_post_airbyte_workspace_success(setup_airbyte_workspace, org_without_workspace):
     """if the request passes the authentication check
     AND there are no airbyte server blocks for this org
     AND we can conenct to airbyte (or a mocked version of it)
@@ -221,7 +221,9 @@ def test_post_airbyte_workspace_1(setup_airbyte_workspace, org_without_workspace
 
 
 # ================================================================================
-def test_get_airbyte_source_definitions_0(org_without_workspace):
+def test_get_airbyte_source_definitions_without_airbyte_workspace(
+    org_without_workspace,
+):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -240,7 +242,7 @@ def test_get_airbyte_source_definitions_0(org_without_workspace):
     "ddpui.ddpairbyte.airbyte_service.get_source_definitions",
     return_value={"sourceDefinitions": [1, 2, 3]},
 )
-def test_get_airbyte_source_definitions_1(org_with_workspace):
+def test_get_airbyte_source_definitions_success(org_with_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -255,7 +257,9 @@ def test_get_airbyte_source_definitions_1(org_with_workspace):
 
 
 # ================================================================================
-def test_get_airbyte_source_definition_specifications_0(org_without_workspace):
+def test_get_airbyte_source_definition_specifications_without_workspace(
+    org_without_workspace,
+):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -274,7 +278,7 @@ def test_get_airbyte_source_definition_specifications_0(org_without_workspace):
     "ddpui.ddpairbyte.airbyte_service.get_source_definition_specification",
     return_value={"srcdefspeec_key": "srcdefspeec_val"},
 )
-def test_get_airbyte_source_definition_specifications_1(org_with_workspace):
+def test_get_airbyte_source_definition_specifications_success(org_with_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -291,7 +295,7 @@ def test_get_airbyte_source_definition_specifications_1(org_with_workspace):
 
 
 # ================================================================================
-def test_post_airbyte_source_0(org_without_workspace):
+def test_post_airbyte_source_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -313,7 +317,7 @@ def test_post_airbyte_source_0(org_without_workspace):
     "ddpui.ddpairbyte.airbyte_service.create_source",
     return_value={"sourceId": "fake-source-id"},
 )
-def test_post_airbyte_source_1(org_with_workspace):
+def test_post_airbyte_source_success(org_with_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -331,7 +335,7 @@ def test_post_airbyte_source_1(org_with_workspace):
 
 
 # ================================================================================
-def test_put_airbyte_source_0(org_without_workspace):
+def test_put_airbyte_source_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -353,7 +357,7 @@ def test_put_airbyte_source_0(org_without_workspace):
     "ddpui.ddpairbyte.airbyte_service.update_source",
     return_value={"sourceId": "fake-source-id"},
 )
-def test_put_airbyte_source_1(org_with_workspace):
+def test_put_airbyte_source_success(org_with_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -371,7 +375,7 @@ def test_put_airbyte_source_1(org_with_workspace):
 
 
 # ================================================================================
-def test_post_airbyte_check_source_0(org_without_workspace):
+def test_post_airbyte_check_source_with_workspace(org_without_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -393,7 +397,7 @@ def test_post_airbyte_check_source_0(org_without_workspace):
     "ddpui.ddpairbyte.airbyte_service.check_source_connection",
     return_value={"jobInfo": {"succeeded": False, "logs": {"logLines": [1]}}},
 )
-def test_post_airbyte_check_source_1(org_with_workspace):
+def test_post_airbyte_check_source_failure(org_with_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -415,7 +419,7 @@ def test_post_airbyte_check_source_1(org_with_workspace):
     "ddpui.ddpairbyte.airbyte_service.check_source_connection",
     return_value={"jobInfo": {"succeeded": True, "logs": {"logLines": [1, 2]}}},
 )
-def test_post_airbyte_check_source_2(org_with_workspace):
+def test_post_airbyte_check_source_success(org_with_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -434,7 +438,7 @@ def test_post_airbyte_check_source_2(org_with_workspace):
 
 
 # ================================================================================
-def test_post_airbyte_check_source_for_update_0(org_without_workspace):
+def test_post_airbyte_check_source_for_update_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -458,7 +462,7 @@ def test_post_airbyte_check_source_for_update_0(org_without_workspace):
     "ddpui.ddpairbyte.airbyte_service.check_source_connection_for_update",
     return_value={"jobInfo": {"succeeded": False, "logs": {"logLines": [1]}}},
 )
-def test_post_airbyte_check_source_for_update_1(org_with_workspace):
+def test_post_airbyte_check_source_for_update_failure(org_with_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -482,7 +486,7 @@ def test_post_airbyte_check_source_for_update_1(org_with_workspace):
     "ddpui.ddpairbyte.airbyte_service.check_source_connection_for_update",
     return_value={"jobInfo": {"succeeded": True, "logs": {"logLines": [1, 2]}}},
 )
-def test_post_airbyte_check_source_for_update_2(org_with_workspace):
+def test_post_airbyte_check_source_for_update_success(org_with_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -503,7 +507,7 @@ def test_post_airbyte_check_source_for_update_2(org_with_workspace):
 
 
 # ================================================================================
-def test_get_airbyte_sources_0(org_without_workspace):
+def test_get_airbyte_sources_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -524,7 +528,7 @@ def test_get_airbyte_sources_0(org_without_workspace):
     "ddpui.ddpairbyte.airbyte_service.get_sources",
     return_value={"sources": [1, 2, 3]},
 )
-def test_get_airbyte_sources_1(org_with_workspace):
+def test_get_airbyte_sources_success(org_with_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -541,7 +545,7 @@ def test_get_airbyte_sources_1(org_with_workspace):
 
 
 # ================================================================================
-def test_get_airbyte_source_0(org_without_workspace):
+def test_get_airbyte_source_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -560,7 +564,7 @@ def test_get_airbyte_source_0(org_without_workspace):
     "ddpui.ddpairbyte.airbyte_service.get_source",
     return_value={"fake-key": "fake-val"},
 )
-def test_get_airbyte_source_1(org_with_workspace):
+def test_get_airbyte_source_success(org_with_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -575,7 +579,7 @@ def test_get_airbyte_source_1(org_with_workspace):
 
 
 # ================================================================================
-def test_delete_airbyte_source_0(org_without_workspace):
+def test_delete_airbyte_source_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -669,7 +673,7 @@ def test_delete_airbyte_source_2(org_with_workspace):
 
 
 # ================================================================================
-def test_get_airbyte_source_schema_catalog_0(org_without_workspace):
+def test_get_airbyte_source_schema_catalog_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -688,7 +692,7 @@ def test_get_airbyte_source_schema_catalog_0(org_without_workspace):
     "ddpui.ddpairbyte.airbyte_service.get_source_schema_catalog",
     return_value={"fake-key": "fake-val"},
 )
-def test_get_airbyte_source_schema_catalog_1(org_with_workspace):
+def test_get_airbyte_source_schema_catalog_success(org_with_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -703,7 +707,7 @@ def test_get_airbyte_source_schema_catalog_1(org_with_workspace):
 
 
 # ================================================================================
-def test_get_airbyte_destination_definitions_0(org_without_workspace):
+def test_get_airbyte_destination_definitions_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -722,7 +726,7 @@ def test_get_airbyte_destination_definitions_0(org_without_workspace):
     "ddpui.ddpairbyte.airbyte_service.get_destination_definitions",
     return_value={"destinationDefinitions": [{"name": "dest1"}, {"name": "dest3"}]},
 )
-def test_get_airbyte_destination_definitions_1(org_with_workspace):
+def test_get_airbyte_destination_definitions_success(org_with_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -739,7 +743,9 @@ def test_get_airbyte_destination_definitions_1(org_with_workspace):
 
 
 # ================================================================================
-def test_get_airbyte_destination_definition_specifications_0(org_without_workspace):
+def test_get_airbyte_destination_definition_specifications_without_workspace(
+    org_without_workspace,
+):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -760,7 +766,7 @@ def test_get_airbyte_destination_definition_specifications_0(org_without_workspa
     "ddpui.ddpairbyte.airbyte_service.get_destination_definition_specification",
     return_value={"connectionSpecification": {"fake-key": "fake-val"}},
 )
-def test_get_airbyte_destination_definition_specifications_1(org_with_workspace):
+def test_get_airbyte_destination_definition_specifications_success(org_with_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -778,7 +784,7 @@ def test_get_airbyte_destination_definition_specifications_1(org_with_workspace)
 
 
 # ================================================================================
-def test_post_airbyte_destination_0(org_without_workspace):
+def test_post_airbyte_destination_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -802,7 +808,7 @@ def test_post_airbyte_destination_0(org_without_workspace):
     "ddpui.ddpairbyte.airbyte_service.create_destination",
     return_value={"destinationId": "fake-dest-id"},
 )
-def test_post_airbyte_destination_1(org_with_workspace):
+def test_post_airbyte_destination_success(org_with_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -822,7 +828,7 @@ def test_post_airbyte_destination_1(org_with_workspace):
 
 
 # ================================================================================
-def test_post_airbyte_check_destination_0(org_without_workspace):
+def test_post_airbyte_check_destination_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -846,7 +852,7 @@ def test_post_airbyte_check_destination_0(org_without_workspace):
     "ddpui.ddpairbyte.airbyte_service.check_destination_connection",
     return_value={"jobInfo": {"succeeded": True, "logs": {"logLines": [1, 2, 3]}}},
 )
-def test_post_airbyte_check_destination_1(org_with_workspace):
+def test_post_airbyte_check_destination_success(org_with_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -870,7 +876,7 @@ def test_post_airbyte_check_destination_1(org_with_workspace):
     "ddpui.ddpairbyte.airbyte_service.check_destination_connection",
     return_value={"jobInfo": {"succeeded": False, "logs": {"logLines": [1, 2, 3, 4]}}},
 )
-def test_post_airbyte_check_destination_2(org_with_workspace):
+def test_post_airbyte_check_destination_failure(org_with_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -891,7 +897,9 @@ def test_post_airbyte_check_destination_2(org_with_workspace):
 
 
 # ================================================================================
-def test_post_airbyte_check_destination_for_update_0(org_without_workspace):
+def test_post_airbyte_check_destination_for_update_without_workspace(
+    org_without_workspace,
+):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -914,7 +922,7 @@ def test_post_airbyte_check_destination_for_update_0(org_without_workspace):
     "ddpui.ddpairbyte.airbyte_service.check_destination_connection_for_update",
     return_value={"jobInfo": {"succeeded": True, "logs": {"logLines": [1, 2, 3]}}},
 )
-def test_post_airbyte_check_destination_for_update_1(org_with_workspace):
+def test_post_airbyte_check_destination_for_update_success(org_with_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -939,7 +947,7 @@ def test_post_airbyte_check_destination_for_update_1(org_with_workspace):
     "ddpui.ddpairbyte.airbyte_service.check_destination_connection_for_update",
     return_value={"jobInfo": {"succeeded": False, "logs": {"logLines": [1, 2, 3, 4]}}},
 )
-def test_post_airbyte_check_destination_for_update_2(org_with_workspace):
+def test_post_airbyte_check_destination_for_update_failure(org_with_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -961,7 +969,7 @@ def test_post_airbyte_check_destination_for_update_2(org_with_workspace):
 
 
 # ================================================================================
-def test_put_airbyte_destination_0(org_without_workspace):
+def test_put_airbyte_destination_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -985,7 +993,7 @@ def test_put_airbyte_destination_0(org_without_workspace):
     "ddpui.ddpairbyte.airbyte_service.update_destination",
     return_value={"destinationId": "fake-dest-id"},
 )
-def test_put_airbyte_destination_1(org_with_workspace):
+def test_put_airbyte_destination_success(org_with_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -1005,7 +1013,7 @@ def test_put_airbyte_destination_1(org_with_workspace):
 
 
 # ================================================================================
-def test_get_airbyte_destinations_0(org_without_workspace):
+def test_get_airbyte_destinations_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -1029,7 +1037,7 @@ def test_get_airbyte_destinations_0(org_without_workspace):
     "ddpui.ddpairbyte.airbyte_service.get_destinations",
     return_value={"destinations": [{"fake-key": "fake-val"}]},
 )
-def test_get_airbyte_destinations_1(org_with_workspace):
+def test_get_airbyte_destinationn_success(org_with_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -1045,7 +1053,7 @@ def test_get_airbyte_destinations_1(org_with_workspace):
 
 
 # ================================================================================
-def test_get_airbyte_destination_0(org_without_workspace):
+def test_get_airbyte_destination_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -1064,7 +1072,7 @@ def test_get_airbyte_destination_0(org_without_workspace):
     "ddpui.ddpairbyte.airbyte_service.get_destination",
     return_value={"fake-key": "fake-val"},
 )
-def test_get_airbyte_destination_1(org_with_workspace):
+def test_get_airbyte_destination_success(org_with_workspace):
     """tests GET /source_definitions"""
 
     mock_orguser = Mock()
@@ -1079,7 +1087,7 @@ def test_get_airbyte_destination_1(org_with_workspace):
 
 
 # ================================================================================
-def test_get_airbyte_connections_0(org_without_workspace):
+def test_get_airbyte_connections_without_workspace(org_without_workspace):
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -1117,7 +1125,7 @@ def test_get_airbyte_connections_0(org_without_workspace):
     ),
     get_last_flow_run_by_deployment_id=Mock(return_value="lastRun"),
 )
-def test_get_airbyte_connections_1(org_with_workspace):
+def test_get_airbyte_connectionn_success(org_with_workspace):
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -1171,7 +1179,7 @@ def test_get_airbyte_connections_1(org_with_workspace):
 
 
 # ================================================================================
-def test_get_airbyte_connection_0(org_without_workspace):
+def test_get_airbyte_connection_without_workspace(org_without_workspace):
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -1210,7 +1218,7 @@ def test_get_airbyte_connection_0(org_without_workspace):
     ),
     get_last_flow_run_by_deployment_id=Mock(return_value="lastRun"),
 )
-def test_get_airbyte_connection_1(org_with_workspace):
+def test_get_airbyte_connection_success(org_with_workspace):
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -1262,7 +1270,7 @@ def test_get_airbyte_connection_1(org_with_workspace):
 
 
 # ================================================================================
-def test_post_airbyte_connection_0(org_without_workspace):
+def test_post_airbyte_connection_without_workspace(org_without_workspace):
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -1283,7 +1291,7 @@ def test_post_airbyte_connection_0(org_without_workspace):
     assert str(excinfo.value) == "create an airbyte workspace first"
 
 
-def test_post_airbyte_connection_1(org_with_workspace):
+def test_post_airbyte_connection_without_stream_names(org_with_workspace):
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -1304,7 +1312,7 @@ def test_post_airbyte_connection_1(org_with_workspace):
     assert str(excinfo.value) == "must specify stream names"
 
 
-def test_post_airbyte_connection_2(org_with_workspace):
+def test_post_airbyte_connection_without_warehouse(org_with_workspace):
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -1341,7 +1349,9 @@ def warehouse_with_destination(org_with_workspace):
     warehouse.delete()
 
 
-def test_post_airbyte_connection_3(org_with_workspace, warehouse_without_destination):
+def test_post_airbyte_connection_without_destination_id(
+    org_with_workspace, warehouse_without_destination
+):
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -1378,7 +1388,9 @@ def test_post_airbyte_connection_3(org_with_workspace, warehouse_without_destina
         }
     ),
 )
-def test_post_airbyte_connection_4(org_with_workspace, warehouse_with_destination):
+def test_post_airbyte_connection_without_server_block(
+    org_with_workspace, warehouse_with_destination
+):
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -1451,7 +1463,7 @@ def airbyte_server_block(org_with_workspace):
         }
     ),
 )
-def test_post_airbyte_connection_5(
+def test_post_airbyte_connection_success(
     org_with_workspace, warehouse_with_destination, airbyte_server_block
 ):
     mock_orguser = Mock()
@@ -1498,7 +1510,7 @@ def test_put_airbyte_connection():
 
 
 # ================================================================================
-def test_delete_airbyte_connection_0():
+def test_delete_airbyte_connection_without_org():
     mock_orguser = Mock()
     mock_orguser.org = None
 
@@ -1511,7 +1523,7 @@ def test_delete_airbyte_connection_0():
     assert str(excinfo.value) == "create an organization first"
 
 
-def test_delete_airbyte_connection_1(org_without_workspace):
+def test_delete_airbyte_connection_without_workspace(org_without_workspace):
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -1535,7 +1547,7 @@ def test_delete_airbyte_connection_1(org_without_workspace):
     "ddpui.ddpairbyte.airbyte_service",
     delete_connection=Mock(),
 )
-def test_delete_airbyte_connection_2(org_with_workspace):
+def test_delete_airbyte_connection_success(org_with_workspace):
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -1571,7 +1583,7 @@ def test_delete_airbyte_connection_2(org_with_workspace):
 
 
 # ================================================================================
-def test_post_airbyte_sync_connection_0(org_without_workspace):
+def test_post_airbyte_sync_connection_without_workspace(org_without_workspace):
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -1600,7 +1612,7 @@ def org_prefect_connection_block(org_with_workspace):
     "ddpui.api.client.airbyte_api",
     run_airbyte_connection_sync=Mock(return_value="retval"),
 )
-def test_post_airbyte_sync_connection_1(
+def test_post_airbyte_sync_connection_success(
     org_with_workspace, org_prefect_connection_block
 ):
     mock_orguser = Mock()
