@@ -487,12 +487,20 @@ def get_airbyte_connections(request):
                 "blockName": prefect_block["name"],
                 "blockData": prefect_block["data"],
                 "connectionId": airbyte_conn["connectionId"],
-                "sourceId": airbyte_conn["sourceId"],
-                "destinationId": airbyte_conn["destinationId"],
+                "source": {"id": airbyte_conn["sourceId"], "name": source_name},
+                "destination": {
+                    "id": airbyte_conn["destinationId"],
+                    "name": destination_name,
+                },
                 "sourceCatalogId": airbyte_conn["sourceCatalogId"],
                 "syncCatalog": airbyte_conn["syncCatalog"],
                 "status": airbyte_conn["status"],
                 "deploymentId": dataflow.deployment_id if dataflow else None,
+                "lastRun": prefect_service.get_last_flow_run_by_deployment_id(
+                    dataflow.deployment_id
+                )
+                if dataflow
+                else None,
             }
         )
 
@@ -528,14 +536,24 @@ def get_airbyte_connection(request, connection_block_id):
     dataflow = OrgDataFlow.objects.filter(
         org=orguser.org, connection_id=airbyte_conn["connectionId"]
     ).first()
+
+    # fetch the source and destination names
+    source_name = airbyte_service.get_source(
+        orguser.org.airbyte_workspace_id, airbyte_conn["sourceId"]
+    )["sourceName"]
+
+    destination_name = airbyte_service.get_destination(
+        orguser.org.airbyte_workspace_id, airbyte_conn["destinationId"]
+    )["destinationName"]
+
     res = {
         "name": org_block.display_name,
         "blockId": prefect_block["id"],
         "blockName": prefect_block["name"],
         "blockData": prefect_block["data"],
         "connectionId": airbyte_conn["connectionId"],
-        "sourceId": airbyte_conn["sourceId"],
-        "destinationId": airbyte_conn["destinationId"],
+        "source": {"id": airbyte_conn["sourceId"], "name": source_name},
+        "destination": {"id": airbyte_conn["destinationId"], "name": destination_name},
         "sourceCatalogId": airbyte_conn["sourceCatalogId"],
         "syncCatalog": airbyte_conn["syncCatalog"],
         "status": airbyte_conn["status"],
@@ -666,8 +684,10 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
         "blockName": airbyte_connection_block["name"],
         "blockData": airbyte_connection_block["data"],
         "connectionId": airbyte_conn["connectionId"],
-        "sourceId": airbyte_conn["sourceId"],
-        "destinationId": airbyte_conn["destinationId"],
+        "source": {"id": airbyte_conn["sourceId"]},
+        "destination": {
+            "id": airbyte_conn["destinationId"],
+        },
         "sourceCatalogId": airbyte_conn["sourceCatalogId"],
         "syncCatalog": airbyte_conn["syncCatalog"],
         "status": airbyte_conn["status"],
@@ -717,7 +737,9 @@ def delete_airbyte_connection(request, connection_block_id):
 
 
 @airbyteapi.post(
-    "/connections/{connection_block_id}/sync/", auth=auth.CanManagePipelines()
+    "/connections/{connection_block_id}/sync/",
+    auth=auth.CanManagePipelines(),
+    deprecated=True,
 )
 def post_airbyte_sync_connection(request, connection_block_id):
     """Sync an airbyte connection in the uer organization workspace"""
