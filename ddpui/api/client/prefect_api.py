@@ -143,6 +143,15 @@ def get_prefect_dataflows(request):
         OrgDataFlow.objects.filter(org=orguser.org).exclude(cron=None).all()
     )
 
+    deployment_ids = [flow.deployment_id for flow in org_data_flows]
+
+    # dictionary to hold {"id": status}
+    is_deployment_active = {}
+
+    # setting active/inactive status based on if the schedule is set or not
+    for deployment in prefect_service.get_filtered_deployments(orguser.org.slug, deployment_ids):
+        is_deployment_active[deployment["deploymentId"]] = deployment["isScheduleActive"] if "isScheduleActive" in deployment else False 
+
     res = []
 
     for flow in org_data_flows:
@@ -155,6 +164,7 @@ def get_prefect_dataflows(request):
                 "lastRun": prefect_service.get_last_flow_run_by_deployment_id(
                     flow.deployment_id
                 ),
+                "status": is_deployment_active[flow.deployment_id] if flow.deployment_id in is_deployment_active else False
             }
         )
 
@@ -185,8 +195,28 @@ def delete_prefect_dataflow(request, deployment_id):
 @prefectapi.post("/flows/{deployment_id}/flow_run", auth=auth.CanManagePipelines())
 def post_prefect_dataflow_quick_run(request, deployment_id):
     """Delete a prefect deployment along with its org data flow"""
+    orguser = request.orguser
+
+    if orguser.org is None:
+        raise HttpError(400, "register an organization first")
+    
     res = prefect_service.create_deployment_flow_run(deployment_id)
     return res
+
+
+@prefectapi.post("/flows/{deployment_id}/set_schedule/{status}", auth=auth.CanManagePipelines())
+def post_deployment_set_schedule(request, deployment_id, status):
+    """Set deployment schedule to active / inactive"""
+    orguser = request.orguser
+
+    if orguser.org is None:
+        raise HttpError(400, "register an organization first")
+    
+    if (status is None) or (isinstance(status, str) is not True) or (status not in ["active", "inactive"]):
+        raise HttpError(422, "incorrect status value")
+    
+    prefect_service.set_deployment_schedule(deployment_id, status)
+    return {"success": 1}
 
 
 @prefectapi.post("/flows/airbyte_sync/", auth=auth.CanManagePipelines())
