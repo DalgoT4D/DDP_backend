@@ -151,7 +151,9 @@ def put_organization_user_self(request, payload: OrgUserUpdate):
     orguser.user.save()
 
     logger.info(f"updated self {orguser.user.email}")
-    return OrgUserResponse(email=orguser.user.email, active=orguser.user.is_active)
+    return OrgUserResponse(
+        email=orguser.user.email, active=orguser.user.is_active, role=orguser.role
+    )
 
 
 @user_org_api.put(
@@ -161,18 +163,30 @@ def put_organization_user_self(request, payload: OrgUserUpdate):
 )
 def put_organization_user(request, payload: OrgUserUpdate):
     """update another OrgUser"""
+    requestor_orguser = request.orguser
+
+    if requestor_orguser.role not in [
+        OrgUserRole.ACCOUNT_MANAGER,
+        OrgUserRole.PIPELINE_MANAGER,
+    ]:
+        raise HttpError(400, "not authorized to update another user")
+
     orguser = OrgUser.objects.filter(
-        email=payload.toupdate_email, org=request.orguser.org
+        user__email=payload.toupdate_email, org=request.orguser.org
     ).first()
 
     if payload.email:
         orguser.user.email = payload.email
     if payload.active is not None:
         orguser.user.is_active = payload.active
+    if payload.role:
+        orguser.role = payload.role
     orguser.user.save()
 
     logger.info(f"updated orguser {orguser.user.email}")
-    return OrgUserResponse(email=orguser.user.email, active=orguser.user.is_active)
+    return OrgUserResponse(
+        email=orguser.user.email, active=orguser.user.is_active, role=orguser.role
+    )
 
 
 @user_org_api.post("/organizations/", response=OrgSchema, auth=auth.FullAccess())
