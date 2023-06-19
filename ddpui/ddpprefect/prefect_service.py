@@ -284,6 +284,14 @@ def get_last_flow_run_by_deployment_id(deployment_id):  # pragma: no cover
         return res[0]
     return None
 
+def set_deployment_schedule(deployment_id, status):
+    res = requests.post(
+        f"{PREFECT_PROXY_API_URL}/proxy/deployments/{deployment_id}/set_schedule/{status}",
+        timeout=30,
+    ) 
+    res.raise_for_status()
+    return None
+
 
 def get_filtered_deployments(org_slug, deployment_ids=[]):  # pragma: no cover
     # pylint: disable=dangerous-default-value
