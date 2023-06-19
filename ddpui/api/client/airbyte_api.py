@@ -150,7 +150,7 @@ def get_airbyte_source_definition_specifications(request, sourcedef_id):
         orguser.org.airbyte_workspace_id, sourcedef_id
     )
     logger.debug(res)
-    return res
+    return res["connectionSpecification"]
 
 
 @airbyteapi.post("/sources/", auth=auth.CanManagePipelines())
