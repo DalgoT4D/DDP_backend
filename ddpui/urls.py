@@ -18,4 +18,5 @@ urlpatterns = [
     path("api/prefect/", prefectapi.urls),
     path("api/tasks/", taskapi.urls),
     path("api/", user_org_api.urls),
+    path('',include('django_prometheus.urls')),
 ]
