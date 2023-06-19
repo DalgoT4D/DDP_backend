@@ -276,7 +276,7 @@ def test_get_airbyte_source_definition_specifications_without_workspace(
 
 @patch(
     "ddpui.ddpairbyte.airbyte_service.get_source_definition_specification",
-    return_value={"srcdefspeec_key": "srcdefspeec_val"},
+    return_value={"connectionSpecification": "srcdefspeec_val"},
 )
 def test_get_airbyte_source_definition_specifications_success(org_with_workspace):
     """tests GET /source_definitions"""
@@ -291,7 +291,7 @@ def test_get_airbyte_source_definition_specifications_success(org_with_workspace
         mock_request, "fake-sourcedef-id"
     )
 
-    assert result["srcdefspeec_key"] == "srcdefspeec_val"
+    assert result == "srcdefspeec_val"
 
 
 # ================================================================================
