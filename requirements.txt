@@ -101,6 +101,7 @@ prefect-airbyte==0.2.0
 prefect-dbt==0.3.1
 prefect-shell==0.1.5
 prefect-sqlalchemy==0.2.4
+django-prometheus
 prompt-toolkit==3.0.38
 psycopg2-binary==2.9.5
 pyasn1==0.4.8

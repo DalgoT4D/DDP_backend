@@ -1,6 +1,6 @@
 # main urls
 # from django.contrib import admin
-from django.urls import path
+from django.urls import path, include
 from ddpui.api.admin.user_org_api import adminapi
 from ddpui.api.client.airbyte_api import airbyteapi
 from ddpui.api.client.dbt_api import dbtapi
@@ -18,4 +18,5 @@ urlpatterns = [
     path("api/prefect/", prefectapi.urls),
     path("api/tasks/", taskapi.urls),
     path("api/", user_org_api.urls),
+    path("prometheus/", include("django_prometheus.urls")),
 ]

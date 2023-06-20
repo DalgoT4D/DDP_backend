@@ -89,7 +89,9 @@ def post_organization_user(
     if signupcode != os.getenv("SIGNUPCODE"):
         raise HttpError(400, "That is not the right signup code")
     email = payload.email.lower().strip()
-    if OrgUser.objects.filter(user__email=email).exists():
+    if User.objects.filter(email=email).exists():
+        raise HttpError(400, f"user having email {email} exists")
+    if User.objects.filter(username=email).exists():
         raise HttpError(400, f"user having email {email} exists")
     user = User.objects.create_user(
         username=email, email=email, password=payload.password
@@ -149,7 +151,9 @@ def put_organization_user_self(request, payload: OrgUserUpdate):
     orguser.user.save()
 
     logger.info(f"updated self {orguser.user.email}")
-    return OrgUserResponse(email=orguser.user.email, active=orguser.user.is_active)
+    return OrgUserResponse(
+        email=orguser.user.email, active=orguser.user.is_active, role=orguser.role
+    )
 
 
 @user_org_api.put(
@@ -159,18 +163,30 @@ def put_organization_user_self(request, payload: OrgUserUpdate):
 )
 def put_organization_user(request, payload: OrgUserUpdate):
     """update another OrgUser"""
+    requestor_orguser = request.orguser
+
+    if requestor_orguser.role not in [
+        OrgUserRole.ACCOUNT_MANAGER,
+        OrgUserRole.PIPELINE_MANAGER,
+    ]:
+        raise HttpError(400, "not authorized to update another user")
+
     orguser = OrgUser.objects.filter(
-        email=payload.toupdate_email, org=request.orguser.org
+        user__email=payload.toupdate_email, org=request.orguser.org
     ).first()
 
     if payload.email:
         orguser.user.email = payload.email
     if payload.active is not None:
         orguser.user.is_active = payload.active
+    if payload.role:
+        orguser.role = payload.role
     orguser.user.save()
 
     logger.info(f"updated orguser {orguser.user.email}")
-    return OrgUserResponse(email=orguser.user.email, active=orguser.user.is_active)
+    return OrgUserResponse(
+        email=orguser.user.email, active=orguser.user.is_active, role=orguser.role
+    )
 
 
 @user_org_api.post("/organizations/", response=OrgSchema, auth=auth.FullAccess())
@@ -181,12 +197,17 @@ def post_organization(request, payload: OrgSchema):
         raise HttpError(400, "orguser already has an associated org")
     org = Org.objects.filter(name=payload.name).first()
     if org:
-        raise HttpError(400, "client org already exists")
+        raise HttpError(400, "client org with this name already exists")
     org = Org.objects.create(**payload.dict())
     org.slug = slugify(org.name)[:20]
     org.save()
     logger.info(f"{orguser.user.email} created new org {org.name}")
-    new_workspace = airbytehelpers.setup_airbyte_workspace(org.slug, org)
+    try:
+        new_workspace = airbytehelpers.setup_airbyte_workspace(org.slug, org)
+    except Exception as error:
+        # delete the org or we won't be able to create it once airbyte comes back up
+        org.delete()
+        raise HttpError(400, "could not create airbyte workspace") from error
     orguser.org = org
     orguser.save()
     return OrgSchema(name=org.name, airbyte_workspace_id=new_workspace.workspaceId)

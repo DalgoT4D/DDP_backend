@@ -72,6 +72,9 @@ def post_prefect_dataflow(request, payload: PrefectDataFlowCreateSchema):
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
 
+    if payload.name in [None, ""]:
+        raise HttpError(400, "must provide a name for the flow")
+
     name_components = [orguser.org.slug]
 
     # check if pipeline has airbyte syncs
@@ -140,6 +143,15 @@ def get_prefect_dataflows(request):
         OrgDataFlow.objects.filter(org=orguser.org).exclude(cron=None).all()
     )
 
+    deployment_ids = [flow.deployment_id for flow in org_data_flows]
+
+    # dictionary to hold {"id": status}
+    is_deployment_active = {}
+
+    # setting active/inactive status based on if the schedule is set or not
+    for deployment in prefect_service.get_filtered_deployments(orguser.org.slug, deployment_ids):
+        is_deployment_active[deployment["deploymentId"]] = deployment["isScheduleActive"] if "isScheduleActive" in deployment else False 
+
     res = []
 
     for flow in org_data_flows:
@@ -152,6 +164,7 @@ def get_prefect_dataflows(request):
                 "lastRun": prefect_service.get_last_flow_run_by_deployment_id(
                     flow.deployment_id
                 ),
+                "status": is_deployment_active[flow.deployment_id] if flow.deployment_id in is_deployment_active else False
             }
         )
 
@@ -182,8 +195,28 @@ def delete_prefect_dataflow(request, deployment_id):
 @prefectapi.post("/flows/{deployment_id}/flow_run", auth=auth.CanManagePipelines())
 def post_prefect_dataflow_quick_run(request, deployment_id):
     """Delete a prefect deployment along with its org data flow"""
+    orguser = request.orguser
+
+    if orguser.org is None:
+        raise HttpError(400, "register an organization first")
+    
     res = prefect_service.create_deployment_flow_run(deployment_id)
     return res
+
+
+@prefectapi.post("/flows/{deployment_id}/set_schedule/{status}", auth=auth.CanManagePipelines())
+def post_deployment_set_schedule(request, deployment_id, status):
+    """Set deployment schedule to active / inactive"""
+    orguser = request.orguser
+
+    if orguser.org is None:
+        raise HttpError(400, "register an organization first")
+    
+    if (status is None) or (isinstance(status, str) is not True) or (status not in ["active", "inactive"]):
+        raise HttpError(422, "incorrect status value")
+    
+    prefect_service.set_deployment_schedule(deployment_id, status)
+    return {"success": 1}
 
 
 @prefectapi.post("/flows/airbyte_sync/", auth=auth.CanManagePipelines())
@@ -291,7 +324,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
             display_name=block_name,
             seq=sequence_number,
             command=slugify(command),
-            dbt_target_schema=target
+            dbt_target_schema=target,
         )
 
         coreprefectblock.save()
@@ -311,7 +344,7 @@ def get_prefect_dbt_run_blocks(request):
             "blockId": prefect_block.block_id,
             "blockName": prefect_block.block_name,
             "action": prefect_block.command,
-            "target": prefect_block.dbt_target_schema
+            "target": prefect_block.dbt_target_schema,
         }
         for prefect_block in OrgPrefectBlock.objects.filter(
             org=orguser.org, block_type=DBTCORE
@@ -361,6 +394,8 @@ def get_prefect_flow_runs_log_history(request, deployment_id):
 
     for flow_run in flow_runs:
         logs_dict = prefect_service.get_flow_run_logs(flow_run["id"], 0)
-        flow_run['logs'] = logs_dict["logs"]["logs"] if "logs" in logs_dict["logs"] else []
+        flow_run["logs"] = (
+            logs_dict["logs"]["logs"] if "logs" in logs_dict["logs"] else []
+        )
 
     return flow_runs
