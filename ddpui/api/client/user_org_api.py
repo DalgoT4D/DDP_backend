@@ -197,12 +197,17 @@ def post_organization(request, payload: OrgSchema):
         raise HttpError(400, "orguser already has an associated org")
     org = Org.objects.filter(name=payload.name).first()
     if org:
-        raise HttpError(400, "client org already exists")
+        raise HttpError(400, "client org with this name already exists")
     org = Org.objects.create(**payload.dict())
     org.slug = slugify(org.name)[:20]
     org.save()
     logger.info(f"{orguser.user.email} created new org {org.name}")
-    new_workspace = airbytehelpers.setup_airbyte_workspace(org.slug, org)
+    try:
+        new_workspace = airbytehelpers.setup_airbyte_workspace(org.slug, org)
+    except Exception as error:
+        # delete the org or we won't be able to create it once airbyte comes back up
+        org.delete()
+        raise HttpError(400, "could not create airbyte workspace") from error
     orguser.org = org
     orguser.save()
     return OrgSchema(name=org.name, airbyte_workspace_id=new_workspace.workspaceId)

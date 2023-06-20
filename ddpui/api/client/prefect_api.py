@@ -72,6 +72,9 @@ def post_prefect_dataflow(request, payload: PrefectDataFlowCreateSchema):
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
 
+    if payload.name in [None, ""]:
+        raise HttpError(400, "must provide a name for the flow")
+
     name_components = [orguser.org.slug]
 
     # check if pipeline has airbyte syncs
@@ -321,7 +324,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
             display_name=block_name,
             seq=sequence_number,
             command=slugify(command),
-            dbt_target_schema=target
+            dbt_target_schema=target,
         )
 
         coreprefectblock.save()
@@ -341,7 +344,7 @@ def get_prefect_dbt_run_blocks(request):
             "blockId": prefect_block.block_id,
             "blockName": prefect_block.block_name,
             "action": prefect_block.command,
-            "target": prefect_block.dbt_target_schema
+            "target": prefect_block.dbt_target_schema,
         }
         for prefect_block in OrgPrefectBlock.objects.filter(
             org=orguser.org, block_type=DBTCORE
@@ -391,6 +394,8 @@ def get_prefect_flow_runs_log_history(request, deployment_id):
 
     for flow_run in flow_runs:
         logs_dict = prefect_service.get_flow_run_logs(flow_run["id"], 0)
-        flow_run['logs'] = logs_dict["logs"]["logs"] if "logs" in logs_dict["logs"] else []
+        flow_run["logs"] = (
+            logs_dict["logs"]["logs"] if "logs" in logs_dict["logs"] else []
+        )
 
     return flow_runs

@@ -74,3 +74,12 @@ def retrieve_warehouse_credentials(warehouse) -> dict | None:
     aws_sm = get_client()
     response = aws_sm.get_secret_value(SecretId=warehouse.credentials)
     return json.loads(response["SecretString"]) if "SecretString" in response else None
+
+
+def delete_warehouse_credentials(warehouse) -> None:
+    """deletes the secret from SM corresponding to a warehouse's credentials"""
+    aws_sm = get_client()
+    try:
+        aws_sm.delete_secret(SecretId=warehouse.credentials)
+    except Exception:
+        pass

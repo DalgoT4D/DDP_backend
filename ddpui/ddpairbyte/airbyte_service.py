@@ -115,6 +115,12 @@ def create_workspace(name: str) -> dict:
     return res
 
 
+def delete_workspace(workspace_id: str):
+    """Deletes an airbyte workspace"""
+    res = abreq("workspaces/delete", {"workspaceId": workspace_id})
+    return res
+
+
 def get_source_definitions(workspace_id: str) -> List[Dict]:
     """Fetch source definitions for an airbyte workspace"""
 
@@ -390,6 +396,14 @@ def get_destination(workspace_id: str, destination_id: str) -> dict:
     if "destinationId" not in res:
         logger.error("Destination not found: %s", destination_id)
         raise HttpError(404, "destination not found")
+    return res
+
+
+def delete_destination(
+    workspace_id: str, destination_id: str
+) -> dict:  # pylint: disable=unused-argument
+    """Fetch a destination in an airbyte workspace"""
+    res = abreq("destinations/delete", {"destinationId": destination_id})
     return res
 
 
