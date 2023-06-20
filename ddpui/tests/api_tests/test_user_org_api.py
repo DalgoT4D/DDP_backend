@@ -281,7 +281,7 @@ def test_post_organization_orgexists(orguserwithoutorg, org_without_workspace):
     payload = OrgSchema(name=org_without_workspace.name)
     with pytest.raises(HttpError) as excinfo:
         post_organization(mock_request, payload)
-    assert str(excinfo.value) == "client org already exists"
+    assert str(excinfo.value) == "client org with this name already exists"
 
 
 @patch(
