@@ -25,6 +25,15 @@ Django application for the DDP platform's management backend. Exposes API endpoi
     -   DELETE <mark>/api/users/:user_id</mark>
 -   Route parameteres should be named in snake_case as shown above.
 
+### Ninja api docs
+
+-   [Dashboard](https://ddpapi.projecttech4dev.org/api/dashboard/docs)
+-   [Airbyte](https://ddpapi.projecttech4dev.org/api/airbyte/docs)
+-   [Flows](https://ddpapi.projecttech4dev.org/api/prefect/docs)
+-   [Dbt](https://ddpapi.projecttech4dev.org/api/dbt/docs)
+-   [Celery tasks](https://ddpapi.projecttech4dev.org/api/tasks/docs)
+-   [User & Org](https://ddpapi.projecttech4dev.org/api/docs)
+
 ### Code style
 
 -   `Pep8` has been used to standardized variable names, classes, module names etc.
