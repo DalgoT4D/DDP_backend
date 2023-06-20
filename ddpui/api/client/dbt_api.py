@@ -1,5 +1,4 @@
 import os
-import shutil
 from pathlib import Path
 
 from ninja import NinjaAPI
@@ -12,12 +11,11 @@ from ninja.errors import HttpError
 from ddpui import auth
 from ddpui.ddpprefect.schema import OrgDbtSchema
 from ddpui.models.org_user import OrgUserResponse
-from ddpui.models.org import OrgPrefectBlock
 from ddpui.utils.helpers import runcmd
-from ddpui.utils import secretsmanager
 from ddpui.celeryworkers.tasks import setup_dbtworkspace
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpprefect import DBTCORE
+from ddpui.ddpdbt import dbt_service
 
 dbtapi = NinjaAPI(urls_namespace="dbt")
 
@@ -74,19 +72,7 @@ def dbt_delete(request):
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
 
-    if orguser.org.dbt:
-        dbt = orguser.org.dbt
-        orguser.org.dbt = None
-        orguser.org.save()
-
-        shutil.rmtree(dbt.project_dir)
-        dbt.delete()
-
-    for dbtblock in OrgPrefectBlock.objects.filter(org=orguser.org, block_type=DBTCORE):
-        prefect_service.delete_dbt_core_block(dbtblock.block_id)
-        dbtblock.delete()
-
-    secretsmanager.delete_github_token(orguser.org)
+    dbt_service.delete_dbt_workspace(orguser.org)
 
     return OrgUserResponse.from_orguser(orguser)
 
@@ -116,8 +102,11 @@ def post_dbt_git_pull(request):
     if not os.path.exists(project_dir):
         raise HttpError(400, "create the dbt env first")
 
-    process = runcmd("git pull", project_dir / "dbtrepo")
-    if process.wait() != 0:
-        raise HttpError(500, f"git pull failed in {str(project_dir / 'dbtrepo')}")
+    try:
+        runcmd("git pull", project_dir / "dbtrepo")
+    except Exception as error:
+        raise HttpError(
+            500, f"git pull failed in {str(project_dir / 'dbtrepo')}"
+        ) from error
 
     return {"success": True}
