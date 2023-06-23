@@ -633,7 +633,7 @@ def create_connection(
 def update_connection(
     workspace_id: str,
     connection_info: schema.AirbyteConnectionUpdate,
-    current_connection
+    current_connection: dict,
 ) -> dict:
     """Update a connection of an airbyte workspace"""
 
