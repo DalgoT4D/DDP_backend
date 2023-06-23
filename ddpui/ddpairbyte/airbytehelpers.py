@@ -57,8 +57,10 @@ def setup_airbyte_workspace(wsname, org) -> AirbyteWorkspace:
         airbyte_server_block_id = prefect_service.get_airbyte_server_block_id(
             block_name
         )
-        assert airbyte_server_block_id is not None
-    except Exception:
+    except Exception as exc:
+        raise Exception("could not connect to prefect-proxy") from exc
+
+    if airbyte_server_block_id is None:
         airbyte_server_block_id = prefect_service.create_airbyte_server_block(
             block_name
         )
