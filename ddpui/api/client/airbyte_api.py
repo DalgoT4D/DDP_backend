@@ -566,6 +566,7 @@ def get_airbyte_connection(request, connection_block_id):
         "destination": {"id": airbyte_conn["destinationId"], "name": destination_name},
         "sourceCatalogId": airbyte_conn["sourceCatalogId"],
         "syncCatalog": airbyte_conn["syncCatalog"],
+        "destinationSchema": airbyte_conn["namespaceFormat"] if airbyte_conn["namespaceDefinition"] == "customformat" else "",
         "status": airbyte_conn["status"],
         "deploymentId": dataflow.deployment_id if dataflow else None,
     }
