@@ -158,6 +158,44 @@ def get_source_definition_specification(workspace_id: str, sourcedef_id: str) ->
     return res
 
 
+def create_custom_source_definition(
+    workspace_id: str,
+    name: str,
+    docker_repository: str,
+    docker_image_tag: str,
+    documentation_url: str,
+):
+    """Create a custom source definition in Airbyte."""
+
+    if not isinstance(workspace_id, str):
+        raise HttpError(400, "Invalid workspace ID")
+    if not isinstance(name, str):
+        raise HttpError(400, "Invalid name")
+    if not isinstance(docker_repository, str):
+        raise HttpError(400, "Invalid docker repository")
+    if not isinstance(docker_image_tag, str):
+        raise HttpError(400, "Invalid docker image tag")
+    if not isinstance(documentation_url, str):
+        raise HttpError(400, "Invalid documentation URL")
+
+    res = abreq(
+        "source_definitions/create_custom",
+        {
+            "workspaceId": workspace_id,
+            "sourceDefinition": {
+                "name": name,
+                "dockerRepository": docker_repository,
+                "dockerImageTag": docker_image_tag,
+                "documentationUrl": documentation_url,
+            },
+        },
+    )
+    if "sourceDefinitionId" not in res:
+        logger.error("Source definition not created: %s", name)
+        raise HttpError(400, "source definition not created")
+    return res
+
+
 def get_sources(workspace_id: str) -> List[Dict]:
     """Fetch all sources in an airbyte workspace"""
 
