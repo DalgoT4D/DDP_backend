@@ -362,6 +362,15 @@ def get_source_schema_catalog(
     res = abreq("sources/discover_schema", {"sourceId": source_id})
     # is it not possible that the job is long-running and we need to check its status later?
     if "catalog" not in res and "jobInfo" in res:
+        # special handling for errors we know
+        if (
+            res["jobInfo"]["failureReason"]["externalMessage"]
+            == "Something went wrong in the connector. See the logs for more details."
+        ):
+            raise HttpError(
+                400,
+                res["jobInfo"]["failureReason"]["stacktrace"],
+            )
         raise HttpError(
             400,
             res["jobInfo"]["failureReason"]["externalMessage"],
