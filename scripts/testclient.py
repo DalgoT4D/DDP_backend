@@ -26,7 +26,10 @@ class TestClient:
             headers=self.clientheaders,
             timeout=10,
         )
-        req.raise_for_status()
+        try:
+            req.raise_for_status()
+        except Exception as error:
+            raise requests.exceptions.HTTPError(req.text) from error
         try:
             if self.verbose:
                 print(req.json())
@@ -44,7 +47,10 @@ class TestClient:
             timeout=kwargs.get("timeout", 10),
             json=kwargs.get("json"),
         )
-        req.raise_for_status()
+        try:
+            req.raise_for_status()
+        except Exception as error:
+            raise requests.exceptions.HTTPError(req.text) from error
         try:
             if self.verbose:
                 print(req.json())
@@ -63,5 +69,5 @@ class TestClient:
         )
         try:
             req.raise_for_status()
-        except Exception:
-            print(req.text)
+        except Exception as error:
+            raise requests.exceptions.HTTPError(req.text) from error
