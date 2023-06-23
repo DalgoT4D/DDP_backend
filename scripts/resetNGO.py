@@ -116,7 +116,10 @@ if len(warehouse_response["warehouses"]) == 0:
             create_warehouse_payload["wtype"] = create_warehouse_payload[
                 "wtype"
             ].lower()
+            break
 
+    if create_warehouse_payload["wtype"] == "postgres":
+        create_warehouse_payload["airbyteConfig"]["schema"] += "-" + args.org_name
     print(create_warehouse_payload)
     destination = ngoClient.clientpost(
         "organizations/warehouse/", json=create_warehouse_payload
@@ -261,6 +264,7 @@ if "sources" in spec:
     flows_response = ngoClient.clientget("prefect/flows/")
 
     if len(flows_response) == 0:
+        connections_response = ngoClient.clientget("airbyte/connections")
         connection_blocks = [
             {
                 "blockName": connection["blockName"],
