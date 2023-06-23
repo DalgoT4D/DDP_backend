@@ -38,6 +38,12 @@ from django.contrib.auth.models import User
 from ddpui.ddpairbyte.schema import AirbyteWorkspace
 from ddpui.utils import timezone
 
+try:
+    pytestmark = pytest.mark.django_db
+except ImportError:
+    # remove this after merging PR 185
+    pass
+
 
 # ================================================================================
 @pytest.fixture
