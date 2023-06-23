@@ -191,8 +191,9 @@ def create_custom_source_definition(
         },
     )
     if "sourceDefinitionId" not in res:
+        error_message = f"Source definition not created: {name}"
         logger.error("Source definition not created: %s", name)
-        raise HttpError(400, "source definition not created")
+        raise HttpError(400, error_message)
     return res
 
 
