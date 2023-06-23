@@ -19,33 +19,35 @@ def setup_airbyte_workspace(wsname, org) -> AirbyteWorkspace:
     org.airbyte_workspace_id = workspace["workspaceId"]
     org.save()
 
-    # create a custom source kobotoolbox
+    try:
+        # create a custom source kobotoolbox
+        kobo_name = "Kobotoolbox"
+        kobo_docker_repository = "airbyte/source-kobotoolbox"
+        kobo_docker_image_tag = "0.1.0"
+        kobo_documentation_url = ""
+        airbyte_service.create_custom_source_definition(
+            workspace_id=workspace["workspaceId"],
+            name=kobo_name,
+            docker_repository=kobo_docker_repository,
+            docker_image_tag=kobo_docker_image_tag,
+            documentation_url=kobo_documentation_url,
+        )
 
-    kobo_name = "Kobotoolbox"
-    kobo_docker_repository = "airbyte/source-kobotoolbox"
-    kobo_docker_image_tag = "0.1.0"
-    kobo_documentation_url = ""
-    airbyte_service.create_custom_source_definition(
-        workspace_id=workspace["workspaceId"],
-        name=kobo_name,
-        docker_repository=kobo_docker_repository,
-        docker_image_tag=kobo_docker_image_tag,
-        documentation_url=kobo_documentation_url,
-    )
-
-    # create a custom source commcare
-
-    commcare_name = "custom_commcare"
-    commcare_docker_repository = "airbyte/source-commcare"
-    commcare_docker_image_tag = "0.1.1"
-    commcare_documentation_url = ""
-    airbyte_service.create_custom_source_definition(
-        workspace_id=workspace["workspaceId"],
-        name=commcare_name,
-        docker_repository=commcare_docker_repository,
-        docker_image_tag=commcare_docker_image_tag,
-        documentation_url=commcare_documentation_url,
-    )
+        # create a custom source commcare
+        commcare_name = "custom_commcare"
+        commcare_docker_repository = "airbyte/source-commcare"
+        commcare_docker_image_tag = "0.1.1"
+        commcare_documentation_url = ""
+        airbyte_service.create_custom_source_definition(
+            workspace_id=workspace["workspaceId"],
+            name=commcare_name,
+            docker_repository=commcare_docker_repository,
+            docker_image_tag=commcare_docker_image_tag,
+            documentation_url=commcare_documentation_url,
+        )
+    except Exception as e:
+        logger.error(f"Error creating custom source definitions: {e}")
+        raise e
 
     # Airbyte server block details. prefect doesn't know the workspace id
     block_name = f"{org.slug}-{slugify(AIRBYTESERVER)}"
