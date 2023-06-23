@@ -8,6 +8,8 @@ class TestClient:
         self.clientheaders = None
         self.port = port
         self.verbose = kwargs.get("verbose")
+        self.host = kwargs.get("host", "localhost")
+        self.httpschema = "http" if self.host in ["localhost", "127.0.0.1"] else "https"
 
     def login(self, email, password):
         """Login"""
@@ -20,10 +22,11 @@ class TestClient:
         """GET"""
         print(f"GET /api/{endpoint}")
         req = requests.get(
-            f"http://localhost:{self.port}/api/{endpoint}",
+            f"{self.httpschema}://{self.host}:{self.port}/api/{endpoint}",
             headers=self.clientheaders,
             timeout=10,
         )
+        req.raise_for_status()
         try:
             if self.verbose:
                 print(req.json())
@@ -36,11 +39,12 @@ class TestClient:
         """POST"""
         print(f"POST /api/{endpoint}")
         req = requests.post(
-            f"http://localhost:{self.port}/api/{endpoint}",
+            f"{self.httpschema}://{self.host}:{self.port}/api/{endpoint}",
             headers=self.clientheaders,
             timeout=kwargs.get("timeout", 10),
             json=kwargs.get("json"),
         )
+        req.raise_for_status()
         try:
             if self.verbose:
                 print(req.json())
@@ -53,7 +57,7 @@ class TestClient:
         """DELETE"""
         print(f"DELETE /api/{endpoint}")
         req = requests.delete(
-            f"http://localhost:{self.port}/api/{endpoint}",
+            f"{self.httpschema}://{self.host}:{self.port}/api/{endpoint}",
             headers=self.clientheaders,
             timeout=10,
         )
