@@ -708,6 +708,39 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
     logger.debug(res)
     return res
 
+
+@airbyteapi.post("/connections/{connection_block_id}/reset", auth=auth.CanManagePipelines())
+def post_airbyte_connection(request, connection_block_id):
+    """Reset the data for connection at destination"""
+    orguser = request.orguser
+    org = orguser.org
+    if org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+    
+    # check if the block exists
+    org_prefect_block = OrgPrefectBlock.objects.filter(
+        org=orguser.org,
+        block_id=connection_block_id,
+    ).first()
+
+    if org_prefect_block is None:
+        raise HttpError(400, "connection block not found")
+    
+    # prefect block
+    airbyte_connection_block = prefect_service.get_airbyte_connection_block_by_id(
+        connection_block_id
+    )
+
+    if "data" not in airbyte_connection_block and "connection_id" not in airbyte_connection_block["data"]:
+        raise HttpError(500, "connection if missing from the block")
+    
+    connection_id = airbyte_connection_block["data"]["connection_id"]
+
+    airbyte_service.reset_connection(connection_id)
+
+    return {"success": 1}
+
+
 @airbyteapi.put("/connections/{connection_block_id}/update", auth=auth.CanManagePipelines())
 def put_airbyte_connection(request, connection_block_id, payload: AirbyteConnectionUpdate):  # pylint: disable=unused-argument
     """Update an airbyte connection in the user organization workspace"""
@@ -776,6 +809,7 @@ def put_airbyte_connection(request, connection_block_id, payload: AirbyteConnect
     )
     
     return res
+
 
 @airbyteapi.delete("/connections/{connection_block_id}", auth=auth.CanManagePipelines())
 def delete_airbyte_connection(request, connection_block_id):

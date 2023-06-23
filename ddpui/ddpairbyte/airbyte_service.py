@@ -681,6 +681,16 @@ def update_connection(
     return res
 
 
+def reset_connection(connection_id: str) -> dict:
+    """Reset data of a connection at the destination"""
+    if not isinstance(connection_id, str):
+        raise HttpError(400, "connection_id must be a string")
+
+    res = abreq("connections/reset", {"connectionId": connection_id})
+    logger.info("Reseting the connection: %s", connection_id)
+    return res
+
+
 def delete_connection(workspace_id: str, connection_id: str) -> dict:
     """Delete a connection of an airbyte workspace"""
 
