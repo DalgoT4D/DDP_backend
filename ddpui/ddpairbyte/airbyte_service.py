@@ -632,55 +632,35 @@ def create_connection(
 
 def update_connection(
     workspace_id: str,
-    connection_id: str,
     connection_info: schema.AirbyteConnectionUpdate,
+    current_connection
 ) -> dict:
     """Update a connection of an airbyte workspace"""
 
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
-    if not isinstance(connection_id, str):
-        raise HttpError(400, "connection_id must be a string")
     if len(connection_info.streams) == 0:
         error_message = f"must specify at least one stream workspace_id={workspace_id}"
         logger.error(error_message)
         raise HttpError(400, error_message)
 
     sourceschemacatalog = get_source_schema_catalog(
-        workspace_id, connection_info.sourceId
+        workspace_id, current_connection["sourceId"]
     )
 
-    payload = {
-        "connectionId": connection_id,
-        "sourceId": connection_info.sourceId,
-        "destinationId": connection_info.destinationId,
-        "sourceCatalogId": sourceschemacatalog["catalogId"],
-        "syncCatalog": {
-            "streams": [
-                # <== we're going to put the stream configs in here in the next step below
-            ]
-        },
-        "prefix": "",
-        "namespaceDefinition": "destination",
-        "namespaceFormat": "${SOURCE_NAMESPACE}",
-        "nonBreakingChangesPreference": "ignore",
-        "scheduleType": "manual",
-        "geography": "auto",
-        "name": connection_info.name,
-        "operations": [
-            {
-                "name": "Normalization",
-                "workspaceId": workspace_id,
-                "operatorConfiguration": {
-                    "operatorType": "normalization",
-                    "normalization": {"option": "basic"},
-                },
-            }
-        ],
-    }
+    # update the name
+    if connection_info.name:
+        current_connection["name"] = connection_info.name
+
+    # update the destination schema
+    if connection_info.destinationSchema:
+        current_connection["namespaceDefinition"] = "customformat"
+        current_connection["namespaceFormat"] = connection_info.destinationSchema
+
+    current_connection["syncCatalog"]["streams"] = []
 
     # one stream per table
-    selected_streams = [{x["name"]: x} for x in connection_info.streams]
+    selected_streams = {x["name"]: x for x in connection_info.streams}
     for schema_cat in sourceschemacatalog["catalog"]["streams"]:
         stream_name = schema_cat["stream"]["name"]
         if (
@@ -688,17 +668,13 @@ def update_connection(
             and selected_streams[stream_name]["selected"]
         ):
             # set schema_cat['config']['syncMode'] from schema_cat['stream']['supportedSyncModes'] here
-            schema_cat["config"]["syncMode"] = (
-                "incremental"
-                if selected_streams[stream_name]["incremental"]
-                else "full_refresh"
-            )
+            schema_cat["config"]["syncMode"] = selected_streams[stream_name]["syncMode"]
             schema_cat["config"]["destinationSyncMode"] = selected_streams[stream_name][
                 "destinationSyncMode"
             ]
-            payload["syncCatalog"]["streams"].append(schema_cat)
+            current_connection["syncCatalog"]["streams"].append(schema_cat)
 
-    res = abreq("connections/update", payload)
+    res = abreq("connections/update", current_connection)
     if "connectionId" not in res:
         logger.error("Failed to update connection: %s", res)
         raise HttpError(500, "failed to update connection")

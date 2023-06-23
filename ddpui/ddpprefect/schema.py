@@ -100,6 +100,7 @@ class PrefectAirbyteConnectionBlockSchema(Schema):
     status: str
     deploymentId: str = None
     lastRun: Optional[dict | None]
+    destinationSchema: str = ""
 
 
 class PrefectFlowAirbyteConnection(Schema):
