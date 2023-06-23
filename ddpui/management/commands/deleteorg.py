@@ -109,10 +109,8 @@ class Command(BaseCommand):
     def delete_orgusers(self, org: Org):
         """delete all login users"""
         for orguser in OrgUser.objects.filter(org=org):
-            orguser.user.is_active = False
-            orguser.user.save()
-            orguser.user = None
-            orguser.delete()
+            orguser.user.delete()
+            # this deletes the orguser as well via CASCADE
 
     def delete_one_org(self, org: Org, yes_really: bool):
         """delete one org"""
