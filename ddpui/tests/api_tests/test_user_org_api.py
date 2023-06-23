@@ -38,11 +38,7 @@ from django.contrib.auth.models import User
 from ddpui.ddpairbyte.schema import AirbyteWorkspace
 from ddpui.utils import timezone
 
-try:
-    pytestmark = pytest.mark.django_db
-except ImportError:
-    # remove this after merging PR 185
-    pass
+pytestmark = pytest.mark.django_db
 
 
 # ================================================================================
@@ -71,12 +67,6 @@ def org_with_workspace():
 @pytest.fixture
 def authuser():
     """a django User object"""
-    while True:
-        existing_authuser = User.objects.filter(email="tempuseremail").first()
-        if existing_authuser:
-            existing_authuser.delete()
-        else:
-            break
     user = User.objects.create(
         username="tempusername", email="tempuseremail", password="tempuserpassword"
     )
@@ -351,13 +341,6 @@ def test_post_organization_warehouse_bigquery(orguser):
         airbyteConfig={"credentials_json": "{}"},
     )
 
-    while True:
-        warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
-        if warehouse:
-            warehouse.delete()
-        else:
-            break
-
     response = post_organization_warehouse(mock_request, payload)
 
     assert response["success"] == 1
@@ -374,13 +357,6 @@ def test_post_organization_warehouse_bigquery(orguser):
 def test_delete_organization_warehouses(orguser):
     mock_request = Mock()
     mock_request.orguser = orguser
-
-    while True:
-        warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
-        if warehouse:
-            warehouse.delete()
-        else:
-            break
 
     OrgWarehouse.objects.create(
         org=orguser.org,
@@ -411,13 +387,6 @@ def test_get_organizations_warehouses(orguser):
     mock_request = Mock()
     mock_request.orguser = orguser
 
-    while True:
-        warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
-        if warehouse:
-            warehouse.delete()
-        else:
-            break
-
     warehouse1 = OrgWarehouse.objects.create(
         org=orguser.org,
         wtype="postgres",
@@ -446,20 +415,7 @@ def test_get_organizations_warehouses(orguser):
 
 
 # ================================================================================
-def reset_invitation_tests(email):
-    for invitation in Invitation.objects.filter(invited_email=email):
-        invitation.delete()
-    for orguser in OrgUser.objects.filter(user__email=email):
-        orguser.delete()
-    for user in User.objects.filter(email=email):
-        user.delete()
-    for user in User.objects.filter(username=email):
-        user.delete()
-
-
-# ================================================================================
 def test_post_organization_user_invite_failure(orguser):
-    reset_invitation_tests("inivted_email")
     payload = InvitationSchema(
         invited_email="inivted_email",
         invited_role=1,
@@ -481,7 +437,6 @@ def test_post_organization_user_invite_failure(orguser):
 
 
 def test_post_organization_user_invite(orguser):
-    reset_invitation_tests("inivted_email")
     payload = InvitationSchema(
         invited_email="inivted_email",
         invited_role=1,
@@ -517,7 +472,6 @@ def test_post_organization_user_invite(orguser):
 # ================================================================================
 def test_get_organization_user_invite_fail(orguser):
     invited_email = "invited_email"
-    reset_invitation_tests(invited_email)
 
     invitation = Invitation.objects.create(
         invited_email=invited_email,
@@ -537,7 +491,6 @@ def test_get_organization_user_invite_fail(orguser):
 
 def test_get_organization_user_invite(orguser):
     invited_email = "invited_email"
-    reset_invitation_tests(invited_email)
 
     invitation = Invitation.objects.create(
         invited_email=invited_email,
@@ -573,7 +526,6 @@ def test_post_organization_user_accept_invite_fail(orguser):
 
 
 def test_post_organization_user_accept_invite(orguser):
-    reset_invitation_tests("inivted_email")
     mock_request = Mock()
     mock_request.orguser = orguser
     payload = AcceptInvitationSchema(invite_code="invite_code", password="password")
@@ -584,15 +536,6 @@ def test_post_organization_user_accept_invite(orguser):
         invited_on=timezone.as_ist(datetime.now()),
         invite_code="invite_code",
     )
-
-    while True:
-        orguser = OrgUser.objects.filter(
-            user__email="invited_email",
-        ).first()
-        if orguser:
-            orguser.delete()
-        else:
-            break
 
     assert (
         OrgUser.objects.filter(
