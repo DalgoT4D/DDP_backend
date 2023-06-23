@@ -296,6 +296,77 @@ def test_get_source_definition_specification_with_invalid_source_definition_id()
     assert str(excinfo.value) == "Invalid source definition ID"
 
 
+def test_create_custom_source_definition_with_invalid_workspace_id():
+    with pytest.raises(HttpError) as excinfo:
+        create_custom_source_definition(123, "test", "test", "test", "test")
+    assert str(excinfo.value) == "Invalid workspace ID"
+
+
+def test_create_custom_source_definition_with_invalid_name():
+    with pytest.raises(HttpError) as excinfo:
+        create_custom_source_definition("test", 123, "test", "test", "test")
+    assert str(excinfo.value) == "Invalid name"
+
+
+def test_create_custom_source_definition_with_invalid_docker_repository():
+    with pytest.raises(HttpError) as excinfo:
+        create_custom_source_definition("test", "test", 123, "test", "test")
+    assert str(excinfo.value) == "Invalid docker repository"
+
+
+def test_create_custom_source_definition_with_invalid_docker_image_tag():
+    with pytest.raises(HttpError) as excinfo:
+        create_custom_source_definition("test", "test", "test", 123, "test")
+    assert str(excinfo.value) == "Invalid docker image tag"
+
+
+def test_create_custom_source_definition_with_invalid_documentation_url():
+    with pytest.raises(HttpError) as excinfo:
+        create_custom_source_definition("test", "test", "test", "test", 123)
+    assert str(excinfo.value) == "Invalid documentation URL"
+
+
+def test_create_custom_source_definition_success():
+    workspace_id = "my_workspace_id"
+    name = "test"
+    docker_repository = "test"
+    docker_image_tag = "test"
+    documentation_url = "test"
+    expected_response = {"sourceDefinitionId": "1", "name": "test"}
+
+    with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.headers = {"Content-Type": "application/json"}
+        mock_post.return_value.json.return_value = expected_response
+        result = create_custom_source_definition(
+            workspace_id, name, docker_repository, docker_image_tag, documentation_url
+        )
+        assert result == expected_response
+        assert isinstance(result, dict)
+
+
+def test_create_custom_source_definition_failure():
+    workspace_id = "my_workspace_id"
+    name = "test"
+    docker_repository = "test"
+    docker_image_tag = "test"
+    documentation_url = "test"
+    with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
+        mock_post.return_value.status_code = 404
+        mock_post.return_value.headers = {"Content-Type": "application/json"}
+        mock_post.return_value.json.return_value = {"error": "Invalid request data"}
+        with pytest.raises(HttpError) as excinfo:
+            create_custom_source_definition(
+                workspace_id,
+                name,
+                docker_repository,
+                docker_image_tag,
+                documentation_url,
+            )
+        assert excinfo.value.status_code == 400
+        assert str(excinfo.value) == f"Source definition not created: {name}"
+
+
 def test_get_sources_success():
     workspace_id = "my_workspace_id"
     expected_response = {"sources": [{"sourceId": "1", "name": "Example Source 1"}]}
