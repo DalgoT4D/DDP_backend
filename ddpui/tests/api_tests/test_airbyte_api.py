@@ -54,11 +54,7 @@ from ddpui.ddpairbyte.schema import (
 )
 from ddpui import ddpprefect
 
-try:
-    pytestmark = pytest.mark.django_db
-except ImportError:
-    # remove this after merging PR 185
-    pass
+pytestmark = pytest.mark.django_db
 
 
 # ================================================================================
