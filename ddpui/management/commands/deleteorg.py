@@ -17,12 +17,12 @@ class Command(BaseCommand):
 
     help = "Deletes an organization"
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser):  # skipcq: PYL-R0201
         """The main parameter is the org name"""
         parser.add_argument("--org-name", required=True)
         parser.add_argument("--yes-really", action="store_true")
 
-    def delete_prefect_deployments(self, org: Org):
+    def delete_prefect_deployments(self, org: Org):  # skipcq: PYL-R0201
         """fetches and deletes every prefect deployment for this org"""
         print("=========== OrgDataFlow ===========")
         for dataflow in OrgDataFlow.objects.filter(org=org):
@@ -33,7 +33,7 @@ class Command(BaseCommand):
                 pass
             dataflow.delete()
 
-    def delete_prefect_shell_blocks(self, org: Org):
+    def delete_prefect_shell_blocks(self, org: Org):  # skipcq: PYL-R0201
         """fetches and deletes all prefect blocks for this org"""
         print("=========== OrgPrefectBlock: Shell Operations ===========")
         for block in OrgPrefectBlock.objects.filter(org=org, block_type=SHELLOPERATION):
@@ -45,11 +45,11 @@ class Command(BaseCommand):
             prefect_service.delete_shell_block(block.block_id)
             block.delete()
 
-    def delete_dbt_workspace(self, org: Org):
+    def delete_dbt_workspace(self, org: Org):  # skipcq: PYL-R0201
         """deletes the dbt workspace"""
         dbt_service.delete_dbt_workspace(org)
 
-    def delete_airbyte_workspace(self, org: Org):
+    def delete_airbyte_workspace(self, org: Org):  # skipcq: PYL-R0201
         """
         deletes airbyte sources, destinations, connections
         deletes airbyte server and connection blocks in prefect
@@ -106,7 +106,7 @@ class Command(BaseCommand):
 
         airbyte_service.delete_workspace(org.airbyte_workspace_id)
 
-    def delete_orgusers(self, org: Org):
+    def delete_orgusers(self, org: Org):  # skipcq: PYL-R0201
         """delete all login users"""
         for orguser in OrgUser.objects.filter(org=org):
             orguser.user.delete()

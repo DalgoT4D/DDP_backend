@@ -12,7 +12,7 @@ from ddpui.ddpairbyte.airbyte_service import *
 
 
 class TestDeleteSource:
-    def test_create_workspace(self):
+    def test_create_workspace(self):  # skipcq: PYL-R0201
         """creates a workspace, checks airbyte response"""
         payload = {"name": "test_workspace"}
 
@@ -30,7 +30,7 @@ class TestDeleteSource:
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
 
-    def test_a_create_source(self, test_workspace_id):
+    def test_a_create_source(self, test_workspace_id):  # skipcq: PYL-R0201
         source_definitions = get_source_definitions(workspace_id=test_workspace_id)[
             "sourceDefinitions"
         ]
@@ -68,7 +68,7 @@ class TestWorkspace:
 
     workspace_id = None
 
-    def test_create_workspace(self):
+    def test_create_workspace(self):  # skipcq: PYL-R0201
         """creates a workspace, checks airbyte response"""
         payload = {"name": "test_workspace"}
 
@@ -86,7 +86,7 @@ class TestWorkspace:
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
 
-    def test_get_workspace(self):
+    def test_get_workspace(self):  # skipcq: PYL-R0201
         """gets a workspace, checks airbyte response"""
         try:
             res = get_workspace(workspace_id=TestWorkspace.workspace_id)
@@ -94,7 +94,7 @@ class TestWorkspace:
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
 
-    def test_get_workspaces(self):
+    def test_get_workspaces(self):  # skipcq: PYL-R0201
         """gets all workspaces, checks airbyte response"""
         try:
             res = get_workspaces()
@@ -102,7 +102,7 @@ class TestWorkspace:
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
 
-    def test_set_workspace_name(self):
+    def test_set_workspace_name(self):  # skipcq: PYL-R0201
         """sets workspace name, checks airbyte response"""
         new_name = "test"
 
@@ -158,7 +158,7 @@ class TestAirbyteSource:
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
 
-    def test_a_create_source(self, test_workspace_id):
+    def test_a_create_source(self, test_workspace_id):  # skipcq: PYL-R0201
         """tests source creation"""
         payload = {
             "sourcedef_id": TestAirbyteSource.source_definition_id,
@@ -193,7 +193,7 @@ class TestAirbyteSource:
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
 
-    def test_get_definitions(self, test_workspace_id):
+    def test_get_definitions(self, test_workspace_id):  # skipcq: PYL-R0201
         """tests retrieval of source definitions"""
         try:
             res = get_source_definitions(workspace_id=test_workspace_id)[
@@ -203,7 +203,7 @@ class TestAirbyteSource:
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
 
-    def test_get_source_schema_catalog(self, test_workspace_id):
+    def test_get_source_schema_catalog(self, test_workspace_id):  # skipcq: PYL-R0201
         """fetches the schema catalog for a source"""
         try:
             res = get_source_schema_catalog(
@@ -213,14 +213,16 @@ class TestAirbyteSource:
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
 
-    def test_fail_to_get_source_schema_catalog(self, test_workspace_id):
+    def test_fail_to_get_source_schema_catalog(
+        self, test_workspace_id
+    ):  # skipcq: PYL-R0201
         """fetches the schema catalog for a source"""
         try:
             get_source_schema_catalog(test_workspace_id, "not-a-source-id")
         except HttpError:
             pass
 
-    def test_get_source(self, test_workspace_id):
+    def test_get_source(self, test_workspace_id):  # skipcq: PYL-R0201
         """tests retrieval of a single source"""
         try:
             res = get_source(
@@ -231,7 +233,7 @@ class TestAirbyteSource:
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
 
-    def test_get_sources(self, test_workspace_id):
+    def test_get_sources(self, test_workspace_id):  # skipcq: PYL-R0201
         """tests retrieval of all sources"""
         try:
             res = get_sources(workspace_id=test_workspace_id)["sources"]
@@ -239,7 +241,7 @@ class TestAirbyteSource:
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
 
-    def test_update_source(self):
+    def test_update_source(self):  # skipcq: PYL-R0201
         """tests updating a source"""
         payload = {
             "name": "source9",
@@ -282,7 +284,7 @@ class TestAirbyteDestination:
         "schema": "staging",
     }
 
-    def test_a_create_destination(self, test_workspace_id):
+    def test_a_create_destination(self, test_workspace_id):  # skipcq: PYL-R0201
         destination_definitions = get_destination_definitions(
             workspace_id=test_workspace_id
         )["destinationDefinitions"]
@@ -317,7 +319,7 @@ class TestAirbyteDestination:
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
 
-    def test_get_destination(self, test_workspace_id):
+    def test_get_destination(self, test_workspace_id):  # skipcq: PYL-R0201
         try:
             res = get_destination(
                 workspace_id=test_workspace_id,
@@ -327,7 +329,7 @@ class TestAirbyteDestination:
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
 
-    def test_update_destination(self):
+    def test_update_destination(self):  # skipcq: PYL-R0201
         payload = {
             "name": "test_update",
             "destination_id": TestAirbyteDestination.destination_id,
@@ -356,7 +358,7 @@ class TestAirbyteDestination:
                 f"Field do not match in resposne: {error.errors()}"
             ) from error
 
-    def test_check_destination_connection(self, test_workspace_id):
+    def test_check_destination_connection(self, test_workspace_id):  # skipcq: PYL-R0201
         workspace_id = test_workspace_id
         try:
             res = check_destination_connection(
@@ -371,7 +373,7 @@ class TestAirbyteDestination:
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
 
-    def test_check_destination_connection_for_update(self):
+    def test_check_destination_connection_for_update(self):  # skipcq: PYL-R0201
         try:
             res = check_destination_connection_for_update(
                 TestAirbyteDestination.destination_id,
@@ -398,7 +400,7 @@ class TestConnection:
         test_workspace_id,
         test_source_id,
         test_destination_id,
-    ):
+    ):  # skipcq: PYL-R0201
         workspace_id = str(test_workspace_id)
         connection_info = schema.AirbyteConnectionCreate(
             sourceId=str(test_source_id),
@@ -427,7 +429,7 @@ class TestConnection:
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
 
-    def test_get_connection(self, test_workspace_id):
+    def test_get_connection(self, test_workspace_id):  # skipcq: PYL-R0201
         workspace_id = test_workspace_id
         connection_id = TestConnection.connection_id
 
@@ -439,7 +441,7 @@ class TestConnection:
 
     def test_update_connection(
         self, test_workspace_id, test_source_id, test_destination_id
-    ):
+    ):  # skipcq: PYL-R0201
         workspace_id = test_workspace_id
         current_connection = get_connection(workspace_id, TestConnection.connection_id)
         connection_info = schema.AirbyteConnectionUpdate(
@@ -463,7 +465,7 @@ class TestConnection:
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
 
-    def test_delete_connection(self, test_workspace_id):
+    def test_delete_connection(self, test_workspace_id):  # skipcq: PYL-R0201
         workspace_id = test_workspace_id
         connection_id = TestConnection.connection_id
 
