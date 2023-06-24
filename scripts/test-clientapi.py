@@ -35,12 +35,16 @@ BIGQUERY_DATASETLOCATION = os.getenv("BIGQUERY_DATASETLOCATION")
 
 DBT_TEST_REPO = os.getenv("DBT_TEST_REPO")
 DBT_TEST_REPO_ACCESSTOKEN = os.getenv("DBT_TEST_REPO_ACCESSTOKEN")
+SIGNUPCODE = os.getenv("SIGNUPCODE")
 
 faker = Faker("en-IN")
 tester = TestClient(args.port, verbose=args.verbose)
 email = faker.email()
 password = faker.password()
-tester.clientpost("organizations/users/", json={"email": email, "password": password})
+tester.clientpost(
+    "organizations/users/",
+    json={"email": email, "password": password, "signupcode": SIGNUPCODE},
+)
 tester.login(email, password)
 tester.clientget("currentuser")
 tester.clientpost(
