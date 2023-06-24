@@ -13,6 +13,7 @@ from django.utils.text import slugify
 
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
+from ddpui.ddpairbyte import airbyte_service
 
 from ddpui.ddpprefect import DBTCORE
 from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
@@ -149,8 +150,14 @@ def get_prefect_dataflows(request):
     is_deployment_active = {}
 
     # setting active/inactive status based on if the schedule is set or not
-    for deployment in prefect_service.get_filtered_deployments(orguser.org.slug, deployment_ids):
-        is_deployment_active[deployment["deploymentId"]] = deployment["isScheduleActive"] if "isScheduleActive" in deployment else False 
+    for deployment in prefect_service.get_filtered_deployments(
+        orguser.org.slug, deployment_ids
+    ):
+        is_deployment_active[deployment["deploymentId"]] = (
+            deployment["isScheduleActive"]
+            if "isScheduleActive" in deployment
+            else False
+        )
 
     res = []
 
@@ -164,9 +171,43 @@ def get_prefect_dataflows(request):
                 "lastRun": prefect_service.get_last_flow_run_by_deployment_id(
                     flow.deployment_id
                 ),
-                "status": is_deployment_active[flow.deployment_id] if flow.deployment_id in is_deployment_active else False
+                "status": is_deployment_active[flow.deployment_id]
+                if flow.deployment_id in is_deployment_active
+                else False,
             }
         )
+
+    return res
+
+
+@prefectapi.get("/flows/{deployment_id}", auth=auth.CanManagePipelines())
+def get_prefect_dataflow(request, deployment_id):
+    """Fetch details of prefect deployment"""
+    orguser = request.orguser
+
+    if orguser.org is None:
+        raise HttpError(400, "register an organization first")
+
+    # remove the org data flow
+    org_data_flow = OrgDataFlow.objects.filter(
+        org=orguser.org, deployment_id=deployment_id
+    ).first()
+
+    if org_data_flow is None:
+        raise HttpError(404, "flow does not exist")
+
+    try:
+        res = prefect_service.get_deployment(deployment_id)
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to get deploymenet from prefect-proxy") from error
+
+    if "parameters" in res and "airbyte_blocks" in res["parameters"]:
+        for airbyte_block in res["parameters"]["airbyte_blocks"]:
+            conn = airbyte_service.get_connection(
+                orguser.org.airbyte_workspace_id, airbyte_block["connectionId"]
+            )
+            airbyte_block["name"] = conn["name"]
 
     return res
 
@@ -199,22 +240,28 @@ def post_prefect_dataflow_quick_run(request, deployment_id):
 
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
-    
+
     res = prefect_service.create_deployment_flow_run(deployment_id)
     return res
 
 
-@prefectapi.post("/flows/{deployment_id}/set_schedule/{status}", auth=auth.CanManagePipelines())
+@prefectapi.post(
+    "/flows/{deployment_id}/set_schedule/{status}", auth=auth.CanManagePipelines()
+)
 def post_deployment_set_schedule(request, deployment_id, status):
     """Set deployment schedule to active / inactive"""
     orguser = request.orguser
 
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
-    
-    if (status is None) or (isinstance(status, str) is not True) or (status not in ["active", "inactive"]):
+
+    if (
+        (status is None)
+        or (isinstance(status, str) is not True)
+        or (status not in ["active", "inactive"])
+    ):
         raise HttpError(422, "incorrect status value")
-    
+
     prefect_service.set_deployment_schedule(deployment_id, status)
     return {"success": 1}
 
