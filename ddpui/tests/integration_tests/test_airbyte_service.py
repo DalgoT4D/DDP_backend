@@ -441,6 +441,7 @@ class TestConnection:
         self, test_workspace_id, test_source_id, test_destination_id
     ):
         workspace_id = test_workspace_id
+        current_connection = get_connection(workspace_id, TestConnection.connection_id)
         connection_info = schema.AirbyteConnectionUpdate(
             sourceId=test_source_id,
             destinationId=test_destination_id,
@@ -455,19 +456,6 @@ class TestConnection:
             ],
             name="New Connection Name",
         )
-        current_connection = {
-            "sourceId": test_source_id,
-            "syncCatalog": {
-                "streams": [
-                    {
-                        "name": "covid19data",
-                        "selected": True,
-                        "syncMode": "full_refresh",
-                        "destinationSyncMode": "overwrite",
-                    }
-                ]
-            },
-        }
 
         try:
             res = update_connection(workspace_id, connection_info, current_connection)
