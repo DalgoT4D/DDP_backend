@@ -441,17 +441,24 @@ class TestConnection:
         self, test_workspace_id, test_source_id, test_destination_id
     ):
         workspace_id = test_workspace_id
-        connection_id = TestConnection.connection_id
+        current_connection = get_connection(workspace_id, TestConnection.connection_id)
         connection_info = schema.AirbyteConnectionUpdate(
             sourceId=test_source_id,
             destinationId=test_destination_id,
             connectionId=TestConnection.connection_id,
-            streams=[{"name": "companies"}],
-            name="Test Connection",
+            streams=[
+                {
+                    "name": "covid19data",
+                    "selected": True,
+                    "syncMode": "full_refresh",
+                    "destinationSyncMode": "append",
+                }
+            ],
+            name="New Connection Name",
         )
 
         try:
-            res = update_connection(workspace_id, connection_id, connection_info)
+            res = update_connection(workspace_id, connection_info, current_connection)
             UpdateConnectionTestResponse(**res)
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error

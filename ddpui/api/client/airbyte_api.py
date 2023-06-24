@@ -21,6 +21,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteWorkspaceCreate,
     AirbyteSourceUpdateCheckConnection,
     AirbyteDestinationUpdateCheckConnection,
+    AirbyteConnectionUpdate,
 )
 from ddpui.ddpprefect.prefect_service import run_airbyte_connection_sync
 from ddpui.ddpprefect.schema import (
@@ -566,6 +567,9 @@ def get_airbyte_connection(request, connection_block_id):
         "destination": {"id": airbyte_conn["destinationId"], "name": destination_name},
         "sourceCatalogId": airbyte_conn["sourceCatalogId"],
         "syncCatalog": airbyte_conn["syncCatalog"],
+        "destinationSchema": airbyte_conn["namespaceFormat"]
+        if airbyte_conn["namespaceDefinition"] == "customformat"
+        else "",
         "status": airbyte_conn["status"],
         "deploymentId": dataflow.deployment_id if dataflow else None,
     }
@@ -707,10 +711,120 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
     return res
 
 
-@airbyteapi.put("/connections/", auth=auth.CanManagePipelines())
-def put_airbyte_connection(request):  # pylint: disable=unused-argument
+@airbyteapi.post(
+    "/connections/{connection_block_id}/reset", auth=auth.CanManagePipelines()
+)
+def post_airbyte_connection_reset(request, connection_block_id):
+    """Reset the data for connection at destination"""
+    orguser = request.orguser
+    org = orguser.org
+    if org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    # check if the block exists
+    org_prefect_block = OrgPrefectBlock.objects.filter(
+        org=orguser.org,
+        block_id=connection_block_id,
+    ).first()
+
+    if org_prefect_block is None:
+        raise HttpError(400, "connection block not found")
+
+    # prefect block
+    airbyte_connection_block = prefect_service.get_airbyte_connection_block_by_id(
+        connection_block_id
+    )
+
+    if (
+        "data" not in airbyte_connection_block
+        or "connection_id" not in airbyte_connection_block["data"]
+    ):
+        raise HttpError(500, "connection is missing from the block")
+
+    connection_id = airbyte_connection_block["data"]["connection_id"]
+
+    airbyte_service.reset_connection(connection_id)
+
+    return {"success": 1}
+
+
+@airbyteapi.put(
+    "/connections/{connection_block_id}/update", auth=auth.CanManagePipelines()
+)
+def put_airbyte_connection(
+    request, connection_block_id, payload: AirbyteConnectionUpdate
+):  # pylint: disable=unused-argument
     """Update an airbyte connection in the user organization workspace"""
-    return {"error": "deprecated"}
+    orguser = request.orguser
+    org = orguser.org
+    if org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    if len(payload.streams) == 0:
+        raise HttpError(400, "must specify stream names")
+
+    # check if the block exists
+    org_prefect_block = OrgPrefectBlock.objects.filter(
+        org=orguser.org,
+        block_id=connection_block_id,
+    ).first()
+
+    if org_prefect_block is None:
+        raise HttpError(400, "connection block not found")
+
+    warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if warehouse is None:
+        raise HttpError(400, "need to set up a warehouse first")
+    if warehouse.airbyte_destination_id is None:
+        raise HttpError(400, "warehouse has no airbyte_destination_id")
+    payload.destinationId = warehouse.airbyte_destination_id
+
+    # prefect block
+    airbyte_connection_block = prefect_service.get_airbyte_connection_block_by_id(
+        connection_block_id
+    )
+
+    if (
+        "data" not in airbyte_connection_block
+        or "connection_id" not in airbyte_connection_block["data"]
+    ):
+        raise HttpError(500, "connection if missing from the block")
+
+    connection_id = airbyte_connection_block["data"]["connection_id"]
+
+    # fetch connection by id from airbyte
+    connection = airbyte_service.get_connection(org.airbyte_workspace_id, connection_id)
+
+    # update normalization of data
+    if payload.normalize:
+        if "operationIds" not in connection or len(connection["operationIds"]) == 0:
+            warehouse.airbyte_norm_op_id = (
+                airbyte_service.create_normalization_operation(
+                    org.airbyte_workspace_id
+                )["operationId"]
+            )
+            warehouse.save()
+            connection["operationIds"] = [warehouse.airbyte_norm_op_id]
+    else:
+        connection["operationIds"] = []
+
+    # update name
+    if payload.name:
+        # airbyte conn name
+        connection["name"] = payload.name
+        # update prefect block name
+        org_prefect_block.display_name = payload.name
+        org_prefect_block.save()
+
+    # always reset the connection
+    connection["skipReset"] = False
+
+    # update the airbyte connection
+    res = airbyte_service.update_connection(
+        org.airbyte_workspace_id, payload, connection
+    )
+
+    return res
 
 
 @airbyteapi.delete("/connections/{connection_block_id}", auth=auth.CanManagePipelines())

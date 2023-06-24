@@ -64,15 +64,14 @@ class AirbyteConnectionCreate(Schema):
     streams: list
     normalize: bool = False
 
-
 class AirbyteConnectionUpdate(Schema):
     """Docstring"""
 
-    connectionId: str
-    name: Optional[str] = None
-    sourceId: Optional[str] = None
-    destinationId: Optional[str] = None
-    streams: Optional[list] = None
+    name: str
+    streams: list
+    normalize: bool = False
+    destinationId: str = None
+    destinationSchema: str = None
 
 
 # response schemas

@@ -1111,3 +1111,194 @@ def test_check_destination_connection_for_update_failure_2():
             check_destination_connection_for_update("destination_id", payload)
 
         assert str(excinfo.value) == "failed to check destination connection"
+
+
+def test_get_connections_bad_workspace_id():
+    with pytest.raises(HttpError) as excinfo:
+        get_connections(1)
+    assert str(excinfo.value) == "workspace_id must be a string"
+
+
+def test_get_connections_no_connections():
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.abreq",
+        return_value={"no-connections": True},
+    ):
+        workspace_id = "workspace-id"
+        with pytest.raises(HttpError) as excinfo:
+            get_connections(workspace_id)
+        assert (
+            str(excinfo.value) == f"connections not found for workspace: {workspace_id}"
+        )
+
+
+def test_get_connections_success():
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.abreq",
+        return_value={"connections": "the-connections"},
+    ):
+        workspace_id = "workspace-id"
+        result = get_connections(workspace_id)
+        assert result["connections"] == "the-connections"
+
+
+def test_get_connection_bad_workspace_id():
+    with pytest.raises(HttpError) as excinfo:
+        get_connection(1, "connection-id")
+    assert str(excinfo.value) == "workspace_id must be a string"
+
+
+def test_get_connection_no_connection():
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.abreq",
+        return_value={"no-connectionId": True},
+    ):
+        workspace_id = "workspace-id"
+        connection_id = "connection-id"
+        with pytest.raises(HttpError) as excinfo:
+            get_connection(workspace_id, connection_id)
+        assert str(excinfo.value) == f"Connection not found: {connection_id}"
+
+
+def test_get_connection_success():
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.abreq",
+        return_value={"connectionId": "the-connection-id"},
+    ):
+        workspace_id = "workspace-id"
+        result = get_connection(workspace_id, "connection-id")
+        assert result["connectionId"] == "the-connection-id"
+
+
+def test_create_normalization_operation_bad_workspace_id():
+    with pytest.raises(HttpError) as excinfo:
+        create_normalization_operation(1)
+    assert str(excinfo.value) == "workspace_id must be a string"
+
+
+def test_create_normalization_operation_no_connection():
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.abreq",
+        return_value={"no-operationId": True},
+    ):
+        workspace_id = "workspace-id"
+        with pytest.raises(HttpError) as excinfo:
+            create_normalization_operation(workspace_id)
+        assert (
+            str(excinfo.value)
+            == f"could not create normalization operation for {workspace_id}"
+        )
+
+
+def test_create_normalization_operation_success():
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.abreq",
+        return_value={"operationId": "the-operation-id"},
+    ):
+        workspace_id = "workspace-id"
+        result = create_normalization_operation(workspace_id)
+        assert result["operationId"] == "the-operation-id"
+
+
+def test_update_connection_bad_workspace_id():
+    conninfo = schema.AirbyteConnectionUpdate(name="connection-name", streams=[])
+    with pytest.raises(HttpError) as excinfo:
+        update_connection(1, conninfo, {})
+    assert str(excinfo.value) == "workspace_id must be a string"
+
+
+def test_update_connection_no_streams():
+    conninfo = schema.AirbyteConnectionUpdate(name="connection-name", streams=[])
+    workspace_id = "workspace-id"
+    with pytest.raises(HttpError) as excinfo:
+        update_connection(workspace_id, conninfo, {})
+    assert (
+        str(excinfo.value)
+        == f"must specify at least one stream workspace_id={workspace_id}"
+    )
+
+
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    get_source_schema_catalog=Mock(
+        return_value={
+            "catalog": {
+                "streams": [
+                    {
+                        "stream": {
+                            "name": "stream-1-name",
+                        },
+                        "config": {},
+                    }
+                ]
+            }
+        }
+    ),
+)
+def test_update_connection_failed_to_update():
+    connection_info = schema.AirbyteConnectionUpdate(
+        name="connection-name",
+        streams=[
+            {
+                "name": "stream-1-name",
+                "selected": True,
+                "syncMode": "sync-mode",
+                "destinationSyncMode": "destination-sync-mode",
+            }
+        ],
+        destinationSchema=None,
+    )
+    workspace_id = "workspace-id"
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.abreq", return_value={"no-connectionId": True}
+    ):
+        with pytest.raises(HttpError) as excinfo:
+            update_connection(
+                workspace_id,
+                connection_info,
+                {"sourceId": "source-id", "syncCatalog": {"streams": []}},
+            )
+        assert str(excinfo.value) == "failed to update connection"
+
+
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    get_source_schema_catalog=Mock(
+        return_value={
+            "catalog": {
+                "streams": [
+                    {
+                        "stream": {
+                            "name": "stream-1-name",
+                        },
+                        "config": {},
+                    }
+                ]
+            }
+        }
+    ),
+)
+def test_update_connection_success():
+    connection_info = schema.AirbyteConnectionUpdate(
+        name="connection-name",
+        streams=[
+            {
+                "name": "stream-1-name",
+                "selected": True,
+                "syncMode": "sync-mode",
+                "destinationSyncMode": "destination-sync-mode",
+            }
+        ],
+        destinationSchema=None,
+    )
+    workspace_id = "workspace-id"
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.abreq",
+        return_value={"connectionId": "connection-id"},
+    ):
+        res = update_connection(
+            workspace_id,
+            connection_info,
+            {"sourceId": "source-id", "syncCatalog": {"streams": []}},
+        )
+        assert res["connectionId"] == "connection-id"
