@@ -35,7 +35,11 @@ jobs:
         run: |
           eval `ssh-agent -s`
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh -L 8080:localhost:8080 ${{ secrets.SERVER }} -f -N
+          ssh -vvv -L 8080:localhost:8080 ${{ secrets.SERVER }} -f -N
+      - name: Check if port is open
+        run: nc -vz localhost 8080
+      - name: Check if server is running
+        run: curl http://localhost:8080
       - name: Check network connectivity
         run: ping -c 3 localhost
       - name: Test with pytest
