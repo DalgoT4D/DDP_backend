@@ -13,6 +13,7 @@ from django.utils.text import slugify
 
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
+from ddpui.ddpairbyte import airbyte_service
 
 from ddpui.ddpprefect import DBTCORE
 from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
@@ -167,6 +168,32 @@ def get_prefect_dataflows(request):
                 "status": is_deployment_active[flow.deployment_id] if flow.deployment_id in is_deployment_active else False
             }
         )
+
+    return res
+
+
+@prefectapi.get("/flows/{deployment_id}", auth=auth.CanManagePipelines())
+def get_prefect_dataflow(request, deployment_id):
+    """Fetch details of prefect deployment"""
+    orguser = request.orguser
+
+    if orguser.org is None:
+        raise HttpError(400, "register an organization first")
+
+    # remove the org data flow
+    org_data_flow = OrgDataFlow.objects.filter(
+        org=orguser.org, deployment_id=deployment_id
+    ).first()
+
+    if org_data_flow is None:
+        raise HttpError(404, "flow does not exist")
+    
+    res = prefect_service.get_deployment(deployment_id)
+
+    if "parameters" in res and "airbyte_blocks" in res["parameters"]:
+        for airbyte_block in res["parameters"]["airbyte_blocks"]:
+            conn = airbyte_service.get_connection(orguser.org.airbyte_workspace_id, airbyte_block["connectionId"])
+            airbyte_block["name"] = conn["name"]
 
     return res
 

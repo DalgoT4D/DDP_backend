@@ -315,6 +315,16 @@ def delete_deployment_by_id(deployment_id):  # pragma: no cover
     return {"success": 1}
 
 
+def get_deployment(deployment_id):
+    """Proxy api to fetch deployment and its details"""
+    res = requests.get(
+        f"{PREFECT_PROXY_API_URL}/proxy/deployments/{deployment_id}",
+        timeout=30,
+    )
+    res.raise_for_status()
+    return res.json()
+
+
 def get_flow_run_logs(flow_run_id, offset):  # pragma: no cover
     """retreive the logs from a flow-run from prefect"""
     res = requests.get(
