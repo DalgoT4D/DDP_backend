@@ -52,6 +52,8 @@ from ddpui.ddpairbyte.schema import (
 )
 from ddpui import ddpprefect
 
+pytestmark = pytest.mark.django_db
+
 
 # ================================================================================
 @pytest.fixture
@@ -1022,11 +1024,6 @@ def test_get_airbyte_destinations_without_workspace(org_without_workspace):
     mock_request = Mock()
     mock_request.orguser = mock_orguser
 
-    payload = AirbyteDestinationUpdate(
-        name="fake-dest-name",
-        destinationDefId="fake-dest-def-id",
-        config={},
-    )
     with pytest.raises(HttpError) as excinfo:
         get_airbyte_destinations(mock_request)
 
@@ -1163,20 +1160,6 @@ def test_get_airbyte_connectionn_success(org_with_workspace):
     assert result[0]["deploymentId"] == "fake-deployment-id"
     assert result[0]["lastRun"] == "lastRun"
 
-    OrgPrefectBlock.objects.filter(
-        org=org_with_workspace,
-        block_type=ddpprefect.AIRBYTECONNECTION,
-        block_id="fake-block-id",
-        block_name="fake-block-name",
-        display_name="fake-display-name",
-    ).first().delete()
-
-    OrgDataFlow.objects.filter(
-        org=org_with_workspace,
-        connection_id="fake-connection-id-1",
-        deployment_id="fake-deployment-id",
-    ).first().delete()
-
 
 # ================================================================================
 def test_get_airbyte_connection_without_workspace(org_without_workspace):
@@ -1253,20 +1236,6 @@ def test_get_airbyte_connection_success(org_with_workspace):
     assert result["syncCatalog"] == "sync-catalog"
     assert result["status"] == "conn-status"
     assert result["deploymentId"] == "fake-deployment-id"
-
-    OrgPrefectBlock.objects.filter(
-        org=org_with_workspace,
-        block_type=ddpprefect.AIRBYTECONNECTION,
-        block_id="fake-block-id",
-        block_name="fake-block-name",
-        display_name="fake-display-name",
-    ).first().delete()
-
-    OrgDataFlow.objects.filter(
-        org=org_with_workspace,
-        connection_id="fake-connection-id-1",
-        deployment_id="fake-deployment-id",
-    ).first().delete()
 
 
 # ================================================================================
