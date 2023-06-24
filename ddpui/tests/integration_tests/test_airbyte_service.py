@@ -445,10 +445,29 @@ class TestConnection:
             sourceId=test_source_id,
             destinationId=test_destination_id,
             connectionId=TestConnection.connection_id,
-            streams=[{"name": "companies"}],
-            name="Test Connection",
+            streams=[
+                {
+                    "name": "covid19data",
+                    "selected": True,
+                    "syncMode": "full_refresh",
+                    "destinationSyncMode": "append",
+                }
+            ],
+            name="New Connection Name",
         )
-        current_connection = {"sourceId": "source-id", "syncCatalog": {"streams": []}}
+        current_connection = {
+            "sourceId": test_source_id,
+            "syncCatalog": {
+                "streams": [
+                    {
+                        "name": "covid19data",
+                        "selected": True,
+                        "syncMode": "full_refresh",
+                        "destinationSyncMode": "overwrite",
+                    }
+                ]
+            },
+        }
 
         try:
             res = update_connection(workspace_id, connection_info, current_connection)
