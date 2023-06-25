@@ -2,9 +2,9 @@ name: Python package
 
 on:
   push:
-    branches: [main]
+    branches: [port-forwading]
   pull_request:
-    branches: [main]
+    branches: [port-forwading]
 
 jobs:
   build:
@@ -36,12 +36,10 @@ jobs:
           eval `ssh-agent -s`
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
           ssh -vvv -L 8080:localhost:8080 ${{ secrets.SERVER }} -f -N
-      - name: Check if port is open
-        run: nc -vz localhost 8080
       - name: Check if server is running
-        run: curl http://localhost:8080
-      - name: Check network connectivity
-        run: ping -c 3 localhost
+        run: curl http://localhost:8080/proxy/blocks/airbyte/server/airbyte1
+      - name: Check prefect tests
+        run: pytest ddpui/tests/unit_integration_tests/test_prefect_service.py
       - name: Test with pytest
         env:
           AIRBYTE_SERVER_HOST: localhost
