@@ -17,7 +17,10 @@ def get_client():
 
 
 def generate_github_token_name(org):
-    """for orgs whose github repos require an access token, we store the token in AWS secrets manager using this name"""
+    """
+    for orgs whose github repos require an access token,
+    we store the token in AWS secrets manager using this name
+    """
     return f"gitrepoAccessToken-{org.slug}-{uuid4()}"
 
 

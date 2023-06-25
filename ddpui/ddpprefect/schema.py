@@ -3,7 +3,10 @@ from ninja import Schema
 
 
 class PrefectAirbyteSync(Schema):
-    """request payload to trigger an airbyte sync in prefect by specifying the prefect blockname"""
+    """
+    request payload to trigger an airbyte sync in prefect
+    by specifying the prefect blockname
+    """
 
     blockName: str
     flowName: str = None
@@ -19,7 +22,10 @@ class PrefectAirbyteSync(Schema):
 
 
 class PrefectDbtCore(Schema):
-    """request payload to trigger a dbt core op flow in prefect by specifying the prefect blockname"""
+    """
+    request payload to trigger a dbt core op flow in prefect
+    by specifying the prefect blockname
+    """
 
     blockName: str
     flowName: str = None
@@ -35,7 +41,10 @@ class PrefectDbtCore(Schema):
 
 
 class PrefectAirbyteConnectionSetup(Schema):
-    """create an airbyte connection block in prefect after creating the connection in airbyte"""
+    """
+    create an airbyte connection block in prefect
+    after creating the connection in airbyte
+    """
 
     serverBlockName: str
     connectionBlockName: str
@@ -86,7 +95,10 @@ class PrefectDbtRun(Schema):
 
 
 class PrefectAirbyteConnectionBlockSchema(Schema):
-    """Return necessary details of connection block in prefect, airbyte and your database"""
+    """
+    Return necessary details of connection block in prefect,
+    airbyte and your database
+    """
 
     name: str
     blockId: str

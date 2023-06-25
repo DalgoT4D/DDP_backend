@@ -34,9 +34,9 @@ from ddpui.models.org_user import (
     Invitation,
     AcceptInvitationSchema,
 )
-from django.contrib.auth.models import User
 from ddpui.ddpairbyte.schema import AirbyteWorkspace
 from ddpui.utils import timezone
+from django.contrib.auth.models import User
 
 pytestmark = pytest.mark.django_db
 

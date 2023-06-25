@@ -16,6 +16,7 @@ if not args.yes_really and not args.yes_partially:
     parser.print_usage()
     sys.exit(0)
 
+
 def checkenv():
     """Docstring"""
     valid = True
@@ -54,7 +55,7 @@ conn = psycopg2.connect(
 conn.autocommit = True
 cursor = conn.cursor()
 
-if args.yes_really: # Full reset
+if args.yes_really:  # Full reset
     print("Full reset of database")
     for cmd in [
         # f"CREATE USER {dbuser} WITH PASSWORD '{dbpassword}'",
@@ -67,7 +68,7 @@ if args.yes_really: # Full reset
         cursor.execute(cmd)
         sleep(1)
 
-if args.yes_partially: # Partial reset of some tables
+if args.yes_partially:  # Partial reset of some tables
     print("Partial reset of database")
     for cmd in [
         "delete from ddpui_orgdataflow",

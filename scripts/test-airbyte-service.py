@@ -69,7 +69,9 @@ else:
     assert "sourceId" in source
     # print("checking connection to new source " + source['sourceId'])
 
-    # check_result = airbyte_service.checksourceconnection(args.workspace_id, source['sourceId'])
+    # check_result = airbyte_service.checksourceconnection(
+    #      args.workspace_id, source['sourceId']
+    #     )
     # if check_result.get('status') != 'succeeded':
     #   print(check_result)
     #   sys.exit(1)

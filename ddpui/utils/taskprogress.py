@@ -2,9 +2,13 @@
 import json
 from redis import Redis
 
+
 class TaskProgress:
-    """maintain a list of steps, store in redis under the name "taskprogress" 
-    with the task_id as the key"""
+    """
+    maintain a list of steps, store in redis under the name "taskprogress"
+    with the task_id as the key
+    """
+    
     def __init__(self, task_id) -> None:
         self.task_id = task_id
         self.taskprogress = []

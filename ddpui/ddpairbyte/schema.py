@@ -24,6 +24,7 @@ class AirbyteSourceUpdate(Schema):
     config: dict
     sourceDefId: str
     
+
 class AirbyteSourceUpdateCheckConnection(Schema):
     """Docstring"""
 
@@ -63,6 +64,7 @@ class AirbyteConnectionCreate(Schema):
     destinationSchema: str = None
     streams: list
     normalize: bool = False
+
 
 class AirbyteConnectionUpdate(Schema):
     """Docstring"""

@@ -14,7 +14,9 @@ def setup_logger():
 
     # from cloudwatch import cloudwatch
     # from datetime import datetime
-    # handler = cloudwatch.CloudwatchHandler(log_group=f"ddpui.{datetime.today().strftime('%Y-%m-%d')}")
+    # handler = cloudwatch.CloudwatchHandler(
+    #          log_group=f"ddpui.{datetime.today().strftime('%Y-%m-%d')}"
+    #     )
     # handler.setLevel(logging.INFO)
     # formatter = logging.Formatter('%(asctime)s : %(levelname)s - %(message)s')
     # handler.setFormatter(formatter)
