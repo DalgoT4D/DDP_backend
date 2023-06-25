@@ -16,7 +16,6 @@ from ddpui.utils.ddp_logger import logger
 @app.task(bind=True)
 def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     """sets up an org's dbt workspace, recreating it if it already exists"""
-
     taskprogress = TaskProgress(self.request.id)
 
     taskprogress.add(

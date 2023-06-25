@@ -126,7 +126,6 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         """Docstring"""
-
         if options["org_name"] == "ALL":
             for org in Org.objects.all():
                 self.delete_one_org(org, options["yes_really"])

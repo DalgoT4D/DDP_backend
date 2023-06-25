@@ -9,7 +9,6 @@ class TestAirbyteServer:
     @staticmethod
     def test_create_serverblock():
         """creates a server block"""
-
         TestAirbyteServer.BLOCK_NAME = "test-" + str(uuid4())
         block_id = prefect_service.create_airbyte_server_block(
             TestAirbyteServer.BLOCK_NAME
