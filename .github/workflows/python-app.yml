@@ -2,9 +2,9 @@ name: Python package
 
 on:
   push:
-    branches: [port-forwading]
+    branches: [port-forwarding]
   pull_request:
-    branches: [port-forwading]
+    branches: [port-forwarding]
 
 jobs:
   build:
