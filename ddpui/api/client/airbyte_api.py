@@ -675,6 +675,9 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
     )
     connection_block.save()
 
+    # use the actual blockname, which may differ from what we constructed above
+    block_name = airbyte_connection_block["name"]
+
     dataflow = prefect_service.create_dataflow(
         PrefectDataFlowCreateSchema2(
             deployment_name=f"manual-sync-{block_name}",
