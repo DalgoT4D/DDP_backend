@@ -13,7 +13,6 @@ def setup_airbyte_workspace(wsname, org) -> AirbyteWorkspace:
     we don't need to update any existing server block because it does not hold
     the workspace id... only the connection details of the airbyte server
     """
-
     workspace = airbyte_service.create_workspace(wsname)
 
     org.airbyte_workspace_id = workspace["workspaceId"]

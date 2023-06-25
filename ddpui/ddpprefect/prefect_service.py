@@ -30,7 +30,6 @@ def get_airbyte_server_block_id(blockname) -> str | None:
 
 def create_airbyte_server_block(blockname) -> str:
     """Create airbyte server block in prefect"""
-
     response = requests.post(
         f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/server/",
         timeout=http_timeout,
@@ -97,7 +96,6 @@ def create_airbyte_connection_block(
     conninfo: PrefectAirbyteConnectionSetup,
 ) -> str:
     """Create airbyte connection block"""
-
     response = requests.post(
         f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/connection/",
         timeout=http_timeout,
@@ -155,7 +153,6 @@ def get_shell_block_id(blockname) -> str | None:
 
 def create_shell_block(shell: PrefectShellSetup):
     """Create a prefect shell block"""
-
     response = requests.post(
         f"{PREFECT_PROXY_API_URL}/proxy/blocks/shell/",
         timeout=http_timeout,
@@ -193,7 +190,6 @@ def create_dbt_core_block(
     credentials: dict,
 ):
     """Create a dbt core block in prefect"""
-
     response = requests.post(
         f"{PREFECT_PROXY_API_URL}/proxy/blocks/dbtcore/",
         timeout=http_timeout,
