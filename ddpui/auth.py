@@ -41,33 +41,12 @@ class PlatformAdmin(HttpBearer):
 def authenticate_org_user(request, token, allowed_roles, require_org):
     """docstring"""
     tokenrecord = Token.objects.filter(key=token).first()
-    # print("=====================================")
-    # print(
-    #     f"{request.get_full_path()}  {token}  "+
-    #     f"{'found tokenrecord' if tokenrecord else 'no tokenrecord'}"
-    # )
-    # if tokenrecord:
-    #     print(
-    #         f"{request.get_full_path()} have tokenrecord "+
-    #         f"{'found user' if tokenrecord.user else 'no user'}"
-    #     )
     if tokenrecord and tokenrecord.user:
-        # print(f"{request.get_full_path()} have tokenrecord and tokenrecord.user")
         request.user = tokenrecord.user
         orguser = OrgUser.objects.filter(user=request.user).first()
-        # print(
-        #     f"{request.get_full_path()}"+
-        #     f" {'found orguser' if orguser else 'no orguser'}"
-        # )
         if orguser is not None:
-            # print(
-            #     f"{request.get_full_path()} "+
-            #     f"role={orguser.role} require_org={require_org} org={orguser.org}"
-            # )
             if require_org and orguser.org is None:
                 raise HttpError(400, "register an organization first")
-
-            # print(f"orguser.role={orguser.role} allowed_roles={allowed_roles}")
             if orguser.role in allowed_roles:
                 request.orguser = orguser
                 return request
