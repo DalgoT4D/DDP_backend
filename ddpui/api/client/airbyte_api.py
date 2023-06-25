@@ -142,7 +142,10 @@ def get_airbyte_source_definitions(request):
     auth=auth.CanManagePipelines(),
 )
 def get_airbyte_source_definition_specifications(request, sourcedef_id):
-    """Fetch definition specifications for a particular source definition in the user organization workspace"""
+    """
+    Fetch definition specifications for a particular
+    source definition in the user organization workspace
+    """
     orguser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
@@ -269,12 +272,14 @@ def delete_airbyte_source(request, source_id):
         conn["connectionId"] for conn in connections if conn["sourceId"] == source_id
     ]
 
-    # delete the connection prefect blocks that has connections built on the source i.e. connections_of_source
+    # delete the connection prefect blocks that has connections
+    # built on the source i.e. connections_of_source
     prefect_conn_blocks = prefect_service.get_airbye_connection_blocks(
         block_names=[block.block_name for block in org_blocks]
     )
     logger.info(
-        "fetched prefect connection blocks based on the names stored in django orgprefectblocks"
+        "fetched prefect connection blocks based on the names stored in "
+        "django orgprefectblocks"
     )
     delete_block_ids = []
     for block in prefect_conn_blocks:
@@ -339,7 +344,10 @@ def get_airbyte_destination_definitions(request):
     auth=auth.CanManagePipelines(),
 )
 def get_airbyte_destination_definition_specifications(request, destinationdef_id):
-    """Fetch specifications for a destination definition in the user organization workspace"""
+    """
+    Fetch specifications for a destination
+    definition in the user organization workspace
+    """
     orguser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
@@ -536,7 +544,8 @@ def get_airbyte_connection(request, connection_block_id):
     ).first()
 
     # fetch prefect block
-    # todo add a "connection_id" column to OrgPrefectBlock, and fetch connection details from airbyte
+    # todo add a "connection_id" column to OrgPrefectBlock,
+    # and fetch connection details from airbyte
     prefect_block = prefect_service.get_airbyte_connection_block_by_id(
         connection_block_id
     )

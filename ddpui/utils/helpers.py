@@ -8,7 +8,10 @@ def runcmd(cmd, cwd):
 
 
 def remove_nested_attribute(obj: dict, attr: str) -> dict:
-    """this function searches for `attr` in the JSON object and removes any occurences it finds"""
+    """
+    this function searches for `attr` in the JSON object
+    and removes any occurences it finds
+    """
     if attr in obj:
         del obj[attr]
 

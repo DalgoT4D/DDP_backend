@@ -99,7 +99,8 @@ def post_organization_user(
     orguser = OrgUser.objects.create(user=user, role=OrgUserRole.ACCOUNT_MANAGER)
     orguser.save()
     logger.info(
-        f"created user [account-manager] {orguser.user.email} having userid {orguser.user.id}"
+        f"created user [account-manager] "
+        f"{orguser.user.email} having userid {orguser.user.id}"
     )
     return OrgUserResponse.from_orguser(orguser)
 
@@ -292,7 +293,8 @@ def post_organization_user_invite(request, payload: InvitationSchema):
     invitation = Invitation.objects.filter(invited_email=payload.invited_email).first()
     if invitation:
         logger.error(
-            f"{payload.invited_email} has already been invited by {invitation.invited_by} on {invitation.invited_on.strftime('%Y-%m-%d')}"
+            f"{payload.invited_email} has already been invited by "
+            f"{invitation.invited_by} on {invitation.invited_on.strftime('%Y-%m-%d')}"
         )
         raise HttpError(400, f"{payload.invited_email} has already been invited")
 
@@ -343,7 +345,8 @@ def post_organization_user_accept_invite(
     ).first()
     if not orguser:
         logger.info(
-            f"creating invited user {invitation.invited_email} for {invitation.invited_by.org.name}"
+            f"creating invited user {invitation.invited_email} "
+            f"for {invitation.invited_by.org.name}"
         )
         user = User.objects.create_user(
             username=invitation.invited_email,

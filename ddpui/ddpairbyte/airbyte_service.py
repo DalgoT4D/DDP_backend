@@ -151,7 +151,10 @@ def get_source_definition_specification(workspace_id: str, sourcedef_id: str) ->
     )
 
     if "connectionSpecification" not in res:
-        error_message = f"specification not found for source definition {sourcedef_id} in workspace {workspace_id}"
+        error_message = (
+            f"specification not found for source definition {sourcedef_id} "
+            f"in workspace {workspace_id}"
+        )
         logger.error(error_message)
         raise HttpError(404, error_message)
 
@@ -360,7 +363,8 @@ def get_source_schema_catalog(
         raise HttpError(400, "source_id must be a string")
 
     res = abreq("sources/discover_schema", {"sourceId": source_id})
-    # is it not possible that the job is long-running and we need to check its status later?
+    # is it not possible that the job is long-running
+    # and we need to check its status later?
     if "catalog" not in res and "jobInfo" in res:
         # special handling for errors we know
         if (
@@ -637,7 +641,8 @@ def create_connection(
         "sourceCatalogId": sourceschemacatalog["catalogId"],
         "syncCatalog": {
             "streams": [
-                # <== we're going to put the stream configs in here in the next step below
+                # we're going to put the stream
+                # configs in here in the next step below
             ]
         },
         "status": "active",
@@ -664,7 +669,8 @@ def create_connection(
             stream_name in selected_streams
             and selected_streams[stream_name]["selected"]
         ):
-            # set schema_cat['config']['syncMode'] from schema_cat['stream']['supportedSyncModes'] here
+            # set schema_cat['config']['syncMode']
+            # from schema_cat['stream']['supportedSyncModes'] here
             schema_cat["config"]["syncMode"] = selected_streams[stream_name]["syncMode"]
             schema_cat["config"]["destinationSyncMode"] = selected_streams[stream_name][
                 "destinationSyncMode"
@@ -715,7 +721,8 @@ def update_connection(
             stream_name in selected_streams
             and selected_streams[stream_name]["selected"]
         ):
-            # set schema_cat['config']['syncMode'] from schema_cat['stream']['supportedSyncModes'] here
+            # set schema_cat['config']['syncMode']
+            # from schema_cat['stream']['supportedSyncModes'] here
             schema_cat["config"]["syncMode"] = selected_streams[stream_name]["syncMode"]
             schema_cat["config"]["destinationSyncMode"] = selected_streams[stream_name][
                 "destinationSyncMode"

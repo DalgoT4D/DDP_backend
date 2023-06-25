@@ -63,7 +63,9 @@ def delete_airbyte_server_block(block_id):
 def get_airbyte_connection_block_id(blockname) -> str | None:
     """get the block_id for the connection block having this name"""
     response = requests.get(
-        f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/connection/byblockname/{blockname}",
+        f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/connection/byblockname/"
+        f"{blockname}"
+        ,
         timeout=30,
     )
     response.raise_for_status()
@@ -120,7 +122,10 @@ def delete_airbyte_connection_block(block_id):
 
 
 def post_prefect_blocks_bulk_delete(block_ids: list):
-    """Delete airbyte connection blocks in prefect corresponding the connection ids array passed"""
+    """
+    Delete airbyte connection blocks in prefect
+    corresponding the connection ids array passed
+    """
     response = requests.post(
         f"{PREFECT_PROXY_API_URL}/proxy/blocks/bulk/delete/",
         timeout=30,
@@ -267,7 +272,10 @@ def create_dataflow(payload: PrefectDataFlowCreateSchema2):  # pragma: no cover
 
 
 def get_flow_runs_by_deployment_id(deployment_id, limit=None):  # pragma: no cover
-    """Fetch flow runs of a deployment that are FAILED/COMPLETED sorted by descending start time of each run"""
+    """
+    Fetch flow runs of a deployment that are FAILED/COMPLETED
+    sorted by descending start time of each run
+    """
     res = requests.get(
         f"{PREFECT_PROXY_API_URL}/proxy/flow_runs",
         timeout=30,
@@ -284,11 +292,13 @@ def get_last_flow_run_by_deployment_id(deployment_id):  # pragma: no cover
         return res[0]
     return None
 
+
 def set_deployment_schedule(deployment_id, status):
     res = requests.post(
-        f"{PREFECT_PROXY_API_URL}/proxy/deployments/{deployment_id}/set_schedule/{status}",
+        f"{PREFECT_PROXY_API_URL}/proxy/deployments/{deployment_id}/set_schedule/"
+        f"{status}",
         timeout=30,
-    ) 
+    )
     res.raise_for_status()
     return None
 
