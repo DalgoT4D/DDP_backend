@@ -63,7 +63,9 @@ def delete_airbyte_server_block(block_id):
 def get_airbyte_connection_block_id(blockname) -> str | None:
     """get the block_id for the connection block having this name"""
     response = requests.get(
-        f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/connection/byblockname/{blockname}",
+        f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/connection/byblockname/"
+        f"{blockname}"
+        ,
         timeout=30,
     )
     response.raise_for_status()

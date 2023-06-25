@@ -151,7 +151,10 @@ def get_source_definition_specification(workspace_id: str, sourcedef_id: str) ->
     )
 
     if "connectionSpecification" not in res:
-        error_message = f"specification not found for source definition {sourcedef_id} in workspace {workspace_id}"
+        error_message = (
+            f"specification not found for source definition {sourcedef_id} "
+            f"in workspace {workspace_id}"
+        )
         logger.error(error_message)
         raise HttpError(404, error_message)
 
@@ -638,7 +641,8 @@ def create_connection(
         "sourceCatalogId": sourceschemacatalog["catalogId"],
         "syncCatalog": {
             "streams": [
-            # we're going to put the stream configs in here in the next step below
+                # we're going to put the stream
+                # configs in here in the next step below
             ]
         },
         "status": "active",

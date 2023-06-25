@@ -8,7 +8,7 @@ class TaskProgress:
     maintain a list of steps, store in redis under the name "taskprogress"
     with the task_id as the key
     """
-    
+
     def __init__(self, task_id) -> None:
         self.task_id = task_id
         self.taskprogress = []

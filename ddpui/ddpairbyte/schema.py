@@ -23,7 +23,7 @@ class AirbyteSourceUpdate(Schema):
     name: str
     config: dict
     sourceDefId: str
-    
+
 
 class AirbyteSourceUpdateCheckConnection(Schema):
     """Docstring"""

@@ -14,7 +14,7 @@ UNAUTHORIZED = "unauthorized"
 
 class BearerAuthentication(TokenAuthentication):
     """
-    This allows us to send the Authorization header "Bearer <token>" 
+    This allows us to send the Authorization header "Bearer <token>"
     instead of "Token <token>"
     """
 

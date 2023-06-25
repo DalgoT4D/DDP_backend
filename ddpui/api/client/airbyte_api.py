@@ -278,7 +278,8 @@ def delete_airbyte_source(request, source_id):
         block_names=[block.block_name for block in org_blocks]
     )
     logger.info(
-        "fetched prefect connection blocks based on the names stored in django orgprefectblocks"
+        "fetched prefect connection blocks based on the names stored in "
+        "django orgprefectblocks"
     )
     delete_block_ids = []
     for block in prefect_conn_blocks:

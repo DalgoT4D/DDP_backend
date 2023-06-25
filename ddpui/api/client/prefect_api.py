@@ -341,7 +341,12 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
         ["clean", "deps", "run", "test", "docs generate"]
     ):
         block_name = f"{orguser.org.slug}-{slugify(payload.profile.name)}-{slugify(target)}-{slugify(command)}"
-
+        block_name = (
+            f"{orguser.org.slug}-"
+            f"{slugify(payload.profile.name)}-"
+            f"{slugify(target)}-"
+            f"{slugify(command)}"
+            )
         block_data = PrefectDbtCoreSetup(
             block_name=block_name,
             profiles_dir=f"{project_dir}/profiles/",
