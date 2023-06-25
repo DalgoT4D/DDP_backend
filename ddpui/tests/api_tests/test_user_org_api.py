@@ -104,7 +104,6 @@ def orguserwithoutorg(authuser):
 # ================================================================================
 def test_get_current_user_no_user():
     """tests /worksspace/detatch/"""
-
     mock_request = Mock()
     mock_request.orguser = None
 
@@ -115,7 +114,6 @@ def test_get_current_user_no_user():
 
 def test_get_current_user_has_user(org_with_workspace):
     """tests /worksspace/detatch/"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
     mock_orguser.user = Mock()

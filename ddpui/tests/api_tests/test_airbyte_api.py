@@ -83,7 +83,6 @@ def org_with_workspace():
 # ================================================================================
 def test_post_airbyte_detach_workspace_without_org():
     """tests /worksspace/detatch/"""
-
     mock_orguser = Mock()
     mock_orguser.org = None
 
@@ -97,7 +96,6 @@ def test_post_airbyte_detach_workspace_without_org():
 
 def test_post_airbyte_detach_workspace_without_workspace(org_without_workspace):
     """tests /worksspace/detatch/"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -116,7 +114,6 @@ def test_post_airbyte_detach_workspace_without_workspace(org_without_workspace):
 )
 def test_post_airbyte_detach_workspace_success(org_with_workspace):
     """tests /worksspace/detatch/"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -183,7 +180,6 @@ def test_post_airbyte_workspace_with_workspace(org_with_workspace):
     AND we can conenct to airbyte (or a mocked version of it)
     then post_airbyte_workspace must succeed
     """
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -211,7 +207,6 @@ def test_post_airbyte_workspace_success(setup_airbyte_workspace, org_without_wor
     AND we can conenct to airbyte (or a mocked version of it)
     then post_airbyte_workspace must succeed
     """
-
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -229,7 +224,6 @@ def test_get_airbyte_source_definitions_without_airbyte_workspace(
     org_without_workspace,
 ):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -248,7 +242,6 @@ def test_get_airbyte_source_definitions_without_airbyte_workspace(
 )
 def test_get_airbyte_source_definitions_success(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -265,7 +258,6 @@ def test_get_airbyte_source_definition_specifications_without_workspace(
     org_without_workspace,
 ):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -284,7 +276,6 @@ def test_get_airbyte_source_definition_specifications_without_workspace(
 )
 def test_get_airbyte_source_definition_specifications_success(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -301,7 +292,6 @@ def test_get_airbyte_source_definition_specifications_success(org_with_workspace
 # ================================================================================
 def test_post_airbyte_source_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -323,7 +313,6 @@ def test_post_airbyte_source_without_workspace(org_without_workspace):
 )
 def test_post_airbyte_source_success(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -341,7 +330,6 @@ def test_post_airbyte_source_success(org_with_workspace):
 # ================================================================================
 def test_put_airbyte_source_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -363,7 +351,6 @@ def test_put_airbyte_source_without_workspace(org_without_workspace):
 )
 def test_put_airbyte_source_success(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -381,7 +368,6 @@ def test_put_airbyte_source_success(org_with_workspace):
 # ================================================================================
 def test_post_airbyte_check_source_with_workspace(org_without_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -403,7 +389,6 @@ def test_post_airbyte_check_source_with_workspace(org_without_workspace):
 )
 def test_post_airbyte_check_source_failure(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -425,7 +410,6 @@ def test_post_airbyte_check_source_failure(org_with_workspace):
 )
 def test_post_airbyte_check_source_success(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -444,7 +428,6 @@ def test_post_airbyte_check_source_success(org_with_workspace):
 # ================================================================================
 def test_post_airbyte_check_source_for_update_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -468,7 +451,6 @@ def test_post_airbyte_check_source_for_update_without_workspace(org_without_work
 )
 def test_post_airbyte_check_source_for_update_failure(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -492,7 +474,6 @@ def test_post_airbyte_check_source_for_update_failure(org_with_workspace):
 )
 def test_post_airbyte_check_source_for_update_success(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -513,7 +494,6 @@ def test_post_airbyte_check_source_for_update_success(org_with_workspace):
 # ================================================================================
 def test_get_airbyte_sources_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -534,7 +514,6 @@ def test_get_airbyte_sources_without_workspace(org_without_workspace):
 )
 def test_get_airbyte_sources_success(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -551,7 +530,6 @@ def test_get_airbyte_sources_success(org_with_workspace):
 # ================================================================================
 def test_get_airbyte_source_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -570,7 +548,6 @@ def test_get_airbyte_source_without_workspace(org_without_workspace):
 )
 def test_get_airbyte_source_success(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -585,7 +562,6 @@ def test_get_airbyte_source_success(org_with_workspace):
 # ================================================================================
 def test_delete_airbyte_source_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -612,7 +588,6 @@ def test_delete_airbyte_source_without_workspace(org_without_workspace):
 )
 def test_delete_airbyte_source_1(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -644,7 +619,6 @@ def test_delete_airbyte_source_1(org_with_workspace):
 )
 def test_delete_airbyte_source_2(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -679,7 +653,6 @@ def test_delete_airbyte_source_2(org_with_workspace):
 # ================================================================================
 def test_get_airbyte_source_schema_catalog_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -698,7 +671,6 @@ def test_get_airbyte_source_schema_catalog_without_workspace(org_without_workspa
 )
 def test_get_airbyte_source_schema_catalog_success(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -713,7 +685,6 @@ def test_get_airbyte_source_schema_catalog_success(org_with_workspace):
 # ================================================================================
 def test_get_airbyte_destination_definitions_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -732,7 +703,6 @@ def test_get_airbyte_destination_definitions_without_workspace(org_without_works
 )
 def test_get_airbyte_destination_definitions_success(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -751,7 +721,6 @@ def test_get_airbyte_destination_definition_specifications_without_workspace(
     org_without_workspace,
 ):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -772,7 +741,6 @@ def test_get_airbyte_destination_definition_specifications_without_workspace(
 )
 def test_get_airbyte_destination_definition_specifications_success(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -790,7 +758,6 @@ def test_get_airbyte_destination_definition_specifications_success(org_with_work
 # ================================================================================
 def test_post_airbyte_destination_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -814,7 +781,6 @@ def test_post_airbyte_destination_without_workspace(org_without_workspace):
 )
 def test_post_airbyte_destination_success(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -834,7 +800,6 @@ def test_post_airbyte_destination_success(org_with_workspace):
 # ================================================================================
 def test_post_airbyte_check_destination_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -858,7 +823,6 @@ def test_post_airbyte_check_destination_without_workspace(org_without_workspace)
 )
 def test_post_airbyte_check_destination_success(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -882,7 +846,6 @@ def test_post_airbyte_check_destination_success(org_with_workspace):
 )
 def test_post_airbyte_check_destination_failure(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -905,7 +868,6 @@ def test_post_airbyte_check_destination_for_update_without_workspace(
     org_without_workspace,
 ):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -928,7 +890,6 @@ def test_post_airbyte_check_destination_for_update_without_workspace(
 )
 def test_post_airbyte_check_destination_for_update_success(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -953,7 +914,6 @@ def test_post_airbyte_check_destination_for_update_success(org_with_workspace):
 )
 def test_post_airbyte_check_destination_for_update_failure(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -975,7 +935,6 @@ def test_post_airbyte_check_destination_for_update_failure(org_with_workspace):
 # ================================================================================
 def test_put_airbyte_destination_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -999,7 +958,6 @@ def test_put_airbyte_destination_without_workspace(org_without_workspace):
 )
 def test_put_airbyte_destination_success(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -1019,7 +977,6 @@ def test_put_airbyte_destination_success(org_with_workspace):
 # ================================================================================
 def test_get_airbyte_destinations_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -1038,7 +995,6 @@ def test_get_airbyte_destinations_without_workspace(org_without_workspace):
 )
 def test_get_airbyte_destination_success(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -1054,7 +1010,6 @@ def test_get_airbyte_destination_success(org_with_workspace):
 # ================================================================================
 def test_get_airbyte_destination_without_workspace(org_without_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_without_workspace
 
@@ -1073,7 +1028,6 @@ def test_get_airbyte_destination_without_workspace(org_without_workspace):
 )
 def test_get_airbyte_destination_success(org_with_workspace):
     """tests GET /source_definitions"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
