@@ -295,7 +295,8 @@ def get_last_flow_run_by_deployment_id(deployment_id):  # pragma: no cover
 
 def set_deployment_schedule(deployment_id, status):
     res = requests.post(
-        f"{PREFECT_PROXY_API_URL}/proxy/deployments/{deployment_id}/set_schedule/{status}",
+        f"{PREFECT_PROXY_API_URL}/proxy/deployments/{deployment_id}/set_schedule/"
+        f"{status}",
         timeout=30,
     )
     res.raise_for_status()

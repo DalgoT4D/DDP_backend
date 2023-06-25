@@ -293,8 +293,8 @@ def post_organization_user_invite(request, payload: InvitationSchema):
     invitation = Invitation.objects.filter(invited_email=payload.invited_email).first()
     if invitation:
         logger.error(
-            f"{payload.invited_email} has already been invited "
-            f"by {invitation.invited_by} on {invitation.invited_on.strftime('%Y-%m-%d')}"
+            f"{payload.invited_email} has already been invited by "
+            f"{invitation.invited_by} on {invitation.invited_on.strftime('%Y-%m-%d')}"
         )
         raise HttpError(400, f"{payload.invited_email} has already been invited")
 

@@ -339,8 +339,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
     block_names = []
     for sequence_number, command in enumerate(
         ["clean", "deps", "run", "test", "docs generate"]
-    ):
-        block_name = f"{orguser.org.slug}-{slugify(payload.profile.name)}-{slugify(target)}-{slugify(command)}"
+    ): 
         block_name = (
             f"{orguser.org.slug}-"
             f"{slugify(payload.profile.name)}-"
