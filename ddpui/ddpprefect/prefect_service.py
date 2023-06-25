@@ -16,13 +16,15 @@ from ddpui.utils.ddp_logger import logger
 load_dotenv()
 
 PREFECT_PROXY_API_URL = os.getenv("PREFECT_PROXY_API_URL")
-http_timeout=int(os.getenv("PREFECT_HTTP_TIMEOUT",5))
+http_timeout = int(os.getenv("PREFECT_HTTP_TIMEOUT", "5"))
+
 
 # ================================================================================================
 def get_airbyte_server_block_id(blockname) -> str | None:
     """get the block_id for the server block having this name"""
     response = requests.get(
-        f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/server/{blockname}", timeout=http_timeout
+        f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/server/{blockname}",
+        timeout=http_timeout,
     )
     response.raise_for_status()
     return response.json()["block_id"]
@@ -55,7 +57,9 @@ def update_airbyte_server_block(blockname):
 
 def delete_airbyte_server_block(block_id):
     """Delete airbyte server block"""
-    requests.delete(f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=http_timeout)
+    requests.delete(
+        f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=http_timeout
+    )
 
 
 # ================================================================================================
@@ -63,8 +67,7 @@ def get_airbyte_connection_block_id(blockname) -> str | None:
     """get the block_id for the connection block having this name"""
     response = requests.get(
         f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/connection/byblockname/"
-        f"{blockname}"
-        ,
+        f"{blockname}",
         timeout=http_timeout,
     )
     response.raise_for_status()
@@ -116,7 +119,9 @@ def update_airbyte_connection_block(blockname):
 
 def delete_airbyte_connection_block(block_id):
     """Delete airbyte connection block in prefect"""
-    requests.delete(f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=http_timeout)
+    requests.delete(
+        f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=http_timeout
+    )
 
 
 def post_prefect_blocks_bulk_delete(block_ids: list):
@@ -169,14 +174,17 @@ def create_shell_block(shell: PrefectShellSetup):
 
 def delete_shell_block(block_id):
     """Delete a prefect shell block"""
-    requests.delete(f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=http_timeout)
+    requests.delete(
+        f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=http_timeout
+    )
 
 
 # ================================================================================================
 def get_dbtcore_block_id(blockname) -> str | None:
     """get the block_id for the dbtcore block having this name"""
     response = requests.get(
-        f"{PREFECT_PROXY_API_URL}/proxy/blocks/dbtcore/{blockname}", timeout=http_timeout
+        f"{PREFECT_PROXY_API_URL}/proxy/blocks/dbtcore/{blockname}",
+        timeout=http_timeout,
     )
     response.raise_for_status()
     return response.json()["block_id"]
@@ -219,7 +227,9 @@ def create_dbt_core_block(
 
 def delete_dbt_core_block(block_id):
     """Delete a dbt core block in prefect"""
-    requests.delete(f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=http_timeout)
+    requests.delete(
+        f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=http_timeout
+    )
 
 
 # ================================================================================================
