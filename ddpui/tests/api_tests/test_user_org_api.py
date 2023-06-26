@@ -80,9 +80,7 @@ def authuser():
 
 @pytest.fixture
 def orguser(authuser, org_without_workspace):
-    """
-    a pytest fixture representing an OrgUser having the account-manager role
-    """
+    """a pytest fixture representing an OrgUser having the account-manager role"""
     orguser = OrgUser.objects.create(
         user=authuser, org=org_without_workspace, role=OrgUserRole.ACCOUNT_MANAGER
     )
@@ -92,9 +90,7 @@ def orguser(authuser, org_without_workspace):
 
 @pytest.fixture
 def nonadminorguser(authuser, org_without_workspace):
-    """
-    a pytest fixture representing an OrgUser having the report-viewer role
-    """
+    """a pytest fixture representing an OrgUser having the report-viewer role"""
     orguser = OrgUser.objects.create(
         user=authuser, org=org_without_workspace, role=OrgUserRole.REPORT_VIEWER
     )
@@ -104,9 +100,7 @@ def nonadminorguser(authuser, org_without_workspace):
 
 @pytest.fixture
 def orguserwithoutorg(authuser):
-    """
-    a pytest fixture representing an OrgUser with no associated Org
-    """
+    """a pytest fixture representing an OrgUser with no associated Org"""
     orguser = OrgUser.objects.create(
         user=authuser, org=None, role=OrgUserRole.REPORT_VIEWER
     )
@@ -146,9 +140,7 @@ def test_get_current_user_has_user(org_with_workspace):
 
 # ================================================================================
 def test_post_organization_user_wrong_signupcode():
-    """
-    a failing test, signup without the signup code
-    """
+    """a failing test, signup without the signup code"""
     mock_request = Mock()
     payload = OrgUserCreate(
         email="useremail", password="userpassword", signupcode="wrong-signupcode"
@@ -160,9 +152,7 @@ def test_post_organization_user_wrong_signupcode():
 
 
 def test_post_organization_user_userexists_email(authuser):
-    """
-    a failing test, the email address is already in use
-    """
+    """a failing test, the email address is already in use"""
     mock_request = Mock()
     payload = OrgUserCreate(
         email="tempuseremail", password="userpassword", signupcode="right-signupcode"
@@ -174,9 +164,7 @@ def test_post_organization_user_userexists_email(authuser):
 
 
 def test_post_organization_user_userexists_username(authuser):
-    """
-    a failing test, the email address is already in use
-    """
+    """a failing test, the email address is already in use"""
     mock_request = Mock()
     payload = OrgUserCreate(
         email="tempusername",
@@ -191,9 +179,7 @@ def test_post_organization_user_userexists_username(authuser):
 
 
 def test_post_organization_user_success():
-    """
-    a success test
-    """
+    """a success test"""
     mock_request = Mock()
     payload = OrgUserCreate(
         email="test-useremail",
@@ -218,9 +204,7 @@ def test_post_organization_user_success():
 
 # ================================================================================
 def test_get_organization_users_no_org():
-    """
-    a failing test, requestor has no associated org
-    """
+    """a failing test, requestor has no associated org"""
     mock_request = Mock()
     mock_request.orguser = Mock()
     mock_request.orguser.org = None
@@ -231,9 +215,7 @@ def test_get_organization_users_no_org():
 
 
 def test_get_organization_users(orguser):
-    """
-    a success test
-    """
+    """a success test"""
     mock_request = Mock()
     mock_request.orguser = orguser
 
@@ -244,9 +226,7 @@ def test_get_organization_users(orguser):
 
 # ================================================================================
 def test_put_organization_user_self(orguser):
-    """
-    a success test
-    """
+    """a success test"""
     mock_request = Mock()
     mock_request.orguser = orguser
 
@@ -265,9 +245,7 @@ def test_put_organization_user_self(orguser):
 
 # ================================================================================
 def test_put_organization_user_not_authorized(orguser, nonadminorguser):
-    """
-    a failing test, requestor cannot update another user
-    """
+    """a failing test, requestor cannot update another user"""
     mock_request = Mock()
     mock_request.orguser = nonadminorguser
 
@@ -282,9 +260,7 @@ def test_put_organization_user_not_authorized(orguser, nonadminorguser):
 
 
 def test_put_organization_user(orguser, nonadminorguser):
-    """
-    a succeas test, requestor updates another user
-    """
+    """a succeas test, requestor updates another user"""
     mock_request = Mock()
     mock_request.orguser = orguser
 
@@ -299,9 +275,7 @@ def test_put_organization_user(orguser, nonadminorguser):
 
 # ================================================================================
 def test_post_organization_has_org(orguser):
-    """
-    failing test, user already has an org
-    """
+    """failing test, user already has an org"""
     mock_request = Mock()
     mock_request.orguser = orguser
 
@@ -312,9 +286,7 @@ def test_post_organization_has_org(orguser):
 
 
 def test_post_organization_orgexists(orguserwithoutorg, org_without_workspace):
-    """
-    failing test, org name is already in use
-    """
+    """failing test, org name is already in use"""
     mock_request = Mock()
     mock_request.orguser = orguserwithoutorg
 
@@ -335,9 +307,7 @@ def test_post_organization_orgexists(orguserwithoutorg, org_without_workspace):
     ),
 )
 def test_post_organization(orguserwithoutorg):
-    """
-    success test for org creation
-    """
+    """success test for org creation"""
     mock_request = Mock()
     mock_request.orguser = orguserwithoutorg
 
@@ -355,9 +325,7 @@ def test_post_organization(orguserwithoutorg):
 
 # ================================================================================
 def test_post_organization_warehouse_unknownwtype(orguser):
-    """
-    a failing test, unrecognized warehouse type
-    """
+    """a failing test, unrecognized warehouse type"""
     mock_request = Mock()
     mock_request.orguser = orguser
     payload = OrgWarehouseSchema(
@@ -383,9 +351,7 @@ def test_post_organization_warehouse_unknownwtype(orguser):
     save_warehouse_credentials=Mock(return_value="credentials_lookupkey"),
 )
 def test_post_organization_warehouse_bigquery(orguser):
-    """
-    success test, warehouse creation
-    """
+    """success test, warehouse creation"""
     mock_request = Mock()
     mock_request.orguser = orguser
     payload = OrgWarehouseSchema(
@@ -406,9 +372,7 @@ def test_post_organization_warehouse_bigquery(orguser):
 
 # ================================================================================
 def test_delete_organization_warehouses(orguser):
-    """
-    success test, deleting a warehouse
-    """
+    """success test, deleting a warehouse"""
     mock_request = Mock()
     mock_request.orguser = orguser
 
@@ -438,9 +402,7 @@ def test_delete_organization_warehouses(orguser):
     ),
 )
 def test_get_organizations_warehouses(orguser):
-    """
-    success test, fetching all warehouses for an org
-    """
+    """success test, fetching all warehouses for an org"""
     mock_request = Mock()
     mock_request.orguser = orguser
 
@@ -473,9 +435,7 @@ def test_get_organizations_warehouses(orguser):
 
 # ================================================================================
 def test_post_organization_user_invite_failure(orguser):
-    """
-    failing test, invitation has already gone out
-    """
+    """failing test, invitation has already gone out"""
     payload = InvitationSchema(
         invited_email="inivted_email",
         invited_role=1,
@@ -497,9 +457,7 @@ def test_post_organization_user_invite_failure(orguser):
 
 
 def test_post_organization_user_invite(orguser):
-    """
-    success test, inviting a new user
-    """
+    """success test, inviting a new user"""
     payload = InvitationSchema(
         invited_email="inivted_email",
         invited_role=1,
@@ -534,9 +492,7 @@ def test_post_organization_user_invite(orguser):
 
 # ================================================================================
 def test_get_organization_user_invite_fail(orguser):
-    """
-    failing test, invalid invitation code
-    """
+    """failing test, invalid invitation code"""
     invited_email = "invited_email"
 
     invitation = Invitation.objects.create(
@@ -556,9 +512,7 @@ def test_get_organization_user_invite_fail(orguser):
 
 
 def test_get_organization_user_invite(orguser):
-    """
-    success test, look up an invitation from the invite code
-    """
+    """success test, look up an invitation from the invite code"""
     invited_email = "invited_email"
 
     invitation = Invitation.objects.create(
@@ -582,9 +536,7 @@ def test_get_organization_user_invite(orguser):
 
 # ================================================================================
 def test_post_organization_user_accept_invite_fail(orguser):
-    """
-    failing test, invalid invite code
-    """
+    """failing test, invalid invite code"""
     mock_request = Mock()
     mock_request.orguser = orguser
     payload = AcceptInvitationSchema(
@@ -598,9 +550,7 @@ def test_post_organization_user_accept_invite_fail(orguser):
 
 
 def test_post_organization_user_accept_invite(orguser):
-    """
-    success test, accepting an invitation
-    """
+    """success test, accepting an invitation"""
     mock_request = Mock()
     mock_request.orguser = orguser
     payload = AcceptInvitationSchema(invite_code="invite_code", password="password")
@@ -629,9 +579,7 @@ def test_post_organization_user_accept_invite(orguser):
 
 
 def test_post_forgot_password_nosuchuser():
-    """
-    success test, invalid email address
-    """
+    """success test, invalid email address"""
     mock_request = Mock()
     payload = ForgotPasswordSchema(email="no-such-email")
     response = post_forgot_password(mock_request, payload)
@@ -643,9 +591,7 @@ def test_post_forgot_password_nosuchuser():
     send_password_reset_email=Mock(side_effect=Exception("error")),
 )
 def test_post_forgot_password_emailfailed():
-    """
-    failure test, could not send email
-    """
+    """failure test, could not send email"""
     mock_request = Mock()
     user = User.objects.create(email="fake-email", username="fake-username")
     temporguser = OrgUser.objects.create(user=user)
@@ -657,9 +603,7 @@ def test_post_forgot_password_emailfailed():
 
 @patch.multiple("ddpui.utils.sendgrid", send_password_reset_email=Mock(return_value=1))
 def test_post_forgot_password_success():
-    """
-    success test, forgot password email sent
-    """
+    """success test, forgot password email sent"""
     mock_request = Mock()
     user = User.objects.create(email="fake-email", username="fake-username")
     temporguser = OrgUser.objects.create(user=user)
@@ -670,9 +614,7 @@ def test_post_forgot_password_success():
 
 @patch.multiple("redis.Redis", get=Mock(return_value=None))
 def test_post_reset_password_invalid_reset_code():
-    """
-    failure test, invalid code
-    """
+    """failure test, invalid code"""
     mock_request = Mock()
     payload = ResetPasswordSchema(token="fake-token", password="new-password")
     with pytest.raises(HttpError) as excinfo:
@@ -682,9 +624,7 @@ def test_post_reset_password_invalid_reset_code():
 
 @patch.multiple("redis.Redis", get=Mock(return_value="98765".encode("utf-8")))
 def test_post_reset_password_no_such_orguser():
-    """
-    failure test, invalid code
-    """
+    """failure test, invalid code"""
     mock_request = Mock()
     payload = ResetPasswordSchema(token="fake-token", password="new-password")
     with pytest.raises(HttpError) as excinfo:
