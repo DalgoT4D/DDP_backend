@@ -4,6 +4,7 @@ from uuid import uuid4
 import json
 import os
 from dotenv import load_dotenv
+from redis import Redis
 
 from django.contrib.auth.models import User
 from django.utils.text import slugify
@@ -17,7 +18,6 @@ from rest_framework.authtoken import views
 
 from ddpui import auth
 from ddpui.models.org import Org, OrgSchema, OrgWarehouse, OrgWarehouseSchema
-from ddpui.models.passwordreset import PasswordReset
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
     Invitation,
@@ -378,10 +378,16 @@ def post_forgot_password(
         # we don't leak any information about which email addresses exist in our database
         return {"success": 1}
 
-    password_reset = PasswordReset.objects.create(orguser=orguser)
-    reset_url = (
-        f"https://ddpui.projecttech4dev.org/resetpassword/{password_reset.token}"
-    )
+    redis = Redis()
+    token = uuid4()
+
+    redis_key = f"password-reset:{token.hex}"
+    orguserid_bytes = str(orguser.id).encode("utf8")
+
+    redis.set(redis_key, orguserid_bytes)
+    redis.expire(redis_key, 3600 * 24)  # 24 hours
+
+    reset_url = f"https://ddpui.projecttech4dev.org/resetpassword/{token.hex}"
     try:
         sendgrid.send_password_reset_email(payload.email, reset_url)
     except Exception as error:
@@ -395,15 +401,19 @@ def post_reset_password(
     request, payload: ResetPasswordSchema
 ):  # pylint: disable=unused-argument
     """step 2 of the forgot-password flow"""
-    password_reset = PasswordReset.objects.filter(token=payload.token).first()
+    redis = Redis()
+    redis_key = f"password-reset:{payload.token}"
+    password_reset = redis.get(redis_key)
     if password_reset is None:
         raise HttpError(400, "invalid reset code")
 
-    user = password_reset.orguser.user
-    user.set_password(payload.password)
-    user.save()
+    orguserid_str = password_reset.decode("utf8")
+    orguser = OrgUser.objects.filter(id=int(orguserid_str)).first()
+    if orguser is None:
+        logger.error("no orguser having id %s", orguserid_str)
+        raise HttpError(400, "could not look up request from this token")
 
-    # invalidate the reset link
-    password_reset.delete()
+    orguser.user.set_password(payload.password.get_secret_value())
+    orguser.user.save()
 
     return {"success": 1}
