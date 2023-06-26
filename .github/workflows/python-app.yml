@@ -31,14 +31,14 @@ jobs:
           touch ~/.ssh/known_hosts
       - name: Add remote host key to known_hosts
         run: ssh-keyscan 65.2.5.51 >> ~/.ssh/known_hosts
-      - name: Set up port forwarding via SSH
-        id: port-forwarding
+      - name: Start SSH tunnel in the background
         run: |
           eval `ssh-agent -s`
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh -L 8080:localhost:8080 ddp@65.2.5.51 -f -N &
-          echo $! >> ssh.pid
-          wait $!
+          ssh -M -S ~/.ssh/control-socket -fnNT -L 8080:localhost:8080 ddp@65.2.5.51
+      - name: Wait for SSH tunnel to be established
+        run: |
+          until ssh -S ~/.ssh/control-socket -O check ddp@65.2.5.51 >/dev/null 2>&1; do sleep 2; done
       - name: Test with pytest
         env:
           AIRBYTE_SERVER_HOST: localhost
@@ -68,12 +68,5 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
-      - name: Cleanup port forwarding
-        if: always()
-        run: |
-          if [ -f ssh.pid ]; then
-            pid=$(cat ssh.pid)
-            if [ -n "$pid" ]; then
-              kill "$pid"
-            fi
-          fi
+      - name: Stop SSH tunnel
+        run: ssh -S ~/.ssh/control-socket -O exit ddp@65.2.5.51
