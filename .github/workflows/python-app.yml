@@ -35,7 +35,9 @@ jobs:
         run: |
           eval `ssh-agent -s`
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh -o ConnectTimeout=600 -L 8080:localhost:8080 ddp@65.2.5.51 -f -N
+          ssh -L 8080:localhost:8080 ddp@65.2.5.51 -f -N
+      - name: Delay before running test
+        run: sleep 300
       - name: Test with pytest
         env:
           AIRBYTE_SERVER_HOST: localhost
@@ -48,7 +50,11 @@ jobs:
           DBPASSWORD: ${{ secrets.DBPASSWORD }}
           PREFECT_PROXY_API_URL: http://localhost:8080
         run: |
-          coverage run -m pytest ddpui/tests/unit_integration_tests/test_prefect_service.py
+          coverage run -m pytest --ignore=ddpui/tests/integration_tests
+          coverage report --fail-under=70
+          coverage xml
+          cd ddpui/tests
+          pytest --cov --ignore=integration_tests
       - name: Check coverage percentage
         run: |
           coverage_percentage=$(coverage report --show-missing | tail -n 1 | awk '{print $4}')
