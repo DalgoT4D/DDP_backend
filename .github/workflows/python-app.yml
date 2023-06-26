@@ -29,7 +29,6 @@ jobs:
         run: |
           mkdir -p ~/.ssh
           touch ~/.ssh/known_hosts
-          cat ~/.ssh/known_hosts
       - name: Add remote host key to known_hosts
         run: ssh-keyscan 65.2.5.51 >> ~/.ssh/known_hosts
       - name: Set up port forwarding via SSH
@@ -46,6 +45,8 @@ jobs:
           DBHOST: ${{ secrets.DBHOST }}
           DBNAME: ${{ secrets.DBNAME }}
           DBUSER: ${{ secrets.DBUSER }}
+          DBPASSWORD: ${{ secrets.DBPASSWORD }}
+          PREFECT_PROXY_API_URL: http://localhost:8080
         run: |
           pip install pytest
           pip install pytest-cov
