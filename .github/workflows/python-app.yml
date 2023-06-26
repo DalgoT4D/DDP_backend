@@ -30,12 +30,12 @@ jobs:
           mkdir -p ~/.ssh
           touch ~/.ssh/known_hosts
       - name: Add remote host key to known_hosts
-        run: ssh-keyscan 65.2.5.51 >> ~/.ssh/known_hosts
+        run: ssh-keyscan ${{ secrets.SERVERIP }} >> ~/.ssh/known_hosts
       - name: Start SSH tunnel in the background
         run: |
           eval `ssh-agent -s`
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh -o ControlMaster=yes -o ControlPersist=yes -N -L 8080:localhost:8080 ddp@65.2.5.51 &
+          ssh -L 8080:localhost:8080 ${{ secrets.SERVER }} -f -N
       - name: Test with pytest
         env:
           AIRBYTE_SERVER_HOST: localhost
