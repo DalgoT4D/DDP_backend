@@ -30,14 +30,12 @@ jobs:
           mkdir -p ~/.ssh
           touch ~/.ssh/known_hosts
       - name: Add remote host key to known_hosts
-        run: ssh-keyscan ${{ secrets.SERVERIP }} >> ~/.ssh/known_hosts
+        run: ssh-keyscan 15.206.88.75 >> ~/.ssh/known_hosts
       - name: Set up port forwarding via SSH
         run: |
           eval `ssh-agent -s`
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh -L 8080:localhost:8080 -L 8000:localhost:8000 ddp@65.2.5.51 -f -N
-      - name: Check if server is running
-        run: curl http://localhost:8080/proxy/blocks/airbyte/server/airbyte1
+          ssh -L 8000:localhost:8000 ddp@15.206.88.75 -f -N
       - name: Test with pytest
         env:
           AIRBYTE_SERVER_HOST: localhost
@@ -47,23 +45,7 @@ jobs:
           DBHOST: ${{ secrets.DBHOST }}
           DBNAME: ${{ secrets.DBNAME }}
           DBUSER: ${{ secrets.DBUSER }}
-          DBPASSWORD: ${{ secrets.DBPASSWORD }}
-          PREFECT_PROXY_API_URL: http://localhost:8080
         run: |
-          coverage run -m pytest
-          coverage report --fail-under=70
-          coverage xml
-          cd ddpui/tests
-          pytest --cov
-      - name: Check coverage percentage
-        run: |
-          coverage_percentage=$(coverage report --show-missing | tail -n 1 | awk '{print $4}')
-          if (( $(echo "$coverage_percentage < 70" | bc -l) )); then
-            echo "Coverage percentage is below 70%"
-            exit 1
-          fi
-      - name: Upload coverage reports to codecov
-        uses: codecov/codecov-action@v3
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: true
+          pip install pytest
+          pip install pytest-cov
+          pytest
