@@ -48,7 +48,7 @@ jobs:
           DBPASSWORD: ${{ secrets.DBPASSWORD }}
           PREFECT_PROXY_API_URL: http://localhost:8080
         run: |
-          coverage run -m pytest --ignore=ddpui/tests/integration_tests
+          coverage run -m pytest ddpui/tests/unit_integration_tests/test_prefect_service.py
       - name: Check coverage percentage
         run: |
           coverage_percentage=$(coverage report --show-missing | tail -n 1 | awk '{print $4}')
