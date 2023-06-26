@@ -35,7 +35,7 @@ jobs:
         run: |
           eval `ssh-agent -s`
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh -vvv -L 8080:localhost:8080 ${{ secrets.SERVER }} -f -N
+          ssh -vvv -L 8080:localhost:8080 ${{ secrets.SERVER }} -f -N -o ServerAliveInterval=300 -o ServerAliveCountMax=3
       - name: Check if server is running
         run: curl http://localhost:8080/proxy/blocks/airbyte/server/airbyte1
       - name: Check prefect tests
