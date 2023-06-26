@@ -17,6 +17,7 @@ from rest_framework.authtoken import views
 
 from ddpui import auth
 from ddpui.models.org import Org, OrgSchema, OrgWarehouse, OrgWarehouseSchema
+from ddpui.models.passwordreset import PasswordReset
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
     Invitation,
@@ -26,10 +27,13 @@ from ddpui.models.org_user import (
     OrgUserResponse,
     OrgUserRole,
     OrgUserUpdate,
+    ForgotPasswordSchema,
+    ResetPasswordSchema,
 )
 from ddpui.utils.ddp_logger import logger
 from ddpui.utils.timezone import IST
 from ddpui.utils import secretsmanager
+from ddpui.utils import sendgrid
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.ddpairbyte import airbyte_service
 
@@ -357,3 +361,49 @@ def post_organization_user_accept_invite(
             user=user, org=invitation.invited_by.org, role=invitation.invited_role
         )
     return OrgUserResponse.from_orguser(orguser)
+
+
+@user_org_api.post(
+    "/users/forgot_password/",
+)
+def post_forgot_password(
+    request, payload: ForgotPasswordSchema
+):  # pylint: disable=unused-argument
+    """step 1 of the forgot-password flow"""
+    orguser = OrgUser.objects.filter(
+        user__email=payload.email, user__is_active=True
+    ).first()
+
+    if orguser is None:
+        # we don't leak any information about which email addresses exist in our database
+        return {"success": 1}
+
+    password_reset = PasswordReset.objects.create(orguser=orguser)
+    reset_url = (
+        f"https://ddpui.projecttech4dev.org/resetpassword/{password_reset.token}"
+    )
+    try:
+        sendgrid.send_password_reset_email(payload.email, reset_url)
+    except Exception as error:
+        raise HttpError(400, "failed to send email") from error
+
+    return {"success": 1}
+
+
+@user_org_api.post("/users/reset_password/")
+def post_reset_password(
+    request, payload: ResetPasswordSchema
+):  # pylint: disable=unused-argument
+    """step 2 of the forgot-password flow"""
+    password_reset = PasswordReset.objects.filter(token=payload.token).first()
+    if password_reset is None:
+        raise HttpError(400, "invalid reset code")
+
+    user = password_reset.orguser.user
+    user.set_password(payload.password)
+    user.save()
+
+    # invalidate the reset link
+    password_reset.delete()
+
+    return {"success": 1}
