@@ -35,7 +35,7 @@ jobs:
         run: |
           eval `ssh-agent -s`
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh -L 8080:localhost:8080 ddp@65.2.5.51 -f -N
+          ssh -o ConnectTimeout=600 -L 8080:localhost:8080 ddp@65.2.5.51 -f -N
       - name: Test with pytest
         env:
           AIRBYTE_SERVER_HOST: localhost
