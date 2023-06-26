@@ -2,9 +2,9 @@ name: Python package
 
 on:
   push:
-    branches: [port-forwarding]
+    branches: [main]
   pull_request:
-    branches: [port-forwarding]
+    branches: [main]
 
 jobs:
   build:
@@ -31,7 +31,7 @@ jobs:
           touch ~/.ssh/known_hosts
       - name: Add remote host key to known_hosts
         run: ssh-keyscan ${{ secrets.SERVERIP }} >> ~/.ssh/known_hosts
-      - name: Start SSH tunnel in the background
+      - name: Set up port forwarding via SSH
         run: |
           eval `ssh-agent -s`
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
