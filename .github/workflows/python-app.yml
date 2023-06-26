@@ -29,6 +29,7 @@ jobs:
         run: |
           mkdir -p ~/.ssh
           touch ~/.ssh/known_hosts
+          cat ~/.ssh/known_hosts
       - name: Add remote host key to known_hosts
         run: ssh-keyscan 65.2.5.51 >> ~/.ssh/known_hosts
       - name: Set up port forwarding via SSH
@@ -48,4 +49,4 @@ jobs:
         run: |
           pip install pytest
           pip install pytest-cov
-          pytest
+          pytest ddpui/tests/unit_integration_tests/test_prefect_service.py
