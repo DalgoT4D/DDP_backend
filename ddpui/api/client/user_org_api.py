@@ -375,7 +375,8 @@ def post_forgot_password(
     ).first()
 
     if orguser is None:
-        # we don't leak any information about which email addresses exist in our database
+        # we don't leak any information about which email
+        # addresses exist in our database
         return {"success": 1}
 
     redis = Redis()
