@@ -23,6 +23,8 @@ from ddpui.api.client.user_org_api import (
     post_organization_user_invite,
     get_organization_user_invite,
     post_organization_user_accept_invite,
+    post_forgot_password,
+    post_reset_password,
 )
 from ddpui.models.org import Org, OrgSchema, OrgWarehouseSchema, OrgWarehouse
 from ddpui.models.org_user import (
@@ -33,6 +35,8 @@ from ddpui.models.org_user import (
     InvitationSchema,
     Invitation,
     AcceptInvitationSchema,
+    ForgotPasswordSchema,
+    ResetPasswordSchema,
 )
 from ddpui.ddpairbyte.schema import AirbyteWorkspace
 from ddpui.utils import timezone
@@ -549,3 +553,52 @@ def test_post_organization_user_accept_invite(orguser):
         ).count()
         == 1
     )
+
+
+def test_post_forgot_password_nosuchuser():
+    mock_request = Mock()
+    payload = ForgotPasswordSchema(email="no-such-email")
+    response = post_forgot_password(mock_request, payload)
+    assert response["success"] == 1
+
+
+@patch.multiple(
+    "ddpui.utils.sendgrid",
+    send_password_reset_email=Mock(side_effect=Exception("error")),
+)
+def test_post_forgot_password_emailfailed():
+    mock_request = Mock()
+    user = User.objects.create(email="fake-email", username="fake-username")
+    temporguser = OrgUser.objects.create(user=user)
+    payload = ForgotPasswordSchema(email=temporguser.user.email)
+    with pytest.raises(HttpError) as excinfo:
+        post_forgot_password(mock_request, payload)
+    assert str(excinfo.value) == "failed to send email"
+
+
+@patch.multiple("ddpui.utils.sendgrid", send_password_reset_email=Mock(return_value=1))
+def test_post_forgot_password_success():
+    mock_request = Mock()
+    user = User.objects.create(email="fake-email", username="fake-username")
+    temporguser = OrgUser.objects.create(user=user)
+    payload = ForgotPasswordSchema(email=temporguser.user.email)
+    response = post_forgot_password(mock_request, payload)
+    assert response["success"] == 1
+
+
+@patch.multiple("redis.Redis", get=Mock(return_value=None))
+def test_post_reset_password_invalid_reset_code():
+    mock_request = Mock()
+    payload = ResetPasswordSchema(token="fake-token", password="new-password")
+    with pytest.raises(HttpError) as excinfo:
+        post_reset_password(mock_request, payload)
+    assert str(excinfo.value) == "invalid reset code"
+
+
+@patch.multiple("redis.Redis", get=Mock(return_value="98765".encode("utf-8")))
+def test_post_reset_password_no_such_orguser():
+    mock_request = Mock()
+    payload = ResetPasswordSchema(token="fake-token", password="new-password")
+    with pytest.raises(HttpError) as excinfo:
+        post_reset_password(mock_request, payload)
+    assert str(excinfo.value) == "could not look up request from this token"
