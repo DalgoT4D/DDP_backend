@@ -31,13 +31,14 @@ jobs:
           touch ~/.ssh/known_hosts
       - name: Add remote host key to known_hosts
         run: ssh-keyscan 65.2.5.51 >> ~/.ssh/known_hosts
-      - name: Start SSH tunnel using autossh
+      - name: Start SSH tunnel in the background
         run: |
           eval `ssh-agent -s`
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          autossh -M 0 -f -N -L 8080:localhost:8080 ddp@65.2.5.51
+          ssh -o ControlMaster=yes -o ControlPersist=yes -N -L 8080:localhost:8080 ddp@65.2.5.51 &
       - name: Wait for SSH tunnel to be established
-        run: sleep 10
+        run: |
+          until ssh -O check -S ~/.ssh/ctl ddp@65.2.5.51 >/dev/null 2>&1; do sleep 2; done
       - name: Test with pytest
         env:
           AIRBYTE_SERVER_HOST: localhost
