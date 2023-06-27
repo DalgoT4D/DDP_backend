@@ -1,6 +1,7 @@
 ## DDP_backend
 
 [![Code coverage badge](https://img.shields.io/codecov/c/github/DevDataPlatform/DDP_backend/main.svg)](https://codecov.io/gh/DevDataPlatform/DDP_backend/branch/main)
+[![DeepSource](https://app.deepsource.com/gh/DevDataPlatform/DDP_backend.svg/?label=active+issues&show_trend=true&token=H-ilF26v7GEjUlQa3hLfMhPy)](https://app.deepsource.com/gh/DevDataPlatform/DDP_backend/?ref=repository-badge)
 
 Django application for the DDP platform's management backend. Exposes API endpoints for the management frontend to communicate with, for the purposes of
 
