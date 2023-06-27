@@ -409,6 +409,7 @@ def post_reset_password(
     if password_reset is None:
         raise HttpError(400, "invalid reset code")
 
+    redis.delete(redis_key)
     orguserid_str = password_reset.decode("utf8")
     orguser = OrgUser.objects.filter(id=int(orguserid_str)).first()
     if orguser is None:
