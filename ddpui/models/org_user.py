@@ -5,6 +5,7 @@ from django.db import models
 from django.contrib.auth.models import User
 
 from ninja import Schema
+from pydantic import SecretStr
 
 from ddpui.models.org import Org, OrgSchema
 
@@ -110,3 +111,16 @@ class AcceptInvitationSchema(Schema):
 
     invite_code: str
     password: str
+
+
+class ForgotPasswordSchema(Schema):
+    """the payload for the forgot-password workflow, step 1"""
+
+    email: str
+
+
+class ResetPasswordSchema(Schema):
+    """the payload for the forgot-password workflow, step 2"""
+
+    token: str
+    password: SecretStr

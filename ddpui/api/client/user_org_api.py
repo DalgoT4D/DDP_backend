@@ -4,6 +4,7 @@ from uuid import uuid4
 import json
 import os
 from dotenv import load_dotenv
+from redis import Redis
 
 from django.contrib.auth.models import User
 from django.utils.text import slugify
@@ -26,10 +27,13 @@ from ddpui.models.org_user import (
     OrgUserResponse,
     OrgUserRole,
     OrgUserUpdate,
+    ForgotPasswordSchema,
+    ResetPasswordSchema,
 )
 from ddpui.utils.ddp_logger import logger
 from ddpui.utils.timezone import IST
 from ddpui.utils import secretsmanager
+from ddpui.utils import sendgrid
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.ddpairbyte import airbyte_service
 
@@ -357,3 +361,61 @@ def post_organization_user_accept_invite(
             user=user, org=invitation.invited_by.org, role=invitation.invited_role
         )
     return OrgUserResponse.from_orguser(orguser)
+
+
+@user_org_api.post(
+    "/users/forgot_password/",
+)
+def post_forgot_password(
+    request, payload: ForgotPasswordSchema
+):  # pylint: disable=unused-argument
+    """step 1 of the forgot-password flow"""
+    orguser = OrgUser.objects.filter(
+        user__email=payload.email, user__is_active=True
+    ).first()
+
+    if orguser is None:
+        # we don't leak any information about which email
+        # addresses exist in our database
+        return {"success": 1}
+
+    redis = Redis()
+    token = uuid4()
+
+    redis_key = f"password-reset:{token.hex}"
+    orguserid_bytes = str(orguser.id).encode("utf8")
+
+    redis.set(redis_key, orguserid_bytes)
+    redis.expire(redis_key, 3600 * 24)  # 24 hours
+
+    FRONTEND_URL = os.getenv("FRONTEND_URL")
+    reset_url = f"{FRONTEND_URL}/resetpassword/?token={token.hex}"
+    try:
+        sendgrid.send_password_reset_email(payload.email, reset_url)
+    except Exception as error:
+        raise HttpError(400, "failed to send email") from error
+
+    return {"success": 1}
+
+
+@user_org_api.post("/users/reset_password/")
+def post_reset_password(
+    request, payload: ResetPasswordSchema
+):  # pylint: disable=unused-argument
+    """step 2 of the forgot-password flow"""
+    redis = Redis()
+    redis_key = f"password-reset:{payload.token}"
+    password_reset = redis.get(redis_key)
+    if password_reset is None:
+        raise HttpError(400, "invalid reset code")
+
+    orguserid_str = password_reset.decode("utf8")
+    orguser = OrgUser.objects.filter(id=int(orguserid_str)).first()
+    if orguser is None:
+        logger.error("no orguser having id %s", orguserid_str)
+        raise HttpError(400, "could not look up request from this token")
+
+    orguser.user.set_password(payload.password.get_secret_value())
+    orguser.user.save()
+
+    return {"success": 1}

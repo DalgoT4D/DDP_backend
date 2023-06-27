@@ -35,7 +35,7 @@ def send_template_message(template_id: str, to_email: str, template_vars: dict) 
     """
     sendgrid_client = SendGridAPIClient(SENDGRID_APIKEY)
 
-    message = Mail(from_email=SENDGRID_SENDER, to_email=to_email)
+    message = Mail(from_email=SENDGRID_SENDER, to_emails=[to_email])
     message.template_id = template_id
     message.dynamic_template_data = template_vars
 
@@ -51,5 +51,5 @@ def send_password_reset_email(to_email: str, reset_url: str) -> None:
     send a password reset email
     """
     send_template_message(
-        os.getenv("SENDGRID_RESET_PASSWORD_TEMPLATE"), to_email, reset_url
+        os.getenv("SENDGRID_RESET_PASSWORD_TEMPLATE"), to_email, {"url": reset_url}
     )
