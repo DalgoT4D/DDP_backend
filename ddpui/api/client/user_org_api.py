@@ -388,7 +388,8 @@ def post_forgot_password(
     redis.set(redis_key, orguserid_bytes)
     redis.expire(redis_key, 3600 * 24)  # 24 hours
 
-    reset_url = f"https://ddpui.projecttech4dev.org/resetpassword/?token={token.hex}"
+    FRONTEND_URL = os.getenv("FRONTEND_URL")
+    reset_url = f"{FRONTEND_URL}/resetpassword/?token={token.hex}"
     try:
         sendgrid.send_password_reset_email(payload.email, reset_url)
     except Exception as error:
