@@ -71,7 +71,7 @@ jobs:
           fail_ci_if_error: true
       - name: Deploy to EC2
         run: |
-          ssh -i ${{ secrets.SERVERIP }} ${{ secrets.SERVER }}
+          ssh -i ${{ secrets.SSH_PRIVATE_KEY }} ${{ secrets.SERVER }} -f -N
           source ~/.nvm/nvm.sh
           cd /home/ddp/DDP_backend
           git pull
