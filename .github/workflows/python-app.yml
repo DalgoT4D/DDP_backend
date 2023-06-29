@@ -69,3 +69,10 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
+      - name: Deploy to EC2
+        run: |
+          ssh -i ${{ secrets.SERVERIP }} ${{ secrets.SERVER }}
+          source ~/.nvm/nvm.sh
+          cd /home/ddp/DDP_backend
+          git pull
+          pm2 restart django-celery-worker django-backend
