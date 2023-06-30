@@ -3,8 +3,6 @@ name: Python package
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
 
 jobs:
   build:
@@ -69,3 +67,8 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
+      - name: Deploy to EC2
+        run: |
+          eval `ssh-agent -s`
+          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
+          ssh ${{ secrets.SERVER }} "source ~/.nvm/nvm.sh; cd /home/ddp/DDP_backend; git pull; pm2 restart django-celery-worker django-backend"
