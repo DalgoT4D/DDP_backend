@@ -87,7 +87,7 @@ elif WAREHOUSETYPE == "bigquery":
             destinationDefinitionId = destdef["destinationDefinitionId"]
             break
     with open(DBT_BIGQUERY_SERVICE_ACCOUNT_CREDSFILE, "r", -1, "utf8") as credsfile:
-        dbtCredentials = json.loads(credsfile.read())
+        dbtCredentials = json.load(credsfile)
         # print(dbtCredentials)
     airbyteConfig = {
         "project_id": BIGQUERY_PROJECTID,

@@ -1656,10 +1656,12 @@ def test_put_airbyte_connection_without_normalization(org_with_workspace):
     opb.refresh_from_db()
     assert opb.display_name == payload.name
 
-    connection = {"conn-key": "conn-val"}
-    connection["operationIds"] = []
-    connection["name"] = payload.name
-    connection["skipReset"] = False
+    connection = {
+        "conn-key": "conn-val",
+        "operationIds": [],
+        "name": payload.name,
+        "skipReset": False,
+    }
     payload.destinationId = warehouse.airbyte_destination_id
     update_connection_mock.assert_called_with(
         org_with_workspace.airbyte_workspace_id, payload, connection
@@ -1702,9 +1704,11 @@ def test_put_airbyte_connection_with_normalization_with_opids(org_with_workspace
     opb.refresh_from_db()
     assert opb.display_name == payload.name
 
-    connection = {"operationIds": [1]}
-    connection["name"] = payload.name
-    connection["skipReset"] = False
+    connection = {
+        "operationIds": [1],
+        "name": payload.name,
+        "skipReset": False,
+    }
     payload.destinationId = warehouse.airbyte_destination_id
     update_connection_mock.assert_called_with(
         org_with_workspace.airbyte_workspace_id, payload, connection
@@ -1750,9 +1754,11 @@ def test_put_airbyte_connection_with_normalization_without_opids(org_with_worksp
     warehouse.refresh_from_db()
     assert warehouse.airbyte_norm_op_id == "norm-op-id"
 
-    connection = {"operationIds": [warehouse.airbyte_norm_op_id]}
-    connection["name"] = payload.name
-    connection["skipReset"] = False
+    connection = {
+        "operationIds": [warehouse.airbyte_norm_op_id],
+        "name": payload.name,
+        "skipReset": False,
+    }
     payload.destinationId = warehouse.airbyte_destination_id
     update_connection_mock.assert_called_with(
         org_with_workspace.airbyte_workspace_id, payload, connection

@@ -10,17 +10,6 @@ def setup_logger():
     """sets up the django logger"""
     logfilename = settings.BASE_DIR / "ddpui/logs/django.log"
     logger.setLevel(logging.INFO)
-    # log to aws cw - requires aws credentials
-
-    # from cloudwatch import cloudwatch
-    # from datetime import datetime
-    # handler = cloudwatch.CloudwatchHandler(
-    #     log_group=f"ddpui.{datetime.today().strftime('%Y-%m-%d')}"
-    #     )
-    # handler.setLevel(logging.INFO)
-    # formatter = logging.Formatter('%(asctime)s : %(levelname)s - %(message)s')
-    # handler.setFormatter(formatter)
-    # logger.addHandler(handler)
 
     # log to stdout
     handler = logging.StreamHandler(sys.stdout)
