@@ -1,6 +1,10 @@
 """
 run the script:
-    python scripts/resetNGO.py --port 8002 --org-name NGO3 --email user3@ngo3 --password password --file scripts/ngo1.json
+    python scripts/resetNGO.py  --port 8002 
+                                --org-name NGO3 
+                                --email user3@ngo3 
+                                --password password 
+                                --file scripts/ngo1.json
 
 sample spec.json
     {
