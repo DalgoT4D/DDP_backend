@@ -31,6 +31,7 @@ class OrgUser(models.Model):
     role = models.IntegerField(
         choices=OrgUserRole.choices(), default=OrgUserRole.REPORT_VIEWER
     )
+    email_verified = models.BooleanField(default=False)
 
     def __str__(self):
         return self.user.email  # pylint: disable=no-member
@@ -124,3 +125,9 @@ class ResetPasswordSchema(Schema):
 
     token: str
     password: SecretStr
+
+
+class VerifyEmailSchema(Schema):
+    """the payload for the verify-email workflow"""
+
+    token: str
