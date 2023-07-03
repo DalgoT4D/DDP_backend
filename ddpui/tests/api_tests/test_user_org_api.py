@@ -195,6 +195,7 @@ def test_post_organization_user_invalid_email(authuser):
     assert str(excinfo.value) == "that is not a valid email address"
 
 
+@patch.multiple("ddpui.utils.sendgrid", send_signup_email=Mock(return_value=1))
 def test_post_organization_user_success():
     """a success test"""
     mock_request = Mock()
