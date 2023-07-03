@@ -345,7 +345,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
             f"{slugify(payload.profile.name)}-"
             f"{slugify(target)}-"
             f"{slugify(command)}"
-            )
+        )
         block_data = PrefectDbtCoreSetup(
             block_name=block_name,
             profiles_dir=f"{project_dir}/profiles/",
@@ -408,7 +408,6 @@ def delete_prefect_dbt_run_block(request):
     """Delete prefect dbt run block for an organization"""
     orguser = request.orguser
 
-    # blocks = prefect_service.get_blocks(prefect_service.DBTCORE, orguser.org.slug)
     org_dbt_blocks = OrgPrefectBlock.objects.filter(
         org=orguser.org, block_type=DBTCORE
     ).all()

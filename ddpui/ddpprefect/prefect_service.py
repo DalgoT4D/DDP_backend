@@ -309,7 +309,7 @@ def set_deployment_schedule(deployment_id, status):
     return None
 
 
-def get_filtered_deployments(org_slug, deployment_ids=[]):  # pragma: no cover
+def get_filtered_deployments(org_slug, deployment_ids):  # pragma: no cover
     # pylint: disable=dangerous-default-value
     """Fetch all deployments by org slug"""
     res = requests.post(

@@ -1,3 +1,40 @@
+"""
+run the script:
+    python scripts/resetNGO.py  --port 8002
+                                --org-name NGO3
+                                --email user3@ngo3
+                                --password password
+                                --file scripts/ngo1.json
+
+sample spec.json
+    {
+        "warehouse": {
+            "wtype": "", # airbyte destination definition
+            "airbyteConfig": {
+                "host": "",
+                "port": 5432,
+                "username": "",
+                "password": "",
+                "database": "",
+                "schema": "",
+            }
+        },
+        "sources": [
+            {
+                "stype": "SurveyCTO", # from airbyte source definition
+                "name": "testing-surveyCto-source",
+                "config": {
+                    "form_id" : [""],
+                    "password": "",
+                    "server_name": "",
+                    "start_date": "",
+                    "username": ""
+                }
+            }
+        ]
+    }
+"""
+
 import sys
 from testclient import TestClient
 import argparse
@@ -11,36 +48,6 @@ from django.utils.text import slugify
 
 load_dotenv(".env")
 
-
-# python scripts/resetNGO.py --port 8002 --org-name NGO3 --email user3@ngo3 --password password --file scripts/ngo1.json
-
-# spec = {
-#     "warehouse": {
-#         "wtype": "", # airbyte destination definition
-#         "airbyteConfig": {
-#             "host": "",
-#             "port": 5432,
-#             "username": "",
-#             "password": "",
-#             "database": "",
-#             "schema": "",
-#         }
-#     },
-#     "sources": [
-#         {
-#             "stype": "SurveyCTO", # from airbyte source definition
-#             "name": "testing-surveyCto-source",
-#             "config": {
-#                 "form_id" : [""],
-#                 "password": "",
-#                 "server_name": "",
-#                 "start_date": "",
-#                 "username": ""
-#             }
-#         }
-#     ]
-# }
-
 parser = argparse.ArgumentParser()
 parser.add_argument("--port", help="port where local app server is listening")
 parser.add_argument("--verbose", action="store_true")
@@ -53,7 +60,7 @@ parser.add_argument(
 args = parser.parse_args()
 
 with open(args.file, "r", encoding="utf-8") as json_file:
-    spec = json.loads(json_file.read())
+    spec = json.load(json_file)
 
 if args.port:
     ngoClient = TestClient(args.port)
@@ -184,12 +191,13 @@ if "sources" in spec:
             print("source's schema catalog:")
             print(remove_nested_attribute(schemaCatalog, ""))
         for streamData in schemaCatalog["catalog"]["streams"]:
-            streamPayload = {}
-            streamPayload["selected"] = True
-            streamPayload["name"] = streamData["stream"]["name"]
-            streamPayload["supportsIncremental"] = False
-            streamPayload["destinationSyncMode"] = "append"
-            streamPayload["syncMode"] = "full_refresh"
+            streamPayload = {
+                "selected": True,
+                "name": streamData["stream"]["name"],
+                "supportsIncremental": False,
+                "destinationSyncMode": "append",
+                "syncMode": "full_refresh",
+            }
             connPayload["streams"].append(streamPayload)
 
         if args.verbose:
