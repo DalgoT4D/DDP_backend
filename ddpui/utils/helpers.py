@@ -1,5 +1,6 @@
 import shlex
 import subprocess
+import re
 
 
 def runcmd(cmd, cwd):
@@ -28,3 +29,14 @@ def remove_nested_attribute(obj: dict, attr: str) -> dict:
                     val[list_idx] = remove_nested_attribute(list_val, attr)
 
     return obj
+
+
+def isvalid_email(email: str) -> bool:
+    """
+    this function uses a regex to check if the provided email
+    address is valid
+    ref: https://www.geeksforgeeks.org/check-if-email-address-valid-or-not-in-python/
+    """
+    regex = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b"
+
+    return re.fullmatch(regex, email)

@@ -25,6 +25,7 @@ from ddpui.api.client.user_org_api import (
     post_organization_user_accept_invite,
     post_forgot_password,
     post_reset_password,
+    post_verify_email,
 )
 from ddpui.models.org import Org, OrgSchema, OrgWarehouseSchema, OrgWarehouse
 from ddpui.models.org_user import (
@@ -37,6 +38,7 @@ from ddpui.models.org_user import (
     AcceptInvitationSchema,
     ForgotPasswordSchema,
     ResetPasswordSchema,
+    VerifyEmailSchema,
 )
 from ddpui.ddpairbyte.schema import AirbyteWorkspace
 from ddpui.utils import timezone
@@ -178,11 +180,26 @@ def test_post_organization_user_userexists_username(authuser):
     assert str(excinfo.value) == f"user having email {authuser.username} exists"
 
 
+def test_post_organization_user_invalid_email(authuser):
+    """a failing test, the email address is not valid"""
+    mock_request = Mock()
+    payload = OrgUserCreate(
+        email="invalid_email",
+        password="userpassword",
+        signupcode="right-signupcode",
+        role=2,
+    )
+    os.environ["SIGNUPCODE"] = "right-signupcode"
+    with pytest.raises(HttpError) as excinfo:
+        post_organization_user(mock_request, payload)
+    assert str(excinfo.value) == "that is not a valid email address"
+
+
 def test_post_organization_user_success():
     """a success test"""
     mock_request = Mock()
     payload = OrgUserCreate(
-        email="test-useremail",
+        email="test@useremail.com",
         password="test-userpassword",
         signupcode="right-signupcode",
     )
@@ -578,6 +595,7 @@ def test_post_organization_user_accept_invite(orguser):
     )
 
 
+# ================================================================================
 def test_post_forgot_password_nosuchuser():
     """success test, invalid email address"""
     mock_request = Mock()
@@ -612,6 +630,7 @@ def test_post_forgot_password_success():
     assert response["success"] == 1
 
 
+# ================================================================================
 @patch.multiple("redis.Redis", get=Mock(return_value=None))
 def test_post_reset_password_invalid_reset_code():
     """failure test, invalid code"""
@@ -626,7 +645,28 @@ def test_post_reset_password_invalid_reset_code():
 def test_post_reset_password_no_such_orguser():
     """failure test, invalid code"""
     mock_request = Mock()
-    payload = ResetPasswordSchema(token="fake-token", password="new-password")
+    payload = ResetPasswordSchema(token="real-token", password="new-password")
     with pytest.raises(HttpError) as excinfo:
         post_reset_password(mock_request, payload)
+    assert str(excinfo.value) == "could not look up request from this token"
+
+
+# ================================================================================
+@patch.multiple("redis.Redis", get=Mock(return_value=None))
+def test_post_verify_email_invalid_reset_code():
+    """failure test, invalid code"""
+    mock_request = Mock()
+    payload = VerifyEmailSchema(token="fake-token")
+    with pytest.raises(HttpError) as excinfo:
+        post_verify_email(mock_request, payload)
+    assert str(excinfo.value) == "this link has expired"
+
+
+@patch.multiple("redis.Redis", get=Mock(return_value="98765".encode("utf-8")))
+def test_post_verify_email_no_such_orguser():
+    """failure test, invalid code"""
+    mock_request = Mock()
+    payload = VerifyEmailSchema(token="real-token")
+    with pytest.raises(HttpError) as excinfo:
+        post_verify_email(mock_request, payload)
     assert str(excinfo.value) == "could not look up request from this token"

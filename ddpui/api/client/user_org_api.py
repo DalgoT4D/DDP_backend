@@ -29,11 +29,13 @@ from ddpui.models.org_user import (
     OrgUserUpdate,
     ForgotPasswordSchema,
     ResetPasswordSchema,
+    VerifyEmailSchema,
 )
 from ddpui.utils.ddp_logger import logger
 from ddpui.utils.timezone import IST
 from ddpui.utils import secretsmanager
 from ddpui.utils import sendgrid
+from ddpui.utils import helpers
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.ddpairbyte import airbyte_service
 
@@ -97,6 +99,9 @@ def post_organization_user(
         raise HttpError(400, f"user having email {email} exists")
     if User.objects.filter(username=email).exists():
         raise HttpError(400, f"user having email {email} exists")
+    if not helpers.isvalid_email(email):
+        raise HttpError(400, "that is not a valid email address")
+
     user = User.objects.create_user(
         username=email, email=email, password=payload.password
     )
@@ -106,6 +111,20 @@ def post_organization_user(
         f"created user [account-manager] "
         f"{orguser.user.email} having userid {orguser.user.id}"
     )
+    redis = Redis()
+    token = uuid4()
+
+    redis_key = f"email-verification:{token.hex}"
+    orguserid_bytes = str(orguser.id).encode("utf8")
+
+    redis.set(redis_key, orguserid_bytes)
+
+    FRONTEND_URL = os.getenv("FRONTEND_URL")
+    reset_url = f"{FRONTEND_URL}/verifyemail/?token={token.hex}"
+    try:
+        sendgrid.send_signup_email(payload.email, reset_url)
+    except Exception as error:
+        raise HttpError(400, "failed to send email") from error
     return OrgUserResponse.from_orguser(orguser)
 
 
@@ -418,5 +437,29 @@ def post_reset_password(
 
     orguser.user.set_password(payload.password.get_secret_value())
     orguser.user.save()
+
+    return {"success": 1}
+
+
+@user_org_api.post("/users/verify_email/")
+def post_verify_email(
+    request, payload: VerifyEmailSchema
+):  # pylint: disable=unused-argument
+    """step 2 of the verify-email flow"""
+    redis = Redis()
+    redis_key = f"email-verification:{payload.token}"
+    verify_email = redis.get(redis_key)
+    if verify_email is None:
+        raise HttpError(400, "this link has expired")
+
+    redis.delete(redis_key)
+    orguserid_str = verify_email.decode("utf8")
+    orguser = OrgUser.objects.filter(id=int(orguserid_str)).first()
+    if orguser is None:
+        logger.error("no orguser having id %s", orguserid_str)
+        raise HttpError(400, "could not look up request from this token")
+
+    orguser.email_verified = True
+    orguser.save()
 
     return {"success": 1}
