@@ -4,6 +4,8 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
+    """add email_verified field to OrgUser"""
+
     dependencies = [
         ("ddpui", "0020_orgprefectblock_command_and_more"),
     ]
