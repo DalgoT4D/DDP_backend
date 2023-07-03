@@ -47,18 +47,14 @@ def send_template_message(template_id: str, to_email: str, template_vars: dict) 
 
 
 def send_password_reset_email(to_email: str, reset_url: str) -> None:
-    """
-    send a password reset email
-    """
+    """send a password reset email"""
     send_template_message(
         os.getenv("SENDGRID_RESET_PASSWORD_TEMPLATE"), to_email, {"url": reset_url}
     )
 
 
 def send_signup_email(to_email: str, verification_url: str) -> None:
-    """
-    send a signup email with an email verification link
-    """
+    """send a signup email with an email verification link"""
     send_template_message(
         os.getenv("SENDGRID_SIGNUP_TEMPLATE"), to_email, {"url": verification_url}
     )
