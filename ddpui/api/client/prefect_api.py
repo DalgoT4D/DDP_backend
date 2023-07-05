@@ -106,16 +106,20 @@ def post_prefect_dataflow(request, payload: PrefectDataFlowCreateSchema):
 
     flow_name = "-".join(name_components + ["flow"])
 
-    res = prefect_service.create_dataflow(
-        PrefectDataFlowCreateSchema2(
-            deployment_name=deployment_name,
-            flow_name=flow_name,
-            orgslug=orguser.org.slug,
-            connection_blocks=payload.connectionBlocks,
-            dbt_blocks=dbt_blocks,
-            cron=payload.cron,
+    try:
+        res = prefect_service.create_dataflow(
+            PrefectDataFlowCreateSchema2(
+                deployment_name=deployment_name,
+                flow_name=flow_name,
+                orgslug=orguser.org.slug,
+                connection_blocks=payload.connectionBlocks,
+                dbt_blocks=dbt_blocks,
+                cron=payload.cron,
+            )
         )
-    )
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to create a dataflow") from error
 
     org_data_flow = OrgDataFlow.objects.create(
         org=orguser.org,
@@ -241,7 +245,11 @@ def post_prefect_dataflow_quick_run(request, deployment_id):
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
 
-    res = prefect_service.create_deployment_flow_run(deployment_id)
+    try:
+        res = prefect_service.create_deployment_flow_run(deployment_id)
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to start a run") from error
     return res
 
 
@@ -262,7 +270,11 @@ def post_deployment_set_schedule(request, deployment_id, status):
     ):
         raise HttpError(422, "incorrect status value")
 
-    prefect_service.set_deployment_schedule(deployment_id, status)
+    try:
+        prefect_service.set_deployment_schedule(deployment_id, status)
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to change flow state") from error
     return {"success": 1}
 
 
@@ -278,7 +290,12 @@ def post_prefect_airbyte_sync_flow(request, payload: PrefectAirbyteSync):
     if payload.flowRunName is None:
         now = timezone.as_ist(datetime.now())
         payload.flowRunName = f"{now.isoformat()}"
-    return prefect_service.run_airbyte_connection_sync(payload)
+    try:
+        result = prefect_service.run_airbyte_connection_sync(payload)
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to run sync") from error
+    return result
 
 
 @prefectapi.post("/flows/dbt_run/", auth=auth.CanManagePipelines())
@@ -300,8 +317,12 @@ def post_prefect_dbt_core_run_flow(
         payload.flowRunName = f"{now.isoformat()}"
 
     # save into some table
-
-    return prefect_service.run_dbt_core_sync(payload)
+    try:
+        result = prefect_service.run_dbt_core_sync(payload)
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to run dbt") from error
+    return result
 
 
 @prefectapi.post("/blocks/dbt/", auth=auth.CanManagePipelines())
@@ -431,7 +452,12 @@ def get_flow_runs_logs(
     request, flow_run_id, offset: int = 0
 ):  # pylint: disable=unused-argument
     """return the logs from a flow-run"""
-    return prefect_service.get_flow_run_logs(flow_run_id, offset)
+    try:
+        result = prefect_service.get_flow_run_logs(flow_run_id, offset)
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to retrieve logs") from error
+    return result
 
 
 @prefectapi.get(
