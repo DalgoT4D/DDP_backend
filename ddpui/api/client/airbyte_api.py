@@ -66,7 +66,7 @@ def ninja_http_error_handler(
     Handle any http errors raised in the apis
     TODO: should we put request.orguser.org.slug into the error message here
     """
-    return Response({"error": " ".join(exc.args)}, status=exc.status_code)
+    return Response({"error": " ".join(exc.args[0][0])}, status=exc.status_code)
 
 
 # @airbyteapi.exception_handler(Exception)
