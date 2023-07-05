@@ -345,6 +345,7 @@ def delete_organization_warehouses(request):
         prefect_service.delete_deployment_by_id(data_flow.deployment_id)
         data_flow.delete()
         logger.info(f"Deleted deployment - {data_flow.deployment_id}")
+    logger.info("FINISHED Deleting data flows")
 
     return {"success": 1}
 
