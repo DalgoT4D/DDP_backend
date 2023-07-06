@@ -11,9 +11,9 @@ from django.utils.text import slugify
 from ninja import NinjaAPI
 from ninja.errors import HttpError
 
-# from ninja.errors import ValidationError
-# from ninja.responses import Response
-# from pydantic.error_wrappers import ValidationError as PydanticValidationError
+from ninja.errors import ValidationError
+from ninja.responses import Response
+from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from rest_framework.authtoken import views
 
 from ddpui import auth
@@ -48,34 +48,34 @@ user_org_api = NinjaAPI(urls_namespace="userorg")
 
 load_dotenv()
 
-# @user_org_api.exception_handler(ValidationError)
-# def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
-#     """Handle any ninja validation errors raised in the apis"""
-#     return Response({"error": exc.errors}, status=422)
+@user_org_api.exception_handler(ValidationError)
+def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
+    """Handle any ninja validation errors raised in the apis"""
+    return Response({"error": exc.errors}, status=422)
 
 
-# @user_org_api.exception_handler(PydanticValidationError)
-# def pydantic_validation_error_handler(
-#     request, exc: PydanticValidationError
-# ):  # pylint: disable=unused-argument
-#     """Handle any pydantic errors raised in the apis"""
-#     return Response({"error": exc.errors()}, status=422)
+@user_org_api.exception_handler(PydanticValidationError)
+def pydantic_validation_error_handler(
+    request, exc: PydanticValidationError
+):  # pylint: disable=unused-argument
+    """Handle any pydantic errors raised in the apis"""
+    return Response({"error": exc.errors()}, status=422)
 
 
-# @user_org_api.exception_handler(HttpError)
-# def ninja_http_error_handler(
-#     request, exc: HttpError
-# ):  # pylint: disable=unused-argument
-#     """Handle any http errors raised in the apis"""
-#     return Response({"error": " ".join(exc.args)}, status=exc.status_code)
+@user_org_api.exception_handler(HttpError)
+def ninja_http_error_handler(
+    request, exc: HttpError
+):  # pylint: disable=unused-argument
+    """Handle any http errors raised in the apis"""
+    return Response({"error": " ".join(exc.args)}, status=exc.status_code)
 
 
-# @user_org_api.exception_handler(Exception)
-# def ninja_default_error_handler(
-#     request, exc: Exception
-# ):  # pylint: disable=unused-argument
-#     """Handle any other exception raised in the apis"""
-#     return Response({"error": " ".join(exc.args)}, status=500)
+@user_org_api.exception_handler(Exception)
+def ninja_default_error_handler(
+    request, exc: Exception
+):  # pylint: disable=unused-argument
+    """Handle any other exception raised in the apis"""
+    return Response({"error": " ".join(exc.args)}, status=500)
 
 
 @user_org_api.get("/currentuser", response=OrgUserResponse, auth=auth.AnyOrgUser())
