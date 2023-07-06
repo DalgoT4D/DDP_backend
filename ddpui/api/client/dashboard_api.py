@@ -14,6 +14,7 @@ from ddpui.models.org import OrgDataFlow
 
 dashboardapi = NinjaAPI(urls_namespace="dashboard")
 
+
 @dashboardapi.exception_handler(ValidationError)
 def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
     """Handle any ninja validation errors raised in the apis"""
