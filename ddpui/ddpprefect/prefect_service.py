@@ -147,7 +147,7 @@ def post_prefect_blocks_bulk_delete(block_ids: list) -> dict:
     corresponding the connection ids array passed
     """
     response = prefect_post(
-        "proxy/blocks/bulk/delete/",
+        "blocks/bulk/delete/",
         {"block_ids": block_ids},
     )
     return response
@@ -156,14 +156,14 @@ def post_prefect_blocks_bulk_delete(block_ids: list) -> dict:
 # ================================================================================================
 def get_shell_block_id(blockname) -> str | None:
     """get the block_id for the shell block having this name"""
-    response = prefect_get(f"/proxy/blocks/shell/{blockname}")
+    response = prefect_get(f"blocks/shell/{blockname}")
     return response["block_id"]
 
 
 def create_shell_block(shell: PrefectShellSetup) -> str:
     """Create a prefect shell block"""
     response = prefect_post(
-        "/blocks/shell/",
+        "blocks/shell/",
         {
             "blockName": shell.blockname,
             "commands": shell.commands,
