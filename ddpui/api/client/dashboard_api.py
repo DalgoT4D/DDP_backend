@@ -1,6 +1,8 @@
 from ninja import NinjaAPI
-from ninja.errors import HttpError
+from ninja.errors import HttpError, ValidationError
+
 from ninja.responses import Response
+from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 # dependencies
 from ddpui.ddpprefect import prefect_service
@@ -12,18 +14,18 @@ from ddpui.models.org import OrgDataFlow
 
 dashboardapi = NinjaAPI(urls_namespace="dashboard")
 
-# @dashboardapi.exception_handler(ValidationError)
-# def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
-#     """Handle any ninja validation errors raised in the apis"""
-#     return Response({"error": exc.errors}, status=422)
+@dashboardapi.exception_handler(ValidationError)
+def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
+    """Handle any ninja validation errors raised in the apis"""
+    return Response({"error": exc.errors}, status=422)
 
 
-# @dashboardapi.exception_handler(PydanticValidationError)
-# def pydantic_validation_error_handler(
-#     request, exc: PydanticValidationError
-# ):  # pylint: disable=unused-argument
-#     """Handle any pydantic errors raised in the apis"""
-#     return Response({"error": exc.errors()}, status=422)
+@dashboardapi.exception_handler(PydanticValidationError)
+def pydantic_validation_error_handler(
+    request, exc: PydanticValidationError
+):  # pylint: disable=unused-argument
+    """Handle any pydantic errors raised in the apis"""
+    return Response({"error": exc.errors()}, status=422)
 
 
 @dashboardapi.exception_handler(HttpError)
@@ -37,12 +39,12 @@ def ninja_http_error_handler(
     return Response({"error": " ".join(exc.args)}, status=exc.status_code)
 
 
-# @dashboardapi.exception_handler(Exception)
-# def ninja_default_error_handler(
-#     request, exc: Exception
-# ):  # pylint: disable=unused-argument
-#     """Handle any other exception raised in the apis"""
-#     return Response({"error": " ".join(exc.args)}, status=500)
+@dashboardapi.exception_handler(Exception)
+def ninja_default_error_handler(
+    request, exc: Exception
+):  # pylint: disable=unused-argument
+    """Handle any other exception raised in the apis"""
+    return Response({"error": " ".join(exc.args)}, status=500)
 
 
 @dashboardapi.get("/", auth=auth.CanManagePipelines())
