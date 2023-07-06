@@ -79,7 +79,7 @@ def pydantic_validation_error_handler(
 @user_org_api.exception_handler(Exception)
 def ninja_default_error_handler(
     request, exc: Exception
-):  # pylint: disable=unused-argument
+):  # pylint: disable=unused-argument skipcq PYL-W0613
     """Handle any other exception raised in the apis"""
     return Response({"detail": "something went wrong"}, status=500)
 
@@ -309,7 +309,7 @@ def delete_organization_warehouses(request):
         try:
             prefect_service.delete_airbyte_connection_block(block.block_id)
             logger.info(f"delete connecion block id - {block.block_id}")
-        except Exception:
+        except Exception:  # skipcq PYL-W0703
             logger.error(
                 "failed to delete %s airbyte-connection-block %s in prefect, deleting from OrgPrefectBlock",
                 orguser.org.slug,
