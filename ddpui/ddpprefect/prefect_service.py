@@ -196,6 +196,7 @@ def create_dbt_core_block(
     target: str,
     wtype: str,
     credentials: dict,
+    bqlocation: str,
 ):
     """Create a dbt core block in prefect"""
     response = requests.post(
@@ -210,6 +211,7 @@ def create_dbt_core_block(
             },
             "wtype": wtype,
             "credentials": credentials,
+            "bqlocation": bqlocation,
             "commands": dbtcore.commands,
             "env": dbtcore.env,
             "working_dir": dbtcore.working_dir,

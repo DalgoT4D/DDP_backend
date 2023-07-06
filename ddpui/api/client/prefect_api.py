@@ -357,6 +357,15 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
         else orguser.org.dbt.default_schema
     )
 
+    # get the bigquery location if warehouse is bq
+    bqlocation = None
+    if warehouse.wtype == "bigquery":
+        destination = airbyte_service.get_destination(
+            orguser.org.airbyte_workspace_id, warehouse.airbyte_destination_id
+        )
+        if destination.get("connectionConfiguration"):
+            bqlocation = destination["connectionConfiguration"]["dataset_location"]
+
     block_names = []
     for sequence_number, command in enumerate(
         ["clean", "deps", "run", "test", "docs generate"]
@@ -383,6 +392,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
                 target,
                 warehouse.wtype,
                 credentials,
+                bqlocation,
             )
         except Exception as error:
             logger.exception(error)
