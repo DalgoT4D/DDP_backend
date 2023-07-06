@@ -46,27 +46,24 @@ airbyteapi = NinjaAPI(urls_namespace="airbyte")
 
 @airbyteapi.exception_handler(ValidationError)
 def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
-    """Handle any ninja validation errors raised in the apis"""
-    return Response({"error": exc.errors}, status=422)
+    """
+    Handle any ninja validation errors raised in the apis
+    These are raised during request payload validation
+    exc.errors is correct
+    """
+    return Response({"detail": exc.errors}, status=422)
 
 
 @airbyteapi.exception_handler(PydanticValidationError)
 def pydantic_validation_error_handler(
     request, exc: PydanticValidationError
 ):  # pylint: disable=unused-argument
-    """Handle any pydantic errors raised in the apis"""
-    return Response({"error": exc.errors()}, status=422)
-
-
-@airbyteapi.exception_handler(HttpError)
-def ninja_http_error_handler(
-    request, exc: HttpError
-):  # pylint: disable=unused-argument
     """
-    Handle any http errors raised in the apis
-    TODO: should we put request.orguser.org.slug into the error message here
+    Handle any pydantic errors raised in the apis
+    These are raised during response payload validation
+    exc.errors() is correct
     """
-    return Response({"error": " ".join(exc.args)}, status=exc.status_code)
+    return Response({"detail": exc.errors()}, status=500)
 
 
 @airbyteapi.exception_handler(Exception)
@@ -74,7 +71,8 @@ def ninja_default_error_handler(
     request, exc: Exception
 ):  # pylint: disable=unused-argument
     """Handle any other exception raised in the apis"""
-    return Response({"error": " ".join(exc.args)}, status=500)
+    logger.exception(exc)
+    return Response({"detail": "something went wrong"}, status=500)
 
 
 @airbyteapi.post("/workspace/detach/", auth=auth.CanManagePipelines())
@@ -116,6 +114,7 @@ def post_airbyte_detach_workspace(request):
 )
 def post_airbyte_workspace(request, payload: AirbyteWorkspaceCreate):
     """Create an airbyte workspace"""
+    return "hello"
     orguser = request.orguser
     if orguser.org.airbyte_workspace_id is not None:
         raise HttpError(400, "org already has a workspace")
