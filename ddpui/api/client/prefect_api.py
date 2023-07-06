@@ -5,11 +5,10 @@ from datetime import datetime
 from ninja import NinjaAPI
 from ninja.errors import HttpError
 
-# from ninja.errors import ValidationError
-# from ninja.responses import Response
+from ninja.errors import ValidationError
+from ninja.responses import Response
+from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from django.utils.text import slugify
-
-# from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
@@ -34,35 +33,34 @@ prefectapi = NinjaAPI(urls_namespace="prefect")
 # http://127.0.0.1:8000/api/docs
 
 
-# @prefectapi.exception_handler(ValidationError)
-# def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
-#     """Handle any ninja validation errors raised in the apis"""
-#     return Response({"error": exc.errors}, status=422)
+@prefectapi.exception_handler(ValidationError)
+def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
+    """
+    Handle any ninja validation errors raised in the apis
+    These are raised during request payload validation
+    exc.errors is correct
+    """
+    return Response({"detail": exc.errors}, status=422)
 
 
-# @prefectapi.exception_handler(PydanticValidationError)
-# def pydantic_validation_error_handler(
-#     request, exc: PydanticValidationError
-# ):  # pylint: disable=unused-argument
-#     """Handle any pydantic errors raised in the apis"""
-#     return Response({"error": exc.errors()}, status=422)
+@prefectapi.exception_handler(PydanticValidationError)
+def pydantic_validation_error_handler(
+    request, exc: PydanticValidationError
+):  # pylint: disable=unused-argument
+    """
+    Handle any pydantic errors raised in the apis
+    These are raised during response payload validation
+    exc.errors() is correct
+    """
+    return Response({"detail": exc.errors()}, status=500)
 
 
-# @prefectapi.exception_handler(HttpError)
-# def ninja_http_error_handler(
-#     request, exc: HttpError
-# ):  # pylint: disable=unused-argument
-#     """Handle any http errors raised in the apis"""
-#     return Response({"error": " ".join(exc.args)}, status=exc.status_code)
-
-
-# @prefectapi.exception_handler(Exception)
-# def ninja_default_error_handler(
-#     request, exc: Exception
-# ):  # pylint: disable=unused-argument
-#     """Handle any other exception raised in the apis"""
-#     raise exc
-#     # return Response({"error": " ".join(exc.args)}, status=500)
+@prefectapi.exception_handler(Exception)
+def ninja_default_error_handler(
+    request, exc: Exception
+):  # pylint: disable=unused-argument # skipcq PYL-W0613
+    """Handle any other exception raised in the apis"""
+    return Response({"detail": "something went wrong"}, status=500)
 
 
 @prefectapi.post("/flows/", auth=auth.CanManagePipelines())

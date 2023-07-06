@@ -1,6 +1,7 @@
 import os
 import requests
 
+from ninja.errors import HttpError
 from dotenv import load_dotenv
 from ddpui.ddpprefect.schema import (
     PrefectDbtCoreSetup,
@@ -20,34 +21,72 @@ http_timeout = int(os.getenv("PREFECT_HTTP_TIMEOUT", "5"))
 
 
 # ================================================================================================
+def prefect_get(endpoint: str, **kwargs) -> dict:
+    """make a GET request to the proxy"""
+    try:
+        res = requests.get(
+            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}", timeout=http_timeout, **kwargs
+        )
+    except Exception as error:
+        raise HttpError(500, "connection error") from error
+    try:
+        res.raise_for_status()
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(res.status_code, res.text) from error
+    return res.json()
+
+
+def prefect_post(endpoint: str, json: dict) -> dict:
+    """make a POST request to the proxy"""
+    try:
+        res = requests.post(
+            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}", timeout=http_timeout, json=json
+        )
+    except Exception as error:
+        raise HttpError(500, "connection error") from error
+    try:
+        res.raise_for_status()
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(res.status_code, res.text) from error
+    return res.json()
+
+
+def prefect_delete_a_block(block_id: str) -> None:
+    """makes a DELETE request to the proxy"""
+    try:
+        res = requests.delete(
+            f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=http_timeout
+        )
+    except Exception as error:
+        raise HttpError(500, "connection error") from error
+    try:
+        res.raise_for_status()
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(res.status_code, res.text) from error
+
+
+# ================================================================================================
 def get_airbyte_server_block_id(blockname) -> str | None:
     """get the block_id for the server block having this name"""
-    response = requests.get(
-        f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/server/{blockname}",
-        timeout=http_timeout,
-    )
-    response.raise_for_status()
-    return response.json()["block_id"]
+    response = prefect_get(f"blocks/airbyte/server/{blockname}")
+    return response["block_id"]
 
 
 def create_airbyte_server_block(blockname) -> str:
     """Create airbyte server block in prefect"""
-    response = requests.post(
-        f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/server/",
-        timeout=http_timeout,
-        json={
+    response = prefect_post(
+        "blocks/airbyte/server/",
+        {
             "blockName": blockname,
             "serverHost": os.getenv("AIRBYTE_SERVER_HOST"),
             "serverPort": os.getenv("AIRBYTE_SERVER_PORT"),
             "apiVersion": os.getenv("AIRBYTE_SERVER_APIVER"),
         },
     )
-    try:
-        response.raise_for_status()
-    except Exception as error:
-        print(response.text)
-        raise error
-    return response.json()["block_id"]
+    return response["block_id"]
 
 
 def update_airbyte_server_block(blockname):
@@ -57,59 +96,48 @@ def update_airbyte_server_block(blockname):
 
 def delete_airbyte_server_block(block_id):
     """Delete airbyte server block"""
-    requests.delete(
-        f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=http_timeout
-    )
+    prefect_delete_a_block(block_id)
 
 
 # ================================================================================================
 def get_airbyte_connection_block_id(blockname) -> str | None:
     """get the block_id for the connection block having this name"""
-    response = requests.get(
-        f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/connection/byblockname/"
-        f"{blockname}",
-        timeout=http_timeout,
+    response = prefect_get(
+        f"blocks/airbyte/connection/byblockname/{blockname}",
     )
-    response.raise_for_status()
-    return response.json()["block_id"]
+    return response["block_id"]
 
 
-def get_airbye_connection_blocks(block_names):
+def get_airbye_connection_blocks(block_names) -> dict:
     """Filter out blocks by query params"""
-    response = requests.post(
-        f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/connection/filter",
-        timeout=http_timeout,
-        json={"block_names": block_names},
+    response = prefect_post(
+        "blocks/airbyte/connection/filter",
+        {"block_names": block_names},
     )
-    response.raise_for_status()
-    return response.json()
+    return response
 
 
-def get_airbyte_connection_block_by_id(block_id: str):
+def get_airbyte_connection_block_by_id(block_id: str) -> dict:
     """look up a prefect airbyte-connection block by id"""
-    response = requests.get(
-        f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/connection/byblockid/{block_id}",
-        timeout=http_timeout,
+    response = prefect_get(
+        f"blocks/airbyte/connection/byblockid/{block_id}",
     )
-    response.raise_for_status()
-    return response.json()
+    return response
 
 
 def create_airbyte_connection_block(
     conninfo: PrefectAirbyteConnectionSetup,
 ) -> str:
     """Create airbyte connection block"""
-    response = requests.post(
-        f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/connection/",
-        timeout=http_timeout,
-        json={
+    response = prefect_post(
+        "blocks/airbyte/connection/",
+        {
             "serverBlockName": conninfo.serverBlockName,
             "connectionId": conninfo.connectionId,
             "connectionBlockName": conninfo.connectionBlockName,
         },
     )
-    response.raise_for_status()
-    return response.json()["block_id"]
+    return response["block_id"]
 
 
 def update_airbyte_connection_block(blockname):
@@ -117,77 +145,54 @@ def update_airbyte_connection_block(blockname):
     raise Exception("not implemented")
 
 
-def delete_airbyte_connection_block(block_id):
+def delete_airbyte_connection_block(block_id) -> None:
     """Delete airbyte connection block in prefect"""
-    requests.delete(
-        f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=http_timeout
-    )
+    prefect_delete_a_block(block_id)
 
 
-def post_prefect_blocks_bulk_delete(block_ids: list):
+def post_prefect_blocks_bulk_delete(block_ids: list) -> dict:
     """
     Delete airbyte connection blocks in prefect
     corresponding the connection ids array passed
     """
-    response = requests.post(
-        f"{PREFECT_PROXY_API_URL}/proxy/blocks/bulk/delete/",
-        timeout=http_timeout,
-        json={"block_ids": block_ids},
+    response = prefect_post(
+        "blocks/bulk/delete/",
+        {"block_ids": block_ids},
     )
-    try:
-        response.raise_for_status()
-    except Exception as error:
-        logger.error(response.text)
-        raise error
-    return response.json()
+    return response
 
 
 # ================================================================================================
 def get_shell_block_id(blockname) -> str | None:
     """get the block_id for the shell block having this name"""
-    response = requests.get(
-        f"{PREFECT_PROXY_API_URL}/proxy/blocks/shell/{blockname}", timeout=http_timeout
-    )
-    try:
-        response.raise_for_status()
-    except Exception as error:
-        logger.error(response.text)
-        raise error
-    return response.json()["block_id"]
+    response = prefect_get(f"blocks/shell/{blockname}")
+    return response["block_id"]
 
 
-def create_shell_block(shell: PrefectShellSetup):
+def create_shell_block(shell: PrefectShellSetup) -> str:
     """Create a prefect shell block"""
-    response = requests.post(
-        f"{PREFECT_PROXY_API_URL}/proxy/blocks/shell/",
-        timeout=http_timeout,
-        json={
+    response = prefect_post(
+        "blocks/shell/",
+        {
             "blockName": shell.blockname,
             "commands": shell.commands,
             "env": shell.env,
             "workingDir": shell.workingDir,
         },
     )
-    response.raise_for_status()
-    return response.json()["block_id"]
+    return response["block_id"]
 
 
 def delete_shell_block(block_id):
     """Delete a prefect shell block"""
-    requests.delete(
-        f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=http_timeout
-    )
+    prefect_delete_a_block(block_id)
 
 
 # ================================================================================================
 def get_dbtcore_block_id(blockname) -> str | None:
     """get the block_id for the dbtcore block having this name"""
-    response = requests.get(
-        f"{PREFECT_PROXY_API_URL}/proxy/blocks/dbtcore/{blockname}",
-        timeout=http_timeout,
-    )
-    response.raise_for_status()
-    return response.json()["block_id"]
+    response = prefect_get(f"blocks/dbtcore/{blockname}")
+    return response["block_id"]
 
 
 def create_dbt_core_block(
@@ -196,12 +201,11 @@ def create_dbt_core_block(
     target: str,
     wtype: str,
     credentials: dict,
-):
+) -> dict:
     """Create a dbt core block in prefect"""
-    response = requests.post(
-        f"{PREFECT_PROXY_API_URL}/proxy/blocks/dbtcore/",
-        timeout=http_timeout,
-        json={
+    response = prefect_post(
+        "blocks/dbtcore/",
+        {
             "blockName": dbtcore.block_name,
             "profile": {
                 "name": profile.name,
@@ -217,51 +221,41 @@ def create_dbt_core_block(
             "project_dir": dbtcore.project_dir,
         },
     )
-    try:
-        response.raise_for_status()
-    except Exception as error:
-        logger.exception(error)
-        raise Exception(response.text) from error
-    return response.json()
+    return response
 
 
 def delete_dbt_core_block(block_id):
     """Delete a dbt core block in prefect"""
-    requests.delete(
-        f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=http_timeout
-    )
+    prefect_delete_a_block(block_id)
 
 
 # ================================================================================================
-def run_airbyte_connection_sync(run_flow: PrefectAirbyteSync):  # pragma: no cover
+def run_airbyte_connection_sync(
+    run_flow: PrefectAirbyteSync,
+) -> dict:  # pragma: no cover
     """initiates an airbyte connection sync"""
-    res = requests.post(
-        f"{PREFECT_PROXY_API_URL}/proxy/flows/airbyte/connection/sync/",
-        timeout=120,
+    res = prefect_post(
+        "flows/airbyte/connection/sync/",
         json=run_flow.to_json(),
     )
-    res.raise_for_status()
-    return res.json()
+    return res
 
 
-def run_dbt_core_sync(run_flow: PrefectDbtCore):  # pragma: no cover
+def run_dbt_core_sync(run_flow: PrefectDbtCore) -> dict:  # pragma: no cover
     """initiates a dbt job sync"""
-    res = requests.post(
-        f"{PREFECT_PROXY_API_URL}/proxy/flows/dbtcore/run/",
-        timeout=120,
+    res = prefect_post(
+        "flows/dbtcore/run/",
         json=run_flow.to_json(),
     )
-    res.raise_for_status()
-    return res.json()
+    return res
 
 
 # Flows and deployments
-def create_dataflow(payload: PrefectDataFlowCreateSchema2):  # pragma: no cover
+def create_dataflow(payload: PrefectDataFlowCreateSchema2) -> dict:  # pragma: no cover
     """create a prefect deployment out of a flow and a cron schedule"""
-    res = requests.post(
-        f"{PREFECT_PROXY_API_URL}/proxy/deployments/",
-        timeout=http_timeout,
-        json={
+    res = prefect_post(
+        "deployments/",
+        {
             "flow_name": payload.flow_name,
             "deployment_name": payload.deployment_name,
             "org_slug": payload.orgslug,
@@ -273,25 +267,22 @@ def create_dataflow(payload: PrefectDataFlowCreateSchema2):  # pragma: no cover
             "cron": payload.cron,
         },
     )
-    res.raise_for_status()
-    return res.json()
+    return res
 
 
-def get_flow_runs_by_deployment_id(deployment_id, limit=None):  # pragma: no cover
+def get_flow_runs_by_deployment_id(deployment_id: str, limit=None):  # pragma: no cover
     """
     Fetch flow runs of a deployment that are FAILED/COMPLETED
     sorted by descending start time of each run
     """
-    res = requests.get(
-        f"{PREFECT_PROXY_API_URL}/proxy/flow_runs",
-        timeout=http_timeout,
+    res = prefect_get(
+        "flow_runs",
         params={"deployment_id": deployment_id, "limit": limit},
     )
-    res.raise_for_status()
-    return res.json()["flow_runs"]
+    return res["flow_runs"]
 
 
-def get_last_flow_run_by_deployment_id(deployment_id):  # pragma: no cover
+def get_last_flow_run_by_deployment_id(deployment_id: str):  # pragma: no cover
     """Fetch most recent flow run of a deployment that is FAILED/COMPLETED"""
     res = get_flow_runs_by_deployment_id(deployment_id, limit=1)
     if len(res) > 0:
@@ -299,65 +290,51 @@ def get_last_flow_run_by_deployment_id(deployment_id):  # pragma: no cover
     return None
 
 
-def set_deployment_schedule(deployment_id, status):
-    res = requests.post(
-        f"{PREFECT_PROXY_API_URL}/proxy/deployments/{deployment_id}/set_schedule/"
-        f"{status}",
-        timeout=http_timeout,
-    )
-    res.raise_for_status()
-    return None
+def set_deployment_schedule(deployment_id: str, status: str):
+    """activates / deactivates a deployment"""
+    prefect_post(f"deployments/{deployment_id}/set_schedule/{status}", {})
 
 
 def get_filtered_deployments(org_slug, deployment_ids):  # pragma: no cover
     # pylint: disable=dangerous-default-value
     """Fetch all deployments by org slug"""
-    res = requests.post(
-        f"{PREFECT_PROXY_API_URL}/proxy/deployments/filter",
-        timeout=http_timeout,
-        json={"org_slug": org_slug, "deployment_ids": deployment_ids},
+    res = prefect_post(
+        "deployments/filter",
+        {"org_slug": org_slug, "deployment_ids": deployment_ids},
     )
-    res.raise_for_status()
-    return res.json()["deployments"]
+    return res["deployments"]
 
 
-def delete_deployment_by_id(deployment_id):  # pragma: no cover
+def delete_deployment_by_id(deployment_id: str) -> dict:  # pragma: no cover
     """Proxy api call to delete a deployment from prefect db"""
-    res = requests.delete(
-        f"{PREFECT_PROXY_API_URL}/proxy/deployments/{deployment_id}",
-        timeout=http_timeout,
-    )
-    res.raise_for_status()
+    try:
+        res = requests.delete(
+            f"{PREFECT_PROXY_API_URL}/proxy/deployments/{deployment_id}",
+            timeout=http_timeout,
+        )
+        res.raise_for_status()
+    except Exception as error:
+        raise HttpError(res.status_code, res.text) from error
     return {"success": 1}
 
 
-def get_deployment(deployment_id):
+def get_deployment(deployment_id) -> dict:
     """Proxy api to fetch deployment and its details"""
-    res = requests.get(
-        f"{PREFECT_PROXY_API_URL}/proxy/deployments/{deployment_id}",
-        timeout=http_timeout,
-    )
-    res.raise_for_status()
-    return res.json()
+    res = prefect_get(f"deployments/{deployment_id}")
+    return res
 
 
-def get_flow_run_logs(flow_run_id, offset):  # pragma: no cover
+def get_flow_run_logs(flow_run_id: str, offset: int) -> dict:  # pragma: no cover
     """retreive the logs from a flow-run from prefect"""
-    res = requests.get(
-        f"{PREFECT_PROXY_API_URL}/proxy/flow_runs/logs/{flow_run_id}",
+    res = prefect_get(
+        f"flow_runs/logs/{flow_run_id}",
         params={"offset": offset},
-        timeout=http_timeout,
     )
-    res.raise_for_status()
-    return {"logs": res.json()}
+    return {"logs": res}
 
 
-def create_deployment_flow_run(deployment_id):  # pragma: no cover
+def create_deployment_flow_run(deployment_id: str) -> dict:  # pragma: no cover
     """Proxy call to create a flow run for deployment.
     This is like a quick check to see if deployment is running"""
-    res = requests.post(
-        f"{PREFECT_PROXY_API_URL}/proxy/deployments/{deployment_id}/flow_run",
-        timeout=http_timeout,
-    )
-    res.raise_for_status()
-    return res.json()
+    res = prefect_post(f"deployments/{deployment_id}/flow_run", {})
+    return res
