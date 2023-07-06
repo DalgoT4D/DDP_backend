@@ -114,7 +114,6 @@ def post_airbyte_detach_workspace(request):
 )
 def post_airbyte_workspace(request, payload: AirbyteWorkspaceCreate):
     """Create an airbyte workspace"""
-    return "hello"
     orguser = request.orguser
     if orguser.org.airbyte_workspace_id is not None:
         raise HttpError(400, "org already has a workspace")
