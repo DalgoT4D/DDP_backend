@@ -46,6 +46,7 @@ user_org_api = NinjaAPI(urls_namespace="userorg")
 
 load_dotenv()
 
+
 @user_org_api.exception_handler(ValidationError)
 def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
     """Handle any ninja validation errors raised in the apis"""
@@ -344,6 +345,7 @@ def delete_organization_warehouses(request):
     logger.info("FINISHED Deleting data flows")
 
     return {"success": 1}
+
 
 @user_org_api.get("/organizations/warehouses", auth=auth.CanManagePipelines())
 def get_organizations_warehouses(request):
