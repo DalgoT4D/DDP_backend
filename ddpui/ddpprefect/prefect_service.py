@@ -27,6 +27,9 @@ def prefect_get(endpoint: str, **kwargs) -> dict:
         res = requests.get(
             f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}", timeout=http_timeout, **kwargs
         )
+    except Exception as error:
+        raise HttpError(500, "connection error") from error
+    try:
         res.raise_for_status()
     except Exception as error:
         logger.exception(error)
@@ -40,6 +43,9 @@ def prefect_post(endpoint: str, json: dict) -> dict:
         res = requests.post(
             f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}", timeout=http_timeout, json=json
         )
+    except Exception as error:
+        raise HttpError(500, "connection error") from error
+    try:
         res.raise_for_status()
     except Exception as error:
         logger.exception(error)
@@ -53,6 +59,9 @@ def prefect_delete_a_block(block_id: str) -> None:
         res = requests.delete(
             f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=http_timeout
         )
+    except Exception as error:
+        raise HttpError(500, "connection error") from error
+    try:
         res.raise_for_status()
     except Exception as error:
         logger.exception(error)
