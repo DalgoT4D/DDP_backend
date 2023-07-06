@@ -32,7 +32,7 @@ from ddpui.models.org_user import (
     VerifyEmailSchema,
 )
 from ddpui.ddpprefect import prefect_service
-from ddpui.ddpairbyte import airbyte_service
+from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 from ddpui.ddpdbt import dbt_service
 from ddpui.ddpprefect import AIRBYTECONNECTION
 from ddpui.utils.ddp_logger import logger
@@ -40,8 +40,6 @@ from ddpui.utils.timezone import IST
 from ddpui.utils import secretsmanager
 from ddpui.utils import sendgrid
 from ddpui.utils import helpers
-from ddpui.ddpairbyte import airbytehelpers
-from ddpui.ddpairbyte import airbyte_service
 
 user_org_api = NinjaAPI(urls_namespace="userorg")
 # http://127.0.0.1:8000/api/docs
@@ -297,32 +295,30 @@ def delete_organization_warehouses(request):
     
     # delete prefect connection blocks
     logger.info("Deleting prefect connection blocks")
-    for block in OrgPrefectBlock.objects.filter(
-            org=orguser.org, block_type=AIRBYTECONNECTION
-        ):
+    for block in OrgPrefectBlock.objects.filter(org=orguser.org, block_type=AIRBYTECONNECTION):
+        
         prefect_service.delete_airbyte_connection_block(block.block_id)
         logger.info(f"delete connecion block id - {block.block_id}")
-
         block.delete()
+
     logger.info("FINISHED Deleting prefect connection blocks")
 
     # delete airbyte connections
     logger.info("Deleting airbyte connections")
-    for connection in airbyte_service.get_connections(orguser.org.airbyte_workspace_id)[
-            "connections"
-        ]:
+    for connection in airbyte_service.get_connections(orguser.org.airbyte_workspace_id)["connections"]:
+        
         connection_id = connection["connectionId"]
         airbyte_service.delete_connection(
             orguser.org.airbyte_workspace_id, connection_id
         )
         logger.info(f"deleted connection in Airbyte - {connection_id}")
+
     logger.info("FINISHED Deleting airbyte connections")
 
     # delete airbyte destinations
     logger.info("Deleting airbyte destinations")
-    for destination in airbyte_service.get_destinations(orguser.org.airbyte_workspace_id)[
-            "destinations"
-        ]:
+    for destination in airbyte_service.get_destinations(orguser.org.airbyte_workspace_id)["destinations"]:
+        
         destination_id = destination["destinationId"]
         airbyte_service.delete_destination(
             orguser.org.airbyte_workspace_id, destination_id
