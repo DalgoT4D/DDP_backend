@@ -1,6 +1,7 @@
 import os
 import requests
 
+from ninja.errors import HttpError
 from dotenv import load_dotenv
 from ddpui.ddpprefect.schema import (
     PrefectDbtCoreSetup,
@@ -20,34 +21,61 @@ http_timeout = int(os.getenv("PREFECT_HTTP_TIMEOUT", "5"))
 
 
 # ================================================================================================
+def prefect_get(endpoint: str) -> dict:
+    """make a GET request to the proxy"""
+    try:
+        res = requests.get(f"{PREFECT_PROXY_API_URL}/{endpoint}", timeout=http_timeout)
+        res.raise_for_status()
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(res.status_code, res.text) from error
+    return res.json()
+
+
+def prefect_post(endpoint: str, json: dict) -> dict:
+    """make a POST request to the proxy"""
+    try:
+        res = requests.post(
+            f"{PREFECT_PROXY_API_URL}/{endpoint}", timeout=http_timeout, json=json
+        )
+        res.raise_for_status()
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(res.status_code, res.text) from error
+    return res.json()
+
+
+def prefect_delete(endpoint: str):
+    """makes a DELETE request to the proxy"""
+    try:
+        res = requests.delete(
+            f"{PREFECT_PROXY_API_URL}/{endpoint}", timeout=http_timeout
+        )
+        res.raise_for_status()
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(res.status_code, res.text) from error
+
+
+# ================================================================================================
 def get_airbyte_server_block_id(blockname) -> str | None:
     """get the block_id for the server block having this name"""
-    response = requests.get(
-        f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/server/{blockname}",
-        timeout=http_timeout,
-    )
-    response.raise_for_status()
-    return response.json()["block_id"]
+    response = prefect_get(f"proxy/blocks/airbyte/server/{blockname}")
+    return response["block_id"]
 
 
 def create_airbyte_server_block(blockname) -> str:
     """Create airbyte server block in prefect"""
-    response = requests.post(
-        f"{PREFECT_PROXY_API_URL}/proxy/blocks/airbyte/server/",
-        timeout=http_timeout,
-        json={
+    response = prefect_post(
+        "proxy/blocks/airbyte/server/",
+        {
             "blockName": blockname,
             "serverHost": os.getenv("AIRBYTE_SERVER_HOST"),
             "serverPort": os.getenv("AIRBYTE_SERVER_PORT"),
             "apiVersion": os.getenv("AIRBYTE_SERVER_APIVER"),
         },
     )
-    try:
-        response.raise_for_status()
-    except Exception as error:
-        print(response.text)
-        raise error
-    return response.json()["block_id"]
+    return response["block_id"]
 
 
 def update_airbyte_server_block(blockname):
@@ -57,9 +85,7 @@ def update_airbyte_server_block(blockname):
 
 def delete_airbyte_server_block(block_id):
     """Delete airbyte server block"""
-    requests.delete(
-        f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=http_timeout
-    )
+    prefect_delete(f"delete-a-block/{block_id}")
 
 
 # ================================================================================================

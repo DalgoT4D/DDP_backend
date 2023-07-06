@@ -17,7 +17,14 @@ from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from rest_framework.authtoken import views
 
 from ddpui import auth
-from ddpui.models.org import Org, OrgSchema, OrgWarehouse, OrgWarehouseSchema, OrgPrefectBlock, OrgDataFlow
+from ddpui.models.org import (
+    Org,
+    OrgSchema,
+    OrgWarehouse,
+    OrgWarehouseSchema,
+    OrgPrefectBlock,
+    OrgDataFlow,
+)
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
     Invitation,
@@ -296,18 +303,27 @@ def delete_organization_warehouses(request):
 
     # delete prefect connection blocks
     logger.info("Deleting prefect connection blocks")
-    for block in OrgPrefectBlock.objects.filter(org=orguser.org, block_type=AIRBYTECONNECTION):
-
-        prefect_service.delete_airbyte_connection_block(block.block_id)
-        logger.info(f"delete connecion block id - {block.block_id}")
+    for block in OrgPrefectBlock.objects.filter(
+        org=orguser.org, block_type=AIRBYTECONNECTION
+    ):
+        try:
+            prefect_service.delete_airbyte_connection_block(block.block_id)
+            logger.info(f"delete connecion block id - {block.block_id}")
+        except Exception:
+            logger.error(
+                "failed to delete %s airbyte-connection-block %s in prefect, deleting from OrgPrefectBlock",
+                orguser.org.slug,
+                block.block_id,
+            )
         block.delete()
 
     logger.info("FINISHED Deleting prefect connection blocks")
 
     # delete airbyte connections
     logger.info("Deleting airbyte connections")
-    for connection in airbyte_service.get_connections(orguser.org.airbyte_workspace_id)["connections"]:
-
+    for connection in airbyte_service.get_connections(orguser.org.airbyte_workspace_id)[
+        "connections"
+    ]:
         connection_id = connection["connectionId"]
         airbyte_service.delete_connection(
             orguser.org.airbyte_workspace_id, connection_id
@@ -318,8 +334,9 @@ def delete_organization_warehouses(request):
 
     # delete airbyte destinations
     logger.info("Deleting airbyte destinations")
-    for destination in airbyte_service.get_destinations(orguser.org.airbyte_workspace_id)["destinations"]:
-
+    for destination in airbyte_service.get_destinations(
+        orguser.org.airbyte_workspace_id
+    )["destinations"]:
         destination_id = destination["destinationId"]
         airbyte_service.delete_destination(
             orguser.org.airbyte_workspace_id, destination_id

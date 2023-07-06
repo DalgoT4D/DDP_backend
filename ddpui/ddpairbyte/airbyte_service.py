@@ -48,7 +48,7 @@ def abreq(endpoint, req=None):
         res.raise_for_status()
     except Exception as error:
         logger.exception(error.args)
-        raise HttpError(res.status_code, error.args) from error
+        raise HttpError(res.status_code, res.text) from error
 
     if "application/json" in res.headers.get("Content-Type", ""):
         return res.json()
