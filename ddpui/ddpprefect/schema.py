@@ -140,3 +140,13 @@ class PrefectDataFlowCreateSchema2(Schema):
     connection_blocks: list[PrefectFlowAirbyteConnection]
     dbt_blocks: list
     cron: str = None
+
+
+class PrefectFlowRunSchema(Schema):
+    """Schema for field of a flow run fetched"""
+    id: str
+    name: str
+    deployment_id: str
+    flow_id: str
+    state_type: str
+    state_name: str
