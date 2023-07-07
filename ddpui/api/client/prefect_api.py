@@ -458,10 +458,10 @@ def get_prefect_dbt_run_blocks(request):
             "deploymentId": None
         }
 
-        # fetch the deploymentId for the dbt run block
+        # fetch the manual deploymentId for the dbt run block
         if prefect_block.command == "run":
-            dataflow = OrgDataFlow.objects.filter(org=orguser.org, cron=None).first()
-            block["deploymentId"] = dataflow.deployment_id if dataflow else None,
+            dataflow = OrgDataFlow.objects.filter(org=orguser.org, cron=None, connection_id=None).first()
+            block["deploymentId"] = dataflow.deployment_id if dataflow else None
 
         blocks.append(block)
 
