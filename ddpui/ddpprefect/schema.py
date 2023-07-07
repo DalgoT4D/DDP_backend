@@ -144,6 +144,7 @@ class PrefectDataFlowCreateSchema2(Schema):
 
 class PrefectFlowRunSchema(Schema):
     """Schema for field of a flow run fetched"""
+
     id: str
     name: str
     deployment_id: str
