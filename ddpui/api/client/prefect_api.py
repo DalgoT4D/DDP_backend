@@ -495,8 +495,8 @@ def delete_prefect_dbt_run_block(request):
                 logger.info("deleting manual deployment for dbt run")
                 # do this in try catch because it can fail & throw error
                 try:
-                    prefect_service.delete_deployment_by_id(dataflow.deployment_id) # skipcq: PYL-W0703
-                except Exception:
+                    prefect_service.delete_deployment_by_id(dataflow.deployment_id)
+                except Exception:  # skipcq: PYL-W0703
                     logger.exception("could not delete prefect deployment")
                     continue
 
