@@ -23,7 +23,7 @@ from ddpui.ddpprefect.schema import (
     PrefectDbtRun,
     PrefectDataFlowCreateSchema,
     PrefectDataFlowCreateSchema2,
-    PrefectFlowRunSchema
+    PrefectFlowRunSchema,
 )
 
 from ddpui.utils.ddp_logger import logger
@@ -408,6 +408,9 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
             dbt_target_schema=target,
         )
 
+        # cleaned name from the prefect-proxy
+        block_name = block_response["block_name"]
+
         # for the command dbt run create a deployment
         if command == "run":
             # create deployment
@@ -417,7 +420,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
                     flow_name=f"manual-{block_name}",
                     orgslug=orguser.org.slug,
                     connection_blocks=[],
-                    dbt_blocks=[{"blockName": block_name, "seq": 0}]
+                    dbt_blocks=[{"blockName": block_name, "seq": 0}],
                 )
             )
 
@@ -436,7 +439,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
             )
 
         coreprefectblock.save()
-        block_names.append(block_response["block_name"])
+        block_names.append(block_name)
 
     return {"success": 1, "block_names": block_names}
 
@@ -448,19 +451,23 @@ def get_prefect_dbt_run_blocks(request):
 
     blocks = []
 
-    for prefect_block in OrgPrefectBlock.objects.filter(org=orguser.org, block_type=DBTCORE):
+    for prefect_block in OrgPrefectBlock.objects.filter(
+        org=orguser.org, block_type=DBTCORE
+    ):
         block = {
             "blockType": prefect_block.block_type,
             "blockId": prefect_block.block_id,
             "blockName": prefect_block.block_name,
             "action": prefect_block.command,
             "target": prefect_block.dbt_target_schema,
-            "deploymentId": None
+            "deploymentId": None,
         }
 
         # fetch the manual deploymentId for the dbt run block
         if prefect_block.command == "run":
-            dataflow = OrgDataFlow.objects.filter(org=orguser.org, cron=None, connection_id=None).first()
+            dataflow = OrgDataFlow.objects.filter(
+                org=orguser.org, cron=None, connection_id=None
+            ).first()
             block["deploymentId"] = dataflow.deployment_id if dataflow else None
 
         blocks.append(block)
@@ -490,19 +497,24 @@ def delete_prefect_dbt_run_block(request):
 
         # For the run block, also delete the manual deployment for this
         if dbt_block.command == "run":
-            dataflow = OrgDataFlow.objects.filter(org=orguser.org, cron=None, connection_id=None).first()
-            if dataflow:
-                logger.info("deleting manual deployment for dbt run")
-                # do this in try catch because it can fail & throw error
-                try:
-                    prefect_service.delete_deployment_by_id(dataflow.deployment_id)
-                except Exception:  # skipcq: PYL-W0703
-                    logger.exception("could not delete prefect deployment")
-                    continue
+            while True:
+                dataflow = OrgDataFlow.objects.filter(
+                    org=orguser.org, cron=None, connection_id=None
+                ).first()
+                if dataflow:
+                    logger.info("deleting manual deployment for dbt run")
+                    # do this in try catch because it can fail & throw error
+                    try:
+                        prefect_service.delete_deployment_by_id(dataflow.deployment_id)
+                    except Exception:  # skipcq: PYL-W0703
+                        logger.exception("could not delete prefect deployment")
+                        continue
 
-                # delete manual dbt run deployment
-                dataflow.delete()
-                logger.info("FINISHED deleting manual deployment for dbt run")
+                    # delete manual dbt run deployment
+                    dataflow.delete()
+                    logger.info("FINISHED deleting manual deployment for dbt run")
+                else:
+                    break
 
     return {"success": 1}
 
@@ -520,7 +532,11 @@ def get_flow_runs_logs(
     return result
 
 
-@prefectapi.get("/flow_runs/{flow_run_id}", auth=auth.CanManagePipelines(), response=PrefectFlowRunSchema)
+@prefectapi.get(
+    "/flow_runs/{flow_run_id}",
+    auth=auth.CanManagePipelines(),
+    response=PrefectFlowRunSchema,
+)
 def get_flow_run_by_id(request, flow_run_id):
     # pylint: disable=unused-argument
     """fetch a flow run from prefect"""
