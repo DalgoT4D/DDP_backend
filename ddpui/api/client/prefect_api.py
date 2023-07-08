@@ -416,8 +416,8 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
             # create deployment
             dataflow = prefect_service.create_dataflow(
                 PrefectDataFlowCreateSchema2(
-                    deployment_name=f"manual-{block_name}",
-                    flow_name=f"manual-{block_name}",
+                    deployment_name=f"manual-run-{block_name}",
+                    flow_name=f"manual-run-{block_name}",
                     orgslug=orguser.org.slug,
                     connection_blocks=[],
                     dbt_blocks=[{"blockName": block_name, "seq": 0}],
@@ -433,7 +433,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
 
             OrgDataFlow.objects.create(
                 org=orguser.org,
-                name=f"manual-sync-{block_name}",
+                name=f"manual-run-{block_name}",
                 deployment_name=dataflow["deployment"]["name"],
                 deployment_id=dataflow["deployment"]["id"],
             )
