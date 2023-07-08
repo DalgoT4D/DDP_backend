@@ -335,6 +335,12 @@ def get_flow_run_logs(flow_run_id: str, offset: int) -> dict:  # pragma: no cove
     return {"logs": res}
 
 
+def get_flow_run(flow_run_id: str) -> dict:
+    """retreive the logs from a flow-run from prefect"""
+    res = prefect_get(f"flow_runs/{flow_run_id}")
+    return res
+
+
 def create_deployment_flow_run(deployment_id: str) -> dict:  # pragma: no cover
     """Proxy call to create a flow run for deployment.
     This is like a quick check to see if deployment is running"""
