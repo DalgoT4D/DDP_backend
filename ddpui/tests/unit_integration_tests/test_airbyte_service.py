@@ -458,11 +458,9 @@ def test_delete_source_failure():
     with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
         mock_post.return_value.status_code = 404
         mock_post.return_value.headers = {"Content-Type": "application/json"}
-        mock_post.return_value.json.return_value = {"error": "Invalid request data"}
         with pytest.raises(HttpError) as excinfo:
             delete_source(workspace_id, source_id)
         assert excinfo.value.status_code == 404
-        assert str(excinfo.value) == "source not found"
 
 
 def test_delete_source_with_invalid_workspace_id():

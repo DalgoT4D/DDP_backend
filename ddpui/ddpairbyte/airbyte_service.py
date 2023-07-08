@@ -48,7 +48,7 @@ def abreq(endpoint, req=None):
         res.raise_for_status()
     except Exception as error:
         logger.exception(error.args)
-        raise HttpError(res.status_code, error.args) from error
+        raise HttpError(res.status_code, res.text) from error
 
     if "application/json" in res.headers.get("Content-Type", ""):
         return res.json()
@@ -228,9 +228,6 @@ def delete_source(workspace_id: str, source_id: str) -> dict:
         raise HttpError(400, "Invalid source ID")
 
     res = abreq("sources/delete", {"sourceId": source_id})
-    if "sourceId" not in res:
-        logger.error("Source not found: %s", source_id)
-        raise HttpError(404, "source not found")
     return res
 
 

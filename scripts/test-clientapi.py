@@ -198,7 +198,7 @@ while ntries < 20:
     sleep(1)
     ntries += 1
     r = requests.get(
-        f"{PREFECT_PROXY_API_URL}/proxy/flow_runs/logs/" + flow_run["id"], timeout=10
+        f"{PREFECT_PROXY_API_URL}/proxy/flow_runs/logs/" + flow_run["id"], timeout=20
     )
     for log in r.json()["logs"]:
         print(log["message"])
