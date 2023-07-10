@@ -1,4 +1,5 @@
 import os
+import json
 from datetime import datetime
 from typing import List
 from ninja import NinjaAPI
@@ -39,6 +40,7 @@ from ddpui.ddpprefect import prefect_service
 from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
 from ddpui.utils.ddp_logger import logger
 from ddpui.ddpairbyte import airbytehelpers
+from ddpui.utils import secretsmanager
 
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
@@ -426,6 +428,20 @@ def put_airbyte_destination(
         destination_id, payload.name, payload.config, payload.destinationDefId
     )
     logger.info("updated destination having id " + destination["destinationId"])
+    warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if warehouse.wtype == "postgres":
+        dbt_credentials = {
+            "host": payload.config["host"],
+            "port": payload.config["port"],
+            "username": payload.config["username"],
+            "password": payload.config["password"],
+            "database": payload.config["database"],
+        }
+
+    elif warehouse.wtype == "bigquery":
+        dbt_credentials = json.loads(payload.config["credentials_json"])
+    secretsmanager.update_warehouse_credentials(warehouse, dbt_credentials)
+
     return {"destinationId": destination["destinationId"]}
 
 
