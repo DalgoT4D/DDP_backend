@@ -407,7 +407,10 @@ def post_organization_user_invite(request, payload: InvitationSchema):
         invited_on=payload.invited_on,
         invite_code=payload.invite_code,
     )
-    logger.info("created Invitation")
+    logger.info(
+        f"Invited {payload.invited_email} to join {orguser.org.name} "
+        f"with invite code {payload.invite_code}"
+    )
     return payload
 
 
