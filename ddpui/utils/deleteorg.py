@@ -1,3 +1,4 @@
+from ninja.errors import HttpError
 from ddpui.models.org_user import Org, OrgUser
 from ddpui.models.org import OrgDataFlow, OrgPrefectBlock, OrgWarehouse
 from ddpui.ddpairbyte import airbyte_service
@@ -16,7 +17,7 @@ def delete_prefect_deployments(org: Org):  # skipcq: PYL-R0201
         logger.info("%s %s", dataflow.deployment_id, dataflow.connection_id)
         try:
             prefect_service.delete_deployment_by_id(dataflow.deployment_id)
-        except Exception:
+        except HttpError:
             pass
         dataflow.delete()
 
