@@ -1,15 +1,12 @@
 import os
-from unittest import mock
 from unittest.mock import patch, Mock
 import django
-from pydantic import ValidationError
 import pytest
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from ninja.errors import HttpError
 from ddpui.models.org import Org, OrgDataFlow, OrgPrefectBlock, OrgWarehouse
 from ddpui.models.org_user import OrgUser, User
 
