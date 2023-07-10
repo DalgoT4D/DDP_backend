@@ -24,7 +24,10 @@ from ddpui.ddpairbyte.schema import (
     AirbyteDestinationUpdateCheckConnection,
     AirbyteConnectionUpdate,
 )
-from ddpui.ddpprefect.prefect_service import run_airbyte_connection_sync
+from ddpui.ddpprefect.prefect_service import (
+    run_airbyte_connection_sync,
+    update_dbt_core_block_credentials,
+)
 from ddpui.ddpprefect.schema import (
     PrefectFlowAirbyteConnection,
     PrefectAirbyteConnectionBlockSchema,
@@ -35,6 +38,7 @@ from ddpui.ddpprefect.schema import (
 from ddpui.ddpprefect import (
     AIRBYTESERVER,
     AIRBYTECONNECTION,
+    DBTCORE,
 )
 from ddpui.ddpprefect import prefect_service
 from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
@@ -440,7 +444,15 @@ def put_airbyte_destination(
 
     elif warehouse.wtype == "bigquery":
         dbt_credentials = json.loads(payload.config["credentials_json"])
+    else:
+        raise HttpError(400, "unknown warehouse type " + warehouse.wtype)
+
     secretsmanager.update_warehouse_credentials(warehouse, dbt_credentials)
+
+    for dbtblock in OrgPrefectBlock.objects.filter(org=orguser.org, block_type=DBTCORE):
+        update_dbt_core_block_credentials(
+            warehouse.wtype, dbtblock.block_name, dbt_credentials
+        )
 
     return {"destinationId": destination["destinationId"]}
 

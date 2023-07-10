@@ -53,6 +53,22 @@ def prefect_post(endpoint: str, json: dict) -> dict:
     return res.json()
 
 
+def prefect_put(endpoint: str, json: dict) -> dict:
+    """make a PUT request to the proxy"""
+    try:
+        res = requests.put(
+            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}", timeout=http_timeout, json=json
+        )
+    except Exception as error:
+        raise HttpError(500, "connection error") from error
+    try:
+        res.raise_for_status()
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(res.status_code, res.text) from error
+    return res.json()
+
+
 def prefect_delete_a_block(block_id: str) -> None:
     """makes a DELETE request to the proxy"""
     try:
@@ -229,6 +245,18 @@ def create_dbt_core_block(
 def delete_dbt_core_block(block_id):
     """Delete a dbt core block in prefect"""
     prefect_delete_a_block(block_id)
+
+
+def update_dbt_core_block_credentials(wtype: str, block_name: str, credentials: dict):
+    """Update the credentials of a dbt core block in prefect"""
+    response = prefect_put(
+        f"blocks/dbtcore/{wtype}/",
+        {
+            "blockName": block_name,
+            "credentials": credentials,
+        },
+    )
+    return response
 
 
 # ================================================================================================
