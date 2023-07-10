@@ -13,7 +13,7 @@ def delete_prefect_deployments(org: Org):  # skipcq: PYL-R0201
     """fetches and deletes every prefect deployment for this org"""
     logger.info("=========== OrgDataFlow ===========")
     for dataflow in OrgDataFlow.objects.filter(org=org):
-        logger.info(dataflow.deployment_id, dataflow.connection_id)
+        logger.info("%s %s", dataflow.deployment_id, dataflow.connection_id)
         try:
             prefect_service.delete_deployment_by_id(dataflow.deployment_id)
         except Exception:
@@ -26,6 +26,7 @@ def delete_prefect_shell_blocks(org: Org):  # skipcq: PYL-R0201
     logger.info("=========== OrgPrefectBlock: Shell Operations ===========")
     for block in OrgPrefectBlock.objects.filter(org=org, block_type=SHELLOPERATION):
         logger.info(
+            "%s %s %s",
             block.block_name,
             block.display_name,
             block.command,
@@ -47,6 +48,7 @@ def delete_airbyte_workspace(org: Org):  # skipcq: PYL-R0201
     logger.info("=========== OrgPrefectBlock: Airbyte Connections ===========")
     for block in OrgPrefectBlock.objects.filter(org=org, block_type=AIRBYTECONNECTION):
         logger.info(
+            "%s %s %s %s %s",
             block.block_name,
             block.block_type,
             block.display_name,
@@ -59,6 +61,7 @@ def delete_airbyte_workspace(org: Org):  # skipcq: PYL-R0201
     logger.info("=========== OrgPrefectBlock: Airbyte Server(s) ===========")
     for block in OrgPrefectBlock.objects.filter(org=org, block_type=AIRBYTESERVER):
         logger.info(
+            "%s %s %s %s %s",
             block.block_name,
             block.block_type,
             block.display_name,
