@@ -120,6 +120,7 @@ def post_organization_user(
     logger.info(
         f"created user [account-manager] "
         f"{orguser.user.email} having userid {orguser.user.id}"
+        f"with slug: {org.slug}"
     )
     redis = Redis()
     token = uuid4()
@@ -184,7 +185,7 @@ def put_organization_user_self(request, payload: OrgUserUpdate):
         orguser.user.is_active = payload.active
     orguser.user.save()
 
-    logger.info(f"updated self {orguser.user.email}")
+    logger.info(f"updated self {orguser.user.email} with slug: {org.slug}")
     return OrgUserResponse(
         email=orguser.user.email, active=orguser.user.is_active, role=orguser.role
     )
@@ -217,7 +218,7 @@ def put_organization_user(request, payload: OrgUserUpdate):
         orguser.role = payload.role
     orguser.user.save()
 
-    logger.info(f"updated orguser {orguser.user.email}")
+    logger.info(f"updated orguser {orguser.user.email} with slug: {org.slug}")
     return OrgUserResponse(
         email=orguser.user.email, active=orguser.user.is_active, role=orguser.role
     )
@@ -235,7 +236,7 @@ def post_organization(request, payload: OrgSchema):
     org = Org.objects.create(**payload.dict())
     org.slug = slugify(org.name)[:20]
     org.save()
-    logger.info(f"{orguser.user.email} created new org {org.name}")
+    logger.info(f"{orguser.user.email} created new org {org.name} with slug: {org.slug}")
     try:
         new_workspace = airbytehelpers.setup_airbyte_workspace(org.slug, org)
     except Exception as error:
@@ -260,7 +261,7 @@ def post_organization_warehouse(request, payload: OrgWarehouseSchema):
         payload.destinationDefId,
         payload.airbyteConfig,
     )
-    logger.info("created destination having id " + destination["destinationId"])
+    logger.info("created destination having id " + destination["destinationId"]+" with slug: "+{org.slug})
 
     # prepare the dbt credentials from airbyteConfig
     dbtCredenials = None
@@ -407,7 +408,7 @@ def post_organization_user_invite(request, payload: InvitationSchema):
         invited_on=payload.invited_on,
         invite_code=payload.invite_code,
     )
-    logger.info("created Invitation")
+    logger.info("created Invitation with slug: "+ org.slug)
     return payload
 
 
@@ -444,8 +445,9 @@ def post_organization_user_accept_invite(
     ).first()
     if not orguser:
         logger.info(
-            f"creating invited user {invitation.invited_email} "
+            f"creating invited user {invitation.invited_email}"
             f"for {invitation.invited_by.org.name}"
+            f"with slug: {org.slug}"
         )
         user = User.objects.create_user(
             username=invitation.invited_email,

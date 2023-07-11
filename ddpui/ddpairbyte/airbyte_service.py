@@ -40,7 +40,7 @@ def abreq(endpoint, req=None):
     try:
         result_obj = remove_nested_attribute(res.json(), "icon")
         logger.info("Response from Airbyte server:")
-        logger.info(json.dumps(result_obj, indent=2))
+        logger.info(json.dumps(result_obj, separators=(",", ":")))
     except ValueError:
         logger.info("Response from Airbyte server: %s", res.text)
 
