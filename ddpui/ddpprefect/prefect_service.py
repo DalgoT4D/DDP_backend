@@ -250,7 +250,7 @@ def delete_dbt_core_block(block_id):
 def update_dbt_core_block_credentials(wtype: str, block_name: str, credentials: dict):
     """Update the credentials of a dbt core block in prefect"""
     response = prefect_put(
-        f"blocks/dbtcore/{wtype}/",
+        f"blocks/dbtcore_edit/{wtype}/",
         {
             "blockName": block_name,
             "credentials": credentials,
