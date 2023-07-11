@@ -433,14 +433,17 @@ def put_airbyte_destination(
     )
     logger.info("updated destination having id " + destination["destinationId"])
     warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+
+    dbt_credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
+
     if warehouse.wtype == "postgres":
-        dbt_credentials = {
-            "host": payload.config["host"],
-            "port": payload.config["port"],
-            "username": payload.config["username"],
-            "password": payload.config["password"],
-            "database": payload.config["database"],
-        }
+        for config_key in ["host", "port", "username", "password", "database"]:
+            if (
+                config_key in payload.config
+                and len(payload.config[config_key]) > 0
+                and list(set(payload.config[config_key]))[0] != "*"
+            ):
+                dbt_credentials[config_key] = payload.config[config_key]
 
     elif warehouse.wtype == "bigquery":
         dbt_credentials = json.loads(payload.config["credentials_json"])
