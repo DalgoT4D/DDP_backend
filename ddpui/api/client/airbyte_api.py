@@ -437,6 +437,9 @@ def put_airbyte_destination(
     dbt_credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
 
     if warehouse.wtype == "postgres":
+        aliases = {
+            "dbname": "database",
+        }
         for config_key in ["host", "port", "username", "password", "database"]:
             if (
                 config_key in payload.config
@@ -444,7 +447,9 @@ def put_airbyte_destination(
                 and len(payload.config[config_key]) > 0
                 and list(set(payload.config[config_key]))[0] != "*"
             ):
-                dbt_credentials[config_key] = payload.config[config_key]
+                dbt_credentials[aliases.get(config_key, config_key)] = payload.config[
+                    config_key
+                ]
 
     elif warehouse.wtype == "bigquery":
         dbt_credentials = json.loads(payload.config["credentials_json"])
