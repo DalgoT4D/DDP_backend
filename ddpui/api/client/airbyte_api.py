@@ -440,6 +440,7 @@ def put_airbyte_destination(
         for config_key in ["host", "port", "username", "password", "database"]:
             if (
                 config_key in payload.config
+                and isinstance(payload.config[config_key], str)
                 and len(payload.config[config_key]) > 0
                 and list(set(payload.config[config_key]))[0] != "*"
             ):
