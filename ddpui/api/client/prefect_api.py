@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from datetime import datetime
+import yaml
 
 from ninja import NinjaAPI
 from ninja.errors import HttpError
@@ -20,7 +21,7 @@ from ddpui.ddpprefect.schema import (
     PrefectAirbyteSync,
     PrefectDbtCore,
     PrefectDbtCoreSetup,
-    PrefectDbtRun,
+    DbtProfile,
     PrefectDataFlowCreateSchema,
     PrefectDataFlowCreateSchema2,
     PrefectFlowRunSchema,
@@ -325,7 +326,7 @@ def post_prefect_dbt_core_run_flow(
 
 
 @prefectapi.post("/blocks/dbt/", auth=auth.CanManagePipelines())
-def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
+def post_prefect_dbt_core_block(request):
     """Create five prefect dbt core blocks:
     - dbt clean
     - dbt deps
@@ -349,12 +350,16 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
 
     dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
     project_dir = str(dbt_env_dir / "dbtrepo")
+    dbt_project_filename = str(dbt_env_dir / "dbtrepo/dbt_project.yml")
 
-    target = (
-        payload.profile.target_configs_schema
-        if payload.profile.target_configs_schema
-        else orguser.org.dbt.default_schema
-    )
+    with open(dbt_project_filename, "r", encoding="utf-8") as dbt_project_file:
+        dbt_project = yaml.safe_load(dbt_project_file)
+        if "profile" not in dbt_project:
+            raise HttpError("could not find profile in dbt_project.yml")
+
+    profile_name = dbt_project["profile"]
+    target = orguser.org.dbt.default_schema
+    logger.info("profile_name=%s target=%s", profile_name, target)
 
     # get the bigquery location if warehouse is bq
     bqlocation = None
@@ -371,7 +376,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
     ):
         block_name = (
             f"{orguser.org.slug}-"
-            f"{slugify(payload.profile.name)}-"
+            f"{slugify(profile_name)}-"
             f"{slugify(target)}-"
             f"{slugify(command)}"
         )
@@ -387,7 +392,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
         try:
             block_response = prefect_service.create_dbt_core_block(
                 block_data,
-                payload.profile,
+                profile_name,
                 target,
                 warehouse.wtype,
                 credentials,

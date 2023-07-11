@@ -197,7 +197,7 @@ def get_dbtcore_block_id(blockname) -> str | None:
 
 def create_dbt_core_block(
     dbtcore: PrefectDbtCoreSetup,
-    profile: DbtProfile,
+    profilename: str,
     target: str,
     wtype: str,
     credentials: dict,
@@ -209,7 +209,7 @@ def create_dbt_core_block(
         {
             "blockName": dbtcore.block_name,
             "profile": {
-                "name": profile.name,
+                "name": profilename,
                 "target": target,
                 "target_configs_schema": target,
             },
