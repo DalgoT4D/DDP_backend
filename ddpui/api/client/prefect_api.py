@@ -1,3 +1,4 @@
+import inspect
 import os
 from pathlib import Path
 from datetime import datetime
@@ -62,6 +63,13 @@ def ninja_default_error_handler(
 ):  # pylint: disable=unused-argument # skipcq PYL-W0613
     """Handle any other exception raised in the apis"""
     return Response({"detail": "something went wrong"}, status=500)
+
+
+def custom_logger_info(request, message):
+    orgname = request.orguser.org.slug
+    caller = inspect.stack()[1]
+    caller_name = caller.function
+    logger.info(message, extra={"orgname": orgname, "caller_name": caller_name})
 
 
 @prefectapi.post("/flows/", auth=auth.CanManagePipelines())
@@ -502,7 +510,9 @@ def delete_prefect_dbt_run_block(request):
                     org=orguser.org, cron=None, connection_id=None
                 ).first()
                 if dataflow:
-                    logger.info("deleting manual deployment for dbt run")
+                    custom_logger_info(
+                        request, "deleting manual deployment for dbt run"
+                    )
                     # do this in try catch because it can fail & throw error
                     try:
                         prefect_service.delete_deployment_by_id(dataflow.deployment_id)
@@ -512,7 +522,9 @@ def delete_prefect_dbt_run_block(request):
 
                     # delete manual dbt run deployment
                     dataflow.delete()
-                    logger.info("FINISHED deleting manual deployment for dbt run")
+                    custom_logger_info(
+                        request, "FINISHED deleting manual deployment for dbt run"
+                    )
                 else:
                     break
 

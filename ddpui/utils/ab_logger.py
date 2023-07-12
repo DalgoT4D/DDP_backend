@@ -25,7 +25,7 @@ def setup_logger():
     handler.setLevel(logging.DEBUG)
     logging.Formatter.converter = ist_time
     formatter = logging.Formatter(
-        "%(levelname)s - %(asctime)s - %(name)s - %(message)s"
+        "%(levelname)s - %(asctime)s - %(name)s - %(filename)s - %(caller_name)s - %(orgname)s: %(message)s"
     )
     handler.setFormatter(formatter)
     logger.addHandler(handler)
@@ -35,7 +35,7 @@ def setup_logger():
     handler.setLevel(logging.INFO)
     logging.Formatter.converter = ist_time
     formatter = logging.Formatter(
-        "%(levelname)s - %(asctime)s - %(name)s - %(message)s"
+        "%(levelname)s - %(asctime)s - %(name)s - %(filename)s - %(caller_name)s - %(orgname)s: %(message)s"
     )
     handler.setFormatter(formatter)
     logger.addHandler(handler)

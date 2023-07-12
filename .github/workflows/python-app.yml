@@ -2,7 +2,9 @@ name: Python package
 
 on:
   push:
-    branches: [main]
+    branches: [fix/update_logs]
+  pull:
+    branches: [fix/update-logs]
 
 jobs:
   build:

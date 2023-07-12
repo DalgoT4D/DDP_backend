@@ -1,10 +1,15 @@
+import inspect
 import os
 import json
 from typing import Dict, List
 import requests
 from dotenv import load_dotenv
 from ninja.errors import HttpError
+from ddpui.api.client import airbyte_api
+from ddpui import auth
 from ddpui.ddpairbyte import schema
+from ddpui.models.org import Org
+from ddpui.models.org_user import OrgUserResponse
 from ddpui.utils.ab_logger import logger
 from ddpui.utils.helpers import remove_nested_attribute
 from ddpui.ddpairbyte.schema import (
@@ -13,6 +18,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteSourceUpdateCheckConnection,
     AirbyteDestinationUpdateCheckConnection,
 )
+from ddpui.api.client import user_org_api
 
 load_dotenv()
 
@@ -60,9 +66,18 @@ def abreq(endpoint, req=None):
     return {}
 
 
+class AirbyteService:
+    def __init__(self, orguser):
+        self.orguser = orguser
+
+    def custom_logger_info(self, message, orgname):
+        caller = inspect.stack()[1]
+        caller_name = caller.function
+        logger.info(message, extra={"orgname": orgname, "caller_name": caller_name})
+
+
 def get_workspaces():
     """Fetch all workspaces in airbyte server"""
-    logger.info("Fetching workspaces from Airbyte server")
 
     res = abreq("workspaces/list")
     if "workspaces" not in res:
@@ -192,19 +207,26 @@ def create_custom_source_definition(
     return res
 
 
-def get_sources(workspace_id: str) -> List[Dict]:
+def get_sources(workspace_id: str, orgname: str) -> List[Dict]:
     """Fetch all sources in an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "Invalid workspace ID")
 
+    airbyte_service = AirbyteService(None)
+    airbyte_service.custom_logger_info(
+        f"Fetching sources from Airbyte server for workspace {workspace_id}", orgname
+    )
+
     res = abreq("sources/list", {"workspaceId": workspace_id})
     if "sources" not in res:
-        logger.error("Sources not found for workspace: %s", workspace_id)
+        airbyte_service.custom_logger_info(
+            f"Sources not found for workspace: {workspace_id}", orgname
+        )
         raise HttpError(404, "sources not found for workspace")
     return res
 
 
-def get_source(workspace_id: str, source_id: str) -> dict:
+def get_source(workspace_id: str, source_id: str, orgname: str) -> dict:
     """Fetch a source in an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "Invalid workspace ID")
@@ -212,9 +234,14 @@ def get_source(workspace_id: str, source_id: str) -> dict:
     if not isinstance(source_id, str):
         raise HttpError(400, "Invalid source ID")
 
+    airbyte_service = AirbyteService(None)
+    airbyte_service.custom_logger_info(
+        f"Fetching source from Airbyte server for workspace {workspace_id} and source {source_id}",
+        orgname,
+    )
     res = abreq("sources/get", {"sourceId": source_id})
     if "sourceId" not in res:
-        logger.error("Source not found: %s", source_id)
+        airbyte_service.custom_logger_info(f"Source not found: {source_id}", orgname)
         raise HttpError(404, "source not found")
     return res
 
@@ -705,25 +732,30 @@ def update_connection(
     return res
 
 
-def reset_connection(connection_id: str) -> dict:
+def reset_connection(connection_id: str, orgname: str) -> dict:
     """Reset data of a connection at the destination"""
     if not isinstance(connection_id, str):
         raise HttpError(400, "connection_id must be a string")
 
     res = abreq("connections/reset", {"connectionId": connection_id})
-    logger.info("Reseting the connection: %s", connection_id)
+    airbyte_service = AirbyteService(None)
+    airbyte_service.custom_logger_info(
+        f"Reseting the connection: {connection_id}", orgname
+    )
     return res
 
 
-def delete_connection(workspace_id: str, connection_id: str) -> dict:
+def delete_connection(workspace_id: str, connection_id: str, orgname: str) -> dict:
     """Delete a connection of an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
     if not isinstance(connection_id, str):
         raise HttpError(400, "connection_id must be a string")
 
+    airbyte_service = AirbyteService(None)
+
     res = abreq("connections/delete", {"connectionId": connection_id})
-    logger.info("Deleting connection: %s", connection_id)
+    airbyte_service.custom_logger_info(f"Deleting connection: {connection_id}", orgname)
     return res
 
 

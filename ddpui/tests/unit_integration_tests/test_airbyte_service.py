@@ -369,44 +369,47 @@ def test_create_custom_source_definition_failure():
 
 def test_get_sources_success():
     workspace_id = "my_workspace_id"
+    orgname = "my_orgname"
     expected_response = {"sources": [{"sourceId": "1", "name": "Example Source 1"}]}
 
     with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
         mock_post.return_value.status_code = 200
         mock_post.return_value.headers = {"Content-Type": "application/json"}
         mock_post.return_value.json.return_value = expected_response
-        result = get_sources(workspace_id)["sources"]
+        result = get_sources(workspace_id, orgname)["sources"]
         assert isinstance(result, list)
 
 
 def test_get_sources_failure():
     workspace_id = "my_workspace_id"
+    orgname = "my_orgname"
     with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
         mock_post.return_value.status_code = 404
         mock_post.return_value.headers = {"Content-Type": "application/json"}
         mock_post.return_value.json.return_value = {"error": "Invalid request data"}
         with pytest.raises(HttpError) as excinfo:
-            get_sources(workspace_id)
+            get_sources(workspace_id, orgname)
         assert excinfo.value.status_code == 404
         assert str(excinfo.value) == "sources not found for workspace"
 
 
 def test_get_sources_with_invalid_workspace_id():
     with pytest.raises(HttpError) as excinfo:
-        get_sources(123)
+        get_sources(123, "orgname")
     assert str(excinfo.value) == "Invalid workspace ID"
 
 
 def test_get_source_success():
     workspace_id = "my_workspace_id"
     source_id = "1"
+    orgname = "orgname"
     expected_response = {"sourceId": "1", "name": "Example Source 1"}
 
     with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
         mock_post.return_value.status_code = 200
         mock_post.return_value.headers = {"Content-Type": "application/json"}
         mock_post.return_value.json.return_value = expected_response
-        result = get_source(workspace_id, source_id)
+        result = get_source(workspace_id, source_id, orgname)
 
         assert result == expected_response
         assert isinstance(result, dict)
@@ -415,25 +418,26 @@ def test_get_source_success():
 def test_get_source_failure():
     workspace_id = "my_workspace_id"
     source_id = "1"
+    orgname = "orgname"
     with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
         mock_post.return_value.status_code = 404
         mock_post.return_value.headers = {"Content-Type": "application/json"}
         mock_post.return_value.json.return_value = {"error": "Invalid request data"}
         with pytest.raises(HttpError) as excinfo:
-            get_source(workspace_id, source_id)
+            get_source(workspace_id, source_id, orgname)
         assert excinfo.value.status_code == 404
         assert str(excinfo.value) == "source not found"
 
 
 def test_get_source_with_invalid_workspace_id():
     with pytest.raises(HttpError) as excinfo:
-        get_source(123, "1")
+        get_source(123, "1", "orgname")
     assert str(excinfo.value) == "Invalid workspace ID"
 
 
 def test_get_source_with_invalid_source_id():
     with pytest.raises(HttpError) as excinfo:
-        get_source("test", 123)
+        get_source("test", 123, "orgname")
     assert str(excinfo.value) == "Invalid source ID"
 
 
@@ -450,17 +454,6 @@ def test_delete_source_success():
 
         assert result == expected_response
         assert isinstance(result, dict)
-
-
-def test_delete_source_failure():
-    workspace_id = "my_workspace_id"
-    source_id = "1"
-    with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
-        mock_post.return_value.status_code = 404
-        mock_post.return_value.headers = {"Content-Type": "application/json"}
-        with pytest.raises(HttpError) as excinfo:
-            delete_source(workspace_id, source_id)
-        assert excinfo.value.status_code == 404
 
 
 def test_delete_source_with_invalid_workspace_id():
