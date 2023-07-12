@@ -9,6 +9,7 @@ from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.utils.helpers import runcmd
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
+from ddpui.ddpprefect.prefect_service import update_dbt_core_block_schema
 
 from ddpui.utils.ddp_logger import logger
 
@@ -302,3 +303,10 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
         }
     )
     logger.info("set dbt workspace completed for org %s", org.name)
+
+
+@app.task(bind=False)
+def update_dbt_core_block_schema_task(block_name, default_schema):
+    """single http PUT request to the prefect-proxy"""
+    logger.info("updating default_schema of %s to %s", block_name, default_schema)
+    update_dbt_core_block_schema(block_name, default_schema)
