@@ -8,7 +8,6 @@ from ddpui.ddpprefect.schema import (
     PrefectShellSetup,
     PrefectAirbyteConnectionSetup,
     PrefectAirbyteSync,
-    DbtProfile,
     PrefectDataFlowCreateSchema2,
     PrefectDbtCore,
 )

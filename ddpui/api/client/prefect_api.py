@@ -22,7 +22,6 @@ from ddpui.ddpprefect.schema import (
     PrefectAirbyteSync,
     PrefectDbtCore,
     PrefectDbtCoreSetup,
-    DbtProfile,
     PrefectDataFlowCreateSchema,
     PrefectDataFlowCreateSchema2,
     PrefectFlowRunSchema,
