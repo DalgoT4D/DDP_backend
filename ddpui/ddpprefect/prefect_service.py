@@ -259,6 +259,18 @@ def update_dbt_core_block_credentials(wtype: str, block_name: str, credentials: 
     return response
 
 
+def update_dbt_core_block_schema(block_name: str, target_configs_schema: str):
+    """Update the schema inside a dbt core block in prefect"""
+    response = prefect_put(
+        "blocks/dbtcore_edit_schema/",
+        {
+            "blockName": block_name,
+            "target_configs_schema": target_configs_schema,
+        },
+    )
+    return response
+
+
 # ================================================================================================
 def run_airbyte_connection_sync(
     run_flow: PrefectAirbyteSync,
