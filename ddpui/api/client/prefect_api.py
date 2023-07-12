@@ -358,7 +358,7 @@ def post_prefect_dbt_core_block(request):
     with open(dbt_project_filename, "r", encoding="utf-8") as dbt_project_file:
         dbt_project = yaml.safe_load(dbt_project_file)
         if "profile" not in dbt_project:
-            raise HttpError("could not find 'profile:' in dbt_project.yml")
+            raise HttpError(400, "could not find 'profile:' in dbt_project.yml")
 
     profile_name = dbt_project["profile"]
     target = orguser.org.dbt.default_schema
