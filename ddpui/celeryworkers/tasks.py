@@ -14,14 +14,72 @@ from ddpui.utils.ddp_logger import logger
 
 
 @app.task(bind=True)
+def clone_github_repo(
+    self,
+    gitrepo_url: str,
+    gitrepo_access_token: str | None,
+    project_dir: str,
+    taskprogress: TaskProgress | None,
+) -> bool:
+    """clones an org's github repo"""
+    if taskprogress is None:
+        child = False
+        taskprogress = TaskProgress(self.request.id)
+    else:
+        child = True
+
+    # clone the client's dbt repo into "dbtrepo/" under the project_dir
+    # if we have an access token with the "contents" and "metadata" permissions then
+    #   git clone https://oauth2:[TOKEN]@github.com/[REPO-OWNER]/[REPO-NAME]
+    if gitrepo_access_token is not None:
+        gitrepo_url = gitrepo_url.replace(
+            "github.com", "oauth2:" + gitrepo_access_token + "@github.com"
+        )
+
+    project_dir = Path(project_dir)
+    if project_dir.exists():
+        shutil.rmtree(str(project_dir))
+    project_dir.mkdir()
+
+    taskprogress.add(
+        {
+            "message": "created project_dir",
+            "status": "running",
+        }
+    )
+    logger.info("created project_dir %s", project_dir)
+
+    cmd = f"git clone {gitrepo_url} dbtrepo"
+
+    try:
+        runcmd(cmd, project_dir)
+    except Exception as error:
+        taskprogress.add(
+            {
+                "message": "git clone failed",
+                "error": str(error),
+                "status": "failed",
+            }
+        )
+        logger.exception(error)
+        return False
+
+    taskprogress.add(
+        {
+            "message": "cloned git repo",
+            "status": "running" if child else "completed",
+        }
+    )
+    return True
+
+
+@app.task(bind=True)
 def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     """sets up an org's dbt workspace, recreating it if it already exists"""
     taskprogress = TaskProgress(self.request.id)
 
     taskprogress.add(
         {
-            "stepnum": 1,
-            "numsteps": 8,
             "message": "started",
             "status": "running",
         }
@@ -33,8 +91,6 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     if warehouse is None:
         taskprogress.add(
             {
-                "stepnum": 2,
-                "numsteps": 8,
                 "message": "need to set up a warehouse first",
                 "status": "failed",
             }
@@ -48,54 +104,16 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
 
     # this client'a dbt setup happens here
     project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
-    if project_dir.exists():
-        shutil.rmtree(str(project_dir))
-    project_dir.mkdir()
 
-    taskprogress.add(
-        {
-            "stepnum": 2,
-            "numsteps": 8,
-            "message": "created project_dir",
-            "status": "running",
-        }
-    )
-    logger.info("created project_dir for org %s", org.name)
-
-    # clone the client's dbt repo into "dbtrepo/" under the project_dir
-    # if we have an access token with the "contents" and "metadata" permissions then
-    #   git clone https://oauth2:[TOKEN]@github.com/[REPO-OWNER]/[REPO-NAME]
-    if payload["gitrepoAccessToken"] is not None:
-        gitrepo_url = payload["gitrepoUrl"].replace(
-            "github.com", "oauth2:" + payload["gitrepoAccessToken"] + "@github.com"
-        )
-        cmd = f"git clone {gitrepo_url} dbtrepo"
-    else:
-        cmd = f"git clone {payload['gitrepoUrl']} dbtrepo"
-
-    try:
-        runcmd(cmd, project_dir)
-    except Exception as error:
-        taskprogress.add(
-            {
-                "stepnum": 3,
-                "numsteps": 8,
-                "message": "git clone failed",
-                "error": str(error),
-                "status": "failed",
-            }
-        )
-        logger.exception(error)
+    # four parameters here is correct despite vscode thinking otherwise
+    if not clone_github_repo(
+        payload["gitrepoUrl"],
+        payload["gitrepoAccessToken"],
+        str(project_dir),
+        taskprogress,
+    ):
         return
 
-    taskprogress.add(
-        {
-            "stepnum": 3,
-            "numsteps": 8,
-            "message": "cloned git repo",
-            "status": "running",
-        }
-    )
     logger.info("git clone succeeded for org %s", org.name)
 
     # install a dbt venv
@@ -104,8 +122,6 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     except Exception as error:
         taskprogress.add(
             {
-                "stepnum": 4,
-                "numsteps": 8,
                 "message": "make venv failed",
                 "error": str(error),
                 "status": "failed",
@@ -116,8 +132,6 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
 
     taskprogress.add(
         {
-            "stepnum": 4,
-            "numsteps": 8,
             "message": "created venv",
             "status": "running",
         }
@@ -132,8 +146,6 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
         if error.returncode != 120:
             taskprogress.add(
                 {
-                    "stepnum": 5,
-                    "numsteps": 8,
                     "message": f"{pip} --upgrade failed",
                     "error": str(error),
                     "status": "failed",
@@ -144,8 +156,6 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     except Exception as error:
         taskprogress.add(
             {
-                "stepnum": 5,
-                "numsteps": 8,
                 "message": f"{pip} --upgrade failed",
                 "error": str(error),
                 "status": "failed",
@@ -156,8 +166,6 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
 
     taskprogress.add(
         {
-            "stepnum": 5,
-            "numsteps": 8,
             "message": "upgraded pip",
             "status": "running",
         }
@@ -171,8 +179,6 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
         if error.returncode != 120:
             taskprogress.add(
                 {
-                    "stepnum": 6,
-                    "numsteps": 8,
                     "message": "pip install dbt-core=={payload['dbtVersion']} failed",
                     "error": str(error),
                     "status": "failed",
@@ -183,8 +189,6 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     except Exception as error:
         taskprogress.add(
             {
-                "stepnum": 6,
-                "numsteps": 8,
                 "message": "pip install dbt-core=={payload['dbtVersion']} failed",
                 "error": str(error),
                 "status": "failed",
@@ -195,8 +199,6 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
 
     taskprogress.add(
         {
-            "stepnum": 6,
-            "numsteps": 8,
             "message": "installed dbt-core",
             "status": "running",
         }
@@ -210,8 +212,6 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
             if error.returncode != 120:
                 taskprogress.add(
                     {
-                        "stepnum": 7,
-                        "numsteps": 8,
                         "message": "pip install dbt-postgres==1.4.5 failed",
                         "error": str(error),
                         "status": "failed",
@@ -222,8 +222,6 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
         except Exception as error:
             taskprogress.add(
                 {
-                    "stepnum": 7,
-                    "numsteps": 8,
                     "message": "pip install dbt-postgres==1.4.5 failed",
                     "error": str(error),
                     "status": "failed",
@@ -233,8 +231,6 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
             return
         taskprogress.add(
             {
-                "stepnum": 7,
-                "numsteps": 8,
                 "message": "installed dbt-postgres",
                 "status": "running",
             }
@@ -248,8 +244,6 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
             if error.returncode != 120:
                 taskprogress.add(
                     {
-                        "stepnum": 7,
-                        "numsteps": 8,
                         "message": "pip install dbt-bigquery==1.4.3 failed",
                         "error": str(error),
                         "status": "failed",
@@ -260,8 +254,6 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
         except Exception as error:
             taskprogress.add(
                 {
-                    "stepnum": 7,
-                    "numsteps": 8,
                     "message": "pip install dbt-bigquery==1.4.3 failed",
                     "error": str(error),
                     "status": "failed",
@@ -271,8 +263,6 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
             return
         taskprogress.add(
             {
-                "stepnum": 7,
-                "numsteps": 8,
                 "message": "installed dbt-bigquery",
                 "status": "running",
             }
@@ -282,8 +272,6 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     else:
         taskprogress.add(
             {
-                "stepnum": 7,
-                "numsteps": 8,
                 "message": "what warehouse is this",
                 "status": "failed",
             }
@@ -309,8 +297,6 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
 
     taskprogress.add(
         {
-            "stepnum": 8,
-            "numsteps": 8,
             "message": "wrote OrgDbt entry",
             "status": "completed",
         }
