@@ -88,6 +88,19 @@ class OrgDbtSchema(Schema):
     dbtVersion: str
 
 
+class OrgDbtGitHub(Schema):
+    """Docstring"""
+
+    gitrepoUrl: str
+    gitrepoAccessToken: Optional[str]
+
+
+class OrgDbtTarget(Schema):
+    """Docstring"""
+
+    target_configs_schema: str
+
+
 class PrefectDbtRun(Schema):
     """Docstring"""
 

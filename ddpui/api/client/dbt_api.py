@@ -9,15 +9,17 @@ from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from ddpui import auth
-from ddpui.ddpprefect.schema import OrgDbtSchema
+from ddpui.ddpprefect.schema import OrgDbtSchema, OrgDbtGitHub, OrgDbtTarget
 from ddpui.models.org_user import OrgUserResponse
-from ddpui.utils.helpers import runcmd
-from ddpui.celeryworkers.tasks import setup_dbtworkspace
-from ddpui.ddpprefect import prefect_service
+from ddpui.models.org import OrgPrefectBlock
 from ddpui.ddpprefect import DBTCORE
+from ddpui.utils.helpers import runcmd
+from ddpui.celeryworkers.tasks import setup_dbtworkspace, clone_github_repo
 from ddpui.ddpdbt import dbt_service
 
 dbtapi = NinjaAPI(urls_namespace="dbt")
+
+from ddpui.utils.ddp_logger import logger
 
 
 @dbtapi.exception_handler(ValidationError)
@@ -63,6 +65,33 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
     task = setup_dbtworkspace.delay(org.id, payload.dict())
 
     return {"task_id": task.id}
+
+
+@dbtapi.put("/github/", auth=auth.CanManagePipelines())
+def put_dbt_github(request, payload: OrgDbtGitHub):
+    """Setup the client git repo and install a virtual env inside it to run dbt"""
+    orguser = request.orguser
+    org = orguser.org
+    project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
+
+    task = clone_github_repo.delay(
+        payload.gitrepoUrl, payload.gitrepoAccessToken, str(project_dir), None
+    )
+
+    return {"task_id": task.id}
+
+
+@dbtapi.put("/target/", auth=auth.CanManagePipelines())
+def put_dbt_target(request, payload: OrgDbtTarget):
+    """Setup the client git repo and install a virtual env inside it to run dbt"""
+    orguser = request.orguser
+    org = orguser.org
+
+    for dbtblock in OrgPrefectBlock.objects.filter(org=org, block_type=DBTCORE):
+        pass
+        # update_dbt_block(dbtblock, target=payload.target_configs_schema)
+
+    return
 
 
 @dbtapi.delete("/workspace/", response=OrgUserResponse, auth=auth.CanManagePipelines())
