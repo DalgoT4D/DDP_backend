@@ -42,6 +42,7 @@ from ddpui.ddpprefect import (
 )
 from ddpui.ddpprefect import prefect_service
 from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
+from ddpui.models.org_user import OrgUser
 from ddpui.utils.ddp_logger import logger
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils import secretsmanager
@@ -84,7 +85,7 @@ def ninja_default_error_handler(
 @airbyteapi.post("/workspace/detach/", auth=auth.CanManagePipelines())
 def post_airbyte_detach_workspace(request):
     """Detach airbyte workspace from organization"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
     if orguser.org.airbyte_workspace_id is None:
@@ -120,7 +121,7 @@ def post_airbyte_detach_workspace(request):
 )
 def post_airbyte_workspace(request, payload: AirbyteWorkspaceCreate):
     """Create an airbyte workspace"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is not None:
         raise HttpError(400, "org already has a workspace")
 
@@ -132,7 +133,7 @@ def post_airbyte_workspace(request, payload: AirbyteWorkspaceCreate):
 @airbyteapi.get("/source_definitions", auth=auth.CanManagePipelines())
 def get_airbyte_source_definitions(request):
     """Fetch airbyte source definitions in the user organization workspace"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
@@ -150,7 +151,7 @@ def get_airbyte_source_definition_specifications(request, sourcedef_id):
     Fetch definition specifications for a particular
     source definition in the user organization workspace
     """
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
@@ -164,7 +165,7 @@ def get_airbyte_source_definition_specifications(request, sourcedef_id):
 @airbyteapi.post("/sources/", auth=auth.CanManagePipelines())
 def post_airbyte_source(request, payload: AirbyteSourceCreate):
     """Create airbyte source in the user organization workspace"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
@@ -181,7 +182,7 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
 @airbyteapi.put("/sources/{source_id}", auth=auth.CanManagePipelines())
 def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
     """Update airbyte source in the user organization workspace"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
     if orguser.org.airbyte_workspace_id is None:
@@ -197,7 +198,7 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
 @airbyteapi.post("/sources/check_connection/", auth=auth.CanManagePipelines())
 def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
     """Test the source connection in the user organization workspace"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
@@ -217,7 +218,7 @@ def post_airbyte_check_source_for_update(
     request, source_id: str, payload: AirbyteSourceUpdateCheckConnection
 ):
     """Test the source connection in the user organization workspace"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
@@ -231,7 +232,7 @@ def post_airbyte_check_source_for_update(
 @airbyteapi.get("/sources", auth=auth.CanManagePipelines())
 def get_airbyte_sources(request):
     """Fetch all airbyte sources in the user organization workspace"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
@@ -243,7 +244,7 @@ def get_airbyte_sources(request):
 @airbyteapi.get("/sources/{source_id}", auth=auth.CanManagePipelines())
 def get_airbyte_source(request, source_id):
     """Fetch a single airbyte source in the user organization workspace"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
@@ -257,7 +258,7 @@ def delete_airbyte_source(request, source_id):
     """Fetch a single airbyte source in the user organization workspace"""
     logger.info("deleting source started")
 
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
@@ -311,7 +312,7 @@ def delete_airbyte_source(request, source_id):
 @airbyteapi.get("/sources/{source_id}/schema_catalog", auth=auth.CanManagePipelines())
 def get_airbyte_source_schema_catalog(request, source_id):
     """Fetch schema catalog for a source in the user organization workspace"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
@@ -325,7 +326,7 @@ def get_airbyte_source_schema_catalog(request, source_id):
 @airbyteapi.get("/destination_definitions", auth=auth.CanManagePipelines())
 def get_airbyte_destination_definitions(request):
     """Fetch destination definitions in the user organization workspace"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
@@ -352,7 +353,7 @@ def get_airbyte_destination_definition_specifications(request, destinationdef_id
     Fetch specifications for a destination
     definition in the user organization workspace
     """
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
@@ -366,7 +367,7 @@ def get_airbyte_destination_definition_specifications(request, destinationdef_id
 @airbyteapi.post("/destinations/", auth=auth.CanManagePipelines())
 def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
     """Create an airbyte destination in the user organization workspace"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
@@ -383,7 +384,7 @@ def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
 @airbyteapi.post("/destinations/check_connection/", auth=auth.CanManagePipelines())
 def post_airbyte_check_destination(request, payload: AirbyteDestinationCreate):
     """Test connection to destination in the user organization workspace"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
@@ -404,7 +405,7 @@ def post_airbyte_check_destination_for_update(
     request, destination_id: str, payload: AirbyteDestinationUpdateCheckConnection
 ):
     """Test connection to destination in the user organization workspace"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
@@ -422,7 +423,7 @@ def put_airbyte_destination(
     request, destination_id: str, payload: AirbyteDestinationUpdate
 ):
     """Update an airbyte destination in the user organization workspace"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
     if orguser.org.airbyte_workspace_id is None:
@@ -469,7 +470,7 @@ def put_airbyte_destination(
 @airbyteapi.get("/destinations", auth=auth.CanManagePipelines())
 def get_airbyte_destinations(request):
     """Fetch all airbyte destinations in the user organization workspace"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
@@ -483,7 +484,7 @@ def get_airbyte_destinations(request):
 @airbyteapi.get("/destinations/{destination_id}", auth=auth.CanManagePipelines())
 def get_airbyte_destination(request, destination_id):
     """Fetch an airbyte destination in the user organization workspace"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
@@ -501,7 +502,7 @@ def get_airbyte_destination(request, destination_id):
 )
 def get_airbyte_connections(request):
     """Fetch all airbyte connections in the user organization workspace"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
@@ -569,7 +570,7 @@ def get_airbyte_connections(request):
 )
 def get_airbyte_connection(request, connection_block_id):
     """Fetch a connection in the user organization workspace"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
@@ -629,7 +630,7 @@ def get_airbyte_connection(request, connection_block_id):
 )
 def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
     """Create an airbyte connection in the user organization workspace"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     org = orguser.org
     if org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
@@ -763,7 +764,7 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
 )
 def post_airbyte_connection_reset(request, connection_block_id):
     """Reset the data for connection at destination"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     org = orguser.org
     if org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
@@ -802,7 +803,7 @@ def put_airbyte_connection(
     request, connection_block_id, payload: AirbyteConnectionUpdate
 ):  # pylint: disable=unused-argument
     """Update an airbyte connection in the user organization workspace"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     org = orguser.org
     if org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
@@ -877,7 +878,7 @@ def put_airbyte_connection(
 @airbyteapi.delete("/connections/{connection_block_id}", auth=auth.CanManagePipelines())
 def delete_airbyte_connection(request, connection_block_id):
     """Update an airbyte connection in the user organization workspace"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     org = orguser.org
     if org is None:
         raise HttpError(400, "create an organization first")
@@ -914,7 +915,7 @@ def delete_airbyte_connection(request, connection_block_id):
 )
 def post_airbyte_sync_connection(request, connection_block_id):
     """Sync an airbyte connection in the uer organization workspace"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     org = orguser.org
     if org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
