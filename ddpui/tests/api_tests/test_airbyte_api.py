@@ -1513,7 +1513,7 @@ def test_post_airbyte_connection_no_connection_in_block_2(org_with_workspace):
         return_value={"data": {"connection_id": "the-connection-id"}}
     ),
 )
-def test_post_airbyte_connection_success(org_with_workspace):
+def test_post_airbyte_connection_reset_success(org_with_workspace):
     mock_request = Mock()
     mock_request.orguser = Mock()
     mock_request.orguser.org = org_with_workspace
