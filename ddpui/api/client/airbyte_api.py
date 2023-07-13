@@ -24,7 +24,6 @@ from ddpui.ddpairbyte.schema import (
     AirbyteDestinationUpdateCheckConnection,
     AirbyteConnectionUpdate,
 )
-from ddpui.ddpprefect import prefect_service
 from ddpui.ddpprefect.schema import (
     PrefectFlowAirbyteConnection,
     PrefectAirbyteConnectionBlockSchema,
