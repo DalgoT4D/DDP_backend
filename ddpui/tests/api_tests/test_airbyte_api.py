@@ -1014,7 +1014,7 @@ def test_get_airbyte_destinations_without_workspace(org_without_workspace):
     "ddpui.ddpairbyte.airbyte_service.get_destinations",
     return_value={"destinations": [{"fake-key": "fake-val"}]},
 )
-def test_get_airbyte_destination_success(org_with_workspace):
+def test_get_airbyte_destinations_success(org_with_workspace):
     """tests GET /source_definitions"""
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
