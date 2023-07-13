@@ -952,9 +952,26 @@ def test_put_airbyte_destination_without_workspace(org_without_workspace):
     assert str(excinfo.value) == "create an airbyte workspace first"
 
 
-@patch(
-    "ddpui.ddpairbyte.airbyte_service.update_destination",
-    return_value={"destinationId": "fake-dest-id"},
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    update_destination=Mock(return_value={"destinationId": "fake-dest-id"}),
+)
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    update_dbt_core_block_credentials=Mock(),
+)
+@patch.multiple(
+    "ddpui.utils.secretsmanager",
+    retrieve_warehouse_credentials=Mock(
+        return_value={
+            "host": "the-host",
+            "port": 0,
+            "username": "the-user",
+            "password": "the-password",
+            "database": "the-database",
+        }
+    ),
+    update_warehouse_credentials=Mock(),
 )
 def test_put_airbyte_destination_success(org_with_workspace):
     """tests GET /source_definitions"""
@@ -968,6 +985,10 @@ def test_put_airbyte_destination_success(org_with_workspace):
         name="fake-dest-name",
         destinationDefId="fake-dest-def-id",
         config={},
+    )
+    OrgWarehouse.objects.create(org=org_with_workspace, wtype="postgres")
+    OrgPrefectBlock.objects.create(
+        org=org_with_workspace, block_type=ddpprefect.DBTCORE
     )
     result = put_airbyte_destination(mock_request, "fake-dest-id", payload)
 
@@ -1865,7 +1886,7 @@ def org_prefect_connection_block(org_with_workspace):
 
 
 @patch.multiple(
-    "ddpui.api.client.airbyte_api",
+    "ddpui.ddpprefect.prefect_service",
     run_airbyte_connection_sync=Mock(return_value="retval"),
 )
 def test_post_airbyte_sync_connection_success(

@@ -24,10 +24,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteDestinationUpdateCheckConnection,
     AirbyteConnectionUpdate,
 )
-from ddpui.ddpprefect.prefect_service import (
-    run_airbyte_connection_sync,
-    update_dbt_core_block_credentials,
-)
+from ddpui.ddpprefect import prefect_service
 from ddpui.ddpprefect.schema import (
     PrefectFlowAirbyteConnection,
     PrefectAirbyteConnectionBlockSchema,
@@ -460,7 +457,7 @@ def put_airbyte_destination(
     secretsmanager.update_warehouse_credentials(warehouse, dbt_credentials)
 
     for dbtblock in OrgPrefectBlock.objects.filter(org=orguser.org, block_type=DBTCORE):
-        update_dbt_core_block_credentials(
+        prefect_service.update_dbt_core_block_credentials(
             warehouse.wtype, dbtblock.block_name, dbt_credentials
         )
 
@@ -927,7 +924,7 @@ def post_airbyte_sync_connection(request, connection_block_id):
     assert org_prefect_connection_block
 
     timenow = datetime.now().strftime("%Y-%m-%d.%H:%M:%S")
-    return run_airbyte_connection_sync(
+    return prefect_service.run_airbyte_connection_sync(
         PrefectAirbyteSync(
             blockName=org_prefect_connection_block.block_name,
             flowRunName=f"manual-sync-{org.name}-{timenow}",
