@@ -72,6 +72,19 @@ def save_warehouse_credentials(warehouse, credentials: dict):
     return secret_name
 
 
+def update_warehouse_credentials(warehouse, credentials: dict):
+    """udpates warehouse credentials for an org"""
+    aws_sm = get_client()
+    response = aws_sm.update_secret(
+        SecretId=warehouse.credentials,
+        SecretString=json.dumps(credentials),
+    )
+    logger.info(
+        "updated warehouse credentials in secrets manager under name="
+        + response["Name"]
+    )
+
+
 def retrieve_warehouse_credentials(warehouse) -> dict | None:
     """decodes and returns the saved warehouse credentials for an org"""
     aws_sm = get_client()

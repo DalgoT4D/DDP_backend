@@ -1,4 +1,5 @@
 import os
+import json
 from datetime import datetime
 from typing import List
 from ninja import NinjaAPI
@@ -23,7 +24,10 @@ from ddpui.ddpairbyte.schema import (
     AirbyteDestinationUpdateCheckConnection,
     AirbyteConnectionUpdate,
 )
-from ddpui.ddpprefect.prefect_service import run_airbyte_connection_sync
+from ddpui.ddpprefect.prefect_service import (
+    run_airbyte_connection_sync,
+    update_dbt_core_block_credentials,
+)
 from ddpui.ddpprefect.schema import (
     PrefectFlowAirbyteConnection,
     PrefectAirbyteConnectionBlockSchema,
@@ -34,11 +38,13 @@ from ddpui.ddpprefect.schema import (
 from ddpui.ddpprefect import (
     AIRBYTESERVER,
     AIRBYTECONNECTION,
+    DBTCORE,
 )
 from ddpui.ddpprefect import prefect_service
 from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
 from ddpui.utils.ddp_logger import logger
 from ddpui.ddpairbyte import airbytehelpers
+from ddpui.utils import secretsmanager
 
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
@@ -426,6 +432,37 @@ def put_airbyte_destination(
         destination_id, payload.name, payload.config, payload.destinationDefId
     )
     logger.info("updated destination having id " + destination["destinationId"])
+    warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+
+    dbt_credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
+
+    if warehouse.wtype == "postgres":
+        aliases = {
+            "dbname": "database",
+        }
+        for config_key in ["host", "port", "username", "password", "database"]:
+            if (
+                config_key in payload.config
+                and isinstance(payload.config[config_key], str)
+                and len(payload.config[config_key]) > 0
+                and list(set(payload.config[config_key]))[0] != "*"
+            ):
+                dbt_credentials[aliases.get(config_key, config_key)] = payload.config[
+                    config_key
+                ]
+
+    elif warehouse.wtype == "bigquery":
+        dbt_credentials = json.loads(payload.config["credentials_json"])
+    else:
+        raise HttpError(400, "unknown warehouse type " + warehouse.wtype)
+
+    secretsmanager.update_warehouse_credentials(warehouse, dbt_credentials)
+
+    for dbtblock in OrgPrefectBlock.objects.filter(org=orguser.org, block_type=DBTCORE):
+        update_dbt_core_block_credentials(
+            warehouse.wtype, dbtblock.block_name, dbt_credentials
+        )
+
     return {"destinationId": destination["destinationId"]}
 
 

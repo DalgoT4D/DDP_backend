@@ -1,3 +1,4 @@
+import os
 import shutil
 from ddpui.models.org_user import Org
 from ddpui.models.org import OrgPrefectBlock, OrgDbt
@@ -12,8 +13,8 @@ def delete_dbt_workspace(org: Org):
         dbt = org.dbt
         org.dbt = None
         org.save()
-
-        shutil.rmtree(dbt.project_dir)
+        if os.path.exists(dbt.project_dir):
+            shutil.rmtree(dbt.project_dir)
         dbt.delete()
 
     for dbtblock in OrgPrefectBlock.objects.filter(org=org, block_type=DBTCORE):
