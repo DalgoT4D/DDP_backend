@@ -105,7 +105,7 @@ def put_dbt_schema(request, payload: OrgDbtTarget):
 
     for dbtblock in OrgPrefectBlock.objects.filter(org=org, block_type=DBTCORE):
         logger.info(
-            "updating block name of %s to %s",
+            "updating schema of %s to %s",
             dbtblock.block_name,
             org.dbt.default_schema,
         )
