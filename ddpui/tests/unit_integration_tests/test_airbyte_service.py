@@ -455,12 +455,9 @@ def test_delete_source_success():
 def test_delete_source_failure():
     workspace_id = "my_workspace_id"
     source_id = "1"
-    with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
-        mock_post.return_value.status_code = 404
-        mock_post.return_value.headers = {"Content-Type": "application/json"}
-        with pytest.raises(HttpError) as excinfo:
-            delete_source(workspace_id, source_id)
-        assert excinfo.value.status_code == 404
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq", return_value="abreq-retval"):
+        response = delete_source(workspace_id, source_id)
+        assert response == "abreq-retval"
 
 
 def test_delete_source_with_invalid_workspace_id():
