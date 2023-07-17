@@ -8,7 +8,6 @@ from ddpui.ddpprefect.schema import (
     PrefectShellSetup,
     PrefectAirbyteConnectionSetup,
     PrefectAirbyteSync,
-    DbtProfile,
     PrefectDataFlowCreateSchema2,
     PrefectDbtCore,
 )
@@ -213,7 +212,7 @@ def get_dbtcore_block_id(blockname) -> str | None:
 
 def create_dbt_core_block(
     dbtcore: PrefectDbtCoreSetup,
-    profile: DbtProfile,
+    profilename: str,
     target: str,
     wtype: str,
     credentials: dict,
@@ -225,7 +224,7 @@ def create_dbt_core_block(
         {
             "blockName": dbtcore.block_name,
             "profile": {
-                "name": profile.name,
+                "name": profilename,
                 "target": target,
                 "target_configs_schema": target,
             },
@@ -254,6 +253,18 @@ def update_dbt_core_block_credentials(wtype: str, block_name: str, credentials: 
         {
             "blockName": block_name,
             "credentials": credentials,
+        },
+    )
+    return response
+
+
+def update_dbt_core_block_schema(block_name: str, target_configs_schema: str):
+    """Update the schema inside a dbt core block in prefect"""
+    response = prefect_put(
+        "blocks/dbtcore_edit_schema/",
+        {
+            "blockName": block_name,
+            "target_configs_schema": target_configs_schema,
         },
     )
     return response

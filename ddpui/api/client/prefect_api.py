@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from datetime import datetime
+import yaml
 
 from ninja import NinjaAPI
 from ninja.errors import HttpError
@@ -16,11 +17,11 @@ from ddpui.ddpairbyte import airbyte_service
 
 from ddpui.ddpprefect import DBTCORE
 from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
+from ddpui.models.org_user import OrgUser
 from ddpui.ddpprefect.schema import (
     PrefectAirbyteSync,
     PrefectDbtCore,
     PrefectDbtCoreSetup,
-    PrefectDbtRun,
     PrefectDataFlowCreateSchema,
     PrefectDataFlowCreateSchema2,
     PrefectFlowRunSchema,
@@ -67,7 +68,7 @@ def ninja_default_error_handler(
 @prefectapi.post("/flows/", auth=auth.CanManagePipelines())
 def post_prefect_dataflow(request, payload: PrefectDataFlowCreateSchema):
     """Create a prefect deployment i.e. a ddp dataflow"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
 
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
@@ -138,7 +139,7 @@ def post_prefect_dataflow(request, payload: PrefectDataFlowCreateSchema):
 @prefectapi.get("/flows/", auth=auth.CanManagePipelines())
 def get_prefect_dataflows(request):
     """Fetch all flows/pipelines created in an organization"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
 
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
@@ -186,7 +187,7 @@ def get_prefect_dataflows(request):
 @prefectapi.get("/flows/{deployment_id}", auth=auth.CanManagePipelines())
 def get_prefect_dataflow(request, deployment_id):
     """Fetch details of prefect deployment"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
 
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
@@ -218,7 +219,7 @@ def get_prefect_dataflow(request, deployment_id):
 @prefectapi.delete("/flows/{deployment_id}", auth=auth.CanManagePipelines())
 def delete_prefect_dataflow(request, deployment_id):
     """Delete a prefect deployment along with its org data flow"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
 
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
@@ -239,7 +240,7 @@ def delete_prefect_dataflow(request, deployment_id):
 @prefectapi.post("/flows/{deployment_id}/flow_run", auth=auth.CanManagePipelines())
 def post_prefect_dataflow_quick_run(request, deployment_id):
     """Delete a prefect deployment along with its org data flow"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
 
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
@@ -257,7 +258,7 @@ def post_prefect_dataflow_quick_run(request, deployment_id):
 )
 def post_deployment_set_schedule(request, deployment_id, status):
     """Set deployment schedule to active / inactive"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
 
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
@@ -280,7 +281,7 @@ def post_deployment_set_schedule(request, deployment_id, status):
 @prefectapi.post("/flows/airbyte_sync/", auth=auth.CanManagePipelines())
 def post_prefect_airbyte_sync_flow(request, payload: PrefectAirbyteSync):
     """Run airbyte sync flow in prefect"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
@@ -302,7 +303,7 @@ def post_prefect_dbt_core_run_flow(
     request, payload: PrefectDbtCore
 ):  # pylint: disable=unused-argument
     """Run dbt flow in prefect"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
 
     dbt = orguser.org.dbt
     profile_file = Path(dbt.project_dir) / "dbtrepo/profiles/profiles.yml"
@@ -325,7 +326,7 @@ def post_prefect_dbt_core_run_flow(
 
 
 @prefectapi.post("/blocks/dbt/", auth=auth.CanManagePipelines())
-def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
+def post_prefect_dbt_core_block(request):
     """Create five prefect dbt core blocks:
     - dbt clean
     - dbt deps
@@ -334,7 +335,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
     - dbt docs generate
     for a ddp-dbt-profile
     """
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org.dbt is None:
         raise HttpError(400, "create a dbt workspace first")
 
@@ -349,12 +350,19 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
 
     dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
     project_dir = str(dbt_env_dir / "dbtrepo")
+    dbt_project_filename = str(dbt_env_dir / "dbtrepo/dbt_project.yml")
 
-    target = (
-        payload.profile.target_configs_schema
-        if payload.profile.target_configs_schema
-        else orguser.org.dbt.default_schema
-    )
+    if not os.path.exists(dbt_project_filename):
+        raise HttpError(400, dbt_project_filename + " is missing")
+
+    with open(dbt_project_filename, "r", encoding="utf-8") as dbt_project_file:
+        dbt_project = yaml.safe_load(dbt_project_file)
+        if "profile" not in dbt_project:
+            raise HttpError(400, "could not find 'profile:' in dbt_project.yml")
+
+    profile_name = dbt_project["profile"]
+    target = orguser.org.dbt.default_schema
+    logger.info("profile_name=%s target=%s", profile_name, target)
 
     # get the bigquery location if warehouse is bq
     bqlocation = None
@@ -371,7 +379,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
     ):
         block_name = (
             f"{orguser.org.slug}-"
-            f"{slugify(payload.profile.name)}-"
+            f"{slugify(profile_name)}-"
             f"{slugify(target)}-"
             f"{slugify(command)}"
         )
@@ -387,7 +395,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
         try:
             block_response = prefect_service.create_dbt_core_block(
                 block_data,
-                payload.profile,
+                profile_name,
                 target,
                 warehouse.wtype,
                 credentials,
@@ -447,7 +455,7 @@ def post_prefect_dbt_core_block(request, payload: PrefectDbtRun):
 @prefectapi.get("/blocks/dbt/", auth=auth.CanManagePipelines())
 def get_prefect_dbt_run_blocks(request):
     """Fetch all prefect dbt run blocks for an organization"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
 
     blocks = []
 
@@ -478,7 +486,7 @@ def get_prefect_dbt_run_blocks(request):
 @prefectapi.delete("/blocks/dbt/", auth=auth.CanManagePipelines())
 def delete_prefect_dbt_run_block(request):
     """Delete prefect dbt run block for an organization"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
 
     org_dbt_blocks = OrgPrefectBlock.objects.filter(
         org=orguser.org, block_type=DBTCORE
