@@ -17,7 +17,6 @@ def remove_nested_attribute(obj: dict, attr: str) -> dict:
         del obj[attr]
 
     for key in obj:
-        assert key != attr
         val = obj[key]
 
         if isinstance(val, dict):
