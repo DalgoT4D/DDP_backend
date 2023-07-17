@@ -179,7 +179,9 @@ def post_dbt_makedocs(request):
     if not os.path.exists(repo_dir / "target"):
         raise HttpError(400, "run dbt docs generate first")
 
-    html = create_single_html(repo_dir)
+    # passing the repo_dir to create_single_html is considered a security
+    # risk by deepsource (PTC-W6004) so we pass only the slug
+    html = create_single_html(orguser.org.slug)
     htmlfilename = str(repo_dir / "dbtdocs.html")
     with open(htmlfilename, "w", encoding="utf-8") as indexfile:
         indexfile.write(html)
