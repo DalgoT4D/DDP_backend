@@ -1,4 +1,5 @@
 import inspect
+import logging
 import os
 import json
 from typing import Dict, List
@@ -23,6 +24,71 @@ from ddpui.api.client import user_org_api
 load_dotenv()
 
 
+class CustomLogger:
+    def __init__(self, name, level=logging.INFO):
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(level)
+
+    def get_slug(self):
+        try:
+            stack = inspect.stack()
+            for frame_info in stack:
+                frame = frame_info.frame
+                userorg = frame.f_locals.get("orguser")
+                if userorg is not None and userorg.org is not None:
+                    return userorg.org.slug
+        except Exception as e:
+            self.logger.error(f"An error occurred while getting slug: {e}")
+        return None
+
+    def info(self, msg):
+        slug = self.get_slug()
+        caller_name = inspect.stack()[1].function
+        if slug:
+            self.logger.info(msg, extra={"caller_name": caller_name, "orgname": slug})
+        else:
+            self.logger.info(msg, extra={"caller_name": caller_name})
+
+    def error(self, msg):
+        slug = self.get_slug()
+        caller_name = inspect.stack()[1].function
+        if slug:
+            self.logger.error(msg, extra={"caller_name": caller_name, "orgname": slug})
+        else:
+            self.logger.error(msg, extra={"caller_name": caller_name})
+
+    def debug(self, msg):
+        slug = self.get_slug()
+        caller_name = inspect.stack()[1].function
+        if slug:
+            self.logger.debug(msg, extra={"caller_name": caller_name, "orgname": slug})
+        else:
+            self.logger.debug(msg, extra={"caller_name": caller_name})
+
+    def exception(self, msg):
+        slug = self.get_slug()
+        caller_name = inspect.stack()[1].function
+        if slug:
+            self.logger.exception(
+                msg, extra={"caller_name": caller_name, "orgname": slug}
+            )
+        else:
+            self.logger.exception(msg, extra={"caller_name": caller_name})
+
+    def warning(self, msg):
+        slug = self.get_slug()
+        caller_name = inspect.stack()[1].function
+        if slug:
+            self.logger.warning(
+                msg, extra={"caller_name": caller_name, "orgname": slug}
+            )
+        else:
+            self.logger.warning(msg, extra={"caller_name": caller_name})
+
+
+custom_logger = CustomLogger("airbyte")
+
+
 def abreq(endpoint, req=None):
     """Request to the airbyte server"""
     abhost = os.getenv("AIRBYTE_SERVER_HOST")
@@ -30,7 +96,7 @@ def abreq(endpoint, req=None):
     abver = os.getenv("AIRBYTE_SERVER_APIVER")
     token = os.getenv("AIRBYTE_API_TOKEN")
 
-    logger.info("Making request to Airbyte server: %s", endpoint)
+    custom_logger.info(f"Making request to Airbyte server: {endpoint}")
 
     try:
         res = requests.post(
@@ -40,25 +106,23 @@ def abreq(endpoint, req=None):
             timeout=30,
         )
     except requests.exceptions.ConnectionError as conn_error:
-        logger.exception(conn_error)
+        custom_logger.exception(conn_error)
         raise HttpError(500, str(conn_error)) from conn_error
 
     try:
         result_obj = remove_nested_attribute(res.json(), "icon")
-        logger.info("Response from Airbyte server:")
-        logger.info(json.dumps(result_obj, indent=2))
     except ValueError:
-        logger.info("Response from Airbyte server: %s", res.text)
+        custom_logger.info(f"Response from Airbyte server: {res.text}")
 
     try:
         res.raise_for_status()
     except Exception as error:
-        logger.exception(error.args)
+        custom_logger.exception(error.args)
         raise HttpError(res.status_code, res.text) from error
 
     if "application/json" in res.headers.get("Content-Type", ""):
         return res.json()
-    logger.error(
+    custom_logger.error(
         "abreq result has content-type %s while hitting %s",
         res.headers.get("Content-Type", ""),
         endpoint,
@@ -66,22 +130,11 @@ def abreq(endpoint, req=None):
     return {}
 
 
-class AirbyteService:
-    def __init__(self, orguser):
-        self.orguser = orguser
-
-    def custom_logger_info(self, message, orgname):
-        caller = inspect.stack()[1]
-        caller_name = caller.function
-        logger.info(message, extra={"orgname": orgname, "caller_name": caller_name})
-
-
 def get_workspaces():
     """Fetch all workspaces in airbyte server"""
 
     res = abreq("workspaces/list")
     if "workspaces" not in res:
-        logger.error("No workspaces found")
         raise HttpError(404, "no workspaces found")
     return res
 
@@ -93,7 +146,6 @@ def get_workspace(workspace_id: str) -> dict:
 
     res = abreq("workspaces/get", {"workspaceId": workspace_id})
     if "workspaceId" not in res:
-        logger.info("Workspace not found: %s", workspace_id)
         raise HttpError(404, "workspace not found")
     return res
 
@@ -108,7 +160,6 @@ def set_workspace_name(workspace_id: str, name: str) -> dict:
 
     res = abreq("workspaces/update_name", {"workspaceId": workspace_id, "name": name})
     if "workspaceId" not in res:
-        logger.info("Workspace not found: %s", workspace_id)
         raise HttpError(404, "workspace not found")
     return res
 
@@ -120,7 +171,6 @@ def create_workspace(name: str) -> dict:
 
     res = abreq("workspaces/create", {"name": name})
     if "workspaceId" not in res:
-        logger.info("Workspace not created: %s", name)
         raise HttpError(400, "workspace not created")
     return res
 
@@ -139,7 +189,7 @@ def get_source_definitions(workspace_id: str) -> List[Dict]:
     res = abreq("source_definitions/list_for_workspace", {"workspaceId": workspace_id})
     if "sourceDefinitions" not in res:
         error_message = f"Source definitions not found for workspace: {workspace_id}"
-        logger.error(error_message)
+        custom_logger.error(error_message)
         raise HttpError(404, error_message)
 
     return res
@@ -163,7 +213,7 @@ def get_source_definition_specification(workspace_id: str, sourcedef_id: str) ->
             f"specification not found for source definition {sourcedef_id} "
             f"in workspace {workspace_id}"
         )
-        logger.error(error_message)
+        custom_logger.error(error_message)
         raise HttpError(404, error_message)
 
     return res
@@ -202,31 +252,28 @@ def create_custom_source_definition(
     )
     if "sourceDefinitionId" not in res:
         error_message = f"Source definition not created: {name}"
-        logger.error("Source definition not created: %s", name)
+        # logger.error(f"Source definition not created: {name}")
         raise HttpError(400, error_message)
     return res
 
 
-def get_sources(workspace_id: str, orgname: str) -> List[Dict]:
+def get_sources(workspace_id: str) -> List[Dict]:
     """Fetch all sources in an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "Invalid workspace ID")
 
-    airbyte_service = AirbyteService(None)
-    airbyte_service.custom_logger_info(
-        f"Fetching sources from Airbyte server for workspace {workspace_id}", orgname
+    custom_logger.info(
+        f"Fetching sources from Airbyte server for workspace {workspace_id}"
     )
 
     res = abreq("sources/list", {"workspaceId": workspace_id})
     if "sources" not in res:
-        airbyte_service.custom_logger_info(
-            f"Sources not found for workspace: {workspace_id}", orgname
-        )
+        custom_logger.error(f"Sources not found for workspace: {workspace_id}")
         raise HttpError(404, "sources not found for workspace")
     return res
 
 
-def get_source(workspace_id: str, source_id: str, orgname: str) -> dict:
+def get_source(workspace_id: str, source_id: str) -> dict:
     """Fetch a source in an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "Invalid workspace ID")
@@ -234,14 +281,12 @@ def get_source(workspace_id: str, source_id: str, orgname: str) -> dict:
     if not isinstance(source_id, str):
         raise HttpError(400, "Invalid source ID")
 
-    airbyte_service = AirbyteService(None)
-    airbyte_service.custom_logger_info(
-        f"Fetching source from Airbyte server for workspace {workspace_id} and source {source_id}",
-        orgname,
+    custom_logger.info(
+        f"Fetching source from Airbyte server for workspace {workspace_id} and source {source_id}"
     )
     res = abreq("sources/get", {"sourceId": source_id})
     if "sourceId" not in res:
-        airbyte_service.custom_logger_info(f"Source not found: {source_id}", orgname)
+        custom_logger.error(f"Source not found: {source_id}")
         raise HttpError(404, "source not found")
     return res
 
@@ -281,7 +326,7 @@ def create_source(
         },
     )
     if "sourceId" not in res:
-        logger.error("Failed to create source: %s", res)
+        custom_logger.error(f"Failed to create source: {res}")
         raise HttpError(500, "failed to create source")
     return res
 
@@ -307,7 +352,7 @@ def update_source(source_id: str, name: str, config: dict, sourcedef_id: str) ->
         },
     )
     if "sourceId" not in res:
-        logger.error("Failed to update source: %s", res)
+        custom_logger.error(f"Failed to update source: {res}")
         raise HttpError(500, "failed to update source")
     return res
 
@@ -326,7 +371,7 @@ def check_source_connection(workspace_id: str, data: AirbyteSourceCreate) -> dic
         },
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        logger.error("Failed to check source connection: %s", res)
+        custom_logger.error(f"Failed to check source connection: {res}")
         raise HttpError(500, "failed to check source connection")
     return res
 
@@ -344,7 +389,7 @@ def check_source_connection_for_update(
         },
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        logger.error("Failed to check source connection: %s", res)
+        custom_logger.error(f"Failed to check source connection: {res}")
         raise HttpError(500, "failed to check source connection")
     # {
     #   'status': 'succeeded',
@@ -402,8 +447,8 @@ def get_destination_definitions(workspace_id: str) -> dict:
         "destination_definitions/list_for_workspace", {"workspaceId": workspace_id}
     )
     if "destinationDefinitions" not in res:
-        logger.error(
-            "Destination definitions not found for workspace: %s", workspace_id
+        custom_logger.error(
+            f"Destination definitions not found for workspace: {workspace_id}"
         )
         raise HttpError(404, "destination definitions not found")
     return res
@@ -423,8 +468,8 @@ def get_destination_definition_specification(
         {"destinationDefinitionId": destinationdef_id, "workspaceId": workspace_id},
     )
     if "connectionSpecification" not in res:
-        logger.error(
-            "Specification not found for destination definition: %s", destinationdef_id
+        custom_logger.error(
+            f"Specification not found for destination definition: {destinationdef_id}"
         )
         raise HttpError(404, "Failed to get destination definition specification")
     return res
@@ -437,7 +482,7 @@ def get_destinations(workspace_id: str) -> dict:
 
     res = abreq("destinations/list", {"workspaceId": workspace_id})
     if "destinations" not in res:
-        logger.error("Destinations not found for workspace: %s", workspace_id)
+        custom_logger.error(f"Destinations not found for workspace: {workspace_id}")
         raise HttpError(404, "destinations not found for this workspace")
     return res
 
@@ -451,7 +496,7 @@ def get_destination(workspace_id: str, destination_id: str) -> dict:
 
     res = abreq("destinations/get", {"destinationId": destination_id})
     if "destinationId" not in res:
-        logger.error("Destination not found: %s", destination_id)
+        custom_logger.error(f"Destination not found: {destination_id}")
         raise HttpError(404, "destination not found")
     return res
 
@@ -487,7 +532,7 @@ def create_destination(
         },
     )
     if "destinationId" not in res:
-        logger.error("Failed to create destination: %s", res)
+        custom_logger.error(f"Failed to create destination: {res}")
         raise HttpError(500, "failed to create destination")
     return res
 
@@ -515,7 +560,7 @@ def update_destination(
         },
     )
     if "destinationId" not in res:
-        logger.error("Failed to update destination: %s", res)
+        custom_logger.error(f"Failed to update destination: {res}")
         raise HttpError(500, "failed to update destination")
     return res
 
@@ -536,7 +581,7 @@ def check_destination_connection(
         },
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        logger.error("Failed to check destination connection: %s", res)
+        custom_logger.error(f"Failed to check destination connection: {res}")
         raise HttpError(500, "failed to check destination connection")
     return res
 
@@ -557,7 +602,7 @@ def check_destination_connection_for_update(
         },
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        logger.error("Failed to check destination connection: %s", res)
+        custom_logger.error(f"Failed to check destination connection: {res}")
         raise HttpError(500, "failed to check destination connection")
     return res
 
@@ -570,7 +615,7 @@ def get_connections(workspace_id: str) -> dict:
     res = abreq("connections/list", {"workspaceId": workspace_id})
     if "connections" not in res:
         error_message = f"connections not found for workspace: {workspace_id}"
-        logger.error(error_message)
+        custom_logger.error(error_message)
         raise HttpError(404, error_message)
     return res
 
@@ -583,7 +628,7 @@ def get_connection(workspace_id: str, connection_id: str) -> dict:
     res = abreq("connections/get", {"connectionId": connection_id})
     if "connectionId" not in res:
         error_message = f"Connection not found: {connection_id}"
-        logger.error(error_message)
+        custom_logger.error(error_message)
         raise HttpError(404, error_message)
     return res
 
@@ -607,7 +652,7 @@ def create_normalization_operation(workspace_id: str) -> str:
     )
     if "operationId" not in res:
         error_message = f"could not create normalization operation for {workspace_id}"
-        logger.error(error_message)
+        custom_logger.error(error_message)
         raise HttpError(404, error_message)
 
     return res
@@ -626,7 +671,7 @@ def create_connection(
 
     if len(connection_info.streams) == 0:
         error_message = f"must specify at least one stream workspace_id={workspace_id}"
-        logger.error(error_message)
+        custom_logger.error(error_message)
         raise HttpError(400, error_message)
 
     sourceschemacatalog = get_source_schema_catalog(
@@ -676,7 +721,7 @@ def create_connection(
 
     res = abreq("connections/create", payload)
     if "connectionId" not in res:
-        logger.error("Failed to create connection: %s", res)
+        custom_logger.error(f"Failed to create connection: {res}")
         raise HttpError(500, "failed to create connection")
     return res
 
@@ -691,7 +736,7 @@ def update_connection(
         raise HttpError(400, "workspace_id must be a string")
     if len(connection_info.streams) == 0:
         error_message = f"must specify at least one stream workspace_id={workspace_id}"
-        logger.error(error_message)
+        custom_logger.error(error_message)
         raise HttpError(400, error_message)
 
     sourceschemacatalog = get_source_schema_catalog(
@@ -727,35 +772,30 @@ def update_connection(
 
     res = abreq("connections/update", current_connection)
     if "connectionId" not in res:
-        logger.error("Failed to update connection: %s", res)
+        custom_logger.error(f"Failed to update connection: {res}")
         raise HttpError(500, "failed to update connection")
     return res
 
 
-def reset_connection(connection_id: str, orgname: str) -> dict:
+def reset_connection(connection_id: str) -> dict:
     """Reset data of a connection at the destination"""
     if not isinstance(connection_id, str):
         raise HttpError(400, "connection_id must be a string")
 
     res = abreq("connections/reset", {"connectionId": connection_id})
-    airbyte_service = AirbyteService(None)
-    airbyte_service.custom_logger_info(
-        f"Reseting the connection: {connection_id}", orgname
-    )
+    custom_logger.info(f"Reseting the connection: {connection_id}")
     return res
 
 
-def delete_connection(workspace_id: str, connection_id: str, orgname: str) -> dict:
+def delete_connection(workspace_id: str, connection_id: str) -> dict:
     """Delete a connection of an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
     if not isinstance(connection_id, str):
         raise HttpError(400, "connection_id must be a string")
 
-    airbyte_service = AirbyteService(None)
-
     res = abreq("connections/delete", {"connectionId": connection_id})
-    airbyte_service.custom_logger_info(f"Deleting connection: {connection_id}", orgname)
+    custom_logger.info(f"Deleting connection: {connection_id}")
     return res
 
 
@@ -767,7 +807,7 @@ def sync_connection(workspace_id: str, connection_id: str) -> dict:
         raise HttpError(400, "connection_id must be a string")
 
     res = abreq("connections/sync", {"connectionId": connection_id})
-    logger.info("Syncing connection: %s", connection_id)
+    custom_logger.info(f"Syncing connection: {connection_id}")
     return res
 
 

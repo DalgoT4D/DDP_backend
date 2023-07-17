@@ -85,13 +85,6 @@ def ninja_default_error_handler(
     return Response({"detail": "something went wrong"}, status=500)
 
 
-def custom_logger_info(request, message):
-    orgname = request.orguser.org.slug
-    caller = inspect.stack()[1]
-    caller_name = caller.function
-    logger.info(message, extra={"orgname": orgname, "caller_name": caller_name})
-
-
 @user_org_api.get("/currentuser", response=OrgUserResponse, auth=auth.AnyOrgUser())
 def get_current_user(request):
     """return the OrgUser making this request"""
@@ -125,8 +118,7 @@ def post_organization_user(
     )
     orguser = OrgUser.objects.create(user=user, role=OrgUserRole.ACCOUNT_MANAGER)
     orguser.save()
-    custom_logger_info(
-        request,
+    logger.info(
         f"created user [account-manager] "
         f"{orguser.user.email} having userid {orguser.user.id}",
     )
@@ -193,7 +185,7 @@ def put_organization_user_self(request, payload: OrgUserUpdate):
         orguser.user.is_active = payload.active
     orguser.user.save()
 
-    custom_logger_info(request, f"updated self {orguser.user.email}")
+    logger.info(f"updated self {orguser.user.email}")
     return OrgUserResponse(
         email=orguser.user.email, active=orguser.user.is_active, role=orguser.role
     )
@@ -226,7 +218,7 @@ def put_organization_user(request, payload: OrgUserUpdate):
         orguser.role = payload.role
     orguser.user.save()
 
-    custom_logger_info(request, f"updated orguser {orguser.user.email}")
+    logger.info(f"updated orguser {orguser.user.email}")
     return OrgUserResponse(
         email=orguser.user.email, active=orguser.user.is_active, role=orguser.role
     )
@@ -244,7 +236,7 @@ def post_organization(request, payload: OrgSchema):
     org = Org.objects.create(**payload.dict())
     org.slug = slugify(org.name)[:20]
     org.save()
-    custom_logger_info(request, f"{orguser.user.email} created new org {org.name}")
+    logger.info(f"{orguser.user.email} created new org {org.name}")
     try:
         new_workspace = airbytehelpers.setup_airbyte_workspace(org.slug, org)
     except Exception as error:
@@ -269,9 +261,7 @@ def post_organization_warehouse(request, payload: OrgWarehouseSchema):
         payload.destinationDefId,
         payload.airbyteConfig,
     )
-    custom_logger_info(
-        request, "created destination having id " + destination["destinationId"]
-    )
+    logger.info("created destination having id " + destination["destinationId"])
 
     # prepare the dbt credentials from airbyteConfig
     dbtCredenials = None
@@ -313,13 +303,13 @@ def delete_organization_warehouses(request):
         raise HttpError(400, "warehouse not created")
 
     # delete prefect connection blocks
-    custom_logger_info(request, "Deleting prefect connection blocks")
+    logger.info("Deleting prefect connection blocks")
     for block in OrgPrefectBlock.objects.filter(
         org=orguser.org, block_type=AIRBYTECONNECTION
     ):
         try:
             prefect_service.delete_airbyte_connection_block(block.block_id)
-            custom_logger_info(request, f"delete connecion block id - {block.block_id}")
+            logger.info(f"delete connecion block id - {block.block_id}")
         except Exception:  # skipcq PYL-W0703
             logger.error(
                 "failed to delete %s airbyte-connection-block %s in prefect, deleting from OrgPrefectBlock",
@@ -328,10 +318,10 @@ def delete_organization_warehouses(request):
             )
         block.delete()
 
-    custom_logger_info(request, "FINISHED Deleting prefect connection blocks")
+    logger.info("FINISHED Deleting prefect connection blocks")
 
     # delete airbyte connections
-    custom_logger_info(request, "Deleting airbyte connections")
+    logger.info("Deleting airbyte connections")
     for connection in airbyte_service.get_connections(orguser.org.airbyte_workspace_id)[
         "connections"
     ]:
@@ -339,12 +329,12 @@ def delete_organization_warehouses(request):
         airbyte_service.delete_connection(
             orguser.org.airbyte_workspace_id, connection_id
         )
-        custom_logger_info(request, f"deleted connection in Airbyte - {connection_id}")
+        logger.info(f"deleted connection in Airbyte - {connection_id}")
 
-    custom_logger_info(request, "FINISHED Deleting airbyte connections")
+    logger.info("FINISHED Deleting airbyte connections")
 
     # delete airbyte destinations
-    custom_logger_info(request, "Deleting airbyte destinations")
+    logger.info("Deleting airbyte destinations")
     for destination in airbyte_service.get_destinations(
         orguser.org.airbyte_workspace_id
     )["destinations"]:
@@ -352,16 +342,12 @@ def delete_organization_warehouses(request):
         airbyte_service.delete_destination(
             orguser.org.airbyte_workspace_id, destination_id
         )
-        custom_logger_info(
-            request, f"deleted destination in Airbyte - {destination_id}"
-        )
+        logger.info(f"deleted destination in Airbyte - {destination_id}")
 
-    custom_logger_info(request, "FINISHED Deleting airbyte destinations")
+    logger.info("FINISHED Deleting airbyte destinations")
 
     # delete django warehouse row
-    custom_logger_info(
-        request, "Deleting django warehouse and the credentials in secrets manager"
-    )
+    logger.info("Deleting django warehouse and the credentials in secrets manager")
     secretsmanager.delete_warehouse_credentials(warehouse)
     warehouse.delete()
 
@@ -369,12 +355,12 @@ def delete_organization_warehouses(request):
     dbt_service.delete_dbt_workspace(orguser.org)
 
     # delete dataflows
-    custom_logger_info(request, "Deleting data flows")
+    logger.info("Deleting data flows")
     for data_flow in OrgDataFlow.objects.filter(org=orguser.org):
         prefect_service.delete_deployment_by_id(data_flow.deployment_id)
         data_flow.delete()
-        custom_logger_info(request, f"Deleted deployment - {data_flow.deployment_id}")
-    custom_logger_info(request, "FINISHED Deleting data flows")
+        logger.info(f"Deleted deployment - {data_flow.deployment_id}")
+    logger.info("FINISHED Deleting data flows")
 
     return {"success": 1}
 
@@ -422,7 +408,7 @@ def post_organization_user_invite(request, payload: InvitationSchema):
         invited_on=payload.invited_on,
         invite_code=payload.invite_code,
     )
-    custom_logger_info(
+    logger.info(
         request,
         f"Invited {payload.invited_email} to join {orguser.org.name} "
         f"with invite code {payload.invite_code}",
@@ -462,7 +448,7 @@ def post_organization_user_accept_invite(
         user__email=invitation.invited_email, org=invitation.invited_by.org
     ).first()
     if not orguser:
-        custom_logger_info(
+        logger.info(
             request,
             f"creating invited user {invitation.invited_email} "
             f"for {invitation.invited_by.org.name}",

@@ -5,6 +5,7 @@ from subprocess import CalledProcessError
 
 from django.utils.text import slugify
 from ddpui.celery import app
+from ddpui.ddpairbyte import airbyte_service
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.utils.helpers import runcmd
 from ddpui.utils import secretsmanager
@@ -18,6 +19,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     """sets up an org's dbt workspace, recreating it if it already exists"""
     taskprogress = TaskProgress(self.request.id)
 
+    custom_logger = airbyte_service.CustomLogger("airbyte")
     taskprogress.add(
         {
             "stepnum": 1,
@@ -27,7 +29,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
         }
     )
     org = Org.objects.filter(id=org_id).first()
-    logger.info("found org %s", org.name)
+    custom_logger.info(f"found org {org.name}")
 
     warehouse = OrgWarehouse.objects.filter(org=org).first()
     if warehouse is None:
@@ -39,7 +41,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
                 "status": "failed",
             }
         )
-        logger.error("need to set up a warehouse first for org %s", org.name)
+        custom_logger.error(f"need to set up a warehouse first for org {org.name}")
         return
 
     if org.slug is None:
@@ -60,7 +62,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
             "status": "running",
         }
     )
-    logger.info("created project_dir for org %s", org.name)
+    custom_logger.info(f"created project_dir for org {org.name}")
 
     # clone the client's dbt repo into "dbtrepo/" under the project_dir
     # if we have an access token with the "contents" and "metadata" permissions then
@@ -85,7 +87,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
                 "status": "failed",
             }
         )
-        logger.exception(error)
+        custom_logger.exception(error)
         return
 
     taskprogress.add(
@@ -96,7 +98,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
             "status": "running",
         }
     )
-    logger.info("git clone succeeded for org %s", org.name)
+    custom_logger.info(f"git clone succeeded for org {org.name}")
 
     # install a dbt venv
     try:
@@ -111,7 +113,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
                 "status": "failed",
             }
         )
-        logger.exception(error)
+        custom_logger.exception(error)
         return
 
     taskprogress.add(
@@ -122,7 +124,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
             "status": "running",
         }
     )
-    logger.info("make venv succeeded for org %s", org.name)
+    custom_logger.info(f"make venv succeeded for org {org.name}")
 
     # upgrade pip
     pip = project_dir / "venv/bin/pip"
@@ -139,7 +141,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
                     "status": "failed",
                 }
             )
-            logger.exception(error)
+            custom_logger.exception(error)
             return
     except Exception as error:
         taskprogress.add(
@@ -151,7 +153,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
                 "status": "failed",
             }
         )
-        logger.exception(error)
+        custom_logger.exception(error)
         return
 
     taskprogress.add(
@@ -162,7 +164,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
             "status": "running",
         }
     )
-    logger.info("upgraded pip for org %s", org.name)
+    custom_logger.info(f"upgraded pip for org {org.name}")
 
     # install dbt in the new env
     try:
@@ -178,7 +180,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
                     "status": "failed",
                 }
             )
-            logger.exception(error)
+            custom_logger.exception(error)
             return
     except Exception as error:
         taskprogress.add(
@@ -190,7 +192,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
                 "status": "failed",
             }
         )
-        logger.exception(error)
+        custom_logger.exception(error)
         return
 
     taskprogress.add(
@@ -201,7 +203,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
             "status": "running",
         }
     )
-    logger.info("installed dbt-core for org %s", org.name)
+    custom_logger.info(f"installed dbt-core for org {org.name}")
 
     if warehouse.wtype == "postgres":
         try:
@@ -217,7 +219,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
                         "status": "failed",
                     }
                 )
-                logger.exception(error)
+                custom_logger.exception(error)
                 return
         except Exception as error:
             taskprogress.add(
@@ -229,7 +231,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
                     "status": "failed",
                 }
             )
-            logger.exception(error)
+            custom_logger.exception(error)
             return
         taskprogress.add(
             {
@@ -239,7 +241,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
                 "status": "running",
             }
         )
-        logger.info("installed dbt-postgres for org %s", org.name)
+        custom_logger.info(f"installed dbt-postgres for org {org.name}")
 
     elif warehouse.wtype == "bigquery":
         try:
@@ -255,7 +257,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
                         "status": "failed",
                     }
                 )
-                logger.exception(error)
+                custom_logger.exception(error)
                 return
         except Exception as error:
             taskprogress.add(
@@ -267,7 +269,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
                     "status": "failed",
                 }
             )
-            logger.exception(error)
+            custom_logger.exception(error)
             return
         taskprogress.add(
             {
@@ -277,7 +279,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
                 "status": "running",
             }
         )
-        logger.info("installed dbt-bigquery for org %s", org.name)
+        custom_logger.info(f"installed dbt-bigquery for org {org.name}")
 
     else:
         taskprogress.add(
@@ -298,10 +300,10 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
         default_schema=payload["profile"]["target_configs_schema"],
     )
     dbt.save()
-    logger.info("created orgdbt for org %s", org.name)
+    custom_logger.info(f"created orgdbt for org {org.name}")
     org.dbt = dbt
     org.save()
-    logger.info("set org.dbt for org %s", org.name)
+    custom_logger.info(f"set org.dbt for org {org.name}")
 
     if payload["gitrepoAccessToken"] is not None:
         secretsmanager.delete_github_token(org)
@@ -315,4 +317,4 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
             "status": "completed",
         }
     )
-    logger.info("set dbt workspace completed for org %s", org.name)
+    custom_logger.info(f"set dbt workspace completed for org {org.name}")
