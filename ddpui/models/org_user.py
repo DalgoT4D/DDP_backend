@@ -1,5 +1,5 @@
 from datetime import datetime
-from enum import IntEnum
+from enum import IntEnum, Enum
 
 from django.db import models
 from django.contrib.auth.models import User
@@ -74,6 +74,18 @@ class OrgUserResponse(Schema):
         )
 
 
+class InvitationStatus(str, Enum):
+    """an enum for statuses of invitation"""
+
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+
+    @classmethod
+    def choices(cls):
+        """django model definition needs an iterable for `choices`"""
+        return [(key.value, key.name) for key in cls]
+
+
 class Invitation(models.Model):
     """Docstring"""
 
@@ -84,6 +96,9 @@ class Invitation(models.Model):
     invited_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE)
     invited_on = models.DateTimeField()
     invite_code = models.CharField(max_length=36)
+    status = models.CharField(
+        max_length=50, default="pending", choices=InvitationStatus.choices()
+    )
 
 
 class InvitationSchema(Schema):

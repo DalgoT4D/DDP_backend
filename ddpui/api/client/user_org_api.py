@@ -29,6 +29,7 @@ from ddpui.models.org_user import (
     AcceptInvitationSchema,
     Invitation,
     InvitationSchema,
+    InvitationStatus,
     OrgUser,
     OrgUserCreate,
     OrgUserResponse,
@@ -388,14 +389,29 @@ def get_organizations_warehouses(request):
 )
 def post_organization_user_invite(request, payload: InvitationSchema):
     """Send an invitation to a user to join platform"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
+    frontend_url = os.getenv("FRONTEND_URL")
+
+    # what if the user already exists, throw error
+    existing_user = User.objects.filter(email=payload.invited_email).first()
+    if existing_user:
+        raise HttpError(400, "Account already exists")
+
+    # user can only invite a role equal or lower to their role
+    if payload.invited_role > orguser.role:
+        raise HttpError(403, "Insufficient permissions for this operation")
+
     invitation = Invitation.objects.filter(invited_email=payload.invited_email).first()
     if invitation:
-        logger.error(
-            f"{payload.invited_email} has already been invited by "
-            f"{invitation.invited_by} on {invitation.invited_on.strftime('%Y-%m-%d')}"
+        if invitation.status != InvitationStatus.PENDING:
+            raise HttpError(400, "Account already exists")
+
+        # if the invitation is already present - trigger the email again
+        invite_url = (
+            f"{frontend_url}/users/invitation/?invite_code={invitation.invite_code}"
         )
-        raise HttpError(400, f"{payload.invited_email} has already been invited")
+        sendgrid.send_invite_user_email(invitation.invited_email, invite_url)
+        return InvitationSchema.from_invitation(invitation)
 
     payload.invited_by = OrgUserResponse.from_orguser(orguser)
     payload.invited_on = datetime.now(IST)
@@ -407,7 +423,12 @@ def post_organization_user_invite(request, payload: InvitationSchema):
         invited_on=payload.invited_on,
         invite_code=payload.invite_code,
     )
-    logger.info("created Invitation")
+
+    # trigger an email to the user
+    invite_url = f"{frontend_url}/users/invitation/?invite_code={payload.invite_code}"
+    sendgrid.send_invite_user_email(invitation.invited_email, invite_url)
+    logger.info("Invitation send to the user")
+
     return payload
 
 
@@ -417,6 +438,7 @@ def post_organization_user_invite(request, payload: InvitationSchema):
 @user_org_api.get(
     "/organizations/users/invite/{invite_code}",
     response=InvitationSchema,
+    deprecated=True,
 )
 def get_organization_user_invite(
     request, invite_code
@@ -439,9 +461,10 @@ def post_organization_user_accept_invite(
     invitation = Invitation.objects.filter(invite_code=payload.invite_code).first()
     if invitation is None:
         raise HttpError(400, "invalid invite code")
-    orguser = OrgUser.objects.filter(
-        user__email=invitation.invited_email, org=invitation.invited_by.org
-    ).first()
+
+    # we only have one user mapped to one orguser and hence one org
+    orguser = OrgUser.objects.filter(user__email=invitation.invited_email).first()
+
     if not orguser:
         logger.info(
             f"creating invited user {invitation.invited_email} "
@@ -455,6 +478,8 @@ def post_organization_user_accept_invite(
         orguser = OrgUser.objects.create(
             user=user, org=invitation.invited_by.org, role=invitation.invited_role
         )
+    invitation.status = InvitationStatus.ACCEPTED
+    invitation.save()
     return OrgUserResponse.from_orguser(orguser)
 
 
