@@ -483,6 +483,18 @@ def post_organization_user_accept_invite(
     return OrgUserResponse.from_orguser(orguser)
 
 
+@user_org_api.get("/users/invitations/", auth=auth.AnyOrgUser())
+def get_invitations(request):
+    """Get all invitations sent by the current user"""
+    orguser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
+
+    invitations = Invitation.objects.filter(invited_by=orguser).values()
+
+    return list(invitations)
+
+
 @user_org_api.post(
     "/users/forgot_password/",
 )
