@@ -18,7 +18,12 @@ def get_dbt_docs(request, tokenhex: str):
     with open(htmlfilename, "r", encoding="utf-8") as htmlfile:
         html = htmlfile.read()
         response = HttpResponse(html)
-        response.headers["X-Frame-Options"] = None
+        # the only valid values for x-frame-options are "deny" and "sameorigin", both
+        # of which will stop the iframe from rendering the docs
+        # removing the header causes it to be set to "deny" by django
+        # but if we set it to an invalid value, it makes its way to the browser where
+        # it is ignored
+        response.headers["X-Frame-Options"] = "ignore"
         response.headers[
             "Content-Security-Policy"
         ] = "frame-src localhost:8002 ddpapi.projecttech4dev.org;"
