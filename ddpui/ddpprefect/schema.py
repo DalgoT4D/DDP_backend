@@ -155,6 +155,12 @@ class PrefectDataFlowCreateSchema2(Schema):
     cron: str = None
 
 
+class PrefectDataFlowUpdateSchema(Schema):
+    """Edit the data flow"""
+
+    cron: str
+
+
 class PrefectFlowRunSchema(Schema):
     """Schema for field of a flow run fetched"""
 
