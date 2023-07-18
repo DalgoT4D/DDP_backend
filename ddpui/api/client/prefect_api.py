@@ -25,6 +25,7 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema,
     PrefectDataFlowCreateSchema2,
     PrefectFlowRunSchema,
+    PrefectDataFlowUpdateSchema,
 )
 
 from ddpui.utils.ddp_logger import logger
@@ -182,6 +183,26 @@ def get_prefect_dataflows(request):
         )
 
     return res
+
+
+@prefectapi.put("/flows/{deployment_id}", auth=auth.CanManagePipelines())
+def put_prefect_dataflow(request, deployment_id, payload: PrefectDataFlowUpdateSchema):
+    """Edit the data flow / prefect deployment. For now only the schedules can be edited"""
+    orguser: OrgUser = request.orguser
+
+    if orguser.org is None:
+        raise HttpError(400, "register an organization first")
+
+    org_data_flow = OrgDataFlow.objects.filter(
+        org=orguser.org, deployment_id=deployment_id
+    ).first()
+
+    prefect_service.update_dataflow(deployment_id, payload)
+
+    org_data_flow.cron = payload.cron
+    org_data_flow.save()
+
+    return {"success": 1}
 
 
 @prefectapi.get("/flows/{deployment_id}", auth=auth.CanManagePipelines())
