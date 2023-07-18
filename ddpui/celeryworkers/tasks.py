@@ -19,7 +19,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     """sets up an org's dbt workspace, recreating it if it already exists"""
     taskprogress = TaskProgress(self.request.id)
 
-    custom_logger = airbyte_service.CustomLogger("airbyte")
+    custom_logger = airbyte_service.CustomLogger("dbt")
     taskprogress.add(
         {
             "stepnum": 1,

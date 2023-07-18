@@ -35,7 +35,7 @@ prefectapi = NinjaAPI(urls_namespace="prefect")
 # http://127.0.0.1:8000/api/docs
 
 
-custom_logger = airbyte_service.CustomLogger("airbyte")
+custom_logger = airbyte_service.CustomLogger("prefect")
 
 
 @prefectapi.exception_handler(ValidationError)
