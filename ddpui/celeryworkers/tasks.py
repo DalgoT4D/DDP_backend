@@ -37,18 +37,20 @@ def clone_github_repo(
             "github.com", "oauth2:" + gitrepo_access_token + "@github.com"
         )
 
-    project_dir = Path(project_dir)
-    if project_dir.exists():
-        shutil.rmtree(str(project_dir))
-    project_dir.mkdir()
+    project_dir: Path = Path(project_dir)
+    dbtrepo_dir = project_dir / "dbtrepo"
+    if not project_dir.exists():
+        project_dir.mkdir()
+        taskprogress.add(
+            {
+                "message": "created project_dir",
+                "status": "running",
+            }
+        )
+        logger.info("created project_dir %s", project_dir)
 
-    taskprogress.add(
-        {
-            "message": "created project_dir",
-            "status": "running",
-        }
-    )
-    logger.info("created project_dir %s", project_dir)
+    elif dbtrepo_dir.exists():
+        shutil.rmtree(str(dbtrepo_dir))
 
     cmd = f"git clone {gitrepo_url} dbtrepo"
 
