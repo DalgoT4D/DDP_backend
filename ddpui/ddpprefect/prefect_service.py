@@ -3,7 +3,6 @@ import requests
 
 from ninja.errors import HttpError
 from dotenv import load_dotenv
-from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect.schema import (
     PrefectDbtCoreSetup,
     PrefectShellSetup,
@@ -14,7 +13,6 @@ from ddpui.ddpprefect.schema import (
     PrefectDbtCore,
 )
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.ddp_logger import logger
 
 load_dotenv()
 
