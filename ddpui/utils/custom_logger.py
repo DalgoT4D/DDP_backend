@@ -3,14 +3,14 @@ import logging
 
 
 class CustomLogger:
-    """custom logger to get org_slug from inspect.stack"""
+    """override the python logger to include the orgname associated with every request"""
 
     def __init__(self, name, level=logging.INFO):
         self.logger = logging.getLogger(name)
         self.logger.setLevel(level)
 
     def get_slug(self):
-        """custom logger for slug"""
+        """retrieve the org.slug from the request"""
         try:
             stack = inspect.stack()
             for frame_info in stack:
@@ -18,55 +18,38 @@ class CustomLogger:
                 userorg = frame.f_locals.get("orguser")
                 if userorg is not None and userorg.org is not None:
                     return userorg.org.slug
-        except Exception as e:
-            self.logger.error(f"An error occurred while getting slug: {e}")
-        return None
+        except Exception as error:
+            self.logger.error("An error occurred while getting slug: %s", str(error))
+        return ""
 
-    def info(self, msg):
-        """custom logger for info"""
+    def info(self, *args):
+        """call logger.info with the caller_name and the orgname"""
         slug = self.get_slug()
         caller_name = inspect.stack()[1].function
-        if slug:
-            self.logger.info(msg, extra={"caller_name": caller_name, "orgname": slug})
-        else:
-            self.logger.info(msg, extra={"caller_name": caller_name})
+        self.logger.info(*args, extra={"caller_name": caller_name, "orgname": slug})
 
-    def error(self, msg):
-        """custom logger for error"""
+    def error(self, *args):
+        """call logger.error with the caller_name and the orgname"""
         slug = self.get_slug()
         caller_name = inspect.stack()[1].function
-        if slug:
-            self.logger.error(msg, extra={"caller_name": caller_name, "orgname": slug})
-        else:
-            self.logger.error(msg, extra={"caller_name": caller_name})
+        self.logger.error(*args, extra={"caller_name": caller_name, "orgname": slug})
 
-    def debug(self, msg):
-        """custom logger for debug"""
+    def debug(self, *args):
+        """call logger.debug with the caller_name and the orgname"""
         slug = self.get_slug()
         caller_name = inspect.stack()[1].function
-        if slug:
-            self.logger.debug(msg, extra={"caller_name": caller_name, "orgname": slug})
-        else:
-            self.logger.debug(msg, extra={"caller_name": caller_name})
+        self.logger.debug(*args, extra={"caller_name": caller_name, "orgname": slug})
 
-    def exception(self, msg):
-        """custom logger for exc"""
+    def exception(self, *args):
+        """call logger.exception with the caller_name and the orgname"""
         slug = self.get_slug()
         caller_name = inspect.stack()[1].function
-        if slug:
-            self.logger.exception(
-                msg, extra={"caller_name": caller_name, "orgname": slug}
-            )
-        else:
-            self.logger.exception(msg, extra={"caller_name": caller_name})
+        self.logger.exception(
+            *args, extra={"caller_name": caller_name, "orgname": slug}
+        )
 
-    def warning(self, msg):
-        """custom logger for warning"""
+    def warning(self, *args):
+        """call logger.warning with the caller_name and the orgname"""
         slug = self.get_slug()
         caller_name = inspect.stack()[1].function
-        if slug:
-            self.logger.warning(
-                msg, extra={"caller_name": caller_name, "orgname": slug}
-            )
-        else:
-            self.logger.warning(msg, extra={"caller_name": caller_name})
+        self.logger.warning(*args, extra={"caller_name": caller_name, "orgname": slug})

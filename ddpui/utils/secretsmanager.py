@@ -2,7 +2,9 @@ import os
 import json
 from uuid import uuid4
 import boto3
-from ddpui.utils.ddp_logger import logger
+from ddpui.utils.custom_logger import CustomLogger
+
+logger = CustomLogger("userorg")
 
 
 def get_client():

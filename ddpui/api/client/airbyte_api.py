@@ -38,17 +38,14 @@ from ddpui.ddpprefect import (
 )
 from ddpui.ddpprefect import prefect_service
 from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
-from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.ddp_logger import logger
 from ddpui.ddpairbyte import airbytehelpers
-from logging import getLogger
+from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.org_user import OrgUser
 from ddpui.utils import secretsmanager
 
-logger = getLogger(__name__)
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
-custom_logger = CustomLogger("airbyte")
+logger = CustomLogger("airbyte")
 
 
 @airbyteapi.exception_handler(ValidationError)
@@ -137,7 +134,7 @@ def get_airbyte_source_definitions(request):
         raise HttpError(400, "create an airbyte workspace first")
 
     res = airbyte_service.get_source_definitions(orguser.org.airbyte_workspace_id)
-    custom_logger.debug(res)
+    logger.debug(res)
     return res["sourceDefinitions"]
 
 
@@ -157,7 +154,7 @@ def get_airbyte_source_definition_specifications(request, sourcedef_id):
     res = airbyte_service.get_source_definition_specification(
         orguser.org.airbyte_workspace_id, sourcedef_id
     )
-    custom_logger.debug(res)
+    logger.debug(res)
     return res["connectionSpecification"]
 
 
@@ -174,7 +171,7 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
         payload.sourceDefId,
         payload.config,
     )
-    custom_logger.info("created source having id " + source["sourceId"])
+    logger.info("created source having id " + source["sourceId"])
     return {"sourceId": source["sourceId"]}
 
 
@@ -190,7 +187,7 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
     source = airbyte_service.update_source(
         source_id, payload.name, payload.config, payload.sourceDefId
     )
-    custom_logger.info("updated source having id " + source["sourceId"])
+    logger.info("updated source having id " + source["sourceId"])
     return {"sourceId": source["sourceId"]}
 
 
@@ -236,8 +233,8 @@ def get_airbyte_sources(request):
         raise HttpError(400, "create an airbyte workspace first")
 
     res = airbyte_service.get_sources(orguser.org.airbyte_workspace_id)["sources"]
-    custom_logger.info("fetched airbyte connections block of this org")
-    custom_logger.debug(res)
+    logger.info("fetched airbyte connections block of this org")
+    logger.debug(res)
     return res
 
 
@@ -249,14 +246,14 @@ def get_airbyte_source(request, source_id):
         raise HttpError(400, "create an airbyte workspace first")
 
     res = airbyte_service.get_source(orguser.org.airbyte_workspace_id, source_id)
-    custom_logger.debug(res)
+    logger.debug(res)
     return res
 
 
 @airbyteapi.delete("/sources/{source_id}", auth=auth.CanManagePipelines())
 def delete_airbyte_source(request, source_id):
     """Fetch a single airbyte source in the user organization workspace"""
-    custom_logger.info("deleting source started")
+    logger.info("deleting source started")
 
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -268,7 +265,7 @@ def delete_airbyte_source(request, source_id):
         block_type=AIRBYTECONNECTION,
     ).all()
 
-    custom_logger.info("fetched airbyte connections block of this org")
+    logger.info("fetched airbyte connections block of this org")
 
     connections = airbyte_service.get_connections(orguser.org.airbyte_workspace_id)[
         "connections"
@@ -282,7 +279,7 @@ def delete_airbyte_source(request, source_id):
     prefect_conn_blocks = prefect_service.get_airbye_connection_blocks(
         block_names=[block.block_name for block in org_blocks]
     )
-    custom_logger.info(
+    logger.info(
         "fetched prefect connection blocks based on the names stored in "
         "django orgprefectblocks",
     )
@@ -293,18 +290,18 @@ def delete_airbyte_source(request, source_id):
 
     # delete the prefect conn blocks
     prefect_service.post_prefect_blocks_bulk_delete(delete_block_ids)
-    custom_logger.info("deleted prefect blocks")
+    logger.info("deleted prefect blocks")
 
     # delete airbyte connection blocks in django orgprefectblock table
     for block in OrgPrefectBlock.objects.filter(
         org=orguser.org, block_type=AIRBYTECONNECTION, block_id__in=delete_block_ids
     ).all():
         block.delete()
-    custom_logger.info("deleted airbyte connection blocks from django database")
+    logger.info("deleted airbyte connection blocks from django database")
 
     # delete the source
     airbyte_service.delete_source(orguser.org.airbyte_workspace_id, source_id)
-    custom_logger.info("deleted airbyte source {source_id}")
+    logger.info("deleted airbyte source {source_id}")
 
     return {"success": 1}
 
@@ -319,7 +316,7 @@ def get_airbyte_source_schema_catalog(request, source_id):
     res = airbyte_service.get_source_schema_catalog(
         orguser.org.airbyte_workspace_id, source_id
     )
-    custom_logger.debug(res)
+    logger.debug(res)
     return res
 
 
@@ -340,7 +337,7 @@ def get_airbyte_destination_definitions(request):
             for destdef in res
             if destdef["name"] in allowed_destinations.split(",")
         ]
-    custom_logger.debug(res)
+    logger.debug(res)
     return res
 
 
@@ -360,7 +357,7 @@ def get_airbyte_destination_definition_specifications(request, destinationdef_id
     res = airbyte_service.get_destination_definition_specification(
         orguser.org.airbyte_workspace_id, destinationdef_id
     )["connectionSpecification"]
-    custom_logger.debug(res)
+    logger.debug(res)
     return res
 
 
@@ -377,7 +374,7 @@ def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
         payload.destinationDefId,
         payload.config,
     )
-    custom_logger.info("created destination having id " + destination["destinationId"])
+    logger.info("created destination having id " + destination["destinationId"])
     return {"destinationId": destination["destinationId"]}
 
 
@@ -464,7 +461,7 @@ def put_airbyte_destination(
             warehouse.wtype, dbtblock.block_name, dbt_credentials
         )
 
-    custom_logger.info("updated destination having id " + destination["destinationId"])
+    logger.info("updated destination having id " + destination["destinationId"])
     return {"destinationId": destination["destinationId"]}
 
 
@@ -478,7 +475,7 @@ def get_airbyte_destinations(request):
     res = airbyte_service.get_destinations(orguser.org.airbyte_workspace_id)[
         "destinations"
     ]
-    custom_logger.debug(res)
+    logger.debug(res)
     return res
 
 
@@ -492,7 +489,7 @@ def get_airbyte_destination(request, destination_id):
     res = airbyte_service.get_destination(
         orguser.org.airbyte_workspace_id, destination_id
     )
-    custom_logger.debug(res)
+    logger.debug(res)
     return res
 
 
@@ -560,7 +557,7 @@ def get_airbyte_connections(request):
             }
         )
 
-    custom_logger.info(res)
+    logger.info(res)
     return res
 
 
@@ -620,7 +617,7 @@ def get_airbyte_connection(request, connection_block_id):
         "deploymentId": dataflow.deployment_id if dataflow else None,
     }
 
-    custom_logger.debug(res)
+    logger.debug(res)
     return res
 
 
@@ -700,7 +697,7 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
         airbyte_connection_block_id
     )
 
-    custom_logger.info(airbyte_connection_block)
+    logger.info(airbyte_connection_block)
 
     # create a prefect AirbyteConnection block
     connection_block = OrgPrefectBlock(
@@ -756,7 +753,7 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
         "status": airbyte_conn["status"],
         "deployment_id": dataflow["deployment"]["id"],
     }
-    custom_logger.debug(res)
+    logger.debug(res)
     return res
 
 
@@ -891,17 +888,17 @@ def delete_airbyte_connection(request, connection_block_id):
     )
 
     # delete airbyte connection
-    custom_logger.info("deleting airbyte connection")
+    logger.info("deleting airbyte connection")
     airbyte_service.delete_connection(
         org.airbyte_workspace_id, prefect_block["data"]["connection_id"]
     )
 
     # delete prefect block
-    custom_logger.info("deleting prefect block")
+    logger.info("deleting prefect block")
     prefect_service.delete_airbyte_connection_block(connection_block_id)
 
     # delete the org prefect airbyteconnection block
-    custom_logger.info("deleting org prefect block")
+    logger.info("deleting org prefect block")
     org_airbyte_connection_block = OrgPrefectBlock.objects.filter(
         org=org, block_id=connection_block_id
     )

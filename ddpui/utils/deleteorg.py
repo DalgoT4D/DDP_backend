@@ -7,7 +7,9 @@ from ddpui.ddpprefect import AIRBYTESERVER, AIRBYTECONNECTION, SHELLOPERATION
 from ddpui.ddpdbt import dbt_service
 from ddpui.utils import secretsmanager
 
-from ddpui.utils.ddp_logger import logger
+from ddpui.utils.custom_logger import CustomLogger
+
+logger = CustomLogger("userorg")
 
 
 def delete_prefect_deployments(org: Org):  # skipcq: PYL-R0201

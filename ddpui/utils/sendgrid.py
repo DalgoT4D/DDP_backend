@@ -1,7 +1,9 @@
 import os
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail, Content
-from ddpui.utils.ddp_logger import logger
+from ddpui.utils.custom_logger import CustomLogger
+
+logger = CustomLogger("userorg")
 
 SENDGRID_APIKEY = os.getenv("SENDGRID_APIKEY")
 SENDGRID_SENDER = os.getenv("SENDGRID_SENDER")

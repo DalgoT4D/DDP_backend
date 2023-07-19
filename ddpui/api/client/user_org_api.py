@@ -42,7 +42,7 @@ from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 from ddpui.ddpdbt import dbt_service
 from ddpui.ddpprefect import AIRBYTECONNECTION
-from ddpui.utils.ddp_logger import logger
+from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.timezone import IST
 from ddpui.utils import secretsmanager
 from ddpui.utils import sendgrid
@@ -52,6 +52,8 @@ user_org_api = NinjaAPI(urls_namespace="userorg")
 # http://127.0.0.1:8000/api/docs
 
 load_dotenv()
+
+logger = CustomLogger("userorg")
 
 
 @user_org_api.exception_handler(ValidationError)
@@ -119,7 +121,7 @@ def post_organization_user(
     orguser.save()
     logger.info(
         f"created user [account-manager] "
-        f"{orguser.user.email} having userid {orguser.user.id}",
+        f"{orguser.user.email} having userid {orguser.user.id}"
     )
     redis = Redis()
     token = uuid4()
@@ -408,7 +410,6 @@ def post_organization_user_invite(request, payload: InvitationSchema):
         invite_code=payload.invite_code,
     )
     logger.info(
-        request,
         f"Invited {payload.invited_email} to join {orguser.org.name} "
         f"with invite code {payload.invite_code}",
     )
@@ -448,7 +449,6 @@ def post_organization_user_accept_invite(
     ).first()
     if not orguser:
         logger.info(
-            request,
             f"creating invited user {invitation.invited_email} "
             f"for {invitation.invited_by.org.name}",
         )

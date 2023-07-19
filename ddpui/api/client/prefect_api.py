@@ -27,6 +27,8 @@ from ddpui.ddpprefect.schema import (
     PrefectFlowRunSchema,
     PrefectDataFlowUpdateSchema,
 )
+
+from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
 from ddpui.utils.custom_logger import CustomLogger
@@ -35,7 +37,7 @@ prefectapi = NinjaAPI(urls_namespace="prefect")
 # http://127.0.0.1:8000/api/docs
 
 
-custom_logger = CustomLogger("prefect")
+logger = CustomLogger("prefect")
 
 
 @prefectapi.exception_handler(ValidationError)
@@ -121,7 +123,7 @@ def post_prefect_dataflow(request, payload: PrefectDataFlowCreateSchema):
             )
         )
     except Exception as error:
-        custom_logger.exception(error)
+        logger.exception(error)
         raise HttpError(400, "failed to create a dataflow") from error
 
     org_data_flow = OrgDataFlow.objects.create(
@@ -226,7 +228,7 @@ def get_prefect_dataflow(request, deployment_id):
     try:
         res = prefect_service.get_deployment(deployment_id)
     except Exception as error:
-        custom_logger.exception(error)
+        logger.exception(error)
         raise HttpError(400, "failed to get deploymenet from prefect-proxy") from error
 
     if "parameters" in res and "airbyte_blocks" in res["parameters"]:
@@ -271,7 +273,7 @@ def post_prefect_dataflow_quick_run(request, deployment_id):
     try:
         res = prefect_service.create_deployment_flow_run(deployment_id)
     except Exception as error:
-        custom_logger.exception(error)
+        logger.exception(error)
         raise HttpError(400, "failed to start a run") from error
     return res
 
@@ -296,7 +298,7 @@ def post_deployment_set_schedule(request, deployment_id, status):
     try:
         prefect_service.set_deployment_schedule(deployment_id, status)
     except Exception as error:
-        custom_logger.exception(error)
+        logger.exception(error)
         raise HttpError(400, "failed to change flow state") from error
     return {"success": 1}
 
@@ -316,7 +318,7 @@ def post_prefect_airbyte_sync_flow(request, payload: PrefectAirbyteSync):
     try:
         result = prefect_service.run_airbyte_connection_sync(payload)
     except Exception as error:
-        custom_logger.exception(error)
+        logger.exception(error)
         raise HttpError(400, "failed to run sync") from error
     return result
 
@@ -343,7 +345,7 @@ def post_prefect_dbt_core_run_flow(
     try:
         result = prefect_service.run_dbt_core_sync(payload)
     except Exception as error:
-        custom_logger.exception(error)
+        logger.exception(error)
         raise HttpError(400, "failed to run dbt") from error
     return result
 
@@ -425,7 +427,7 @@ def post_prefect_dbt_core_block(request):
                 bqlocation,
             )
         except Exception as error:
-            custom_logger.exception(error)
+            logger.exception(error)
             raise HttpError(400, str(error)) from error
 
         coreprefectblock = OrgPrefectBlock(
@@ -520,7 +522,7 @@ def delete_prefect_dbt_run_block(request):
         try:
             prefect_service.delete_dbt_core_block(dbt_block.block_id)
         except Exception as error:
-            custom_logger.exception(error)
+            logger.exception(error)
             # may have deleted the block via the prefect ui, continue
 
         # Delete block row from database
@@ -533,19 +535,17 @@ def delete_prefect_dbt_run_block(request):
                     org=orguser.org, cron=None, connection_id=None
                 ).first()
                 if dataflow:
-                    custom_logger.info("deleting manual deployment for dbt run")
+                    logger.info("deleting manual deployment for dbt run")
                     # do this in try catch because it can fail & throw error
                     try:
                         prefect_service.delete_deployment_by_id(dataflow.deployment_id)
                     except Exception:  # skipcq: PYL-W0703
-                        custom_logger.exception("could not delete prefect deployment")
+                        logger.exception("could not delete prefect deployment")
                         continue
 
                     # delete manual dbt run deployment
                     dataflow.delete()
-                    custom_logger.info(
-                        "FINISHED deleting manual deployment for dbt run"
-                    )
+                    logger.info("FINISHED deleting manual deployment for dbt run")
                 else:
                     break
 
@@ -560,7 +560,7 @@ def get_flow_runs_logs(
     try:
         result = prefect_service.get_flow_run_logs(flow_run_id, offset)
     except Exception as error:
-        custom_logger.exception(error)
+        logger.exception(error)
         raise HttpError(400, "failed to retrieve logs") from error
     return result
 
@@ -576,7 +576,7 @@ def get_flow_run_by_id(request, flow_run_id):
     try:
         flow_run = prefect_service.get_flow_run(flow_run_id)
     except Exception as error:
-        custom_logger.exception(error)
+        logger.exception(error)
         raise HttpError(400, "failed to retrieve logs") from error
     return flow_run
 
