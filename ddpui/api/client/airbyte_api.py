@@ -75,6 +75,7 @@ def ninja_default_error_handler(
     request, exc: Exception
 ):  # pylint: disable=unused-argument
     """Handle any other exception raised in the apis"""
+    logger.exception(exc)
     return Response({"detail": "something went wrong"}, status=500)
 
 
