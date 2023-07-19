@@ -450,7 +450,7 @@ def post_organization_user_accept_invite(
     if not orguser:
         logger.info(
             f"creating invited user {invitation.invited_email} "
-            f"for {invitation.invited_by.org.name}",
+            f"for {invitation.invited_by.org.name}"
         )
         user = User.objects.create_user(
             username=invitation.invited_email,

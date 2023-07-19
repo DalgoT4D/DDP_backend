@@ -49,7 +49,7 @@ def clone_github_repo(
                 "status": "running",
             }
         )
-        logger.info(f"created project_dir {project_dir}")
+        logger.info("created project_dir %s", project_dir)
 
     elif dbtrepo_dir.exists():
         shutil.rmtree(str(dbtrepo_dir))
@@ -90,7 +90,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
         }
     )
     org = Org.objects.filter(id=org_id).first()
-    logger.info(f"found org {org.name}")
+    logger.info("found org %s", org.name)
 
     warehouse = OrgWarehouse.objects.filter(org=org).first()
     if warehouse is None:
@@ -100,7 +100,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
                 "status": "failed",
             }
         )
-        logger.error(f"need to set up a warehouse first for org {org.name}")
+        logger.error("need to set up a warehouse first for org %s", org.name)
         return
 
     if org.slug is None:
@@ -119,7 +119,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     ):
         return
 
-    logger.info(f"git clone succeeded for org {org.name}")
+    logger.info("git clone succeeded for org %s", org.name)
 
     # install a dbt venv
     try:
@@ -141,7 +141,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
             "status": "running",
         }
     )
-    logger.info(f"make venv succeeded for org {org.name}")
+    logger.info("make venv succeeded for org %s", org.name)
 
     # upgrade pip
     pip = project_dir / "venv/bin/pip"
@@ -175,7 +175,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
             "status": "running",
         }
     )
-    logger.info(f"upgraded pip for org {org.name}")
+    logger.info("upgraded pip for org %s", org.name)
 
     # install dbt in the new env
     try:
@@ -208,7 +208,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
             "status": "running",
         }
     )
-    logger.info(f"installed dbt-core for org {org.name}")
+    logger.info("installed dbt-core for org %s", org.name)
 
     if warehouse.wtype == "postgres":
         try:
@@ -240,7 +240,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
                 "status": "running",
             }
         )
-        logger.info(f"installed dbt-postgres for org {org.name}")
+        logger.info("installed dbt-postgres for org %s", org.name)
 
     elif warehouse.wtype == "bigquery":
         try:
@@ -272,7 +272,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
                 "status": "running",
             }
         )
-        logger.info(f"installed dbt-bigquery for org {org.name}")
+        logger.info("installed dbt-bigquery for org %s", org.name)
 
     else:
         taskprogress.add(
@@ -291,10 +291,10 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
         default_schema=payload["profile"]["target_configs_schema"],
     )
     dbt.save()
-    logger.info(f"created orgdbt for org {org.name}")
+    logger.info("created orgdbt for org %s", org.name)
     org.dbt = dbt
     org.save()
-    logger.info(f"set org.dbt for org {org.name}")
+    logger.info("set org.dbt for org %s", org.name)
 
     if payload["gitrepoAccessToken"] is not None:
         secretsmanager.delete_github_token(org)
@@ -306,11 +306,11 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
             "status": "completed",
         }
     )
-    logger.info(f"set dbt workspace completed for org {org.name}")
+    logger.info("set dbt workspace completed for org %s", org.name)
 
 
 @app.task(bind=False)
 def update_dbt_core_block_schema_task(block_name, default_schema):
     """single http PUT request to the prefect-proxy"""
-    logger.info(f"updating default_schema of {block_name} to {default_schema}")
+    logger.info("updating default_schema of %s to %s", block_name, default_schema)
     update_dbt_core_block_schema(block_name, default_schema)

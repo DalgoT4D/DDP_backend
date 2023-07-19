@@ -1,4 +1,5 @@
 import os
+import json
 from typing import Dict, List
 import requests
 from dotenv import load_dotenv
@@ -26,7 +27,7 @@ def abreq(endpoint, req=None):
     abver = os.getenv("AIRBYTE_SERVER_APIVER")
     token = os.getenv("AIRBYTE_API_TOKEN")
 
-    logger.info(f"Making request to Airbyte server: {endpoint}")
+    logger.info("Making request to Airbyte server: %s", endpoint)
 
     try:
         res = requests.post(
@@ -41,9 +42,10 @@ def abreq(endpoint, req=None):
 
     try:
         result_obj = remove_nested_attribute(res.json(), "icon")
-        logger.debug(result_obj)
+        logger.info("Response from Airbyte server:")
+        logger.info(result_obj)
     except ValueError:
-        logger.info(f"Response from Airbyte server: {res.text}")
+        logger.info("Response from Airbyte server: %s", res.text)
 
     try:
         res.raise_for_status()
@@ -64,8 +66,11 @@ def abreq(endpoint, req=None):
 
 def get_workspaces():
     """Fetch all workspaces in airbyte server"""
+    logger.info("Fetching workspaces from Airbyte server")
+
     res = abreq("workspaces/list")
     if "workspaces" not in res:
+        logger.error("No workspaces found")
         raise HttpError(404, "no workspaces found")
     return res
 
@@ -77,6 +82,7 @@ def get_workspace(workspace_id: str) -> dict:
 
     res = abreq("workspaces/get", {"workspaceId": workspace_id})
     if "workspaceId" not in res:
+        logger.info("Workspace not found: %s", workspace_id)
         raise HttpError(404, "workspace not found")
     return res
 
@@ -91,6 +97,7 @@ def set_workspace_name(workspace_id: str, name: str) -> dict:
 
     res = abreq("workspaces/update_name", {"workspaceId": workspace_id, "name": name})
     if "workspaceId" not in res:
+        logger.info("Workspace not found: %s", workspace_id)
         raise HttpError(404, "workspace not found")
     return res
 
@@ -102,6 +109,7 @@ def create_workspace(name: str) -> dict:
 
     res = abreq("workspaces/create", {"name": name})
     if "workspaceId" not in res:
+        logger.info("Workspace not created: %s", name)
         raise HttpError(400, "workspace not created")
     return res
 
@@ -183,6 +191,7 @@ def create_custom_source_definition(
     )
     if "sourceDefinitionId" not in res:
         error_message = f"Source definition not created: {name}"
+        logger.error("Source definition not created: %s", name)
         raise HttpError(400, error_message)
     return res
 
@@ -192,11 +201,9 @@ def get_sources(workspace_id: str) -> List[Dict]:
     if not isinstance(workspace_id, str):
         raise HttpError(400, "Invalid workspace ID")
 
-    logger.info(f"Fetching sources from Airbyte server for workspace {workspace_id}")
-
     res = abreq("sources/list", {"workspaceId": workspace_id})
     if "sources" not in res:
-        logger.error(f"Sources not found for workspace: {workspace_id}")
+        logger.error("Sources not found for workspace: %s", workspace_id)
         raise HttpError(404, "sources not found for workspace")
     return res
 
@@ -209,12 +216,9 @@ def get_source(workspace_id: str, source_id: str) -> dict:
     if not isinstance(source_id, str):
         raise HttpError(400, "Invalid source ID")
 
-    logger.info(
-        f"Fetching source from Airbyte server for workspace {workspace_id} and source {source_id}"
-    )
     res = abreq("sources/get", {"sourceId": source_id})
     if "sourceId" not in res:
-        logger.error(f"Source not found: {source_id}")
+        logger.error("Source not found: %s", source_id)
         raise HttpError(404, "source not found")
     return res
 
@@ -254,7 +258,7 @@ def create_source(
         },
     )
     if "sourceId" not in res:
-        logger.error(f"Failed to create source: {res}")
+        logger.error("Failed to create source: %s", res)
         raise HttpError(500, "failed to create source")
     return res
 
@@ -280,7 +284,7 @@ def update_source(source_id: str, name: str, config: dict, sourcedef_id: str) ->
         },
     )
     if "sourceId" not in res:
-        logger.error(f"Failed to update source: {res}")
+        logger.error("Failed to update source: %s", res)
         raise HttpError(500, "failed to update source")
     return res
 
@@ -299,7 +303,7 @@ def check_source_connection(workspace_id: str, data: AirbyteSourceCreate) -> dic
         },
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        logger.error(f"Failed to check source connection: {res}")
+        logger.error("Failed to check source connection: %s", res)
         raise HttpError(500, "failed to check source connection")
     return res
 
@@ -317,7 +321,7 @@ def check_source_connection_for_update(
         },
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        logger.error(f"Failed to check source connection: {res}")
+        logger.error("Failed to check source connection: %s", res)
         raise HttpError(500, "failed to check source connection")
     # {
     #   'status': 'succeeded',
@@ -375,7 +379,9 @@ def get_destination_definitions(workspace_id: str) -> dict:
         "destination_definitions/list_for_workspace", {"workspaceId": workspace_id}
     )
     if "destinationDefinitions" not in res:
-        logger.error(f"Destination definitions not found for workspace: {workspace_id}")
+        logger.error(
+            "Destination definitions not found for workspace: %s", workspace_id
+        )
         raise HttpError(404, "destination definitions not found")
     return res
 
@@ -395,7 +401,7 @@ def get_destination_definition_specification(
     )
     if "connectionSpecification" not in res:
         logger.error(
-            f"Specification not found for destination definition: {destinationdef_id}"
+            "Specification not found for destination definition: %s", destinationdef_id
         )
         raise HttpError(404, "Failed to get destination definition specification")
     return res
@@ -408,7 +414,7 @@ def get_destinations(workspace_id: str) -> dict:
 
     res = abreq("destinations/list", {"workspaceId": workspace_id})
     if "destinations" not in res:
-        logger.error(f"Destinations not found for workspace: {workspace_id}")
+        logger.error("Destinations not found for workspace: %s", workspace_id)
         raise HttpError(404, "destinations not found for this workspace")
     return res
 
@@ -422,7 +428,7 @@ def get_destination(workspace_id: str, destination_id: str) -> dict:
 
     res = abreq("destinations/get", {"destinationId": destination_id})
     if "destinationId" not in res:
-        logger.error(f"Destination not found: {destination_id}")
+        logger.error("Destination not found: %s", destination_id)
         raise HttpError(404, "destination not found")
     return res
 
@@ -458,7 +464,7 @@ def create_destination(
         },
     )
     if "destinationId" not in res:
-        logger.error(f"Failed to create destination: {res}")
+        logger.error("Failed to create destination: %s", res)
         raise HttpError(500, "failed to create destination")
     return res
 
@@ -486,7 +492,7 @@ def update_destination(
         },
     )
     if "destinationId" not in res:
-        logger.error(f"Failed to update destination: {res}")
+        logger.error("Failed to update destination: %s", res)
         raise HttpError(500, "failed to update destination")
     return res
 
@@ -507,7 +513,7 @@ def check_destination_connection(
         },
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        logger.error(f"Failed to check destination connection: {res}")
+        logger.error("Failed to check destination connection: %s", res)
         raise HttpError(500, "failed to check destination connection")
     return res
 
@@ -528,7 +534,7 @@ def check_destination_connection_for_update(
         },
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        logger.error(f"Failed to check destination connection: {res}")
+        logger.error("Failed to check destination connection: %s", res)
         raise HttpError(500, "failed to check destination connection")
     return res
 
@@ -647,7 +653,7 @@ def create_connection(
 
     res = abreq("connections/create", payload)
     if "connectionId" not in res:
-        logger.error(f"Failed to create connection: {res}")
+        logger.error("Failed to create connection: %s", res)
         raise HttpError(500, "failed to create connection")
     return res
 
@@ -698,7 +704,7 @@ def update_connection(
 
     res = abreq("connections/update", current_connection)
     if "connectionId" not in res:
-        logger.error(f"Failed to update connection: {res}")
+        logger.error("Failed to update connection: %s", res)
         raise HttpError(500, "failed to update connection")
     return res
 
@@ -709,7 +715,7 @@ def reset_connection(connection_id: str) -> dict:
         raise HttpError(400, "connection_id must be a string")
 
     res = abreq("connections/reset", {"connectionId": connection_id})
-    logger.info(f"Reseting the connection: {connection_id}")
+    logger.info("Reseting the connection: %s", connection_id)
     return res
 
 
@@ -721,7 +727,7 @@ def delete_connection(workspace_id: str, connection_id: str) -> dict:
         raise HttpError(400, "connection_id must be a string")
 
     res = abreq("connections/delete", {"connectionId": connection_id})
-    logger.info(f"Deleting connection: {connection_id}")
+    logger.info("Deleting connection: %s", connection_id)
     return res
 
 
@@ -733,7 +739,7 @@ def sync_connection(workspace_id: str, connection_id: str) -> dict:
         raise HttpError(400, "connection_id must be a string")
 
     res = abreq("connections/sync", {"connectionId": connection_id})
-    logger.info(f"Syncing connection: {connection_id}")
+    logger.info("Syncing connection: %s", connection_id)
     return res
 
 

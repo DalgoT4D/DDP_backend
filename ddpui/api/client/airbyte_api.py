@@ -38,9 +38,9 @@ from ddpui.ddpprefect import (
 )
 from ddpui.ddpprefect import prefect_service
 from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
+from ddpui.models.org_user import OrgUser
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.models.org_user import OrgUser
 from ddpui.utils import secretsmanager
 
 
@@ -233,7 +233,6 @@ def get_airbyte_sources(request):
         raise HttpError(400, "create an airbyte workspace first")
 
     res = airbyte_service.get_sources(orguser.org.airbyte_workspace_id)["sources"]
-    logger.info("fetched airbyte connections block of this org")
     logger.debug(res)
     return res
 
@@ -281,7 +280,7 @@ def delete_airbyte_source(request, source_id):
     )
     logger.info(
         "fetched prefect connection blocks based on the names stored in "
-        "django orgprefectblocks",
+        "django orgprefectblocks"
     )
     delete_block_ids = []
     for block in prefect_conn_blocks:
@@ -301,7 +300,7 @@ def delete_airbyte_source(request, source_id):
 
     # delete the source
     airbyte_service.delete_source(orguser.org.airbyte_workspace_id, source_id)
-    logger.info("deleted airbyte source {source_id}")
+    logger.info(f"deleted airbyte source {source_id}")
 
     return {"success": 1}
 
@@ -461,7 +460,6 @@ def put_airbyte_destination(
             warehouse.wtype, dbtblock.block_name, dbt_credentials
         )
 
-    logger.info("updated destination having id " + destination["destinationId"])
     return {"destinationId": destination["destinationId"]}
 
 
@@ -921,9 +919,6 @@ def post_airbyte_sync_connection(request, connection_block_id):
     org_prefect_connection_block = OrgPrefectBlock.objects.filter(
         org=org, block_id=connection_block_id
     ).first()
-
-    if not org_prefect_connection_block:
-        raise AssertionError
 
     timenow = datetime.now().strftime("%Y-%m-%d.%H:%M:%S")
     return prefect_service.run_airbyte_connection_sync(

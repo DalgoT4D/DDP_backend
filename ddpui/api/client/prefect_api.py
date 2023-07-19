@@ -31,7 +31,6 @@ from ddpui.ddpprefect.schema import (
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
-from ddpui.utils.custom_logger import CustomLogger
 
 prefectapi = NinjaAPI(urls_namespace="prefect")
 # http://127.0.0.1:8000/api/docs
@@ -387,7 +386,7 @@ def post_prefect_dbt_core_block(request):
 
     profile_name = dbt_project["profile"]
     target = orguser.org.dbt.default_schema
-    custom_logger.info(f"profile_name={profile_name} target={target}")
+    logger.info("profile_name=%s target=%s", profile_name, target)
 
     # get the bigquery location if warehouse is bq
     bqlocation = None
