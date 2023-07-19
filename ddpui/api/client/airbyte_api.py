@@ -43,8 +43,6 @@ from ddpui.utils.ddp_logger import logger
 from ddpui.ddpairbyte import airbytehelpers
 from logging import getLogger
 from ddpui.models.org_user import OrgUser
-from ddpui.utils.ddp_logger import logger
-from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils import secretsmanager
 
 logger = getLogger(__name__)
