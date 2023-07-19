@@ -920,8 +920,6 @@ def post_airbyte_sync_connection(request, connection_block_id):
         org=org, block_id=connection_block_id
     ).first()
 
-    assert org_prefect_connection_block
-
     timenow = datetime.now().strftime("%Y-%m-%d.%H:%M:%S")
     return prefect_service.run_airbyte_connection_sync(
         PrefectAirbyteSync(
