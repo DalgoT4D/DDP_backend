@@ -25,8 +25,8 @@ http_timeout = int(os.getenv("PREFECT_HTTP_TIMEOUT", "5"))
 # ================================================================================================
 def prefect_get(endpoint: str, **kwargs) -> dict:
     """make a GET request to the proxy"""
-    logger = CustomLogger("prefect")
-    orgname = logger.get_slug()
+    new_logger = CustomLogger("prefect")
+    orgname = new_logger.get_slug()
     headers = kwargs.get("headers", {})
     headers["x-ddp-org"] = orgname
     kwargs["headers"] = headers
@@ -49,8 +49,8 @@ def prefect_get(endpoint: str, **kwargs) -> dict:
 
 def prefect_post(endpoint: str, json: dict, **kwargs) -> dict:
     """make a POST request to the proxy"""
-    logger = CustomLogger("prefect")
-    orgname = logger.get_slug()
+    new_logger = CustomLogger("prefect")
+    orgname = new_logger.get_slug()
     headers = kwargs.get("headers", {})
     headers["x-ddp-org"] = orgname
     kwargs["headers"] = headers
@@ -362,7 +362,9 @@ def get_flow_run(flow_run_id: str) -> dict:
 
 
 def create_deployment_flow_run(deployment_id: str) -> dict:  # pragma: no cover
-    """Proxy call to create a flow run for deployment.
-    This is like a quick check to see if deployment is running"""
+    """
+    Proxy call to create a flow run for deployment.
+    This is like a quick check to see if deployment is running
+    """
     res = prefect_post(f"deployments/{deployment_id}/flow_run", {})
     return res

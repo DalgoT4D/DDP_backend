@@ -369,7 +369,6 @@ def test_create_custom_source_definition_failure():
 
 def test_get_sources_success():
     workspace_id = "my_workspace_id"
-    orgname = "my_orgname"
     expected_response = {"sources": [{"sourceId": "1", "name": "Example Source 1"}]}
 
     with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
@@ -382,7 +381,6 @@ def test_get_sources_success():
 
 def test_get_sources_failure():
     workspace_id = "my_workspace_id"
-    orgname = "my_orgname"
     with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
         mock_post.return_value.status_code = 404
         mock_post.return_value.headers = {"Content-Type": "application/json"}
@@ -402,7 +400,6 @@ def test_get_sources_with_invalid_workspace_id():
 def test_get_source_success():
     workspace_id = "my_workspace_id"
     source_id = "1"
-    orgname = "orgname"
     expected_response = {"sourceId": "1", "name": "Example Source 1"}
 
     with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
@@ -418,7 +415,6 @@ def test_get_source_success():
 def test_get_source_failure():
     workspace_id = "my_workspace_id"
     source_id = "1"
-    orgname = "orgname"
     with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
         mock_post.return_value.status_code = 404
         mock_post.return_value.headers = {"Content-Type": "application/json"}

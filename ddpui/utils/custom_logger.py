@@ -3,11 +3,14 @@ import logging
 
 
 class CustomLogger:
+    """custom logger to get org_slug from inspect.stack"""
+
     def __init__(self, name, level=logging.INFO):
         self.logger = logging.getLogger(name)
         self.logger.setLevel(level)
 
     def get_slug(self):
+        """custom logger for slug"""
         try:
             stack = inspect.stack()
             for frame_info in stack:
@@ -20,6 +23,7 @@ class CustomLogger:
         return None
 
     def info(self, msg):
+        """custom logger for info"""
         slug = self.get_slug()
         caller_name = inspect.stack()[1].function
         if slug:
@@ -28,6 +32,7 @@ class CustomLogger:
             self.logger.info(msg, extra={"caller_name": caller_name})
 
     def error(self, msg):
+        """custom logger for error"""
         slug = self.get_slug()
         caller_name = inspect.stack()[1].function
         if slug:
@@ -36,6 +41,7 @@ class CustomLogger:
             self.logger.error(msg, extra={"caller_name": caller_name})
 
     def debug(self, msg):
+        """custom logger for debug"""
         slug = self.get_slug()
         caller_name = inspect.stack()[1].function
         if slug:
@@ -44,6 +50,7 @@ class CustomLogger:
             self.logger.debug(msg, extra={"caller_name": caller_name})
 
     def exception(self, msg):
+        """custom logger for exc"""
         slug = self.get_slug()
         caller_name = inspect.stack()[1].function
         if slug:
@@ -54,6 +61,7 @@ class CustomLogger:
             self.logger.exception(msg, extra={"caller_name": caller_name})
 
     def warning(self, msg):
+        """custom logger for warning"""
         slug = self.get_slug()
         caller_name = inspect.stack()[1].function
         if slug:

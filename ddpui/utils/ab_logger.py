@@ -10,6 +10,7 @@ IST = pytz.timezone("Asia/Kolkata")
 
 
 def ist_time(*args):
+    """set ist time"""
     utc_dt = pytz.utc.localize(datetime.datetime.utcnow())
     converted = utc_dt.astimezone(IST)
     return converted.timetuple()

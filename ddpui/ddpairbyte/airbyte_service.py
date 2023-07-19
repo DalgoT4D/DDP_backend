@@ -40,7 +40,7 @@ def abreq(endpoint, req=None):
         raise HttpError(500, str(conn_error)) from conn_error
 
     try:
-        result_obj = remove_nested_attribute(res.json(), "icon")
+        remove_nested_attribute(res.json(), "icon")
     except ValueError:
         custom_logger.info(f"Response from Airbyte server: {res.text}")
 
