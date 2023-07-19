@@ -3,6 +3,7 @@ import requests
 
 from ninja.errors import HttpError
 from dotenv import load_dotenv
+from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect.schema import (
     PrefectDbtCoreSetup,
     PrefectShellSetup,
@@ -17,44 +18,62 @@ from ddpui.utils.ddp_logger import logger
 load_dotenv()
 
 PREFECT_PROXY_API_URL = os.getenv("PREFECT_PROXY_API_URL")
-http_timeout = int(os.getenv("PREFECT_HTTP_TIMEOUT", "30"))
+http_timeout = int(os.getenv("PREFECT_HTTP_TIMEOUT", "5"))
 
 
 # ================================================================================================
 def prefect_get(endpoint: str, **kwargs) -> dict:
     """make a GET request to the proxy"""
+    logger = airbyte_service.CustomLogger("prefect")
+    orgname = logger.get_slug()
+    headers = kwargs.get("headers", {})
+    headers["x-ddp-org"] = orgname
+    kwargs["headers"] = headers
+    custom_logger = airbyte_service.CustomLogger("airbyte")
     try:
         res = requests.get(
-            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}", timeout=http_timeout, **kwargs
+            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}",
+            timeout=http_timeout,
+            headers=headers,
         )
     except Exception as error:
         raise HttpError(500, "connection error") from error
     try:
         res.raise_for_status()
     except Exception as error:
-        logger.exception(error)
+        custom_logger.exception(error)
         raise HttpError(res.status_code, res.text) from error
     return res.json()
 
 
-def prefect_post(endpoint: str, json: dict) -> dict:
+def prefect_post(endpoint: str, json: dict, **kwargs) -> dict:
     """make a POST request to the proxy"""
+    logger = airbyte_service.CustomLogger("prefect")
+    orgname = logger.get_slug()
+    headers = kwargs.get("headers", {})
+    headers["x-ddp-org"] = orgname
+    kwargs["headers"] = headers
+    custom_logger = airbyte_service.CustomLogger("airbyte")
     try:
         res = requests.post(
-            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}", timeout=http_timeout, json=json
+            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}",
+            timeout=http_timeout,
+            json=json,
+            headers=headers,
         )
     except Exception as error:
         raise HttpError(500, "connection error") from error
     try:
         res.raise_for_status()
     except Exception as error:
-        logger.exception(error)
+        custom_logger.exception(error)
         raise HttpError(res.status_code, res.text) from error
     return res.json()
 
 
 def prefect_delete_a_block(block_id: str) -> None:
     """makes a DELETE request to the proxy"""
+    custom_logger = airbyte_service.CustomLogger("airbyte")
     try:
         res = requests.delete(
             f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=http_timeout
@@ -64,7 +83,7 @@ def prefect_delete_a_block(block_id: str) -> None:
     try:
         res.raise_for_status()
     except Exception as error:
-        logger.exception(error)
+        custom_logger.exception(error)
         raise HttpError(res.status_code, res.text) from error
 
 
