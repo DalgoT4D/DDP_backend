@@ -1,4 +1,3 @@
-import inspect
 import os
 from pathlib import Path
 from datetime import datetime
@@ -26,8 +25,6 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema2,
     PrefectFlowRunSchema,
 )
-
-from ddpui.utils.ddp_logger import logger
 from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
 

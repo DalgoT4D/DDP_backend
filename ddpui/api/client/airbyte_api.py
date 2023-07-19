@@ -74,7 +74,6 @@ def ninja_default_error_handler(
     request, exc: Exception
 ):  # pylint: disable=unused-argument
     """Handle any other exception raised in the apis"""
-
     return Response({"detail": "something went wrong"}, status=500)
 
 
@@ -892,7 +891,8 @@ def post_airbyte_sync_connection(request, connection_block_id):
         org=org, block_id=connection_block_id
     ).first()
 
-    assert org_prefect_connection_block
+    if not org_prefect_connection_block:
+        raise AssertionError
 
     timenow = datetime.now().strftime("%Y-%m-%d.%H:%M:%S")
     return run_airbyte_connection_sync(
@@ -901,13 +901,6 @@ def post_airbyte_sync_connection(request, connection_block_id):
             flowRunName=f"manual-sync-{org.name}-{timenow}",
         )
     )
-    # {
-    #     "created_at": "2023-05-10T14:25:42+00:00",
-    #     "job_status": "succeeded",
-    #     "job_id": 77,
-    #     "records_synced": 20799,
-    #     "updated_at": "2023-05-10T14:25:58+00:00"
-    # }
 
 
 @airbyteapi.get("/jobs/{job_id}", auth=auth.CanManagePipelines())

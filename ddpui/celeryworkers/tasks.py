@@ -11,8 +11,6 @@ from ddpui.utils.helpers import runcmd
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
 
-from ddpui.utils.ddp_logger import logger
-
 
 @app.task(bind=True)
 def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:

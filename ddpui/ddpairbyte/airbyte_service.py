@@ -1,17 +1,11 @@
 import inspect
 import logging
 import os
-import json
 from typing import Dict, List
 import requests
 from dotenv import load_dotenv
 from ninja.errors import HttpError
-from ddpui.api.client import airbyte_api
-from ddpui import auth
 from ddpui.ddpairbyte import schema
-from ddpui.models.org import Org
-from ddpui.models.org_user import OrgUserResponse
-from ddpui.utils.ab_logger import logger
 from ddpui.utils.helpers import remove_nested_attribute
 from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
@@ -19,7 +13,6 @@ from ddpui.ddpairbyte.schema import (
     AirbyteSourceUpdateCheckConnection,
     AirbyteDestinationUpdateCheckConnection,
 )
-from ddpui.api.client import user_org_api
 
 load_dotenv()
 
@@ -132,7 +125,6 @@ def abreq(endpoint, req=None):
 
 def get_workspaces():
     """Fetch all workspaces in airbyte server"""
-
     res = abreq("workspaces/list")
     if "workspaces" not in res:
         raise HttpError(404, "no workspaces found")
@@ -252,7 +244,6 @@ def create_custom_source_definition(
     )
     if "sourceDefinitionId" not in res:
         error_message = f"Source definition not created: {name}"
-        # logger.error(f"Source definition not created: {name}")
         raise HttpError(400, error_message)
     return res
 
