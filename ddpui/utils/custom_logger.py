@@ -62,4 +62,3 @@ class CustomLogger:
             )
         else:
             self.logger.warning(msg, extra={"caller_name": caller_name})
-

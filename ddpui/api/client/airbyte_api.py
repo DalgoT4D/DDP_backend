@@ -429,9 +429,7 @@ def put_airbyte_destination(
     destination = airbyte_service.update_destination(
         destination_id, payload.name, payload.config, payload.destinationDefId
     )
-    custom_logger.info(
-        "updated destination having id " + destination["destinationId"]
-    )
+    custom_logger.info("updated destination having id " + destination["destinationId"])
     return {"destinationId": destination["destinationId"]}
 
 
