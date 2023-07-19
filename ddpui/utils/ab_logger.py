@@ -2,18 +2,9 @@ import logging
 import sys
 from logging.handlers import RotatingFileHandler
 from ddpui import settings
-import pytz
-import datetime
+from ddpui.utils.timezone import ist_time
 
 logger = logging.getLogger("airbyte")
-IST = pytz.timezone("Asia/Kolkata")
-
-
-def ist_time(*args):
-    """set ist time"""
-    utc_dt = pytz.utc.localize(datetime.datetime.utcnow())
-    converted = utc_dt.astimezone(IST)
-    return converted.timetuple()
 
 
 def setup_logger():
