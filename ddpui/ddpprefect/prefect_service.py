@@ -72,6 +72,7 @@ def prefect_post(endpoint: str, json: dict, **kwargs) -> dict:
 
 def prefect_put(endpoint: str, json: dict) -> dict:
     """make a PUT request to the proxy"""
+    custom_logger = CustomLogger("prefect")
     try:
         res = requests.put(
             f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}", timeout=http_timeout, json=json
@@ -81,7 +82,7 @@ def prefect_put(endpoint: str, json: dict) -> dict:
     try:
         res.raise_for_status()
     except Exception as error:
-        logger.exception(error)
+        custom_logger.exception(error)
         raise HttpError(res.status_code, res.text) from error
     return res.json()
 

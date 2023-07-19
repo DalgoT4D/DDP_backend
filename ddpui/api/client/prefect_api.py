@@ -385,7 +385,7 @@ def post_prefect_dbt_core_block(request):
 
     profile_name = dbt_project["profile"]
     target = orguser.org.dbt.default_schema
-    logger.info("profile_name=%s target=%s", profile_name, target)
+    custom_logger.info(f"profile_name={profile_name} target={target}")
 
     # get the bigquery location if warehouse is bq
     bqlocation = None

@@ -22,6 +22,7 @@ def clone_github_repo(
     taskprogress: TaskProgress | None,
 ) -> bool:
     """clones an org's github repo"""
+    custom_logger = CustomLogger("dbt")
     if taskprogress is None:
         child = False
         taskprogress = TaskProgress(self.request.id)
@@ -46,7 +47,7 @@ def clone_github_repo(
                 "status": "running",
             }
         )
-        logger.info("created project_dir %s", project_dir)
+        custom_logger.info(f"created project_dir {project_dir}")
 
     elif dbtrepo_dir.exists():
         shutil.rmtree(str(dbtrepo_dir))
@@ -63,7 +64,7 @@ def clone_github_repo(
                 "status": "failed",
             }
         )
-        logger.exception(error)
+        custom_logger.exception(error)
         return False
 
     taskprogress.add(
@@ -117,7 +118,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     ):
         return
 
-    logger.info("git clone succeeded for org %s", org.name)
+    custom_logger.info(f"git clone succeeded for org {org.name}")
 
     # install a dbt venv
     try:
@@ -304,11 +305,12 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
             "status": "completed",
         }
     )
-    logger.info("set dbt workspace completed for org %s", org.name)
+    custom_logger.info(f"set dbt workspace completed for org {org.name}")
 
 
 @app.task(bind=False)
 def update_dbt_core_block_schema_task(block_name, default_schema):
     """single http PUT request to the prefect-proxy"""
-    logger.info("updating default_schema of %s to %s", block_name, default_schema)
+    custom_logger = CustomLogger("dbt")
+    custom_logger.info(f"updating default_schema of {block_name} to {default_schema}")
     update_dbt_core_block_schema(block_name, default_schema)
