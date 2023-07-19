@@ -26,5 +26,5 @@ def get_dbt_docs(request, tokenhex: str):
         response.headers["X-Frame-Options"] = "ignore"
         response.headers[
             "Content-Security-Policy"
-        ] = "frame-src localhost:8002 ddpapi.projecttech4dev.org;"
+        ] = f"frame-src localhost:8002 {request.headers['Host']};"
         return response
