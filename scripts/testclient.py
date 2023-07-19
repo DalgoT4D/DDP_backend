@@ -59,6 +59,27 @@ class TestClient:
             print(req.text)
         return None
 
+    def clientput(self, endpoint, **kwargs):
+        """PUT"""
+        print(f"PUT /api/{endpoint}")
+        req = requests.put(
+            f"{self.httpschema}://{self.host}:{self.port}/api/{endpoint}",
+            headers=self.clientheaders,
+            timeout=kwargs.get("timeout", 10),
+            json=kwargs.get("json"),
+        )
+        try:
+            req.raise_for_status()
+        except Exception as error:
+            raise requests.exceptions.HTTPError(req.text) from error
+        try:
+            if self.verbose:
+                print(req.json())
+            return req.json()
+        except Exception:
+            print(req.text)
+        return None
+
     def clientdelete(self, endpoint, **kwargs):
         """DELETE"""
         print(f"DELETE /api/{endpoint}")

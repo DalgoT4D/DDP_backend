@@ -8,9 +8,9 @@ from ddpui.ddpprefect.schema import (
     PrefectShellSetup,
     PrefectAirbyteConnectionSetup,
     PrefectAirbyteSync,
-    DbtProfile,
     PrefectDataFlowCreateSchema2,
     PrefectDbtCore,
+    PrefectDataFlowUpdateSchema,
 )
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -66,6 +66,22 @@ def prefect_post(endpoint: str, json: dict, **kwargs) -> dict:
         res.raise_for_status()
     except Exception as error:
         custom_logger.exception(error)
+        raise HttpError(res.status_code, res.text) from error
+    return res.json()
+
+
+def prefect_put(endpoint: str, json: dict) -> dict:
+    """make a PUT request to the proxy"""
+    try:
+        res = requests.put(
+            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}", timeout=http_timeout, json=json
+        )
+    except Exception as error:
+        raise HttpError(500, "connection error") from error
+    try:
+        res.raise_for_status()
+    except Exception as error:
+        logger.exception(error)
         raise HttpError(res.status_code, res.text) from error
     return res.json()
 
@@ -215,7 +231,7 @@ def get_dbtcore_block_id(blockname) -> str | None:
 
 def create_dbt_core_block(
     dbtcore: PrefectDbtCoreSetup,
-    profile: DbtProfile,
+    profilename: str,
     target: str,
     wtype: str,
     credentials: dict,
@@ -227,7 +243,7 @@ def create_dbt_core_block(
         {
             "blockName": dbtcore.block_name,
             "profile": {
-                "name": profile.name,
+                "name": profilename,
                 "target": target,
                 "target_configs_schema": target,
             },
@@ -247,6 +263,30 @@ def create_dbt_core_block(
 def delete_dbt_core_block(block_id):
     """Delete a dbt core block in prefect"""
     prefect_delete_a_block(block_id)
+
+
+def update_dbt_core_block_credentials(wtype: str, block_name: str, credentials: dict):
+    """Update the credentials of a dbt core block in prefect"""
+    response = prefect_put(
+        f"blocks/dbtcore_edit/{wtype}/",
+        {
+            "blockName": block_name,
+            "credentials": credentials,
+        },
+    )
+    return response
+
+
+def update_dbt_core_block_schema(block_name: str, target_configs_schema: str):
+    """Update the schema inside a dbt core block in prefect"""
+    response = prefect_put(
+        "blocks/dbtcore_edit_schema/",
+        {
+            "blockName": block_name,
+            "target_configs_schema": target_configs_schema,
+        },
+    )
+    return response
 
 
 # ================================================================================================
@@ -284,6 +324,19 @@ def create_dataflow(payload: PrefectDataFlowCreateSchema2) -> dict:  # pragma: n
                 for conn in payload.connection_blocks
             ],
             "dbt_blocks": payload.dbt_blocks,
+            "cron": payload.cron,
+        },
+    )
+    return res
+
+
+def update_dataflow(
+    deployment_id: str, payload: PrefectDataFlowUpdateSchema
+) -> dict:  # pragma: no cover
+    """update a prefect deployment with a new cron schedule"""
+    res = prefect_put(
+        f"deployments/{deployment_id}",
+        {
             "cron": payload.cron,
         },
     )

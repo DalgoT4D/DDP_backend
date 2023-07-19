@@ -452,6 +452,14 @@ def test_delete_source_success():
         assert isinstance(result, dict)
 
 
+def test_delete_source_failure():
+    workspace_id = "my_workspace_id"
+    source_id = "1"
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq", return_value="abreq-retval"):
+        response = delete_source(workspace_id, source_id)
+        assert response == "abreq-retval"
+
+
 def test_delete_source_with_invalid_workspace_id():
     with pytest.raises(HttpError) as excinfo:
         delete_source(123, "1")
