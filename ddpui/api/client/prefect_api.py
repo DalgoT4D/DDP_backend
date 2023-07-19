@@ -27,12 +27,13 @@ from ddpui.ddpprefect.schema import (
 )
 from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
+from ddpui.utils.custom_logger import CustomLogger
 
 prefectapi = NinjaAPI(urls_namespace="prefect")
 # http://127.0.0.1:8000/api/docs
 
 
-custom_logger = airbyte_service.CustomLogger("prefect")
+custom_logger = CustomLogger("prefect")
 
 
 @prefectapi.exception_handler(ValidationError)

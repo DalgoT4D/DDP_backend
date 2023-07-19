@@ -5,8 +5,8 @@ from subprocess import CalledProcessError
 
 from django.utils.text import slugify
 from ddpui.celery import app
-from ddpui.ddpairbyte import airbyte_service
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
+from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.helpers import runcmd
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
@@ -17,7 +17,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     """sets up an org's dbt workspace, recreating it if it already exists"""
     taskprogress = TaskProgress(self.request.id)
 
-    custom_logger = airbyte_service.CustomLogger("dbt")
+    custom_logger = CustomLogger("dbt")
     taskprogress.add(
         {
             "stepnum": 1,

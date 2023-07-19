@@ -37,6 +37,7 @@ from ddpui.ddpprefect import (
 )
 from ddpui.ddpprefect import prefect_service
 from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
+from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.ddp_logger import logger
 from ddpui.ddpairbyte import airbytehelpers
 from logging import getLogger
@@ -44,7 +45,7 @@ from logging import getLogger
 logger = getLogger(__name__)
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
-custom_logger = airbyte_service.CustomLogger("airbyte")
+custom_logger = CustomLogger("airbyte")
 
 
 @airbyteapi.exception_handler(ValidationError)
@@ -429,7 +430,7 @@ def put_airbyte_destination(
         destination_id, payload.name, payload.config, payload.destinationDefId
     )
     custom_logger.info(
-        request, "updated destination having id " + destination["destinationId"]
+        "updated destination having id " + destination["destinationId"]
     )
     return {"destinationId": destination["destinationId"]}
 
@@ -526,7 +527,7 @@ def get_airbyte_connections(request):
             }
         )
 
-    custom_logger.info(request, res)
+    custom_logger.info(res)
     return res
 
 
@@ -666,7 +667,7 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
         airbyte_connection_block_id
     )
 
-    custom_logger.info(request, airbyte_connection_block)
+    custom_logger.info(airbyte_connection_block)
 
     # create a prefect AirbyteConnection block
     connection_block = OrgPrefectBlock(

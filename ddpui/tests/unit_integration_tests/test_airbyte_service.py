@@ -376,7 +376,7 @@ def test_get_sources_success():
         mock_post.return_value.status_code = 200
         mock_post.return_value.headers = {"Content-Type": "application/json"}
         mock_post.return_value.json.return_value = expected_response
-        result = get_sources(workspace_id, orgname)["sources"]
+        result = get_sources(workspace_id)["sources"]
         assert isinstance(result, list)
 
 
@@ -388,14 +388,14 @@ def test_get_sources_failure():
         mock_post.return_value.headers = {"Content-Type": "application/json"}
         mock_post.return_value.json.return_value = {"error": "Invalid request data"}
         with pytest.raises(HttpError) as excinfo:
-            get_sources(workspace_id, orgname)
+            get_sources(workspace_id)
         assert excinfo.value.status_code == 404
         assert str(excinfo.value) == "sources not found for workspace"
 
 
 def test_get_sources_with_invalid_workspace_id():
     with pytest.raises(HttpError) as excinfo:
-        get_sources(123, "orgname")
+        get_sources(123)
     assert str(excinfo.value) == "Invalid workspace ID"
 
 
@@ -409,7 +409,7 @@ def test_get_source_success():
         mock_post.return_value.status_code = 200
         mock_post.return_value.headers = {"Content-Type": "application/json"}
         mock_post.return_value.json.return_value = expected_response
-        result = get_source(workspace_id, source_id, orgname)
+        result = get_source(workspace_id, source_id)
 
         assert result == expected_response
         assert isinstance(result, dict)
@@ -424,20 +424,20 @@ def test_get_source_failure():
         mock_post.return_value.headers = {"Content-Type": "application/json"}
         mock_post.return_value.json.return_value = {"error": "Invalid request data"}
         with pytest.raises(HttpError) as excinfo:
-            get_source(workspace_id, source_id, orgname)
+            get_source(workspace_id, source_id)
         assert excinfo.value.status_code == 404
         assert str(excinfo.value) == "source not found"
 
 
 def test_get_source_with_invalid_workspace_id():
     with pytest.raises(HttpError) as excinfo:
-        get_source(123, "1", "orgname")
+        get_source(123, "1")
     assert str(excinfo.value) == "Invalid workspace ID"
 
 
 def test_get_source_with_invalid_source_id():
     with pytest.raises(HttpError) as excinfo:
-        get_source("test", 123, "orgname")
+        get_source("test", 123)
     assert str(excinfo.value) == "Invalid source ID"
 
 

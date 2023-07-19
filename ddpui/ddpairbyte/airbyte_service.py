@@ -1,11 +1,10 @@
-import inspect
-import logging
 import os
 from typing import Dict, List
 import requests
 from dotenv import load_dotenv
 from ninja.errors import HttpError
 from ddpui.ddpairbyte import schema
+from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.helpers import remove_nested_attribute
 from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
@@ -15,68 +14,6 @@ from ddpui.ddpairbyte.schema import (
 )
 
 load_dotenv()
-
-
-class CustomLogger:
-    def __init__(self, name, level=logging.INFO):
-        self.logger = logging.getLogger(name)
-        self.logger.setLevel(level)
-
-    def get_slug(self):
-        try:
-            stack = inspect.stack()
-            for frame_info in stack:
-                frame = frame_info.frame
-                userorg = frame.f_locals.get("orguser")
-                if userorg is not None and userorg.org is not None:
-                    return userorg.org.slug
-        except Exception as e:
-            self.logger.error(f"An error occurred while getting slug: {e}")
-        return None
-
-    def info(self, msg):
-        slug = self.get_slug()
-        caller_name = inspect.stack()[1].function
-        if slug:
-            self.logger.info(msg, extra={"caller_name": caller_name, "orgname": slug})
-        else:
-            self.logger.info(msg, extra={"caller_name": caller_name})
-
-    def error(self, msg):
-        slug = self.get_slug()
-        caller_name = inspect.stack()[1].function
-        if slug:
-            self.logger.error(msg, extra={"caller_name": caller_name, "orgname": slug})
-        else:
-            self.logger.error(msg, extra={"caller_name": caller_name})
-
-    def debug(self, msg):
-        slug = self.get_slug()
-        caller_name = inspect.stack()[1].function
-        if slug:
-            self.logger.debug(msg, extra={"caller_name": caller_name, "orgname": slug})
-        else:
-            self.logger.debug(msg, extra={"caller_name": caller_name})
-
-    def exception(self, msg):
-        slug = self.get_slug()
-        caller_name = inspect.stack()[1].function
-        if slug:
-            self.logger.exception(
-                msg, extra={"caller_name": caller_name, "orgname": slug}
-            )
-        else:
-            self.logger.exception(msg, extra={"caller_name": caller_name})
-
-    def warning(self, msg):
-        slug = self.get_slug()
-        caller_name = inspect.stack()[1].function
-        if slug:
-            self.logger.warning(
-                msg, extra={"caller_name": caller_name, "orgname": slug}
-            )
-        else:
-            self.logger.warning(msg, extra={"caller_name": caller_name})
 
 
 custom_logger = CustomLogger("airbyte")
@@ -116,9 +53,7 @@ def abreq(endpoint, req=None):
     if "application/json" in res.headers.get("Content-Type", ""):
         return res.json()
     custom_logger.error(
-        "abreq result has content-type %s while hitting %s",
-        res.headers.get("Content-Type", ""),
-        endpoint,
+        f"abreq result has content-type {res.headers.get('Content-Type', '')} while hitting {endpoint}"
     )
     return {}
 
