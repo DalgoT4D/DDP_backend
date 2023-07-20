@@ -28,7 +28,6 @@ def prefect_get(endpoint: str, **kwargs) -> dict:
     orgname = logger.get_slug()
     headers = kwargs.get("headers", {})
     headers["x-ddp-org"] = orgname
-    kwargs["headers"] = headers
     try:
         res = requests.get(
             f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}",
@@ -51,7 +50,6 @@ def prefect_post(endpoint: str, json: dict, **kwargs) -> dict:
     orgname = logger.get_slug()
     headers = kwargs.get("headers", {})
     headers["x-ddp-org"] = orgname
-    kwargs["headers"] = headers
     try:
         res = requests.post(
             f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}",
@@ -69,11 +67,17 @@ def prefect_post(endpoint: str, json: dict, **kwargs) -> dict:
     return res.json()
 
 
-def prefect_put(endpoint: str, json: dict) -> dict:
+def prefect_put(endpoint: str, json: dict, **kwargs) -> dict:
     """make a PUT request to the proxy"""
+    orgname = logger.get_slug()
+    headers = kwargs.get("headers", {})
+    headers["x-ddp-org"] = orgname
     try:
         res = requests.put(
-            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}", timeout=http_timeout, json=json
+            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}",
+            timeout=http_timeout,
+            json=json,
+            headers=headers,
         )
     except Exception as error:
         raise HttpError(500, "connection error") from error
@@ -85,11 +89,16 @@ def prefect_put(endpoint: str, json: dict) -> dict:
     return res.json()
 
 
-def prefect_delete_a_block(block_id: str) -> None:
+def prefect_delete_a_block(block_id: str, **kwargs) -> None:
     """makes a DELETE request to the proxy"""
+    orgname = logger.get_slug()
+    headers = kwargs.get("headers", {})
+    headers["x-ddp-org"] = orgname
     try:
         res = requests.delete(
-            f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=http_timeout
+            f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}",
+            timeout=http_timeout,
+            headers=headers,
         )
     except Exception as error:
         raise HttpError(500, "connection error") from error
