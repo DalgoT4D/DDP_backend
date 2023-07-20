@@ -12,7 +12,7 @@ from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.ddpprefect.prefect_service import update_dbt_core_block_schema
 
-logger = CustomLogger("dbt")
+logger = CustomLogger("ddpui")
 
 
 @app.task(bind=True)

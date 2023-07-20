@@ -53,7 +53,7 @@ user_org_api = NinjaAPI(urls_namespace="userorg")
 
 load_dotenv()
 
-logger = CustomLogger("userorg")
+logger = CustomLogger("ddpui")
 
 
 @user_org_api.exception_handler(ValidationError)

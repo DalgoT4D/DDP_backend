@@ -9,7 +9,7 @@ from ddpui.utils import secretsmanager
 
 from ddpui.utils.custom_logger import CustomLogger
 
-logger = CustomLogger("userorg")
+logger = CustomLogger("ddpui")
 
 
 def delete_prefect_deployments(org: Org):  # skipcq: PYL-R0201

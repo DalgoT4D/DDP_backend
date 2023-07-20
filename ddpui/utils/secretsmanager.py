@@ -4,7 +4,7 @@ from uuid import uuid4
 import boto3
 from ddpui.utils.custom_logger import CustomLogger
 
-logger = CustomLogger("userorg")
+logger = CustomLogger("ddpui")
 
 
 def get_client():

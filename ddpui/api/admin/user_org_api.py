@@ -16,7 +16,7 @@ from ddpui.models.admin_user import AdminUserResponse
 
 adminapi = NinjaAPI(urls_namespace="admin")
 
-logger = CustomLogger("userorg")
+logger = CustomLogger("ddpui")
 
 
 # @adminapi.exception_handler(ValidationError)

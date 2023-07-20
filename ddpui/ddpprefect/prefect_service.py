@@ -19,7 +19,7 @@ load_dotenv()
 PREFECT_PROXY_API_URL = os.getenv("PREFECT_PROXY_API_URL")
 http_timeout = int(os.getenv("PREFECT_HTTP_TIMEOUT", "30"))
 
-logger = CustomLogger("prefect")
+logger = CustomLogger("ddpui")
 
 
 # ================================================================================================

@@ -36,7 +36,7 @@ prefectapi = NinjaAPI(urls_namespace="prefect")
 # http://127.0.0.1:8000/api/docs
 
 
-logger = CustomLogger("prefect")
+logger = CustomLogger("ddpui")
 
 
 @prefectapi.exception_handler(ValidationError)

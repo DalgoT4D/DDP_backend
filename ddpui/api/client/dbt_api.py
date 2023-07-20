@@ -23,9 +23,10 @@ from ddpui.celeryworkers.tasks import (
     update_dbt_core_block_schema_task,
 )
 from ddpui.ddpdbt import dbt_service
-from ddpui.utils.ddp_logger import logger
+from ddpui.utils.custom_logger import CustomLogger
 
 dbtapi = NinjaAPI(urls_namespace="dbt")
+logger = CustomLogger("ddpui")
 
 
 @dbtapi.exception_handler(ValidationError)
