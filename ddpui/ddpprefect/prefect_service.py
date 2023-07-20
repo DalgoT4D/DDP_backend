@@ -12,20 +12,27 @@ from ddpui.ddpprefect.schema import (
     PrefectDbtCore,
     PrefectDataFlowUpdateSchema,
 )
-from ddpui.utils.ddp_logger import logger
+from ddpui.utils.custom_logger import CustomLogger
 
 load_dotenv()
 
 PREFECT_PROXY_API_URL = os.getenv("PREFECT_PROXY_API_URL")
-http_timeout = int(os.getenv("PREFECT_HTTP_TIMEOUT", "5"))
+http_timeout = int(os.getenv("PREFECT_HTTP_TIMEOUT", "30"))
+
+logger = CustomLogger("ddpui")
 
 
 # ================================================================================================
 def prefect_get(endpoint: str, **kwargs) -> dict:
     """make a GET request to the proxy"""
+    orgname = logger.get_slug()
+    headers = kwargs.get("headers", {})
+    headers["x-ddp-org"] = orgname
     try:
         res = requests.get(
-            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}", timeout=http_timeout, **kwargs
+            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}",
+            timeout=http_timeout,
+            headers=headers,
         )
     except Exception as error:
         raise HttpError(500, "connection error") from error
@@ -37,11 +44,17 @@ def prefect_get(endpoint: str, **kwargs) -> dict:
     return res.json()
 
 
-def prefect_post(endpoint: str, json: dict) -> dict:
+def prefect_post(endpoint: str, json: dict, **kwargs) -> dict:
     """make a POST request to the proxy"""
+    orgname = logger.get_slug()
+    headers = kwargs.get("headers", {})
+    headers["x-ddp-org"] = orgname
     try:
         res = requests.post(
-            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}", timeout=http_timeout, json=json
+            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}",
+            timeout=http_timeout,
+            json=json,
+            headers=headers,
         )
     except Exception as error:
         raise HttpError(500, "connection error") from error
@@ -53,11 +66,17 @@ def prefect_post(endpoint: str, json: dict) -> dict:
     return res.json()
 
 
-def prefect_put(endpoint: str, json: dict) -> dict:
+def prefect_put(endpoint: str, json: dict, **kwargs) -> dict:
     """make a PUT request to the proxy"""
+    orgname = logger.get_slug()
+    headers = kwargs.get("headers", {})
+    headers["x-ddp-org"] = orgname
     try:
         res = requests.put(
-            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}", timeout=http_timeout, json=json
+            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}",
+            timeout=http_timeout,
+            json=json,
+            headers=headers,
         )
     except Exception as error:
         raise HttpError(500, "connection error") from error
@@ -69,11 +88,16 @@ def prefect_put(endpoint: str, json: dict) -> dict:
     return res.json()
 
 
-def prefect_delete_a_block(block_id: str) -> None:
+def prefect_delete_a_block(block_id: str, **kwargs) -> None:
     """makes a DELETE request to the proxy"""
+    orgname = logger.get_slug()
+    headers = kwargs.get("headers", {})
+    headers["x-ddp-org"] = orgname
     try:
         res = requests.delete(
-            f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=http_timeout
+            f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}",
+            timeout=http_timeout,
+            headers=headers,
         )
     except Exception as error:
         raise HttpError(500, "connection error") from error
@@ -395,7 +419,9 @@ def get_flow_run(flow_run_id: str) -> dict:
 
 
 def create_deployment_flow_run(deployment_id: str) -> dict:  # pragma: no cover
-    """Proxy call to create a flow run for deployment.
-    This is like a quick check to see if deployment is running"""
+    """
+    Proxy call to create a flow run for deployment.
+    This is like a quick check to see if deployment is running
+    """
     res = prefect_post(f"deployments/{deployment_id}/flow_run", {})
     return res

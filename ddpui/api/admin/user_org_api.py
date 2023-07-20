@@ -7,7 +7,7 @@ from ninja.errors import HttpError
 # from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from rest_framework.authtoken import views
 
-from ddpui.utils.ddp_logger import logger
+from ddpui.utils.custom_logger import CustomLogger
 from ddpui import auth
 from ddpui.models.org import Org, OrgSchema
 
@@ -15,6 +15,8 @@ from ddpui.models.org_user import OrgUser, OrgUserResponse, OrgUserUpdate
 from ddpui.models.admin_user import AdminUserResponse
 
 adminapi = NinjaAPI(urls_namespace="admin")
+
+logger = CustomLogger("ddpui")
 
 
 # @adminapi.exception_handler(ValidationError)

@@ -25,6 +25,8 @@ class Command(BaseCommand):
         else:
             org = Org.objects.filter(name=options["org_name"]).first()
             if org is None:
+                org = Org.objects.filter(slug=options["org_name"]).first()
+            if org is None:
                 print("no such org")
                 return
 

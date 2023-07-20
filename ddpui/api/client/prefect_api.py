@@ -28,12 +28,15 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowUpdateSchema,
 )
 
-from ddpui.utils.ddp_logger import logger
+from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
 
 prefectapi = NinjaAPI(urls_namespace="prefect")
 # http://127.0.0.1:8000/api/docs
+
+
+logger = CustomLogger("ddpui")
 
 
 @prefectapi.exception_handler(ValidationError)

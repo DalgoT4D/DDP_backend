@@ -5,13 +5,14 @@ from subprocess import CalledProcessError
 
 from django.utils.text import slugify
 from ddpui.celery import app
+from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.utils.helpers import runcmd
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.ddpprefect.prefect_service import update_dbt_core_block_schema
 
-from ddpui.utils.ddp_logger import logger
+logger = CustomLogger("ddpui")
 
 
 @app.task(bind=True)

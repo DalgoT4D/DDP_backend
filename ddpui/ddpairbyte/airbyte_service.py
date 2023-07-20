@@ -1,11 +1,10 @@
 import os
-import json
 from typing import Dict, List
 import requests
 from dotenv import load_dotenv
 from ninja.errors import HttpError
 from ddpui.ddpairbyte import schema
-from ddpui.utils.ab_logger import logger
+from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.helpers import remove_nested_attribute
 from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
@@ -15,6 +14,9 @@ from ddpui.ddpairbyte.schema import (
 )
 
 load_dotenv()
+
+
+logger = CustomLogger("airbyte")
 
 
 def abreq(endpoint, req=None):
@@ -40,7 +42,7 @@ def abreq(endpoint, req=None):
     try:
         result_obj = remove_nested_attribute(res.json(), "icon")
         logger.info("Response from Airbyte server:")
-        logger.info(json.dumps(result_obj, indent=2))
+        logger.info(result_obj)
     except ValueError:
         logger.info("Response from Airbyte server: %s", res.text)
 
@@ -52,6 +54,7 @@ def abreq(endpoint, req=None):
 
     if "application/json" in res.headers.get("Content-Type", ""):
         return res.json()
+
     logger.error(
         "abreq result has content-type %s while hitting %s",
         res.headers.get("Content-Type", ""),
