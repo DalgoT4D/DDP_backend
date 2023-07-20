@@ -14,6 +14,9 @@ class OrgDbt(models.Model):
     target_type = models.CharField(max_length=10)
     default_schema = models.CharField(max_length=50)
 
+    def __str__(self) -> str:
+        return f"OrgDbt[{self.gitrepo_url}|{self.target_type}|{self.default_schema}]"
+
 
 class Org(models.Model):
     """Docstring"""
@@ -22,6 +25,9 @@ class Org(models.Model):
     slug = models.CharField(max_length=20, null=True)
     airbyte_workspace_id = models.CharField(max_length=36, null=True)
     dbt = models.ForeignKey(OrgDbt, on_delete=models.SET_NULL, null=True)
+
+    def __str__(self) -> str:
+        return f"Org[{self.slug}|{self.name}|{self.airbyte_workspace_id}]"
 
 
 class OrgPrefectBlock(models.Model):
@@ -39,7 +45,7 @@ class OrgPrefectBlock(models.Model):
     seq = models.SmallIntegerField(null=True)
 
     def __str__(self) -> str:
-        return f"{self.org.name} {self.block_type} {self.block_name}"
+        return f"OrgPrefectBlock[{self.org.name}|{self.block_type}|{self.block_name}]"
 
 
 class OrgDataFlow(models.Model):
@@ -52,6 +58,9 @@ class OrgDataFlow(models.Model):
     cron = models.CharField(max_length=36, null=True)
     # and if deployment is manual airbyte-connection-sync,then we store the conn_id
     connection_id = models.CharField(max_length=36, unique=True, null=True)
+
+    def __str__(self) -> str:
+        return f"OrgDataFlow[{self.name}|{self.deployment_name}|{self.deployment_id}|{self.cron}|{self.connection_id}]"
 
 
 class OrgSchema(Schema):
@@ -69,6 +78,11 @@ class OrgWarehouse(models.Model):
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     airbyte_destination_id = models.TextField(max_length=36, null=True)
     airbyte_norm_op_id = models.TextField(max_length=36, null=True)
+
+    def __str__(self) -> str:
+        return (
+            f"OrgWarehouse[{self.org.slug}|{self.wtype}|{self.airbyte_destination_id}]"
+        )
 
 
 class OrgWarehouseSchema(Schema):

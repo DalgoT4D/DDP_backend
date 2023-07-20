@@ -25,14 +25,17 @@ logger = CustomLogger("ddpui")
 # ================================================================================================
 def prefect_get(endpoint: str, **kwargs) -> dict:
     """make a GET request to the proxy"""
-    orgname = logger.get_slug()
-    headers = kwargs.get("headers", {})
-    headers["x-ddp-org"] = orgname
+    # we send headers and timeout separately from kwargs, just to be explicit about it
+    headers = kwargs.pop("headers", {})
+    headers["x-ddp-org"] = logger.get_slug()
+    timeout = kwargs.pop("timeout", http_timeout)
+
     try:
         res = requests.get(
             f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}",
-            timeout=http_timeout,
             headers=headers,
+            timeout=timeout,
+            **kwargs,
         )
     except Exception as error:
         raise HttpError(500, "connection error") from error
@@ -46,15 +49,18 @@ def prefect_get(endpoint: str, **kwargs) -> dict:
 
 def prefect_post(endpoint: str, json: dict, **kwargs) -> dict:
     """make a POST request to the proxy"""
-    orgname = logger.get_slug()
-    headers = kwargs.get("headers", {})
-    headers["x-ddp-org"] = orgname
+    # we send headers and timeout separately from kwargs, just to be explicit about it
+    headers = kwargs.pop("headers", {})
+    headers["x-ddp-org"] = logger.get_slug()
+    timeout = kwargs.pop("timeout", http_timeout)
+
     try:
         res = requests.post(
             f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}",
-            timeout=http_timeout,
-            json=json,
             headers=headers,
+            timeout=timeout,
+            json=json,
+            **kwargs,
         )
     except Exception as error:
         raise HttpError(500, "connection error") from error
@@ -68,15 +74,18 @@ def prefect_post(endpoint: str, json: dict, **kwargs) -> dict:
 
 def prefect_put(endpoint: str, json: dict, **kwargs) -> dict:
     """make a PUT request to the proxy"""
-    orgname = logger.get_slug()
-    headers = kwargs.get("headers", {})
-    headers["x-ddp-org"] = orgname
+    # we send headers and timeout separately from kwargs, just to be explicit about it
+    headers = kwargs.pop("headers", {})
+    headers["x-ddp-org"] = logger.get_slug()
+    timeout = kwargs.pop("timeout", http_timeout)
+
     try:
         res = requests.put(
             f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}",
-            timeout=http_timeout,
-            json=json,
             headers=headers,
+            timeout=timeout,
+            json=json,
+            **kwargs,
         )
     except Exception as error:
         raise HttpError(500, "connection error") from error
@@ -90,14 +99,17 @@ def prefect_put(endpoint: str, json: dict, **kwargs) -> dict:
 
 def prefect_delete_a_block(block_id: str, **kwargs) -> None:
     """makes a DELETE request to the proxy"""
-    orgname = logger.get_slug()
-    headers = kwargs.get("headers", {})
-    headers["x-ddp-org"] = orgname
+    # we send headers and timeout separately from kwargs, just to be explicit about it
+    headers = kwargs.pop("headers", {})
+    headers["x-ddp-org"] = logger.get_slug()
+    timeout = kwargs.pop("timeout", http_timeout)
+
     try:
         res = requests.delete(
             f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}",
-            timeout=http_timeout,
             headers=headers,
+            timeout=timeout,
+            **kwargs,
         )
     except Exception as error:
         raise HttpError(500, "connection error") from error
