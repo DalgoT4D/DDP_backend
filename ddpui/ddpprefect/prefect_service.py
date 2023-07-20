@@ -46,7 +46,6 @@ def prefect_get(endpoint: str, **kwargs) -> dict:
 
 def prefect_post(endpoint: str, json: dict, **kwargs) -> dict:
     """make a POST request to the proxy"""
-
     orgname = logger.get_slug()
     headers = kwargs.get("headers", {})
     headers["x-ddp-org"] = orgname
