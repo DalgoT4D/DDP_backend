@@ -19,10 +19,11 @@ class DevSecretsManager:
             logger.info(f"created dev-secrets-dir {dev_secrets_dir}")
             os.makedirs(dev_secrets_dir)
 
+        self.dev_secrets_dir = dev_secrets_dir
+
     def secretfile(self, secretid):
         """returns the filename under which the secret is stored"""
-        dev_secrets_dir = os.getenv("DEV_SECRETS_DIR")
-        return f"{dev_secrets_dir}/{secretid}"
+        return f"{self.dev_secrets_dir}/{secretid}"
 
     def create_secret(self, **kwargs):
         """save a secret to a file on disk"""
