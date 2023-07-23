@@ -1,7 +1,11 @@
+from dotenv import load_dotenv
 from django.core.management.base import BaseCommand
 
 from ddpui.models.org_user import Org
 from ddpui.utils.deleteorg import delete_one_org
+
+
+load_dotenv()
 
 
 class Command(BaseCommand):
