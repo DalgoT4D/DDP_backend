@@ -404,7 +404,7 @@ def post_prefect_dbt_core_block(request):
             command=slugify(command),
         )
         shellprefectblock.save()
-        
+
     except Exception as error:
         logger.exception(error)
         raise HttpError(400, str(error)) from error
@@ -543,7 +543,7 @@ def delete_prefect_dbt_run_block(request):
     orguser: OrgUser = request.orguser
 
     org_dbt_blocks = OrgPrefectBlock.objects.filter(
-        org=orguser.org, block_type=DBTCORE
+        org=orguser.org, block_type__in=[DBTCORE, SHELLOPERATION]
     ).all()
 
     for dbt_block in org_dbt_blocks:
