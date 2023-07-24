@@ -395,7 +395,7 @@ def post_prefect_dbt_core_block(request):
         block_response = prefect_service.create_shell_block(shell_cmd)
 
         # store prefect shell block in database
-        coreprefectblock = OrgPrefectBlock(
+        shellprefectblock = OrgPrefectBlock(
             org=orguser.org,
             block_type=SHELLOPERATION,
             block_id=block_response["block_id"],
@@ -403,6 +403,8 @@ def post_prefect_dbt_core_block(request):
             display_name=block_name,
             command=slugify(command),
         )
+        shellprefectblock.save()
+        
     except Exception as error:
         logger.exception(error)
         raise HttpError(400, str(error)) from error
