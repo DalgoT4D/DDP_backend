@@ -401,6 +401,7 @@ def post_prefect_dbt_core_block(request):
             block_id=block_response["block_id"],
             block_name=block_response["block_name"],
             display_name=block_name,
+            seq=0,
             command=slugify(command),
         )
         shellprefectblock.save()
@@ -465,7 +466,8 @@ def post_prefect_dbt_core_block(request):
             block_id=block_response["block_id"],
             block_name=block_response["block_name"],
             display_name=block_name,
-            seq=sequence_number,
+            seq=sequence_number
+            + 1,  # shell command would be at zero, dbt commands starts from 1
             command=slugify(command),
             dbt_target_schema=target,
         )
