@@ -403,7 +403,6 @@ def post_prefect_dbt_core_block(request):
             display_name=block_name,
             command=slugify(command),
         )
-
     except Exception as error:
         logger.exception(error)
         raise HttpError(400, str(error)) from error

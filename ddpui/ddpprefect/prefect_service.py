@@ -232,7 +232,7 @@ def create_shell_block(shell: PrefectShellSetup) -> str:
             "workingDir": shell.workingDir,
         },
     )
-    return response["block_id"]
+    return response
 
 
 def delete_shell_block(block_id):
