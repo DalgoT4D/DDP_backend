@@ -417,7 +417,7 @@ def post_prefect_dbt_core_block(request):
             block_name=block_response["block_name"],
             display_name=block_name,
             seq=0,
-            command=slugify(command),
+            command=slugify(command_name),
         )
         shellprefectblock.save()
 
