@@ -94,7 +94,13 @@ def post_prefect_dataflow(request, payload: PrefectDataFlowCreateSchema):
         for dbt_block in OrgPrefectBlock.objects.filter(
             org=orguser.org, block_type__in=[DBTCORE, SHELLOPERATION]
         ).order_by("seq"):
-            dbt_blocks.append({"blockName": dbt_block.block_name, "seq": dbt_block.seq, "blockType":  dbt_block.block_type})
+            dbt_blocks.append(
+                {
+                    "blockName": dbt_block.block_name,
+                    "seq": dbt_block.seq,
+                    "blockType": dbt_block.block_type,
+                }
+            )
 
     # fetch all deployment names to compute a unique one
     deployment_names = []
@@ -384,8 +390,16 @@ def post_prefect_dbt_core_block(request):
 
     # create the git pull shell block
     try:
-        command = "git pull"
-        block_name = f"{orguser.org.slug}-" f"{slugify(command)}"
+        gitrepo_access_token = orguser.org.dbt.gitrepo_access_token_secret
+        command_name = "git pull"
+        command = command_name
+        if gitrepo_access_token is not None:
+            gitrepo_url = gitrepo_url.replace(
+                "github.com", "oauth2:" + gitrepo_access_token + "@github.com"
+            )
+            command += f"{command} {gitrepo_url}"
+
+        block_name = f"{orguser.org.slug}-" f"{slugify(command_name)}"
         shell_cmd = PrefectShellSetup(
             blockname=block_name,
             commands=[command],
