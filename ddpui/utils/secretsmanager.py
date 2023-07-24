@@ -121,6 +121,7 @@ def retrieve_github_token(org_dbt: OrgDbt) -> str | None:
         aws_sm = get_client()
         try:
             response = aws_sm.get_secret_value(SecretId=secret_name)
+            logger.info("Git token fetched from secrets manager")
             return (
                 json.loads(response["SecretString"])
                 if "SecretString" in response
@@ -128,7 +129,7 @@ def retrieve_github_token(org_dbt: OrgDbt) -> str | None:
             )
         except Exception:
             # no secret available by the secret_name
-            pass
+            logger.info("Could not find the secret")
 
     return None
 
