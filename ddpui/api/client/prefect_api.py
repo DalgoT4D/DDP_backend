@@ -398,7 +398,7 @@ def post_prefect_dbt_core_block(request):
             gitrepo_url = gitrepo_url.replace(
                 "github.com", "oauth2:" + gitrepo_access_token + "@github.com"
             )
-            command += f"{command} {gitrepo_url}"
+            command += (" " + gitrepo_url)
 
         block_name = f"{orguser.org.slug}-" f"{slugify(command_name)}"
         shell_cmd = PrefectShellSetup(
