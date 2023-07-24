@@ -390,7 +390,7 @@ def post_prefect_dbt_core_block(request):
 
     # create the git pull shell block
     try:
-        gitrepo_access_token = orguser.org.dbt.gitrepo_access_token_secret
+        gitrepo_access_token = secretsmanager.retrieve_github_token(orguser.org.dbt)
         gitrepo_url = orguser.org.dbt.gitrepo_url
         command_name = "git pull"
         command = command_name

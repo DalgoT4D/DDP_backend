@@ -3,7 +3,7 @@ import json
 from uuid import uuid4
 import boto3
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.models.org import Org, OrgWarehouse
+from ddpui.models.org import Org, OrgWarehouse, OrgDbt
 
 logger = CustomLogger("ddpui")
 
@@ -112,6 +112,25 @@ def save_github_token(org: Org, access_token: str):
     )
     org.dbt.gitrepo_access_token_secret = secret_name
     org.dbt.save()
+
+
+def retrieve_github_token(org_dbt: OrgDbt) -> str | None:
+    """retreive the github token if present otherwise return None"""
+    secret_name = org_dbt.gitrepo_access_token_secret
+    if secret_name is not None:
+        aws_sm = get_client()
+        try:
+            response = aws_sm.get_secret_value(SecretId=secret_name)
+            return (
+                json.loads(response["SecretString"])
+                if "SecretString" in response
+                else None
+            )
+        except Exception:
+            # no secret available by the secret_name
+            pass
+
+    return None
 
 
 def delete_github_token(org: Org):
