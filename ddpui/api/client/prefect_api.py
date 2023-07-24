@@ -27,6 +27,7 @@ from ddpui.ddpprefect.schema import (
     PrefectFlowRunSchema,
     PrefectDataFlowUpdateSchema,
     PrefectShellSetup,
+    PrefectSecretBlockCreate,
 )
 
 from ddpui.utils.custom_logger import CustomLogger
@@ -392,20 +393,32 @@ def post_prefect_dbt_core_block(request):
     try:
         gitrepo_access_token = secretsmanager.retrieve_github_token(orguser.org.dbt)
         gitrepo_url = orguser.org.dbt.gitrepo_url
-        command_name = "git pull"
-        command = command_name
+        command = "git pull"
+        
+        # make sure this key is always present in the env of git pull shell command
+        shell_env = {"secret-git-pull-url-block": ""}
+
         if gitrepo_access_token is not None:
             gitrepo_url = gitrepo_url.replace(
                 "github.com", "oauth2:" + gitrepo_access_token + "@github.com"
             )
-            command += (" " + gitrepo_url)
 
-        block_name = f"{orguser.org.slug}-" f"{slugify(command_name)}"
+            # store the git oauth endpoint with token in a prefect secret block
+            secret_block = PrefectSecretBlockCreate(
+                block_name=f"{orguser.org.slug}-git-pull-url",
+                secret=gitrepo_url,
+            )
+            block_response = prefect_service.create_secret_block(secret_block)
+
+            # store the prefect secret block in the git pull shell command
+            shell_env["secret-git-pull-url-block"] = block_response["block_name"]
+
+        block_name = f"{orguser.org.slug}-" f"{slugify(command)}"
         shell_cmd = PrefectShellSetup(
             blockname=block_name,
             commands=[command],
             workingDir=project_dir,
-            env={},
+            env=shell_env,
         )
         block_response = prefect_service.create_shell_block(shell_cmd)
 
@@ -417,7 +430,7 @@ def post_prefect_dbt_core_block(request):
             block_name=block_response["block_name"],
             display_name=block_name,
             seq=0,
-            command=slugify(command_name),
+            command=slugify(command),
         )
         shellprefectblock.save()
 

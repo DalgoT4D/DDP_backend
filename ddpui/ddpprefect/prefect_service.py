@@ -11,6 +11,7 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema2,
     PrefectDbtCore,
     PrefectDataFlowUpdateSchema,
+    PrefectSecretBlockCreate,
 )
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -305,6 +306,23 @@ def update_dbt_core_block_schema(block_name: str, target_configs_schema: str):
         },
     )
     return response
+
+
+# ================================================================================================
+
+
+def create_secret_block(secret_block: PrefectSecretBlockCreate):
+    """This will create a secret block in the prefect to store any password like string"""
+    response = prefect_post(
+        "blocks/secret/",
+        {"blockName": secret_block.block_name, "secret": secret_block.secret},
+    )
+    return response
+
+
+def delete_secret_block(block_id) -> None:
+    """Delete airbyte connection block in prefect"""
+    prefect_delete_a_block(block_id)
 
 
 # ================================================================================================
