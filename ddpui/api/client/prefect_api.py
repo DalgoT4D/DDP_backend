@@ -92,9 +92,9 @@ def post_prefect_dataflow(request, payload: PrefectDataFlowCreateSchema):
     if payload.dbtTransform == "yes":
         name_components.append("dbt")
         for dbt_block in OrgPrefectBlock.objects.filter(
-            org=orguser.org, block_type=DBTCORE
+            org=orguser.org, block_type__in=[DBTCORE, SHELLOPERATION]
         ).order_by("seq"):
-            dbt_blocks.append({"blockName": dbt_block.block_name, "seq": dbt_block.seq})
+            dbt_blocks.append({"blockName": dbt_block.block_name, "seq": dbt_block.seq, "blockType":  dbt_block.block_type})
 
     # fetch all deployment names to compute a unique one
     deployment_names = []
