@@ -1041,7 +1041,9 @@ def test_check_destination_connection_failure_1():
         with pytest.raises(HttpError) as excinfo:
             check_destination_connection("workspace_id", payload)
 
-        assert str(excinfo.value) == "failed to check destination connection"
+        assert (
+            str(excinfo.value) == "Failed to connect - please check your crendentials"
+        )
 
 
 def test_check_destination_connection_failure_2():
@@ -1057,7 +1059,9 @@ def test_check_destination_connection_failure_2():
         with pytest.raises(HttpError) as excinfo:
             check_destination_connection("workspace_id", payload)
 
-        assert str(excinfo.value) == "failed to check destination connection"
+        assert (
+            str(excinfo.value) == "Failed to connect - please check your crendentials"
+        )
 
 
 def test_check_destination_connection_for_update_success():
@@ -1091,7 +1095,9 @@ def test_check_destination_connection_for_update_failure_1():
         with pytest.raises(HttpError) as excinfo:
             check_destination_connection_for_update("destination_id", payload)
 
-        assert str(excinfo.value) == "failed to check destination connection"
+        assert (
+            str(excinfo.value) == "Failed to connect - please check your crendentials"
+        )
 
 
 def test_check_destination_connection_for_update_failure_2():
@@ -1105,7 +1111,9 @@ def test_check_destination_connection_for_update_failure_2():
         with pytest.raises(HttpError) as excinfo:
             check_destination_connection_for_update("destination_id", payload)
 
-        assert str(excinfo.value) == "failed to check destination connection"
+        assert (
+            str(excinfo.value) == "Failed to connect - please check your crendentials"
+        )
 
 
 def test_get_connections_bad_workspace_id():
