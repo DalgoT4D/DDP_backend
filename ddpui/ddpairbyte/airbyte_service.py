@@ -303,7 +303,7 @@ def check_source_connection(workspace_id: str, data: AirbyteSourceCreate) -> dic
     )
     if "jobInfo" not in res or res.get("status") == "failed":
         logger.error("Failed to check source connection: %s", res)
-        raise HttpError(500, "failed to check source connection")
+        raise HttpError(500, "Failed to connect - please check your crendentials")
     return res
 
 
@@ -321,7 +321,7 @@ def check_source_connection_for_update(
     )
     if "jobInfo" not in res or res.get("status") == "failed":
         logger.error("Failed to check source connection: %s", res)
-        raise HttpError(500, "failed to check source connection")
+        raise HttpError(500, "Failed to connect - please check your crendentials")
     # {
     #   'status': 'succeeded',
     #   'jobInfo': {
@@ -513,7 +513,7 @@ def check_destination_connection(
     )
     if "jobInfo" not in res or res.get("status") == "failed":
         logger.error("Failed to check destination connection: %s", res)
-        raise HttpError(500, "failed to check destination connection")
+        raise HttpError(500, "Failed to connect - please check your crendentials")
     return res
 
 
@@ -534,7 +534,7 @@ def check_destination_connection_for_update(
     )
     if "jobInfo" not in res or res.get("status") == "failed":
         logger.error("Failed to check destination connection: %s", res)
-        raise HttpError(500, "failed to check destination connection")
+        raise HttpError(500, "Failed to connect - please check your crendentials")
     return res
 
 
