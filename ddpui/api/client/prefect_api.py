@@ -394,7 +394,7 @@ def post_prefect_dbt_core_block(request):
         gitrepo_access_token = secretsmanager.retrieve_github_token(orguser.org.dbt)
         gitrepo_url = orguser.org.dbt.gitrepo_url
         command = "git pull"
-        
+
         # make sure this key is always present in the env of git pull shell command
         shell_env = {"secret-git-pull-url-block": ""}
 

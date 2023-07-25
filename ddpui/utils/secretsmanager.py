@@ -123,7 +123,7 @@ def retrieve_github_token(org_dbt: OrgDbt) -> str | None:
             response = aws_sm.get_secret_value(SecretId=secret_name)
             logger.info("Git token fetched from secrets manager")
             return response["SecretString"] if "SecretString" in response else None
-        except Exception:
+        except Exception:  # skipcq PYL-W0703
             # no secret available by the secret_name
             logger.info("Could not find the secret")
 
@@ -137,7 +137,7 @@ def delete_github_token(org: Org):
         secret_name = org.dbt.gitrepo_access_token_secret
         try:
             aws_sm.delete_secret(SecretId=secret_name)
-        except Exception:
+        except Exception:  # skipcq PYL-W0703
             # no secret to delete, carry on
             pass
         org.dbt.gitrepo_access_token_secret = None
@@ -183,5 +183,5 @@ def delete_warehouse_credentials(warehouse: OrgWarehouse) -> None:
     aws_sm = get_client()
     try:
         aws_sm.delete_secret(SecretId=warehouse.credentials)
-    except Exception:
+    except Exception:  # skipcq PYL-W0703
         pass
