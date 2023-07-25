@@ -1,76 +1,76 @@
 name: Python package
 
 on:
-  push:
-    branches: [fix/update_logs]
-  pull_request:
-    branches: [fix/update-logs]
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.10"]
-        redis-version: [6]
+    build:
+        runs-on: ubuntu-latest
+        strategy:
+            matrix:
+                python-version: ["3.10"]
+                redis-version: [6]
 
-    steps:
-      - uses: actions/checkout@v3
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Start Redis
-        uses: supercharge/redis-github-action@1.5.0
-        with:
-          redis-version: ${{ matrix.redis-version }}
-      - name: Create logs directory
-        run: mkdir -p ddpui/logs
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-      - name: Create known_hosts file
-        run: |
-          mkdir -p ~/.ssh
-          touch ~/.ssh/known_hosts
-      - name: Add remote host key to known_hosts
-        run: ssh-keyscan ${{ secrets.SERVERIP }} >> ~/.ssh/known_hosts
-      - name: Set up port forwarding via SSH
-        run: |
-          eval `ssh-agent -s`
-          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh -L 8080:localhost:8080 ${{ secrets.SERVER }} -f -N
-      - name: Test with pytest
-        env:
-          AIRBYTE_SERVER_HOST: localhost
-          AIRBYTE_SERVER_PORT: 8000
-          AIRBYTE_SERVER_APIVER: v1
-          AIRBYTE_API_TOKEN: ${{ secrets.AIRBYTE_API_TOKEN }}
-          DBHOST: ${{ secrets.DBHOST }}
-          DBNAME: ${{ secrets.DBNAME }}
-          DBUSER: ${{ secrets.DBUSER }}
-          DBPASSWORD: ${{ secrets.DBPASSWORD }}
-          PREFECT_PROXY_API_URL: http://localhost:8080
-        run: |
-          coverage run -m pytest ddpui/tests -k "test_prefect_service.py" --ignore=ddpui/tests/integration_tests
-          coverage run -m pytest ddpui/tests -k "not test_prefect_service.py" --ignore=ddpui/tests/integration_tests
-          coverage report --fail-under=70
-          coverage xml
-      - name: Check coverage percentage
-        run: |
-          coverage_percentage=$(coverage report --show-missing | tail -n 1 | awk '{print $4}')
-          if (( $(echo "$coverage_percentage < 70" | bc -l) )); then
-            echo "Coverage percentage is below 70%"
-            exit 1
-          fi
-      - name: Upload coverage reports to codecov
-        uses: codecov/codecov-action@v3
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: true
-      # - name: Deploy to EC2
-      #   run: |
-      #     eval `ssh-agent -s`
-      #     ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-      #     ssh ${{ secrets.SERVER }} "source ~/.nvm/nvm.sh; cd /home/ddp/DDP_backend; git pull; pm2 restart django-celery-worker django-backend"
+        steps:
+            - uses: actions/checkout@v3
+            - name: Set up Python ${{ matrix.python-version }}
+              uses: actions/setup-python@v4
+              with:
+                  python-version: ${{ matrix.python-version }}
+            - name: Start Redis
+              uses: supercharge/redis-github-action@1.5.0
+              with:
+                  redis-version: ${{ matrix.redis-version }}
+            - name: Create logs directory
+              run: mkdir -p ddpui/logs
+            - name: Install dependencies
+              run: |
+                  python -m pip install --upgrade pip
+                  if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+            - name: Create known_hosts file
+              run: |
+                  mkdir -p ~/.ssh
+                  touch ~/.ssh/known_hosts
+            - name: Add remote host key to known_hosts
+              run: ssh-keyscan ${{ secrets.SERVERIP }} >> ~/.ssh/known_hosts
+            - name: Set up port forwarding via SSH
+              run: |
+                  eval `ssh-agent -s`
+                  ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
+                  ssh -L 8080:localhost:8080 ${{ secrets.SERVER }} -f -N
+            - name: Test with pytest
+              env:
+                  AIRBYTE_SERVER_HOST: localhost
+                  AIRBYTE_SERVER_PORT: 8000
+                  AIRBYTE_SERVER_APIVER: v1
+                  AIRBYTE_API_TOKEN: ${{ secrets.AIRBYTE_API_TOKEN }}
+                  DBHOST: ${{ secrets.DBHOST }}
+                  DBNAME: ${{ secrets.DBNAME }}
+                  DBUSER: ${{ secrets.DBUSER }}
+                  DBPASSWORD: ${{ secrets.DBPASSWORD }}
+                  PREFECT_PROXY_API_URL: http://localhost:8080
+              run: |
+                  coverage run -m pytest ddpui/tests -k "test_prefect_service.py" --ignore=ddpui/tests/integration_tests
+                  coverage run -m pytest ddpui/tests -k "not test_prefect_service.py" --ignore=ddpui/tests/integration_tests
+                  coverage report --fail-under=70
+                  coverage xml
+            - name: Check coverage percentage
+              run: |
+                  coverage_percentage=$(coverage report --show-missing | tail -n 1 | awk '{print $4}')
+                  if (( $(echo "$coverage_percentage < 70" | bc -l) )); then
+                    echo "Coverage percentage is below 70%"
+                    exit 1
+                  fi
+            - name: Upload coverage reports to codecov
+              uses: codecov/codecov-action@v3
+              with:
+                  token: ${{ secrets.CODECOV_TOKEN }}
+                  fail_ci_if_error: true
+            # - name: Deploy to EC2
+            #   run: |
+            #     eval `ssh-agent -s`
+            #     ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
+            #     ssh ${{ secrets.SERVER }} "source ~/.nvm/nvm.sh; cd /home/ddp/DDP_backend; git pull; pm2 restart django-celery-worker django-backend"
