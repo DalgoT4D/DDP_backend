@@ -53,6 +53,7 @@ jobs:
                   DBPASSWORD: ${{ secrets.DBPASSWORD }}
                   PREFECT_PROXY_API_URL: http://localhost:8080
                   DEV_SECRETS_DIR: /tmp/
+                  CLIENTDBT_ROOT: /tmp/
               run: |
                   coverage run -m pytest ddpui/tests -k "test_prefect_service.py" --ignore=ddpui/tests/integration_tests
                   coverage run -m pytest ddpui/tests -k "not test_prefect_service.py" --ignore=ddpui/tests/integration_tests
