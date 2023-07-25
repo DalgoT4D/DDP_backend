@@ -79,6 +79,13 @@ class PrefectShellSetup(Schema):
     env: dict
 
 
+class PrefectSecretBlockCreate(Schema):
+    """Docstring"""
+
+    secret: str
+    block_name: str
+
+
 class OrgDbtSchema(Schema):
     """Docstring"""
 

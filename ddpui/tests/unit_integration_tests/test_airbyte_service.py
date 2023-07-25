@@ -1,6 +1,7 @@
 import os
 from unittest import mock
 from unittest.mock import patch, Mock
+import requests
 import django
 from pydantic import ValidationError
 import pytest
@@ -11,7 +12,42 @@ django.setup()
 
 from ninja.errors import HttpError
 from ddpui.tests.helper.test_airbyte_unit_schemas import *
-from ddpui.ddpairbyte.airbyte_service import *
+
+from ddpui.ddpairbyte.airbyte_service import (
+    abreq,
+    create_workspace,
+    get_source_definitions,
+    get_workspaces,
+    get_workspace,
+    set_workspace_name,
+    get_source_definition_specification,
+    create_custom_source_definition,
+    get_sources,
+    get_source,
+    delete_source,
+    create_source,
+    update_source,
+    AirbyteSourceCreate,
+    check_source_connection,
+    AirbyteSourceUpdateCheckConnection,
+    AirbyteDestinationUpdateCheckConnection,
+    check_source_connection_for_update,
+    get_source_schema_catalog,
+    get_destination_definitions,
+    get_destination_definition_specification,
+    get_destinations,
+    get_destination,
+    create_destination,
+    update_destination,
+    AirbyteDestinationCreate,
+    check_destination_connection,
+    check_destination_connection_for_update,
+    get_connections,
+    get_connection,
+    create_normalization_operation,
+    update_connection,
+    schema,
+)
 
 
 @pytest.fixture(scope="module")
@@ -1041,7 +1077,9 @@ def test_check_destination_connection_failure_1():
         with pytest.raises(HttpError) as excinfo:
             check_destination_connection("workspace_id", payload)
 
-        assert str(excinfo.value) == "failed to check destination connection"
+        assert (
+            str(excinfo.value) == "Failed to connect - please check your crendentials"
+        )
 
 
 def test_check_destination_connection_failure_2():
@@ -1057,7 +1095,9 @@ def test_check_destination_connection_failure_2():
         with pytest.raises(HttpError) as excinfo:
             check_destination_connection("workspace_id", payload)
 
-        assert str(excinfo.value) == "failed to check destination connection"
+        assert (
+            str(excinfo.value) == "Failed to connect - please check your crendentials"
+        )
 
 
 def test_check_destination_connection_for_update_success():
@@ -1091,7 +1131,9 @@ def test_check_destination_connection_for_update_failure_1():
         with pytest.raises(HttpError) as excinfo:
             check_destination_connection_for_update("destination_id", payload)
 
-        assert str(excinfo.value) == "failed to check destination connection"
+        assert (
+            str(excinfo.value) == "Failed to connect - please check your crendentials"
+        )
 
 
 def test_check_destination_connection_for_update_failure_2():
@@ -1105,7 +1147,9 @@ def test_check_destination_connection_for_update_failure_2():
         with pytest.raises(HttpError) as excinfo:
             check_destination_connection_for_update("destination_id", payload)
 
-        assert str(excinfo.value) == "failed to check destination connection"
+        assert (
+            str(excinfo.value) == "Failed to connect - please check your crendentials"
+        )
 
 
 def test_get_connections_bad_workspace_id():

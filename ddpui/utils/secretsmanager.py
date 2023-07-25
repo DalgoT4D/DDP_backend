@@ -3,7 +3,7 @@ import json
 from uuid import uuid4
 import boto3
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.models.org import Org, OrgWarehouse
+from ddpui.models.org import Org, OrgWarehouse, OrgDbt
 
 logger = CustomLogger("ddpui")
 
@@ -114,6 +114,22 @@ def save_github_token(org: Org, access_token: str):
     org.dbt.save()
 
 
+def retrieve_github_token(org_dbt: OrgDbt) -> str | None:
+    """retreive the github token if present otherwise return None"""
+    secret_name = org_dbt.gitrepo_access_token_secret
+    if secret_name is not None:
+        aws_sm = get_client()
+        try:
+            response = aws_sm.get_secret_value(SecretId=secret_name)
+            logger.info("Git token fetched from secrets manager")
+            return response["SecretString"] if "SecretString" in response else None
+        except Exception:  # skipcq PYL-W0703
+            # no secret available by the secret_name
+            logger.info("Could not find the secret")
+
+    return None
+
+
 def delete_github_token(org: Org):
     """deletes a secret corresponding to a github auth token for an org, if it exists"""
     if org.dbt and org.dbt.gitrepo_access_token_secret:
@@ -121,7 +137,7 @@ def delete_github_token(org: Org):
         secret_name = org.dbt.gitrepo_access_token_secret
         try:
             aws_sm.delete_secret(SecretId=secret_name)
-        except Exception:
+        except Exception:  # skipcq PYL-W0703
             # no secret to delete, carry on
             pass
         org.dbt.gitrepo_access_token_secret = None
@@ -167,5 +183,5 @@ def delete_warehouse_credentials(warehouse: OrgWarehouse) -> None:
     aws_sm = get_client()
     try:
         aws_sm.delete_secret(SecretId=warehouse.credentials)
-    except Exception:
+    except Exception:  # skipcq PYL-W0703
         pass

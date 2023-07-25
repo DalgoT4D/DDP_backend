@@ -15,7 +15,7 @@ from ddpui import auth
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service
 
-from ddpui.ddpprefect import DBTCORE
+from ddpui.ddpprefect import DBTCORE, SHELLOPERATION
 from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
 from ddpui.models.org_user import OrgUser
 from ddpui.ddpprefect.schema import (
@@ -26,6 +26,8 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema2,
     PrefectFlowRunSchema,
     PrefectDataFlowUpdateSchema,
+    PrefectShellSetup,
+    PrefectSecretBlockCreate,
 )
 
 from ddpui.utils.custom_logger import CustomLogger
@@ -91,9 +93,15 @@ def post_prefect_dataflow(request, payload: PrefectDataFlowCreateSchema):
     if payload.dbtTransform == "yes":
         name_components.append("dbt")
         for dbt_block in OrgPrefectBlock.objects.filter(
-            org=orguser.org, block_type=DBTCORE
+            org=orguser.org, block_type__in=[DBTCORE, SHELLOPERATION]
         ).order_by("seq"):
-            dbt_blocks.append({"blockName": dbt_block.block_name, "seq": dbt_block.seq})
+            dbt_blocks.append(
+                {
+                    "blockName": dbt_block.block_name,
+                    "seq": dbt_block.seq,
+                    "blockType": dbt_block.block_type,
+                }
+            )
 
     # fetch all deployment names to compute a unique one
     deployment_names = []
@@ -357,6 +365,8 @@ def post_prefect_dbt_core_block(request):
     - dbt run
     - dbt test
     - dbt docs generate
+    and Create one shell block to do git pull
+    - git pull
     for a ddp-dbt-profile
     """
     orguser: OrgUser = request.orguser
@@ -378,6 +388,55 @@ def post_prefect_dbt_core_block(request):
 
     if not os.path.exists(dbt_project_filename):
         raise HttpError(400, dbt_project_filename + " is missing")
+
+    # create the git pull shell block
+    try:
+        gitrepo_access_token = secretsmanager.retrieve_github_token(orguser.org.dbt)
+        gitrepo_url = orguser.org.dbt.gitrepo_url
+        command = "git pull"
+
+        # make sure this key is always present in the env of git pull shell command
+        shell_env = {"secret-git-pull-url-block": ""}
+
+        if gitrepo_access_token is not None:
+            gitrepo_url = gitrepo_url.replace(
+                "github.com", "oauth2:" + gitrepo_access_token + "@github.com"
+            )
+
+            # store the git oauth endpoint with token in a prefect secret block
+            secret_block = PrefectSecretBlockCreate(
+                block_name=f"{orguser.org.slug}-git-pull-url",
+                secret=gitrepo_url,
+            )
+            block_response = prefect_service.create_secret_block(secret_block)
+
+            # store the prefect secret block in the git pull shell command
+            shell_env["secret-git-pull-url-block"] = block_response["block_name"]
+
+        block_name = f"{orguser.org.slug}-" f"{slugify(command)}"
+        shell_cmd = PrefectShellSetup(
+            blockname=block_name,
+            commands=[command],
+            workingDir=project_dir,
+            env=shell_env,
+        )
+        block_response = prefect_service.create_shell_block(shell_cmd)
+
+        # store prefect shell block in database
+        shellprefectblock = OrgPrefectBlock(
+            org=orguser.org,
+            block_type=SHELLOPERATION,
+            block_id=block_response["block_id"],
+            block_name=block_response["block_name"],
+            display_name=block_name,
+            seq=0,
+            command=slugify(command),
+        )
+        shellprefectblock.save()
+
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, str(error)) from error
 
     with open(dbt_project_filename, "r", encoding="utf-8") as dbt_project_file:
         dbt_project = yaml.safe_load(dbt_project_file)
@@ -435,7 +494,8 @@ def post_prefect_dbt_core_block(request):
             block_id=block_response["block_id"],
             block_name=block_response["block_name"],
             display_name=block_name,
-            seq=sequence_number,
+            seq=sequence_number
+            + 1,  # shell command would be at zero, dbt commands starts from 1
             command=slugify(command),
             dbt_target_schema=target,
         )
@@ -496,7 +556,7 @@ def get_prefect_dbt_run_blocks(request):
         }
 
         # fetch the manual deploymentId for the dbt run block
-        if prefect_block.command == "run":
+        if prefect_block.block_type == DBTCORE and prefect_block.command == "run":
             dataflow = OrgDataFlow.objects.filter(
                 org=orguser.org, cron=None, connection_id=None
             ).first()
@@ -513,13 +573,18 @@ def delete_prefect_dbt_run_block(request):
     orguser: OrgUser = request.orguser
 
     org_dbt_blocks = OrgPrefectBlock.objects.filter(
-        org=orguser.org, block_type=DBTCORE
+        org=orguser.org, block_type__in=[DBTCORE, SHELLOPERATION]
     ).all()
 
     for dbt_block in org_dbt_blocks:
         # Delete block in prefect
         try:
-            prefect_service.delete_dbt_core_block(dbt_block.block_id)
+            if dbt_block.block_type == DBTCORE:
+                prefect_service.delete_dbt_core_block(dbt_block.block_id)
+
+            if dbt_block.block_type == SHELLOPERATION:
+                prefect_service.delete_shell_block(dbt_block.block_id)
+
         except Exception as error:
             logger.exception(error)
             # may have deleted the block via the prefect ui, continue
