@@ -248,6 +248,18 @@ def create_source(
         raise HttpError(400, "config must be a dictionary")
 
     res = abreq(
+        "source_definition_specifications/get",
+        {"sourceDefinitionId": sourcedef_id, "workspaceId": workspace_id},
+    )
+    if "connectionSpecification" not in res:
+        raise HttpError(500, "could not find spec for this source type")
+
+    source_definition_spec = res["connectionSpecification"]
+    for prop, prop_def in source_definition_spec["properties"].items():
+        if prop_def.get("const"):
+            config[prop] = prop_def["const"]
+
+    res = abreq(
         "sources/create",
         {
             "workspaceId": workspace_id,
@@ -292,6 +304,18 @@ def check_source_connection(workspace_id: str, data: AirbyteSourceCreate) -> dic
     """Test a potential source's connection in an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
+
+    res = abreq(
+        "source_definition_specifications/get",
+        {"sourceDefinitionId": data.sourceDefId, "workspaceId": workspace_id},
+    )
+    if "connectionSpecification" not in res:
+        raise HttpError(500, "could not find spec for this source type")
+
+    source_definition_spec = res["connectionSpecification"]
+    for prop, prop_def in source_definition_spec["properties"].items():
+        if prop_def.get("const"):
+            data.config[prop] = prop_def["const"]
 
     res = abreq(
         "scheduler/sources/check_connection",
