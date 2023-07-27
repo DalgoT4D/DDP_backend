@@ -1,9 +1,9 @@
 from django.core.management.base import BaseCommand
+from django.utils.text import slugify
 
 from ddpui.models.org import Org, OrgPrefectBlock
 from ddpui.ddpprefect import SHELLOPERATION, DBTCORE, prefect_service
 from ddpui.ddpprefect.schema import PrefectShellSetup
-from django.utils.text import slugify
 
 
 class Command(BaseCommand):
@@ -15,7 +15,8 @@ class Command(BaseCommand):
 
     help = "Adds git-pull blocks to deployments if required"
 
-    def create_shell_block_for_migration(self, org: Org):
+    @staticmethod
+    def create_shell_block_for_migration(org: Org):
         """looks for a shell block, runs only if it doesn't find one"""
         if not OrgPrefectBlock.objects.filter(
             org=org, block_type=SHELLOPERATION
@@ -64,6 +65,4 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         """runs for all orgs in the database"""
         for org in Org.objects.exclude(dbt__project_dir__isnull=True):
-            assert org.dbt
-            assert org.dbt.project_dir
-            self.create_shell_block_for_migration(org)
+            Command.create_shell_block_for_migration(org)
