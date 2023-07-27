@@ -1,6 +1,5 @@
 import os
 import django
-from pydantic import ValidationError
 from unittest.mock import patch, Mock
 import pytest
 
@@ -8,7 +7,39 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from ddpui.ddpprefect.prefect_service import *
+from ddpui.ddpprefect.prefect_service import (
+    prefect_get,
+    prefect_put,
+    prefect_post,
+    prefect_delete_a_block,
+    HttpError,
+    get_airbyte_server_block_id,
+    get_airbye_connection_blocks,
+    update_airbyte_server_block,
+    update_airbyte_connection_block,
+    get_airbyte_connection_block_by_id,
+    get_airbyte_connection_block_id,
+    get_dbtcore_block_id,
+    create_airbyte_server_block,
+    delete_airbyte_server_block,
+    create_airbyte_connection_block,
+    PrefectAirbyteConnectionSetup,
+    delete_airbyte_server_block,
+    delete_airbyte_connection_block,
+    post_prefect_blocks_bulk_delete,
+    get_shell_block_id,
+    PrefectShellSetup,
+    create_shell_block,
+    delete_shell_block,
+    PrefectDbtCoreSetup,
+    create_dbt_core_block,
+    delete_dbt_core_block,
+    PrefectSecretBlockCreate,
+    create_secret_block,
+    delete_secret_block,
+    update_dbt_core_block_credentials,
+    update_dbt_core_block_schema,
+)
 
 PREFECT_PROXY_API_URL = os.getenv("PREFECT_PROXY_API_URL")
 
@@ -402,7 +433,7 @@ def test_update_dbt_core_block_credentials(mock_put: Mock):
 
     assert response == "retval"
     mock_put.assert_called_once_with(
-        f"blocks/dbtcore_edit/wtype/",
+        "blocks/dbtcore_edit/wtype/",
         {
             "blockName": "block_name",
             "credentials": {"c1": "c2"},
