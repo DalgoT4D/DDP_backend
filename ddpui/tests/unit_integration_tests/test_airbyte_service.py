@@ -510,28 +510,31 @@ def test_delete_source_with_invalid_source_id():
 
 def test_create_source_success():
     workspace_id = "my_workspace_id"
-    expected_response = {
+    expected_response_srcdef = {"connectionSpecification": {"properties": {}}}
+    expected_response_src = {
         "sourceId": "1",
         "name": "Example Source 1",
         "sourcedef_id": "1",
         "config": {"test": "test"},
     }
-    with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
-        mock_post.return_value.status_code = 200
-        mock_post.return_value.json.return_value = expected_response
-        mock_post.return_value.headers = {"Content-Type": "application/json"}
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq_:
+        mock_abreq_.side_effect = [
+            expected_response_srcdef,
+            expected_response_src,
+        ]
 
         result = create_source(workspace_id, "Example Source 1", "1", {"test": "test"})
-        assert result == expected_response
+        assert result == expected_response_src
         assert isinstance(result, dict)
 
 
 def test_create_source_failure():
     workspace_id = "my_workspace_id"
-    with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
-        mock_post.return_value.status_code = 500
-        mock_post.return_value.headers = {"Content-Type": "application/json"}
-        mock_post.return_value.json.return_value = {"error": "Invalid request data"}
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq_:
+        mock_abreq_.side_effect = [
+            {"connectionSpecification": {"properties": {}}},
+            {"error": "Invalid request data"},
+        ]
         with pytest.raises(HttpError) as excinfo:
             create_source(workspace_id, "Example Source 1", "1", {"test": "test"})
         assert excinfo.value.status_code == 500
@@ -627,15 +630,14 @@ def test_check_source_connection_success():
         sourceDefId="my_sourcedef_id",
         config={"key": "value"},
     )
-    expected_response = {"status": "succeeded", "jobInfo": {}}
+    expected_response_srcdef = {"connectionSpecification": {"properties": {}}}
+    expected_response_src = {"status": "succeeded", "jobInfo": {}}
 
-    with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
-        mock_post.return_value.status_code = 200
-        mock_post.return_value.json.return_value = expected_response
-        mock_post.return_value.headers = {"Content-Type": "application/json"}
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq_:
+        mock_abreq_.side_effect = [expected_response_srcdef, expected_response_src]
 
         result = check_source_connection(workspace_id, data)
-        assert result == expected_response
+        assert result == expected_response_src
         assert isinstance(result, dict)
 
 
@@ -646,20 +648,15 @@ def test_check_source_connection_failure():
         sourceDefId="my_sourcedef_id",
         config={"key": "value"},
     )
-    with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
-        mock_response = Mock(spec=requests.Response)
-        mock_response.headers = {}
-        mock_response.status_code = 500
-        mock_response.json.return_value = {
-            "error": "failed to check source connection",
-            "status": "failed",
-        }
-        mock_post.return_value = mock_response
+    expected_response_srcdef = {"connectionSpecification": {"properties": {}}}
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq_:
+        mock_abreq_.side_effect = [expected_response_srcdef, {}]
         with pytest.raises(HttpError) as excinfo:
-            result = check_source_connection(workspace_id, data)
-            assert result is None
-            assert excinfo.value.status_code == 500
-            assert str(excinfo.value) == "failed to check source connection"
+            check_source_connection(workspace_id, data)
+            assert (
+                str(excinfo.value)
+                == "Failed to connect - please check your crendentials"
+            )
 
 
 def test_check_source_connection_with_invalid_workspace_id():
