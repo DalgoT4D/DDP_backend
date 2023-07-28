@@ -512,7 +512,9 @@ def post_prefect_dbt_core_block(request):
                     flow_name=f"manual-run-{block_name}",
                     orgslug=orguser.org.slug,
                     connection_blocks=[],
-                    dbt_blocks=[{"blockName": block_name, "seq": 0}],
+                    dbt_blocks=[
+                        {"blockName": block_name, "blockType": DBTCORE, "seq": 0}
+                    ],
                 )
             )
 
