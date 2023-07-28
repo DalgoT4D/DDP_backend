@@ -38,6 +38,22 @@ from ddpui.ddpprefect.prefect_service import (
     delete_secret_block,
     update_dbt_core_block_credentials,
     update_dbt_core_block_schema,
+    run_airbyte_connection_sync,
+    PrefectAirbyteSync,
+    run_dbt_core_sync,
+    PrefectDbtCore,
+    create_dataflow,
+    PrefectDataFlowCreateSchema2,
+    update_dataflow,
+    PrefectDataFlowUpdateSchema,
+    get_flow_runs_by_deployment_id,
+    set_deployment_schedule,
+    get_filtered_deployments,
+    delete_deployment_by_id,
+    get_deployment,
+    get_flow_run_logs,
+    get_flow_run,
+    create_deployment_flow_run,
 )
 
 PREFECT_PROXY_API_URL = os.getenv("PREFECT_PROXY_API_URL")
@@ -472,3 +488,179 @@ def test_create_secret_block(mock_post: Mock):
 def test_delete_secret_block(mock_delete: Mock):
     delete_secret_block("blockid")
     mock_delete.assert_called_once_with("blockid")
+
+
+# =============================================================================
+@patch("ddpui.ddpprefect.prefect_service.prefect_post")
+def test_run_airbyte_connection_sync(mock_post: Mock):
+    run_flow = PrefectAirbyteSync(
+        blockName="block-name", flowName="flow-name", flowRunName="flow-run-name"
+    )
+    mock_post.return_value = "retval"
+    response = run_airbyte_connection_sync(run_flow)
+    assert response == "retval"
+    mock_post.assert_called_once_with(
+        "flows/airbyte/connection/sync/",
+        json={
+            "blockName": "block-name",
+            "flowName": "flow-name",
+            "flowRunName": "flow-run-name",
+        },
+    )
+
+
+@patch("ddpui.ddpprefect.prefect_service.prefect_post")
+def test_run_dbt_core_sync(mock_post: Mock):
+    run_flow = PrefectDbtCore(
+        blockName="block-name", flowName="flow-name", flowRunName="flow-run-name"
+    )
+    mock_post.return_value = "retval"
+    response = run_dbt_core_sync(run_flow)
+    assert response == "retval"
+    mock_post.assert_called_once_with(
+        "flows/dbtcore/run/",
+        json={
+            "blockName": "block-name",
+            "flowName": "flow-name",
+            "flowRunName": "flow-run-name",
+        },
+    )
+
+
+@patch("ddpui.ddpprefect.prefect_service.prefect_post")
+def test_create_dataflow(mock_post: Mock):
+    payload = PrefectDataFlowCreateSchema2(
+        flow_name="flow_name",
+        deployment_name="deployment_name",
+        orgslug="orgslug",
+        connection_blocks=[
+            {"seq": 0, "blockName": "blockName0"},
+            {"seq": 1, "blockName": "blockName1"},
+        ],
+        dbt_blocks=[],
+        cron="cron",
+    )
+    mock_post.return_value = "retval"
+    response = create_dataflow(payload)
+    assert response == "retval"
+    mock_post.assert_called_once_with(
+        "deployments/",
+        {
+            "flow_name": payload.flow_name,
+            "deployment_name": payload.deployment_name,
+            "org_slug": payload.orgslug,
+            "connection_blocks": [
+                {"seq": conn.seq, "blockName": conn.blockName}
+                for conn in payload.connection_blocks
+            ],
+            "dbt_blocks": payload.dbt_blocks,
+            "cron": payload.cron,
+        },
+    )
+
+
+@patch("ddpui.ddpprefect.prefect_service.prefect_put")
+def test_update_dataflow(mock_put: Mock):
+    payload = PrefectDataFlowUpdateSchema(cron="newcron")
+    mock_put.return_value = "retval"
+    response = update_dataflow("depid1", payload)
+    assert response == "retval"
+    mock_put.assert_called_once_with(
+        "deployments/depid1",
+        {
+            "cron": "newcron",
+        },
+    )
+
+
+@patch("ddpui.ddpprefect.prefect_service.prefect_get")
+def test_get_flow_runs_by_deployment_id_limit(mock_get: Mock):
+    mock_get.return_value = {"flow_runs": "runs"}
+    response = get_flow_runs_by_deployment_id("depid1", 100)
+    assert response == "runs"
+    mock_get.assert_called_once_with(
+        "flow_runs",
+        params={"deployment_id": "depid1", "limit": 100},
+    )
+
+
+@patch("ddpui.ddpprefect.prefect_service.prefect_get")
+def test_get_flow_runs_by_deployment_id_nolimit(mock_get: Mock):
+    mock_get.return_value = {"flow_runs": "runs"}
+    response = get_flow_runs_by_deployment_id("depid1")
+    assert response == "runs"
+    mock_get.assert_called_once_with(
+        "flow_runs",
+        params={"deployment_id": "depid1", "limit": None},
+    )
+
+
+@patch("ddpui.ddpprefect.prefect_service.prefect_post")
+def test_set_deployment_schedule(mock_post: Mock):
+    set_deployment_schedule("depid1", "newstatus")
+    mock_post.assert_called_once_with("deployments/depid1/set_schedule/newstatus", {})
+
+
+@patch("ddpui.ddpprefect.prefect_service.prefect_post")
+def test_get_filtered_deployments(mock_post: Mock):
+    mock_post.return_value = {"deployments": ["deployments"]}
+    response = get_filtered_deployments("org", ["depid1", "depid2"])
+    assert response == ["deployments"]
+    mock_post.assert_called_once_with(
+        "deployments/filter",
+        {"org_slug": "org", "deployment_ids": ["depid1", "depid2"]},
+    )
+
+
+@patch("ddpui.ddpprefect.prefect_service.requests.delete")
+def test_delete_deployment_by_id_error(mock_delete: Mock):
+    mock_delete.return_value = Mock(
+        raise_for_status=Mock(side_effect=Exception("error")),
+        status_code=400,
+        text="errortext",
+    )
+    with pytest.raises(HttpError) as excinfo:
+        delete_deployment_by_id("depid")
+    assert excinfo.value.status_code == 400
+    assert str(excinfo.value) == "errortext"
+
+
+@patch("ddpui.ddpprefect.prefect_service.requests.delete")
+def test_delete_deployment_by_id_success(mock_delete: Mock):
+    mock_delete.return_value = Mock(
+        raise_for_status=Mock(),
+    )
+    response = delete_deployment_by_id("depid")
+    assert response["success"] == 1
+
+
+@patch("ddpui.ddpprefect.prefect_service.prefect_get")
+def test_get_deployment(mock_get: Mock):
+    mock_get.return_value = "retval"
+    response = get_deployment("depid")
+    assert response == "retval"
+    mock_get.assert_called_once_with("deployments/depid")
+
+
+@patch("ddpui.ddpprefect.prefect_service.prefect_get")
+def test_get_flow_run_logs(mock_get: Mock):
+    mock_get.return_value = "the-logs"
+    response = get_flow_run_logs("flowrunid", 3)
+    assert response == {"logs": "the-logs"}
+    mock_get.assert_called_once_with("flow_runs/logs/flowrunid", params={"offset": 3})
+
+
+@patch("ddpui.ddpprefect.prefect_service.prefect_get")
+def test_get_flow_run(mock_get: Mock):
+    mock_get.return_value = "retval"
+    response = get_flow_run("flowrunid")
+    assert response == "retval"
+    mock_get.assert_called_once_with("flow_runs/flowrunid")
+
+
+@patch("ddpui.ddpprefect.prefect_service.prefect_post")
+def test_create_deployment_flow_run(mock_post: Mock):
+    mock_post.return_value = "retval"
+    response = create_deployment_flow_run("depid")
+    assert response == "retval"
+    mock_post.assert_called_once_with("deployments/depid/flow_run", {})
