@@ -57,6 +57,7 @@ jobs:
         run: |
           coverage run -m pytest ddpui/tests -k "test_prefect_service.py" --ignore=ddpui/tests/integration_tests
           coverage run -m pytest ddpui/tests -k "not test_prefect_service.py" --ignore=ddpui/tests/integration_tests
+          coverage run -m pytest ddpui/tests/unit_tests -k "test_prefect_service.py"
           coverage report --fail-under=70
           coverage xml
       - name: Check coverage percentage
