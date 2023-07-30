@@ -22,8 +22,8 @@ class Org(models.Model):
     """Docstring"""
 
     name = models.CharField(max_length=50)
-    slug = models.CharField(max_length=20, null=True, blank=True)
-    airbyte_workspace_id = models.CharField(max_length=36, null=True, blank=True)
+    slug = models.CharField(max_length=20, null=True)
+    airbyte_workspace_id = models.CharField(max_length=36, null=True)
     dbt = models.ForeignKey(OrgDbt, on_delete=models.SET_NULL, null=True)
 
     def __str__(self) -> str:
@@ -39,10 +39,10 @@ class OrgPrefectBlock(models.Model):
     block_name = models.CharField(
         max_length=100, unique=True
     )  # use blockname to distinguish between different dbt commands
-    display_name = models.CharField(max_length=100, null=True, blank=True)
-    command = models.CharField(max_length=100, null=True, blank=True)
-    dbt_target_schema = models.CharField(max_length=50, null=True, blank=True)
-    seq = models.SmallIntegerField(null=True, blank=True)
+    display_name = models.CharField(max_length=100, null=True)
+    command = models.CharField(max_length=100, null=True)
+    dbt_target_schema = models.CharField(max_length=50, null=True)
+    seq = models.SmallIntegerField(null=True)
 
     def __str__(self) -> str:
         return f"OrgPrefectBlock[{self.org.name}|{self.block_type}|{self.block_name}]"
@@ -53,11 +53,11 @@ class OrgDataFlow(models.Model):
 
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     name = models.CharField(max_length=100)
-    deployment_name = models.CharField(max_length=100, null=True, blank=True)
-    deployment_id = models.CharField(max_length=36, unique=True, null=True, blank=True)
-    cron = models.CharField(max_length=36, null=True, blank=True)
+    deployment_name = models.CharField(max_length=100, null=True)
+    deployment_id = models.CharField(max_length=36, unique=True, null=True)
+    cron = models.CharField(max_length=36, null=True)
     # and if deployment is manual airbyte-connection-sync,then we store the conn_id
-    connection_id = models.CharField(max_length=36, unique=True, null=True, blank=True)
+    connection_id = models.CharField(max_length=36, unique=True, null=True)
 
     def __str__(self) -> str:
         return f"OrgDataFlow[{self.name}|{self.deployment_name}|{self.deployment_id}|{self.cron}|{self.connection_id}]"
@@ -77,8 +77,8 @@ class OrgWarehouse(models.Model):
     wtype = models.CharField(max_length=25)  # postgres, bigquery
     credentials = models.CharField(max_length=200)
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
-    airbyte_destination_id = models.TextField(max_length=36, null=True, blank=True)
-    airbyte_norm_op_id = models.TextField(max_length=36, null=True, blank=True)
+    airbyte_destination_id = models.TextField(max_length=36, null=True)
+    airbyte_norm_op_id = models.TextField(max_length=36, null=True)
 
     def __str__(self) -> str:
         return (
