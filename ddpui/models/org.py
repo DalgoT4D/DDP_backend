@@ -24,15 +24,15 @@ class Org(models.Model):
     """Docstring"""
 
     name = models.CharField(max_length=50)
-    slug = models.CharField(
+    slug = models.CharField(  # skipcq: PTC-W0901 skipcq: PTC-W0906
         max_length=20, null=True
-    )  # skipcq: PTC-W0901 skipcq: PTC-W0906
-    airbyte_workspace_id = models.CharField(
+    )
+    airbyte_workspace_id = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
         max_length=36, null=True
-    )  # skipcq: PTC-W0901, PTC-W0906
-    dbt = models.ForeignKey(
+    )
+    dbt = models.ForeignKey(  # skipcq: PTC-W0901, PTC-W0906
         OrgDbt, on_delete=models.SET_NULL, null=True
-    )  # skipcq: PTC-W0901, PTC-W0906
+    )
 
     def __str__(self) -> str:
         return f"Org[{self.slug}|{self.name}|{self.airbyte_workspace_id}]"
@@ -47,15 +47,15 @@ class OrgPrefectBlock(models.Model):
     block_name = models.CharField(
         max_length=100, unique=True
     )  # use blockname to distinguish between different dbt commands
-    display_name = models.CharField(
+    display_name = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
         max_length=100, null=True
-    )  # skipcq: PTC-W0901, PTC-W0906
-    command = models.CharField(
+    )
+    command = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
         max_length=100, null=True
-    )  # skipcq: PTC-W0901, PTC-W0906
-    dbt_target_schema = models.CharField(
+    )
+    dbt_target_schema = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
         max_length=50, null=True
-    )  # skipcq: PTC-W0901, PTC-W0906
+    )
     seq = models.SmallIntegerField(null=True)  # skipcq: PTC-W0901, PTC-W0906
 
     def __str__(self) -> str:
@@ -67,17 +67,17 @@ class OrgDataFlow(models.Model):
 
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     name = models.CharField(max_length=100)
-    deployment_name = models.CharField(
+    deployment_name = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
         max_length=100, null=True
-    )  # skipcq: PTC-W0901, PTC-W0906
-    deployment_id = models.CharField(
+    )
+    deployment_id = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
         max_length=36, unique=True, null=True
-    )  # skipcq: PTC-W0901, PTC-W0906
+    )
     cron = models.CharField(max_length=36, null=True)  # skipcq: PTC-W0901, PTC-W0906
     # and if deployment is manual airbyte-connection-sync,then we store the conn_id
-    connection_id = models.CharField(
+    connection_id = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
         max_length=36, unique=True, null=True
-    )  # skipcq: PTC-W0901, PTC-W0906
+    )
 
     def __str__(self) -> str:
         return f"OrgDataFlow[{self.name}|{self.deployment_name}|{self.deployment_id}|{self.cron}|{self.connection_id}]"
@@ -97,12 +97,12 @@ class OrgWarehouse(models.Model):
     wtype = models.CharField(max_length=25)  # postgres, bigquery
     credentials = models.CharField(max_length=200)
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
-    airbyte_destination_id = models.TextField(
+    airbyte_destination_id = models.TextField(  # skipcq: PTC-W0901, PTC-W0906
         max_length=36, null=True
-    )  # skipcq: PTC-W0901, PTC-W0906
-    airbyte_norm_op_id = models.TextField(
+    )
+    airbyte_norm_op_id = models.TextField(  # skipcq: PTC-W0901, PTC-W0906
         max_length=36, null=True
-    )  # skipcq: PTC-W0901, PTC-W0906
+    )
 
     def __str__(self) -> str:
         return (
