@@ -12,6 +12,7 @@ django.setup()
 
 from ddpui.api.client.user_org_api import (
     get_current_user,
+    get_current_user_v2,
     post_organization_user,
     get_organization_users,
     put_organization_user_self,
@@ -51,7 +52,7 @@ pytestmark = pytest.mark.django_db
 def org_without_workspace():
     """a pytest fixture which creates an Org without an airbyte workspace"""
     print("creating org_without_workspace")
-    org = Org.objects.create(airbyte_workspace_id=None, slug="test-org-slug")
+    org = Org.objects.create(airbyte_workspace_id=None, slug="test-org-WO-slug")
     yield org
     print("deleting org_without_workspace")
     org.delete()
@@ -62,7 +63,9 @@ def org_with_workspace():
     """a pytest fixture which creates an Org having an airbyte workspace"""
     print("creating org_with_workspace")
     org = Org.objects.create(
-        name="org-name", airbyte_workspace_id="FAKE-WORKSPACE-ID", slug="test-org-slug"
+        name="org-name",
+        airbyte_workspace_id="FAKE-WORKSPACE-ID",
+        slug="test-org-W-slug",
     )
     yield org
     print("deleting org_with_workspace")
@@ -137,6 +140,36 @@ def test_get_current_user_has_user(org_with_workspace):
     assert response.org.name == "org-name"
     assert response.active is True
     assert response.role == 3
+
+
+def test_get_current_userv2_has_user(
+    authuser, org_with_workspace, org_without_workspace
+):
+    """tests /worksspace/detatch/"""
+    orguser1 = OrgUser.objects.create(
+        user=authuser, org=org_with_workspace, role=OrgUserRole.REPORT_VIEWER
+    )
+    orguser2 = OrgUser.objects.create(
+        user=authuser, org=org_without_workspace, role=OrgUserRole.ACCOUNT_MANAGER
+    )
+
+    mock_request = Mock()
+    mock_request.orguser = orguser1
+
+    response = get_current_user_v2(mock_request)
+    assert len(response) == 2
+    assert response[0].email == authuser.email
+    assert response[0].active == authuser.is_active
+    assert response[1].email == authuser.email
+    assert response[1].active == authuser.is_active
+
+    if response[0].org.slug == org_with_workspace.slug:
+        assert response[0].role == orguser1.role
+        assert response[1].role == orguser2.role
+
+    elif response[1].org.slug == org_with_workspace.slug:
+        assert response[1].role == orguser1.role
+        assert response[0].role == orguser2.role
 
 
 # ================================================================================
@@ -596,6 +629,75 @@ def test_post_organization_user_accept_invite(orguser):
         ).count()
         == 1
     )
+
+
+def test_post_organization_user_accept_invite_firstaccount_fail(orguser):
+    """failing test, invalid invite code"""
+    mock_request = Mock()
+    mock_request.orguser = orguser
+    payload = AcceptInvitationSchema(
+        invite_code="invite_code",
+    )
+    Invitation.objects.create(
+        invited_email="invited_email",
+        invited_by=orguser,
+        invited_on=timezone.as_ist(datetime.now()),
+        invite_code="invite_code",
+    )
+
+    with pytest.raises(HttpError) as excinfo:
+        post_organization_user_accept_invite(mock_request, payload)
+
+    assert str(excinfo.value) == "password is required"
+
+
+def test_post_organization_user_accept_invite_secondaccount(orguser):
+    """success test, accepting an invitation"""
+    mock_request = Mock()
+    mock_request.orguser = orguser
+    payload = AcceptInvitationSchema(invite_code="invite_code")
+
+    Invitation.objects.create(
+        invited_email="invited_email",
+        invited_by=orguser,
+        invited_on=timezone.as_ist(datetime.now()),
+        invite_code="invite_code",
+    )
+
+    authuser = User.objects.create_user(
+        username="invited_email", email="invited_email", password="oldpassword"
+    )
+    assert User.objects.filter(email="invited_email").count() == 1
+    anotherorg = Org.objects.create(name="anotherorg", slug="anotherorg")
+    OrgUser.objects.create(user=authuser, org=anotherorg)
+
+    assert (
+        OrgUser.objects.filter(
+            user__email="invited_email",
+        ).count()
+        == 1
+    )
+    response = post_organization_user_accept_invite(mock_request, payload)
+    assert response.email == "invited_email"
+    assert (
+        OrgUser.objects.filter(
+            user__email="invited_email",
+        ).count()
+        == 2
+    )
+    assert (
+        OrgUser.objects.filter(
+            user__email="invited_email", org__slug=orguser.org.slug
+        ).count()
+        == 1
+    )
+    assert (
+        OrgUser.objects.filter(
+            user__email="invited_email", org__slug=anotherorg.slug
+        ).count()
+        == 1
+    )
+    assert User.objects.filter(email="invited_email").count() == 1
 
 
 # ================================================================================

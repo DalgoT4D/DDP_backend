@@ -67,6 +67,7 @@ class OrgSchema(Schema):
     """Docstring"""
 
     name: str
+    slug: str = None
     airbyte_workspace_id: str = None
 
 
