@@ -35,7 +35,6 @@ def user():
     temp_user.delete()
 
 
-# @pytest.fixture
 def token(user: User):
     temp_token = Token.objects.create(key="ttt", user=user)
     return temp_token
