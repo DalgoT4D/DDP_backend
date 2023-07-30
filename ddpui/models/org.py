@@ -24,9 +24,7 @@ class Org(models.Model):
     """Docstring"""
 
     name = models.CharField(max_length=50)
-    slug = models.CharField(  # skipcq: PTC-W0901 skipcq: PTC-W0906
-        max_length=20, null=True
-    )
+    slug = models.CharField(max_length=20, null=True)  # skipcq: PTC-W0901, PTC-W0906
     airbyte_workspace_id = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
         max_length=36, null=True
     )
