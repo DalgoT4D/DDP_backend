@@ -95,6 +95,20 @@ def get_current_user(request):
     raise HttpError(400, "requestor is not an OrgUser")
 
 
+@user_org_api.get(
+    "/currentuserv2", response=List[OrgUserResponse], auth=auth.AnyOrgUser()
+)
+def get_current_user_v2(request):
+    """return all the OrgUsers for the User making this request"""
+    if request.orguser is None:
+        raise HttpError(400, "requestor is not an OrgUser")
+    user = request.orguser.user
+    return [
+        OrgUserResponse.from_orguser(orguser)
+        for orguser in OrgUser.objects.filter(user=user)
+    ]
+
+
 @user_org_api.post("/organizations/users/", response=OrgUserResponse)
 def post_organization_user(
     request, payload: OrgUserCreate
@@ -448,15 +462,22 @@ def post_organization_user_accept_invite(
         user__email=invitation.invited_email, org=invitation.invited_by.org
     ).first()
     if not orguser:
-        logger.info(
-            f"creating invited user {invitation.invited_email} "
-            f"for {invitation.invited_by.org.name}"
-        )
-        user = User.objects.create_user(
+        user = User.objects.filter(
             username=invitation.invited_email,
             email=invitation.invited_email,
-            password=payload.password,
-        )
+        ).first()
+        if user is None:
+            if payload.password is None:
+                raise HttpError(400, "password is required")
+            logger.info(
+                f"creating invited user {invitation.invited_email} "
+                f"for {invitation.invited_by.org.name}"
+            )
+            user = User.objects.create_user(
+                username=invitation.invited_email,
+                email=invitation.invited_email,
+                password=payload.password,
+            )
         orguser = OrgUser.objects.create(
             user=user, org=invitation.invited_by.org, role=invitation.invited_role
         )
