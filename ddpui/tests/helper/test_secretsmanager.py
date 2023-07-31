@@ -17,14 +17,14 @@ from ddpui.utils.secretsmanager import (
 def test_generate_github_token_name():
     org = Org(name="temporg", slug="temporg")
     response = generate_github_token_name(org)
-    assert response == f"gitrepoAccessToken-temporg-unique-val"
+    assert response == "gitrepoAccessToken-temporg-unique-val"
 
 
 @patch("ddpui.utils.secretsmanager.uuid4", Mock(return_value="unique-val"))
 def test_generate_warehouse_credentials_name():
     org = Org(name="temporg", slug="temporg")
     response = generate_warehouse_credentials_name(org)
-    assert response == f"warehouseCreds-temporg-unique-val"
+    assert response == "warehouseCreds-temporg-unique-val"
 
 
 @patch(
