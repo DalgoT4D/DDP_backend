@@ -62,6 +62,7 @@ class OrgUserResponse(Schema):
     org: OrgSchema = None
     active: bool
     role: int
+    role_slug: str
 
     @staticmethod
     def from_orguser(orguser: OrgUser):
@@ -71,6 +72,7 @@ class OrgUserResponse(Schema):
             org=orguser.org,
             active=orguser.user.is_active,
             role=orguser.role,
+            role_slug=OrgUserRole(orguser.role).name,
         )
 
 

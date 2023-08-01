@@ -168,7 +168,7 @@ def post_login(request):
             "token": token.data["token"],
             "org": org,
             "email": str(orguser),
-            "role": OrgUserRole(orguser.role).name,
+            "role_slug": OrgUserRole(orguser.role).name,
             "active": orguser.user.is_active,
         }
 
@@ -423,6 +423,11 @@ def post_organization_user_invite(request, payload: InvitationSchema):
         invited_on=payload.invited_on,
         invite_code=payload.invite_code,
     )
+
+    # trigger an email to the user
+    invite_url = f"{frontend_url}/invitations/?invite_code={payload.invite_code}"
+    sendgrid.send_invite_user_email(invitation.invited_email, invite_url)
+
     logger.info(
         f"Invited {payload.invited_email} to join {orguser.org.name} "
         f"with invite code {payload.invite_code}",
@@ -458,9 +463,13 @@ def post_organization_user_accept_invite(
     invitation = Invitation.objects.filter(invite_code=payload.invite_code).first()
     if invitation is None:
         raise HttpError(400, "invalid invite code")
+
+    # we can have one auth user mapped to multiple orguser and hence multiple orgs
+    # but there can only be one orguser per one org
     orguser = OrgUser.objects.filter(
         user__email=invitation.invited_email, org=invitation.invited_by.org
     ).first()
+
     if not orguser:
         user = User.objects.filter(
             username=invitation.invited_email,
@@ -491,9 +500,22 @@ def get_invitations(request):
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
 
-    invitations = Invitation.objects.filter(invited_by=orguser).values()
+    invitations = (
+        Invitation.objects.filter(invited_by=orguser).order_by("-invited_on").all()
+    )
+    res = []
+    for invitation in invitations:
+        res.append(
+            {
+                "invited_email": invitation.invited_email,
+                "invited_role_slug": OrgUserRole(invitation.invited_role).name,
+                "invited_role": invitation.invited_role,
+                "invited_on": invitation.invited_on,
+                "status": invitation.status,
+            }
+        )
 
-    return list(invitations)
+    return res
 
 
 @user_org_api.post(
