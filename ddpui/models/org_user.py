@@ -150,3 +150,9 @@ class VerifyEmailSchema(Schema):
     """the payload for the verify-email workflow"""
 
     token: str
+
+
+class DeleteOrgUserPayload(Schema):
+    """payload to delete an org user"""
+
+    email: str

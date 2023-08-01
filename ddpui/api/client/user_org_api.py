@@ -38,6 +38,7 @@ from ddpui.models.org_user import (
     ForgotPasswordSchema,
     ResetPasswordSchema,
     VerifyEmailSchema,
+    DeleteOrgUserPayload,
 )
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers
@@ -186,6 +187,26 @@ def get_organization_users(request):
         raise HttpError(400, "no associated org")
     query = OrgUser.objects.filter(org=orguser.org)
     return [OrgUserResponse.from_orguser(orguser) for orguser in query]
+
+
+@user_org_api.post("/organizations/users/delete", auth=auth.CanManageUsers())
+def delete_organization_users(request, payload: DeleteOrgUserPayload):
+    """delete the orguser posted"""
+    orguser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "no associated org")
+
+    orguser_delete = OrgUser.objects.filter(
+        org=orguser.org, user__email=payload.email
+    ).first()
+
+    if orguser_delete is None:
+        raise HttpError(400, "user does not belong to the org")
+
+    # delete the org user
+    orguser_delete.delete()
+
+    return {"success": 1}
 
 
 @user_org_api.put(
@@ -409,9 +430,9 @@ def post_organization_user_invite(request, payload: InvitationSchema):
     frontend_url = os.getenv("FRONTEND_URL")
 
     # what if the user already exists, throw error
-    existing_user = User.objects.filter(email=payload.invited_email).first()
-    if existing_user:
-        raise HttpError(400, "Account already exists")
+    # existing_user = User.objects.filter(email=payload.invited_email).first()
+    # if existing_user:
+    #     raise HttpError(400, "Account already exists")
 
     # user can only invite a role equal or lower to their role
     if payload.invited_role > orguser.role:
@@ -423,10 +444,12 @@ def post_organization_user_invite(request, payload: InvitationSchema):
             raise HttpError(400, "Account already exists")
 
         # if the invitation is already present - trigger the email again
-        invite_url = (
-            f"{frontend_url}/users/invitation/?invite_code={invitation.invite_code}"
-        )
+        invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
         sendgrid.send_invite_user_email(invitation.invited_email, invite_url)
+        logger.info(
+            f"Invited {payload.invited_email} to join {orguser.org.name} "
+            f"with invite code {payload.invite_code}",
+        )
         return InvitationSchema.from_invitation(invitation)
 
     payload.invited_by = OrgUserResponse.from_orguser(orguser)
