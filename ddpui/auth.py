@@ -43,7 +43,11 @@ def authenticate_org_user(request, token, allowed_roles, require_org):
     tokenrecord = Token.objects.filter(key=token).first()
     if tokenrecord and tokenrecord.user:
         request.user = tokenrecord.user
-        orguser = OrgUser.objects.filter(user=request.user).first()
+        q_orguser = OrgUser.objects.filter(user=request.user)
+        if request.headers.get("x-kaapi-org"):
+            orgslug = request.headers["x-kaapi-org"]
+            q_orguser = q_orguser.filter(org__slug=orgslug)
+        orguser = q_orguser.first()
         if orguser is not None:
             if require_org and orguser.org is None:
                 raise HttpError(400, "register an organization first")

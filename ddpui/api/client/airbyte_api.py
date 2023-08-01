@@ -39,12 +39,13 @@ from ddpui.ddpprefect import (
 from ddpui.ddpprefect import prefect_service
 from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
 from ddpui.models.org_user import OrgUser
-from ddpui.utils.ddp_logger import logger
 from ddpui.ddpairbyte import airbytehelpers
+from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
+logger = CustomLogger("airbyte")
 
 
 @airbyteapi.exception_handler(ValidationError)
@@ -920,8 +921,6 @@ def post_airbyte_sync_connection(request, connection_block_id):
         org=org, block_id=connection_block_id
     ).first()
 
-    assert org_prefect_connection_block
-
     timenow = datetime.now().strftime("%Y-%m-%d.%H:%M:%S")
     return prefect_service.run_airbyte_connection_sync(
         PrefectAirbyteSync(
@@ -929,13 +928,6 @@ def post_airbyte_sync_connection(request, connection_block_id):
             flowRunName=f"manual-sync-{org.name}-{timenow}",
         )
     )
-    # {
-    #     "created_at": "2023-05-10T14:25:42+00:00",
-    #     "job_status": "succeeded",
-    #     "job_id": 77,
-    #     "records_synced": 20799,
-    #     "updated_at": "2023-05-10T14:25:58+00:00"
-    # }
 
 
 @airbyteapi.get("/jobs/{job_id}", auth=auth.CanManagePipelines())

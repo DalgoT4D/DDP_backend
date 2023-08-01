@@ -43,7 +43,7 @@ from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 from ddpui.ddpdbt import dbt_service
 from ddpui.ddpprefect import AIRBYTECONNECTION
-from ddpui.utils.ddp_logger import logger
+from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.timezone import IST
 from ddpui.utils import secretsmanager
 from ddpui.utils import sendgrid
@@ -53,6 +53,8 @@ user_org_api = NinjaAPI(urls_namespace="userorg")
 # http://127.0.0.1:8000/api/docs
 
 load_dotenv()
+
+logger = CustomLogger("ddpui")
 
 
 @user_org_api.exception_handler(ValidationError)
@@ -92,6 +94,20 @@ def get_current_user(request):
     if orguser is not None:
         return OrgUserResponse.from_orguser(orguser)
     raise HttpError(400, "requestor is not an OrgUser")
+
+
+@user_org_api.get(
+    "/currentuserv2", response=List[OrgUserResponse], auth=auth.AnyOrgUser()
+)
+def get_current_user_v2(request):
+    """return all the OrgUsers for the User making this request"""
+    if request.orguser is None:
+        raise HttpError(400, "requestor is not an OrgUser")
+    user = request.orguser.user
+    return [
+        OrgUserResponse.from_orguser(orguser)
+        for orguser in OrgUser.objects.filter(user=user)
+    ]
 
 
 @user_org_api.post("/organizations/users/", response=OrgUserResponse)
@@ -427,8 +443,11 @@ def post_organization_user_invite(request, payload: InvitationSchema):
     # trigger an email to the user
     invite_url = f"{frontend_url}/users/invitation/?invite_code={payload.invite_code}"
     sendgrid.send_invite_user_email(invitation.invited_email, invite_url)
-    logger.info("Invitation send to the user")
 
+    logger.info(
+        f"Invited {payload.invited_email} to join {orguser.org.name} "
+        f"with invite code {payload.invite_code}",
+    )
     return payload
 
 
@@ -466,15 +485,22 @@ def post_organization_user_accept_invite(
     orguser = OrgUser.objects.filter(user__email=invitation.invited_email).first()
 
     if not orguser:
-        logger.info(
-            f"creating invited user {invitation.invited_email} "
-            f"for {invitation.invited_by.org.name}"
-        )
-        user = User.objects.create_user(
+        user = User.objects.filter(
             username=invitation.invited_email,
             email=invitation.invited_email,
-            password=payload.password,
-        )
+        ).first()
+        if user is None:
+            if payload.password is None:
+                raise HttpError(400, "password is required")
+            logger.info(
+                f"creating invited user {invitation.invited_email} "
+                f"for {invitation.invited_by.org.name}"
+            )
+            user = User.objects.create_user(
+                username=invitation.invited_email,
+                email=invitation.invited_email,
+                password=payload.password,
+            )
         orguser = OrgUser.objects.create(
             user=user, org=invitation.invited_by.org, role=invitation.invited_role
         )

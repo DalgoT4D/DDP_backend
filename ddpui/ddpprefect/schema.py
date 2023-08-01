@@ -79,6 +79,13 @@ class PrefectShellSetup(Schema):
     env: dict
 
 
+class PrefectSecretBlockCreate(Schema):
+    """Docstring"""
+
+    secret: str
+    block_name: str
+
+
 class OrgDbtSchema(Schema):
     """Docstring"""
 
@@ -153,6 +160,12 @@ class PrefectDataFlowCreateSchema2(Schema):
     connection_blocks: list[PrefectFlowAirbyteConnection]
     dbt_blocks: list
     cron: str = None
+
+
+class PrefectDataFlowUpdateSchema(Schema):
+    """Edit the data flow"""
+
+    cron: str
 
 
 class PrefectFlowRunSchema(Schema):

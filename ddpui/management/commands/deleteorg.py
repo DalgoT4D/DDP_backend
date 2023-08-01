@@ -1,7 +1,11 @@
+from dotenv import load_dotenv
 from django.core.management.base import BaseCommand
 
 from ddpui.models.org_user import Org
 from ddpui.utils.deleteorg import delete_one_org
+
+
+load_dotenv()
 
 
 class Command(BaseCommand):
@@ -24,6 +28,8 @@ class Command(BaseCommand):
                 self.delete_one_org(org, options["yes_really"])
         else:
             org = Org.objects.filter(name=options["org_name"]).first()
+            if org is None:
+                org = Org.objects.filter(slug=options["org_name"]).first()
             if org is None:
                 print("no such org")
                 return

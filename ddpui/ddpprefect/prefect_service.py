@@ -10,21 +10,33 @@ from ddpui.ddpprefect.schema import (
     PrefectAirbyteSync,
     PrefectDataFlowCreateSchema2,
     PrefectDbtCore,
+    PrefectDataFlowUpdateSchema,
+    PrefectSecretBlockCreate,
 )
-from ddpui.utils.ddp_logger import logger
+from ddpui.utils.custom_logger import CustomLogger
 
 load_dotenv()
 
 PREFECT_PROXY_API_URL = os.getenv("PREFECT_PROXY_API_URL")
-http_timeout = int(os.getenv("PREFECT_HTTP_TIMEOUT", "5"))
+http_timeout = int(os.getenv("PREFECT_HTTP_TIMEOUT", "30"))
+
+logger = CustomLogger("ddpui")
 
 
 # ================================================================================================
 def prefect_get(endpoint: str, **kwargs) -> dict:
     """make a GET request to the proxy"""
+    # we send headers and timeout separately from kwargs, just to be explicit about it
+    headers = kwargs.pop("headers", {})
+    headers["x-ddp-org"] = logger.get_slug()
+    timeout = kwargs.pop("timeout", http_timeout)
+
     try:
         res = requests.get(
-            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}", timeout=http_timeout, **kwargs
+            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}",
+            headers=headers,
+            timeout=timeout,
+            **kwargs,
         )
     except Exception as error:
         raise HttpError(500, "connection error") from error
@@ -36,11 +48,20 @@ def prefect_get(endpoint: str, **kwargs) -> dict:
     return res.json()
 
 
-def prefect_post(endpoint: str, json: dict) -> dict:
+def prefect_post(endpoint: str, json: dict, **kwargs) -> dict:
     """make a POST request to the proxy"""
+    # we send headers and timeout separately from kwargs, just to be explicit about it
+    headers = kwargs.pop("headers", {})
+    headers["x-ddp-org"] = logger.get_slug()
+    timeout = kwargs.pop("timeout", http_timeout)
+
     try:
         res = requests.post(
-            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}", timeout=http_timeout, json=json
+            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}",
+            headers=headers,
+            timeout=timeout,
+            json=json,
+            **kwargs,
         )
     except Exception as error:
         raise HttpError(500, "connection error") from error
@@ -52,11 +73,20 @@ def prefect_post(endpoint: str, json: dict) -> dict:
     return res.json()
 
 
-def prefect_put(endpoint: str, json: dict) -> dict:
+def prefect_put(endpoint: str, json: dict, **kwargs) -> dict:
     """make a PUT request to the proxy"""
+    # we send headers and timeout separately from kwargs, just to be explicit about it
+    headers = kwargs.pop("headers", {})
+    headers["x-ddp-org"] = logger.get_slug()
+    timeout = kwargs.pop("timeout", http_timeout)
+
     try:
         res = requests.put(
-            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}", timeout=http_timeout, json=json
+            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}",
+            headers=headers,
+            timeout=timeout,
+            json=json,
+            **kwargs,
         )
     except Exception as error:
         raise HttpError(500, "connection error") from error
@@ -68,11 +98,19 @@ def prefect_put(endpoint: str, json: dict) -> dict:
     return res.json()
 
 
-def prefect_delete_a_block(block_id: str) -> None:
+def prefect_delete_a_block(block_id: str, **kwargs) -> None:
     """makes a DELETE request to the proxy"""
+    # we send headers and timeout separately from kwargs, just to be explicit about it
+    headers = kwargs.pop("headers", {})
+    headers["x-ddp-org"] = logger.get_slug()
+    timeout = kwargs.pop("timeout", http_timeout)
+
     try:
         res = requests.delete(
-            f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}", timeout=http_timeout
+            f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}",
+            headers=headers,
+            timeout=timeout,
+            **kwargs,
         )
     except Exception as error:
         raise HttpError(500, "connection error") from error
@@ -195,7 +233,7 @@ def create_shell_block(shell: PrefectShellSetup) -> str:
             "workingDir": shell.workingDir,
         },
     )
-    return response["block_id"]
+    return response
 
 
 def delete_shell_block(block_id):
@@ -271,6 +309,23 @@ def update_dbt_core_block_schema(block_name: str, target_configs_schema: str):
 
 
 # ================================================================================================
+
+
+def create_secret_block(secret_block: PrefectSecretBlockCreate):
+    """This will create a secret block in the prefect to store any password like string"""
+    response = prefect_post(
+        "blocks/secret/",
+        {"blockName": secret_block.block_name, "secret": secret_block.secret},
+    )
+    return response
+
+
+def delete_secret_block(block_id) -> None:
+    """Delete airbyte connection block in prefect"""
+    prefect_delete_a_block(block_id)
+
+
+# ================================================================================================
 def run_airbyte_connection_sync(
     run_flow: PrefectAirbyteSync,
 ) -> dict:  # pragma: no cover
@@ -305,6 +360,19 @@ def create_dataflow(payload: PrefectDataFlowCreateSchema2) -> dict:  # pragma: n
                 for conn in payload.connection_blocks
             ],
             "dbt_blocks": payload.dbt_blocks,
+            "cron": payload.cron,
+        },
+    )
+    return res
+
+
+def update_dataflow(
+    deployment_id: str, payload: PrefectDataFlowUpdateSchema
+) -> dict:  # pragma: no cover
+    """update a prefect deployment with a new cron schedule"""
+    res = prefect_put(
+        f"deployments/{deployment_id}",
+        {
             "cron": payload.cron,
         },
     )
@@ -381,7 +449,9 @@ def get_flow_run(flow_run_id: str) -> dict:
 
 
 def create_deployment_flow_run(deployment_id: str) -> dict:  # pragma: no cover
-    """Proxy call to create a flow run for deployment.
-    This is like a quick check to see if deployment is running"""
+    """
+    Proxy call to create a flow run for deployment.
+    This is like a quick check to see if deployment is running
+    """
     res = prefect_post(f"deployments/{deployment_id}/flow_run", {})
     return res

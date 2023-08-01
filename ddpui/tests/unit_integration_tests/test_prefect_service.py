@@ -87,16 +87,20 @@ class TestShellBlock:
     """tests the creation and retrieval of shell blocks"""
 
     @staticmethod
-    def test_create_shellblock():
+    def test_create_shell_block():
         """creates a shell block"""
-        TestShellBlock.block_name = "test-shell-" + str(uuid4())
+        block_name = "test-shell-" + str(uuid4())
         shell = schema.PrefectShellSetup(
-            blockname=TestShellBlock.block_name,
+            blockname=block_name,
             commands=["cmd1", "cmd2"],
             workingDir="/tmp",
             env={},
         )
-        TestShellBlock.block_id = prefect_service.create_shell_block(shell)
+        block = prefect_service.create_shell_block(shell)
+        assert "block_id" in block
+        assert "block_name" in block
+        TestShellBlock.block_id = block["block_id"]
+        TestShellBlock.block_name = block["block_name"]
 
     @staticmethod
     def test_get_shell_block():

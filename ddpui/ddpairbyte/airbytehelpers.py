@@ -4,7 +4,9 @@ from ddpui.ddpairbyte.schema import AirbyteWorkspace
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpprefect import AIRBYTESERVER
 from ddpui.models.org import OrgPrefectBlock
-from ddpui.utils.ddp_logger import logger
+from ddpui.utils.custom_logger import CustomLogger
+
+logger = CustomLogger("airbyte")
 
 
 def setup_airbyte_workspace(wsname, org) -> AirbyteWorkspace:
@@ -44,9 +46,9 @@ def setup_airbyte_workspace(wsname, org) -> AirbyteWorkspace:
             docker_image_tag=commcare_docker_image_tag,
             documentation_url=commcare_documentation_url,
         )
-    except Exception as e:
-        logger.error(f"Error creating custom source definitions: {e}")
-        raise e
+    except Exception as error:
+        logger.error("Error creating custom source definitions: %s", str(error))
+        raise error
 
     # Airbyte server block details. prefect doesn't know the workspace id
     block_name = f"{org.slug}-{slugify(AIRBYTESERVER)}"

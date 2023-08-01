@@ -1,11 +1,10 @@
 import os
-import json
 from typing import Dict, List
 import requests
 from dotenv import load_dotenv
 from ninja.errors import HttpError
 from ddpui.ddpairbyte import schema
-from ddpui.utils.ab_logger import logger
+from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.helpers import remove_nested_attribute
 from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
@@ -15,6 +14,9 @@ from ddpui.ddpairbyte.schema import (
 )
 
 load_dotenv()
+
+
+logger = CustomLogger("airbyte")
 
 
 def abreq(endpoint, req=None):
@@ -40,7 +42,7 @@ def abreq(endpoint, req=None):
     try:
         result_obj = remove_nested_attribute(res.json(), "icon")
         logger.info("Response from Airbyte server:")
-        logger.info(json.dumps(result_obj, indent=2))
+        logger.info(result_obj)
     except ValueError:
         logger.info("Response from Airbyte server: %s", res.text)
 
@@ -52,6 +54,7 @@ def abreq(endpoint, req=None):
 
     if "application/json" in res.headers.get("Content-Type", ""):
         return res.json()
+
     logger.error(
         "abreq result has content-type %s while hitting %s",
         res.headers.get("Content-Type", ""),
@@ -245,6 +248,18 @@ def create_source(
         raise HttpError(400, "config must be a dictionary")
 
     res = abreq(
+        "source_definition_specifications/get",
+        {"sourceDefinitionId": sourcedef_id, "workspaceId": workspace_id},
+    )
+    if "connectionSpecification" not in res:
+        raise HttpError(500, "could not find spec for this source type")
+
+    source_definition_spec = res["connectionSpecification"]
+    for prop, prop_def in source_definition_spec["properties"].items():
+        if prop_def.get("const"):
+            config[prop] = prop_def["const"]
+
+    res = abreq(
         "sources/create",
         {
             "workspaceId": workspace_id,
@@ -291,6 +306,18 @@ def check_source_connection(workspace_id: str, data: AirbyteSourceCreate) -> dic
         raise HttpError(400, "workspace_id must be a string")
 
     res = abreq(
+        "source_definition_specifications/get",
+        {"sourceDefinitionId": data.sourceDefId, "workspaceId": workspace_id},
+    )
+    if "connectionSpecification" not in res:
+        raise HttpError(500, "could not find spec for this source type")
+
+    source_definition_spec = res["connectionSpecification"]
+    for prop, prop_def in source_definition_spec["properties"].items():
+        if prop_def.get("const"):
+            data.config[prop] = prop_def["const"]
+
+    res = abreq(
         "scheduler/sources/check_connection",
         {
             "sourceDefinitionId": data.sourceDefId,
@@ -300,7 +327,7 @@ def check_source_connection(workspace_id: str, data: AirbyteSourceCreate) -> dic
     )
     if "jobInfo" not in res or res.get("status") == "failed":
         logger.error("Failed to check source connection: %s", res)
-        raise HttpError(500, "failed to check source connection")
+        raise HttpError(500, "Failed to connect - please check your crendentials")
     return res
 
 
@@ -318,7 +345,7 @@ def check_source_connection_for_update(
     )
     if "jobInfo" not in res or res.get("status") == "failed":
         logger.error("Failed to check source connection: %s", res)
-        raise HttpError(500, "failed to check source connection")
+        raise HttpError(500, "Failed to connect - please check your crendentials")
     # {
     #   'status': 'succeeded',
     #   'jobInfo': {
@@ -510,7 +537,7 @@ def check_destination_connection(
     )
     if "jobInfo" not in res or res.get("status") == "failed":
         logger.error("Failed to check destination connection: %s", res)
-        raise HttpError(500, "failed to check destination connection")
+        raise HttpError(500, "Failed to connect - please check your crendentials")
     return res
 
 
@@ -531,7 +558,7 @@ def check_destination_connection_for_update(
     )
     if "jobInfo" not in res or res.get("status") == "failed":
         logger.error("Failed to check destination connection: %s", res)
-        raise HttpError(500, "failed to check destination connection")
+        raise HttpError(500, "Failed to connect - please check your crendentials")
     return res
 
 

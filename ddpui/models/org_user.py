@@ -126,7 +126,9 @@ class AcceptInvitationSchema(Schema):
     """Docstring"""
 
     invite_code: str
-    password: str
+    password: str = (
+        None  # the password is required only when the user has no platform account
+    )
 
 
 class ForgotPasswordSchema(Schema):
