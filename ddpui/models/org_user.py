@@ -98,6 +98,7 @@ class Invitation(models.Model):
     invited_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE)
     invited_on = models.DateTimeField()
     invite_code = models.CharField(max_length=36)
+    invited_org = models.ForeignKey(Org, on_delete=models.CASCADE, null=True)
     status = models.CharField(
         max_length=50, default="pending", choices=InvitationStatus.choices()
     )

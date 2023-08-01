@@ -203,6 +203,11 @@ def delete_organization_users(request, payload: DeleteOrgUserPayload):
     if orguser_delete is None:
         raise HttpError(400, "user does not belong to the org")
 
+    # remove the invitations associated with the org user
+    Invitation.objects.filter(
+        invited_org=orguser.org, invited_email=payload.email
+    ).delete()
+
     # delete the org user
     orguser_delete.delete()
 
@@ -429,6 +434,9 @@ def post_organization_user_invite(request, payload: InvitationSchema):
     orguser: OrgUser = request.orguser
     frontend_url = os.getenv("FRONTEND_URL")
 
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
+
     # what if the user already exists, throw error
     # existing_user = User.objects.filter(email=payload.invited_email).first()
     # if existing_user:
@@ -461,6 +469,7 @@ def post_organization_user_invite(request, payload: InvitationSchema):
         invited_by=orguser,
         invited_on=payload.invited_on,
         invite_code=payload.invite_code,
+        invited_org=orguser.org,
     )
 
     # trigger an email to the user
@@ -549,6 +558,7 @@ def get_invitations(request):
     for invitation in invitations:
         res.append(
             {
+                "id": invitation.id,
                 "invited_email": invitation.invited_email,
                 "invited_role_slug": OrgUserRole(invitation.invited_role).name,
                 "invited_role": invitation.invited_role,
@@ -558,6 +568,43 @@ def get_invitations(request):
         )
 
     return res
+
+
+@user_org_api.post("/users/invitations/resend/{invitation_id}", auth=auth.AnyOrgUser())
+def post_resend_invitation(request, invitation_id):
+    """Get all invitations sent by the current user"""
+    orguser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
+
+    invitation = Invitation.objects.filter(id=invitation_id).first()
+
+    if invitation:
+        invitation.invited_on = datetime.utcnow()
+        invitation.save()
+        # trigger an email to the user
+        frontend_url = os.getenv("FRONTEND_URL")
+        invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
+        sendgrid.send_invite_user_email(invitation.invited_email, invite_url)
+
+    return {"success": 1}
+
+
+@user_org_api.delete(
+    "/users/invitations/delete/{invitation_id}", auth=auth.AnyOrgUser()
+)
+def delete_invitation(request, invitation_id):
+    """Get all invitations sent by the current user"""
+    orguser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
+
+    invitation = Invitation.objects.filter(id=invitation_id).first()
+
+    if invitation:
+        invitation.delete()
+
+    return {"success": 1}
 
 
 @user_org_api.post(
