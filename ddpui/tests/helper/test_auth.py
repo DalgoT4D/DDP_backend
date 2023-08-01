@@ -194,21 +194,21 @@ def test_authenticate_org_user_select_org_success(
     allowed_roles = [OrgUserRole.ACCOUNT_MANAGER]
     require_org = True
 
-    request.headers = {"x-kaapi-org": org.slug}
+    request.headers = {"x-dalgo-org": org.slug}
     response = authenticate_org_user(
         request, test_token.key, allowed_roles, require_org
     )
     assert response == request
     assert response.orguser == orguser1
 
-    request.headers = {"x-kaapi-org": anotherorg.slug}
+    request.headers = {"x-dalgo-org": anotherorg.slug}
     response = authenticate_org_user(
         request, test_token.key, allowed_roles, require_org
     )
     assert response == request
     assert response.orguser == orguser2
 
-    request.headers = {"x-kaapi-org": "dne-slug"}
+    request.headers = {"x-dalgo-org": "dne-slug"}
     with pytest.raises(HttpError) as excinfo:
         authenticate_org_user(request, test_token.key, allowed_roles, require_org)
     assert str(excinfo.value) == UNAUTHORIZED

@@ -15,17 +15,20 @@ from ddpui.api.client.user_org_api import (
     get_current_user_v2,
     post_organization_user,
     get_organization_users,
+    delete_organization_users,
     put_organization_user_self,
     put_organization_user,
     post_organization,
     post_organization_warehouse,
     get_organizations_warehouses,
     post_organization_user_invite,
-    get_organization_user_invite,
     post_organization_user_accept_invite,
     post_forgot_password,
     post_reset_password,
     post_verify_email,
+    get_invitations,
+    post_resend_invitation,
+    delete_invitation,
 )
 from ddpui.models.org import Org, OrgSchema, OrgWarehouseSchema, OrgWarehouse
 from ddpui.models.org_user import (
@@ -39,6 +42,7 @@ from ddpui.models.org_user import (
     ForgotPasswordSchema,
     ResetPasswordSchema,
     VerifyEmailSchema,
+    DeleteOrgUserPayload,
 )
 from ddpui.ddpairbyte.schema import AirbyteWorkspace
 from ddpui.utils import timezone
@@ -275,6 +279,47 @@ def test_get_organization_users(orguser):
 
 
 # ================================================================================
+def test_delete_organization_users_no_org():
+    """a failing test, requestor has no associated org"""
+    mock_request = Mock()
+    mock_request.orguser = Mock()
+    mock_request.orguser.org = None
+    payload = DeleteOrgUserPayload(email="email-dne")
+
+    with pytest.raises(HttpError) as excinfo:
+        delete_organization_users(mock_request, payload)
+    assert str(excinfo.value) == "no associated org"
+
+
+def test_delete_organization_users(orguser):
+    """a failing test, orguser dne"""
+    mock_request = Mock()
+    mock_request.orguser = orguser
+    payload = DeleteOrgUserPayload(email="email-dne")
+
+    with pytest.raises(HttpError) as excinfo:
+        delete_organization_users(mock_request, payload)
+    assert str(excinfo.value) == "user does not belong to the org"
+
+
+def test_delete_organization_users_success(orguser):
+    """a passing test"""
+    mock_request = Mock()
+    mock_request.orguser = orguser
+    payload = DeleteOrgUserPayload(email="useremail")
+    user = User.objects.create(email=payload.email, username=payload.email)
+    OrgUser.objects.create(org=orguser.org, user=user)
+    assert (
+        OrgUser.objects.filter(org=orguser.org, user__email=payload.email).count() == 1
+    )
+    delete_organization_users(mock_request, payload)
+    assert (
+        OrgUser.objects.filter(org=orguser.org, user__email=payload.email).count() == 0
+    )
+    user.delete()
+
+
+# ================================================================================
 def test_put_organization_user_self(orguser):
     """a success test"""
     mock_request = Mock()
@@ -487,33 +532,53 @@ def test_get_organizations_warehouses(orguser):
 
 
 # ================================================================================
-def test_post_organization_user_invite_failure(orguser):
-    """failing test, invitation has already gone out"""
-    payload = InvitationSchema(
-        invited_email="inivted_email",
-        invited_role=1,
-        invited_by=None,
-        invited_on=timezone.as_ist(datetime.now()),
-        invite_code="invite_code",
-    )
-    invitation = Invitation.objects.create(
-        invited_email=payload.invited_email,
-        invited_by=orguser,
-        invited_on=timezone.as_ist(datetime.now()),
-    )
+@patch("ddpui.utils.sendgrid.send_invite_user_email", Mock())
+def test_post_organization_user_invite_no_org(orguser):
+    """failing test, no org"""
     mock_request = Mock()
+    orguser.org = None
     mock_request.orguser = orguser
+    payload = InvitationSchema(
+        invited_email="some-email", invited_role_slug="report_viewer"
+    )
     with pytest.raises(HttpError) as excinfo:
         post_organization_user_invite(mock_request, payload)
-    assert str(excinfo.value) == f"{payload.invited_email} has already been invited"
-    invitation.delete()
+    assert str(excinfo.value) == "create an organization first"
 
 
-def test_post_organization_user_invite(orguser):
+@patch("ddpui.utils.sendgrid.send_invite_user_email", Mock())
+def test_post_organization_user_invite_nosuchrole(orguser):
+    """failing test, no such role"""
+    mock_request = Mock()
+    mock_request.orguser = orguser
+    payload = InvitationSchema(
+        invited_email="some-email", invited_role_slug="hot_stepper"
+    )
+    with pytest.raises(HttpError) as excinfo:
+        post_organization_user_invite(mock_request, payload)
+    assert str(excinfo.value) == "Invalid role"
+
+
+@patch("ddpui.utils.sendgrid.send_invite_user_email", Mock())
+def test_post_organization_user_invite_insufficientrole(orguser):
+    """failing test, no such role"""
+    mock_request = Mock()
+    mock_request.orguser = orguser
+    orguser.role = 1
+    payload = InvitationSchema(
+        invited_email="some-email", invited_role_slug="pipeline_manager"
+    )
+    with pytest.raises(HttpError) as excinfo:
+        post_organization_user_invite(mock_request, payload)
+    assert str(excinfo.value) == "Insufficient permissions for this operation"
+
+
+@patch("ddpui.utils.sendgrid.send_invite_user_email", mock_sendgrid=Mock())
+def test_post_organization_user_invite(mock_sendgrid, orguser):
     """success test, inviting a new user"""
     payload = InvitationSchema(
         invited_email="inivted_email",
-        invited_role=1,
+        invited_role_slug="report_viewer",
         invited_by=None,
         invited_on=timezone.as_ist(datetime.now()),
         invite_code="invite_code",
@@ -541,50 +606,7 @@ def test_post_organization_user_invite(orguser):
     assert response.invited_role == payload.invited_role
     assert response.invited_on == payload.invited_on
     assert response.invite_code == payload.invite_code
-
-
-# ================================================================================
-def test_get_organization_user_invite_fail(orguser):
-    """failing test, invalid invitation code"""
-    invited_email = "invited_email"
-
-    invitation = Invitation.objects.create(
-        invited_email=invited_email,
-        invited_by=orguser,
-        invited_on=timezone.as_ist(datetime.now()),
-        invite_code="invite_code",
-    )
-    mock_request = Mock()
-    mock_request.orguser = orguser
-
-    with pytest.raises(HttpError) as excinfo:
-        get_organization_user_invite(mock_request, "wrong-code")
-    assert str(excinfo.value) == "invalid invite code"
-
-    invitation.delete()
-
-
-def test_get_organization_user_invite(orguser):
-    """success test, look up an invitation from the invite code"""
-    invited_email = "invited_email"
-
-    invitation = Invitation.objects.create(
-        invited_email=invited_email,
-        invited_by=orguser,
-        invited_on=timezone.as_ist(datetime.now()),
-        invite_code="invite_code",
-    )
-    mock_request = Mock()
-    mock_request.orguser = orguser
-
-    response = get_organization_user_invite(mock_request, "invite_code")
-    assert response.invited_email == invitation.invited_email
-    assert response.invited_role == invitation.invited_role
-    assert response.invited_by.email == invitation.invited_by.user.email
-    assert response.invited_on == invitation.invited_on
-    assert response.invite_code == invitation.invite_code
-
-    invitation.delete()
+    mock_sendgrid.assert_called_once()
 
 
 # ================================================================================
@@ -775,3 +797,92 @@ def test_post_verify_email_no_such_orguser():
     with pytest.raises(HttpError) as excinfo:
         post_verify_email(mock_request, payload)
     assert str(excinfo.value) == "could not look up request from this token"
+
+
+# ================================================================================
+def test_get_invitations_no_org(orguser):
+    """failure - no org"""
+    orguser.org = None
+    mock_request = Mock()
+    mock_request.orguser = orguser
+    with pytest.raises(HttpError) as excinfo:
+        get_invitations(mock_request)
+    assert str(excinfo.value) == "create an organization first"
+
+
+def test_get_invitations(orguser):
+    """success - return invitations"""
+    mock_request = Mock()
+    mock_request.orguser = orguser
+    Invitation.objects.create(
+        invited_by=orguser,
+        invited_email="invited-email",
+        invited_role=1,
+        invited_on=timezone.as_ist(datetime(2023, 1, 1, 10, 0, 0)),
+    )
+    response = get_invitations(mock_request)
+    assert len(response) == 1
+    assert response[0]["invited_email"] == "invited-email"
+    assert response[0]["invited_role_slug"] == "report_viewer"
+    assert response[0]["invited_role"] == 1
+    assert response[0]["invited_on"] == datetime(
+        2023, 1, 1, 4, 30, 0, tzinfo=timezone.pytz.utc
+    )
+
+
+# ================================================================================
+def test_post_resend_invitation_no_org(orguser):
+    """failure - no org"""
+    orguser.org = None
+    mock_request = Mock()
+    mock_request.orguser = orguser
+    with pytest.raises(HttpError) as excinfo:
+        post_resend_invitation(mock_request, 1)
+    assert str(excinfo.value) == "create an organization first"
+
+
+@patch("ddpui.utils.sendgrid.send_invite_user_email", sendgrid=Mock())
+def test_post_resend_invitation(sendgrid: Mock, orguser):
+    """success test"""
+    original_invited_on = timezone.as_ist(datetime(2023, 1, 1, 10, 0, 0))
+    invitation = Invitation.objects.create(
+        invited_on=original_invited_on,
+        invited_email="email",
+        invite_code="hello",
+        invited_by=orguser,
+        invited_role=1,
+    )
+    frontend_url = os.getenv("FRONTEND_URL")
+    invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
+    mock_request = Mock(orguser=orguser)
+    post_resend_invitation(mock_request, invitation.id)
+    sendgrid.assert_called_once_with("email", invite_url)
+    invitation.refresh_from_db()
+    assert invitation.invited_on > original_invited_on
+
+
+# ================================================================================
+def test_delete_invitation_no_org(orguser):
+    """failure - no org"""
+    orguser.org = None
+    mock_request = Mock()
+    mock_request.orguser = orguser
+    with pytest.raises(HttpError) as excinfo:
+        delete_invitation(mock_request, 1)
+    assert str(excinfo.value) == "create an organization first"
+
+
+def test_delete_invitation(orguser):
+    """success"""
+    original_invited_on = timezone.as_ist(datetime(2023, 1, 1, 10, 0, 0))
+    invitation = Invitation.objects.create(
+        invited_on=original_invited_on,
+        invited_email="email",
+        invite_code="hello",
+        invited_by=orguser,
+        invited_role=1,
+    )
+    mock_request = Mock(orguser=orguser)
+    assert Invitation.objects.filter(id=invitation.id).exists()
+    delete_invitation(mock_request, invitation.id)
+    assert not Invitation.objects.filter(id=invitation.id).exists()
