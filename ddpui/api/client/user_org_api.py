@@ -204,7 +204,7 @@ def delete_organization_users(request, payload: DeleteOrgUserPayload):
 
     # remove the invitations associated with the org user
     Invitation.objects.filter(
-        invited_org=orguser.org, invited_email=payload.email
+        invited_by__org=orguser.org, invited_email=payload.email
     ).delete()
 
     # delete the org user
@@ -227,9 +227,7 @@ def put_organization_user_self(request, payload: OrgUserUpdate):
     orguser.user.save()
 
     logger.info(f"updated self {orguser.user.email}")
-    return OrgUserResponse(
-        email=orguser.user.email, active=orguser.user.is_active, role=orguser.role
-    )
+    return OrgUserResponse.from_orguser(orguser)
 
 
 @user_org_api.put(
@@ -260,9 +258,7 @@ def put_organization_user(request, payload: OrgUserUpdate):
     orguser.user.save()
 
     logger.info(f"updated orguser {orguser.user.email}")
-    return OrgUserResponse(
-        email=orguser.user.email, active=orguser.user.is_active, role=orguser.role
-    )
+    return OrgUserResponse.from_orguser(orguser)
 
 
 @user_org_api.post("/organizations/", response=OrgSchema, auth=auth.FullAccess())
