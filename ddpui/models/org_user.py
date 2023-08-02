@@ -76,18 +76,6 @@ class OrgUserResponse(Schema):
         )
 
 
-class InvitationStatus(str, Enum):
-    """an enum for statuses of invitation"""
-
-    PENDING = "pending"
-    ACCEPTED = "accepted"
-
-    @classmethod
-    def choices(cls):
-        """django model definition needs an iterable for `choices`"""
-        return [(key.value, key.name) for key in cls]
-
-
 class Invitation(models.Model):
     """Docstring"""
 

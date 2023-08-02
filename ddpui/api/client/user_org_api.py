@@ -457,7 +457,7 @@ def post_organization_user_invite(request, payload: InvitationSchema):
         return InvitationSchema.from_invitation(invitation)
 
     payload.invited_by = OrgUserResponse.from_orguser(orguser)
-    payload.invited_on = datetime.now(IST)
+    payload.invited_on = datetime.utcnow()
     payload.invite_code = str(uuid4())
     invitation = Invitation.objects.create(
         invited_email=payload.invited_email,
@@ -558,7 +558,6 @@ def get_invitations(request):
                 "invited_role_slug": OrgUserRole(invitation.invited_role).name,
                 "invited_role": invitation.invited_role,
                 "invited_on": invitation.invited_on,
-                "status": invitation.status,
             }
         )
 
