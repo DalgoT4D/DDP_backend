@@ -29,6 +29,7 @@ from ddpui.models.org_user import (
     AcceptInvitationSchema,
     Invitation,
     InvitationSchema,
+    InvitationPayloadSchema,
     OrgUser,
     OrgUserCreate,
     OrgUserResponse,
@@ -44,7 +45,6 @@ from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 from ddpui.ddpdbt import dbt_service
 from ddpui.ddpprefect import AIRBYTECONNECTION
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.timezone import IST
 from ddpui.utils import secretsmanager
 from ddpui.utils import sendgrid
 from ddpui.utils import helpers
@@ -428,7 +428,7 @@ def get_organizations_warehouses(request):
     response=InvitationSchema,
     auth=auth.CanManageUsers(),
 )
-def post_organization_user_invite(request, payload: InvitationSchema):
+def post_organization_user_invite(request, payload: InvitationPayloadSchema):
     """Send an invitation to a user to join platform"""
     orguser: OrgUser = request.orguser
     frontend_url = os.getenv("FRONTEND_URL")
@@ -436,13 +436,14 @@ def post_organization_user_invite(request, payload: InvitationSchema):
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
 
-    # what if the user already exists, throw error
-    # existing_user = User.objects.filter(email=payload.invited_email).first()
-    # if existing_user:
-    #     raise HttpError(400, "Account already exists")
+    role_slugs = OrgUserRole.role_slugs()
+    if payload.invited_role_slug not in role_slugs:
+        raise HttpError(404, "Invalid role")
+
+    invited_role = role_slugs[payload.invited_role_slug]
 
     # user can only invite a role equal or lower to their role
-    if payload.invited_role > orguser.role:
+    if invited_role > orguser.role:
         raise HttpError(403, "Insufficient permissions for this operation")
 
     invitation = Invitation.objects.filter(invited_email=payload.invited_email).first()
@@ -461,11 +462,10 @@ def post_organization_user_invite(request, payload: InvitationSchema):
     payload.invite_code = str(uuid4())
     invitation = Invitation.objects.create(
         invited_email=payload.invited_email,
-        invited_role=payload.invited_role,
+        invited_role=invited_role,
         invited_by=orguser,
         invited_on=payload.invited_on,
         invite_code=payload.invite_code,
-        invited_org=orguser.org,
     )
 
     # trigger an email to the user
