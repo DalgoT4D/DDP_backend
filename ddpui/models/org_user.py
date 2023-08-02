@@ -1,5 +1,7 @@
 from datetime import datetime
-from enum import IntEnum, Enum
+from enum import IntEnum
+from django.utils.text import slugify
+
 
 from django.db import models
 from django.contrib.auth.models import User
@@ -21,6 +23,15 @@ class OrgUserRole(IntEnum):
     def choices(cls):
         """django model definition needs an iterable for `choices`"""
         return [(key.value, key.name) for key in cls]
+
+    @classmethod
+    def role_slugs(cls):
+        """return a dictionary with slug as key and role_id as value"""
+        role_dict = {}
+        for key in cls:
+            slug = slugify(key.name)
+            role_dict[slug] = key.value
+        return role_dict
 
 
 class OrgUser(models.Model):
@@ -72,7 +83,7 @@ class OrgUserResponse(Schema):
             org=orguser.org,
             active=orguser.user.is_active,
             role=orguser.role,
-            role_slug=OrgUserRole(orguser.role).name,
+            role_slug=slugify(OrgUserRole(orguser.role).name),
         )
 
 
@@ -86,6 +97,16 @@ class Invitation(models.Model):
     invited_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE)
     invited_on = models.DateTimeField()
     invite_code = models.CharField(max_length=36)
+
+
+class InvitationPayloadSchema(Schema):
+    """Docstring"""
+
+    invited_email: str
+    invited_role_slug: str
+    invited_by: OrgUserResponse = None
+    invited_on: datetime = None
+    invite_code: str = None
 
 
 class InvitationSchema(Schema):
