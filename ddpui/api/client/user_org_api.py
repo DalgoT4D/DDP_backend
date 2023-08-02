@@ -37,13 +37,13 @@ from ddpui.models.org_user import (
     ForgotPasswordSchema,
     ResetPasswordSchema,
     VerifyEmailSchema,
+    DeleteOrgUserPayload,
 )
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 from ddpui.ddpdbt import dbt_service
 from ddpui.ddpprefect import AIRBYTECONNECTION
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.timezone import IST
 from ddpui.utils import secretsmanager
 from ddpui.utils import sendgrid
 from ddpui.utils import helpers
@@ -83,6 +83,7 @@ def ninja_default_error_handler(
     request, exc: Exception
 ):  # pylint: disable=unused-argument # skipcq PYL-W0613
     """Handle any other exception raised in the apis"""
+    print(exc)
     return Response({"detail": "something went wrong"}, status=500)
 
 
@@ -168,7 +169,7 @@ def post_login(request):
             "token": token.data["token"],
             "org": org,
             "email": str(orguser),
-            "role": OrgUserRole(orguser.role).name,
+            "role_slug": slugify(OrgUserRole(orguser.role).name),
             "active": orguser.user.is_active,
         }
 
@@ -187,6 +188,31 @@ def get_organization_users(request):
     return [OrgUserResponse.from_orguser(orguser) for orguser in query]
 
 
+@user_org_api.post("/organizations/users/delete", auth=auth.CanManageUsers())
+def delete_organization_users(request, payload: DeleteOrgUserPayload):
+    """delete the orguser posted"""
+    orguser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "no associated org")
+
+    orguser_delete = OrgUser.objects.filter(
+        org=orguser.org, user__email=payload.email
+    ).first()
+
+    if orguser_delete is None:
+        raise HttpError(400, "user does not belong to the org")
+
+    # remove the invitations associated with the org user
+    Invitation.objects.filter(
+        invited_by__org=orguser.org, invited_email=payload.email
+    ).delete()
+
+    # delete the org user
+    orguser_delete.delete()
+
+    return {"success": 1}
+
+
 @user_org_api.put(
     "/organizations/user_self/", response=OrgUserResponse, auth=auth.AnyOrgUser()
 )
@@ -201,9 +227,7 @@ def put_organization_user_self(request, payload: OrgUserUpdate):
     orguser.user.save()
 
     logger.info(f"updated self {orguser.user.email}")
-    return OrgUserResponse(
-        email=orguser.user.email, active=orguser.user.is_active, role=orguser.role
-    )
+    return OrgUserResponse.from_orguser(orguser)
 
 
 @user_org_api.put(
@@ -234,9 +258,7 @@ def put_organization_user(request, payload: OrgUserUpdate):
     orguser.user.save()
 
     logger.info(f"updated orguser {orguser.user.email}")
-    return OrgUserResponse(
-        email=orguser.user.email, active=orguser.user.is_active, role=orguser.role
-    )
+    return OrgUserResponse.from_orguser(orguser)
 
 
 @user_org_api.post("/organizations/", response=OrgSchema, auth=auth.FullAccess())
@@ -404,47 +426,54 @@ def get_organizations_warehouses(request):
 )
 def post_organization_user_invite(request, payload: InvitationSchema):
     """Send an invitation to a user to join platform"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
+    frontend_url = os.getenv("FRONTEND_URL")
+
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
+
+    role_slugs = OrgUserRole.role_slugs()
+    if payload.invited_role_slug not in role_slugs:
+        raise HttpError(404, "Invalid role")
+
+    invited_role = role_slugs[payload.invited_role_slug]
+
+    # user can only invite a role equal or lower to their role
+    if invited_role > orguser.role:
+        raise HttpError(403, "Insufficient permissions for this operation")
+
     invitation = Invitation.objects.filter(invited_email=payload.invited_email).first()
     if invitation:
-        logger.error(
-            f"{payload.invited_email} has already been invited by "
-            f"{invitation.invited_by} on {invitation.invited_on.strftime('%Y-%m-%d')}"
+        invitation.invited_on = datetime.utcnow()
+        # if the invitation is already present - trigger the email again
+        invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
+        sendgrid.send_invite_user_email(invitation.invited_email, invite_url)
+        logger.info(
+            f"Invited {payload.invited_email} to join {orguser.org.name} "
+            f"with invite code {payload.invite_code}",
         )
-        raise HttpError(400, f"{payload.invited_email} has already been invited")
+        return InvitationSchema.from_invitation(invitation)
 
     payload.invited_by = OrgUserResponse.from_orguser(orguser)
-    payload.invited_on = datetime.now(IST)
+    payload.invited_on = datetime.utcnow()
     payload.invite_code = str(uuid4())
     invitation = Invitation.objects.create(
         invited_email=payload.invited_email,
-        invited_role=payload.invited_role,
+        invited_role=invited_role,
         invited_by=orguser,
         invited_on=payload.invited_on,
         invite_code=payload.invite_code,
     )
+
+    # trigger an email to the user
+    invite_url = f"{frontend_url}/invitations/?invite_code={payload.invite_code}"
+    sendgrid.send_invite_user_email(invitation.invited_email, invite_url)
+
     logger.info(
         f"Invited {payload.invited_email} to join {orguser.org.name} "
         f"with invite code {payload.invite_code}",
     )
     return payload
-
-
-# the invitee will get a hyperlink via email, clicking will take them to \
-# the UI where they will choose
-# a password, then click a button POSTing to this endpoint
-@user_org_api.get(
-    "/organizations/users/invite/{invite_code}",
-    response=InvitationSchema,
-)
-def get_organization_user_invite(
-    request, invite_code
-):  # pylint: disable=unused-argument
-    """Fetch the invite sent to user with a particular invite code"""
-    invitation = Invitation.objects.filter(invite_code=invite_code).first()
-    if invitation is None:
-        raise HttpError(400, "invalid invite code")
-    return InvitationSchema.from_invitation(invitation)
 
 
 @user_org_api.post(
@@ -458,9 +487,13 @@ def post_organization_user_accept_invite(
     invitation = Invitation.objects.filter(invite_code=payload.invite_code).first()
     if invitation is None:
         raise HttpError(400, "invalid invite code")
+
+    # we can have one auth user mapped to multiple orguser and hence multiple orgs
+    # but there can only be one orguser per one org
     orguser = OrgUser.objects.filter(
         user__email=invitation.invited_email, org=invitation.invited_by.org
     ).first()
+
     if not orguser:
         user = User.objects.filter(
             username=invitation.invited_email,
@@ -481,7 +514,70 @@ def post_organization_user_accept_invite(
         orguser = OrgUser.objects.create(
             user=user, org=invitation.invited_by.org, role=invitation.invited_role
         )
+    invitation.delete()
     return OrgUserResponse.from_orguser(orguser)
+
+
+@user_org_api.get("/users/invitations/", auth=auth.AnyOrgUser())
+def get_invitations(request):
+    """Get all invitations sent by the current user"""
+    orguser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
+
+    invitations = (
+        Invitation.objects.filter(invited_by=orguser).order_by("-invited_on").all()
+    )
+    res = []
+    for invitation in invitations:
+        res.append(
+            {
+                "id": invitation.id,
+                "invited_email": invitation.invited_email,
+                "invited_role_slug": slugify(OrgUserRole(invitation.invited_role).name),
+                "invited_role": invitation.invited_role,
+                "invited_on": invitation.invited_on,
+            }
+        )
+
+    return res
+
+
+@user_org_api.post("/users/invitations/resend/{invitation_id}", auth=auth.AnyOrgUser())
+def post_resend_invitation(request, invitation_id):
+    """Get all invitations sent by the current user"""
+    orguser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
+
+    invitation = Invitation.objects.filter(id=invitation_id).first()
+
+    if invitation:
+        invitation.invited_on = datetime.utcnow()
+        invitation.save()
+        # trigger an email to the user
+        frontend_url = os.getenv("FRONTEND_URL")
+        invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
+        sendgrid.send_invite_user_email(invitation.invited_email, invite_url)
+
+    return {"success": 1}
+
+
+@user_org_api.delete(
+    "/users/invitations/delete/{invitation_id}", auth=auth.AnyOrgUser()
+)
+def delete_invitation(request, invitation_id):
+    """Get all invitations sent by the current user"""
+    orguser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
+
+    invitation = Invitation.objects.filter(id=invitation_id).first()
+
+    if invitation:
+        invitation.delete()
+
+    return {"success": 1}
 
 
 @user_org_api.post(

@@ -1,5 +1,7 @@
 from datetime import datetime
 from enum import IntEnum
+from django.utils.text import slugify
+
 
 from django.db import models
 from django.contrib.auth.models import User
@@ -21,6 +23,15 @@ class OrgUserRole(IntEnum):
     def choices(cls):
         """django model definition needs an iterable for `choices`"""
         return [(key.value, key.name) for key in cls]
+
+    @classmethod
+    def role_slugs(cls):
+        """return a dictionary with slug as key and role_id as value"""
+        role_dict = {}
+        for key in cls:
+            slug = slugify(key.name)
+            role_dict[slug] = key.value
+        return role_dict
 
 
 class OrgUser(models.Model):
@@ -62,6 +73,7 @@ class OrgUserResponse(Schema):
     org: OrgSchema = None
     active: bool
     role: int
+    role_slug: str
 
     @staticmethod
     def from_orguser(orguser: OrgUser):
@@ -71,6 +83,7 @@ class OrgUserResponse(Schema):
             org=orguser.org,
             active=orguser.user.is_active,
             role=orguser.role,
+            role_slug=slugify(OrgUserRole(orguser.role).name),
         )
 
 
@@ -90,7 +103,8 @@ class InvitationSchema(Schema):
     """Docstring"""
 
     invited_email: str
-    invited_role: int
+    invited_role_slug: str
+    invited_role: int = None
     invited_by: OrgUserResponse = None
     invited_on: datetime = None
     invite_code: str = None
@@ -101,6 +115,7 @@ class InvitationSchema(Schema):
         return InvitationSchema(
             invited_email=invitation.invited_email,
             invited_role=invitation.invited_role,
+            invited_role_slug=slugify(OrgUserRole(invitation.invited_role).name),
             invited_by=OrgUserResponse.from_orguser(invitation.invited_by),
             invited_on=invitation.invited_on,
             invite_code=invitation.invite_code,
@@ -133,3 +148,9 @@ class VerifyEmailSchema(Schema):
     """the payload for the verify-email workflow"""
 
     token: str
+
+
+class DeleteOrgUserPayload(Schema):
+    """payload to delete an org user"""
+
+    email: str
