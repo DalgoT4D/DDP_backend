@@ -479,24 +479,6 @@ def post_organization_user_invite(request, payload: InvitationSchema):
     return payload
 
 
-# the invitee will get a hyperlink via email, clicking will take them to \
-# the UI where they will choose
-# a password, then click a button POSTing to this endpoint
-@user_org_api.get(
-    "/organizations/users/invite/{invite_code}",
-    response=InvitationSchema,
-    deprecated=True,
-)
-def get_organization_user_invite(
-    request, invite_code
-):  # pylint: disable=unused-argument
-    """Fetch the invite sent to user with a particular invite code"""
-    invitation = Invitation.objects.filter(invite_code=invite_code).first()
-    if invitation is None:
-        raise HttpError(400, "invalid invite code")
-    return InvitationSchema.from_invitation(invitation)
-
-
 @user_org_api.post(
     "/organizations/users/invite/accept/",
     response=OrgUserResponse,
