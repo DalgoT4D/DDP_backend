@@ -29,7 +29,6 @@ from ddpui.models.org_user import (
     AcceptInvitationSchema,
     Invitation,
     InvitationSchema,
-    InvitationPayloadSchema,
     OrgUser,
     OrgUserCreate,
     OrgUserResponse,
@@ -84,6 +83,7 @@ def ninja_default_error_handler(
     request, exc: Exception
 ):  # pylint: disable=unused-argument # skipcq PYL-W0613
     """Handle any other exception raised in the apis"""
+    print(exc)
     return Response({"detail": "something went wrong"}, status=500)
 
 
@@ -428,7 +428,7 @@ def get_organizations_warehouses(request):
     response=InvitationSchema,
     auth=auth.CanManageUsers(),
 )
-def post_organization_user_invite(request, payload: InvitationPayloadSchema):
+def post_organization_user_invite(request, payload: InvitationSchema):
     """Send an invitation to a user to join platform"""
     orguser: OrgUser = request.orguser
     frontend_url = os.getenv("FRONTEND_URL")
@@ -448,6 +448,7 @@ def post_organization_user_invite(request, payload: InvitationPayloadSchema):
 
     invitation = Invitation.objects.filter(invited_email=payload.invited_email).first()
     if invitation:
+        invitation.invited_on = datetime.utcnow()
         # if the invitation is already present - trigger the email again
         invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
         sendgrid.send_invite_user_email(invitation.invited_email, invite_url)
