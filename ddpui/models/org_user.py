@@ -99,21 +99,12 @@ class Invitation(models.Model):
     invite_code = models.CharField(max_length=36)
 
 
-class InvitationPayloadSchema(Schema):
-    """Docstring"""
-
-    invited_email: str
-    invited_role_slug: str
-    invited_by: OrgUserResponse = None
-    invited_on: datetime = None
-    invite_code: str = None
-
-
 class InvitationSchema(Schema):
     """Docstring"""
 
     invited_email: str
-    invited_role: int
+    invited_role_slug: str
+    invited_role: int = None
     invited_by: OrgUserResponse = None
     invited_on: datetime = None
     invite_code: str = None
@@ -124,6 +115,7 @@ class InvitationSchema(Schema):
         return InvitationSchema(
             invited_email=invitation.invited_email,
             invited_role=invitation.invited_role,
+            invited_role_slug=slugify(OrgUserRole(invitation.invited_role).name),
             invited_by=OrgUserResponse.from_orguser(invitation.invited_by),
             invited_on=invitation.invited_on,
             invite_code=invitation.invite_code,
