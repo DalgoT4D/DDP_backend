@@ -29,7 +29,6 @@ from ddpui.models.org_user import (
     AcceptInvitationSchema,
     Invitation,
     InvitationSchema,
-    InvitationStatus,
     OrgUser,
     OrgUserCreate,
     OrgUserResponse,
@@ -448,9 +447,6 @@ def post_organization_user_invite(request, payload: InvitationSchema):
 
     invitation = Invitation.objects.filter(invited_email=payload.invited_email).first()
     if invitation:
-        if invitation.status != InvitationStatus.PENDING:
-            raise HttpError(400, "Account already exists")
-
         # if the invitation is already present - trigger the email again
         invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
         sendgrid.send_invite_user_email(invitation.invited_email, invite_url)
@@ -539,8 +535,7 @@ def post_organization_user_accept_invite(
         orguser = OrgUser.objects.create(
             user=user, org=invitation.invited_by.org, role=invitation.invited_role
         )
-    invitation.status = InvitationStatus.ACCEPTED
-    invitation.save()
+    invitation.delete()
     return OrgUserResponse.from_orguser(orguser)
 
 
