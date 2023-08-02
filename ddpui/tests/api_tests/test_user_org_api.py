@@ -35,6 +35,7 @@ from ddpui.models.org_user import (
     OrgUser,
     OrgUserCreate,
     OrgUserRole,
+    OrgUserResponse,
     OrgUserUpdate,
     InvitationSchema,
     Invitation,
