@@ -169,7 +169,7 @@ def post_login(request):
             "token": token.data["token"],
             "org": org,
             "email": str(orguser),
-            "role_slug": OrgUserRole(orguser.role).name,
+            "role_slug": slugify(OrgUserRole(orguser.role).name),
             "active": orguser.user.is_active,
         }
 
@@ -537,7 +537,7 @@ def get_invitations(request):
             {
                 "id": invitation.id,
                 "invited_email": invitation.invited_email,
-                "invited_role_slug": OrgUserRole(invitation.invited_role).name,
+                "invited_role_slug": slugify(OrgUserRole(invitation.invited_role).name),
                 "invited_role": invitation.invited_role,
                 "invited_on": invitation.invited_on,
             }
