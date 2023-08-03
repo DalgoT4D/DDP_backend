@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from ddpui.utils.django_logger import setup_logger as setup_django_logger
 from ddpui.utils.ddp_logger import setup_logger as setup_ddp_logger
 from ddpui.utils.ab_logger import setup_logger as setup_ab_logger
+from corsheaders.defaults import default_headers
 
 load_dotenv()
 
@@ -36,12 +37,18 @@ DEBUG = os.getenv("DEBUG", "") == "True"
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
-    "ddpapi.projecttech4dev.org",
+    "ddpstagingapi.projecttech4dev.org",
+    "ddp-prod-api.projecttech4dev.org",
 ]
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ORIGIN_WHITELIST = (
     "http://localhost:3000",
-    "https://ddpui.projecttech4dev.org",
+    "https://ddpstagingui.projecttech4dev.org",
+    "https://ddp-prod-ui.projecttech4dev.org",
+)
+CORS_ALLOW_HEADERS = (
+    *default_headers,
+    "x-dalgo-org",
 )
 
 # Application definition
