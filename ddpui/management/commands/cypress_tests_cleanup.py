@@ -15,8 +15,6 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         """Delete cypress user and org"""
-        for org in Org.objects.filter(slug__startswith="cypress_").all():
-            org.delete()
+        Org.objects.filter(slug__startswith="cypress_").delete()
 
-        for user in User.objects.filter(username__startswith="cypress_").all():
-            user.delete()
+        User.objects.filter(username__startswith="cypress_").delete()
