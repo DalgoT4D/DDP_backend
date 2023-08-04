@@ -8,6 +8,7 @@ from redis import Redis
 
 from django.contrib.auth.models import User
 from django.utils.text import slugify
+from django.db import transaction
 from ninja import NinjaAPI
 from ninja.errors import HttpError
 
@@ -31,6 +32,7 @@ from ddpui.models.org_user import (
     InvitationSchema,
     OrgUser,
     OrgUserCreate,
+    OrgUserNewOwner,
     OrgUserResponse,
     OrgUserRole,
     OrgUserUpdate,
@@ -90,7 +92,7 @@ def ninja_default_error_handler(
 @user_org_api.get("/currentuser", response=OrgUserResponse, auth=auth.AnyOrgUser())
 def get_current_user(request):
     """return the OrgUser making this request"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser is not None:
         return OrgUserResponse.from_orguser(orguser)
     raise HttpError(400, "requestor is not an OrgUser")
@@ -181,7 +183,7 @@ def post_login(request):
 )
 def get_organization_users(request):
     """list all OrgUsers in the requestor's org, including inactive"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org is None:
         raise HttpError(400, "no associated org")
     query = OrgUser.objects.filter(org=orguser.org)
@@ -191,13 +193,16 @@ def get_organization_users(request):
 @user_org_api.post("/organizations/users/delete", auth=auth.CanManageUsers())
 def delete_organization_users(request, payload: DeleteOrgUserPayload):
     """delete the orguser posted"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org is None:
         raise HttpError(400, "no associated org")
 
     orguser_delete = OrgUser.objects.filter(
         org=orguser.org, user__email=payload.email
     ).first()
+
+    if orguser == orguser_delete:
+        raise HttpError(400, "user cannot delete themselves")
 
     if orguser_delete is None:
         raise HttpError(400, "user does not belong to the org")
@@ -218,7 +223,7 @@ def delete_organization_users(request, payload: DeleteOrgUserPayload):
 )
 def put_organization_user_self(request, payload: OrgUserUpdate):
     """update the requestor's OrgUser"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
 
     if payload.email:
         orguser.user.email = payload.email
@@ -237,7 +242,7 @@ def put_organization_user_self(request, payload: OrgUserUpdate):
 )
 def put_organization_user(request, payload: OrgUserUpdate):
     """update another OrgUser"""
-    requestor_orguser = request.orguser
+    requestor_orguser: OrgUser = request.orguser
 
     if requestor_orguser.role not in [
         OrgUserRole.ACCOUNT_MANAGER,
@@ -261,10 +266,51 @@ def put_organization_user(request, payload: OrgUserUpdate):
     return OrgUserResponse.from_orguser(orguser)
 
 
+@user_org_api.post(
+    "/organizations/users/makeowner/",
+    response=OrgUserResponse,
+    auth=auth.FullAccess(),
+)
+def post_transfer_ownership(request, payload: OrgUserNewOwner):
+    """update another OrgUser"""
+    requestor_orguser: OrgUser = request.orguser
+
+    if requestor_orguser.role not in [
+        OrgUserRole.ACCOUNT_MANAGER,
+    ]:
+        raise HttpError(400, "only an account owner can transfer account ownership")
+
+    new_owner = OrgUser.objects.filter(
+        org=requestor_orguser.org,
+        user__email=payload.new_owner_email,
+        user__is_active=True,
+    ).first()
+
+    if new_owner is None:
+        raise HttpError(
+            400, "could not find user having this email address in this org"
+        )
+
+    if new_owner.role not in [OrgUserRole.PIPELINE_MANAGER]:
+        raise HttpError(400, "can only promote pipeline managers")
+
+    new_owner.role = OrgUserRole.ACCOUNT_MANAGER
+    requestor_orguser.role = OrgUserRole.PIPELINE_MANAGER
+    try:
+        with transaction.atomic():
+            new_owner.save()
+            requestor_orguser.save()
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to transfer ownership") from error
+
+    return OrgUserResponse.from_orguser(requestor_orguser)
+
+
 @user_org_api.post("/organizations/", response=OrgSchema, auth=auth.FullAccess())
 def post_organization(request, payload: OrgSchema):
     """creates a new org and attaches it to the requestor"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org:
         raise HttpError(400, "orguser already has an associated org")
     org = Org.objects.filter(name=payload.name).first()
@@ -288,7 +334,7 @@ def post_organization(request, payload: OrgSchema):
 @user_org_api.post("/organizations/warehouse/", auth=auth.CanManagePipelines())
 def post_organization_warehouse(request, payload: OrgWarehouseSchema):
     """registers a data warehouse for the org"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if payload.wtype not in ["postgres", "bigquery"]:
         raise HttpError(400, "unrecognized warehouse type " + payload.wtype)
 
@@ -331,7 +377,7 @@ def post_organization_warehouse(request, payload: OrgWarehouseSchema):
 @user_org_api.delete("/organizations/warehouses/", auth=auth.CanManagePipelines())
 def delete_organization_warehouses(request):
     """deletes all (references to) data warehouses for the org"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
 
@@ -405,7 +451,7 @@ def delete_organization_warehouses(request):
 @user_org_api.get("/organizations/warehouses", auth=auth.CanManagePipelines())
 def get_organizations_warehouses(request):
     """returns all warehouses associated with this org"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     warehouses = [
         {
             "wtype": warehouse.wtype,
@@ -447,7 +493,9 @@ def post_organization_user_invite(request, payload: InvitationSchema):
         invitation.invited_on = datetime.utcnow()
         # if the invitation is already present - trigger the email again
         invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
-        sendgrid.send_invite_user_email(invitation.invited_email, invite_url)
+        sendgrid.send_invite_user_email(
+            invitation.invited_email, invitation.invited_by.user.email, invite_url
+        )
         logger.info(
             f"Invited {payload.invited_email} to join {orguser.org.name} "
             f"with invite code {payload.invite_code}",
@@ -467,7 +515,9 @@ def post_organization_user_invite(request, payload: InvitationSchema):
 
     # trigger an email to the user
     invite_url = f"{frontend_url}/invitations/?invite_code={payload.invite_code}"
-    sendgrid.send_invite_user_email(invitation.invited_email, invite_url)
+    sendgrid.send_invite_user_email(
+        invitation.invited_email, invitation.invited_by.user.email, invite_url
+    )
 
     logger.info(
         f"Invited {payload.invited_email} to join {orguser.org.name} "
@@ -521,7 +571,7 @@ def post_organization_user_accept_invite(
 @user_org_api.get("/users/invitations/", auth=auth.AnyOrgUser())
 def get_invitations(request):
     """Get all invitations sent by the current user"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
 
@@ -546,7 +596,7 @@ def get_invitations(request):
 @user_org_api.post("/users/invitations/resend/{invitation_id}", auth=auth.AnyOrgUser())
 def post_resend_invitation(request, invitation_id):
     """Get all invitations sent by the current user"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
 
@@ -558,7 +608,9 @@ def post_resend_invitation(request, invitation_id):
         # trigger an email to the user
         frontend_url = os.getenv("FRONTEND_URL")
         invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
-        sendgrid.send_invite_user_email(invitation.invited_email, invite_url)
+        sendgrid.send_invite_user_email(
+            invitation.invited_email, invitation.invited_by.user.email, invite_url
+        )
 
     return {"success": 1}
 
@@ -568,7 +620,7 @@ def post_resend_invitation(request, invitation_id):
 )
 def delete_invitation(request, invitation_id):
     """Get all invitations sent by the current user"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
 

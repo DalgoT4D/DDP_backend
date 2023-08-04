@@ -18,6 +18,7 @@ from ddpui.api.client.user_org_api import (
     delete_organization_users,
     put_organization_user_self,
     put_organization_user,
+    post_transfer_ownership,
     post_organization,
     post_organization_warehouse,
     get_organizations_warehouses,
@@ -36,6 +37,7 @@ from ddpui.models.org_user import (
     OrgUserCreate,
     OrgUserRole,
     OrgUserUpdate,
+    OrgUserNewOwner,
     InvitationSchema,
     Invitation,
     AcceptInvitationSchema,
@@ -291,7 +293,7 @@ def test_delete_organization_users_no_org():
     assert str(excinfo.value) == "no associated org"
 
 
-def test_delete_organization_users(orguser):
+def test_delete_organization_users_wrong_org(orguser):
     """a failing test, orguser dne"""
     mock_request = Mock()
     mock_request.orguser = orguser
@@ -300,6 +302,17 @@ def test_delete_organization_users(orguser):
     with pytest.raises(HttpError) as excinfo:
         delete_organization_users(mock_request, payload)
     assert str(excinfo.value) == "user does not belong to the org"
+
+
+def test_delete_organization_users_cant_delete_self(orguser):
+    """a failing test, orguser dne"""
+    mock_request = Mock()
+    mock_request.orguser = orguser
+    payload = DeleteOrgUserPayload(email=orguser.user.email)
+
+    with pytest.raises(HttpError) as excinfo:
+        delete_organization_users(mock_request, payload)
+    assert str(excinfo.value) == "user cannot delete themselves"
 
 
 def test_delete_organization_users_success(orguser):
@@ -366,6 +379,72 @@ def test_put_organization_user(orguser, nonadminorguser):
 
     response = put_organization_user(mock_request, payload)
     assert response.email == payload.email
+
+
+# ================================================================================
+def test_post_transfer_ownership_only_account_owner(authuser, org_with_workspace):
+    """only an account owner can transfer account ownership"""
+    orguser = OrgUser.objects.create(user=authuser, org=org_with_workspace)
+    orguser.role = OrgUserRole.PIPELINE_MANAGER
+    mock_request = Mock()
+    mock_request.orguser = orguser
+    payload = OrgUserNewOwner(new_owner_email="new-email")
+    with pytest.raises(HttpError) as excinfo:
+        post_transfer_ownership(mock_request, payload)
+    assert str(excinfo.value) == "only an account owner can transfer account ownership"
+
+
+def test_post_transfer_ownership_no_such_user(authuser, org_with_workspace):
+    """only an account owner can transfer account ownership"""
+    orguser = OrgUser.objects.create(user=authuser, org=org_with_workspace)
+    orguser.role = OrgUserRole.ACCOUNT_MANAGER
+    mock_request = Mock()
+    mock_request.orguser = orguser
+    payload = OrgUserNewOwner(new_owner_email="new-email")
+    with pytest.raises(HttpError) as excinfo:
+        post_transfer_ownership(mock_request, payload)
+    assert (
+        str(excinfo.value)
+        == "could not find user having this email address in this org"
+    )
+
+
+def test_post_transfer_ownership_not_pipeline_mgr(authuser, org_with_workspace):
+    """only an account owner can transfer account ownership"""
+    orguser = OrgUser.objects.create(user=authuser, org=org_with_workspace)
+    orguser.role = OrgUserRole.ACCOUNT_MANAGER
+    mock_request = Mock()
+    mock_request.orguser = orguser
+    new_owner_authuser = User.objects.create(username="new-owner", email="new-owner")
+    new_owner = OrgUser.objects.create(user=new_owner_authuser, org=org_with_workspace)
+    new_owner.role = OrgUserRole.REPORT_VIEWER
+    payload = OrgUserNewOwner(new_owner_email="new-owner")
+    with pytest.raises(HttpError) as excinfo:
+        post_transfer_ownership(mock_request, payload)
+    assert str(excinfo.value) == "can only promote pipeline managers"
+
+
+@patch(
+    "ddpui.api.client.user_org_api.transaction.atomic",
+    Mock(side_effect=Exception("db error")),
+)
+def test_post_transfer_ownership_db_error(
+    authuser,
+    org_with_workspace,
+):
+    """only an account owner can transfer account ownership"""
+    orguser = OrgUser.objects.create(user=authuser, org=org_with_workspace)
+    orguser.role = OrgUserRole.ACCOUNT_MANAGER
+    mock_request = Mock()
+    mock_request.orguser = orguser
+    new_owner_authuser = User.objects.create(username="new-owner", email="new-owner")
+    new_owner = OrgUser.objects.create(user=new_owner_authuser, org=org_with_workspace)
+    new_owner.role = OrgUserRole.PIPELINE_MANAGER
+    new_owner.save()
+    payload = OrgUserNewOwner(new_owner_email="new-owner")
+    with pytest.raises(HttpError) as excinfo:
+        post_transfer_ownership(mock_request, payload)
+    assert str(excinfo.value) == "failed to transfer ownership"
 
 
 # ================================================================================
@@ -856,7 +935,7 @@ def test_post_resend_invitation(sendgrid: Mock, orguser):
     invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
     mock_request = Mock(orguser=orguser)
     post_resend_invitation(mock_request, invitation.id)
-    sendgrid.assert_called_once_with("email", invite_url)
+    sendgrid.assert_called_once_with("email", orguser.user.email, invite_url)
     invitation.refresh_from_db()
     assert invitation.invited_on > original_invited_on
 

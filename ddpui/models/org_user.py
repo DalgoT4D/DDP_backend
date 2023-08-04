@@ -66,6 +66,12 @@ class OrgUserUpdate(Schema):
     role: str = None
 
 
+class OrgUserNewOwner(Schema):
+    """payload to transfer account ownership"""
+
+    new_owner_email: str
+
+
 class OrgUserResponse(Schema):
     """structure for returning an OrgUser in an http response"""
 
