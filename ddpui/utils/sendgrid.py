@@ -62,8 +62,12 @@ def send_signup_email(to_email: str, verification_url: str) -> None:
     )
 
 
-def send_invite_user_email(to_email: str, invite_url: str) -> None:
+def send_invite_user_email(
+    to_email: str, invited_by_email: str, invite_url: str
+) -> None:
     """send an invitation email to the user with the invite link through which they will set their password"""
     send_template_message(
-        os.getenv("SENDGRID_INVITE_USER_TEMPLATE"), to_email, {"url": invite_url}
+        os.getenv("SENDGRID_INVITE_USER_TEMPLATE"),
+        to_email,
+        {"url": invite_url, "invited_by_email": invited_by_email},
     )
