@@ -207,6 +207,9 @@ def delete_organization_users(request, payload: DeleteOrgUserPayload):
     if orguser_delete is None:
         raise HttpError(400, "user does not belong to the org")
 
+    if orguser_delete.role > orguser.role:
+        raise HttpError(400, "cannot delete user having higher role")
+
     # remove the invitations associated with the org user
     Invitation.objects.filter(
         invited_by__org=orguser.org, invited_email=payload.email

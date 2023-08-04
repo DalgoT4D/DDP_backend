@@ -315,6 +315,20 @@ def test_delete_organization_users_cant_delete_self(orguser):
     assert str(excinfo.value) == "user cannot delete themselves"
 
 
+def test_delete_organization_users_cant_delete_higher_role(orguser):
+    """a failing test, orguser not authorized"""
+    mock_request = Mock()
+    mock_request.orguser = orguser
+    orguser.role = OrgUserRole.PIPELINE_MANAGER
+    payload = DeleteOrgUserPayload(email="useremail")
+    user = User.objects.create(email=payload.email, username=payload.email)
+    OrgUser.objects.create(org=orguser.org, user=user, role=OrgUserRole.ACCOUNT_MANAGER)
+
+    with pytest.raises(HttpError) as excinfo:
+        delete_organization_users(mock_request, payload)
+    assert str(excinfo.value) == "cannot delete user having higher role"
+
+
 def test_delete_organization_users_success(orguser):
     """a passing test"""
     mock_request = Mock()
