@@ -4,7 +4,7 @@ import datetime
 IST = pytz.IST = pytz.timezone("Asia/Kolkata")
 
 
-def as_ist(timestamp):
+def as_ist(timestamp: datetime.datetime):
     """Return time in IST"""
     return timestamp.astimezone(IST) if timestamp.tzinfo else IST.localize(timestamp)
 

@@ -229,7 +229,7 @@ def put_organization_user_self(request, payload: OrgUserUpdate):
     orguser: OrgUser = request.orguser
 
     if payload.email:
-        orguser.user.email = payload.email
+        orguser.user.email = payload.email.lower().strip()
     if payload.active is not None:
         orguser.user.is_active = payload.active
     orguser.user.save()
@@ -258,7 +258,7 @@ def put_organization_user(request, payload: OrgUserUpdate):
     ).first()
 
     if payload.email:
-        orguser.user.email = payload.email
+        orguser.user.email = payload.email.lower().strip()
     if payload.active is not None:
         orguser.user.is_active = payload.active
     if payload.role:
@@ -481,6 +481,12 @@ def post_organization_user_invite(request, payload: InvitationSchema):
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
 
+    invited_email = payload.invited_email.lower().strip()
+    if OrgUser.objects.filter(
+        org=orguser.org, user__email__iexact=invited_email
+    ).exists():
+        raise HttpError(400, "user already has an account")
+
     role_slugs = OrgUserRole.role_slugs()
     if payload.invited_role_slug not in role_slugs:
         raise HttpError(404, "Invalid role")
@@ -491,7 +497,7 @@ def post_organization_user_invite(request, payload: InvitationSchema):
     if invited_role > orguser.role:
         raise HttpError(403, "Insufficient permissions for this operation")
 
-    invitation = Invitation.objects.filter(invited_email=payload.invited_email).first()
+    invitation = Invitation.objects.filter(invited_email__iexact=invited_email).first()
     if invitation:
         invitation.invited_on = datetime.utcnow()
         # if the invitation is already present - trigger the email again
@@ -500,7 +506,7 @@ def post_organization_user_invite(request, payload: InvitationSchema):
             invitation.invited_email, invitation.invited_by.user.email, invite_url
         )
         logger.info(
-            f"Invited {payload.invited_email} to join {orguser.org.name} "
+            f"Invited {invited_email} to join {orguser.org.name} "
             f"with invite code {payload.invite_code}",
         )
         return InvitationSchema.from_invitation(invitation)
@@ -509,7 +515,7 @@ def post_organization_user_invite(request, payload: InvitationSchema):
     payload.invited_on = datetime.utcnow()
     payload.invite_code = str(uuid4())
     invitation = Invitation.objects.create(
-        invited_email=payload.invited_email,
+        invited_email=invited_email,
         invited_role=invited_role,
         invited_by=orguser,
         invited_on=payload.invited_on,
@@ -523,7 +529,7 @@ def post_organization_user_invite(request, payload: InvitationSchema):
     )
 
     logger.info(
-        f"Invited {payload.invited_email} to join {orguser.org.name} "
+        f"Invited {invited_email} to join {orguser.org.name} "
         f"with invite code {payload.invite_code}",
     )
     return payload
@@ -544,7 +550,7 @@ def post_organization_user_accept_invite(
     # we can have one auth user mapped to multiple orguser and hence multiple orgs
     # but there can only be one orguser per one org
     orguser = OrgUser.objects.filter(
-        user__email=invitation.invited_email, org=invitation.invited_by.org
+        user__email__iexact=invitation.invited_email, org=invitation.invited_by.org
     ).first()
 
     if not orguser:
@@ -560,8 +566,8 @@ def post_organization_user_accept_invite(
                 f"for {invitation.invited_by.org.name}"
             )
             user = User.objects.create_user(
-                username=invitation.invited_email,
-                email=invitation.invited_email,
+                username=invitation.invited_email.lower().strip(),
+                email=invitation.invited_email.lower().strip(),
                 password=payload.password,
             )
         orguser = OrgUser.objects.create(

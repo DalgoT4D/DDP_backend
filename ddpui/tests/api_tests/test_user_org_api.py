@@ -203,6 +203,18 @@ def test_post_organization_user_userexists_email(authuser):
     assert str(excinfo.value) == f"user having email {authuser.email} exists"
 
 
+def test_post_organization_user_userexists_caps_email(authuser):
+    """a failing test, the email address is already in use"""
+    mock_request = Mock()
+    payload = OrgUserCreate(
+        email="TEMPUSEREMAIL", password="userpassword", signupcode="right-signupcode"
+    )
+    os.environ["SIGNUPCODE"] = "right-signupcode"
+    with pytest.raises(HttpError) as excinfo:
+        post_organization_user(mock_request, payload)
+    assert str(excinfo.value) == f"user having email {authuser.email} exists"
+
+
 def test_post_organization_user_userexists_username(authuser):
     """a failing test, the email address is already in use"""
     mock_request = Mock()
@@ -249,6 +261,31 @@ def test_post_organization_user_success():
     os.environ["SIGNUPCODE"] = "right-signupcode"
     response = post_organization_user(mock_request, payload)
     assert response.email == payload.email
+    assert response.org is None
+    assert response.active is True
+    assert response.role == OrgUserRole.ACCOUNT_MANAGER
+
+    the_authuser = User.objects.filter(email=payload.email).first()
+    if the_authuser:
+        the_authuser.delete()
+
+
+@patch.multiple("ddpui.utils.sendgrid", send_signup_email=Mock(return_value=1))
+def test_post_organization_user_success_lowercase_email():
+    """a success test"""
+    mock_request = Mock()
+    payload = OrgUserCreate(
+        email="TEST@useremail.com",
+        password="test-userpassword",
+        signupcode="right-signupcode",
+    )
+    the_authuser = User.objects.filter(email__iexact=payload.email).first()
+    if the_authuser:
+        the_authuser.delete()
+
+    os.environ["SIGNUPCODE"] = "right-signupcode"
+    response = post_organization_user(mock_request, payload)
+    assert response.email == payload.email.lower()
     assert response.org is None
     assert response.active is True
     assert response.role == OrgUserRole.ACCOUNT_MANAGER
@@ -702,6 +739,42 @@ def test_post_organization_user_invite(mock_sendgrid, orguser):
     mock_sendgrid.assert_called_once()
 
 
+@patch("ddpui.utils.sendgrid.send_invite_user_email", mock_sendgrid=Mock())
+def test_post_organization_user_invite_lowercase_email(mock_sendgrid, orguser: OrgUser):
+    """success test, inviting a new user"""
+    payload = InvitationSchema(
+        invited_email="INVITED_EMAIL",
+        invited_role_slug="report_viewer",
+        invited_by=None,
+        invited_on=timezone.as_ist(datetime.now()),
+        invite_code="invite_code",
+    )
+
+    mock_request = Mock()
+    mock_request.orguser = orguser
+
+    assert (
+        Invitation.objects.filter(
+            invited_email__iexact=payload.invited_email, invited_by=orguser
+        ).count()
+        == 0
+    )
+    response = post_organization_user_invite(mock_request, payload)
+    assert (
+        Invitation.objects.filter(
+            invited_email=payload.invited_email.lower(), invited_by=orguser
+        ).count()
+        == 1
+    )
+
+    assert response.invited_by.email == orguser.user.email
+    assert response.invited_by.role == orguser.role
+    assert response.invited_role == payload.invited_role
+    assert response.invited_on == payload.invited_on
+    assert response.invite_code == payload.invite_code
+    mock_sendgrid.assert_called_once()
+
+
 # ================================================================================
 def test_post_organization_user_accept_invite_fail(orguser):
     """failing test, invalid invite code"""
@@ -733,6 +806,35 @@ def test_post_organization_user_accept_invite(orguser):
     assert (
         OrgUser.objects.filter(
             user__email="invited_email",
+        ).count()
+        == 0
+    )
+    response = post_organization_user_accept_invite(mock_request, payload)
+    assert response.email == "invited_email"
+    assert (
+        OrgUser.objects.filter(
+            user__email="invited_email",
+        ).count()
+        == 1
+    )
+
+
+def test_post_organization_user_accept_invite_lowercase_email(orguser):
+    """success test, accepting an invitation"""
+    mock_request = Mock()
+    mock_request.orguser = orguser
+    payload = AcceptInvitationSchema(invite_code="invite_code", password="password")
+
+    Invitation.objects.create(
+        invited_email="INVITED_EMAIL",
+        invited_by=orguser,
+        invited_on=timezone.as_ist(datetime.now()),
+        invite_code="invite_code",
+    )
+
+    assert (
+        OrgUser.objects.filter(
+            user__email__iexact="invited_email",
         ).count()
         == 0
     )
