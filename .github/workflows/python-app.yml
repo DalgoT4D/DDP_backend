@@ -55,7 +55,7 @@ jobs:
           DEV_SECRETS_DIR: /tmp/
           CLIENTDBT_ROOT: /tmp
         run: |
-          coverage run -m pytest ddpui/tests/unit_integration_tests/test_airbyte_service.py ddpui/tests/unit_integration_tests/test_utils.py ddpui/tests/unit_tests/test_prefect_service.py ddpui/tests/helper/test_airbyte_unit_schemas.py ddpui/tests/helper/test_auth.py ddpui/tests/helper/test_dev_secretsmanager.py ddpui/tests/helper/test_secretsmanager.py ddpui/tests/api_tests/test_user_org_api.py ddpui/tests/api_tests/test_dbt_api.py
+          coverage run -m pytest ddpui/tests/unit_integration_tests/test_airbyte_service.py ddpui/tests/unit_integration_tests/test_utils.py ddpui/tests/unit_tests/test_prefect_service.py ddpui/tests/helper/test_airbyte_unit_schemas.py ddpui/tests/helper/test_auth.py ddpui/tests/helper/test_dev_secretsmanager.py ddpui/tests/helper/test_secretsmanager.py ddpui/tests/helper/test_airbytehelpers.py ddpui/tests/api_tests/test_user_org_api.py ddpui/tests/api_tests/test_dbt_api.py
           coverage report --fail-under=70
           coverage xml
       - name: Check coverage percentage

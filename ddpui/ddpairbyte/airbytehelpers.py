@@ -1,4 +1,5 @@
 from django.utils.text import slugify
+from django.conf import settings
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import AirbyteWorkspace
 from ddpui.ddpprefect import prefect_service
@@ -7,6 +8,76 @@ from ddpui.models.org import OrgPrefectBlock
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("airbyte")
+
+
+def add_custom_airbyte_connector(
+    workspace_id: str,
+    connector_name: str,
+    connector_docker_repository: str,
+    connector_docker_image_tag: str,
+    connector_documentation_url,
+) -> None:
+    """creates a custom source definition in airbyte"""
+    airbyte_service.create_custom_source_definition(
+        workspace_id=workspace_id,
+        name=connector_name,
+        docker_repository=connector_docker_repository,
+        docker_image_tag=connector_docker_image_tag,
+        documentation_url=connector_documentation_url,
+    )
+    logger.info(
+        f"added custom source {connector_name} [{connector_docker_repository}:{connector_docker_image_tag}]"
+    )
+
+
+def upgrade_custom_sources(workspace_id: str) -> None:
+    """
+    compares the versions of the custom sources listed above with those in the airbyte workspace
+    and upgrades if necessary
+    """
+    source_definitions = airbyte_service.get_source_definitions(workspace_id)
+
+    for custom_source, custom_source_info in settings.AIRBYTE_CUSTOM_SOURCES.items():
+        found_custom_source = False
+
+        for source_def in source_definitions["sourceDefinitions"]:
+            if (
+                custom_source == source_def["dockerRepository"]
+                and custom_source_info["name"] == source_def["name"]
+            ):
+                found_custom_source = True
+                if (
+                    source_def["dockerImageTag"]
+                    < custom_source_info["docker_image_tag"]
+                ):
+                    logger.info(
+                        f"ready to upgrade {custom_source} from "
+                        f"{custom_source_info['docker_image_tag']} to "
+                        f"{source_def['dockerImageTag']}"
+                    )
+                    add_custom_airbyte_connector(
+                        workspace_id,
+                        custom_source_info["name"],
+                        custom_source_info["docker_repository"],
+                        custom_source_info["docker_image_tag"],
+                        custom_source_info["documentation_url"],
+                    )
+                else:
+                    logger.info(
+                        f"{custom_source} version {custom_source_info['docker_image_tag']} has not changed"
+                    )
+
+        if not found_custom_source:
+            logger.info(
+                f'did not find {custom_source}, adding version {custom_source_info["docker_image_tag"]} now'
+            )
+            add_custom_airbyte_connector(
+                workspace_id,
+                custom_source_info["name"],
+                custom_source_info["docker_repository"],
+                custom_source_info["docker_image_tag"],
+                custom_source_info["documentation_url"],
+            )
 
 
 def setup_airbyte_workspace(wsname, org) -> AirbyteWorkspace:
@@ -21,31 +92,14 @@ def setup_airbyte_workspace(wsname, org) -> AirbyteWorkspace:
     org.save()
 
     try:
-        # create a custom source kobotoolbox
-        kobo_name = "Kobotoolbox"
-        kobo_docker_repository = "airbyte/source-kobotoolbox"
-        kobo_docker_image_tag = "0.1.0"
-        kobo_documentation_url = ""
-        airbyte_service.create_custom_source_definition(
-            workspace_id=workspace["workspaceId"],
-            name=kobo_name,
-            docker_repository=kobo_docker_repository,
-            docker_image_tag=kobo_docker_image_tag,
-            documentation_url=kobo_documentation_url,
-        )
-
-        # create a custom source commcare
-        commcare_name = "custom_commcare"
-        commcare_docker_repository = "airbyte/source-commcare"
-        commcare_docker_image_tag = "0.1.1"
-        commcare_documentation_url = ""
-        airbyte_service.create_custom_source_definition(
-            workspace_id=workspace["workspaceId"],
-            name=commcare_name,
-            docker_repository=commcare_docker_repository,
-            docker_image_tag=commcare_docker_image_tag,
-            documentation_url=commcare_documentation_url,
-        )
+        for custom_source_info in settings.AIRBYTE_CUSTOM_SOURCES.values():
+            add_custom_airbyte_connector(
+                workspace["workspaceId"],
+                custom_source_info["name"],
+                custom_source_info["docker_repository"],
+                custom_source_info["docker_image_tag"],
+                custom_source_info["documentation_url"],
+            )
     except Exception as error:
         logger.error("Error creating custom source definitions: %s", str(error))
         raise error

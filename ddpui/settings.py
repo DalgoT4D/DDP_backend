@@ -163,6 +163,28 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# custom airbyte connectors
+AIRBYTE_CUSTOM_SOURCES = {
+    "airbyte/source-kobotoolbox": {
+        "name": "Kobotoolbox",
+        "docker_repository": "airbyte/source-kobotoolbox",
+        "docker_image_tag": "0.1.0",
+        "documentation_url": "",
+    },
+    "airbyte/source-commcare": {
+        "name": "custom_commcare",
+        "docker_repository": "airbyte/source-commcare",
+        "docker_image_tag": "0.1.1",
+        "documentation_url": "",
+    },
+    "airbyte/source-avni": {
+        "name": "Avni",
+        "docker_repository": "airbyte/source-avni",
+        "docker_image_tag": "0.1.0",
+        "documentation_url": "",
+    },
+}
+
 # finally set up the loggers
 setup_django_logger()
 setup_ddp_logger()
