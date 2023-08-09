@@ -104,6 +104,8 @@ class OrgSchema(Schema):
     name: str
     slug: str = None
     airbyte_workspace_id: str = None
+    viz_url: str = None
+    viz_login_tye: str = None
 
 
 class OrgWarehouse(models.Model):

@@ -80,8 +80,6 @@ class OrgUserResponse(Schema):
     active: bool
     role: int
     role_slug: str
-    viz_url: str = None
-    viz_login_type: str = None
 
     @staticmethod
     def from_orguser(orguser: OrgUser):
@@ -92,8 +90,6 @@ class OrgUserResponse(Schema):
             active=orguser.user.is_active,
             role=orguser.role,
             role_slug=slugify(OrgUserRole(orguser.role).name),
-            viz_url=orguser.org.viz_url,
-            viz_login_type=orguser.org.viz_login_type,
         )
 
 
