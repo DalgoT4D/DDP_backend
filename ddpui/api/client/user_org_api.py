@@ -164,13 +164,9 @@ def post_login(request):
     request_obj = json.loads(request.body)
     token = views.obtain_auth_token(request)
     if "token" in token.data:
-        org = None
         orguser = OrgUser.objects.filter(user__email=request_obj["username"]).first()
-        if orguser.org is not None:
-            org = orguser.org.name
         return {
             "token": token.data["token"],
-            "org": org,
             "email": str(orguser),
             "role_slug": slugify(OrgUserRole(orguser.role).name),
             "active": orguser.user.is_active,
