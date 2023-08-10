@@ -50,9 +50,6 @@ def get_dashboard(request):
     """Fetch all flows/pipelines created in an organization"""
     orguser = request.orguser
 
-    if orguser.org is None:
-        raise HttpError(400, "register an organization first")
-
     org_data_flows = (
         OrgDataFlow.objects.filter(org=orguser.org).exclude(cron=None).all()
     )
