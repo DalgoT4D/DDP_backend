@@ -312,13 +312,16 @@ def post_transfer_ownership(request, payload: OrgUserNewOwner):
 
 @user_org_api.post("/organizations/", response=OrgSchema, auth=auth.FullAccess())
 def post_organization(request, payload: OrgSchema):
-    """creates a new org and attaches it to the requestor"""
+    """creates a new org & new orguser (if required) and attaches it to the requestor"""
     orguser: OrgUser = request.orguser
-    if orguser.org:
-        raise HttpError(400, "orguser already has an associated org")
     org = Org.objects.filter(name=payload.name).first()
     if org:
         raise HttpError(400, "client org with this name already exists")
+
+    # create a new orguser if the org is already there
+    if orguser.org:
+        orguser = OrgUser.objects.create(user=orguser.org.user, role=OrgUserRole.ACCOUNT_MANAGER)
+
     org = Org.objects.create(**payload.dict())
     org.slug = slugify(org.name)[:20]
     org.save()
