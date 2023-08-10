@@ -1,5 +1,5 @@
 from ninja import NinjaAPI
-from ninja.errors import HttpError, ValidationError
+from ninja.errors import ValidationError
 
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
