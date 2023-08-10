@@ -164,13 +164,20 @@ def post_login(request):
     request_obj = json.loads(request.body)
     token = views.obtain_auth_token(request)
     if "token" in token.data:
-        orguser = OrgUser.objects.filter(user__email=request_obj["username"]).first()
+        user = User.objects.filter(email=request_obj["username"]).first()
+
+        # check if all the orgusers for this user have email verified
+        email_verified = True
+        for orguser in OrgUser.objects.filter(user=user):
+            if orguser.email_verified is False:
+                email_verified = False
+                break
+
         return {
             "token": token.data["token"],
-            "email": str(orguser),
-            "email_verified": orguser.email_verified,
-            "role_slug": slugify(OrgUserRole(orguser.role).name),
-            "active": orguser.user.is_active,
+            "email": user.email,
+            "email_verified": email_verified,
+            "active": user.is_active,
         }
 
     return token
