@@ -19,7 +19,7 @@ load_dotenv()
 logger = CustomLogger("airbyte")
 
 
-def abreq(endpoint, req=None):
+def abreq(endpoint, req=None, **kwargs):
     """Request to the airbyte server"""
     abhost = os.getenv("AIRBYTE_SERVER_HOST")
     abport = os.getenv("AIRBYTE_SERVER_PORT")
@@ -33,7 +33,7 @@ def abreq(endpoint, req=None):
             f"http://{abhost}:{abport}/api/{abver}/{endpoint}",
             headers={"Authorization": f"Basic {token}"},
             json=req,
-            timeout=30,
+            timeout=kwargs.get("timeout", 30),
         )
     except requests.exceptions.ConnectionError as conn_error:
         logger.exception(conn_error)
@@ -324,6 +324,7 @@ def check_source_connection(workspace_id: str, data: AirbyteSourceCreate) -> dic
             "connectionConfiguration": data.config,
             "workspaceId": workspace_id,
         },
+        timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
         logger.error("Failed to check source connection: %s", res)
@@ -342,6 +343,7 @@ def check_source_connection_for_update(
             "connectionConfiguration": data.config,
             "name": data.name,
         },
+        timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
         logger.error("Failed to check source connection: %s", res)
@@ -534,6 +536,7 @@ def check_destination_connection(
             "connectionConfiguration": data.config,
             "workspaceId": workspace_id,
         },
+        timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
         logger.error("Failed to check destination connection: %s", res)
@@ -555,6 +558,7 @@ def check_destination_connection_for_update(
             "connectionConfiguration": data.config,
             "name": data.name,
         },
+        timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
         logger.error("Failed to check destination connection: %s", res)
