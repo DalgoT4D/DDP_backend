@@ -168,6 +168,7 @@ def post_login(request):
         return {
             "token": token.data["token"],
             "email": str(orguser),
+            "email_verified": orguser.email_verified,
             "role_slug": slugify(OrgUserRole(orguser.role).name),
             "active": orguser.user.is_active,
         }
