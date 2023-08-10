@@ -89,6 +89,15 @@ class OrgSchema(Schema):
     airbyte_workspace_id: str = None
 
 
+class CreateOrgSchema(Schema):
+    """Docstring"""
+
+    name: str
+    createorg_code: str = None
+    airbyte_workspace_id: str = None
+    slug: str = None
+
+
 class OrgWarehouse(models.Model):
     """A data warehouse for an org. Typically we expect exactly one"""
 

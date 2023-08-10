@@ -25,6 +25,7 @@ from ddpui.models.org import (
     OrgWarehouseSchema,
     OrgPrefectBlock,
     OrgDataFlow,
+    CreateOrgSchema,
 )
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
@@ -311,8 +312,11 @@ def post_transfer_ownership(request, payload: OrgUserNewOwner):
 
 
 @user_org_api.post("/organizations/", response=OrgSchema, auth=auth.FullAccess())
-def post_organization(request, payload: OrgSchema):
+def post_organization(request, payload: CreateOrgSchema):
     """creates a new org & new orguser (if required) and attaches it to the requestor"""
+    if payload.createorg_code != os.getenv("CREATEORG_CODE"):
+        raise HttpError(400, "Invalid code")
+
     orguser: OrgUser = request.orguser
     org = Org.objects.filter(name=payload.name).first()
     if org:
@@ -320,9 +324,11 @@ def post_organization(request, payload: OrgSchema):
 
     # create a new orguser if the org is already there
     if orguser.org:
-        orguser = OrgUser.objects.create(user=orguser.org.user, role=OrgUserRole.ACCOUNT_MANAGER)
+        orguser = OrgUser.objects.create(
+            user=orguser.org.user, role=OrgUserRole.ACCOUNT_MANAGER
+        )
 
-    org = Org.objects.create(**payload.dict())
+    org = Org.objects.create(name=payload.name)
     org.slug = slugify(org.name)[:20]
     org.save()
     logger.info(f"{orguser.user.email} created new org {org.name}")
