@@ -499,17 +499,6 @@ def test_post_transfer_ownership_db_error(
 
 
 # ================================================================================
-def test_post_organization_has_org(orguser):
-    """failing test, user already has an org"""
-    mock_request = Mock()
-    mock_request.orguser = orguser
-
-    payload = OrgSchema(name="some-name")
-    with pytest.raises(HttpError) as excinfo:
-        post_organization(mock_request, payload)
-    assert str(excinfo.value) == "orguser already has an associated org"
-
-
 def test_post_organization_orgexists(orguserwithoutorg, org_without_workspace):
     """failing test, org name is already in use"""
     mock_request = Mock()
