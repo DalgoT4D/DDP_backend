@@ -163,16 +163,20 @@ def post_login(request):
     request_obj = json.loads(request.body)
     token = views.obtain_auth_token(request)
     if "token" in token.data:
-        org = None
-        orguser = OrgUser.objects.filter(user__email=request_obj["username"]).first()
-        if orguser.org is not None:
-            org = orguser.org.name
+        user = User.objects.filter(email=request_obj["username"]).first()
+
+        # check if all the orgusers for this user have email verified
+        email_verified = OrgUser.objects.filter(user=user, email_verified=True).exists()
+        if email_verified:
+            OrgUser.objects.filter(user=user, email_verified=False).update(
+                email_verified=True
+            )
+
         return {
             "token": token.data["token"],
-            "org": org,
-            "email": str(orguser),
-            "role_slug": slugify(OrgUserRole(orguser.role).name),
-            "active": orguser.user.is_active,
+            "email": user.email,
+            "email_verified": email_verified,
+            "active": user.is_active,
         }
 
     return token
@@ -312,14 +316,13 @@ def post_transfer_ownership(request, payload: OrgUserNewOwner):
 
 @user_org_api.post("/organizations/", response=OrgSchema, auth=auth.FullAccess())
 def post_organization(request, payload: OrgSchema):
-    """creates a new org and attaches it to the requestor"""
+    """creates a new org & new orguser (if required) and attaches it to the requestor"""
     orguser: OrgUser = request.orguser
-    if orguser.org:
-        raise HttpError(400, "orguser already has an associated org")
     org = Org.objects.filter(name=payload.name).first()
     if org:
         raise HttpError(400, "client org with this name already exists")
-    org = Org.objects.create(**payload.dict())
+
+    org = Org(name=payload.name)
     org.slug = slugify(org.name)[:20]
     org.save()
     logger.info(f"{orguser.user.email} created new org {org.name}")
@@ -329,8 +332,19 @@ def post_organization(request, payload: OrgSchema):
         # delete the org or we won't be able to create it once airbyte comes back up
         org.delete()
         raise HttpError(400, "could not create airbyte workspace") from error
-    orguser.org = org
-    orguser.save()
+
+    # create a new orguser if the org is already there
+    if orguser.org is None:
+        orguser.org = org
+        orguser.save()
+    else:
+        orguser = OrgUser.objects.create(
+            user=orguser.user,
+            role=OrgUserRole.ACCOUNT_MANAGER,
+            email_verified=True,
+            org=org,
+        )
+
     return OrgSchema(name=org.name, airbyte_workspace_id=new_workspace.workspaceId)
 
 
@@ -507,7 +521,7 @@ def post_organization_user_invite(request, payload: InvitationSchema):
         )
         logger.info(
             f"Invited {invited_email} to join {orguser.org.name} "
-            f"with invite code {payload.invite_code}",
+            f"with invite code {invitation.invite_code}",
         )
         return InvitationSchema.from_invitation(invitation)
 
@@ -700,6 +714,27 @@ def post_reset_password(
     return {"success": 1}
 
 
+@user_org_api.get("/users/verify_email/resend", auth=auth.AnyOrgUser())
+def get_verify_email_resend(request):  # pylint: disable=unused-argument
+    """this api is hit when the user is logged in but the email is still not verified"""
+    redis = Redis()
+    token = uuid4()
+
+    redis_key = f"email-verification:{token.hex}"
+    orguserid_bytes = str(request.orguser.id).encode("utf8")
+
+    redis.set(redis_key, orguserid_bytes)
+
+    FRONTEND_URL = os.getenv("FRONTEND_URL")
+    reset_url = f"{FRONTEND_URL}/verifyemail/?token={token.hex}"
+    try:
+        sendgrid.send_signup_email(request.user.email, reset_url)
+    except Exception as error:
+        raise HttpError(400, "failed to send email") from error
+
+    return {"success": 1}
+
+
 @user_org_api.post("/users/verify_email/")
 def post_verify_email(
     request, payload: VerifyEmailSchema
@@ -718,7 +753,7 @@ def post_verify_email(
         logger.error("no orguser having id %s", orguserid_str)
         raise HttpError(400, "could not look up request from this token")
 
-    orguser.email_verified = True
-    orguser.save()
+    # verify email for all the orgusers
+    OrgUser.objects.filter(user_id=orguser.user.id).update(email_verified=True)
 
     return {"success": 1}

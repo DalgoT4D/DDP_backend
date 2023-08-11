@@ -1,5 +1,5 @@
 from ninja import NinjaAPI
-from ninja.errors import HttpError, ValidationError
+from ninja.errors import ValidationError
 
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
@@ -49,9 +49,6 @@ def ninja_default_error_handler(
 def get_dashboard(request):
     """Fetch all flows/pipelines created in an organization"""
     orguser = request.orguser
-
-    if orguser.org is None:
-        raise HttpError(400, "register an organization first")
 
     org_data_flows = (
         OrgDataFlow.objects.filter(org=orguser.org).exclude(cron=None).all()
