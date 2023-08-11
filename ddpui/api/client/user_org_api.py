@@ -516,7 +516,7 @@ def post_organization_user_invite(request, payload: InvitationSchema):
         )
         logger.info(
             f"Invited {invited_email} to join {orguser.org.name} "
-            f"with invite code {payload.invite_code}",
+            f"with invite code {invitation.invite_code}",
         )
         return InvitationSchema.from_invitation(invitation)
 
