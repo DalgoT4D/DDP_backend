@@ -325,7 +325,7 @@ def post_organization(request, payload: OrgSchema):
     # create a new orguser if the org is already there
     if orguser.org:
         orguser = OrgUser.objects.create(
-            user=orguser.user, role=OrgUserRole.ACCOUNT_MANAGER
+            user=orguser.user, role=OrgUserRole.ACCOUNT_MANAGER, email_verified=True
         )
 
     org = Org.objects.create(name=payload.name)
