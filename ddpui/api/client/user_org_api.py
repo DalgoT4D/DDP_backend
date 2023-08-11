@@ -25,7 +25,6 @@ from ddpui.models.org import (
     OrgWarehouseSchema,
     OrgPrefectBlock,
     OrgDataFlow,
-    CreateOrgSchema,
 )
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
@@ -316,11 +315,8 @@ def post_transfer_ownership(request, payload: OrgUserNewOwner):
 
 
 @user_org_api.post("/organizations/", response=OrgSchema, auth=auth.FullAccess())
-def post_organization(request, payload: CreateOrgSchema):
+def post_organization(request, payload: OrgSchema):
     """creates a new org & new orguser (if required) and attaches it to the requestor"""
-    if payload.createorg_code != os.getenv("CREATEORG_CODE"):
-        raise HttpError(400, "Invalid code")
-
     orguser: OrgUser = request.orguser
     org = Org.objects.filter(name=payload.name).first()
     if org:
@@ -709,6 +705,27 @@ def post_reset_password(
 
     orguser.user.set_password(payload.password.get_secret_value())
     orguser.user.save()
+
+    return {"success": 1}
+
+
+@user_org_api.get("/users/verify_email/resend", auth=auth.AnyOrgUser())
+def post_verify_email_resend(request):  # pylint: disable=unused-argument
+    """this api is hit when the user is logged in but the email is still not verified"""
+    redis = Redis()
+    token = uuid4()
+
+    redis_key = f"email-verification:{token.hex}"
+    orguserid_bytes = str(request.orguser.id).encode("utf8")
+
+    redis.set(redis_key, orguserid_bytes)
+
+    FRONTEND_URL = os.getenv("FRONTEND_URL")
+    reset_url = f"{FRONTEND_URL}/verifyemail/?token={token.hex}"
+    try:
+        sendgrid.send_signup_email(request.user.email, reset_url)
+    except Exception as error:
+        raise HttpError(400, "failed to send email") from error
 
     return {"success": 1}
 
