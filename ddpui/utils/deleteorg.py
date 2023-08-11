@@ -98,7 +98,10 @@ def delete_airbyte_workspace(org: Org):  # skipcq: PYL-R0201
         secretsmanager.delete_warehouse_credentials(warehouse)
         warehouse.delete()
 
-    airbyte_service.delete_workspace(org.airbyte_workspace_id)
+    try:
+        airbyte_service.delete_workspace(org.airbyte_workspace_id)
+    except Exception:
+        pass
 
 
 def delete_orgusers(org: Org):  # skipcq: PYL-R0201
