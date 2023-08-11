@@ -710,7 +710,7 @@ def post_reset_password(
 
 
 @user_org_api.get("/users/verify_email/resend", auth=auth.AnyOrgUser())
-def post_verify_email_resend(request):  # pylint: disable=unused-argument
+def get_verify_email_resend(request):  # pylint: disable=unused-argument
     """this api is hit when the user is logged in but the email is still not verified"""
     redis = Redis()
     token = uuid4()
@@ -748,7 +748,7 @@ def post_verify_email(
         logger.error("no orguser having id %s", orguserid_str)
         raise HttpError(400, "could not look up request from this token")
 
-    orguser.email_verified = True
-    orguser.save()
+    # verify email for all the orgusers
+    OrgUser.objects.filter(user_id=orguser.user.id).update(email_verified=True)
 
     return {"success": 1}
