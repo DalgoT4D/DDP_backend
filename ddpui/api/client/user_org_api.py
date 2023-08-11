@@ -166,11 +166,11 @@ def post_login(request):
         user = User.objects.filter(email=request_obj["username"]).first()
 
         # check if all the orgusers for this user have email verified
-        email_verified = True
-        for orguser in OrgUser.objects.filter(user=user):
-            if orguser.email_verified is False:
-                email_verified = False
-                break
+        email_verified = OrgUser.objects.filter(user=user, email_verified=True).exists()
+        if email_verified:
+            OrgUser.objects.filter(user=user, email_verified=False).update(
+                email_verified=True
+            )
 
         return {
             "token": token.data["token"],
