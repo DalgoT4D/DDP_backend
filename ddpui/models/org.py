@@ -1,5 +1,18 @@
+from enum import Enum
 from django.db import models
 from ninja import Schema
+
+
+class OrgVizLoginType(str, Enum):
+    """an enum for roles assignable to org-users"""
+
+    BASIC_AUTH = "basic"
+    GOOGLE_AUTH = "google"
+
+    @classmethod
+    def choices(cls):
+        """django model definition needs an iterable for `choices`"""
+        return [(key.value, key.name) for key in cls]
 
 
 class OrgDbt(models.Model):
@@ -30,6 +43,10 @@ class Org(models.Model):
     )
     dbt = models.ForeignKey(  # skipcq: PTC-W0901, PTC-W0906
         OrgDbt, on_delete=models.SET_NULL, null=True
+    )
+    viz_url = models.CharField(max_length=100, null=True)
+    viz_login_type = models.CharField(
+        choices=OrgVizLoginType.choices(), max_length=50, null=True
     )
 
     def __str__(self) -> str:
@@ -87,6 +104,8 @@ class OrgSchema(Schema):
     name: str
     slug: str = None
     airbyte_workspace_id: str = None
+    viz_url: str = None
+    viz_login_type: str = None
 
 
 class OrgWarehouse(models.Model):
