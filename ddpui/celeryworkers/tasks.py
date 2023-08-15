@@ -1,7 +1,6 @@
 import os
 import shutil
 from pathlib import Path
-from subprocess import CalledProcessError
 
 from django.utils.text import slugify
 from ddpui.celery import app
