@@ -122,7 +122,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     dbt = OrgDbt(
         gitrepo_url=payload["gitrepoUrl"],
         project_dir=str(project_dir),
-        dbt_version="1.4.5",
+        dbt_venv=os.getenv("DBT_VENV"),
         target_type=warehouse.wtype,
         default_schema=payload["profile"]["target_configs_schema"],
     )

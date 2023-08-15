@@ -24,7 +24,7 @@ class OrgDbt(models.Model):
     )  # skipcq: PTC-W0901, PTC-W0906
 
     project_dir = models.CharField(max_length=200)
-    dbt_version = models.CharField(max_length=10)
+    dbt_venv = models.CharField(max_length=200, null=True)
 
     target_type = models.CharField(max_length=10)
     default_schema = models.CharField(max_length=50)
