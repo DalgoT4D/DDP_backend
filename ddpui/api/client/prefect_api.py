@@ -378,13 +378,14 @@ def post_prefect_dbt_core_block(request):
         raise HttpError(400, "need to set up a warehouse first")
     credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
 
-    dbt_env_dir = Path(os.getenv("CLIENTDBT_ROOT")) / orguser.org.slug
+    dbt_env_dir = Path(os.getenv("DBT_VENV"))
     if not os.path.exists(dbt_env_dir):
         raise HttpError(400, "create the dbt env first")
 
     dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
-    project_dir = str(dbt_env_dir / "dbtrepo")
-    dbt_project_filename = str(dbt_env_dir / "dbtrepo/dbt_project.yml")
+    dbt_client_dir = Path(os.getenv("CLIENTDBT_ROOT")) / orguser.org.slug
+    project_dir = str(dbt_client_dir / "dbtrepo")
+    dbt_project_filename = str(dbt_client_dir / "dbtrepo/dbt_project.yml")
 
     if not os.path.exists(dbt_project_filename):
         raise HttpError(400, dbt_project_filename + " is missing")
