@@ -74,7 +74,8 @@ def test_post_dbt_workspace(orguser):
         name="fake-name", target_configs_schema="target_configs_schema"
     )
     payload = OrgDbtSchema(
-        profile=dbtprofile, gitrepoUrl="gitrepoUrl", dbtVersion="1.1.1"
+        profile=dbtprofile,
+        gitrepoUrl="gitrepoUrl",
     )
 
     mocked_task = Mock()

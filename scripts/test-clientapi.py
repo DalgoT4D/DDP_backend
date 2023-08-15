@@ -114,7 +114,6 @@ if True:
         json={
             "gitrepoUrl": DBT_TEST_REPO,
             # "gitrepoAccessToken": DBT_TEST_REPO_ACCESSTOKEN,
-            "dbtVersion": "1.4.5",
             "profile": {
                 "name": DBT_PROFILE,
                 "target": "dev",

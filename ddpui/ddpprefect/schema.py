@@ -92,7 +92,6 @@ class OrgDbtSchema(Schema):
     profile: DbtProfile
     gitrepoUrl: str
     gitrepoAccessToken: Optional[str]
-    dbtVersion: str
 
 
 class OrgDbtGitHub(Schema):
