@@ -217,7 +217,6 @@ if "dbt" in spec:
             "dbt/workspace/",
             json={
                 "gitrepoUrl": spec["dbt"]["gitrepo_url"],
-                "dbtVersion": "1.4.5",
                 "profile": {
                     "name": spec["dbt"]["profile"],
                     "target": "dev",
