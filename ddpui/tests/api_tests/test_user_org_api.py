@@ -729,6 +729,54 @@ def test_post_organization_user_invite(mock_sendgrid, orguser):
 
 
 @patch("ddpui.utils.sendgrid.send_invite_user_email", mock_sendgrid=Mock())
+def test_post_organization_user_invite_multiple_open_invites(mock_sendgrid, orguser):
+    """success test, inviting a new user"""
+    another_org = Org.objects.create(name="anotherorg", slug="anotherorg")
+    another_user = User.objects.create(username="anotheruser", email="anotheruser")
+    another_org_user = OrgUser.objects.create(
+        org=another_org, user=another_user, role=OrgUserRole.PIPELINE_MANAGER
+    )
+    Invitation.objects.create(
+        invited_email="inivted_email",
+        invited_role=OrgUserRole.PIPELINE_MANAGER,
+        invited_by=another_org_user,
+        invited_on=timezone.as_ist(datetime.now()),
+        invite_code="invite_code_existing",
+    )
+    payload = InvitationSchema(
+        invited_email="inivted_email",
+        invited_role_slug="report_viewer",
+        invited_by=None,
+        invited_on=timezone.as_ist(datetime.now()),
+        invite_code="invite_code",
+    )
+
+    mock_request = Mock()
+    mock_request.orguser = orguser
+
+    assert (
+        Invitation.objects.filter(
+            invited_email=payload.invited_email, invited_by=orguser
+        ).count()
+        == 0
+    )
+    response = post_organization_user_invite(mock_request, payload)
+    assert (
+        Invitation.objects.filter(
+            invited_email=payload.invited_email, invited_by=orguser
+        ).count()
+        == 1
+    )
+
+    assert response.invited_by.email == orguser.user.email
+    assert response.invited_by.role == orguser.role
+    assert response.invited_role == payload.invited_role
+    assert response.invited_on == payload.invited_on
+    assert response.invite_code == payload.invite_code
+    mock_sendgrid.assert_called_once()
+
+
+@patch("ddpui.utils.sendgrid.send_invite_user_email", mock_sendgrid=Mock())
 def test_post_organization_user_invite_lowercase_email(mock_sendgrid, orguser: OrgUser):
     """success test, inviting a new user"""
     payload = InvitationSchema(
