@@ -20,6 +20,8 @@ from ddpui.api.client.dbt_api import (
     put_dbt_schema,
     dbt_delete,
     get_dbt_workspace,
+    post_dbt_git_pull,
+    post_dbt_makedocs,
 )
 from ddpui.ddpprefect.schema import DbtProfile, OrgDbtSchema, OrgDbtGitHub, OrgDbtTarget
 
@@ -190,3 +192,124 @@ def test_get_dbt_workspace_success(orguser):
     assert response["gitrepo_url"] == "A"
     assert response["target_type"] == "B"
     assert response["default_schema"] == "C"
+
+
+def test_post_dbt_git_pull_dbt_not_configured(orguser: OrgUser):
+    """fail - dbt not configured"""
+    request = Mock()
+    request.orguser = orguser
+    request.orguser.org.dbt = None
+
+    with pytest.raises(HttpError) as excinfo:
+        post_dbt_git_pull(request)
+    assert str(excinfo.value) == "dbt is not configured for this client"
+
+
+@patch("os.path.exists", return_value=False)
+def test_post_dbt_git_pull_no_env(orguser: OrgUser):
+    """fail - dbt not configured"""
+    request = Mock()
+    request.orguser = orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        post_dbt_git_pull(request)
+    assert str(excinfo.value) == "create the dbt env first"
+
+
+@patch.multiple("os.path", exists=Mock(return_value=True))
+@patch.multiple(
+    "ddpui.api.client.dbt_api", runcmd=Mock(side_effect=Exception("runcmd failed"))
+)
+def test_post_dbt_git_pull_gitpull_failed(orguser: OrgUser):
+    """fail - dbt not configured"""
+    request = Mock()
+    request.orguser = orguser
+    request.orguser.org.dbt = OrgDbt(
+        gitrepo_url="A", target_type="B", default_schema="C"
+    )
+
+    with pytest.raises(HttpError) as excinfo:
+        post_dbt_git_pull(request)
+    assert (
+        str(excinfo.value)
+        == "git pull failed in "
+        + os.getenv("CLIENTDBT_ROOT")
+        + "/"
+        + request.orguser.org.slug
+        + "/dbtrepo"
+    )
+
+
+@patch.multiple("os.path", exists=Mock(return_value=True))
+@patch.multiple("ddpui.api.client.dbt_api", runcmd=Mock(return_value=True))
+def test_post_dbt_git_pull_succes(orguser: OrgUser):
+    """fail - dbt not configured"""
+    request = Mock()
+    request.orguser = orguser
+    request.orguser.org.dbt = OrgDbt(
+        gitrepo_url="A", target_type="B", default_schema="C"
+    )
+
+    response = post_dbt_git_pull(request)
+    assert response == {"success": True}
+
+
+def test_post_dbt_makedocs_dbt_not_configured(orguser: OrgUser):
+    """fail - dbt not configured"""
+    request = Mock()
+    request.orguser = orguser
+    request.orguser.org.dbt = None
+
+    with pytest.raises(HttpError) as excinfo:
+        post_dbt_makedocs(request)
+    assert str(excinfo.value) == "dbt is not configured for this client"
+
+
+@patch("os.path.exists", return_value=False)
+def test_post_dbt_makedocs_no_env(orguser: OrgUser):
+    """fail - dbt not configured"""
+    request = Mock()
+    request.orguser = orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        post_dbt_makedocs(request)
+    assert str(excinfo.value) == "create the dbt env first"
+
+
+@patch("os.path.exists", side_effect=[True, False])
+def test_post_dbt_makedocs_no_target(orguser: OrgUser):
+    """fail - dbt docs not generated"""
+    request = Mock()
+    request.orguser = orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        post_dbt_makedocs(request)
+    assert str(excinfo.value) == "run dbt docs generate first"
+
+
+@patch("os.path.exists", mock_exists=Mock(side_effect=[True, True]))
+@patch(
+    "ddpui.api.client.dbt_api.create_single_html",
+    mock_create_single_html=Mock(return_value="html"),
+)
+@patch("builtins.open", mock_open=Mock(write=Mock(), close=Mock()))
+@patch(
+    "ddpui.api.client.dbt_api.Redis",
+    mock_Redis=Mock(return_value=Mock(set=Mock(), expire=Mock())),
+)
+def test_post_dbt_makedocs_no_target(
+    mock_Redis: Mock,
+    mock_open: Mock,
+    mock_create_single_html: Mock,
+    mock_exists: Mock,
+    orguser: OrgUser,
+):
+    """success"""
+    request = Mock()
+    request.orguser = orguser
+    request.orguser.org.dbt = OrgDbt(
+        gitrepo_url="A", target_type="B", default_schema="C"
+    )
+
+    post_dbt_makedocs(request)
+    mock_create_single_html.assert_called_once()
