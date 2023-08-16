@@ -492,6 +492,8 @@ def post_organization_user_invite(request, payload: InvitationSchema):
     orguser: OrgUser = request.orguser
     frontend_url = os.getenv("FRONTEND_URL")
 
+    logger.info(payload)
+
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
 
@@ -511,7 +513,9 @@ def post_organization_user_invite(request, payload: InvitationSchema):
     if invited_role > orguser.role:
         raise HttpError(403, "Insufficient permissions for this operation")
 
-    invitation = Invitation.objects.filter(invited_email__iexact=invited_email).first()
+    invitation = Invitation.objects.filter(
+        invited_email__iexact=invited_email, invited_by__org=orguser.org
+    ).first()
     if invitation:
         invitation.invited_on = datetime.utcnow()
         # if the invitation is already present - trigger the email again
@@ -520,7 +524,7 @@ def post_organization_user_invite(request, payload: InvitationSchema):
             invitation.invited_email, invitation.invited_by.user.email, invite_url
         )
         logger.info(
-            f"Invited {invited_email} to join {orguser.org.name} "
+            f"Resent invitation to {invited_email} to join {orguser.org.name} "
             f"with invite code {invitation.invite_code}",
         )
         return InvitationSchema.from_invitation(invitation)
@@ -528,6 +532,7 @@ def post_organization_user_invite(request, payload: InvitationSchema):
     payload.invited_by = OrgUserResponse.from_orguser(orguser)
     payload.invited_on = datetime.utcnow()
     payload.invite_code = str(uuid4())
+
     invitation = Invitation.objects.create(
         invited_email=invited_email,
         invited_role=invited_role,
