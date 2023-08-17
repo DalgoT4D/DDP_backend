@@ -314,11 +314,11 @@ def post_transfer_ownership(request, payload: OrgUserNewOwner):
     return OrgUserResponse.from_orguser(requestor_orguser)
 
 
-@user_org_api.post("/organizations/", response=OrgSchema, auth=auth.FullAccess())
+@user_org_api.post("/organizations/", response=OrgSchema, auth=auth.AnyOrgUser())
 def post_organization(request, payload: OrgSchema):
     """creates a new org & new orguser (if required) and attaches it to the requestor"""
     orguser: OrgUser = request.orguser
-    org = Org.objects.filter(name=payload.name).first()
+    org = Org.objects.filter(name__iexact=payload.name).first()
     if org:
         raise HttpError(400, "client org with this name already exists")
 
