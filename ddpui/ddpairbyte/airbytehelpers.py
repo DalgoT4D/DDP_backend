@@ -129,7 +129,13 @@ def setup_airbyte_workspace(wsname, org) -> AirbyteWorkspace:
             block_name=block_name,
             display_name=display_name,
         )
-        org_airbyte_server_block.save()
+        try:
+            org_airbyte_server_block.save()
+        except Exception as error:
+            prefect_service.delete_airbyte_server_block(airbyte_server_block_id)
+            raise Exception(
+                "could not create orgprefectblock for airbyte-server"
+            ) from error
 
     return AirbyteWorkspace(
         name=workspace["name"],
