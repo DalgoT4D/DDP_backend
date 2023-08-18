@@ -65,6 +65,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "ddpui",
     "django_prometheus",
+    "django_extensions",
 ]
 
 REST_FRAMEWORK = {
