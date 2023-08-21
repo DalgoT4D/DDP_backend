@@ -2,7 +2,7 @@ import pytz
 import datetime
 
 IST = pytz.IST = pytz.timezone("Asia/Kolkata")
-UTC = pytz.UTC
+UTC = pytz.utc
 
 
 def as_utc(timestamp: datetime.datetime):
