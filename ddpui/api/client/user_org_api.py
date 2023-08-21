@@ -49,6 +49,7 @@ from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils import sendgrid
 from ddpui.utils import helpers
+from ddpui.utils import timezone
 
 user_org_api = NinjaAPI(urls_namespace="userorg")
 # http://127.0.0.1:8000/api/docs
@@ -517,7 +518,7 @@ def post_organization_user_invite(request, payload: InvitationSchema):
         invited_email__iexact=invited_email, invited_by__org=orguser.org
     ).first()
     if invitation:
-        invitation.invited_on = datetime.utcnow()
+        invitation.invited_on = timezone.as_utc(datetime.utcnow())
         # if the invitation is already present - trigger the email again
         invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
         sendgrid.send_invite_user_email(
@@ -530,7 +531,7 @@ def post_organization_user_invite(request, payload: InvitationSchema):
         return InvitationSchema.from_invitation(invitation)
 
     payload.invited_by = OrgUserResponse.from_orguser(orguser)
-    payload.invited_on = datetime.utcnow()
+    payload.invited_on = timezone.as_utc(datetime.utcnow())
     payload.invite_code = str(uuid4())
 
     invitation = Invitation.objects.create(
@@ -631,7 +632,7 @@ def post_resend_invitation(request, invitation_id):
     invitation = Invitation.objects.filter(id=invitation_id).first()
 
     if invitation:
-        invitation.invited_on = datetime.utcnow()
+        invitation.invited_on = timezone.as_utc(datetime.utcnow())
         invitation.save()
         # trigger an email to the user
         frontend_url = os.getenv("FRONTEND_URL")
