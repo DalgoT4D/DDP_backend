@@ -245,6 +245,10 @@ def get_prefect_dataflow(request, deployment_id):
             )
             airbyte_block["name"] = conn["name"]
 
+    # differentiate between deploymentName and name
+    res["deploymentName"] = res["name"]
+    res["name"] = org_data_flow.name
+
     return res
 
 
