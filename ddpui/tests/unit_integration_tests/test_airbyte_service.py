@@ -45,6 +45,8 @@ from ddpui.ddpairbyte.airbyte_service import (
     get_connections,
     get_connection,
     create_normalization_operation,
+    get_airbyte_operation,
+    is_operation_normalization,
     update_connection,
     schema,
 )
@@ -1234,6 +1236,38 @@ def test_create_normalization_operation_success():
         workspace_id = "workspace-id"
         result = create_normalization_operation(workspace_id)
         assert result["operationId"] == "the-operation-id"
+
+
+def test_get_airbyte_operation_nosuchop():
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
+        mock_abreq.return_value = {}
+        with pytest.raises(HttpError) as excinfo:
+            get_airbyte_operation("fake-op-id")
+        assert str(excinfo.value) == "could not fetch the operation with id fake-op-id"
+
+
+def test_get_airbyte_operation_success():
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
+        mock_abreq.return_value = {"operationId": "fake-op-id"}
+        result = get_airbyte_operation("fake-op-id")
+        assert result == {"operationId": "fake-op-id"}
+
+
+def test_is_operation_normalization_false():
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
+        mock_abreq.return_value = {"operationId": "fake-result"}
+        result = is_operation_normalization("fake-op-id")
+        assert result is False
+
+
+def test_is_operation_normalization_true():
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
+        mock_abreq.return_value = {
+            "operationId": "fake-op-id",
+            "operatorConfiguration": {"operatorType": "normalization"},
+        }
+        result = is_operation_normalization("fake-op-id")
+        assert result is True
 
 
 def test_update_connection_bad_workspace_id():
