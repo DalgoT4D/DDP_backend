@@ -640,6 +640,7 @@ def is_operation_normalization(operation_id: str):
     res = get_airbyte_operation(operation_id)
 
     if "operatorConfiguration" in res:
+        # for now the only operator we know about is normalization
         if (
             "operatorType" in res["operatorConfiguration"]
             and res["operatorConfiguration"]["operatorType"] == "normalization"
