@@ -2,6 +2,12 @@ import pytz
 import datetime
 
 IST = pytz.IST = pytz.timezone("Asia/Kolkata")
+UTC = pytz.utc
+
+
+def as_utc(timestamp: datetime.datetime):
+    """Return time in UTC"""
+    return timestamp.astimezone(UTC) if timestamp.tzinfo else UTC.localize(timestamp)
 
 
 def as_ist(timestamp: datetime.datetime):
