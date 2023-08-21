@@ -557,6 +557,8 @@ def get_airbyte_connections(request):
         )
 
     logger.info(res)
+
+    # by default normalization is going as False here because we dont do anything with it
     return res
 
 
@@ -614,6 +616,11 @@ def get_airbyte_connection(request, connection_block_id):
         else "",
         "status": airbyte_conn["status"],
         "deploymentId": dataflow.deployment_id if dataflow else None,
+        "normalize": airbyte_service.is_operation_normalization(
+            airbyte_conn["operationIds"][0]
+        )
+        if "operationIds" in airbyte_conn and len(airbyte_conn["operationIds"]) == 1
+        else False,
     }
 
     logger.debug(res)
@@ -751,6 +758,7 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
         "syncCatalog": airbyte_conn["syncCatalog"],
         "status": airbyte_conn["status"],
         "deployment_id": dataflow["deployment"]["id"],
+        "normalize": payload.normalize,
     }
     logger.debug(res)
     return res
