@@ -184,7 +184,7 @@ def test_setup_airbyte_workspace_create_server_block(
     }
     mock_add_custom_airbyte_connector.return_value = 1
     mock_get_airbyte_server_block_id.return_value = None
-    mock_create_airbyte_server_block.return_value = 1
+    mock_create_airbyte_server_block.return_value = (1, "cleaned-block-name")
     setup_airbyte_workspace("workspace_name", org)
     mock_get_airbyte_server_block_id.assert_called_once_with("org-airbyte-server")
     mock_create_airbyte_server_block.assert_called_once_with("org-airbyte-server")
