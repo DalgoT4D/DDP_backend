@@ -108,6 +108,7 @@ def setup_airbyte_workspace(wsname, org) -> AirbyteWorkspace:
     block_name = f"{org.slug}-{slugify(AIRBYTESERVER)}"
     display_name = wsname
 
+    airbyte_server_block_cleaned_name = block_name
     try:
         airbyte_server_block_id = prefect_service.get_airbyte_server_block_id(
             block_name
@@ -116,9 +117,10 @@ def setup_airbyte_workspace(wsname, org) -> AirbyteWorkspace:
         raise Exception("could not connect to prefect-proxy") from exc
 
     if airbyte_server_block_id is None:
-        airbyte_server_block_id = prefect_service.create_airbyte_server_block(
-            block_name
-        )
+        (
+            airbyte_server_block_id,
+            airbyte_server_block_cleaned_name,
+        ) = prefect_service.create_airbyte_server_block(block_name)
         logger.info(f"Created Airbyte server block with ID {airbyte_server_block_id}")
 
     if not OrgPrefectBlock.objects.filter(org=org, block_type=AIRBYTESERVER).exists():
@@ -126,7 +128,7 @@ def setup_airbyte_workspace(wsname, org) -> AirbyteWorkspace:
             org=org,
             block_type=AIRBYTESERVER,
             block_id=airbyte_server_block_id,
-            block_name=block_name,
+            block_name=airbyte_server_block_cleaned_name,
             display_name=display_name,
         )
         try:

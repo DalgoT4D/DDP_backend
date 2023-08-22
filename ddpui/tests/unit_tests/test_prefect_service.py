@@ -250,7 +250,7 @@ def test_get_airbyte_server_block_id(mock_get: Mock):
 @patch("ddpui.ddpprefect.prefect_service.prefect_post")
 def test_create_airbyte_server_block(mock_post: Mock):
     blockname = "theblockname"
-    mock_post.return_value = {"block_id": "the-block-id"}
+    mock_post.return_value = {"block_id": "the-block-id", "cleaned_block_name": "theblockname"}
     response = create_airbyte_server_block(blockname)
     mock_post.assert_called_once_with(
         "blocks/airbyte/server/",
@@ -261,7 +261,7 @@ def test_create_airbyte_server_block(mock_post: Mock):
             "apiVersion": os.getenv("AIRBYTE_SERVER_APIVER"),
         },
     )
-    assert response == "the-block-id"
+    assert response == ("the-block-id", "theblockname")
 
 
 def test_update_airbyte_server_block():
