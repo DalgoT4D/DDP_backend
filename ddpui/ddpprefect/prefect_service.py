@@ -128,7 +128,7 @@ def get_airbyte_server_block_id(blockname) -> str | None:
     return response["block_id"]
 
 
-def create_airbyte_server_block(blockname) -> str:
+def create_airbyte_server_block(blockname):
     """Create airbyte server block in prefect"""
     response = prefect_post(
         "blocks/airbyte/server/",
@@ -139,7 +139,7 @@ def create_airbyte_server_block(blockname) -> str:
             "apiVersion": os.getenv("AIRBYTE_SERVER_APIVER"),
         },
     )
-    return response["block_id"]
+    return (response["block_id"], response["cleaned_block_name"])
 
 
 def update_airbyte_server_block(blockname):
