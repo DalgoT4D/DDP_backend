@@ -37,14 +37,14 @@ DEBUG = os.getenv("DEBUG", "") == "True"
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
-    "ddpstagingapi.projecttech4dev.org",
-    "ddp-prod-api.projecttech4dev.org",
+    "staging-api.dalgo.in",
+    "api.dalgo.in",
 ]
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ORIGIN_WHITELIST = (
     "http://localhost:3000",
-    "https://ddpstagingui.projecttech4dev.org",
-    "https://ddp-prod-ui.projecttech4dev.org",
+    "https://staging.dalgo.in",
+    "https://dashboard.dalgo.in",
 )
 CORS_ALLOW_HEADERS = (
     *default_headers,
