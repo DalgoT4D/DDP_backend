@@ -43,6 +43,7 @@ def send_template_message(template_id: str, to_email: str, template_vars: dict) 
 
     try:
         sendgrid_client.send(message)
+        logger.info(f"sent email to {to_email} using template {template_id}")
     except Exception as error:
         logger.exception(error)
         raise
