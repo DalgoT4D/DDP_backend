@@ -3,7 +3,10 @@ from ninja import Schema
 
 
 class PrefectAirbyteSync(Schema):
-    """request payload to trigger an airbyte sync in prefect by specifying the prefect blockname"""
+    """
+    request payload to trigger an airbyte sync in prefect
+    by specifying the prefect blockname
+    """
 
     blockName: str
     flowName: str = None
@@ -19,7 +22,10 @@ class PrefectAirbyteSync(Schema):
 
 
 class PrefectDbtCore(Schema):
-    """request payload to trigger a dbt core op flow in prefect by specifying the prefect blockname"""
+    """
+    request payload to trigger a dbt core op flow in prefect
+    by specifying the prefect blockname
+    """
 
     blockName: str
     flowName: str = None
@@ -35,7 +41,10 @@ class PrefectDbtCore(Schema):
 
 
 class PrefectAirbyteConnectionSetup(Schema):
-    """create an airbyte connection block in prefect after creating the connection in airbyte"""
+    """
+    create an airbyte connection block in prefect
+    after creating the connection in airbyte
+    """
 
     serverBlockName: str
     connectionBlockName: str
@@ -70,13 +79,32 @@ class PrefectShellSetup(Schema):
     env: dict
 
 
+class PrefectSecretBlockCreate(Schema):
+    """Docstring"""
+
+    secret: str
+    block_name: str
+
+
 class OrgDbtSchema(Schema):
     """Docstring"""
 
     profile: DbtProfile
     gitrepoUrl: str
     gitrepoAccessToken: Optional[str]
-    dbtVersion: str
+
+
+class OrgDbtGitHub(Schema):
+    """Docstring"""
+
+    gitrepoUrl: str
+    gitrepoAccessToken: Optional[str]
+
+
+class OrgDbtTarget(Schema):
+    """Docstring"""
+
+    target_configs_schema: str
 
 
 class PrefectDbtRun(Schema):
@@ -86,18 +114,25 @@ class PrefectDbtRun(Schema):
 
 
 class PrefectAirbyteConnectionBlockSchema(Schema):
-    """Return necessary details of connection block in prefect, airbyte and your database"""
+    """
+    Return necessary details of connection block in prefect,
+    airbyte and your database
+    """
 
     name: str
     blockId: str
     blockName: str
     blockData: dict
     connectionId: str
-    sourceId: str
-    destinationId: str
+    source: dict
+    destination: dict
     sourceCatalogId: str
     syncCatalog: dict
     status: str
+    deploymentId: str = None
+    lastRun: Optional[dict | None]
+    destinationSchema: str = ""
+    normalize: bool = False
 
 
 class PrefectFlowAirbyteConnection(Schema):
@@ -122,6 +157,23 @@ class PrefectDataFlowCreateSchema2(Schema):
     deployment_name: str
     flow_name: str
     orgslug: str
-    connection_blocks: list
+    connection_blocks: list[PrefectFlowAirbyteConnection]
     dbt_blocks: list
+    cron: str = None
+
+
+class PrefectDataFlowUpdateSchema(Schema):
+    """Edit the data flow"""
+
     cron: str
+
+
+class PrefectFlowRunSchema(Schema):
+    """Schema for field of a flow run fetched"""
+
+    id: str
+    name: str
+    deployment_id: str
+    flow_id: str
+    state_type: str
+    state_name: str

@@ -1,3 +1,4 @@
+# pylint: disable=missing-class-docstring
 from typing import List
 from ninja import Schema
 
@@ -64,6 +65,10 @@ class GetSourceDefinitionsTestResponse(Schema):
 
     class Config:
         extra = "allow"
+
+
+class GetSourceSchemaCatalogTestResponse(Schema):
+    catalog: dict
 
 
 class GetWorkspacesTestResponse(Schema):
@@ -238,7 +243,7 @@ class UpdateConnectionTestResponse(Schema):
 
 
 class CheckSourceConnectionTestResponse(Schema):
-    status: str
+    jobInfo: dict
 
     class Config:
         extra = "allow"

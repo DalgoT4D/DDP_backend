@@ -35,12 +35,16 @@ BIGQUERY_DATASETLOCATION = os.getenv("BIGQUERY_DATASETLOCATION")
 
 DBT_TEST_REPO = os.getenv("DBT_TEST_REPO")
 DBT_TEST_REPO_ACCESSTOKEN = os.getenv("DBT_TEST_REPO_ACCESSTOKEN")
+SIGNUPCODE = os.getenv("SIGNUPCODE")
 
 faker = Faker("en-IN")
 tester = TestClient(args.port, verbose=args.verbose)
 email = faker.email()
 password = faker.password()
-tester.clientpost("organizations/users/", json={"email": email, "password": password})
+tester.clientpost(
+    "organizations/users/",
+    json={"email": email, "password": password, "signupcode": SIGNUPCODE},
+)
 tester.login(email, password)
 tester.clientget("currentuser")
 tester.clientpost(
@@ -83,7 +87,7 @@ elif WAREHOUSETYPE == "bigquery":
             destinationDefinitionId = destdef["destinationDefinitionId"]
             break
     with open(DBT_BIGQUERY_SERVICE_ACCOUNT_CREDSFILE, "r", -1, "utf8") as credsfile:
-        dbtCredentials = json.loads(credsfile.read())
+        dbtCredentials = json.load(credsfile)
         # print(dbtCredentials)
     airbyteConfig = {
         "project_id": BIGQUERY_PROJECTID,
@@ -110,7 +114,6 @@ if True:
         json={
             "gitrepoUrl": DBT_TEST_REPO,
             # "gitrepoAccessToken": DBT_TEST_REPO_ACCESSTOKEN,
-            "dbtVersion": "1.4.5",
             "profile": {
                 "name": DBT_PROFILE,
                 "target": "dev",
@@ -194,7 +197,7 @@ while ntries < 20:
     sleep(1)
     ntries += 1
     r = requests.get(
-        f"{PREFECT_PROXY_API_URL}/proxy/flow_runs/logs/" + flow_run["id"], timeout=10
+        f"{PREFECT_PROXY_API_URL}/proxy/flow_runs/logs/" + flow_run["id"], timeout=20
     )
     for log in r.json()["logs"]:
         print(log["message"])

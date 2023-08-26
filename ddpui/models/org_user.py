@@ -1,10 +1,13 @@
 from datetime import datetime
 from enum import IntEnum
+from django.utils.text import slugify
+
 
 from django.db import models
 from django.contrib.auth.models import User
 
 from ninja import Schema
+from pydantic import SecretStr
 
 from ddpui.models.org import Org, OrgSchema
 
@@ -21,6 +24,15 @@ class OrgUserRole(IntEnum):
         """django model definition needs an iterable for `choices`"""
         return [(key.value, key.name) for key in cls]
 
+    @classmethod
+    def role_slugs(cls):
+        """return a dictionary with slug as key and role_id as value"""
+        role_dict = {}
+        for key in cls:
+            slug = slugify(key.name)
+            role_dict[slug] = key.value
+        return role_dict
+
 
 class OrgUser(models.Model):
     """a user from a client NGO"""
@@ -30,6 +42,7 @@ class OrgUser(models.Model):
     role = models.IntegerField(
         choices=OrgUserRole.choices(), default=OrgUserRole.REPORT_VIEWER
     )
+    email_verified = models.BooleanField(default=False)
 
     def __str__(self):
         return self.user.email  # pylint: disable=no-member
@@ -40,6 +53,7 @@ class OrgUserCreate(Schema):
 
     email: str
     password: str
+    signupcode: str
     role: str = None
 
 
@@ -52,6 +66,12 @@ class OrgUserUpdate(Schema):
     role: str = None
 
 
+class OrgUserNewOwner(Schema):
+    """payload to transfer account ownership"""
+
+    new_owner_email: str
+
+
 class OrgUserResponse(Schema):
     """structure for returning an OrgUser in an http response"""
 
@@ -59,6 +79,7 @@ class OrgUserResponse(Schema):
     org: OrgSchema = None
     active: bool
     role: int
+    role_slug: str
 
     @staticmethod
     def from_orguser(orguser: OrgUser):
@@ -68,6 +89,7 @@ class OrgUserResponse(Schema):
             org=orguser.org,
             active=orguser.user.is_active,
             role=orguser.role,
+            role_slug=slugify(OrgUserRole(orguser.role).name),
         )
 
 
@@ -87,7 +109,8 @@ class InvitationSchema(Schema):
     """Docstring"""
 
     invited_email: str
-    invited_role: int
+    invited_role_slug: str
+    invited_role: int = None
     invited_by: OrgUserResponse = None
     invited_on: datetime = None
     invite_code: str = None
@@ -98,6 +121,7 @@ class InvitationSchema(Schema):
         return InvitationSchema(
             invited_email=invitation.invited_email,
             invited_role=invitation.invited_role,
+            invited_role_slug=slugify(OrgUserRole(invitation.invited_role).name),
             invited_by=OrgUserResponse.from_orguser(invitation.invited_by),
             invited_on=invitation.invited_on,
             invite_code=invitation.invite_code,
@@ -108,4 +132,31 @@ class AcceptInvitationSchema(Schema):
     """Docstring"""
 
     invite_code: str
-    password: str
+    password: str = (
+        None  # the password is required only when the user has no platform account
+    )
+
+
+class ForgotPasswordSchema(Schema):
+    """the payload for the forgot-password workflow, step 1"""
+
+    email: str
+
+
+class ResetPasswordSchema(Schema):
+    """the payload for the forgot-password workflow, step 2"""
+
+    token: str
+    password: SecretStr
+
+
+class VerifyEmailSchema(Schema):
+    """the payload for the verify-email workflow"""
+
+    token: str
+
+
+class DeleteOrgUserPayload(Schema):
+    """payload to delete an org user"""
+
+    email: str

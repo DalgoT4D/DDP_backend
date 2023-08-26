@@ -1,5 +1,5 @@
-from django.db import models
 from ninja import Schema
+from django.db import models
 from django.contrib.auth.models import User
 
 

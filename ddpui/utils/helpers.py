@@ -1,8 +1,6 @@
 import shlex
 import subprocess
-from typing import Union
-from typing import List
-import humps
+import re
 
 
 def runcmd(cmd, cwd):
@@ -10,42 +8,15 @@ def runcmd(cmd, cwd):
     return subprocess.run(shlex.split(cmd), cwd=str(cwd), check=True)
 
 
-def api_res_camel_case(api_res: Union[List[dict], dict, str]):
-    """Convert strings and dictionary keys to camel case"""
-    if isinstance(api_res, str):
-        return humps.camelize(api_res)
-
-    if isinstance(api_res, dict):
-        camel_dict_obj = {}
-        for old_key, value in api_res.items():
-            new_key = humps.camelize(old_key)
-            camel_dict_obj[new_key] = value
-
-        return camel_dict_obj
-
-    if isinstance(api_res, list):
-        ans = []
-        for dict_obj in api_res:
-            camel_dict_obj = {}
-            if isinstance(dict_obj, dict):
-                for old_key, value in dict_obj.items():
-                    new_key = humps.camelize(old_key)
-                    camel_dict_obj[new_key] = value
-
-            ans.append(camel_dict_obj)
-
-        return ans
-
-    return api_res
-
-
 def remove_nested_attribute(obj: dict, attr: str) -> dict:
-    """this function searches for `attr` in the JSON object and removes any occurences it finds"""
+    """
+    this function searches for `attr` in the JSON object
+    and removes any occurences it finds
+    """
     if attr in obj:
         del obj[attr]
 
     for key in obj:
-        assert key != attr
         val = obj[key]
 
         if isinstance(val, dict):
@@ -57,3 +28,14 @@ def remove_nested_attribute(obj: dict, attr: str) -> dict:
                     val[list_idx] = remove_nested_attribute(list_val, attr)
 
     return obj
+
+
+def isvalid_email(email: str) -> bool:
+    """
+    this function uses a regex to check if the provided email
+    address is valid
+    ref: https://www.geeksforgeeks.org/check-if-email-address-valid-or-not-in-python/
+    """
+    regex = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b"
+
+    return re.fullmatch(regex, email)

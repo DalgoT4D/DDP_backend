@@ -13,6 +13,10 @@ https://docs.djangoproject.com/en/4.1/ref/settings/
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+from ddpui.utils.django_logger import setup_logger as setup_django_logger
+from ddpui.utils.ddp_logger import setup_logger as setup_ddp_logger
+from ddpui.utils.ab_logger import setup_logger as setup_ab_logger
+from corsheaders.defaults import default_headers
 
 load_dotenv()
 
@@ -27,11 +31,25 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv("DJANGOSECRET")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv("DEBUG", "") == "True"
 
 # CORS
-ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
-CORS_ALLOW_ALL_ORIGINS = True
+ALLOWED_HOSTS = [
+    "localhost",
+    "127.0.0.1",
+    "staging-api.dalgo.in",
+    "api.dalgo.in",
+]
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ORIGIN_WHITELIST = (
+    "http://localhost:3000",
+    "https://staging.dalgo.in",
+    "https://dashboard.dalgo.in",
+)
+CORS_ALLOW_HEADERS = (
+    *default_headers,
+    "x-dalgo-org",
+)
 
 # Application definition
 
@@ -46,6 +64,8 @@ INSTALLED_APPS = [
     "rest_framework.authtoken",
     "corsheaders",
     "ddpui",
+    "django_prometheus",
+    "django_extensions",
 ]
 
 REST_FRAMEWORK = {
@@ -55,6 +75,7 @@ REST_FRAMEWORK = {
 }
 
 MIDDLEWARE = [
+    "django_prometheus.middleware.PrometheusBeforeMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.security.SecurityMiddleware",
@@ -64,6 +85,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "django_prometheus.middleware.PrometheusAfterMiddleware",
 ]
 
 ROOT_URLCONF = "ddpui.urls"
@@ -97,6 +119,7 @@ DATABASES = {
         "HOST": os.getenv("DBHOST"),
         "USER": os.getenv("DBUSER"),
         "PASSWORD": os.getenv("DBPASSWORD"),
+        "PORT": os.getenv("DBPORT"),
     }
 }
 
@@ -141,3 +164,30 @@ STATIC_URL = "static/"
 # https://docs.djangoproject.com/en/4.1/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# custom airbyte connectors
+AIRBYTE_CUSTOM_SOURCES = {
+    "airbyte/source-kobotoolbox": {
+        "name": "Kobotoolbox",
+        "docker_repository": "airbyte/source-kobotoolbox",
+        "docker_image_tag": "0.1.0",
+        "documentation_url": "",
+    },
+    "airbyte/source-commcare": {
+        "name": "custom_commcare",
+        "docker_repository": "airbyte/source-commcare",
+        "docker_image_tag": "0.1.1",
+        "documentation_url": "",
+    },
+    "airbyte/source-avni": {
+        "name": "Avni",
+        "docker_repository": "airbyte/source-avni",
+        "docker_image_tag": "0.1.0",
+        "documentation_url": "",
+    },
+}
+
+# finally set up the loggers
+setup_django_logger()
+setup_ddp_logger()
+setup_ab_logger()

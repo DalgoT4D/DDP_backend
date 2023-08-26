@@ -12,6 +12,7 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.10"]
+        redis-version: [6]
 
     steps:
       - uses: actions/checkout@v3
@@ -19,6 +20,10 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Start Redis
+        uses: supercharge/redis-github-action@1.5.0
+        with:
+          redis-version: ${{ matrix.redis-version }}
       - name: Create logs directory
         run: mkdir -p ddpui/logs
       - name: Install dependencies
@@ -30,23 +35,44 @@ jobs:
           mkdir -p ~/.ssh
           touch ~/.ssh/known_hosts
       - name: Add remote host key to known_hosts
-        run: ssh-keyscan 65.2.5.51 >> ~/.ssh/known_hosts
+        run: ssh-keyscan ${{ secrets.SERVERIP }} >> ~/.ssh/known_hosts
       - name: Set up port forwarding via SSH
         run: |
           eval `ssh-agent -s`
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh -L 8000:localhost:8000 ddp@65.2.5.51 -f -N
+          ssh -L 8080:localhost:8080 -L 5433:${{ secrets.DBHOST }}:5432 ${{ secrets.SERVER }} -f -N
       - name: Test with pytest
         env:
           AIRBYTE_SERVER_HOST: localhost
           AIRBYTE_SERVER_PORT: 8000
           AIRBYTE_SERVER_APIVER: v1
           AIRBYTE_API_TOKEN: ${{ secrets.AIRBYTE_API_TOKEN }}
-          DBHOST: ${{ secrets.DBHOST }}
+          DBHOST: localhost
+          DBPORT: 5433
           DBNAME: ${{ secrets.DBNAME }}
           DBUSER: ${{ secrets.DBUSER }}
+          DBPASSWORD: ${{ secrets.DBPASSWORD }}
+          PREFECT_PROXY_API_URL: http://localhost:8080
+          DEV_SECRETS_DIR: /tmp/
+          CLIENTDBT_ROOT: /tmp
         run: |
-          pip install pytest
-          pip install pytest-cov
-          pytest ddpui/tests/unit_integration_tests/test_airbyte_service_unit.py --doctest-modules --junitxml=junit/test-results.xml --cov=com --cov-report=xml --cov-report=html
-          python scripts/test-airbyte-api.py
+          coverage run -m pytest ddpui/tests/unit_integration_tests/test_airbyte_service.py ddpui/tests/unit_integration_tests/test_utils.py ddpui/tests/unit_tests/test_prefect_service.py ddpui/tests/helper/test_airbyte_unit_schemas.py ddpui/tests/helper/test_auth.py ddpui/tests/helper/test_dev_secretsmanager.py ddpui/tests/helper/test_secretsmanager.py ddpui/tests/helper/test_airbytehelpers.py ddpui/tests/api_tests/test_user_org_api.py ddpui/tests/api_tests/test_dbt_api.py
+          coverage report --fail-under=70
+          coverage xml
+      - name: Check coverage percentage
+        run: |
+          coverage_percentage=$(coverage report --show-missing | tail -n 1 | awk '{print $4}')
+          if (( $(echo "$coverage_percentage < 70" | bc -l) )); then
+            echo "Coverage percentage is below 70%"
+            exit 1
+          fi
+      - name: Upload coverage reports to codecov
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
+      - name: Deploy to EC2
+        run: |
+          eval `ssh-agent -s`
+          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
+          ssh ${{ secrets.SERVER }} "source ~/.nvm/nvm.sh; cd /home/ddp/DDP_backend; git pull; pm2 restart django-celery-worker django-backend"

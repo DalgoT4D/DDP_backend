@@ -1,5 +1,8 @@
 ## DDP_backend
 
+[![Code coverage badge](https://img.shields.io/codecov/c/github/DevDataPlatform/DDP_backend/main.svg)](https://codecov.io/gh/DevDataPlatform/DDP_backend/branch/main)
+[![DeepSource](https://app.deepsource.com/gh/DevDataPlatform/DDP_backend.svg/?label=active+issues&show_trend=true&token=H-ilF26v7GEjUlQa3hLfMhPy)](https://app.deepsource.com/gh/DevDataPlatform/DDP_backend/?ref=repository-badge)
+
 Django application for the DDP platform's management backend. Exposes API endpoints for the management frontend to communicate with, for the purposes of
 
 -   Onboarding an NGO client
@@ -22,6 +25,15 @@ Django application for the DDP platform's management backend. Exposes API endpoi
     -   PUT <mark>/api/users/:user_id</mark>
     -   DELETE <mark>/api/users/:user_id</mark>
 -   Route parameteres should be named in snake_case as shown above.
+
+### Ninja api docs
+
+-   [Dashboard](https://ddpapi.projecttech4dev.org/api/dashboard/docs)
+-   [Airbyte](https://ddpapi.projecttech4dev.org/api/airbyte/docs)
+-   [Flows](https://ddpapi.projecttech4dev.org/api/prefect/docs)
+-   [Dbt](https://ddpapi.projecttech4dev.org/api/dbt/docs)
+-   [Celery tasks](https://ddpapi.projecttech4dev.org/api/tasks/docs)
+-   [User & Org](https://ddpapi.projecttech4dev.org/api/docs)
 
 ### Code style
 
