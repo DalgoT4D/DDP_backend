@@ -474,6 +474,18 @@ class TestConnection:
         try:
             res = update_connection(workspace_id, connection_info, current_connection)
             UpdateConnectionTestResponse(**res)
+
+            # check if the streams have been set in the connection
+            conn = get_connection(workspace_id, res["connectionId"])
+            assert conn is not None
+            assert "syncCatalog" in conn
+            assert "streams" in conn["syncCatalog"]
+            assert len(conn["syncCatalog"]["streams"]) == len(connection_info.streams)
+
+            for stream in conn["syncCatalog"]["streams"]:
+                assert "config" in stream
+                assert stream["config"]["selected"] is True
+
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
 
