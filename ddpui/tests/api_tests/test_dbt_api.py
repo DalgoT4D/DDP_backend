@@ -297,7 +297,7 @@ def test_post_dbt_makedocs_no_target(orguser: OrgUser):
     "ddpui.api.client.dbt_api.Redis",
     mock_Redis=Mock(return_value=Mock(set=Mock(), expire=Mock())),
 )
-def test_post_dbt_makedocs_no_target(
+def test_post_dbt_makedocs(
     mock_Redis: Mock,
     mock_open: Mock,
     mock_create_single_html: Mock,
