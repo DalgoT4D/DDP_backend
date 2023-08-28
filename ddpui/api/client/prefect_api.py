@@ -65,8 +65,8 @@ def pydantic_validation_error_handler(
 
 @prefectapi.exception_handler(Exception)
 def ninja_default_error_handler(
-    request, exc: Exception
-):  # pylint: disable=unused-argument # skipcq PYL-W0613
+    request, exc: Exception  # skipcq PYL-W0613
+):  # pylint: disable=unused-argument
     """Handle any other exception raised in the apis"""
     return Response({"detail": "something went wrong"}, status=500)
 
