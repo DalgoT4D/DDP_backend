@@ -705,6 +705,7 @@ def create_connection(
         ):
             # set schema_cat['config']['syncMode']
             # from schema_cat['stream']['supportedSyncModes'] here
+            schema_cat["config"]["selected"] = True
             schema_cat["config"]["syncMode"] = selected_streams[stream_name]["syncMode"]
             schema_cat["config"]["destinationSyncMode"] = selected_streams[stream_name][
                 "destinationSyncMode"
