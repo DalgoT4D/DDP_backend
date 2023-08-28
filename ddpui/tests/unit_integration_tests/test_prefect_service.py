@@ -10,10 +10,11 @@ class TestAirbyteServer:
     def test_create_serverblock():
         """creates a server block"""
         TestAirbyteServer.BLOCK_NAME = "test-" + str(uuid4())
-        block_id = prefect_service.create_airbyte_server_block(
+        block_id, block_name = prefect_service.create_airbyte_server_block(
             TestAirbyteServer.BLOCK_NAME
         )
         assert block_id is not None
+        assert block_name is not None
         TestAirbyteServer.block_id = block_id
 
     @staticmethod
@@ -43,7 +44,7 @@ class TestAirbyteConnection:
         TestAirbyteConnection.server_block_id = (
             prefect_service.create_airbyte_server_block(
                 TestAirbyteConnection.server_block_name
-            )
+            )[0]
         )
 
     @staticmethod

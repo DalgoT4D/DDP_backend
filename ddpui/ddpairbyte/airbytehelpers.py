@@ -55,6 +55,8 @@ def upgrade_custom_sources(workspace_id: str) -> None:
                         f"{custom_source_info['docker_image_tag']} to "
                         f"{source_def['dockerImageTag']}"
                     )
+                    # instead we should update the existing sourceDef to use the new docker image
+                    #  /v1/source_definitions/update
                     add_custom_airbyte_connector(
                         workspace_id,
                         custom_source_info["name"],
