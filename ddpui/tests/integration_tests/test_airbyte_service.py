@@ -281,8 +281,8 @@ class TestAirbyteDestination:
         "port": 5432,
         "database": os.getenv("TESTING_AIRBYTE_DEST_CONFIG_DBNAME"),
         "username": os.getenv("TESTING_AIRBYTE_DEST_CONFIG_DBUSER"),
-        "password": os.getenv('TESTING_AIRBYTE_DEST_CONFIG_DBPASS'),
-        "schema": "staging"
+        "password": os.getenv("TESTING_AIRBYTE_DEST_CONFIG_DBPASS"),
+        "schema": "staging",
     }
 
     def test_a_create_destination(self, test_workspace_id):  # skipcq: PYL-R0201
@@ -427,6 +427,17 @@ class TestConnection:
             )
             CreateConnectionTestResponse(**res)
             TestConnection.connection_id = res["connectionId"]
+            # check if the streams have been set in the connection
+            conn = get_connection(workspace_id, res["connectionId"])
+            assert conn is not None
+            assert "syncCatalog" in conn
+            assert "streams" in conn["syncCatalog"]
+            assert len(conn["syncCatalog"]["streams"]) == len(connection_info.streams)
+
+            for stream in conn["syncCatalog"]["streams"]:
+                assert "config" in stream
+                assert stream["config"]["selected"] is True
+
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
 
