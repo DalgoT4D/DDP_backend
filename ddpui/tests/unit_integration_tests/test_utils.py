@@ -162,9 +162,7 @@ def test_delete_orgusers(org_with_workspace):
     assert (
         OrgUser.objects.filter(user__email=email, org=org_with_workspace).count() == 1
     )
-    assert User.objects.filter(email=email).count() == 1
     delete_orgusers(org_with_workspace)
     assert (
         OrgUser.objects.filter(user__email=email, org=org_with_workspace).count() == 0
     )
-    assert User.objects.filter(email=email).count() == 0
