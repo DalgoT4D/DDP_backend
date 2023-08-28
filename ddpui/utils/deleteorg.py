@@ -107,7 +107,7 @@ def delete_airbyte_workspace(org: Org):  # skipcq: PYL-R0201
 def delete_orgusers(org: Org):  # skipcq: PYL-R0201
     """delete all login users"""
     for orguser in OrgUser.objects.filter(org=org):
-        orguser.user.delete()
+        orguser.delete()
         # this deletes the orguser as well via CASCADE
 
 
