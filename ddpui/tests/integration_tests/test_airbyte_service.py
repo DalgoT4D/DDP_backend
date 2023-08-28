@@ -277,11 +277,12 @@ def test_source_id(test_workspace_id):
 
 class TestAirbyteDestination:
     destination_config = {
-        "host": os.getenv("DBHOST"),
+        "host": os.getenv("TESTING_AIRBYTE_DEST_CONFIG_DBHOST"),
         "port": 5432,
-        "database": os.getenv("DBNAME"),
-        "username": os.getenv("DBUSER"),
-        "schema": "staging",
+        "database": os.getenv("TESTING_AIRBYTE_DEST_CONFIG_DBNAME"),
+        "username": os.getenv("TESTING_AIRBYTE_DEST_CONFIG_DBUSER"),
+        "password": os.getenv('TESTING_AIRBYTE_DEST_CONFIG_DBPASS'),
+        "schema": "staging"
     }
 
     def test_a_create_destination(self, test_workspace_id):  # skipcq: PYL-R0201
