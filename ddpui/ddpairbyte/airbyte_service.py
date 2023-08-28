@@ -466,7 +466,7 @@ def get_destination(workspace_id: str, destination_id: str) -> dict:
 
 
 def delete_destination(
-    workspace_id: str, destination_id: str
+    workspace_id: str, destination_id: str  # skipcq PYL-W0613
 ) -> dict:  # pylint: disable=unused-argument
     """Fetch a destination in an airbyte workspace"""
     res = abreq("destinations/delete", {"destinationId": destination_id})
