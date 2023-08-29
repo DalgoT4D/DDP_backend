@@ -523,14 +523,10 @@ def get_airbyte_connections(request):
             org=orguser.org, connection_id=airbyte_conn["connectionId"]
         ).first()
 
-        # fetch the source and destination names
-        source_name = airbyte_service.get_source(
-            orguser.org.airbyte_workspace_id, airbyte_conn["sourceId"]
-        )["sourceName"]
+        # fetch the source and destination types
+        source_name = airbyte_conn["source"]["sourceName"]
 
-        destination_name = airbyte_service.get_destination(
-            orguser.org.airbyte_workspace_id, airbyte_conn["destinationId"]
-        )["destinationName"]
+        destination_name = airbyte_conn["destination"]["destinationName"]
 
         res.append(
             {
@@ -595,9 +591,9 @@ def get_airbyte_connection(request, connection_block_id):
     # fetch the source and destination names
     # the web_backend/connections/get fetches the source & destination objects also so we dont need to query again
 
-    source_name = airbyte_conn["source"]["name"]
+    source_name = airbyte_conn["source"]["sourceName"]
 
-    destination_name = airbyte_conn["destination"]["name"]
+    destination_name = airbyte_conn["destination"]["destinationName"]
 
     res = {
         "name": org_block.display_name,
