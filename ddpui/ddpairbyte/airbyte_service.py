@@ -584,7 +584,7 @@ def get_connection(workspace_id: str, connection_id: str) -> dict:
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
 
-    res = abreq("connections/get", {"connectionId": connection_id})
+    res = abreq("web_backend/connections/get", {"connectionId": connection_id})
     if "connectionId" not in res:
         error_message = f"Connection not found: {connection_id}"
         logger.error(error_message)
