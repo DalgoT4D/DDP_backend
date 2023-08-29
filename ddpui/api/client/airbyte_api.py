@@ -748,7 +748,7 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
         "destination": {
             "id": airbyte_conn["destinationId"],
         },
-        "catalogId": airbyte_conn["catalogId"],
+        "catalogId": airbyte_conn["sourceCatalogId"],
         "syncCatalog": airbyte_conn["syncCatalog"],
         "status": airbyte_conn["status"],
         "deployment_id": dataflow["deployment"]["id"],
