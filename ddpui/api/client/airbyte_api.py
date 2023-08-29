@@ -540,7 +540,7 @@ def get_airbyte_connections(request):
                     "id": airbyte_conn["destinationId"],
                     "name": destination_name,
                 },
-                "sourceCatalogId": airbyte_conn["sourceCatalogId"],
+                "catalogId": airbyte_conn["catalogId"],
                 "syncCatalog": airbyte_conn["syncCatalog"],
                 "status": airbyte_conn["status"],
                 "deploymentId": dataflow.deployment_id if dataflow else None,
