@@ -593,13 +593,11 @@ def get_airbyte_connection(request, connection_block_id):
     ).first()
 
     # fetch the source and destination names
-    source_name = airbyte_service.get_source(
-        orguser.org.airbyte_workspace_id, airbyte_conn["sourceId"]
-    )["sourceName"]
+    # the web_backend/connections/get fetches the source & destination objects also so we dont need to query again
 
-    destination_name = airbyte_service.get_destination(
-        orguser.org.airbyte_workspace_id, airbyte_conn["destinationId"]
-    )["destinationName"]
+    source_name = airbyte_conn["source"]["name"]
+
+    destination_name = airbyte_conn["destination"]["name"]
 
     res = {
         "name": org_block.display_name,
