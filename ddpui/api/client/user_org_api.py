@@ -346,7 +346,9 @@ def post_organization(request, payload: OrgSchema):
             org=org,
         )
 
-    return OrgSchema(name=org.name, airbyte_workspace_id=new_workspace.workspaceId)
+    return OrgSchema(
+        name=org.name, airbyte_workspace_id=new_workspace.workspaceId, slug=org.slug
+    )
 
 
 @user_org_api.post("/organizations/warehouse/", auth=auth.CanManagePipelines())
