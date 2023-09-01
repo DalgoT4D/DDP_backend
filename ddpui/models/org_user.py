@@ -12,6 +12,14 @@ from pydantic import SecretStr
 from ddpui.models.org import Org, OrgSchema
 
 
+class UserAttributes(models.Model):
+    """extensions to the django User object"""
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    email_verified = models.BooleanField(default=False)
+    can_create_orgs = models.BooleanField(default=False)
+
+
 class OrgUserRole(IntEnum):
     """an enum for roles assignable to org-users"""
 
