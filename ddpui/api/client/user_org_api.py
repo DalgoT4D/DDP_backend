@@ -333,7 +333,7 @@ def post_transfer_ownership(request, payload: OrgUserNewOwner):
 def post_organization(request, payload: OrgSchema):
     """creates a new org & new orguser (if required) and attaches it to the requestor"""
     userattributes = UserAttributes.objects.filter(user=request.orguser.user).first()
-    if userattributes and userattributes.can_create_orgs is False:
+    if userattributes is None or userattributes.can_create_orgs is False:
          raise HttpError(403, "Insufficient permissions for this operation")
 
     orguser: OrgUser = request.orguser
