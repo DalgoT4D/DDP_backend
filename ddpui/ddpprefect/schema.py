@@ -126,7 +126,7 @@ class PrefectAirbyteConnectionBlockSchema(Schema):
     connectionId: str
     source: dict
     destination: dict
-    sourceCatalogId: str
+    catalogId: str
     syncCatalog: dict
     status: str
     deploymentId: str = None
