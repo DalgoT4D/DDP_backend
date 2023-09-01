@@ -332,6 +332,10 @@ def post_transfer_ownership(request, payload: OrgUserNewOwner):
 @user_org_api.post("/organizations/", response=OrgSchema, auth=auth.AnyOrgUser())
 def post_organization(request, payload: OrgSchema):
     """creates a new org & new orguser (if required) and attaches it to the requestor"""
+    userattributes = UserAttributes.objects.filter(user=request.orguser.user).first()
+    if userattributes is None or userattributes.can_create_orgs is False:
+         raise HttpError(403, "Insufficient permissions for this operation")
+
     orguser: OrgUser = request.orguser
     org = Org.objects.filter(name__iexact=payload.name).first()
     if org:
