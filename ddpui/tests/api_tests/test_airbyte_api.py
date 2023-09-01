@@ -1081,9 +1081,14 @@ def test_get_airbyte_connections_without_workspace(org_without_workspace):
             "sourceId": "fake-source-id-1",
             "connectionId": "fake-connection-id-1",
             "destinationId": "fake-destination-id-1",
-            "sourceCatalogId": "fake-source-catalog-id-1",
+            "catalogId": "fake-source-catalog-id-1",
             "syncCatalog": "sync-catalog",
             "status": "conn-status",
+            "source": {"id": "fake-source-id-1", "sourceName": "fake-source-name-1"},
+            "destination": {
+                "id": "fake-destination-id-1",
+                "destinationName": "fake-destination-name-1",
+            },
         }
     ),
     get_source=Mock(return_value={"sourceName": "fake-source-name-1"}),
@@ -1099,7 +1104,7 @@ def test_get_airbyte_connections_without_workspace(org_without_workspace):
     ),
     get_last_flow_run_by_deployment_id=Mock(return_value="lastRun"),
 )
-def test_get_airbyte_connectionn_success(org_with_workspace):
+def test_get_airbyte_connections_success(org_with_workspace):
     mock_orguser = Mock()
     mock_orguser.org = org_with_workspace
 
@@ -1131,7 +1136,7 @@ def test_get_airbyte_connectionn_success(org_with_workspace):
     assert result[0]["source"]["name"] == "fake-source-name-1"
     assert result[0]["destination"]["id"] == "fake-destination-id-1"
     assert result[0]["destination"]["name"] == "fake-destination-name-1"
-    assert result[0]["sourceCatalogId"] == "fake-source-catalog-id-1"
+    assert result[0]["catalogId"] == "fake-source-catalog-id-1"
     assert result[0]["syncCatalog"] == "sync-catalog"
     assert result[0]["status"] == "conn-status"
     assert result[0]["deploymentId"] == "fake-deployment-id"
@@ -1159,10 +1164,15 @@ def test_get_airbyte_connection_without_workspace(org_without_workspace):
             "sourceId": "fake-source-id-1",
             "connectionId": "fake-connection-id-1",
             "destinationId": "fake-destination-id-1",
-            "sourceCatalogId": "fake-source-catalog-id-1",
+            "catalogId": "fake-source-catalog-id-1",
             "syncCatalog": "sync-catalog",
             "namespaceDefinition": "namespace-definition",
             "status": "conn-status",
+            "source": {"id": "fake-source-id-1", "sourceName": "fake-source-name-1"},
+            "destination": {
+                "id": "fake-destination-id-1",
+                "destinationName": "fake-destination-name-1",
+            },
         }
     ),
     get_source=Mock(return_value={"sourceName": "fake-source-name-1"}),
@@ -1210,7 +1220,7 @@ def test_get_airbyte_connection_success(org_with_workspace):
     assert result["source"]["name"] == "fake-source-name-1"
     assert result["destination"]["id"] == "fake-destination-id-1"
     assert result["destination"]["name"] == "fake-destination-name-1"
-    assert result["sourceCatalogId"] == "fake-source-catalog-id-1"
+    assert result["catalogId"] == "fake-source-catalog-id-1"
     assert result["syncCatalog"] == "sync-catalog"
     assert result["status"] == "conn-status"
     assert result["deploymentId"] == "fake-deployment-id"
@@ -1443,7 +1453,7 @@ def test_post_airbyte_connection_success(
     assert response["connectionId"] == "fake-connection-id"
     assert response["source"]["id"] == "fake-source-id"
     assert response["destination"]["id"] == "fake-destination-id"
-    assert response["sourceCatalogId"] == "fake-source-catalog-id"
+    assert response["catalogId"] == "fake-source-catalog-id"
     assert response["status"] == "running"
     assert response["deployment_id"] == "fake-deployment-id"
 
