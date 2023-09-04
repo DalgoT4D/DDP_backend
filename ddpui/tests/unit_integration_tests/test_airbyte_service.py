@@ -829,7 +829,9 @@ def test_get_destination_definition_specification_success():
         mock_response.status_code = 200
         mock_response.headers = {"Content-Type": "application/json"}
         mock_response.json.return_value = {
-            "connectionSpecification": "theConnectionSpecification"
+            "connectionSpecification": {
+                "title": "theTitle",
+            }
         }
         mock_post.return_value = mock_response
 
@@ -837,7 +839,42 @@ def test_get_destination_definition_specification_success():
             "workspace-id", "destinationdef_id"
         )
 
-        assert response["connectionSpecification"] == "theConnectionSpecification"
+        assert response["connectionSpecification"] == {
+            "title": "theTitle",
+        }
+
+
+def test_get_destination_definition_specification_success_postgres():
+    with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
+        mock_response = Mock(spec=requests.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"Content-Type": "application/json"}
+        mock_response.json.return_value = {
+            "connectionSpecification": {
+                "title": "Postgres Destination Spec",
+                "properties": {
+                    "ssl_mode": {"title": ""},
+                    "tunnel_method": {"title": ""},
+                },
+            }
+        }
+        mock_post.return_value = mock_response
+
+        response = get_destination_definition_specification(
+            "workspace-id", "destinationdef_id"
+        )
+
+        assert response["connectionSpecification"] == {
+            "title": "Postgres Destination Spec",
+            "properties": {
+                "ssl_mode": {
+                    "title": "SSL modes* (select 'disable' if you don't know)"
+                },
+                "tunnel_method": {
+                    "title": "SSH Tunnel Method* (select 'No Tunnel' if you don't know)"
+                },
+            },
+        }
 
 
 def test_get_destination_definition_specification_with_invalid_workspace():
