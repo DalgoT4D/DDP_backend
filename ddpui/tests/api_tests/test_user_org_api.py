@@ -503,12 +503,24 @@ def test_post_transfer_ownership_db_error(
 def test_post_organization_orgexists(orguserwithoutorg, org_without_workspace):
     """failing test, org name is already in use"""
     mock_request = Mock()
+    UserAttributes.objects.create(user=orguserwithoutorg.user, can_create_orgs=True)
     mock_request.orguser = orguserwithoutorg
 
     payload = OrgSchema(name=org_without_workspace.name)
     with pytest.raises(HttpError) as excinfo:
         post_organization(mock_request, payload)
     assert str(excinfo.value) == "client org with this name already exists"
+
+
+def test_post_organization_no_create_org(orguserwithoutorg, org_without_workspace):
+    """failing test, org name is already in use"""
+    mock_request = Mock()
+    mock_request.orguser = orguserwithoutorg
+
+    payload = OrgSchema(name=org_without_workspace.name)
+    with pytest.raises(HttpError) as excinfo:
+        post_organization(mock_request, payload)
+    assert str(excinfo.value) == "Insufficient permissions for this operation"
 
 
 @patch(
@@ -525,6 +537,7 @@ def test_post_organization(orguserwithoutorg):
     """success test for org creation"""
     mock_request = Mock()
     mock_request.orguser = orguserwithoutorg
+    UserAttributes.objects.create(user=orguserwithoutorg.user, can_create_orgs=True)
 
     payload = OrgSchema(name="newname")
     response = post_organization(mock_request, payload)
