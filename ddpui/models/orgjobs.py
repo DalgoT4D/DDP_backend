@@ -26,6 +26,24 @@ class OrgJobs(models.Model):
     updated_at = models.DateTimeField(auto_now_add=True)
 
 
+class BlockLock(models.Model):
+    """A locking implementation for OrgPrefectBlocks"""
+
+    block = models.ForeignKey(OrgPrefectBlock, on_delete=models.CASCADE, unique=True)
+    locked_at = models.DateTimeField(auto_now_add=True)
+    locked_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE)
+    flow_run_id = models.TextField(max_length=36, blank=True, default="")
+
+
+# submitting a deployment run
+# get blocknames from prefect-proxy/proxy/deployments/{deployment_id}
+# atomic { create BlockLock for each OrgPrefectBlock(block_name={block_name}) with empty flow_run_id }
+# if fail: return who locked which block when
+# if success: submit deployment for run, get flow-run-id
+# update the BlockLocks with the flow-run-id
+
+# when an OrgUser accesses a page
+
 # submitting a deployment run
 # - have orgdataflow entry already
 # - get flow run id
