@@ -284,7 +284,7 @@ def test_get_source_definitions_failure():
         with pytest.raises(HttpError) as excinfo:
             get_source_definitions("test")["sourceDefinitions"]
         assert excinfo.value.status_code == 404
-        assert str(excinfo.value) == f"Source definitions not found for workspace: test"
+        assert str(excinfo.value) == "Source definitions not found for workspace: test"
 
 
 def test_get_source_definitions_with_invalid_workspace_id():
