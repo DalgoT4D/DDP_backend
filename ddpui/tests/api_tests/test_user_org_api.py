@@ -40,6 +40,7 @@ from ddpui.models.org_user import (
     OrgUserNewOwner,
     InvitationSchema,
     Invitation,
+    UserAttributes,
     AcceptInvitationSchema,
     ForgotPasswordSchema,
     ResetPasswordSchema,
@@ -854,6 +855,7 @@ def test_post_organization_user_accept_invite(orguser):
         ).count()
         == 1
     )
+    assert UserAttributes.objects.filter(user__email="invited_email").exists()
 
 
 def test_post_organization_user_accept_invite_lowercase_email(orguser):

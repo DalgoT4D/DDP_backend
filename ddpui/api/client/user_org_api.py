@@ -30,6 +30,7 @@ from ddpui.models.org_user import (
     AcceptInvitationSchema,
     Invitation,
     InvitationSchema,
+    UserAttributes,
     OrgUser,
     OrgUserCreate,
     OrgUserNewOwner,
@@ -135,6 +136,7 @@ def post_organization_user(
     user = User.objects.create_user(
         username=email, email=email, password=payload.password
     )
+    UserAttributes.objects.create(user=user)
     orguser = OrgUser.objects.create(user=user, role=OrgUserRole.ACCOUNT_MANAGER)
     orguser.save()
     logger.info(
@@ -166,18 +168,30 @@ def post_login(request):
     if "token" in token.data:
         user = User.objects.filter(email=request_obj["username"]).first()
 
-        # check if all the orgusers for this user have email verified
-        email_verified = OrgUser.objects.filter(user=user, email_verified=True).exists()
-        if email_verified:
-            OrgUser.objects.filter(user=user, email_verified=False).update(
-                email_verified=True
-            )
+        userattributes = UserAttributes.objects.filter(user=user).first()
+        if userattributes is None:
+            userattributes = UserAttributes.objects.create(user=user)
+
+        email_verified = userattributes.email_verified
+        if email_verified is False:
+            # check if all the orgusers for this user have email verified
+            email_verified = OrgUser.objects.filter(
+                user=user, email_verified=True
+            ).exists()
+            if email_verified:
+                userattributes.email_verified = True
+                userattributes.save()
+                # to be removed soon
+                OrgUser.objects.filter(user=user, email_verified=False).update(
+                    email_verified=True
+                )
 
         return {
             "token": token.data["token"],
             "email": user.email,
-            "email_verified": email_verified,
+            "email_verified": userattributes.email_verified,
             "active": user.is_active,
+            "can_create_orgs": userattributes.can_create_orgs,
         }
 
     return token
@@ -318,6 +332,10 @@ def post_transfer_ownership(request, payload: OrgUserNewOwner):
 @user_org_api.post("/organizations/", response=OrgSchema, auth=auth.AnyOrgUser())
 def post_organization(request, payload: OrgSchema):
     """creates a new org & new orguser (if required) and attaches it to the requestor"""
+    userattributes = UserAttributes.objects.filter(user=request.orguser.user).first()
+    if userattributes is None or userattributes.can_create_orgs is False:
+         raise HttpError(403, "Insufficient permissions for this operation")
+
     orguser: OrgUser = request.orguser
     org = Org.objects.filter(name__iexact=payload.name).first()
     if org:
@@ -346,7 +364,9 @@ def post_organization(request, payload: OrgSchema):
             org=org,
         )
 
-    return OrgSchema(name=org.name, airbyte_workspace_id=new_workspace.workspaceId)
+    return OrgSchema(
+        name=org.name, airbyte_workspace_id=new_workspace.workspaceId, slug=org.slug
+    )
 
 
 @user_org_api.post("/organizations/warehouse/", auth=auth.CanManagePipelines())
@@ -590,6 +610,7 @@ def post_organization_user_accept_invite(
                 email=invitation.invited_email.lower().strip(),
                 password=payload.password,
             )
+            UserAttributes.objects.create(user=user, email_verified=True)
         orguser = OrgUser.objects.create(
             user=user, org=invitation.invited_by.org, role=invitation.invited_role
         )
@@ -761,5 +782,6 @@ def post_verify_email(
 
     # verify email for all the orgusers
     OrgUser.objects.filter(user_id=orguser.user.id).update(email_verified=True)
+    UserAttributes.objects.filter(user=orguser.user).update(email_verified=True)
 
     return {"success": 1}
