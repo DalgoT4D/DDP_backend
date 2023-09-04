@@ -432,10 +432,10 @@ def get_destination_definition_specification(
     if res["connectionSpecification"]["title"] == "Postgres Destination Spec":
         res["connectionSpecification"]["properties"]["ssl_mode"][
             "title"
-        ] = "SSL modes (select 'disable' if you don't know)"
+        ] = "SSL modes* (select 'disable' if you don't know)"
         res["connectionSpecification"]["properties"]["tunnel_method"][
             "title"
-        ] = "SSH Tunnel Method (select 'No Tunnel' if you don't know)"
+        ] = "SSH Tunnel Method* (select 'No Tunnel' if you don't know)"
     return res
 
 
