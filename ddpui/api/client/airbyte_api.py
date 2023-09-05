@@ -534,13 +534,8 @@ def get_airbyte_connections(request):
                 "blockName": prefect_block["name"],
                 "blockData": prefect_block["data"],
                 "connectionId": airbyte_conn["connectionId"],
-                # "source": {"id": airbyte_conn["sourceId"], "name": source_name},
                 "source": airbyte_conn["source"],
                 "destination": airbyte_conn["destination"],
-                # "destination": {
-                #     "id": airbyte_conn["destinationId"],
-                #     "name": destination_name,
-                # },
                 "catalogId": airbyte_conn["catalogId"],
                 "syncCatalog": airbyte_conn["syncCatalog"],
                 "status": airbyte_conn["status"],
