@@ -334,7 +334,7 @@ def post_organization(request, payload: OrgSchema):
     """creates a new org & new orguser (if required) and attaches it to the requestor"""
     userattributes = UserAttributes.objects.filter(user=request.orguser.user).first()
     if userattributes is None or userattributes.can_create_orgs is False:
-         raise HttpError(403, "Insufficient permissions for this operation")
+        raise HttpError(403, "Insufficient permissions for this operation")
 
     orguser: OrgUser = request.orguser
     org = Org.objects.filter(name__iexact=payload.name).first()
@@ -400,6 +400,7 @@ def post_organization_warehouse(request, payload: OrgWarehouseSchema):
 
     warehouse = OrgWarehouse(
         org=orguser.org,
+        name=payload.name,
         wtype=payload.wtype,
         credentials="",
         airbyte_destination_id=destination["destinationId"],
@@ -494,6 +495,7 @@ def get_organizations_warehouses(request):
         {
             "wtype": warehouse.wtype,
             # "credentials": warehouse.credentials,
+            "name": warehouse.name,
             "airbyte_destination": airbyte_service.get_destination(
                 orguser.org.airbyte_workspace_id, warehouse.airbyte_destination_id
             ),

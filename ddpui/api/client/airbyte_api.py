@@ -432,6 +432,10 @@ def put_airbyte_destination(
     logger.info("updated destination having id " + destination["destinationId"])
     warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
 
+    if warehouse.name != payload.name:
+        warehouse.name = payload.name
+        warehouse.save()
+
     dbt_credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
 
     if warehouse.wtype == "postgres":
@@ -523,11 +527,6 @@ def get_airbyte_connections(request):
             org=orguser.org, connection_id=airbyte_conn["connectionId"]
         ).first()
 
-        # fetch the source and destination types
-        source_name = airbyte_conn["source"]["sourceName"]
-
-        destination_name = airbyte_conn["destination"]["destinationName"]
-
         res.append(
             {
                 "name": org_block.display_name,
@@ -535,11 +534,8 @@ def get_airbyte_connections(request):
                 "blockName": prefect_block["name"],
                 "blockData": prefect_block["data"],
                 "connectionId": airbyte_conn["connectionId"],
-                "source": {"id": airbyte_conn["sourceId"], "name": source_name},
-                "destination": {
-                    "id": airbyte_conn["destinationId"],
-                    "name": destination_name,
-                },
+                "source": airbyte_conn["source"],
+                "destination": airbyte_conn["destination"],
                 "catalogId": airbyte_conn["catalogId"],
                 "syncCatalog": airbyte_conn["syncCatalog"],
                 "status": airbyte_conn["status"],
