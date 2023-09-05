@@ -17,6 +17,7 @@ from ddpui.ddpairbyte import airbyte_service
 
 from ddpui.ddpprefect import DBTCORE, SHELLOPERATION
 from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
+from ddpui.models.orgjobs import BlockLock
 from ddpui.models.org_user import OrgUser
 from ddpui.ddpprefect.schema import (
     PrefectAirbyteSync,
@@ -282,6 +283,13 @@ def post_prefect_dataflow_quick_run(request, deployment_id):
         raise HttpError(400, "register an organization first")
 
     try:
+        deployment = prefect_service.get_deployment(deployment_id)
+        logger.info(deployment)
+        block_names = deployment["parameters"].get("airbyte_blocks", []) + deployment[
+            "parameters"
+        ].get("dbt_blocks", [])
+        if BlockLock.objects.filter(block__block_name__in=block_names).exists():
+            raise HttpError(400, "Someone else is running a block from this pipeline")
         res = prefect_service.create_deployment_flow_run(deployment_id)
     except Exception as error:
         logger.exception(error)
