@@ -112,6 +112,7 @@ class OrgWarehouse(models.Model):
     """A data warehouse for an org. Typically we expect exactly one"""
 
     wtype = models.CharField(max_length=25)  # postgres, bigquery
+    name = models.CharField(max_length=25, default="", blank=True)
     credentials = models.CharField(max_length=200)
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     airbyte_destination_id = models.TextField(  # skipcq: PTC-W0901, PTC-W0906
@@ -131,5 +132,6 @@ class OrgWarehouseSchema(Schema):
     """payload to register an organization's data warehouse"""
 
     wtype: str
+    name: str
     destinationDefId: str
     airbyteConfig: dict

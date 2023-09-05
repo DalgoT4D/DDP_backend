@@ -557,7 +557,10 @@ def test_post_organization_warehouse_unknownwtype(orguser):
     mock_request = Mock()
     mock_request.orguser = orguser
     payload = OrgWarehouseSchema(
-        wtype="unknown", destinationDefId="destinationDefId", airbyteConfig={}
+        wtype="unknown",
+        name="warehousename",
+        destinationDefId="destinationDefId",
+        airbyteConfig={},
     )
 
     with pytest.raises(HttpError) as excinfo:
@@ -584,6 +587,7 @@ def test_post_organization_warehouse_bigquery(orguser):
     mock_request.orguser = orguser
     payload = OrgWarehouseSchema(
         wtype="bigquery",
+        name="bigquery",
         destinationDefId="destinationDefId",
         airbyteConfig={"credentials_json": "{}"},
     )
