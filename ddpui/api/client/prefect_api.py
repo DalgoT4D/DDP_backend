@@ -285,9 +285,9 @@ def post_prefect_dataflow_quick_run(request, deployment_id):
     try:
         deployment = prefect_service.get_deployment(deployment_id)
         logger.info(deployment)
-        block_names = deployment["parameters"].get("airbyte_blocks", []) + deployment[
-            "parameters"
-        ].get("dbt_blocks", [])
+        blocks = deployment["parameters"].get("airbyte_blocks", [])
+        blocks += deployment["parameters"].get("dbt_blocks", [])
+        block_names = [x["blockName"] for x in blocks]
         if BlockLock.objects.filter(block__block_name__in=block_names).exists():
             raise HttpError(400, "Someone else is running a block from this pipeline")
         res = prefect_service.create_deployment_flow_run(deployment_id)
