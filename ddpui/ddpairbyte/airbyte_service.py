@@ -710,13 +710,20 @@ def create_connection(
             stream_name in selected_streams
             and selected_streams[stream_name]["selected"]
         ):
-            # set schema_cat['config']['syncMode']
-            # from schema_cat['stream']['supportedSyncModes'] here
             schema_cat["config"]["selected"] = True
             schema_cat["config"]["syncMode"] = selected_streams[stream_name]["syncMode"]
             schema_cat["config"]["destinationSyncMode"] = selected_streams[stream_name][
                 "destinationSyncMode"
             ]
+            # update the cursorField when the mode is incremental
+            # weirdhly the cursor field is an array of single element eg ["created_on"] or []
+            if schema_cat["config"]["syncMode"] == "incremental":
+                schema_cat["config"]["cursorField"] = [
+                    selected_streams[stream_name]["cursorField"]
+                ]
+            else:
+                schema_cat["config"]["cursorField"] = []
+
             payload["syncCatalog"]["streams"].append(schema_cat)
 
     res = abreq("connections/create", payload)
@@ -769,6 +776,14 @@ def update_connection(
             schema_cat["config"]["destinationSyncMode"] = selected_streams[stream_name][
                 "destinationSyncMode"
             ]
+            # update the cursorField when the mode is incremental
+            # weirdhly the cursor field is an array of single element eg ["created_on"] or []
+            if schema_cat["config"]["syncMode"] == "incremental":
+                schema_cat["config"]["cursorField"] = [
+                    selected_streams[stream_name]["cursorField"]
+                ]
+            else:
+                schema_cat["config"]["cursorField"] = []
             current_connection["syncCatalog"]["streams"].append(schema_cat)
 
     res = abreq("connections/update", current_connection)
