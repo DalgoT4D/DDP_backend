@@ -35,22 +35,17 @@ def get_message_type(message_object: dict) -> str | None:
     return None
 
 
-def get_flow_run_id_from_logs(message: str) -> str | None:
-    """uses regex matching to try to get a flow-run id"""
-    match = re.search("Flow run ID: (.*)", message)
+def get_flowrun_id_and_state(message: str) -> tuple:
+    """Flow run {flow_run_name} with id {flow_run_id} entered state {flow_run_state_name}"""
+    match = re.search(
+        "Flow run ([a-zA-Z0-9-]+) with id ([a-zA-Z0-9-]+) entered state ([a-zA-Z0-9]+)",
+        message,
+    )
     if match:
-        flow_run_id = match.groups()[0]
-        return flow_run_id
-    return None
-
-
-def get_state_message_from_logs(message: str) -> str | None:
-    """uses regex matching to try to get a flow-run id"""
-    match = re.search("State message: (.*)", message)
-    if match:
-        state_message = match.groups()[0]
-        return state_message
-    return None
+        flow_run_id = match.groups()[1]
+        state_message = match.groups()[2]
+        return flow_run_id, state_message
+    return None, None
 
 
 def get_org_from_flow_run(flow_run: dict) -> Org | None:
@@ -154,23 +149,31 @@ def post_notification(request):  # pylint: disable=unused-argument
             flow_run_id = message_object["id"]
 
     else:
-        # <empty line>
-        # Flow run return-dbt-test-failed/lush-elephant entered state `DBT_TEST_FAILED` at 2023-08-26T08:09:20.159919+00:00.
-        # <empty line>
-        # Flow ID: c7266896-10b0-4c65-a503-dce17d4de807
-        # Flow run ID: acad1e73-4d23-4d38-9a1a-4ce36631971f
-        # Flow run URL: http://127.0.0.1:4200/flow-runs/flow-run/acad1e73-4d23-4d38-9a1a-4ce36631971f
-        # State message: WARNING: test failed
-
-        flow_run_id = get_flow_run_id_from_logs(message)
+        # 'Flow run {flow_run_name} with id {flow_run_id} entered state {flow_run_state_name}'
+        flow_run_id, state = get_flowrun_id_and_state(message)
 
     if flow_run_id:
-        logger.info("found flow-run id %s, retrieving flow-run", flow_run_id)
-        state = get_state_message_from_logs(message)
-        if state in ["WARNING: test failed", "All states completed."]:
+        logger.info("found flow-run id %s, state %s", flow_run_id, state)
+        if state in ["Cancelled", "Completed", "Failed", "Crashed"]:
             BlockLock.objects.filter(flow_run_id=flow_run_id).delete()
         # flow_run = prefect_service.get_flow_run(flow_run_id)
         # logger.info(flow_run)
         # org = get_org_from_flow_run(flow_run)
 
     return {"status": "ok"}
+
+
+# setting up the notification and customizing the message format
+#
+# 1. create the custom-webhook notification. not the notification block! just the notification,
+#    from http://127.0.0.1:4200/notifications
+#    parameters:
+#      - url = http://localhost:8002/webhooks/notification/
+#      - custom headers = {"X-Notification-Key": "<PREFECT_NOTIFICATIONS_WEBHOOK_KEY>"}
+#      - json body = {"body": "{{body}}"}
+# 2. requests.post('http://localhost:4200/api/flow_run_notification_policies/filter', json={}).json()
+# 3. find the flor-run-notification-policy for the new notification in this list
+# 4. save it in frnp = '<the id>'
+# 5. requests.patch(f'http://localhost:4200/api/flow_run_notification_policies/{frnp}', json={
+#      'message_template': 'Flow run {flow_run_name} with id {flow_run_id} entered state {flow_run_state_name}'
+#    })

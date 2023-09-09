@@ -13,8 +13,7 @@ django.setup()
 from ddpui.api.client.webhook_api import (
     FLOW_RUN,
     get_message_type,
-    get_flow_run_id_from_logs,
-    get_state_message_from_logs,
+    get_flowrun_id_and_state,
     get_org_from_flow_run,
     generate_notification_email,
     email_orgusers,
@@ -38,28 +37,11 @@ def test_get_message_type():
     assert get_message_type({"state": {"state_details": {}}, "id": "THEID"}) is None
 
 
-def test_get_flow_run_id_from_logs():
-    """tests the get_flow_run_id_from_logs function"""
-    assert get_flow_run_id_from_logs("Flow run ID: FR-ID") == "FR-ID"
-    assert get_flow_run_id_from_logs("hellooooo\nFlow run ID: FR-ID") == "FR-ID"
-    assert (
-        get_flow_run_id_from_logs("hellooooo\nFlow run ID: FR-ID\ngoodbye") == "FR-ID"
-    )
-
-
-def test_get_state_message_from_logs():
-    """tests the get_state_message_from_logs function"""
-    assert (
-        get_state_message_from_logs("State message: state-message") == "state-message"
-    )
-    assert (
-        get_state_message_from_logs("hellooooo\nState message: state-message")
-        == "state-message"
-    )
-    assert (
-        get_state_message_from_logs("hellooooo\nState message: state-message\ngoodbye")
-        == "state-message"
-    )
+def test_get_flowrun_id_and_state():
+    """tests the get_flowrun_id_and_state function"""
+    assert get_flowrun_id_and_state(
+        "Flow run glossy-bittern with id 3b55ee18-7511-4ede-abba-ad866ebf982c entered state Running"
+    ) == ("3b55ee18-7511-4ede-abba-ad866ebf982c", "Running")
 
 
 def test_get_org_from_flow_run_by_blockname():
