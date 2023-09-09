@@ -11,9 +11,15 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
 from ddpui.api.client.webhook_api import (
-    post_notification,
+    FLOW_RUN,
+    get_message_type,
+    get_flow_run_id_from_logs,
+    get_state_message_from_logs,
     get_org_from_flow_run,
     generate_notification_email,
+    email_orgusers,
+    email_flowrun_logs_to_orgusers,
+    post_notification,
 )
 from ddpui.models.org import Org, OrgPrefectBlock
 from ddpui.models.org_user import OrgUser, User, OrgUserRole
@@ -21,44 +27,39 @@ from ddpui.models.org_user import OrgUser, User, OrgUserRole
 pytestmark = pytest.mark.django_db
 
 
-def test_post_notification_unauthorized():
-    """tests the api endpoint /notifications/"""
-    request = Mock()
-    request.headers = {}
-    os.environ["X-Notification-Key"] = ""
-    with pytest.raises(HttpError) as excinfo:
-        post_notification(request)
-    assert str(excinfo.value) == "unauthorized"
-
-
-def test_post_notification():
-    """tests the api endpoint /notifications/"""
-    request = Mock()
-    body = """this is a message
-    and another
-    Flow run ID: test-flow-run-id
-    more text
-    """
-    request.body = json.dumps({"body": body})
-    request.headers = {
-        "X-Notification-Key": os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY")
-    }
-    blockid = str(uuid4())
-    flow_run = {"parameters": {"airbyte_connection": {"_block_document_id": blockid}}}
-    org = Org.objects.create(name="temp", slug="temp")
-    OrgPrefectBlock.objects.create(
-        org=org, block_name="tempblockname", block_type="fake-type", block_id=blockid
+def test_get_message_type():
+    """tests the get_message_type function"""
+    assert (
+        get_message_type(
+            {"state": {"state_details": {"flow_run_id": "THEID"}}, "id": "THEID"}
+        )
+        == FLOW_RUN
     )
-    with patch("ddpui.ddpprefect.prefect_service.get_flow_run") as mock_get_flow_run:
-        mock_get_flow_run.return_value = flow_run
-        with patch(
-            "ddpui.ddpprefect.prefect_service.get_flow_run_logs"
-        ) as mock_get_flow_run_logs:
-            mock_get_flow_run_logs.return_value = {"logs": []}
-            user = User.objects.create(email="email", username="username")
-            OrgUser.objects.create(org=org, user=user, role=OrgUserRole.ACCOUNT_MANAGER)
-            response = post_notification(request)
-            assert response["status"] == "ok"
+    assert get_message_type({"state": {"state_details": {}}, "id": "THEID"}) is None
+
+
+def test_get_flow_run_id_from_logs():
+    """tests the get_flow_run_id_from_logs function"""
+    assert get_flow_run_id_from_logs("Flow run ID: FR-ID") == "FR-ID"
+    assert get_flow_run_id_from_logs("hellooooo\nFlow run ID: FR-ID") == "FR-ID"
+    assert (
+        get_flow_run_id_from_logs("hellooooo\nFlow run ID: FR-ID\ngoodbye") == "FR-ID"
+    )
+
+
+def test_get_state_message_from_logs():
+    """tests the get_state_message_from_logs function"""
+    assert (
+        get_state_message_from_logs("State message: state-message") == "state-message"
+    )
+    assert (
+        get_state_message_from_logs("hellooooo\nState message: state-message")
+        == "state-message"
+    )
+    assert (
+        get_state_message_from_logs("hellooooo\nState message: state-message\ngoodbye")
+        == "state-message"
+    )
 
 
 def test_get_org_from_flow_run_by_blockname():
@@ -118,3 +119,95 @@ def test_generate_notification_email():
     assert response.find("flow-run-id") > -1
     assert response.find("log-message-1") > -1
     assert response.find("log-message-2") > -1
+
+
+def test_email_orgusers():
+    """tests the email_orgusers function"""
+    org = Org.objects.create(name="temp", slug="temp")
+    user = User.objects.create(username="username", email="useremail")
+    OrgUser.objects.create(org=org, role=OrgUserRole.ACCOUNT_MANAGER, user=user)
+    with patch(
+        "ddpui.api.client.webhook_api.send_text_message"
+    ) as mock_send_text_message:
+        email_orgusers(org, "hello")
+        mock_send_text_message.assert_called_once_with(
+            "useremail", "Prefect notification", "hello"
+        )
+
+
+def test_email_orgusers_not_to_report_viewers():
+    """tests the email_orgusers function"""
+    org = Org.objects.create(name="temp", slug="temp")
+    user = User.objects.create(username="username", email="useremail")
+    OrgUser.objects.create(org=org, role=OrgUserRole.REPORT_VIEWER, user=user)
+    with patch(
+        "ddpui.api.client.webhook_api.send_text_message"
+    ) as mock_send_text_message:
+        email_orgusers(org, "hello")
+        mock_send_text_message.assert_not_called()
+
+
+def test_email_flowrun_logs_to_orgusers():
+    """tests the email_flowrun_logs_to_orgusers function"""
+    org = Org.objects.create(name="temp", slug="temp")
+    with patch(
+        "ddpui.ddpprefect.prefect_service.get_flow_run_logs"
+    ) as mock_get_flow_run_logs:
+        mock_get_flow_run_logs.return_value = {
+            "logs": [
+                {
+                    "message": "log-message-1",
+                },
+                {
+                    "message": "log-message-2",
+                },
+            ]
+        }
+        with patch(
+            "ddpui.api.client.webhook_api.email_orgusers"
+        ) as mock_email_orgusers:
+            email_flowrun_logs_to_orgusers(org, "flow-run-id")
+            mock_email_orgusers.assert_called_once_with(
+                org,
+                "\nTo the admins of temp,\n\nThis is an automated notification from Prefect\n\nFlow run id: flow-run-id\nLogs:\nlog-message-1\nlog-message-2",
+            )
+
+
+def test_post_notification_unauthorized():
+    """tests the api endpoint /notifications/"""
+    request = Mock()
+    request.headers = {}
+    os.environ["X-Notification-Key"] = ""
+    with pytest.raises(HttpError) as excinfo:
+        post_notification(request)
+    assert str(excinfo.value) == "unauthorized"
+
+
+def test_post_notification():
+    """tests the api endpoint /notifications/"""
+    request = Mock()
+    body = """this is a message
+    and another
+    Flow run ID: test-flow-run-id
+    more text
+    """
+    request.body = json.dumps({"body": body})
+    request.headers = {
+        "X-Notification-Key": os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY")
+    }
+    blockid = str(uuid4())
+    flow_run = {"parameters": {"airbyte_connection": {"_block_document_id": blockid}}}
+    org = Org.objects.create(name="temp", slug="temp")
+    OrgPrefectBlock.objects.create(
+        org=org, block_name="tempblockname", block_type="fake-type", block_id=blockid
+    )
+    with patch("ddpui.ddpprefect.prefect_service.get_flow_run") as mock_get_flow_run:
+        mock_get_flow_run.return_value = flow_run
+        with patch(
+            "ddpui.ddpprefect.prefect_service.get_flow_run_logs"
+        ) as mock_get_flow_run_logs:
+            mock_get_flow_run_logs.return_value = {"logs": []}
+            user = User.objects.create(email="email", username="username")
+            OrgUser.objects.create(org=org, user=user, role=OrgUserRole.ACCOUNT_MANAGER)
+            response = post_notification(request)
+            assert response["status"] == "ok"
