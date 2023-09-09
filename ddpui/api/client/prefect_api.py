@@ -10,6 +10,7 @@ from ninja.errors import ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from django.utils.text import slugify
+from django.db import transaction
 
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
@@ -17,7 +18,7 @@ from ddpui.ddpairbyte import airbyte_service
 
 from ddpui.ddpprefect import DBTCORE, SHELLOPERATION
 from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
-from ddpui.models.orgjobs import BlockLock
+from ddpui.models.orgjobs import BlockLock, DataflowBlock
 from ddpui.models.org_user import OrgUser
 from ddpui.ddpprefect.schema import (
     PrefectAirbyteSync,
@@ -31,6 +32,7 @@ from ddpui.ddpprefect.schema import (
     PrefectSecretBlockCreate,
 )
 
+from ddpui.utils.deploymentblocks import write_dataflowblocks
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
@@ -141,6 +143,8 @@ def post_prefect_dataflow(request, payload: PrefectDataFlowCreateSchema):
         deployment_id=res["deployment"]["id"],
         cron=payload.cron,
     )
+
+    write_dataflowblocks(org_data_flow)
 
     return {
         "deploymentId": org_data_flow.deployment_id,
@@ -282,18 +286,42 @@ def post_prefect_dataflow_quick_run(request, deployment_id):
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
 
+    dataflow_blocks = DataflowBlock.objects.filter(
+        dataflow__deployment_id=deployment_id
+    )
+
+    block_names = [
+        x["opb__block_name"] for x in dataflow_blocks.values("opb__block_name")
+    ]
+    lock = BlockLock.objects.filter(opb__block_name__in=block_names).first()
+    if lock:
+        raise HttpError(
+            400, f"{lock.locked_by.user.email} is running this pipeline right now"
+        )
+
     try:
-        deployment = prefect_service.get_deployment(deployment_id)
-        logger.info(deployment)
-        blocks = deployment["parameters"].get("airbyte_blocks", [])
-        blocks += deployment["parameters"].get("dbt_blocks", [])
-        block_names = [x["blockName"] for x in blocks]
-        if BlockLock.objects.filter(block__block_name__in=block_names).exists():
-            raise HttpError(400, "Someone else is running a block from this pipeline")
+        with transaction.atomic():
+            locks = []
+            for df_block in dataflow_blocks:
+                blocklock = BlockLock.objects.create(
+                    opb=df_block.opb, locked_by=orguser
+                )
+                locks.append(blocklock)
+    except Exception:
+        return HttpError(
+            400, "Someone else is trying to run this pipeline... try again"
+        )
+
+    try:
         res = prefect_service.create_deployment_flow_run(deployment_id)
     except Exception as error:
         logger.exception(error)
         raise HttpError(400, "failed to start a run") from error
+
+    for blocklock in locks:
+        blocklock.flow_run_id = res["flow_run_id"]
+        blocklock.save()
+
     return res
 
 
