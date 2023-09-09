@@ -1,7 +1,7 @@
 import os
 import shutil
 from ddpui.models.org_user import Org
-from ddpui.models.org import OrgPrefectBlock, OrgDbt
+from ddpui.models.org import OrgPrefectBlock
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpprefect import DBTCORE
 from ddpui.utils import secretsmanager
@@ -22,6 +22,3 @@ def delete_dbt_workspace(org: Org):
         dbtblock.delete()
 
     secretsmanager.delete_github_token(org)
-
-    for orgdbt in OrgDbt.objects.filter(org=org):
-        orgdbt.delete()
