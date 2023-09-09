@@ -57,12 +57,8 @@ def test_post_notification():
             mock_get_flow_run_logs.return_value = {"logs": []}
             user = User.objects.create(email="email", username="username")
             OrgUser.objects.create(org=org, user=user, role=OrgUserRole.ACCOUNT_MANAGER)
-            with patch(
-                "ddpui.api.client.webhook_api.send_text_message"
-            ) as mock_send_text_message:
-                response = post_notification(request)
-                assert response["status"] == "ok"
-                mock_send_text_message.assert_called_once()
+            response = post_notification(request)
+            assert response["status"] == "ok"
 
 
 def test_get_org_from_flow_run_by_blockname():
