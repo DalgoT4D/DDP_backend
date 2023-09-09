@@ -136,3 +136,5 @@ celeryworker.pid
 
 secrets/
 data/
+
+celerybeat-schedule.db
