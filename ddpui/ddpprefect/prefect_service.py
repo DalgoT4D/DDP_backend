@@ -451,7 +451,6 @@ def get_flow_run(flow_run_id: str) -> dict:
 def create_deployment_flow_run(deployment_id: str) -> dict:  # pragma: no cover
     """
     Proxy call to create a flow run for deployment.
-    This is like a quick check to see if deployment is running
     """
     res = prefect_post(f"deployments/{deployment_id}/flow_run", {})
     return res
