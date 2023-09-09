@@ -25,7 +25,7 @@ class Command(BaseCommand):
         """Docstring"""
         if options["org_name"] == "ALL":
             for org in Org.objects.all():
-                self.delete_one_org(org, options["yes_really"])
+                delete_one_org(org, options["yes_really"])
         else:
             org = Org.objects.filter(name=options["org_name"]).first()
             if org is None:
