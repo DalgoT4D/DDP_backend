@@ -116,7 +116,7 @@ def email_orgusers(org: Org, email_body: str):
         ],
     ):
         logger.info(f"sending prefect-notification email to {orguser.user.email}")
-        send_text_message(orguser.user.email, "Prefect notificatdion", email_body)
+        send_text_message(orguser.user.email, "Prefect notification", email_body)
 
 
 def email_flowrun_logs_to_orgusers(org: Org, flow_run_id: str):
