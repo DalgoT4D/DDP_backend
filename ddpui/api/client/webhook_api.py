@@ -167,7 +167,7 @@ def post_notification(request):  # pylint: disable=unused-argument
     if flow_run_id:
         logger.info("found flow-run id %s, retrieving flow-run", flow_run_id)
         state = get_state_message_from_logs(message)
-        if state in ["WARNING: test failed"]:
+        if state in ["WARNING: test failed", "All states completed."]:
             BlockLock.objects.filter(flow_run_id=flow_run_id).delete()
         # flow_run = prefect_service.get_flow_run(flow_run_id)
         # logger.info(flow_run)
