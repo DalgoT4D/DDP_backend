@@ -1,6 +1,6 @@
 from django.db import models
 
-from ddpui.models.org import Org, OrgPrefectBlock, OrgDataFlow
+from ddpui.models.org import OrgPrefectBlock, OrgDataFlow
 from ddpui.models.org_user import OrgUser
 
 
