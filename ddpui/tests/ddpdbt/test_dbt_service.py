@@ -34,16 +34,16 @@ def test_delete_dbt_workspace():
 
     assert OrgPrefectBlock.objects.filter(block_id="block-id").count() == 1
 
-    with patch("ddpui.ddpdbt.dbt_service.os.path.exists") as mock_exists:
-        with patch("ddpui.ddpdbt.dbt_service.shutil.rmtree") as mock_rmtree:
-            with patch(
-                "ddpui.ddpdbt.dbt_service.prefect_service.delete_dbt_core_block"
-            ) as mock_delete_dbt_core_block:
-                mock_exists.return_value = True
-                delete_dbt_workspace(org)
-                mock_exists.assert_called_once_with("project-dir")
-                mock_rmtree.assert_called_once_with("project-dir")
-                mock_delete_dbt_core_block.assert_called_once_with("block-id")
+    with patch("ddpui.ddpdbt.dbt_service.os.path.exists") as mock_exists, patch(
+        "ddpui.ddpdbt.dbt_service.shutil.rmtree"
+    ) as mock_rmtree, patch(
+        "ddpui.ddpdbt.dbt_service.prefect_service.delete_dbt_core_block"
+    ) as mock_delete_dbt_core_block:
+        mock_exists.return_value = True
+        delete_dbt_workspace(org)
+        mock_exists.assert_called_once_with("project-dir")
+        mock_rmtree.assert_called_once_with("project-dir")
+        mock_delete_dbt_core_block.assert_called_once_with("block-id")
 
     assert org.dbt is None
     assert OrgDbt.objects.filter(gitrepo_url="gitrepo_url").count() == 0
