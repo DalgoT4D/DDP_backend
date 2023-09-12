@@ -292,6 +292,7 @@ def post_prefect_dataflow_quick_run(request, deployment_id):
     except Exception as error:
         logger.exception(error)
         for blocklock in locks:
+            logger.info("deleting BlockLock %s", blocklock.opb.block_name)
             blocklock.delete()
         raise HttpError(400, "failed to start a run") from error
 
@@ -355,10 +356,10 @@ def post_prefect_dbt_core_run_flow(
     orguser: OrgUser = request.orguser
 
     orgprefectblock = OrgPrefectBlock.objects.filter(
-        org=orguser.org, block_name=payload["blockName"]
+        org=orguser.org, block_name=payload.blockName
     ).first()
     if orgprefectblock is None:
-        logger.error("block name %s not found", payload["blockName"])
+        logger.error("block name %s not found", payload.blockName)
         raise HttpError(400, "block name not found")
 
     blocklock = BlockLock.objects.filter(opb=orgprefectblock).first()
@@ -392,7 +393,7 @@ def post_prefect_dbt_core_run_flow(
         raise HttpError(400, "failed to run dbt") from error
 
     blocklock.delete()
-    logger.info("released lock on block %s", payload["blockName"])
+    logger.info("released lock on block %s", payload.blockName)
     return result
 
 
@@ -569,12 +570,13 @@ def post_prefect_dbt_core_block(request):
             if existing_dataflow:
                 existing_dataflow.delete()
 
-            OrgDataFlow.objects.create(
+            manual_run_dataflow = OrgDataFlow.objects.create(
                 org=orguser.org,
                 name=f"manual-run-{block_name}",
                 deployment_name=dataflow["deployment"]["name"],
                 deployment_id=dataflow["deployment"]["id"],
             )
+            write_dataflowblocks(manual_run_dataflow)
 
         coreprefectblock.save()
         block_names.append(block_name)
