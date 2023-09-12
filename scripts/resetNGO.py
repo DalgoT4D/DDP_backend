@@ -65,7 +65,7 @@ with open(args.file, "r", encoding="utf-8") as json_file:
 if args.port:
     ngoClient = TestClient(args.port)
 else:
-    ngoClient = TestClient("443", host="ddpapi.projecttech4dev.org")
+    ngoClient = TestClient("443", host="staging-api.dalgo.in")
 
 try:
     ngoClient.login(args.email, args.password)
@@ -81,7 +81,7 @@ except Exception:
     )
     ngoClient.login(args.email, args.password)
 
-currentuser = ngoClient.clientget("currentuser")
+currentuser = ngoClient.clientget("currentuserv2")
 if currentuser.get("org") is None:
     # create org
     try:

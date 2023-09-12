@@ -3,6 +3,7 @@ import requests
 
 from ninja.errors import HttpError
 from dotenv import load_dotenv
+from django.db import transaction
 from ddpui.ddpprefect.schema import (
     PrefectDbtCoreSetup,
     PrefectShellSetup,
@@ -14,6 +15,8 @@ from ddpui.ddpprefect.schema import (
     PrefectSecretBlockCreate,
 )
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.models.orgjobs import BlockLock, DataflowBlock
+from ddpui.models.org_user import OrgUser
 
 load_dotenv()
 
@@ -451,7 +454,37 @@ def get_flow_run(flow_run_id: str) -> dict:
 def create_deployment_flow_run(deployment_id: str) -> dict:  # pragma: no cover
     """
     Proxy call to create a flow run for deployment.
-    This is like a quick check to see if deployment is running
     """
     res = prefect_post(f"deployments/{deployment_id}/flow_run", {})
     return res
+
+
+def lock_blocks_for_deployment(deployment_id: str, orguser: OrgUser):
+    """locks all orgprefectblocks for a deployment"""
+    dataflow_blocks = DataflowBlock.objects.filter(
+        dataflow__deployment_id=deployment_id
+    )
+
+    block_names = [
+        x["opb__block_name"] for x in dataflow_blocks.values("opb__block_name")
+    ]
+    lock = BlockLock.objects.filter(opb__block_name__in=block_names).first()
+    if lock:
+        logger.info(f"{lock.locked_by.user.email} is running this pipeline right now")
+        raise HttpError(
+            400, f"{lock.locked_by.user.email} is running this pipeline right now"
+        )
+
+    locks = []
+    try:
+        with transaction.atomic():
+            for df_block in dataflow_blocks:
+                blocklock = BlockLock.objects.create(
+                    opb=df_block.opb, locked_by=orguser
+                )
+                locks.append(blocklock)
+    except Exception as error:
+        raise HttpError(
+            400, "Someone else is trying to run this pipeline... try again"
+        ) from error
+    return locks

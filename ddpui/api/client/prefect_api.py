@@ -17,6 +17,7 @@ from ddpui.ddpairbyte import airbyte_service
 
 from ddpui.ddpprefect import DBTCORE, SHELLOPERATION
 from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
+from ddpui.models.orgjobs import BlockLock
 from ddpui.models.org_user import OrgUser
 from ddpui.ddpprefect.schema import (
     PrefectAirbyteSync,
@@ -30,6 +31,7 @@ from ddpui.ddpprefect.schema import (
     PrefectSecretBlockCreate,
 )
 
+from ddpui.utils.deploymentblocks import write_dataflowblocks
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
@@ -140,6 +142,8 @@ def post_prefect_dataflow(request, payload: PrefectDataFlowCreateSchema):
         deployment_id=res["deployment"]["id"],
         cron=payload.cron,
     )
+
+    write_dataflowblocks(org_data_flow)
 
     return {
         "deploymentId": org_data_flow.deployment_id,
@@ -281,11 +285,21 @@ def post_prefect_dataflow_quick_run(request, deployment_id):
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
 
+    locks = prefect_service.lock_blocks_for_deployment(deployment_id, orguser)
+
     try:
         res = prefect_service.create_deployment_flow_run(deployment_id)
     except Exception as error:
         logger.exception(error)
+        for blocklock in locks:
+            logger.info("deleting BlockLock %s", blocklock.opb.block_name)
+            blocklock.delete()
         raise HttpError(400, "failed to start a run") from error
+
+    for blocklock in locks:
+        blocklock.flow_run_id = res["flow_run_id"]
+        blocklock.save()
+
     return res
 
 
@@ -341,6 +355,24 @@ def post_prefect_dbt_core_run_flow(
     """Run dbt flow in prefect"""
     orguser: OrgUser = request.orguser
 
+    orgprefectblock = OrgPrefectBlock.objects.filter(
+        org=orguser.org, block_name=payload.blockName
+    ).first()
+    if orgprefectblock is None:
+        logger.error("block name %s not found", payload.blockName)
+        raise HttpError(400, "block name not found")
+
+    blocklock = BlockLock.objects.filter(opb=orgprefectblock).first()
+    if blocklock:
+        raise HttpError(
+            400, f"{blocklock.locked_by.user.email} is running this operation"
+        )
+
+    try:
+        blocklock = BlockLock.objects.create(opb=orgprefectblock, locked_by=orguser)
+    except Exception as error:
+        raise HttpError(400, "someone else is running this operation") from error
+
     dbt = orguser.org.dbt
     profile_file = Path(dbt.project_dir) / "dbtrepo/profiles/profiles.yml"
     if os.path.exists(profile_file):
@@ -356,8 +388,12 @@ def post_prefect_dbt_core_run_flow(
     try:
         result = prefect_service.run_dbt_core_sync(payload)
     except Exception as error:
+        blocklock.delete()
         logger.exception(error)
         raise HttpError(400, "failed to run dbt") from error
+
+    blocklock.delete()
+    logger.info("released lock on block %s", payload.blockName)
     return result
 
 
@@ -534,12 +570,13 @@ def post_prefect_dbt_core_block(request):
             if existing_dataflow:
                 existing_dataflow.delete()
 
-            OrgDataFlow.objects.create(
+            manual_run_dataflow = OrgDataFlow.objects.create(
                 org=orguser.org,
                 name=f"manual-run-{block_name}",
                 deployment_name=dataflow["deployment"]["name"],
                 deployment_id=dataflow["deployment"]["id"],
             )
+            write_dataflowblocks(manual_run_dataflow)
 
         coreprefectblock.save()
         block_names.append(block_name)

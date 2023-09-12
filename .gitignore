@@ -133,6 +133,9 @@ dmypy.json
 .vscode
 
 celeryworker.pid
+celerybeat.pid
 
 secrets/
 data/
+
+celerybeat-schedule.db

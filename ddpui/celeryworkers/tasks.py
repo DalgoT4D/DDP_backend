@@ -2,10 +2,13 @@ import os
 import shutil
 from pathlib import Path
 
+from datetime import datetime, timedelta
+from ddpui.utils.timezone import UTC
 from django.utils.text import slugify
 from ddpui.celery import app
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
+from ddpui.models.orgjobs import BlockLock
 from ddpui.utils.helpers import runcmd
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
@@ -150,3 +153,22 @@ def update_dbt_core_block_schema_task(block_name, default_schema):
     """single http PUT request to the prefect-proxy"""
     logger.info("updating default_schema of %s to %s", block_name, default_schema)
     update_dbt_core_block_schema(block_name, default_schema)
+
+
+@app.task()
+def delete_old_blocklocks():
+    """delete blocklocks which were created over an hour ago"""
+    logger.info("deleting old blocklocks")
+    onehourago = UTC.localize(datetime.utcnow() - timedelta(seconds=3600))
+    logger.info(
+        BlockLock.objects.filter(locked_at__lt=onehourago).values("opb__block_name")
+    )
+    BlockLock.objects.filter(locked_at__lt=onehourago).delete()
+
+
+@app.on_after_finalize.connect
+def setup_periodic_tasks(sender, **kwargs):
+    """check for old blocks every minute"""
+    sender.add_periodic_task(
+        60 * 1.0, delete_old_blocklocks.s(), name="remove old blocklocks"
+    )
