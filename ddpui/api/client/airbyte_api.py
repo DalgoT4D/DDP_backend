@@ -24,6 +24,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteDestinationUpdateCheckConnection,
     AirbyteConnectionUpdate,
 )
+from ddpui.utils.deploymentblocks import write_dataflowblocks
 from ddpui.ddpprefect.schema import (
     PrefectFlowAirbyteConnection,
     PrefectAirbyteConnectionBlockSchema,
@@ -751,13 +752,14 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
     if existing_dataflow:
         existing_dataflow.delete()
 
-    OrgDataFlow.objects.create(
+    org_dataflow = OrgDataFlow.objects.create(
         org=orguser.org,
         name=f"manual-sync-{block_name}",
         deployment_name=dataflow["deployment"]["name"],
         deployment_id=dataflow["deployment"]["id"],
         connection_id=airbyte_conn["connectionId"],
     )
+    write_dataflowblocks(org_dataflow)
 
     res = {
         "name": display_name,
@@ -772,7 +774,7 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
         "catalogId": airbyte_conn["sourceCatalogId"],
         "syncCatalog": airbyte_conn["syncCatalog"],
         "status": airbyte_conn["status"],
-        "deployment_id": dataflow["deployment"]["id"],
+        "deploymentId": dataflow["deployment"]["id"],
         "normalize": payload.normalize,
     }
     logger.debug(res)
