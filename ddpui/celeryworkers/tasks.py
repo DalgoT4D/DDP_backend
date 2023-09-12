@@ -160,7 +160,7 @@ def delete_old_blocklocks():
     """delete blocklocks which were created over an hour ago"""
     logger.info("deleting old blocklocks")
     onehourago = UTC.localize(datetime.utcnow() - timedelta(seconds=3600))
-    BlockLock.objects.filter(locked_at__lt=onehourago).delete()
+    BlockLock.objects.filter(locked_at__gt=onehourago).delete()
 
 
 @app.on_after_finalize.connect
