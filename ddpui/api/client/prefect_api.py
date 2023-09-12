@@ -17,6 +17,7 @@ from ddpui.ddpairbyte import airbyte_service
 
 from ddpui.ddpprefect import DBTCORE, SHELLOPERATION
 from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
+from ddpui.models.orgjobs import BlockLock
 from ddpui.models.org_user import OrgUser
 from ddpui.ddpprefect.schema import (
     PrefectAirbyteSync,
@@ -353,6 +354,24 @@ def post_prefect_dbt_core_run_flow(
     """Run dbt flow in prefect"""
     orguser: OrgUser = request.orguser
 
+    orgprefectblock = OrgPrefectBlock.objects.filter(
+        org=orguser.org, block_name=payload["blockName"]
+    ).first()
+    if orgprefectblock is None:
+        logger.error("block name %s not found", payload["blockName"])
+        raise HttpError(400, "block name not found")
+
+    blocklock = BlockLock.objects.filter(opb=orgprefectblock).first()
+    if blocklock:
+        raise HttpError(
+            400, f"{blocklock.locked_by.user.email} is running this operation"
+        )
+
+    try:
+        blocklock = BlockLock.objects.create(opb=orgprefectblock, locked_by=orguser)
+    except Exception as error:
+        raise HttpError(400, "someone else is running this operation") from error
+
     dbt = orguser.org.dbt
     profile_file = Path(dbt.project_dir) / "dbtrepo/profiles/profiles.yml"
     if os.path.exists(profile_file):
@@ -368,8 +387,12 @@ def post_prefect_dbt_core_run_flow(
     try:
         result = prefect_service.run_dbt_core_sync(payload)
     except Exception as error:
+        blocklock.delete()
         logger.exception(error)
         raise HttpError(400, "failed to run dbt") from error
+
+    blocklock.delete()
+    logger.info("released lock on block %s", payload["blockName"])
     return result
 
 
