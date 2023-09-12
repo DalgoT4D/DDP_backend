@@ -482,8 +482,8 @@ def lock_blocks_for_deployment(deployment_id: str, orguser: OrgUser):
                     opb=df_block.opb, locked_by=orguser
                 )
                 locks.append(blocklock)
-    except Exception:
-        return HttpError(
+    except Exception as error:
+        raise HttpError(
             400, "Someone else is trying to run this pipeline... try again"
-        )
+        ) from error
     return locks
