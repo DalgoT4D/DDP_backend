@@ -38,10 +38,12 @@ from ddpui.ddpprefect import (
 )
 from ddpui.ddpprefect import prefect_service
 from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
+from ddpui.models.orgjobs import DataflowBlock
 from ddpui.models.org_user import OrgUser
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
+from ddpui.utils.deploymentblocks import write_dataflowblocks
 
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
@@ -523,9 +525,34 @@ def get_airbyte_connections(request):
         airbyte_conn = airbyte_service.get_connection(
             orguser.org.airbyte_workspace_id, prefect_block["data"]["connection_id"]
         )
-        dataflow = OrgDataFlow.objects.filter(
-            org=orguser.org, connection_id=airbyte_conn["connectionId"]
+        # a single connection will have a manual deployment and probably a pipeline
+        manual_dataflow = OrgDataFlow.objects.filter(
+            org=orguser.org,
+            connection_id=airbyte_conn["connectionId"],
+            cron__isnull=True,
         ).first()
+
+        # manual_dataflow = DataflowBlock.objects.filter(
+        #     opb=org_block,
+        #     dataflow__cron__isnull=True,
+        # ).first()
+
+        # we want to show the last sync, whether manual or via a pipeline
+        last_runs = []
+        for dfb in DataflowBlock.objects.filter(
+            opb=org_block,
+        ):
+            run = prefect_service.get_last_flow_run_by_deployment_id(
+                dfb.dataflow.deployment_id
+            )
+            if run:
+                last_runs.append(run)
+
+        last_runs.sort(
+            key=lambda run: run["startTime"]
+            if run["startTime"]
+            else run["expectedStartTime"]
+        )
 
         res.append(
             {
@@ -539,12 +566,10 @@ def get_airbyte_connections(request):
                 "catalogId": airbyte_conn["catalogId"],
                 "syncCatalog": airbyte_conn["syncCatalog"],
                 "status": airbyte_conn["status"],
-                "deploymentId": dataflow.deployment_id if dataflow else None,
-                "lastRun": prefect_service.get_last_flow_run_by_deployment_id(
-                    dataflow.deployment_id
-                )
-                if dataflow
+                "deploymentId": manual_dataflow.deployment_id
+                if manual_dataflow
                 else None,
+                "lastRun": last_runs[-1] if len(last_runs) > 0 else None,
             }
         )
 
