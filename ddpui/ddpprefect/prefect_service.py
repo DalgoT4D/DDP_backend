@@ -470,6 +470,7 @@ def lock_blocks_for_deployment(deployment_id: str, orguser: OrgUser):
     ]
     lock = BlockLock.objects.filter(opb__block_name__in=block_names).first()
     if lock:
+        logger.info(f"{lock.locked_by.user.email} is running this pipeline right now")
         raise HttpError(
             400, f"{lock.locked_by.user.email} is running this pipeline right now"
         )
