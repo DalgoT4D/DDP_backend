@@ -526,19 +526,8 @@ def get_airbyte_connections(request):
         airbyte_conn = airbyte_service.get_connection(
             orguser.org.airbyte_workspace_id, prefect_block["data"]["connection_id"]
         )
-        # a single connection will have a manual deployment and probably a pipeline
-        manual_dataflow = OrgDataFlow.objects.filter(
-            org=orguser.org,
-            connection_id=airbyte_conn["connectionId"],
-            cron__isnull=True,
-        ).first()
-
-        # manual_dataflow = DataflowBlock.objects.filter(
-        #     opb=org_block,
-        #     dataflow__cron__isnull=True,
-        # ).first()
-
-        # we want to show the last sync, whether manual or via a pipeline
+        # a single connection will have a manual deployment and (usually) a pipeline
+        # we want to show the last sync, from whichever
         last_runs = []
         for dfb in DataflowBlock.objects.filter(
             opb=org_block,
@@ -555,6 +544,11 @@ def get_airbyte_connections(request):
             else run["expectedStartTime"]
         )
 
+        manual_dataflow = DataflowBlock.objects.filter(
+            opb=org_block,
+            dataflow__cron__isnull=True,
+        ).first()
+
         res.append(
             {
                 "name": org_block.display_name,
@@ -567,7 +561,7 @@ def get_airbyte_connections(request):
                 "catalogId": airbyte_conn["catalogId"],
                 "syncCatalog": airbyte_conn["syncCatalog"],
                 "status": airbyte_conn["status"],
-                "deploymentId": manual_dataflow.deployment_id
+                "deploymentId": manual_dataflow.dataflow.deployment_id
                 if manual_dataflow
                 else None,
                 "lastRun": last_runs[-1] if len(last_runs) > 0 else None,
