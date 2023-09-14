@@ -44,7 +44,6 @@ from ddpui.models.org_user import OrgUser
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
-from ddpui.utils.deploymentblocks import write_dataflowblocks
 
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
