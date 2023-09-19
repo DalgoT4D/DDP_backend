@@ -17,7 +17,7 @@ from ddpui.ddpairbyte import airbyte_service
 
 from ddpui.ddpprefect import DBTCORE, SHELLOPERATION
 from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
-from ddpui.models.orgjobs import BlockLock
+from ddpui.models.orgjobs import BlockLock, DataflowBlock
 from ddpui.models.org_user import OrgUser
 from ddpui.ddpprefect.schema import (
     PrefectAirbyteSync,
@@ -182,6 +182,12 @@ def get_prefect_dataflows(request):
     res = []
 
     for flow in org_data_flows:
+        block_ids = DataflowBlock.objects.filter(dataflow=flow).values("opb__block_id")
+        # if there is one there will typically be several - a sync,
+        # a git-run, a git-test... we return the userinfo only for the first one
+        lock = BlockLock.objects.filter(
+            opb__block_id__in=[x["opb__block_id"] for x in block_ids]
+        ).first()
         res.append(
             {
                 "name": flow.name,
@@ -194,6 +200,12 @@ def get_prefect_dataflows(request):
                 "status": is_deployment_active[flow.deployment_id]
                 if flow.deployment_id in is_deployment_active
                 else False,
+                "lock": {
+                    "lockedBy": lock.locked_by.user.email,
+                    "lockedAt": lock.locked_at,
+                }
+                if lock
+                else None,
             }
         )
 
@@ -594,6 +606,8 @@ def get_prefect_dbt_run_blocks(request):
     for prefect_block in OrgPrefectBlock.objects.filter(
         org=orguser.org, block_type=DBTCORE
     ):
+        # is the block currently locked?
+        lock = BlockLock.objects.filter(opb=prefect_block).first()
         block = {
             "blockType": prefect_block.block_type,
             "blockId": prefect_block.block_id,
@@ -601,6 +615,12 @@ def get_prefect_dbt_run_blocks(request):
             "action": prefect_block.command,
             "target": prefect_block.dbt_target_schema,
             "deploymentId": None,
+            "lock": {
+                "lockedBy": lock.locked_by.user.email,
+                "lockedAt": lock.locked_at,
+            }
+            if lock
+            else None,
         }
 
         # fetch the manual deploymentId for the dbt run block

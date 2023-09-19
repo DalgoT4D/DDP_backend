@@ -10,6 +10,7 @@ from ddpui import auth
 
 # models
 from ddpui.models.org import OrgDataFlow
+from ddpui.models.orgjobs import BlockLock, DataflowBlock
 
 
 dashboardapi = NinjaAPI(urls_namespace="dashboard")
@@ -58,6 +59,12 @@ def get_dashboard(request):
 
     # fetch 50 (default limit) flow runs for each flow
     for flow in org_data_flows:
+        block_ids = DataflowBlock.objects.filter(dataflow=flow).values("opb__block_id")
+        # if there is one there will typically be several - a sync,
+        # a git-run, a git-test... we return the userinfo only for the first one
+        lock = BlockLock.objects.filter(
+            opb__block_id__in=[x["opb__block_id"] for x in block_ids]
+        ).first()
         res.append(
             {
                 "name": flow.name,
@@ -67,6 +74,12 @@ def get_dashboard(request):
                 "runs": prefect_service.get_flow_runs_by_deployment_id(
                     flow.deployment_id, 50
                 ),
+                "lock": {
+                    "lockedBy": lock.locked_by.user.email,
+                    "lockedAt": lock.locked_at,
+                }
+                if lock
+                else None,
             }
         )
 
