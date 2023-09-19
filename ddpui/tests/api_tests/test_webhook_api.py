@@ -14,11 +14,13 @@ from ddpui.api.client.webhook_api import (
     FLOW_RUN,
     get_message_type,
     get_flowrun_id_and_state,
+    post_notification,
+)
+from ddpui.utils.webhook_helpers import (
     get_org_from_flow_run,
     generate_notification_email,
     email_orgusers,
     email_flowrun_logs_to_orgusers,
-    post_notification,
 )
 from ddpui.models.org import Org, OrgPrefectBlock
 from ddpui.models.org_user import OrgUser, User, OrgUserRole
@@ -109,7 +111,7 @@ def test_email_orgusers():
     user = User.objects.create(username="username", email="useremail")
     OrgUser.objects.create(org=org, role=OrgUserRole.ACCOUNT_MANAGER, user=user)
     with patch(
-        "ddpui.api.client.webhook_api.send_text_message"
+        "ddpui.utils.webhook_helpers.send_text_message"
     ) as mock_send_text_message:
         email_orgusers(org, "hello")
         mock_send_text_message.assert_called_once_with(
@@ -123,7 +125,7 @@ def test_email_orgusers_not_to_report_viewers():
     user = User.objects.create(username="username", email="useremail")
     OrgUser.objects.create(org=org, role=OrgUserRole.REPORT_VIEWER, user=user)
     with patch(
-        "ddpui.api.client.webhook_api.send_text_message"
+        "ddpui.utils.webhook_helpers.send_text_message"
     ) as mock_send_text_message:
         email_orgusers(org, "hello")
         mock_send_text_message.assert_not_called()
@@ -145,9 +147,7 @@ def test_email_flowrun_logs_to_orgusers():
                 },
             ]
         }
-        with patch(
-            "ddpui.api.client.webhook_api.email_orgusers"
-        ) as mock_email_orgusers:
+        with patch("ddpui.utils.webhook_helpers.email_orgusers") as mock_email_orgusers:
             email_flowrun_logs_to_orgusers(org, "flow-run-id")
             mock_email_orgusers.assert_called_once_with(
                 org,
