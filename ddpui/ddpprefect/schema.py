@@ -133,6 +133,7 @@ class PrefectAirbyteConnectionBlockSchema(Schema):
     lastRun: Optional[dict | None]
     destinationSchema: str = ""
     normalize: bool = False
+    lock: Optional[dict | None]
 
 
 class PrefectFlowAirbyteConnection(Schema):
