@@ -39,7 +39,7 @@ from ddpui.ddpprefect import (
 )
 from ddpui.ddpprefect import prefect_service
 from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
-from ddpui.models.orgjobs import DataflowBlock
+from ddpui.models.orgjobs import DataflowBlock, BlockLock
 from ddpui.models.org_user import OrgUser
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
@@ -548,6 +548,9 @@ def get_airbyte_connections(request):
             dataflow__cron__isnull=True,
         ).first()
 
+        # is the block currently locked?
+        lock = BlockLock.objects.filter(opb=org_block).first()
+
         res.append(
             {
                 "name": org_block.display_name,
@@ -564,6 +567,12 @@ def get_airbyte_connections(request):
                 if manual_dataflow
                 else None,
                 "lastRun": last_runs[-1] if len(last_runs) > 0 else None,
+                "lock": {
+                    "lockedBy": lock.locked_by.user.email,
+                    "lockedAt": lock.locked_at,
+                }
+                if lock
+                else None,
             }
         )
 
@@ -590,8 +599,6 @@ def get_airbyte_connection(request, connection_block_id):
     ).first()
 
     # fetch prefect block
-    # todo add a "connection_id" column to OrgPrefectBlock,
-    # and fetch connection details from airbyte
     prefect_block = prefect_service.get_airbyte_connection_block_by_id(
         connection_block_id
     )
@@ -602,6 +609,9 @@ def get_airbyte_connection(request, connection_block_id):
     dataflow = OrgDataFlow.objects.filter(
         org=orguser.org, connection_id=airbyte_conn["connectionId"]
     ).first()
+
+    # is the block currently locked?
+    lock = BlockLock.objects.filter(opb=org_block).first()
 
     # fetch the source and destination names
     # the web_backend/connections/get fetches the source & destination objects also so we dont need to query again
@@ -630,6 +640,12 @@ def get_airbyte_connection(request, connection_block_id):
         )
         if "operationIds" in airbyte_conn and len(airbyte_conn["operationIds"]) == 1
         else False,
+        "lock": {
+            "lockedBy": lock.locked_by.user.email,
+            "lockedAt": lock.locked_at,
+        }
+        if lock
+        else None,
     }
 
     logger.debug(res)

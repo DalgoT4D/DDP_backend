@@ -9,7 +9,9 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
+from ddpui.models.org_user import User, OrgUser
 from ddpui.models.org import Org, OrgPrefectBlock, OrgDataFlow, OrgWarehouse
+from ddpui.models.orgjobs import BlockLock, DataflowBlock
 from ddpui.api.client.airbyte_api import (
     post_airbyte_detach_workspace,
     post_airbyte_workspace,
@@ -1102,7 +1104,13 @@ def test_get_airbyte_connections_without_workspace(org_without_workspace):
             "name": "fake-block-name",
         }
     ),
-    get_last_flow_run_by_deployment_id=Mock(return_value="lastRun"),
+    get_last_flow_run_by_deployment_id=Mock(
+        return_value={
+            "flow-run-id": "00000",
+            "startTime": 0,
+            "expectedStartTime": 0,
+        }
+    ),
 )
 def test_get_airbyte_connections_success(org_with_workspace):
     mock_orguser = Mock()
@@ -1111,7 +1119,7 @@ def test_get_airbyte_connections_success(org_with_workspace):
     mock_request = Mock()
     mock_request.orguser = mock_orguser
 
-    OrgPrefectBlock.objects.create(
+    opb = OrgPrefectBlock.objects.create(
         org=org_with_workspace,
         block_type=ddpprefect.AIRBYTECONNECTION,
         block_id="fake-block-id",
@@ -1119,11 +1127,13 @@ def test_get_airbyte_connections_success(org_with_workspace):
         display_name="fake-display-name",
     )
 
-    OrgDataFlow.objects.create(
+    odf = OrgDataFlow.objects.create(
         org=org_with_workspace,
         connection_id="fake-connection-id-1",
         deployment_id="fake-deployment-id",
     )
+
+    DataflowBlock.objects.create(dataflow=odf, opb=opb)
 
     result = get_airbyte_connections(mock_request)
     assert len(result) == 1
@@ -1140,7 +1150,97 @@ def test_get_airbyte_connections_success(org_with_workspace):
     assert result[0]["syncCatalog"] == "sync-catalog"
     assert result[0]["status"] == "conn-status"
     assert result[0]["deploymentId"] == "fake-deployment-id"
-    assert result[0]["lastRun"] == "lastRun"
+    assert result[0]["lastRun"] == {
+        "flow-run-id": "00000",
+        "startTime": 0,
+        "expectedStartTime": 0,
+    }
+    assert result[0]["lock"] is None
+
+
+# ================================================================================
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    get_connection=Mock(
+        return_value={
+            "sourceId": "fake-source-id-1",
+            "connectionId": "fake-connection-id-1",
+            "destinationId": "fake-destination-id-1",
+            "catalogId": "fake-source-catalog-id-1",
+            "syncCatalog": "sync-catalog",
+            "status": "conn-status",
+            "source": {"id": "fake-source-id-1", "sourceName": "fake-source-name-1"},
+            "destination": {
+                "id": "fake-destination-id-1",
+                "destinationName": "fake-destination-name-1",
+            },
+        }
+    ),
+    get_source=Mock(return_value={"sourceName": "fake-source-name-1"}),
+    get_destination=Mock(return_value={"destinationName": "fake-destination-name-1"}),
+)
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    get_airbyte_connection_block_by_id=Mock(
+        return_value={
+            "data": {"connection_id": "fake-connection-id"},
+            "name": "fake-block-name",
+        }
+    ),
+    get_last_flow_run_by_deployment_id=Mock(
+        return_value={
+            "flow-run-id": "00000",
+            "startTime": 0,
+            "expectedStartTime": 0,
+        }
+    ),
+)
+def test_get_airbyte_connections_success_locked(org_with_workspace):
+    user = User.objects.create(email="useremail", username="username")
+    orguser = OrgUser.objects.create(user=user, org=org_with_workspace)
+
+    mock_request = Mock()
+    mock_request.orguser = orguser
+
+    opb = OrgPrefectBlock.objects.create(
+        org=org_with_workspace,
+        block_type=ddpprefect.AIRBYTECONNECTION,
+        block_id="fake-block-id",
+        block_name="fake-block-name",
+        display_name="fake-display-name",
+    )
+
+    BlockLock.objects.create(opb=opb, locked_by=orguser)
+
+    odf = OrgDataFlow.objects.create(
+        org=org_with_workspace,
+        connection_id="fake-connection-id-1",
+        deployment_id="fake-deployment-id",
+    )
+
+    DataflowBlock.objects.create(dataflow=odf, opb=opb)
+
+    result = get_airbyte_connections(mock_request)
+    assert len(result) == 1
+
+    assert result[0]["name"] == "fake-display-name"
+    assert result[0]["blockId"] == "fake-block-id"
+    assert result[0]["blockName"] == "fake-block-name"
+    assert result[0]["blockData"]["connection_id"] == "fake-connection-id"
+    assert result[0]["source"]["id"] == "fake-source-id-1"
+    assert result[0]["source"]["sourceName"] == "fake-source-name-1"
+    assert result[0]["destination"]["id"] == "fake-destination-id-1"
+    assert result[0]["destination"]["destinationName"] == "fake-destination-name-1"
+    assert result[0]["catalogId"] == "fake-source-catalog-id-1"
+    assert result[0]["syncCatalog"] == "sync-catalog"
+    assert result[0]["status"] == "conn-status"
+    assert result[0]["deploymentId"] == "fake-deployment-id"
+    assert result[0]["lastRun"] == {
+        "flow-run-id": "00000",
+        "startTime": 0,
+        "expectedStartTime": 0,
+    }
+    assert result[0]["lock"]["lockedBy"] == "useremail"
 
 
 # ================================================================================
@@ -1438,7 +1538,8 @@ def test_post_airbyte_connection_success(
         normalize=False,
     )
 
-    response = post_airbyte_connection(mock_request, payload)
+    with patch("ddpui.api.client.airbyte_api.write_dataflowblocks"):
+        response = post_airbyte_connection(mock_request, payload)
 
     # reload the warehouse from the database
     warehouse_with_destination = OrgWarehouse.objects.filter(
@@ -1455,7 +1556,7 @@ def test_post_airbyte_connection_success(
     assert response["destination"]["id"] == "fake-destination-id"
     assert response["catalogId"] == "fake-source-catalog-id"
     assert response["status"] == "running"
-    assert response["deployment_id"] == "fake-deployment-id"
+    assert response["deploymentId"] == "fake-deployment-id"
 
 
 # ================================================================================
