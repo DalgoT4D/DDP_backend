@@ -926,16 +926,32 @@ def delete_airbyte_connection(request, connection_block_id):
         org.airbyte_workspace_id, prefect_block["data"]["connection_id"]
     )
 
-    # delete prefect block
-    logger.info("deleting prefect block")
-    prefect_service.delete_airbyte_connection_block(connection_block_id)
+    # delete the manual dataflow record and the corresponding deployment in prefect
+    dataflow_block_vals = DataflowBlock.objects.filter(
+        dataflow__cron__isnull=True, opb__org=org, opb__block_id=connection_block_id
+    ).values("opb__block_id", "dataflow__deployment_id", "dataflow_id", "opb_id ")
 
-    # delete the org prefect airbyteconnection block
-    logger.info("deleting org prefect block")
-    org_airbyte_connection_block = OrgPrefectBlock.objects.filter(
-        org=org, block_id=connection_block_id
-    )
-    org_airbyte_connection_block.delete()
+    if dataflow_block_vals and len(dataflow_block_vals) > 0:
+        deployment_id = dataflow_block_vals[0]["dataflow__deployment_id"]
+        manual_dataflow_id = dataflow_block_vals[0]["dataflow_id"]
+        org_airbyte_connection_block_id = dataflow_block_vals[0]["opb_id"]
+
+        # delete the deployment from prefect
+        logger.info("deleting prefect deployment")
+        prefect_service.delete_deployment_by_id(deployment_id)
+
+        # delete the org dataflow for manual deployment
+        logger.info("deleting org dataflow from db")
+        OrgDataFlow.objects.filter(id=manual_dataflow_id).delete()
+
+        # delete prefect block
+        logger.info("deleting prefect block")
+        prefect_service.delete_airbyte_connection_block(connection_block_id)
+
+        # delete the org prefect airbyteconnection block
+        logger.info("deleting org prefect block")
+        OrgPrefectBlock.objects.filter(id=org_airbyte_connection_block_id).delete()
+
     return {"success": 1}
 
 
