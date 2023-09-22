@@ -931,11 +931,31 @@ def delete_airbyte_connection(request, connection_block_id):
     prefect_service.delete_airbyte_connection_block(connection_block_id)
 
     # delete the org prefect airbyteconnection block
-    logger.info("deleting org prefect block")
     org_airbyte_connection_block = OrgPrefectBlock.objects.filter(
         org=org, block_id=connection_block_id
-    )
-    org_airbyte_connection_block.delete()
+    ).first()
+    if org_airbyte_connection_block:
+        # delete the dataflows and their corresponding deployments in prefect
+        for dataflow_block in DataflowBlock.objects.filter(
+            opb=org_airbyte_connection_block
+        ):
+            # delete the deployment from prefect
+            logger.info("deleting prefect deployment")
+            prefect_service.delete_deployment_by_id(
+                dataflow_block.dataflow.deployment_id
+            )
+
+            # delete the org dataflow for manual deployment
+            logger.info("deleting org dataflow from db")
+            dataflow_block.dataflow.delete()
+
+            # delete the dataflowblock
+            logger.info("deleting dataflowblock from db")
+            dataflow_block.delete()
+
+        logger.info("deleting org prefect block")
+        org_airbyte_connection_block.delete()
+
     return {"success": 1}
 
 
