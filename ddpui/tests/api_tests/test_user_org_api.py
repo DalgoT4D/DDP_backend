@@ -830,6 +830,32 @@ def test_post_organization_user_invite_lowercase_email(mock_sendgrid, orguser: O
     mock_sendgrid.assert_called_once()
 
 
+@patch("ddpui.utils.sendgrid.send_youve_been_added_email", mock_sendgrid=Mock())
+def test_post_organization_user_invite_user_exists(mock_sendgrid, orguser: OrgUser):
+    """success test, inviting an existing user"""
+
+    user = User.objects.create(email="existinguser", username="existinguser")
+    assert OrgUser.objects.filter(user=user).count() == 0
+
+    payload = InvitationSchema(
+        invited_email="existinguser",
+        invited_role_slug="report_viewer",
+        invited_by=None,
+        invited_on=timezone.as_ist(datetime.now()),
+        invite_code="invite_code",
+    )
+
+    mock_request = Mock()
+    mock_request.orguser = orguser
+
+    response = post_organization_user_invite(mock_request, payload)
+    mock_sendgrid.assert_called_once()
+
+    assert OrgUser.objects.filter(user=user).count() == 1
+    assert OrgUser.objects.filter(user=user, org=orguser.org).count() == 1
+    assert response.invited_role == payload.invited_role
+
+
 # ================================================================================
 def test_post_organization_user_accept_invite_fail(orguser):
     """failing test, invalid invite code"""

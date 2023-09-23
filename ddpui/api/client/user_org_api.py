@@ -536,6 +536,19 @@ def post_organization_user_invite(request, payload: InvitationSchema):
     if invited_role > orguser.role:
         raise HttpError(403, "Insufficient permissions for this operation")
 
+    existing_user = User.objects.filter(email__iexact=invited_email).first()
+
+    if existing_user:
+        logger.info("user exists, creating new OrgUser")
+        OrgUser.objects.create(user=existing_user, org=orguser.org, role=invited_role)
+        sendgrid.send_youve_been_added_email(
+            invited_email, orguser.user.email, orguser.org.name
+        )
+        return InvitationSchema(
+            invited_email=invited_email,
+            invited_role_slug=payload.invited_role_slug,
+        )
+
     invitation = Invitation.objects.filter(
         invited_email__iexact=invited_email, invited_by__org=orguser.org
     ).first()
