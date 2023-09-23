@@ -833,7 +833,6 @@ def test_post_organization_user_invite_lowercase_email(mock_sendgrid, orguser: O
 @patch("ddpui.utils.sendgrid.send_youve_been_added_email", mock_sendgrid=Mock())
 def test_post_organization_user_invite_user_exists(mock_sendgrid, orguser: OrgUser):
     """success test, inviting an existing user"""
-
     user = User.objects.create(email="existinguser", username="existinguser")
     assert OrgUser.objects.filter(user=user).count() == 0
 
