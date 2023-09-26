@@ -111,7 +111,7 @@ class OrgSchema(Schema):
 class OrgWarehouse(models.Model):
     """A data warehouse for an org. Typically we expect exactly one"""
 
-    wtype = models.CharField(max_length=25)  # postgres, bigquery
+    wtype = models.CharField(max_length=25)  # postgres, bigquery, snowflake
     name = models.CharField(max_length=25, default="", blank=True)
     credentials = models.CharField(max_length=200)
     org = models.ForeignKey(Org, on_delete=models.CASCADE)

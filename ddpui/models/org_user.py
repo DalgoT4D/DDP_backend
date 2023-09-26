@@ -9,7 +9,7 @@ from django.contrib.auth.models import User
 from ninja import Schema
 from pydantic import SecretStr
 
-from ddpui.models.org import Org, OrgSchema
+from ddpui.models.org import Org, OrgSchema, OrgWarehouse
 
 
 class UserAttributes(models.Model):
@@ -88,16 +88,19 @@ class OrgUserResponse(Schema):
     active: bool
     role: int
     role_slug: str
+    wtype: str | None
 
     @staticmethod
     def from_orguser(orguser: OrgUser):
         """helper to turn an OrgUser into an OrgUserResponse"""
+        warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
         return OrgUserResponse(
             email=orguser.user.email,
             org=orguser.org,
             active=orguser.user.is_active,
             role=orguser.role,
             role_slug=slugify(OrgUserRole(orguser.role).name),
+            wtype=warehouse.wtype if warehouse else None,
         )
 
 
