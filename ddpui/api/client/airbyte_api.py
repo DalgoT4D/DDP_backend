@@ -457,6 +457,16 @@ def put_airbyte_destination(
 
     elif warehouse.wtype == "bigquery":
         dbt_credentials = json.loads(payload.config["credentials_json"])
+    elif warehouse.wtype == "snowflake":
+        if (
+            "credentials" in payload.config
+            and "password" in payload.config["credentials"]
+            and isinstance(payload.config["credentials"]["password"], str)
+            and len(payload.config["credentials"]["password"]) > 0
+            and list(set(payload.config["credentials"]["password"])) != "*"
+        ):
+            dbt_credentials["credentials"]["password"] = payload.config["credentials"]["password"]
+
     else:
         raise HttpError(400, "unknown warehouse type " + warehouse.wtype)
 
