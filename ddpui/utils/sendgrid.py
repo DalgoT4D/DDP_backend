@@ -72,3 +72,18 @@ def send_invite_user_email(
         to_email,
         {"url": invite_url, "invited_by_email": invited_by_email},
     )
+
+
+def send_youve_been_added_email(to_email: str, added_by: str, org_name: str) -> None:
+    """sends an email notification informing an existing dalgo user that they have
+    been granted access to a new org
+    """
+    send_template_message(
+        os.getenv("SENDGRID_YOUVE_BEEN_ADDED_TEMPLATE"),
+        to_email,
+        {
+            "org_name": org_name,
+            "added_by": added_by,
+            "url": os.getenv("FRONTEND_URL"),
+        },
+    )
