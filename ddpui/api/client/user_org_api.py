@@ -373,7 +373,7 @@ def post_organization(request, payload: OrgSchema):
 def post_organization_warehouse(request, payload: OrgWarehouseSchema):
     """registers a data warehouse for the org"""
     orguser: OrgUser = request.orguser
-    if payload.wtype not in ["postgres", "bigquery"]:
+    if payload.wtype not in ["postgres", "bigquery", "snowflake"]:
         raise HttpError(400, "unrecognized warehouse type " + payload.wtype)
 
     destination = airbyte_service.create_destination(
@@ -397,6 +397,16 @@ def post_organization_warehouse(request, payload: OrgWarehouseSchema):
 
     elif payload.wtype == "bigquery":
         dbt_credentials = json.loads(payload.airbyteConfig["credentials_json"])
+    elif payload.wtype == "snowflake":
+        dbt_credentials = {
+            "host": payload.airbyteConfig["host"],
+            "role": payload.airbyteConfig["role"],
+            "warehouse": payload.airbyteConfig["warehouse"],
+            "database": payload.airbyteConfig["database"],
+            "schema": payload.airbyteConfig["schema"],
+            "username": payload.airbyteConfig["username"],
+            "credentials": payload.airbyteConfig["credentials"],
+        }
 
     warehouse = OrgWarehouse(
         org=orguser.org,
