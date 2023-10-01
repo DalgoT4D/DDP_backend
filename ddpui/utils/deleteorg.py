@@ -1,5 +1,5 @@
 from ninja.errors import HttpError
-from ddpui.models.org_user import Org, OrgUser
+from ddpui.models.org_user import Org, OrgUser, OrgUserRole
 from ddpui.models.org import OrgDataFlow, OrgPrefectBlock, OrgWarehouse
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect import prefect_service
@@ -113,10 +113,14 @@ def delete_orgusers(org: Org):  # skipcq: PYL-R0201
 
 def delete_one_org(org: Org, yes_really: bool):
     """delete one org"""
+    account_admin = OrgUser.objects.filter(
+        org=org, role=OrgUserRole.ACCOUNT_MANAGER
+    ).first()
     logger.info(
-        "OrgName: %s   Airbyte workspace ID: %s",
+        "OrgName: %-25s Airbyte workspace ID: %-40s Admin: %s",
         org.name,
         org.airbyte_workspace_id,
+        account_admin.user.email if account_admin else "<unknonw>",
     )
     if yes_really:
         delete_prefect_deployments(org)
