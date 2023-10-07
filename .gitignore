@@ -139,3 +139,5 @@ secrets/
 data/
 
 celerybeat-schedule.db
+
+createsources.env
