@@ -170,7 +170,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AIRBYTE_CUSTOM_SOURCES = {
     "airbyte/source-kobotoolbox": {
         "name": "Kobotoolbox",
-        "docker_repository": "airbyte/source-kobotoolbox",
+        "docker_repository": "tech4dev/source-kobotoolbox",
         "docker_image_tag": "0.1.0",
         "documentation_url": "",
     },
@@ -182,7 +182,7 @@ AIRBYTE_CUSTOM_SOURCES = {
     },
     "airbyte/source-avni": {
         "name": "Avni",
-        "docker_repository": "airbyte/source-avni",
+        "docker_repository": "tech4dev/source-avni",
         "docker_image_tag": "0.1.0",
         "documentation_url": "",
     },
