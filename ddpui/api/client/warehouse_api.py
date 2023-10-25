@@ -123,15 +123,15 @@ def get_table_columns(request, schema_name: str, table_name: str):
 
         client = get_client(wtype, credentials)
         if wtype == "postgres":
-            data = client.get_table_columns(schema_name, table_name)
+            columns = client.get_table_columns(schema_name, table_name)
         elif wtype == "bigquery":
-            data = client.get_table_columns(schema_name, table_name)
+            columns = client.get_table_columns(schema_name, table_name)
 
     except Exception as error:
         logger.exception("Exception occurred in get_table_columns: %s", error)
-        data = []
+        columns = []
 
-    return {"data": data}
+    return {"columns": columns}
 
 
 @warehouseapi.get(
