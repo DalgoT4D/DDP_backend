@@ -96,3 +96,31 @@ def get_schema(request):
         schemas = []
 
     return {"schemas": schemas}
+
+
+@warehouseapi.get(
+    "/table_data/{schema_name}/{table_name}", auth=auth.CanManagePipelines()
+)
+def get_table_data(request, schema_name: str, table_name: str):
+    try:
+        org_user = request.orguser
+        org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).first()
+        wtype = org_warehouse.wtype
+        credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+        client = get_client(wtype, credentials)
+        limit = 10
+        if wtype == "postgres":
+            data = client.get_table_data(schema_name, table_name, limit)
+        elif wtype == "bigquery":
+            data = [
+                dict(row)
+                for row in client.list_rows(
+                    f"{schema_name}.{table_name}", max_results=limit
+                )
+            ]
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        data = []
+
+    return {"data": data}
