@@ -60,7 +60,7 @@ def ninja_default_error_handler(
 def get_table(request, schema_name: str):
     try:
         org_user = request.orguser
-        org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).last()
+        org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).first()
         wtype = org_warehouse.wtype
         credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
         if wtype == "postgres":
