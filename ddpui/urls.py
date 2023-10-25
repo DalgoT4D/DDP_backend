@@ -7,6 +7,7 @@ from ddpui.api.client.dbt_api import dbtapi
 from ddpui.api.client.prefect_api import prefectapi
 from ddpui.api.client.user_org_api import user_org_api
 from ddpui.api.client.task_api import taskapi
+from ddpui.api.client.warehouse_api import warehouseapi
 from ddpui.api.client.dashboard_api import dashboardapi
 from ddpui.html.docs import get_dbt_docs
 from ddpui.api.client.webhook_api import webhookapi
@@ -19,6 +20,7 @@ urlpatterns = [
     path("api/dbt/", dbtapi.urls),
     path("api/prefect/", prefectapi.urls),
     path("api/tasks/", taskapi.urls),
+    path("api/warehouse/", warehouseapi.urls),
     path("api/", user_org_api.urls),
     path("docs/<tokenhex>/", get_dbt_docs),
     path("prometheus/", include("django_prometheus.urls")),
