@@ -60,16 +60,21 @@ def ninja_default_error_handler(
 def get_table(request, schema_name: str):
     try:
         org_user = request.orguser
-        org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).first()
+        org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).last()
         wtype = org_warehouse.wtype
         credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+        if wtype == "postgres":
+            credentials = credentials
+        elif wtype == "bigquery":
+            credentials = json.loads(credentials)
+
         client = get_client(wtype, credentials)
         if wtype == "postgres":
             tables = client.get_tables(schema_name)
         elif wtype == "bigquery":
-            tables = [table.table_id for table in client.list_tables(schema_name)]
-    except Exception as e:
-        print(f"An error occurred: {e}")
+            tables = client.get_tables(schema_name)
+    except Exception as error:
+        logger.exception("Exception occurred in get_table: %s", error)
         tables = []
 
     return {"tables": tables}
@@ -81,21 +86,52 @@ def get_schema(request):
         org_user = request.orguser
         org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).first()
         wtype = org_warehouse.wtype
+
         credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+        if wtype == "postgres":
+            credentials = credentials
+        elif wtype == "bigquery":
+            credentials = json.loads(credentials)
+
+        client = get_client(wtype, credentials)
         if wtype == "postgres":
             client = get_client(wtype, credentials)
             schemas = client.get_schemas()
         elif wtype == "bigquery":
             client = get_client(wtype, credentials)
-            datasets = list(client.list_datasets())
-            for dataset in datasets:
-                print(dataset.dataset_id)
-            schemas = [dataset.dataset_id for dataset in datasets]
-    except Exception as e:
-        print(f"An error occurred: {e}")
+            schemas = client.get_schemas()
+    except Exception as error:
+        logger.exception("Exception occurred in get_schema: %s", error)
         schemas = []
 
     return {"schemas": schemas}
+
+
+@warehouseapi.get(
+    "/table_columns/{schema_name}/{table_name}", auth=auth.CanManagePipelines()
+)
+def get_table_columns(request, schema_name: str, table_name: str):
+    try:
+        org_user = request.orguser
+        org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).first()
+        credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+        wtype = org_warehouse.wtype
+        if wtype == "postgres":
+            credentials = credentials
+        elif wtype == "bigquery":
+            credentials = json.loads(credentials)
+
+        client = get_client(wtype, credentials)
+        if wtype == "postgres":
+            data = client.get_table_columns(schema_name, table_name)
+        elif wtype == "bigquery":
+            data = client.get_table_columns(schema_name, table_name)
+
+    except Exception as error:
+        logger.exception("Exception occurred in get_table_columns: %s", error)
+        data = []
+
+    return {"data": data}
 
 
 @warehouseapi.get(
@@ -107,20 +143,21 @@ def get_table_data(request, schema_name: str, table_name: str):
         org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).first()
         wtype = org_warehouse.wtype
         credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+
+        if wtype == "postgres":
+            credentials = credentials
+        elif wtype == "bigquery":
+            credentials = json.loads(credentials)
+
         client = get_client(wtype, credentials)
         limit = 10
         if wtype == "postgres":
             data = client.get_table_data(schema_name, table_name, limit)
         elif wtype == "bigquery":
-            data = [
-                dict(row)
-                for row in client.list_rows(
-                    f"{schema_name}.{table_name}", max_results=limit
-                )
-            ]
+            data = client.get_table_data(schema_name, table_name, limit)
 
-    except Exception as e:
-        print(f"An error occurred: {e}")
+    except Exception as error:
+        logger.exception("Exception occurred in get_table_data: %s", error)
         data = []
 
     return {"data": data}
