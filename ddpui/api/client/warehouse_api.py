@@ -1,17 +1,15 @@
 import json
 
+from dbt_automation.utils.warehouseclient import get_client
 from ninja import NinjaAPI
 from ninja.errors import HttpError, ValidationError
 from ninja.responses import Response
+from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from ddpui import auth
 from ddpui.models.org import OrgWarehouse
 from ddpui.utils import secretsmanager
 from ddpui.utils.custom_logger import CustomLogger
-from dbt_automation.utils.warehouseclient import get_client
-
-from pydantic.error_wrappers import ValidationError as PydanticValidationError
-
 
 warehouseapi = NinjaAPI(urls_namespace="warehouse")
 logger = CustomLogger("ddpui")
@@ -59,9 +57,7 @@ def get_warehouse_data(request, data_type: str, **kwargs):
         wtype = org_warehouse.wtype
         credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
 
-        if wtype == "postgres":
-            credentials = credentials
-        elif wtype == "bigquery":
+        if wtype == "bigquery":
             credentials = json.loads(credentials)
 
         client = get_client(wtype, credentials)
