@@ -1,4 +1,4 @@
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from ddpui.api.client.warehouse_api import (
     get_schema,
@@ -8,46 +8,60 @@ from ddpui.api.client.warehouse_api import (
 )
 
 
+@patch.multiple(
+    "ddpui.api.client.warehouse_api",
+    get_warehouse_data=Mock(return_value=["table1", "table2"]),
+)
 def test_get_table_success():
     mock_request = Mock()
     mock_request.orguser = "test"
-
     schema_name = "test_schema"
     response = get_table(mock_request, schema_name)
 
     assert response is not None
-    assert "tables" in response
+    assert response == ["table1", "table2"]
 
 
+@patch.multiple(
+    "ddpui.api.client.warehouse_api",
+    get_warehouse_data=Mock(return_value=["schema1", "schema2"]),
+)
 def test_get_schema_success():
     mock_request = Mock()
     mock_request.orguser = "test"
-
     response = get_schema(mock_request)
 
     assert response is not None
-    assert "schemas" in response
+    assert response == ["schema1", "schema2"]
 
 
-def test_get_table_data_success():
+@patch.multiple(
+    "ddpui.api.client.warehouse_api",
+    get_warehouse_data=Mock(return_value=["column1", "column2"]),
+)
+def test_get_table_columns_success():
     mock_request = Mock()
     mock_request.orguser = "test"
-
-    schema_name = "test_schema"
-    table_name = "test_table"
-    response = get_table_data(mock_request, schema_name, table_name)
-
-    assert response is not None
-    assert "data" in response
-
-
-def test_get_table_column():
-    mock_request = Mock()
-    mock_request.orguser = "test"
-
     schema_name = "test_schema"
     table_name = "test_table"
     response = get_table_columns(mock_request, schema_name, table_name)
 
     assert response is not None
-    assert "columns" in response
+    assert response == ["column1", "column2"]
+
+
+@patch.multiple(
+    "ddpui.api.client.warehouse_api",
+    get_warehouse_data=Mock(
+        return_value=[{"column_1": "value_1"}, {"column2": "value2}"}]
+    ),
+)
+def test_get_table_data_success():
+    mock_request = Mock()
+    mock_request.orguser = "test"
+    schema_name = "test_schema"
+    table_name = "test_table"
+    response = get_table_data(mock_request, schema_name, table_name)
+
+    assert response is not None
+    assert response == [{"column_1": "value_1"}, {"column2": "value2}"}]
