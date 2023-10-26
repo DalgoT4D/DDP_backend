@@ -7,11 +7,14 @@ from time import sleep
 from uuid import uuid4
 from faker import Faker
 import requests
+import yaml
 from dotenv import load_dotenv
 from testclient import TestClient
 
-load_dotenv(".env.test")
-
+load_dotenv("testclient/.env.test")
+with open("testclient/config.yaml", "r", -1, "utf8") as configfile:
+    config = yaml.safe_load(configfile)
+print(config)
 parser = argparse.ArgumentParser()
 parser.add_argument("-v", "--verbose", action="store_true")
 parser.add_argument(
@@ -21,7 +24,6 @@ args = parser.parse_args()
 
 
 DBT_PROFILE = os.getenv("DBT_PROFILE")
-WAREHOUSETYPE = os.getenv("WAREHOUSETYPE")
 DBT_TARGETCONFIGS_SCHEMA = os.getenv("DBT_TARGETCONFIGS_SCHEMA")
 DBT_CREDENTIALS_USERNAME = os.getenv("DBT_CREDENTIALS_USERNAME")
 DBT_CREDENTIALS_PASSWORD = os.getenv("DBT_CREDENTIALS_PASSWORD")
@@ -40,27 +42,29 @@ SIGNUPCODE = os.getenv("SIGNUPCODE")
 
 faker = Faker("en-IN")
 tester = TestClient(args.port, verbose=args.verbose)
-email = faker.email()
-password = faker.password()
-tester.clientpost(
-    "organizations/users/",
-    json={"email": email, "password": password, "signupcode": SIGNUPCODE},
-)
-tester.login(email, password)
-tester.clientget("currentuser")
-tester.clientpost(
-    "organizations/",
-    json={
-        "name": faker.company()[:20],
-    },
-)
-# tester.clientdelete("organizations/warehouses/")
+if config["org"]["create_new"]:
+    email = faker.email()
+    password = faker.password()
+    tester.clientpost(
+        "organizations/users/",
+        json={"email": email, "password": password, "signupcode": SIGNUPCODE},
+    )
+    tester.login(email, password)
+    tester.clientget("currentuser")
+    tester.clientpost(
+        "organizations/",
+        json={
+            "name": faker.company()[:20],
+        },
+    )
+else:
+    tester.login(os.getenv("DALGO_USER"), os.getenv("DALGO_PASSWORD"))
 
 
-# dbtCredentials = None
-# airbyteConfig = None
-# destinationDefinitionId = None
+if config["warehouse"]["delete_existing"]:
+    tester.clientdelete("organizations/warehouses/")
 
+WAREHOUSETYPE = config["warehouse"]["wtype"]
 destination_definitions = tester.clientget("airbyte/destination_definitions")
 if WAREHOUSETYPE == "postgres":
     for destdef in destination_definitions:
@@ -99,16 +103,17 @@ elif WAREHOUSETYPE == "bigquery":
 else:
     raise Exception("unknown WAREHOUSETYPE " + WAREHOUSETYPE)
 
-tester.clientpost(
-    "organizations/warehouse/",
-    json={
-        "wtype": WAREHOUSETYPE,
-        "destinationDefId": destinationDefinitionId,
-        "airbyteConfig": airbyteConfig,
-    },
-)
+if config["org"]["create_new"]:
+    tester.clientpost(
+        "organizations/warehouse/",
+        json={
+            "wtype": WAREHOUSETYPE,
+            "destinationDefId": destinationDefinitionId,
+            "airbyteConfig": airbyteConfig,
+        },
+    )
 
-if True:
+if config["dbt_workspace"]["setup_new"]:
     tester.clientdelete("dbt/workspace/")
     r = tester.clientpost(
         "dbt/workspace/",
@@ -138,70 +143,78 @@ if True:
             break
         print("=" * 40)
 
-if False:
+if config["dbt_workspace"]["git_pull"]:
     tester.clientpost("dbt/git_pull/")
 
-tester.clientdelete("prefect/blocks/dbt/")
+if config["prefect"]["dbt"]["delete_blocks"]:
+    tester.clientdelete("prefect/blocks/dbt/")
 
-r = tester.clientpost(
-    "prefect/blocks/dbt/",
-    json={
-        "profile": {
-            "name": DBT_PROFILE,
-            "target_configs_schema": DBT_TARGETCONFIGS_SCHEMA,
+if config["prefect"]["dbt"]["create_blocks"]:
+    r = tester.clientpost(
+        "prefect/blocks/dbt/",
+        json={
+            "profile": {
+                "name": DBT_PROFILE,
+                "target_configs_schema": DBT_TARGETCONFIGS_SCHEMA,
+            },
         },
-    },
-    timeout=60,
-)
-print(r)
-
-flow_run_name: str = str(uuid4())
-tester.clientpost(
-    "prefect/flows/dbt_run/",
-    json={
-        "blockName": r["block_names"][0],
-        "flowRunName": flow_run_name,
-    },
-    timeout=10,
-)
-sleep(10)
-PREFECT_PROXY_API_URL = os.getenv("PREFECT_PROXY_API_URL")
-nattempts: int = 0
-while nattempts < 10:
-    try:
-        print(f"POST {PREFECT_PROXY_API_URL}/proxy/flow_run/ with name={flow_run_name}")
-        response = requests.post(
-            f"{PREFECT_PROXY_API_URL}/proxy/flow_run/",
-            json={"name": flow_run_name},
-            timeout=5,
-        )
-        message = response.json()
-        print(message)
-        if "flow_run" in message:
-            break
-    except ValueError:
-        print(response.text)
-        sys.exit(1)
-    except Exception as error:
-        print(str(error))
-        nattempts += 1
-        sleep(3)
-
-if nattempts == 10:
-    sys.exit(1)
-
-flow_run = message["flow_run"]
-print(flow_run)
-
-ntries: int = 0
-while ntries < 20:
-    sleep(1)
-    ntries += 1
-    r = requests.get(
-        f"{PREFECT_PROXY_API_URL}/proxy/flow_runs/logs/" + flow_run["id"], timeout=20
+        timeout=60,
     )
-    for log in r.json()["logs"]:
-        print(log["message"])
-    print("=" * 80)
+    print(r)
 
-# tester.clientdelete("prefect/blocks/dbt/")
+if config["prefect"]["dbt"]["run_flow"]:
+    r = tester.clientget("prefect/blocks/dbt/")
+    flow_run_name: str = str(uuid4())
+    tester.clientpost(
+        "prefect/flows/dbt_run/",
+        json={
+            "blockName": r["block_names"][0],
+            "flowRunName": flow_run_name,
+        },
+        timeout=10,
+    )
+    sleep(10)
+    PREFECT_PROXY_API_URL = os.getenv("PREFECT_PROXY_API_URL")
+    nattempts: int = 0
+    while nattempts < 10:
+        try:
+            print(
+                f"POST {PREFECT_PROXY_API_URL}/proxy/flow_run/ with name={flow_run_name}"
+            )
+            response = requests.post(
+                f"{PREFECT_PROXY_API_URL}/proxy/flow_run/",
+                json={"name": flow_run_name},
+                timeout=5,
+            )
+            message = response.json()
+            print(message)
+            if "flow_run" in message:
+                break
+        except ValueError:
+            print(response.text)
+            sys.exit(1)
+        except Exception as error:
+            print(str(error))
+            nattempts += 1
+            sleep(3)
+
+    if nattempts == 10:
+        sys.exit(1)
+
+    flow_run = message["flow_run"]
+    print(flow_run)
+
+    ntries: int = 0
+    while ntries < 20:
+        sleep(1)
+        ntries += 1
+        r = requests.get(
+            f"{PREFECT_PROXY_API_URL}/proxy/flow_runs/logs/" + flow_run["id"],
+            timeout=20,
+        )
+        for log in r.json()["logs"]:
+            print(log["message"])
+        print("=" * 80)
+
+if config["prefect"]["dbt"]["delete_blocks"]:
+    tester.clientdelete("prefect/blocks/dbt/")

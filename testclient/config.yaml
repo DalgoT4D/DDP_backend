@@ -1,0 +1,17 @@
+version: 2
+org:
+  create_new: false
+
+warehouse:
+  delete_existing: false
+  wtype: bigquery
+
+dbt_workspace:
+  setup_new: false
+  git_pull: false
+
+prefect:
+  dbt:
+    delete_blocks: false
+    create_blocks: false
+    run_flow: false
