@@ -53,19 +53,19 @@ if config["org"]["create_new"]:
     tester.clientget("currentuser")
     tester.clientpost(
         "organizations/",
-        json={
-            "name": faker.company()[:20],
-        },
+        json={"name": config["org"]["name"]},
     )
 else:
     tester.login(os.getenv("DALGO_USER"), os.getenv("DALGO_PASSWORD"))
 
+tester.clientheaders["x-dalgo-org"] = config["org"]["name"]
 
 if config["warehouse"]["delete_existing"]:
     tester.clientdelete("organizations/warehouses/")
 
 WAREHOUSETYPE = config["warehouse"]["wtype"]
 destination_definitions = tester.clientget("airbyte/destination_definitions")
+
 if WAREHOUSETYPE == "postgres":
     for destdef in destination_definitions:
         if destdef["name"] == "Postgres":
@@ -113,6 +113,71 @@ if config["org"]["create_new"]:
         },
     )
 
+# ======
+source_definitions = tester.clientget("airbyte/source_definitions")
+
+sources = tester.clientget("airbyte/sources")
+# create sources
+for src in config["airbyte"]["sources"]:
+    if src["name"] in [s["name"] for s in sources]:
+        print(f"source {src['name']} already exists")
+        continue
+    for sourceDef in source_definitions:
+        if sourceDef["name"] == src["stype"]:
+            sourceDefId = sourceDef["sourceDefinitionId"]
+            # add source
+            try:
+                source_creation_config = {
+                    "name": src["name"],
+                    "sourceDefId": sourceDefId,
+                    "config": src["config"],
+                }
+                source_creation_response = tester.clientpost(
+                    "airbyte/sources/",
+                    json=source_creation_config,
+                )
+                sources = tester.clientget("airbyte/sources")
+                break
+            except Exception as error:
+                print(error)
+                sys.exit(1)
+
+connections_response = tester.clientget("airbyte/connections")
+for connection in config["airbyte"]["connections"]:
+    if connection["name"] in [c["name"] for c in connections_response]:
+        print(f"connection {connection['name']} already exists")
+        continue
+
+    src = [s for s in sources if s["name"] == connection["source"]][0]
+    connPayload = {
+        "name": connection["name"],
+        "normalize": False,
+        "sourceId": src["sourceId"],
+        "streams": [],
+        "destinationSchema": connection["destinationSchema"],
+    }
+
+    schemaCatalog = tester.clientget(
+        f'airbyte/sources/{src["sourceId"]}/schema_catalog'
+    )
+
+    for streamData in schemaCatalog["catalog"]["streams"]:
+        for specStream in connection["streams"]:
+            if streamData["stream"]["name"] == specStream["name"]:
+                streamPayload = {
+                    "selected": True,
+                    "name": specStream["name"],
+                    "supportsIncremental": False,
+                    "destinationSyncMode": specStream["syncMode"],
+                    "syncMode": "full_refresh",
+                }
+                connPayload["streams"].append(streamPayload)
+
+    new_connection_response = tester.clientpost(
+        "airbyte/connections/", json=connPayload
+    )
+
+# ======
 if config["dbt_workspace"]["setup_new"]:
     tester.clientdelete("dbt/workspace/")
     r = tester.clientpost(
