@@ -60,6 +60,7 @@ def get_warehouse_data(request, data_type: str, **kwargs):
         if wtype == "bigquery":
             credentials = json.loads(credentials)
 
+        data = []
         client = get_client(wtype, credentials)
         if data_type == "tables":
             data = client.get_tables(kwargs["schema_name"])
@@ -76,7 +77,7 @@ def get_warehouse_data(request, data_type: str, **kwargs):
         logger.exception(f"Exception occurred in get_{data_type}: {error}")
         raise HttpError(500, f"Failed to get {data_type}")
 
-    return {data_type: data}
+    return data
 
 
 @warehouseapi.get("/tables/{schema_name}", auth=auth.CanManagePipelines())
