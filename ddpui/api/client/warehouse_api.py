@@ -1,28 +1,20 @@
-import os
-from dbt_automation.utils.warehouseclient import get_client
-from ninja import NinjaAPI
-from ddpui import auth
-from ninja.errors import ValidationError
-
-from ddpui.models.org import OrgWarehouse
-from ddpui.utils import secretsmanager
-import os
 import json
-from ninja import NinjaAPI
 
-from ninja.errors import ValidationError
+from ninja import NinjaAPI
+from ninja.errors import HttpError, ValidationError
 from ninja.responses import Response
 
-from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from ddpui import auth
-
 from ddpui.models.org import OrgWarehouse
 from ddpui.utils import secretsmanager
 from ddpui.utils.custom_logger import CustomLogger
+from dbt_automation.utils.warehouseclient import get_client
+
+from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 
 warehouseapi = NinjaAPI(urls_namespace="warehouse")
-logger = CustomLogger("airbyte")
+logger = CustomLogger("ddpui")
 
 
 @warehouseapi.exception_handler(ValidationError)
@@ -56,108 +48,68 @@ def ninja_default_error_handler(
     return Response({"detail": "something went wrong"}, status=500)
 
 
-@warehouseapi.get("/tables/{schema_name}", auth=auth.CanManagePipelines())
-def get_table(request, schema_name: str):
+def get_warehouse_data(request, data_type: str, **kwargs):
+    """
+    Fetches data from a warehouse based on the data type
+    and optional parameters
+    """
     try:
         org_user = request.orguser
         org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).first()
         wtype = org_warehouse.wtype
         credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+
         if wtype == "postgres":
             credentials = credentials
         elif wtype == "bigquery":
             credentials = json.loads(credentials)
 
         client = get_client(wtype, credentials)
-        if wtype == "postgres":
-            tables = client.get_tables(schema_name)
-        elif wtype == "bigquery":
-            tables = client.get_tables(schema_name)
+        if data_type == "tables":
+            data = client.get_tables(kwargs["schema_name"])
+        elif data_type == "schemas":
+            data = client.get_schemas()
+        elif data_type == "table_columns":
+            data = client.get_table_columns(kwargs["schema_name"], kwargs["table_name"])
+        elif data_type == "table_data":
+            limit = 10
+            data = client.get_table_data(
+                kwargs["schema_name"], kwargs["table_name"], limit
+            )
     except Exception as error:
-        logger.exception("Exception occurred in get_table: %s", error)
-        tables = []
+        logger.exception(f"Exception occurred in get_{data_type}: {error}")
+        raise HttpError(500, f"Failed to get {data_type}")
 
-    return {"tables": tables}
+    return {data_type: data}
+
+
+@warehouseapi.get("/tables/{schema_name}", auth=auth.CanManagePipelines())
+def get_table(request, schema_name: str):
+    """Fetches table names from a warehouse"""
+    return get_warehouse_data(request, "tables", schema_name=schema_name)
 
 
 @warehouseapi.get("/schemas", auth=auth.CanManagePipelines())
 def get_schema(request):
-    try:
-        org_user = request.orguser
-        org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).first()
-        wtype = org_warehouse.wtype
-
-        credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
-        if wtype == "postgres":
-            credentials = credentials
-        elif wtype == "bigquery":
-            credentials = json.loads(credentials)
-
-        client = get_client(wtype, credentials)
-        if wtype == "postgres":
-            client = get_client(wtype, credentials)
-            schemas = client.get_schemas()
-        elif wtype == "bigquery":
-            client = get_client(wtype, credentials)
-            schemas = client.get_schemas()
-    except Exception as error:
-        logger.exception("Exception occurred in get_schema: %s", error)
-        schemas = []
-
-    return {"schemas": schemas}
+    """Fetches schema names from a warehouse"""
+    return get_warehouse_data(request, "schemas")
 
 
 @warehouseapi.get(
     "/table_columns/{schema_name}/{table_name}", auth=auth.CanManagePipelines()
 )
 def get_table_columns(request, schema_name: str, table_name: str):
-    try:
-        org_user = request.orguser
-        org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).first()
-        credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
-        wtype = org_warehouse.wtype
-        if wtype == "postgres":
-            credentials = credentials
-        elif wtype == "bigquery":
-            credentials = json.loads(credentials)
-
-        client = get_client(wtype, credentials)
-        if wtype == "postgres":
-            columns = client.get_table_columns(schema_name, table_name)
-        elif wtype == "bigquery":
-            columns = client.get_table_columns(schema_name, table_name)
-
-    except Exception as error:
-        logger.exception("Exception occurred in get_table_columns: %s", error)
-        columns = []
-
-    return {"columns": columns}
+    """Fetches column names for a specific table from a warehouse"""
+    return get_warehouse_data(
+        request, "table_columns", schema_name=schema_name, table_name=table_name
+    )
 
 
 @warehouseapi.get(
     "/table_data/{schema_name}/{table_name}", auth=auth.CanManagePipelines()
 )
 def get_table_data(request, schema_name: str, table_name: str):
-    try:
-        org_user = request.orguser
-        org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).first()
-        wtype = org_warehouse.wtype
-        credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
-
-        if wtype == "postgres":
-            credentials = credentials
-        elif wtype == "bigquery":
-            credentials = json.loads(credentials)
-
-        client = get_client(wtype, credentials)
-        limit = 10
-        if wtype == "postgres":
-            data = client.get_table_data(schema_name, table_name, limit)
-        elif wtype == "bigquery":
-            data = client.get_table_data(schema_name, table_name, limit)
-
-    except Exception as error:
-        logger.exception("Exception occurred in get_table_data: %s", error)
-        data = []
-
-    return {"data": data}
+    """Fetches data from a specific table in a warehouse"""
+    return get_warehouse_data(
+        request, "table_data", schema_name=schema_name, table_name=table_name
+    )
