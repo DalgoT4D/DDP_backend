@@ -1,11 +1,12 @@
+"""test various dalgo services via client api"""
 import os
 import sys
 import json
-from time import sleep
-from faker import Faker
-from uuid import uuid4
-import requests
 import argparse
+from time import sleep
+from uuid import uuid4
+from faker import Faker
+import requests
 from dotenv import load_dotenv
 from testclient import TestClient
 
