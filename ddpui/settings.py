@@ -168,21 +168,27 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # custom airbyte connectors
 AIRBYTE_CUSTOM_SOURCES = {
-    "airbyte/source-kobotoolbox": {
-        "name": "Kobotoolbox",
+    "tech4dev/source-kobotoolbox": {
+        "name": "KoboToolbox",
         "docker_repository": "tech4dev/source-kobotoolbox",
         "docker_image_tag": "0.1.0",
         "documentation_url": "",
     },
-    "airbyte/source-commcare": {
-        "name": "custom_commcare",
-        "docker_repository": "airbyte/source-commcare",
-        "docker_image_tag": "0.1.1",
+    "tech4dev/source-commcare": {
+        "name": "CommCare T4D",
+        "docker_repository": "tech4dev/source-commcare",
+        "docker_image_tag": "0.1.0",
         "documentation_url": "",
     },
-    "airbyte/source-avni": {
+    "tech4dev/source-avni": {
         "name": "Avni",
         "docker_repository": "tech4dev/source-avni",
+        "docker_image_tag": "0.1.0",
+        "documentation_url": "",
+    },
+    "tech4dev/source-papersurvey": {
+        "name": "PaperSurvey",
+        "docker_repository": "tech4dev/source-papersurvey",
         "docker_image_tag": "0.1.0",
         "documentation_url": "",
     },
