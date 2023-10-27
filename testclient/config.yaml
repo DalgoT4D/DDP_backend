@@ -1,0 +1,38 @@
+version: 2
+org:
+  create_new: false
+  name: testclient
+
+warehouse:
+  delete_existing: false
+  wtype: bigquery
+
+airbyte:
+  sources:
+    - name: covid19data
+      stype: "File (CSV, JSON, Excel, Feather, Parquet)"
+      config:
+        url: "https://storage.googleapis.com/covid19-open-data/v2/latest/epidemiology.csv"
+        format: csv
+        provider:
+          storage: "HTTPS"
+          user_agent: false
+        dataset_name: covid19data
+
+  connections:
+    - name: covid19data
+      source: covid19data
+      streams:
+        - name: covid19data
+          syncMode: overwrite
+      destinationSchema: csv_schema
+
+dbt_workspace:
+  setup_new: false
+  git_pull: false
+
+prefect:
+  dbt:
+    delete_blocks: false
+    create_blocks: false
+    run_flow: false
