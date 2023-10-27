@@ -42,7 +42,7 @@ def test_upgrade_custom_sources(
     mock_get_source_definitions.return_value = {
         "sourceDefinitions": [
             {
-                "name": "Kobotoolbox",
+                "name": "KoboToolbox",
                 "dockerRepository": "tech4dev/source-kobotoolbox",
                 "dockerImageTag": "0.0.0",
             },
@@ -52,21 +52,21 @@ def test_upgrade_custom_sources(
                 "dockerImageTag": "0.0.0",
             },
             {
-                "name": "custom_commcare",
-                "dockerRepository": "airbyte/source-commcare",
+                "name": "CommCare T4D",
+                "dockerRepository": "tech4dev/source-commcare",
                 "dockerImageTag": "0.0.0",
             },
         ]
     }
     upgrade_custom_sources("workspace_id")
     mock_add_custom_airbyte_connector.assert_any_call(
-        "workspace_id", "Kobotoolbox", "tech4dev/source-kobotoolbox", "0.1.0", ""
+        "workspace_id", "KoboToolbox", "tech4dev/source-kobotoolbox", "0.1.0", ""
     )
     mock_add_custom_airbyte_connector.assert_any_call(
         "workspace_id", "Avni", "tech4dev/source-avni", "0.1.0", ""
     )
     mock_add_custom_airbyte_connector.assert_any_call(
-        "workspace_id", "custom_commcare", "airbyte/source-commcare", "0.1.1", ""
+        "workspace_id", "CommCare T4D", "tech4dev/source-commcare", "0.1.0", ""
     )
 
 
@@ -86,13 +86,13 @@ def test_upgrade_custom_sources_add(
     mock_get_source_definitions.return_value = {"sourceDefinitions": []}
     upgrade_custom_sources("workspace_id")
     mock_add_custom_airbyte_connector.assert_any_call(
-        "workspace_id", "Kobotoolbox", "tech4dev/source-kobotoolbox", "0.1.0", ""
+        "workspace_id", "KoboToolbox", "tech4dev/source-kobotoolbox", "0.1.0", ""
     )
     mock_add_custom_airbyte_connector.assert_any_call(
         "workspace_id", "Avni", "tech4dev/source-avni", "0.1.0", ""
     )
     mock_add_custom_airbyte_connector.assert_any_call(
-        "workspace_id", "custom_commcare", "airbyte/source-commcare", "0.1.1", ""
+        "workspace_id", "CommCare T4D", "tech4dev/source-commcare", "0.1.0", ""
     )
 
 
