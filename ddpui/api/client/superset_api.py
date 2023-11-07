@@ -1,17 +1,16 @@
 import os
-import json
-from ninja import NinjaAPI
 import requests
 
-from ninja.errors import HttpError
+from ninja import NinjaAPI
+from ninja.errors import HttpError, ValidationError
+from ninja.responses import Response
+from pydantic.error_wrappers import ValidationError as PydanticValidationError
+
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgWarehouse
 from ddpui import auth
 from ddpui.utils import secretsmanager
-from ninja.errors import HttpError, ValidationError
-from ninja.responses import Response
-from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 
 supersetapi = NinjaAPI(urls_namespace="superset")
@@ -82,6 +81,7 @@ def post_fetch_embed_token(request, dashboard_uuid):  # pylint: disable=unused-a
                 "refresh": True,
                 "provider": "db",
             },
+            timeout=10,
         )
         response.raise_for_status()
         access_token = response.json()["access_token"]
@@ -91,6 +91,7 @@ def post_fetch_embed_token(request, dashboard_uuid):  # pylint: disable=unused-a
             "Something went wrong when trying to fetch jwt token from superset usage dashboard domain : %s",
             str(err),
         )
+        # pylint:disable=raise-missing-from
         raise HttpError(500, "couldn't connect to superset")
 
     # Hit the superset endpoint /api/v1/security/csrf_token
@@ -98,6 +99,7 @@ def post_fetch_embed_token(request, dashboard_uuid):  # pylint: disable=unused-a
         response = requests.get(
             f"{os.getenv('SUPERSET_USAGE_DASHBOARD_API_URL')}/security/csrf_token",
             headers={"Authorization": f"Bearer {access_token}"},  # skipcq: PTC-W1006
+            timeout=10,
         )
         response.raise_for_status()
         csrf_token = response.json()["result"]
@@ -107,6 +109,7 @@ def post_fetch_embed_token(request, dashboard_uuid):  # pylint: disable=unused-a
             "Something went wrong trying to fetch the csrf token from superset usage dashboard domain : %s",
             str(err),
         )
+        # pylint:disable=raise-missing-from
         raise HttpError(500, "couldn't connect to superset")
 
     # Hit the superset endpoint /api/v1/security/guest_token
@@ -120,12 +123,13 @@ def post_fetch_embed_token(request, dashboard_uuid):  # pylint: disable=unused-a
                     "last_name": credentials["last_name"],
                 },
                 "resources": [{"type": "dashboard", "id": dashboard_uuid}],
-                "rls": [{}],  # TODO: add the correct RLS here
+                "rls": [{"clause": f"org={orguser.org.slug}"}],
             },
             headers={
                 "Authorization": f"Bearer {access_token}",
                 "X-CSRFToken": csrf_token,
             },  # skipcq: PTC-W1006
+            timeout=10,
         )
         response.raise_for_status()
         embed_token = response.json()["token"]
@@ -135,6 +139,7 @@ def post_fetch_embed_token(request, dashboard_uuid):  # pylint: disable=unused-a
             "Something went wrong trying to fetch the csrf token from superset usage dashboard domain : %s",
             str(err),
         )
+        # pylint:disable=raise-missing-from
         raise HttpError(500, "couldn't connect to superset")
 
     return {"embed_token": embed_token}
