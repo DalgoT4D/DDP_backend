@@ -11,6 +11,7 @@ from ddpui.api.client.warehouse_api import warehouseapi
 from ddpui.api.client.dashboard_api import dashboardapi
 from ddpui.html.docs import get_dbt_docs
 from ddpui.api.client.webhook_api import webhookapi
+from ddpui.api.client.superset_api import supersetapi
 
 urlpatterns = [
     # path("admin/", admin.site.urls), # Uncomment if you want to use django-admin app
@@ -21,6 +22,7 @@ urlpatterns = [
     path("api/prefect/", prefectapi.urls),
     path("api/tasks/", taskapi.urls),
     path("api/warehouse/", warehouseapi.urls),
+    path("api/superset/", supersetapi.urls),
     path("api/", user_org_api.urls),
     path("docs/<tokenhex>/", get_dbt_docs),
     path("prometheus/", include("django_prometheus.urls")),
