@@ -121,6 +121,9 @@ class OrgWarehouse(models.Model):
     airbyte_norm_op_id = models.TextField(  # skipcq: PTC-W0901, PTC-W0906
         max_length=36, null=True
     )
+    superset_creds = models.CharField(
+        max_length=200, null=True
+    )  # skipcq: PTC-W0901, PTC-W0906
 
     def __str__(self) -> str:
         return (
