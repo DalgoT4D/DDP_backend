@@ -99,6 +99,11 @@ def generate_warehouse_credentials_name(org: Org):
     return f"warehouseCreds-{org.slug}-{uuid4()}"
 
 
+def generate_superset_credentials_name(org: Org):
+    """store the connection credentials to their data warehouse"""
+    return f"supersetCreds-{org.slug}-{uuid4()}"
+
+
 def save_github_token(org: Org, access_token: str):
     """saves a github auth token for an org under a predefined secret name"""
     aws_sm = get_client()
@@ -185,3 +190,29 @@ def delete_warehouse_credentials(warehouse: OrgWarehouse) -> None:
         aws_sm.delete_secret(SecretId=warehouse.credentials)
     except Exception:  # skipcq PYL-W0703
         pass
+
+
+def save_superset_usage_dashboard_credentials(
+    warehouse: OrgWarehouse, credentials: dict
+):
+    """saves superset usage dashboard user credentials for an org under a predefined secret name"""
+    aws_sm = get_client()
+    secret_name = generate_superset_credentials_name(warehouse.org)
+    response = aws_sm.create_secret(
+        Name=secret_name,
+        SecretString=json.dumps(credentials),
+    )
+    logger.info(
+        "saved superset usage dashboard user credentials in secrets manager under name="
+        + response["Name"]
+    )
+    return secret_name
+
+
+def retrieve_superset_usage_dashboard_credentials(
+    warehouse: OrgWarehouse,
+) -> dict | None:
+    """decodes and returns the saved superset usage dashboard credentials for an org"""
+    aws_sm = get_client()
+    response = aws_sm.get_secret_value(SecretId=warehouse.superset_creds)
+    return json.loads(response["SecretString"]) if "SecretString" in response else None
