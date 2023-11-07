@@ -36,7 +36,7 @@ class Command(BaseCommand):
             logger.error("warehouse not found")
             return
 
-        save_superset_usage_dashboard_credentials(
+        secret_id = save_superset_usage_dashboard_credentials(
             warehouse,
             {
                 "username": options["username"],
@@ -45,4 +45,6 @@ class Command(BaseCommand):
                 "password": options["password"],
             },
         )
+        warehouse.superset_creds = secret_id
+        warehouse.save()
         logger.info("credentials saved")
