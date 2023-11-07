@@ -716,15 +716,20 @@ def get_flow_run_by_id(request, flow_run_id):
 @prefectapi.get(
     "/flows/{deployment_id}/flow_runs/history", auth=auth.CanManagePipelines()
 )
-def get_prefect_flow_runs_log_history(request, deployment_id):
+def get_prefect_flow_runs_log_history(
+    request, deployment_id, limit: int = 0, fetchlogs=True
+):
     # pylint: disable=unused-argument
     """Fetch all flow runs for the deployment and the logs for each flow run"""
-    flow_runs = prefect_service.get_flow_runs_by_deployment_id(deployment_id, limit=0)
+    flow_runs = prefect_service.get_flow_runs_by_deployment_id(
+        deployment_id, limit=limit
+    )
 
-    for flow_run in flow_runs:
-        logs_dict = prefect_service.get_flow_run_logs(flow_run["id"], 0)
-        flow_run["logs"] = (
-            logs_dict["logs"]["logs"] if "logs" in logs_dict["logs"] else []
-        )
+    if fetchlogs:
+        for flow_run in flow_runs:
+            logs_dict = prefect_service.get_flow_run_logs(flow_run["id"], 0)
+            flow_run["logs"] = (
+                logs_dict["logs"]["logs"] if "logs" in logs_dict["logs"] else []
+            )
 
     return flow_runs
