@@ -63,7 +63,7 @@ def post_fetch_embed_token(request, dashboard_uuid):  # pylint: disable=unused-a
     if warehouse is None:
         raise HttpError(400, "create a warehouse first")
 
-    # {username: "", password: "", first_name: "", last_name: ""}
+    # {username: "", password: "", first_name: "", last_name: ""} # skipcq: PY-W0069
     credentials = secretsmanager.retrieve_superset_usage_dashboard_credentials(
         warehouse
     )
