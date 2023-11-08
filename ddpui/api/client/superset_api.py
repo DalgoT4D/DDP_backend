@@ -95,12 +95,15 @@ def post_fetch_embed_token(request, dashboard_uuid):  # pylint: disable=unused-a
         raise HttpError(500, "couldn't connect to superset")
 
     # Hit the superset endpoint /api/v1/security/csrf_token
+    cookies = None
     try:
         response = requests.get(
             f"{os.getenv('SUPERSET_USAGE_DASHBOARD_API_URL')}/security/csrf_token",
             headers={"Authorization": f"Bearer {access_token}"},  # skipcq: PTC-W1006
             timeout=10,
         )
+        if "Set-Cookie" in response.headers:
+            cookies = response.headers["Set-Cookie"]
         response.raise_for_status()
         csrf_token = response.json()["result"]
 
@@ -128,7 +131,10 @@ def post_fetch_embed_token(request, dashboard_uuid):  # pylint: disable=unused-a
             headers={
                 "Authorization": f"Bearer {access_token}",
                 "X-CSRFToken": csrf_token,
+                "Content-Type": "application/json",
+                "Referer": f"{os.getenv('SUPERSET_USAGE_DASHBOARD_API_URL')}",
             },  # skipcq: PTC-W1006
+            cookies={"session": cookies.split("=")[1]},
             timeout=10,
         )
         response.raise_for_status()
@@ -136,7 +142,7 @@ def post_fetch_embed_token(request, dashboard_uuid):  # pylint: disable=unused-a
 
     except requests.exceptions.RequestException as err:
         logger.error(
-            "Something went wrong trying to fetch the csrf token from superset usage dashboard domain : %s",
+            "Something went wrong trying to fetch the guest/embed token from superset usage dashboard domain : %s",
             str(err),
         )
         # pylint:disable=raise-missing-from
