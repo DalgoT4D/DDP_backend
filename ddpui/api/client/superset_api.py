@@ -132,7 +132,7 @@ def post_fetch_embed_token(request, dashboard_uuid):  # pylint: disable=unused-a
                 "Authorization": f"Bearer {access_token}",
                 "X-CSRFToken": csrf_token,
                 "Content-Type": "application/json",
-                "Referer": "https://superset.dalgo.in",
+                "Referer": f"{os.getenv('SUPERSET_USAGE_DASHBOARD_API_URL')}",
             },  # skipcq: PTC-W1006
             cookies={"session": cookies.split("=")[1]},
             timeout=10,
