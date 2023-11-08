@@ -581,23 +581,21 @@ def test_update_dataflow(mock_put: Mock):
 
 @patch("ddpui.ddpprefect.prefect_service.prefect_get")
 def test_get_flow_runs_by_deployment_id_limit(mock_get: Mock):
-    mock_get.return_value = {"flow_runs": "runs"}
+    mock_get.return_value = {"flow_runs": []}
     response = get_flow_runs_by_deployment_id("depid1", 100)
     assert response == "runs"
     mock_get.assert_called_once_with(
-        "flow_runs",
-        params={"deployment_id": "depid1", "limit": 100},
+        "flow_runs", params={"deployment_id": "depid1", "limit": 100}, timeout=60
     )
 
 
 @patch("ddpui.ddpprefect.prefect_service.prefect_get")
 def test_get_flow_runs_by_deployment_id_nolimit(mock_get: Mock):
-    mock_get.return_value = {"flow_runs": "runs"}
+    mock_get.return_value = {"flow_runs": []}
     response = get_flow_runs_by_deployment_id("depid1")
     assert response == "runs"
     mock_get.assert_called_once_with(
-        "flow_runs",
-        params={"deployment_id": "depid1", "limit": None},
+        "flow_runs", params={"deployment_id": "depid1", "limit": None}, timeout=60
     )
 
 
