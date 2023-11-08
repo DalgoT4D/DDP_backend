@@ -17,6 +17,7 @@ from ddpui.ddpprefect.schema import (
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.orgjobs import BlockLock, DataflowBlock
 from ddpui.models.org_user import OrgUser
+from ddpui.models.flow_runs import PrefectFlowRun
 
 load_dotenv()
 
@@ -387,11 +388,39 @@ def get_flow_runs_by_deployment_id(deployment_id: str, limit=None):  # pragma: n
     Fetch flow runs of a deployment that are FAILED/COMPLETED
     sorted by descending start time of each run
     """
-    res = prefect_get(
-        "flow_runs",
-        params={"deployment_id": deployment_id, "limit": limit},
-    )
-    return res["flow_runs"]
+    result = []
+    # sorted by start-time ASC
+    for prefect_flow_run in PrefectFlowRun.objects.filter(
+        deployment_id=deployment_id
+    ).order_by("start_time"):
+        result.append(prefect_flow_run.to_json())
+
+    params = {"deployment_id": deployment_id, "limit": limit}
+    if len(result) > 0:
+        params["start_time_gt"] = result[-1]["startTime"]
+    res = prefect_get("flow_runs", params=params, timeout=60)
+
+    # iterate so that start-time is ASC
+    for flow_run in res["flow_runs"][::-1]:
+        if not PrefectFlowRun.objects.filter(flow_run_id=flow_run["id"]).exists():
+            if flow_run["startTime"] in ["", None]:
+                flow_run["startTime"] = flow_run["expectedStartTime"]
+            prefect_flow_run = PrefectFlowRun.objects.create(
+                deployment_id=deployment_id,
+                flow_run_id=flow_run["id"],
+                name=flow_run["name"],
+                start_time=flow_run["startTime"],
+                expected_start_time=flow_run["expectedStartTime"],
+                total_run_time=flow_run["totalRunTime"],
+                status=flow_run["status"],
+                state_name=flow_run["state_name"],
+            )
+            prefect_flow_run.refresh_from_db()
+            result.append(prefect_flow_run.to_json())
+
+    # sorted by start-time DESC
+    result.reverse()
+    return result
 
 
 def get_last_flow_run_by_deployment_id(deployment_id: str):  # pragma: no cover
