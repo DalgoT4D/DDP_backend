@@ -7,6 +7,9 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
+pytestmark = pytest.mark.django_db
+
+
 from ddpui.ddpprefect.prefect_service import (
     prefect_get,
     prefect_put,
@@ -250,7 +253,10 @@ def test_get_airbyte_server_block_id(mock_get: Mock):
 @patch("ddpui.ddpprefect.prefect_service.prefect_post")
 def test_create_airbyte_server_block(mock_post: Mock):
     blockname = "theblockname"
-    mock_post.return_value = {"block_id": "the-block-id", "cleaned_block_name": "theblockname"}
+    mock_post.return_value = {
+        "block_id": "the-block-id",
+        "cleaned_block_name": "theblockname",
+    }
     response = create_airbyte_server_block(blockname)
     mock_post.assert_called_once_with(
         "blocks/airbyte/server/",
