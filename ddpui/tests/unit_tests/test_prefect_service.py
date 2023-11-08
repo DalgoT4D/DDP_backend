@@ -619,8 +619,8 @@ def test_get_flow_runs_by_deployment_id_insert_pfr(mock_get: Mock):
     assert response[0]["deployment_id"] == "depid1"
     assert response[0]["id"] == "flowrunid"
     assert response[0]["name"] == "flowrunname"
-    assert response[0]["startTime"] == "2021-01-01T00:00:00.000Z"
-    assert response[0]["expectedStartTime"] == "2021-01-01T00:00:00.000Z"
+    assert response[0]["startTime"] == "2021-01-01T00:00:00+00:00"
+    assert response[0]["expectedStartTime"] == "2021-01-01T00:00:00+00:00"
     assert response[0]["totalRunTime"] == 10.0
     assert response[0]["status"] == "COMPLETED"
     assert response[0]["state_name"] == "COMPLETED"
