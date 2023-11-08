@@ -583,7 +583,7 @@ def test_update_dataflow(mock_put: Mock):
 def test_get_flow_runs_by_deployment_id_limit(mock_get: Mock):
     mock_get.return_value = {"flow_runs": []}
     response = get_flow_runs_by_deployment_id("depid1", 100)
-    assert response == "runs"
+    assert response == []
     mock_get.assert_called_once_with(
         "flow_runs", params={"deployment_id": "depid1", "limit": 100}, timeout=60
     )
@@ -593,7 +593,37 @@ def test_get_flow_runs_by_deployment_id_limit(mock_get: Mock):
 def test_get_flow_runs_by_deployment_id_nolimit(mock_get: Mock):
     mock_get.return_value = {"flow_runs": []}
     response = get_flow_runs_by_deployment_id("depid1")
-    assert response == "runs"
+    assert response == []
+    mock_get.assert_called_once_with(
+        "flow_runs", params={"deployment_id": "depid1", "limit": None}, timeout=60
+    )
+
+
+@patch("ddpui.ddpprefect.prefect_service.prefect_get")
+def test_get_flow_runs_by_deployment_id_insert_pfr(mock_get: Mock):
+    mock_get.return_value = {
+        "flow_runs": [
+            {
+                "id": "flowrunid",
+                "name": "flowrunname",
+                "startTime": "",
+                "expectedStartTime": "2021-01-01T00:00:00.000Z",
+                "totalRunTime": 10.0,
+                "status": "COMPLETED",
+                "state_name": "COMPLETED",
+            }
+        ]
+    }
+    response = get_flow_runs_by_deployment_id("depid1")
+    assert len(response) == 1
+    assert response[0]["deployment_id"] == "depid1"
+    assert response[0]["id"] == "flowrunid"
+    assert response[0]["name"] == "flowrunname"
+    assert response[0]["startTime"] == "2021-01-01T00:00:00.000Z"
+    assert response[0]["expectedStartTime"] == "2021-01-01T00:00:00.000Z"
+    assert response[0]["totalRunTime"] == 10.0
+    assert response[0]["status"] == "COMPLETED"
+    assert response[0]["state_name"] == "COMPLETED"
     mock_get.assert_called_once_with(
         "flow_runs", params={"deployment_id": "depid1", "limit": None}, timeout=60
     )
