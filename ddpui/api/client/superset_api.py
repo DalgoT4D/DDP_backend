@@ -67,6 +67,8 @@ def post_fetch_embed_token(request, dashboard_uuid):  # pylint: disable=unused-a
     credentials = secretsmanager.retrieve_superset_usage_dashboard_credentials(
         warehouse
     )
+    if credentials is None:
+        raise HttpError(400, "superset usage credentials are missing")
 
     access_token = None
     csrf_token = None
