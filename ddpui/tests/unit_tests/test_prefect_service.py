@@ -7,6 +7,9 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
+pytestmark = pytest.mark.django_db
+
+
 from ddpui.ddpprefect.prefect_service import (
     prefect_get,
     prefect_put,
@@ -250,7 +253,10 @@ def test_get_airbyte_server_block_id(mock_get: Mock):
 @patch("ddpui.ddpprefect.prefect_service.prefect_post")
 def test_create_airbyte_server_block(mock_post: Mock):
     blockname = "theblockname"
-    mock_post.return_value = {"block_id": "the-block-id", "cleaned_block_name": "theblockname"}
+    mock_post.return_value = {
+        "block_id": "the-block-id",
+        "cleaned_block_name": "theblockname",
+    }
     response = create_airbyte_server_block(blockname)
     mock_post.assert_called_once_with(
         "blocks/airbyte/server/",
@@ -575,23 +581,51 @@ def test_update_dataflow(mock_put: Mock):
 
 @patch("ddpui.ddpprefect.prefect_service.prefect_get")
 def test_get_flow_runs_by_deployment_id_limit(mock_get: Mock):
-    mock_get.return_value = {"flow_runs": "runs"}
+    mock_get.return_value = {"flow_runs": []}
     response = get_flow_runs_by_deployment_id("depid1", 100)
-    assert response == "runs"
+    assert response == []
     mock_get.assert_called_once_with(
-        "flow_runs",
-        params={"deployment_id": "depid1", "limit": 100},
+        "flow_runs", params={"deployment_id": "depid1", "limit": 100}, timeout=60
     )
 
 
 @patch("ddpui.ddpprefect.prefect_service.prefect_get")
 def test_get_flow_runs_by_deployment_id_nolimit(mock_get: Mock):
-    mock_get.return_value = {"flow_runs": "runs"}
+    mock_get.return_value = {"flow_runs": []}
     response = get_flow_runs_by_deployment_id("depid1")
-    assert response == "runs"
+    assert response == []
     mock_get.assert_called_once_with(
-        "flow_runs",
-        params={"deployment_id": "depid1", "limit": None},
+        "flow_runs", params={"deployment_id": "depid1", "limit": None}, timeout=60
+    )
+
+
+@patch("ddpui.ddpprefect.prefect_service.prefect_get")
+def test_get_flow_runs_by_deployment_id_insert_pfr(mock_get: Mock):
+    mock_get.return_value = {
+        "flow_runs": [
+            {
+                "id": "flowrunid",
+                "name": "flowrunname",
+                "startTime": "",
+                "expectedStartTime": "2021-01-01T00:00:00.000Z",
+                "totalRunTime": 10.0,
+                "status": "COMPLETED",
+                "state_name": "COMPLETED",
+            }
+        ]
+    }
+    response = get_flow_runs_by_deployment_id("depid1")
+    assert len(response) == 1
+    assert response[0]["deployment_id"] == "depid1"
+    assert response[0]["id"] == "flowrunid"
+    assert response[0]["name"] == "flowrunname"
+    assert response[0]["startTime"] == "2021-01-01T00:00:00+00:00"
+    assert response[0]["expectedStartTime"] == "2021-01-01T00:00:00+00:00"
+    assert response[0]["totalRunTime"] == 10.0
+    assert response[0]["status"] == "COMPLETED"
+    assert response[0]["state_name"] == "COMPLETED"
+    mock_get.assert_called_once_with(
+        "flow_runs", params={"deployment_id": "depid1", "limit": None}, timeout=60
     )
 
 
