@@ -180,7 +180,11 @@ def retrieve_warehouse_credentials(warehouse: OrgWarehouse) -> dict | None:
     """decodes and returns the saved warehouse credentials for an org"""
     aws_sm = get_client()
     response = aws_sm.get_secret_value(SecretId=warehouse.credentials)
-    return json.loads(response["SecretString"]) if "SecretString" in response else None
+    return (
+        json.loads(response["SecretString"])
+        if response and "SecretString" in response
+        else None
+    )
 
 
 def delete_warehouse_credentials(warehouse: OrgWarehouse) -> None:
@@ -215,4 +219,8 @@ def retrieve_superset_usage_dashboard_credentials(
     """decodes and returns the saved superset usage dashboard credentials for an org"""
     aws_sm = get_client()
     response = aws_sm.get_secret_value(SecretId=warehouse.superset_creds)
-    return json.loads(response["SecretString"]) if "SecretString" in response else None
+    return (
+        json.loads(response["SecretString"])
+        if response and "SecretString" in response
+        else None
+    )
