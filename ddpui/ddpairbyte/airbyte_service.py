@@ -154,6 +154,15 @@ def get_source_definition_specification(workspace_id: str, sourcedef_id: str) ->
         logger.error(error_message)
         raise HttpError(404, error_message)
 
+    if "properties" in res["connectionSpecification"] and (
+        "__injected_declarative_manifest"
+        in res["connectionSpecification"]["properties"]
+    ):
+        # remove the injected manifest
+        del res["connectionSpecification"]["properties"][
+            "__injected_declarative_manifest"
+        ]
+
     return res
 
 
