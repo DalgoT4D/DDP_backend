@@ -27,6 +27,7 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema2,
     PrefectFlowRunSchema,
     PrefectDataFlowUpdateSchema,
+    PrefectDataFlowUpdateSchema2,
     PrefectShellSetup,
     PrefectSecretBlockCreate,
 )
@@ -225,9 +226,34 @@ def put_prefect_dataflow(request, deployment_id, payload: PrefectDataFlowUpdateS
         org=orguser.org, deployment_id=deployment_id
     ).first()
 
-    prefect_service.update_dataflow(deployment_id, payload)
+    if org_data_flow is None:
+        raise HttpError(404, "Pipeline not found")
 
-    org_data_flow.cron = payload.cron
+    # check if pipeline has dbt transformation
+    dbt_blocks = []
+    if payload.dbtTransform == "yes":
+        for dbt_block in OrgPrefectBlock.objects.filter(
+            org=orguser.org, block_type__in=[DBTCORE, SHELLOPERATION]
+        ).order_by("seq"):
+            dbt_blocks.append(
+                {
+                    "blockName": dbt_block.block_name,
+                    "seq": dbt_block.seq,
+                    "blockType": dbt_block.block_type,
+                }
+            )
+
+    prefect_service.update_dataflow(
+        deployment_id,
+        PrefectDataFlowUpdateSchema2(
+            dbt_blocks=dbt_blocks,
+            connection_blocks=payload.connectionBlocks,
+            cron=payload.cron,
+        ),
+    )
+
+    org_data_flow.cron = payload.cron if payload.cron else None
+    org_data_flow.name = payload.name
     org_data_flow.save()
 
     return {"success": 1}
