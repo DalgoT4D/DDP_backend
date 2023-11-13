@@ -141,6 +141,7 @@ def post_prefect_dataflow(request, payload: PrefectDataFlowCreateSchema):
         deployment_name=res["deployment"]["name"],
         deployment_id=res["deployment"]["id"],
         cron=payload.cron,
+        dataflow_type="orchestrate",
     )
 
     write_dataflowblocks(org_data_flow)
@@ -160,9 +161,9 @@ def get_prefect_dataflows(request):
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
 
-    org_data_flows = (
-        OrgDataFlow.objects.filter(org=orguser.org).exclude(cron=None).all()
-    )
+    org_data_flows = OrgDataFlow.objects.filter(
+        org=orguser.org, dataflow_type="orchestrate"
+    ).all()
 
     deployment_ids = [flow.deployment_id for flow in org_data_flows]
 
@@ -587,6 +588,7 @@ def post_prefect_dbt_core_block(request):
                 name=f"manual-run-{block_name}",
                 deployment_name=dataflow["deployment"]["name"],
                 deployment_id=dataflow["deployment"]["id"],
+                dataflow_type="manual",
             )
             write_dataflowblocks(manual_run_dataflow)
 

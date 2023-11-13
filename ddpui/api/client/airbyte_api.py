@@ -777,6 +777,7 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
         deployment_name=dataflow["deployment"]["name"],
         deployment_id=dataflow["deployment"]["id"],
         connection_id=airbyte_conn["connectionId"],
+        deployment_type="manual",
     )
     write_dataflowblocks(org_dataflow)
 
