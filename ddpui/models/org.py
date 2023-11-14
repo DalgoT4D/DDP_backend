@@ -93,6 +93,11 @@ class OrgDataFlow(models.Model):
     connection_id = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
         max_length=36, unique=True, null=True
     )
+    dataflow_type = models.CharField(
+        max_length=25,
+        choices=(("orchestrate", "orchestrate"), ("manual", "manual")),
+        default="orchestrate",
+    )  # skipcq: PTC-W0901, PTC-W0906
 
     def __str__(self) -> str:
         return f"OrgDataFlow[{self.name}|{self.deployment_name}|{self.deployment_id}|{self.cron}|{self.connection_id}]"
