@@ -465,7 +465,9 @@ def put_airbyte_destination(
             and len(payload.config["credentials"]["password"]) > 0
             and list(set(payload.config["credentials"]["password"])) != "*"
         ):
-            dbt_credentials["credentials"]["password"] = payload.config["credentials"]["password"]
+            dbt_credentials["credentials"]["password"] = payload.config["credentials"][
+                "password"
+            ]
 
     else:
         raise HttpError(400, "unknown warehouse type " + warehouse.wtype)
@@ -777,6 +779,7 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
         deployment_name=dataflow["deployment"]["name"],
         deployment_id=dataflow["deployment"]["id"],
         connection_id=airbyte_conn["connectionId"],
+        dataflow_type="manual",
     )
     write_dataflowblocks(org_dataflow)
 

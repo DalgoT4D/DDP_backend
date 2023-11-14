@@ -166,7 +166,18 @@ class PrefectDataFlowCreateSchema2(Schema):
 class PrefectDataFlowUpdateSchema(Schema):
     """Edit the data flow"""
 
+    name: str
+    connectionBlocks: list[PrefectFlowAirbyteConnection]
+    dbtTransform: str
     cron: str
+
+
+class PrefectDataFlowUpdateSchema2(Schema):
+    """Edit the data flow"""
+
+    connection_blocks: list[PrefectFlowAirbyteConnection]
+    dbt_blocks: list
+    cron: str = None
 
 
 class PrefectFlowRunSchema(Schema):

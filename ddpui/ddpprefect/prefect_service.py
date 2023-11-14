@@ -11,7 +11,7 @@ from ddpui.ddpprefect.schema import (
     PrefectAirbyteSync,
     PrefectDataFlowCreateSchema2,
     PrefectDbtCore,
-    PrefectDataFlowUpdateSchema,
+    PrefectDataFlowUpdateSchema2,
     PrefectSecretBlockCreate,
 )
 from ddpui.utils.custom_logger import CustomLogger
@@ -371,13 +371,18 @@ def create_dataflow(payload: PrefectDataFlowCreateSchema2) -> dict:  # pragma: n
 
 
 def update_dataflow(
-    deployment_id: str, payload: PrefectDataFlowUpdateSchema
+    deployment_id: str, payload: PrefectDataFlowUpdateSchema2
 ) -> dict:  # pragma: no cover
     """update a prefect deployment with a new cron schedule"""
     res = prefect_put(
         f"deployments/{deployment_id}",
         {
             "cron": payload.cron,
+            "connection_blocks": [
+                {"seq": conn.seq, "blockName": conn.blockName}
+                for conn in payload.connection_blocks
+            ],
+            "dbt_blocks": payload.dbt_blocks,
         },
     )
     return res

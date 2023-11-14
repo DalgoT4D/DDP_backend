@@ -48,7 +48,7 @@ from ddpui.ddpprefect.prefect_service import (
     create_dataflow,
     PrefectDataFlowCreateSchema2,
     update_dataflow,
-    PrefectDataFlowUpdateSchema,
+    PrefectDataFlowUpdateSchema2,
     get_flow_runs_by_deployment_id,
     set_deployment_schedule,
     get_filtered_deployments,
@@ -567,7 +567,9 @@ def test_create_dataflow(mock_post: Mock):
 
 @patch("ddpui.ddpprefect.prefect_service.prefect_put")
 def test_update_dataflow(mock_put: Mock):
-    payload = PrefectDataFlowUpdateSchema(cron="newcron")
+    payload = PrefectDataFlowUpdateSchema2(
+        cron="newcron", connection_blocks=[], dbt_blocks=[]
+    )
     mock_put.return_value = "retval"
     response = update_dataflow("depid1", payload)
     assert response == "retval"
@@ -575,6 +577,35 @@ def test_update_dataflow(mock_put: Mock):
         "deployments/depid1",
         {
             "cron": "newcron",
+            "connection_blocks": [],
+            "dbt_blocks": [],
+        },
+    )
+
+
+@patch("ddpui.ddpprefect.prefect_service.prefect_put")
+def test_update_dataflow_2(mock_put: Mock):
+    payload = PrefectDataFlowUpdateSchema2(
+        cron="newcron",
+        connection_blocks=[
+            Mock(blockName="blockName0", seq=0),
+        ],
+        dbt_blocks=[1, 2, 3],
+    )
+    mock_put.return_value = "retval"
+    response = update_dataflow("depid1", payload)
+    assert response == "retval"
+    mock_put.assert_called_once_with(
+        "deployments/depid1",
+        {
+            "cron": "newcron",
+            "connection_blocks": [
+                {
+                    "seq": 0,
+                    "blockName": "blockName0",
+                }
+            ],
+            "dbt_blocks": [1, 2, 3],
         },
     )
 
