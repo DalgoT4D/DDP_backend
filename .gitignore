@@ -144,5 +144,4 @@ data/
 celerybeat-schedule.db
 
 createsources.env
-
-flow_runs/
+parseprefectlogs.env
