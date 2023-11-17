@@ -266,6 +266,34 @@ def parse_dbt_test_log(line: str):
         return {
             "pattern": "timing-report",
         }
+    pattern_5 = re.compile(r"Got \d+ results, configured to fail if ")
+    if pattern_5.match(line):
+        return {
+            "pattern": "configured-to-fail-if",
+        }
+    pattern_6 = re.compile(r"compiled Code at ")
+    if pattern_6.match(line):
+        return {
+            "pattern": "compiled-code-at",
+        }
+    pattern_7 = re.compile(
+        r"Done. PASS=(\d+) WARN=(\d+) ERROR=(\d+) SKIP=(\d+) TOTAL=(\d+)"
+    )
+    if pattern_7.match(line):
+        match = pattern_7.match(line)
+        passed = int(match.groups()[0])
+        warnings = int(match.groups()[1])
+        errors = int(match.groups()[2])
+        skipped = int(match.groups()[3])
+
+        return {
+            "pattern": "test-summary",
+            "status": "success" if warnings + errors == 0 else "failed",
+            "passed": passed,
+            "warnings": warnings,
+            "errors": errors,
+            "skipped": skipped,
+        }
 
 
 def parse_dbt_docs_generate_log(line: str):
@@ -288,7 +316,9 @@ def parse_dbt_docs_generate_log(line: str):
 
 def rename_task_name(task_name: str):
     """renames the task name"""
-    if task_name == "gitpulljob-0":
+    if task_name == "wait_for_completion-0":
+        return "airbyte sync"
+    elif task_name == "gitpulljob-0":
         return "git pull"
     elif task_name == "dbtjob-0":
         return "dbt clean"
@@ -309,7 +339,7 @@ def parse_prefect_logs(connection_info: dict, flow_run_id: str):
 
     result = []
     last_task_name = None
-    task_summary = {"task_name": None, "state_name": None}
+    task_summary = {"task_name": None}
 
     for message in messages:
         # some task types are just skipped
@@ -323,11 +353,12 @@ def parse_prefect_logs(connection_info: dict, flow_run_id: str):
         if task_summary["task_name"] is None:
             task_summary["task_name"] = message["task_name"]
 
+        # move to next task
         if last_task_name is None or last_task_name != message["task_name"]:
-            if task_summary["state_name"] != "unknown":
+            if "status" in task_summary:
                 result.append(task_summary)
             last_task_name = message["task_name"]
-            task_summary = {"task_name": message["task_name"], "state_name": None}
+            task_summary = {"task_name": message["task_name"], "log_lines": []}
             logger.debug(f"new task: {message['task_name']}")
 
         # some log lines are multiline
@@ -337,6 +368,9 @@ def parse_prefect_logs(connection_info: dict, flow_run_id: str):
             # escape characters
             line = remove_color_codes(line.strip())
 
+            # all lines are added in case the user wants to see them
+            task_summary["log_lines"].append(line)
+
             # skip lines based on regex patterns
             if skip_line(line):
                 continue
@@ -345,17 +379,10 @@ def parse_prefect_logs(connection_info: dict, flow_run_id: str):
             line = remove_timestamps(line).strip()
 
             # now start parsing based on the task
-            if message["task_name"] == "wait_for_completion-0":
-                # airbyte sync failure
-                if message["state_name"] == "Failed":
-                    match = parse_airbyte_wait_for_completion_log(line)
-                    if match:
-                        logger.debug(
-                            f"[{message['task_name']}] [{message['state_name']}] {match['pattern']}"
-                        )
-                        task_summary.update(match)
-                # airbyte sync success
-                elif message["state_name"] == "Completed":
+
+            # airbyte sync
+            if message["task_name"] == "airbyte sync":
+                if message["state_name"] in ["Failed", "Completed"]:
                     match = parse_airbyte_wait_for_completion_log(line)
                     if match:
                         logger.debug(
@@ -373,7 +400,7 @@ def parse_prefect_logs(connection_info: dict, flow_run_id: str):
                 match = parse_git_pull_log(line)
                 if match:
                     if match["pattern"] == "already-up-to-date":
-                        logger.debug(f"[{message['task_name']}] => already-up-to-date")
+                        logger.debug(f"[{message['task_name']}] {match['pattern']}")
                         task_summary.update(match)
                     # ignore other matches
                 else:
@@ -385,7 +412,7 @@ def parse_prefect_logs(connection_info: dict, flow_run_id: str):
                 match = parse_dbt_clean_log(line)
                 if match:
                     if match["pattern"] == "cleaned-all-paths":
-                        logger.debug(f"[{message['task_name']}] => cleaned all paths")
+                        logger.debug(f"[{message['task_name']}] {match['pattern']}")
                         task_summary.update(match)
                     # ignore other matches
                 else:
@@ -397,7 +424,7 @@ def parse_prefect_logs(connection_info: dict, flow_run_id: str):
                 match = parse_dbt_deps_log(line)
                 if match:
                     if match["pattern"] == "installed-package":
-                        logger.debug(f"[{message['task_name']}] => installed package")
+                        logger.debug(f"[{message['task_name']}] {match['pattern']}")
                         task_summary.update(match)
                     # ignore other matches
                 else:
@@ -409,6 +436,7 @@ def parse_prefect_logs(connection_info: dict, flow_run_id: str):
                 match = parse_dbt_run_log(line)
                 if match:
                     if match["pattern"] == "run-summary":
+                        logger.debug(f"[{message['task_name']}] {match['pattern']}")
                         task_summary.update(match)
                     # ignore all matches
                 else:
@@ -423,7 +451,18 @@ def parse_prefect_logs(connection_info: dict, flow_run_id: str):
                         logger.debug(
                             f"[{message['task_name']}] => test failed for model {match['model']} in file {match['file']}"
                         )
-                        task_summary.update(match)
+                        task_summary["status"] = "failed"
+                        task_summary["tests"] = [match]
+                        # we know the test summary is coming
+                        # and there may be more failure details before it
+                        # result.append(task_summary)
+
+                    elif match["pattern"] == "test-summary":
+                        logger.debug(f"[{message['task_name']}] {match['pattern']}")
+                        task_summary["tests"].append(match)
+                        if task_summary.get("status") != "failed":
+                            task_summary["status"] = "success"
+
                     # ignore other matches
                 else:
                     logger.warning(f"[{message['task_name']}] {line}")
@@ -444,6 +483,8 @@ def parse_prefect_logs(connection_info: dict, flow_run_id: str):
                     f"[{message['task_name']}] [{message['state_name']}] {line}"
                 )
 
-    if task_summary["state_name"] is not None:
+    # get the last task
+    if "status" in task_summary:
         result.append(task_summary)
+
     return result
