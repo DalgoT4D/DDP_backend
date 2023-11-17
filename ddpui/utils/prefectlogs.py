@@ -264,7 +264,7 @@ def parse_dbt_test_log(line: str):
     pattern_4 = re.compile(r"Completed with \d+ errors? and \d+ warnings?")
     if pattern_4.match(line):
         return {
-            "pattern": "timing-report",
+            "pattern": "completed-with-errors-and-warnings",
         }
     pattern_5 = re.compile(r"Got \d+ results, configured to fail if ")
     if pattern_5.match(line):
