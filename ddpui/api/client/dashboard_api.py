@@ -51,9 +51,9 @@ def get_dashboard(request):
     """Fetch all flows/pipelines created in an organization"""
     orguser = request.orguser
 
-    org_data_flows = (
-        OrgDataFlow.objects.filter(org=orguser.org).exclude(cron=None).all()
-    )
+    org_data_flows = OrgDataFlow.objects.filter(
+        org=orguser.org, dataflow_type="orchestrate"
+    ).all()
 
     res = []
 
