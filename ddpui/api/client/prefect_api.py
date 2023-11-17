@@ -36,6 +36,7 @@ from ddpui.utils.deploymentblocks import write_dataflowblocks
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
+from ddpui.utils.prefectlogs import parse_prefect_logs
 
 prefectapi = NinjaAPI(urls_namespace="prefect")
 # http://127.0.0.1:8000/api/docs
@@ -719,6 +720,24 @@ def get_flow_runs_logs(
     """return the logs from a flow-run"""
     try:
         result = prefect_service.get_flow_run_logs(flow_run_id, offset)
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to retrieve logs") from error
+    return result
+
+
+@prefectapi.get("/flow_runs/{flow_run_id}/logsummary", auth=auth.CanManagePipelines())
+def get_flow_runs_logsummary(request, flow_run_id):  # pylint: disable=unused-argument
+    """return the logs from a flow-run"""
+    try:
+        connection_info = {
+            "host": os.getenv("PREFECT_HOST"),
+            "port": os.getenv("PREFECT_PORT"),
+            "database": os.getenv("PREFECT_DB"),
+            "user": os.getenv("PREFECT_USER"),
+            "password": os.getenv("PREFECT_PASSWORD"),
+        }
+        result = parse_prefect_logs(connection_info, flow_run_id)
     except Exception as error:
         logger.exception(error)
         raise HttpError(400, "failed to retrieve logs") from error
