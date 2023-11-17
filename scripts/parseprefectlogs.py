@@ -1,13 +1,22 @@
 """fetches the logs from the prefect database"""
 import os
 import re
+import json
 import argparse
+import logging
 import psycopg2
 from dotenv import load_dotenv
 
 parser = argparse.ArgumentParser(description="Parse the logs from a flow run")
 parser.add_argument("flowrun", help="flow run id")
 args = parser.parse_args()
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)s %(message)s",
+    handlers=[logging.StreamHandler()],
+)
 
 
 def fetch_logs_from_db(flow_run_id: str):
@@ -86,6 +95,97 @@ def parse_airbyte_wait_for_completion_log(line: str):
     if pattern_1.match(line):
         return {
             "pattern": "airbyte-sync-job-failed",
+            "status": "failed",
+        }
+    pattern_2 = re.compile(r"Job \d+ succeeded")
+    if pattern_2.match(line):
+        return {
+            "pattern": "airbyte-sync-job-succeeded",
+            "status": "success",
+        }
+
+
+def parse_git_pull_log(line: str):
+    """parses a log line from git pull"""
+    pattern_1 = re.compile(r"Already up to date.")
+    if pattern_1.match(line):
+        return {
+            "pattern": "already-up-to-date",
+            "status": "success",
+        }
+
+
+def parse_dbt_clean_log(line: str):
+    """parses a log line from dbt run"""
+    pattern_start_step = re.compile(r"\d+ of \d+ START ")
+    if pattern_start_step.search(line):
+        return {
+            "pattern": "step-started",
+            "status": "success",
+        }
+    pattern_1 = re.compile(r"Checking target")
+    if pattern_1.match(line):
+        return {
+            "pattern": "checking-target",
+            "status": "success",
+        }
+    pattern_2 = re.compile(r"Cleaned target")
+    if pattern_2.match(line):
+        return {
+            "pattern": "cleaned-target",
+            "status": "success",
+        }
+    pattern_3 = re.compile(r"Checking dbt_packages")
+    if pattern_3.match(line):
+        return {
+            "pattern": "checking-dbt-packages",
+            "status": "success",
+        }
+    pattern_4 = re.compile(r"Cleaned dbt_packages")
+    if pattern_4.match(line):
+        return {
+            "pattern": "cleaned-dbt-packages",
+            "status": "success",
+        }
+    pattern_5 = re.compile(r"Finished cleaning all paths")
+    if pattern_5.match(line):
+        return {
+            "pattern": "cleaned-all-paths",
+            "status": "success",
+        }
+
+
+def parse_dbt_deps_log(line: str):
+    """parses a log line from dbt run"""
+    pattern_start_step = re.compile(r"\d+ of \d+ START ")
+    if pattern_start_step.search(line):
+        return {
+            "pattern": "step-started",
+            "status": "success",
+        }
+    pattern_1 = re.compile(r"Installing")
+    if pattern_1.match(line):
+        return {
+            "pattern": "installing-package",
+            "status": "success",
+        }
+    pattern_2 = re.compile(r"Installed from version")
+    if pattern_2.match(line):
+        return {
+            "pattern": "installed-package",
+            "status": "success",
+        }
+    pattern_3 = re.compile(r"Updated version available")
+    if pattern_3.match(line):
+        return {
+            "pattern": "updated-version-available",
+            "status": "success",
+        }
+    pattern_4 = re.compile(r"Updates available for packages")
+    if pattern_4.match(line):
+        return {
+            "pattern": "updates-available-for-packages",
+            "status": "success",
         }
 
 
@@ -97,22 +197,73 @@ def parse_dbt_run_log(line: str):
     if pattern_1.match(line):
         return {
             "pattern": "found-models-tests-sources-etc",
+            "status": "success",
+        }
+    pattern_start_step = re.compile(r"\d+ of \d+ START ")
+    if pattern_start_step.search(line):
+        return {
+            "pattern": "step-started",
+            "status": "success",
+        }
+    pattern_3 = re.compile(r"\d+ of \d+ OK created ")
+    if pattern_3.search(line):
+        return {
+            "pattern": "step-success",
+            "status": "success",
+        }
+    pattern_4 = re.compile(r"Finished running")
+    if pattern_4.match(line):
+        return {
+            "pattern": "run-finished",
+            "status": "success",
+        }
+    pattern_5 = re.compile(
+        r"Done. PASS=(\d+) WARN=(\d+) ERROR=(\d+) SKIP=(\d+) TOTAL=(\d+)"
+    )
+    if pattern_5.match(line):
+        match = pattern_5.match(line)
+        passed = int(match.groups()[0])
+        warnings = int(match.groups()[1])
+        errors = int(match.groups()[2])
+        skipped = int(match.groups()[3])
+
+        return {
+            "pattern": "run-summary",
+            "status": "success" if warnings + errors == 0 else "failed",
+            "passed": passed,
+            "warnings": warnings,
+            "errors": errors,
+            "skipped": skipped,
         }
 
 
 def parse_dbt_test_log(line: str):
     """parses a log line from dbt test"""
+    pattern_start_step = re.compile(r"\d+ of \d+ START ")
+    if pattern_start_step.search(line):
+        return {
+            "pattern": "step-started",
+            "status": "success",
+        }
     pattern_0 = re.compile(r"Failure in test ([\w_]+) \(([\w\/\.]+)\)")
     if pattern_0.match(line):
         return {
             "pattern": "failure-in-test",
             "model": pattern_0.match(line).groups()[0],
             "file": pattern_0.match(line).groups()[1],
+            "status": "failed",
         }
-    pattern_1 = re.compile(r"\d+ of \d+ (PASS|FAIL) .*")
+    pattern_1 = re.compile(r"\d+ of \d+ PASS .*")
     if pattern_1.match(line):
         return {
-            "pattern": "test-passed-or-failed",
+            "pattern": "test-passed",
+            "status": "success",
+        }
+    pattern_1b = re.compile(r"\d+ of \d+ FAIL .*")
+    if pattern_1b.match(line):
+        return {
+            "pattern": "test-failed",
+            "status": "failed",
         }
     pattern_2 = re.compile(
         r"Found \d+ models, \d+ tests, \d+ sources, \d+ exposures, \d+ metrics, \d+ macros, \d+ groups, \d+ semantic models"
@@ -120,11 +271,13 @@ def parse_dbt_test_log(line: str):
     if pattern_2.match(line):
         return {
             "pattern": "found-models-tests-sources-etc",
+            "status": "success",
         }
     pattern_3 = re.compile(r"Finished running \d+ tests in \d+ hours \d+ minutes")
     if pattern_3.match(line):
         return {
             "pattern": "timing-report",
+            "status": "success",
         }
     pattern_4 = re.compile(r"Completed with \d+ errors? and \d+ warnings?")
     if pattern_4.match(line):
@@ -135,12 +288,19 @@ def parse_dbt_test_log(line: str):
 
 def parse_dbt_docs_generate_log(line: str):
     """parses a log line from dbt run"""
+    pattern_start_step = re.compile(r"\d+ of \d+ START ")
+    if pattern_start_step.search(line):
+        return {
+            "pattern": "step-started",
+            "status": "success",
+        }
     pattern_1 = re.compile(
         r"Found \d+ models, \d+ tests, \d+ sources, \d+ exposures, \d+ metrics, \d+ macros, \d+ groups, \d+ semantic models"
     )
     if pattern_1.match(line):
         return {
             "pattern": "found-models-tests-sources-etc",
+            "status": "success",
         }
 
 
@@ -164,57 +324,147 @@ def rename_task_name(task_name: str):
 def run():
     """runs the script"""
     messages = fetch_logs_from_db(args.flowrun)
+
+    result = []
+    last_task_name = None
+    task_summary = {"task_name": None, "state_name": None}
+
     for message in messages:
+        # some task types are just skipped
         if message["task_name"] == "trigger-0":
+            logger.debug(f"skipping task: {message['task_name']}")
             continue
+
+        # rename to more descriptive task names
         message["task_name"] = rename_task_name(message["task_name"])
+
+        if task_summary["task_name"] is None:
+            task_summary["task_name"] = message["task_name"]
+
+        if last_task_name is None or last_task_name != message["task_name"]:
+            if task_summary["state_name"] != "unknown":
+                result.append(task_summary)
+            last_task_name = message["task_name"]
+            task_summary = {"task_name": message["task_name"], "state_name": None}
+            logger.debug(f"new task: {message['task_name']}")
+
+        # some log lines are multiline
         lines = message["message"].split("\n")
+
         for line in lines:
+            # escape characters
             line = remove_color_codes(line.strip())
+
+            # skip lines based on regex patterns
             if skip_line(line):
                 continue
+
+            # clean up a little
             line = remove_timestamps(line).strip()
+
+            # now start parsing based on the task
             if message["task_name"] == "wait_for_completion-0":
+                # airbyte sync failure
                 if message["state_name"] == "Failed":
                     match = parse_airbyte_wait_for_completion_log(line)
                     if match:
-                        print(
+                        logger.debug(
                             f"[{message['task_name']}] [{message['state_name']}] {match['pattern']}"
                         )
+                        task_summary.update(match)
+                # airbyte sync success
+                elif message["state_name"] == "Completed":
+                    match = parse_airbyte_wait_for_completion_log(line)
+                    if match:
+                        logger.debug(
+                            f"[{message['task_name']}] [{message['state_name']}] {match['pattern']}"
+                        )
+                        task_summary.update(match)
                 else:
-                    print(f"[{message['task_name']}] {line}")
-            elif message["task_name"] == "dbt run":
-                if line.find(" START ") > -1:
-                    continue
-                match = parse_dbt_run_log(line)
+                    logger.warning(
+                        f"[{message['task_name']}] {message['state_name']} {line}"
+                    )
+
+            # git pull
+            elif message["task_name"] == "git pull":
+                # we ignore most output from git pull
+                match = parse_git_pull_log(line)
                 if match:
-                    pass
+                    if match["pattern"] == "already-up-to-date":
+                        logger.debug(f"[{message['task_name']}] => already-up-to-date")
+                        task_summary.update(match)
                     # ignore other matches
                 else:
-                    print(f"[{message['task_name']}] {line}")
+                    logger.warning(f"[{message['task_name']}] {line}")
+
+            # dbt clean
+            elif message["task_name"] == "dbt clean":
+                # we ignore most output from dbt clean
+                match = parse_dbt_clean_log(line)
+                if match:
+                    if match["pattern"] == "cleaned-all-paths":
+                        logger.debug(f"[{message['task_name']}] => cleaned all paths")
+                        task_summary.update(match)
+                    # ignore other matches
+                else:
+                    logger.warning(f"[{message['task_name']}] {line}")
+
+            # dbt deps
+            elif message["task_name"] == "dbt deps":
+                # we ignore most output from dbt deps
+                match = parse_dbt_deps_log(line)
+                if match:
+                    if match["pattern"] == "installed-package":
+                        logger.debug(f"[{message['task_name']}] => installed package")
+                        task_summary.update(match)
+                    # ignore other matches
+                else:
+                    logger.warning(f"[{message['task_name']}] {line}")
+
+            # dbt run
+            elif message["task_name"] == "dbt run":
+                # we ignore most output from dbt run
+                match = parse_dbt_run_log(line)
+                if match:
+                    if match["pattern"] == "run-summary":
+                        task_summary.update(match)
+                    # ignore all matches
+                else:
+                    logger.warning(f"[{message['task_name']}] {line}")
+
+            # dbt test
             elif message["task_name"] == "dbt test":
-                if line.find(" START ") > -1:
-                    continue
+                # look for patterns we care about
                 match = parse_dbt_test_log(line)
                 if match:
                     if match["pattern"] == "failure-in-test":
-                        print(
+                        logger.debug(
                             f"[{message['task_name']}] => test failed for model {match['model']} in file {match['file']}"
                         )
+                        task_summary.update(match)
                     # ignore other matches
                 else:
-                    print(f"[{message['task_name']}] {line}")
+                    logger.warning(f"[{message['task_name']}] {line}")
+
+            # dbt docs
             elif message["task_name"] == "dbt docs generate":
-                if line.find(" START ") > -1:
-                    continue
                 match = parse_dbt_docs_generate_log(line)
+
+                # we ignore most output from dbt docs
                 if match:
                     pass
-                    # ignore other matches
+                    # ignore all matches
                 else:
-                    print(f"[{message['task_name']}] {line}")
+                    logger.warning(f"[{message['task_name']}] {line}")
+
             else:
-                print(f"[{message['task_name']}] [{message['state_name']}] {line}")
+                logger.warning(
+                    f"[{message['task_name']}] [{message['state_name']}] {line}"
+                )
+
+    if task_summary["state_name"] is not None:
+        result.append(task_summary)
+    return result
 
 
 if __name__ == "__main__":
@@ -222,4 +472,5 @@ if __name__ == "__main__":
     # 9755ec98-db63-40c7-8e52-eccf6b220d12
     # 55beb129-ba43-48a9-8139-14765c0b26fc
     # ed16d9ff-3fba-4bf3-bbe9-04ee51a22092
-    run()
+    # be98ad56-b17c-4dc8-a732-f6fe552a50f1
+    print(json.dumps(run(), indent=2))
