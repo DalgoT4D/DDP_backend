@@ -425,7 +425,7 @@ def get_flow_runs_by_deployment_id(deployment_id: str, limit=None):  # pragma: n
 
     # sorted by start-time DESC
     result.reverse()
-    return result
+    return result[:50]
 
 
 def get_last_flow_run_by_deployment_id(deployment_id: str):  # pragma: no cover
