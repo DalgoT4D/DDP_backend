@@ -2,7 +2,7 @@ Plan to go away from the prefect dbt core blocks & connection blocks
 
 ### Motivation
 
-The prefect dont actually add any value and have just increased the complexity through out the app. Lot convoluted relationships need to be formed/used to work with blocks. The only use of the block is to run dbt cli operations and airbyte syncs.
+The prefect blocks dont actually add any value and have just increased the complexity through out the app. Lot convoluted relationships need to be formed/used to work with blocks. The only use of the block is to run dbt cli operations and airbyte syncs.
 
 ### Idea
 
