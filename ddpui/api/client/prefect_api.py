@@ -563,6 +563,7 @@ def post_prefect_dbt_core_block(request):
             block_response = prefect_service.create_dbt_core_block(
                 block_data,
                 profile_name,
+                f"{orguser.org.slug}_{profile_name}",
                 target,
                 warehouse.wtype,
                 credentials,
