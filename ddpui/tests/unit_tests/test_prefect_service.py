@@ -410,6 +410,7 @@ def test_create_dbt_core_block(mock_post: Mock):
     response = create_dbt_core_block(
         dbtcore,
         "profilename",
+        "cli_profile_block_name",
         "target",
         "wtype",
         credentials={"c1": "c2"},
@@ -427,6 +428,7 @@ def test_create_dbt_core_block(mock_post: Mock):
             },
             "wtype": "wtype",
             "credentials": {"c1": "c2"},
+            "cli_profile_block_name": "cli_profile_block_name",
             "bqlocation": None,
             "commands": dbtcore.commands,
             "env": dbtcore.env,
