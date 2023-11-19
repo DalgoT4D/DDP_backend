@@ -18,14 +18,20 @@ def delete_dbt_workspace(org: Org):
         dbt.delete()
 
     for dbtblock in OrgPrefectBlock.objects.filter(org=org, block_type=DBTCORE):
-        prefect_service.delete_dbt_core_block(dbtblock.block_id)
+        try:
+            prefect_service.delete_dbt_core_block(dbtblock.block_id)
+        except Exception:  # pylint:disable=broad-exception-caught
+            pass
         dbtblock.delete()
 
     for shellblock in OrgPrefectBlock.objects.filter(
         org=org, block_type=SHELLOPERATION
     ):
         if shellblock.block_name.find("-git-pull") > -1:
-            prefect_service.delete_shell_block(shellblock.block_id)
+            try:
+                prefect_service.delete_shell_block(shellblock.block_id)
+            except Exception:  # pylint:disable=broad-exception-caught
+                pass
             shellblock.delete()
 
     secretsmanager.delete_github_token(org)

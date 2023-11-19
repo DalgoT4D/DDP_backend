@@ -255,6 +255,7 @@ def get_dbtcore_block_id(blockname) -> str | None:
 def create_dbt_core_block(
     dbtcore: PrefectDbtCoreSetup,
     profilename: str,
+    cli_profile_block_name: str,
     target: str,
     wtype: str,
     credentials: dict,
@@ -270,6 +271,7 @@ def create_dbt_core_block(
                 "target": target,
                 "target_configs_schema": target,
             },
+            "cli_profile_block_name": cli_profile_block_name,
             "wtype": wtype,
             "credentials": credentials,
             "bqlocation": bqlocation,
@@ -425,7 +427,7 @@ def get_flow_runs_by_deployment_id(deployment_id: str, limit=None):  # pragma: n
 
     # sorted by start-time DESC
     result.reverse()
-    return result
+    return result[:50]
 
 
 def get_last_flow_run_by_deployment_id(deployment_id: str):  # pragma: no cover
