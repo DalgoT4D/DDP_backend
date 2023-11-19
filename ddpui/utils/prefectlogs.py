@@ -95,6 +95,20 @@ def parse_git_pull_log(line: str):
             "pattern": "already-up-to-date",
             "status": "success",
         }
+    pattern_2 = re.compile(
+        r"\d+ files changed, \d+ insertions\(+\), \d+ deletions\(-\)"
+    )
+    if pattern_2.match(line):
+        return {
+            "pattern": "update-summary",
+            "status": "success",
+        }
+    pattern3 = re.compile(r"create mode .*")
+    if pattern3.match(line):
+        return {
+            "pattern": "create-mode",
+            "status": "success",
+        }
 
 
 def parse_dbt_clean_log(line: str):
@@ -169,6 +183,12 @@ def parse_dbt_deps_log(line: str):
             "pattern": "updates-available-for-packages",
             "status": "success",
         }
+    pattern_5 = re.compile(r"Up to date!")
+    if pattern_5.match(line):
+        return {
+            "pattern": "up-to-date",
+            "status": "success",
+        }
 
 
 def parse_dbt_run_log(line: str):
@@ -177,6 +197,14 @@ def parse_dbt_run_log(line: str):
         r"Found \d+ models, \d+ tests, \d+ sources, \d+ exposures, \d+ metrics, \d+ macros, \d+ groups, \d+ semantic models"
     )
     if pattern_1.match(line):
+        return {
+            "pattern": "found-models-tests-sources-etc",
+            "status": "success",
+        }
+    pattern_1a = re.compile(
+        r"Found \d+ models?, \d+ analyses, \d+ seeds?, \d+ tests?, \d+ sources?, \d+ exposures?, \d+ metrics?, \d+ macros?, \d+ groups?, \d+ semantic models"
+    )
+    if pattern_1a.match(line):
         return {
             "pattern": "found-models-tests-sources-etc",
             "status": "success",
@@ -192,6 +220,12 @@ def parse_dbt_run_log(line: str):
         return {
             "pattern": "step-success",
             "status": "success",
+        }
+    pattern_3a = re.compile(r"\d+ of \d+ ERROR .*")
+    if pattern_3a.match(line):
+        return {
+            "pattern": "run-error",
+            "status": "failure",
         }
     pattern_4 = re.compile(r"Finished running")
     if pattern_4.match(line):
