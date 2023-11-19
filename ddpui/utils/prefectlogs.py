@@ -98,7 +98,7 @@ def parse_git_pull_log(line: str):
 
 
 def parse_dbt_clean_log(line: str):
-    """parses a log line from dbt run"""
+    """parses a log line from dbt clean"""
     pattern_start_step = re.compile(r"\d+ of \d+ START ")
     if pattern_start_step.search(line):
         return {
@@ -138,7 +138,7 @@ def parse_dbt_clean_log(line: str):
 
 
 def parse_dbt_deps_log(line: str):
-    """parses a log line from dbt run"""
+    """parses a log line from dbt deps"""
     pattern_start_step = re.compile(r"\d+ of \d+ START ")
     if pattern_start_step.search(line):
         return {
@@ -297,7 +297,7 @@ def parse_dbt_test_log(line: str):
 
 
 def parse_dbt_docs_generate_log(line: str):
-    """parses a log line from dbt run"""
+    """parses a log line from dbt docs"""
     pattern_start_step = re.compile(r"\d+ of \d+ START ")
     if pattern_start_step.search(line):
         return {
@@ -315,7 +315,7 @@ def parse_dbt_docs_generate_log(line: str):
 
 
 def rename_task_name(task_name: str):
-    """renames the task name"""
+    """renames the task name... this doesn't work"""
     if task_name == "wait_for_completion-0":
         return "airbyte sync"
     elif task_name == "gitpulljob-0":
