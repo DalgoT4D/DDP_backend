@@ -59,7 +59,17 @@ Plan to go away from the prefect dbt core blocks & connection blocks
 
 - `ddpui_dataflowblock` will go away and we create a new table instead `ddpui_dataflowtask`. Each deployment will now be mapped to a task from our master table.
 
-- `ddpui_blocklock` becomes `ddpui_locktask`. These will be the table that locks tasks when running or triggered.
+- `ddpui_blocklock` becomes `ddpui_locktask`. This will be the table that stores the locks when tasks are running or triggered. Prefect webhook will now update this.
+
+### Deployment plan
+
+- The idea is to make sure things currently running dont break. Since we wont be doing pushing UI changes but only backend in the release.
+
+- Both the old block and new tasks logic should work simultaenously. Until we release the UI changes.
+
+- We won't touch the old apis. We will version & create new ones. Same goes for the flows in prefect. Everything will be deprecated once we move away with the blocks completely.
+
+- Final step is to migrate the current setup. For this we will write django commands(scripts) that help us go away with the blocks.
 
 ### Tasks/steps
 
