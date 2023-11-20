@@ -575,6 +575,7 @@ def get_airbyte_connections(request):
                 "catalogId": airbyte_conn["catalogId"],
                 "syncCatalog": airbyte_conn["syncCatalog"],
                 "status": airbyte_conn["status"],
+                "schemaChange": airbyte_conn["schemaChange"],
                 "deploymentId": manual_dataflow.dataflow.deployment_id
                 if manual_dataflow
                 else None,
@@ -642,6 +643,7 @@ def get_airbyte_connection(request, connection_block_id):
         "destination": {"id": airbyte_conn["destinationId"], "name": destination_name},
         "catalogId": airbyte_conn["catalogId"],
         "syncCatalog": airbyte_conn["syncCatalog"],
+        "schemaChange": airbyte_conn["schemaChange"],
         "destinationSchema": airbyte_conn["namespaceFormat"]
         if airbyte_conn["namespaceDefinition"] == "customformat"
         else "",
@@ -662,6 +664,40 @@ def get_airbyte_connection(request, connection_block_id):
 
     logger.debug(res)
     return res
+
+
+@airbyteapi.get(
+    "/connections/{connection_block_id}/refreshschema", auth=auth.CanManagePipelines()
+)
+def refreshconnectionschema(request, connection_block_id):
+    """refresh the schema for a connection's source"""
+    orguser: OrgUser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+    # fetch prefect block
+    prefect_block = prefect_service.get_airbyte_connection_block_by_id(
+        connection_block_id
+    )
+    # fetch airbyte connection
+    airbyte_conn = airbyte_service.get_connection(
+        orguser.org.airbyte_workspace_id, prefect_block["data"]["connection_id"]
+    )
+    # fetch the new catalog from the source
+    catalog = airbyte_service.get_source_schema_catalog(
+        orguser.org.airbyte_workspace_id, airbyte_conn["sourceId"]
+    )
+    old_stream_names = [
+        stream["stream"]["name"] for stream in airbyte_conn["syncCatalog"]["streams"]
+    ]
+    new_stream_names = [
+        stream["stream"]["name"] for stream in catalog["catalog"]["streams"]
+    ]
+    return {
+        "addedStreams": list(set(new_stream_names).difference(old_stream_names)),
+        "removedStreams": list(set(old_stream_names).difference(new_stream_names)),
+        "oldCatalog": airbyte_conn["syncCatalog"],
+        "newCatalog": catalog["catalog"],
+    }
 
 
 @airbyteapi.post(
@@ -795,6 +831,7 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
         },
         "catalogId": airbyte_conn["sourceCatalogId"],
         "syncCatalog": airbyte_conn["syncCatalog"],
+        "schemaChange": "no_change",
         "status": airbyte_conn["status"],
         "deploymentId": dataflow["deployment"]["id"],
         "normalize": payload.normalize,
