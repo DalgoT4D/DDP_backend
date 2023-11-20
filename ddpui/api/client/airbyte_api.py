@@ -606,7 +606,7 @@ def get_airbyte_connection(request, connection_block_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    airbyteconnection = airbyte_service.do_get_airbyte_connection(
+    airbyteconnection = airbytehelpers.do_get_airbyte_connection(
         orguser.org, orguser.org.airbyte_workspace_id, connection_block_id
     )
     logger.debug(airbyteconnection)
@@ -622,7 +622,7 @@ def refreshconnectionschema(request, connection_block_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    airbyteconnection = airbyte_service.do_get_airbyte_connection(
+    airbyteconnection = airbytehelpers.do_get_airbyte_connection(
         orguser.org, orguser.org.airbyte_workspace_id, connection_block_id
     )
     # fetch the new catalog from the source

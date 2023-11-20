@@ -4,7 +4,8 @@ from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import AirbyteWorkspace
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpprefect import AIRBYTESERVER
-from ddpui.models.org import OrgPrefectBlock
+from ddpui.models.org import OrgPrefectBlock, OrgDataFlow, Org
+from ddpui.models.orgjobs import BlockLock
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("airbyte")
@@ -146,3 +147,63 @@ def setup_airbyte_workspace(wsname, org) -> AirbyteWorkspace:
         workspaceId=workspace["workspaceId"],
         initialSetupComplete=workspace["initialSetupComplete"],
     )
+
+
+def do_get_airbyte_connection(org: Org, workspace_id: str, connection_block_id: str):
+    """Fetches an airbyte connection, prefect block info, latest run status"""
+    org_block = OrgPrefectBlock.objects.filter(
+        org=org,
+        block_id=connection_block_id,
+    ).first()
+
+    # fetch prefect block
+    prefect_block = prefect_service.get_airbyte_connection_block_by_id(
+        connection_block_id
+    )
+    # fetch airbyte connection
+    airbyte_conn = airbyte_service.get_connection(
+        workspace_id, prefect_block["data"]["connection_id"]
+    )
+    dataflow = OrgDataFlow.objects.filter(
+        org=org, connection_id=airbyte_conn["connectionId"]
+    ).first()
+
+    # is the block currently locked?
+    lock = BlockLock.objects.filter(opb=org_block).first()
+
+    # fetch the source and destination names
+    # the web_backend/connections/get fetches the source & destination objects also so we dont need to query again
+
+    source_name = airbyte_conn["source"]["sourceName"]
+
+    destination_name = airbyte_conn["destination"]["destinationName"]
+
+    res = {
+        "name": org_block.display_name,
+        "blockId": prefect_block["id"],
+        "blockName": prefect_block["name"],
+        "blockData": prefect_block["data"],
+        "connectionId": airbyte_conn["connectionId"],
+        "source": {"id": airbyte_conn["sourceId"], "name": source_name},
+        "destination": {"id": airbyte_conn["destinationId"], "name": destination_name},
+        "catalogId": airbyte_conn["catalogId"],
+        "syncCatalog": airbyte_conn["syncCatalog"],
+        "schemaChange": airbyte_conn["schemaChange"],
+        "destinationSchema": airbyte_conn["namespaceFormat"]
+        if airbyte_conn["namespaceDefinition"] == "customformat"
+        else "",
+        "status": airbyte_conn["status"],
+        "deploymentId": dataflow.deployment_id if dataflow else None,
+        "normalize": airbyte_service.is_operation_normalization(
+            airbyte_conn["operationIds"][0]
+        )
+        if "operationIds" in airbyte_conn and len(airbyte_conn["operationIds"]) == 1
+        else False,
+        "lock": {
+            "lockedBy": lock.locked_by.user.email,
+            "lockedAt": lock.locked_at,
+        }
+        if lock
+        else None,
+    }
+    return res
