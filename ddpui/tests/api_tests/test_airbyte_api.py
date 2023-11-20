@@ -1086,6 +1086,7 @@ def test_get_airbyte_connections_without_workspace(org_without_workspace):
             "catalogId": "fake-source-catalog-id-1",
             "syncCatalog": "sync-catalog",
             "status": "conn-status",
+            "schemaChange": "no-change",
             "source": {"id": "fake-source-id-1", "sourceName": "fake-source-name-1"},
             "destination": {
                 "id": "fake-destination-id-1",
@@ -1149,6 +1150,7 @@ def test_get_airbyte_connections_success(org_with_workspace):
     assert result[0]["catalogId"] == "fake-source-catalog-id-1"
     assert result[0]["syncCatalog"] == "sync-catalog"
     assert result[0]["status"] == "conn-status"
+    assert result[0]["schemaChange"] == "no-change"
     assert result[0]["deploymentId"] == "fake-deployment-id"
     assert result[0]["lastRun"] == {
         "flow-run-id": "00000",
@@ -1169,6 +1171,7 @@ def test_get_airbyte_connections_success(org_with_workspace):
             "catalogId": "fake-source-catalog-id-1",
             "syncCatalog": "sync-catalog",
             "status": "conn-status",
+            "schemaChange": "no-change",
             "source": {"id": "fake-source-id-1", "sourceName": "fake-source-name-1"},
             "destination": {
                 "id": "fake-destination-id-1",
@@ -1234,6 +1237,7 @@ def test_get_airbyte_connections_success_locked(org_with_workspace):
     assert result[0]["catalogId"] == "fake-source-catalog-id-1"
     assert result[0]["syncCatalog"] == "sync-catalog"
     assert result[0]["status"] == "conn-status"
+    assert result[0]["schemaChange"] == "no-change"
     assert result[0]["deploymentId"] == "fake-deployment-id"
     assert result[0]["lastRun"] == {
         "flow-run-id": "00000",
@@ -1268,6 +1272,7 @@ def test_get_airbyte_connection_without_workspace(org_without_workspace):
             "syncCatalog": "sync-catalog",
             "namespaceDefinition": "namespace-definition",
             "status": "conn-status",
+            "schemaChange": "no-change",
             "source": {"id": "fake-source-id-1", "sourceName": "fake-source-name-1"},
             "destination": {
                 "id": "fake-destination-id-1",
@@ -1323,6 +1328,7 @@ def test_get_airbyte_connection_success(org_with_workspace):
     assert result["catalogId"] == "fake-source-catalog-id-1"
     assert result["syncCatalog"] == "sync-catalog"
     assert result["status"] == "conn-status"
+    assert result["schemaChange"] == "no-change"
     assert result["deploymentId"] == "fake-deployment-id"
 
 
