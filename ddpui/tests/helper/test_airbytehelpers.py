@@ -5,6 +5,7 @@ from ddpui.ddpairbyte.airbytehelpers import (
     upgrade_custom_sources,
     setup_airbyte_workspace,
     AIRBYTESERVER,
+    do_get_airbyte_connection,
 )
 from ddpui.models.org import Org, OrgPrefectBlock
 
@@ -235,3 +236,70 @@ def test_setup_airbyte_workspace_server_block_exists(
     assert response.workspaceId == "wsid"
     assert response.initialSetupComplete is False
     org.delete()
+
+
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.airbyte_service.is_operation_normalization",
+    is_operation_normalization=Mock(),
+)
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.prefect_service.get_airbyte_connection_block_by_id",
+    get_airbyte_connection_block_by_id=Mock(),
+)
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection",
+    get_connection=Mock(),
+)
+def test_do_get_airbyte_connection(
+    get_connection: Mock,
+    get_airbyte_connection_block_by_id: Mock,
+    is_operation_normalization: Mock,
+):
+    org = Org.objects.create(name="org", slug="org")
+    OrgPrefectBlock.objects.create(
+        org=org,
+        block_id="connection_block_id",
+        block_type="AIRBYTECONNECTION",
+        block_name="connection_block_name",
+        display_name="connection_display_name",
+    )
+    get_airbyte_connection_block_by_id.return_value = {
+        "data": {
+            "connection_id": "connection_id",
+        },
+        "id": "blockId",
+        "name": "block_name",
+    }
+    get_connection.return_value = {
+        "connectionId": "connection_id",
+        "sourceId": "source_id",
+        "source": {
+            "sourceName": "source-name",
+        },
+        "destinationId": "destination_id",
+        "destination": {
+            "destinationName": "destination-name",
+        },
+        "catalogId": "catalog-id",
+        "syncCatalog": "syncCatalog",
+        "schemaChange": "schemaChange",
+        "namespaceFormat": "schema-name",
+        "namespaceDefinition": "customformat",
+        "status": "status",
+        "operationIds": ["operation_id"],
+    }
+    is_operation_normalization.return_value = True
+    res = do_get_airbyte_connection(org, "workspace_id", "connection_block_id")
+    assert res["name"] == "connection_display_name"
+    assert res["blockId"] == "blockId"
+    assert res["blockName"] == "block_name"
+    assert res["blockData"] == {"connection_id": "connection_id"}
+    assert res["connectionId"] == "connection_id"
+    assert res["source"] == {"id": "source_id", "name": "source-name"}
+    assert res["destination"] == {"id": "destination_id", "name": "destination-name"}
+    assert res["catalogId"] == "catalog-id"
+    assert res["syncCatalog"] == "syncCatalog"
+    assert res["schemaChange"] == "schemaChange"
+    assert res["destinationSchema"] == "schema-name"
+    assert res["status"] == "status"
+    assert res["normalize"] is True
