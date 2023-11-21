@@ -57,6 +57,7 @@ from ddpui.ddpprefect.prefect_service import (
     get_flow_run_logs,
     get_flow_run,
     create_deployment_flow_run,
+    create_dbt_cli_profile_block,
 )
 
 PREFECT_PROXY_API_URL = os.getenv("PREFECT_PROXY_API_URL")
@@ -475,6 +476,35 @@ def test_update_dbt_core_block_schema(mock_put: Mock):
         {
             "blockName": "block_name",
             "target_configs_schema": "target",
+        },
+    )
+
+
+# =============================================================================
+@patch("ddpui.ddpprefect.prefect_service.prefect_post")
+def test_create_dbt_cli_profile_block(mock_post: Mock):
+    mock_post.return_value = "retval"
+    response = create_dbt_cli_profile_block(
+        "block-name",
+        "profilename",
+        "target",
+        "wtype",
+        credentials={"c1": "c2"},
+        bqlocation=None,
+    )
+    assert response == "retval"
+    mock_post.assert_called_once_with(
+        "blocks/dbtcli/profile/",
+        {
+            "cli_profile_block_name": "block-name",
+            "profile": {
+                "name": "profilename",
+                "target": "target",
+                "target_configs_schema": "target",
+            },
+            "wtype": "wtype",
+            "credentials": {"c1": "c2"},
+            "bqlocation": None,
         },
     )
 
