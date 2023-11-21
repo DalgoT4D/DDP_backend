@@ -712,6 +712,83 @@ def delete_prefect_dbt_run_block(request):
     return {"success": 1}
 
 
+@prefectapi.post("/blocks/dbtcli/profile/", auth=auth.CanManagePipelines())
+def post_prefect_dbt_cli_profile_block(request):
+    """Creates a prefect dbt cli profile block"""
+    orguser: OrgUser = request.orguser
+    if orguser.org.dbt is None:
+        raise HttpError(400, "create a dbt workspace first")
+
+    warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if warehouse is None:
+        raise HttpError(400, "need to set up a warehouse first")
+    credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
+
+    if orguser.org.dbt.dbt_venv is None:
+        orguser.org.dbt.dbt_venv = os.getenv("DBT_VENV")
+        orguser.org.dbt.save()
+
+    dbt_env_dir = Path(orguser.org.dbt.dbt_venv)
+    if not dbt_env_dir.exists():
+        raise HttpError(400, "create the dbt env first")
+
+    dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
+    dbtrepodir = Path(os.getenv("CLIENTDBT_ROOT")) / orguser.org.slug / "dbtrepo"
+    project_dir = str(dbtrepodir)
+    dbt_project_filename = str(dbtrepodir / "dbt_project.yml")
+
+    if not os.path.exists(dbt_project_filename):
+        raise HttpError(400, dbt_project_filename + " is missing")
+
+    # create a secret block to save the github endpoint url along with token
+    try:
+        gitrepo_access_token = secretsmanager.retrieve_github_token(orguser.org.dbt)
+        gitrepo_url = orguser.org.dbt.gitrepo_url
+
+        if gitrepo_access_token is not None:
+            gitrepo_url = gitrepo_url.replace(
+                "github.com", "oauth2:" + gitrepo_access_token + "@github.com"
+            )
+
+            # store the git oauth endpoint with token in a prefect secret block
+            secret_block = PrefectSecretBlockCreate(
+                block_name=f"{orguser.org.slug}-git-pull-url",
+                secret=gitrepo_url,
+            )
+            block_response = prefect_service.create_secret_block(secret_block)
+
+            # TODO: store secret block name block_response["block_name"] in orgdbt
+
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, str(error)) from error
+
+    with open(dbt_project_filename, "r", encoding="utf-8") as dbt_project_file:
+        dbt_project = yaml.safe_load(dbt_project_file)
+        if "profile" not in dbt_project:
+            raise HttpError(400, "could not find 'profile:' in dbt_project.yml")
+
+    profile_name = dbt_project["profile"]
+    target = orguser.org.dbt.default_schema
+    logger.info("profile_name=%s target=%s", profile_name, target)
+
+    # create a dbt cli profile block
+    try:
+        block_name = f"{orguser.org.slug}-dbt-cli-profile"
+        block_response = prefect_service.create_dbt_cli_profile_block(
+            block_name,
+            profile_name,
+            target,
+            warehouse.wtype,
+            credentials,
+        )
+
+        return {"success": 1, "block_name": block_response["block_name"]}
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, str(error)) from error
+
+
 @prefectapi.get("/flow_runs/{flow_run_id}/logs", auth=auth.CanManagePipelines())
 def get_flow_runs_logs(
     request, flow_run_id, offset: int = 0

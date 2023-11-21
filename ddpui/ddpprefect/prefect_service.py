@@ -315,6 +315,35 @@ def update_dbt_core_block_schema(block_name: str, target_configs_schema: str):
 # ================================================================================================
 
 
+def create_dbt_cli_profile_block(
+    block_name: str,
+    profilename: str,
+    target: str,
+    wtype: str,
+    bqlocation: str,
+    credentials: dict,
+) -> dict:
+    """Create a dbt cli profile block in that has the warehouse information"""
+    response = prefect_post(
+        "blocks/dbtcli/profile/",
+        {
+            "blockName": block_name,
+            "profile": {
+                "name": profilename,
+                "target": target,
+                "target_configs_schema": target,
+            },
+            "wtype": wtype,
+            "credentials": credentials,
+            "bqlocation": bqlocation,
+        },
+    )
+    return response
+
+
+# ================================================================================================
+
+
 def create_secret_block(secret_block: PrefectSecretBlockCreate):
     """This will create a secret block in the prefect to store any password like string"""
     response = prefect_post(

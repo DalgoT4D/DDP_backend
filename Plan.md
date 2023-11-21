@@ -14,6 +14,8 @@ Plan to go away from the prefect dbt core blocks & connection blocks
 
 - Only `dbt cli profile` and `airbyte server` blocks will be created to store warehouse information and airbyte server host details.
 
+- We will also create `secret` block(s) in prefect to store github token if they want to connect to a private repo.
+
 - We can go away with `airbyte server` block & take the creds from env. Since all orgs have the same airbyte server. Or we can create a single server block for the entire app.
 
 - Run git pull command through `ShellOperation` class. `shell_op.run()`. To run a shell operation we need
@@ -73,4 +75,8 @@ Plan to go away from the prefect dbt core blocks & connection blocks
 
 ### Tasks/steps
 
-- `/`
+#### Setup the api to save dbt cli profile
+
+- New api in prefect proxy to create dbt cli profile block `/proxy/blocks/dbtcli/profile/`
+
+- Api in Django backend `/blocks/dbtcli/profile/`. This api will be hit instead of `/blocks/dbt/`
