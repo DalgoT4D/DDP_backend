@@ -329,7 +329,7 @@ def create_dbt_cli_profile_block(
     response = prefect_post(
         "blocks/dbtcli/profile/",
         {
-            "blockName": block_name,
+            "cli_profile_block_name": block_name,
             "profile": {
                 "name": profilename,
                 "target": target,

@@ -15,7 +15,7 @@ from ddpui import auth
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service
 
-from ddpui.ddpprefect import DBTCORE, SHELLOPERATION
+from ddpui.ddpprefect import DBTCORE, SHELLOPERATION, DBTCLIPROFILE, SECRET
 from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
 from ddpui.models.orgjobs import BlockLock, DataflowBlock
 from ddpui.models.org_user import OrgUser
@@ -758,7 +758,13 @@ def post_prefect_dbt_cli_profile_block(request):
             )
             block_response = prefect_service.create_secret_block(secret_block)
 
-            # TODO: store secret block name block_response["block_name"] in orgdbt
+            # store secret block name block_response["block_name"] in orgdbt
+            OrgPrefectBlock.objects.create(
+                org=orguser.org,
+                block_type=SECRET,
+                block_id=block_response["block_id"],
+                block_name=block_response["block_name"],
+            )
 
     except Exception as error:
         logger.exception(error)
@@ -773,18 +779,40 @@ def post_prefect_dbt_cli_profile_block(request):
     target = orguser.org.dbt.default_schema
     logger.info("profile_name=%s target=%s", profile_name, target)
 
+    # get the dataset location if warehouse type is bigquery
+    bqlocation = None
+    if warehouse.wtype == "bigquery":
+        destination = airbyte_service.get_destination(
+            orguser.org.airbyte_workspace_id, warehouse.airbyte_destination_id
+        )
+        if destination.get("connectionConfiguration"):
+            bqlocation = destination["connectionConfiguration"]["dataset_location"]
+
     # create a dbt cli profile block
     try:
-        block_name = f"{orguser.org.slug}-dbt-cli-profile"
+        block_name = f"{orguser.org.slug}_{profile_name}"
         block_response = prefect_service.create_dbt_cli_profile_block(
             block_name,
             profile_name,
             target,
             warehouse.wtype,
+            bqlocation,
             credentials,
         )
 
-        return {"success": 1, "block_name": block_response["block_name"]}
+        # save the cli profile block in django db
+        OrgPrefectBlock.objects.create(
+            org=orguser.org,
+            block_type=DBTCLIPROFILE,
+            block_id=block_response["block_id"],
+            block_name=block_response["block_name"],
+        )
+
+        return {
+            "success": 1,
+            "block_name": block_response["block_name"],
+            "block_id": block_response["block_id"],
+        }
     except Exception as error:
         logger.exception(error)
         raise HttpError(400, str(error)) from error
