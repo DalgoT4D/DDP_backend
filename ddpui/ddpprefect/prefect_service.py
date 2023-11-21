@@ -255,6 +255,7 @@ def get_dbtcore_block_id(blockname) -> str | None:
 def create_dbt_core_block(
     dbtcore: PrefectDbtCoreSetup,
     profilename: str,
+    cli_profile_block_name: str,
     target: str,
     wtype: str,
     credentials: dict,
@@ -270,6 +271,7 @@ def create_dbt_core_block(
                 "target": target,
                 "target_configs_schema": target,
             },
+            "cli_profile_block_name": cli_profile_block_name,
             "wtype": wtype,
             "credentials": credentials,
             "bqlocation": bqlocation,
