@@ -47,7 +47,7 @@ Plan to go away from the prefect dbt core blocks & connection blocks
 
 ### Structural & schema changes
 
-- `ddpui_orgprefectblock` will go away.
+- `ddpui_orgprefectblock` will have very minimal use in the entire. No block lock logic here. We will store airbyte server, dbt cli profile and secret blocks here.
 
 - We will have to store the name of the dbt cli profile block name. Add a col in table `ddpui_orgdbt` to store this. Whenever a block runs, we pass directory information & the cli profile block name to run with.
 
