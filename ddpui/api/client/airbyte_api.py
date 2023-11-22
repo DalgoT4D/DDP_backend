@@ -589,7 +589,7 @@ def get_airbyte_connections(request):
             }
         )
 
-    logger.info(res)
+    logger.debug(res)
 
     # by default normalization is going as False here because we dont do anything with it
     return res
@@ -629,6 +629,34 @@ def refreshconnectionschema(request, connection_block_id):
     new_catalog = airbyte_service.get_source_schema_catalog(
         orguser.org.airbyte_workspace_id, airbyteconnection["source"]["id"]
     )
+    # for testing - remove before merge
+    # new_stream = {
+    #     "stream": {
+    #         "name": "new_stream",
+    #         "jsonSchema": {
+    #             "$schema": "http://json-schema.org/draft-07/schema#",
+    #             "type": "object",
+    #             "properties": {
+    #                 "name": {"type": "string"},
+    #                 "id": {"type": "string"},
+    #                 "designation": {"type": "string"},
+    #             },
+    #         },
+    #         "supportedSyncModes": ["full_refresh"],
+    #         "defaultCursorField": [],
+    #         "sourceDefinedPrimaryKey": [],
+    #     },
+    #     "config": {
+    #         "syncMode": "full_refresh",
+    #         "cursorField": [],
+    #         "destinationSyncMode": "append",
+    #         "primaryKey": [],
+    #         "aliasName": "health_officials",
+    #         "selected": False,
+    #         "fieldSelectionEnabled": False,
+    #     },
+    # }
+    # new_catalog["catalog"]["streams"].append(new_stream)
     old_stream_names = [
         stream["stream"]["name"]
         for stream in airbyteconnection["syncCatalog"]["streams"]
@@ -636,11 +664,19 @@ def refreshconnectionschema(request, connection_block_id):
     new_stream_names = [
         stream["stream"]["name"] for stream in new_catalog["catalog"]["streams"]
     ]
+    added_streams = list(set(new_stream_names).difference(old_stream_names))
+    removed_streams = list(set(old_stream_names).difference(new_stream_names))
     airbyteconnection.update(
         {
-            "addedStreams": list(set(new_stream_names).difference(old_stream_names)),
-            "removedStreams": list(set(old_stream_names).difference(new_stream_names)),
-            "newCatalog": new_catalog["catalog"],
+            "addedStreams": added_streams,
+            "removedStreams": removed_streams,
+            "newCatalog": {
+                "streams": [
+                    stream
+                    for stream in new_catalog["catalog"]["streams"]
+                    if stream["stream"]["name"] in added_streams
+                ]
+            },
         }
     )
     return airbyteconnection
