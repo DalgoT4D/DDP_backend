@@ -10,6 +10,8 @@ from ddpui.models.org_user import OrgUser
 from ddpui.utils.webhook_helpers import (
     get_message_type,
     get_flowrun_id_and_state,
+    get_org_from_flow_run,
+    email_flowrun_logs_to_orgusers,
     FLOW_RUN,
 )
 
@@ -70,7 +72,11 @@ def post_notification(request):  # pylint: disable=unused-argument
                 )
 
         # logger.info(flow_run)
-        # org = get_org_from_flow_run(flow_run)
+        if state in ["Failed", "Crashed"]:
+            flow_run = prefect_service.get_flow_run(flow_run_id)
+            org = get_org_from_flow_run(flow_run)
+            if org:
+                email_flowrun_logs_to_orgusers(org, flow_run_id)
 
     return {"status": "ok"}
 

@@ -138,20 +138,22 @@ def test_email_flowrun_logs_to_orgusers():
         "ddpui.ddpprefect.prefect_service.get_flow_run_logs"
     ) as mock_get_flow_run_logs:
         mock_get_flow_run_logs.return_value = {
-            "logs": [
-                {
-                    "message": "log-message-1",
-                },
-                {
-                    "message": "log-message-2",
-                },
-            ]
+            "logs": {
+                "logs": [
+                    {
+                        "message": "log-message-1",
+                    },
+                    {
+                        "message": "log-message-2",
+                    },
+                ]
+            }
         }
         with patch("ddpui.utils.webhook_helpers.email_orgusers") as mock_email_orgusers:
             email_flowrun_logs_to_orgusers(org, "flow-run-id")
             mock_email_orgusers.assert_called_once_with(
                 org,
-                "\nTo the admins of temp,\n\nThis is an automated notification from Prefect\n\nFlow run id: flow-run-id\nLogs:\nlog-message-1\nlog-message-2",
+                "\nTo the admins of temp,\n\nThis is an automated notification from Dalgo.\n\nFlow run id: flow-run-id\nLogs:\nlog-message-1\nlog-message-2",
             )
 
 
