@@ -352,18 +352,18 @@ def rename_task_name(task_name: str):
     """renames the task name... this doesn't work"""
     if task_name == "wait_for_completion-0":
         return "airbyte sync"
-    elif task_name == "gitpulljob-0":
+    if task_name == "gitpulljob-0":
         return "git pull"
-    elif task_name == "dbtjob-0":
+    if task_name == "dbt-clean":
         return "dbt clean"
-    elif task_name == "dbtjob-1":
+    if task_name == "dbt-deps":
         return "dbt deps"
-    elif task_name == "dbtjob-2":
+    if task_name == "dbt-run":
         return "dbt run"
-    elif task_name == "dbtjob-3":
+    if task_name == "dbt-test":
         return "dbt test"
-    elif task_name == "dbtjob-4":
-        return "dbt docs generate"
+    if task_name == "dbt-docs":
+        return "dbt docs"
     return task_name
 
 
@@ -502,7 +502,7 @@ def parse_prefect_logs(connection_info: dict, flow_run_id: str):
                     logger.warning(f"[{message['task_name']}] {line}")
 
             # dbt docs
-            elif message["task_name"] == "dbt docs generate":
+            elif message["task_name"] == "dbt docs":
                 match = parse_dbt_docs_generate_log(line)
 
                 # we ignore most output from dbt docs
