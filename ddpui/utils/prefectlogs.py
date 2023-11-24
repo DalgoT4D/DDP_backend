@@ -352,17 +352,17 @@ def rename_task_name(task_name: str):
     """renames the task name... this doesn't work"""
     if task_name == "wait_for_completion-0":
         return "airbyte sync"
-    if task_name == "gitpulljob-0":
+    if task_name == "gitpull":
         return "git pull"
-    if task_name == "dbt-clean":
+    if task_name == "dbtjob-clean":
         return "dbt clean"
-    if task_name == "dbt-deps":
+    if task_name == "dbtjob-deps":
         return "dbt deps"
-    if task_name == "dbt-run":
+    if task_name == "dbtjob-run":
         return "dbt run"
-    if task_name == "dbt-test":
+    if task_name == "dbtjob-test":
         return "dbt test"
-    if task_name == "dbt-docs":
+    if task_name == "dbtjob-docs":
         return "dbt docs"
     return task_name
 
