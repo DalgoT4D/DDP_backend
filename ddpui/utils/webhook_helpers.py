@@ -55,17 +55,17 @@ def get_org_from_flow_run(flow_run: dict) -> Org | None:
                 block_name=parameters["block_name"]
             ).first()
 
-        elif "airbyte_connection" in parameters:
+        if opb is None and "airbyte_connection" in parameters:
             block_id = parameters["airbyte_connection"]["_block_document_id"]
             opb = OrgPrefectBlock.objects.filter(block_id=block_id).first()
 
-        elif "airbyte_blocks" in parameters:
+        if opb is None and "airbyte_blocks" in parameters:
             if len(parameters["airbyte_blocks"]) > 0:
                 opb = OrgPrefectBlock.objects.filter(
                     block_name=parameters["airbyte_blocks"][0]["blockName"]
                 ).first()
 
-        elif "dbt_blocks" in parameters:
+        if opb is None and "dbt_blocks" in parameters:
             if len(parameters["dbt_blocks"]) > 0:
                 opb = OrgPrefectBlock.objects.filter(
                     block_name=parameters["dbt_blocks"][0]["blockName"]
@@ -83,7 +83,7 @@ def generate_notification_email(
     email_body = f"""
 To the admins of {orgname},
 
-This is an automated notification from Prefect
+This is an automated notification from Dalgo.
 
 Flow run id: {flow_run_id}
 Logs:
@@ -108,6 +108,6 @@ def email_orgusers(org: Org, email_body: str):
 def email_flowrun_logs_to_orgusers(org: Org, flow_run_id: str):
     """retrieves logs for a flow-run and emails them to all users for the org"""
     logs = prefect_service.get_flow_run_logs(flow_run_id, 0)
-    logmessages = [x["message"] for x in logs["logs"]]
+    logmessages = [x["message"] for x in logs["logs"]["logs"]]
     email_body = generate_notification_email(org.name, flow_run_id, logmessages)
     email_orgusers(org, email_body)
