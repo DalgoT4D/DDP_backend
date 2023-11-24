@@ -792,9 +792,9 @@ def post_prefect_dbt_cli_profile_block(request):
 
     # create a dbt cli profile block
     try:
-        block_name = f"{orguser.org.slug}_{profile_name}"
-        block_response = prefect_service.create_dbt_cli_profile_block(
-            block_name,
+        cli_block_name = f"{orguser.org.slug}_{profile_name}"
+        cli_block_response = prefect_service.create_dbt_cli_profile_block(
+            cli_block_name,
             profile_name,
             target,
             warehouse.wtype,
@@ -806,8 +806,8 @@ def post_prefect_dbt_cli_profile_block(request):
         OrgPrefectBlock.objects.create(
             org=orguser.org,
             block_type=DBTCLIPROFILE,
-            block_id=block_response["block_id"],
-            block_name=block_response["block_name"],
+            block_id=cli_block_response["block_id"],
+            block_name=cli_block_response["block_name"],
         )
 
     except Exception as error:
@@ -816,7 +816,7 @@ def post_prefect_dbt_cli_profile_block(request):
 
     # create org tasks for the transformation page
     for task in Task.objects.filter(type__in=["dbt", "git"]).all():
-        OrgTask.objects.create(org=orguser.org, task=task)
+        org_task = OrgTask.objects.create(org=orguser.org, task=task)
 
         if task.slug == "dbt-run":
             # create deployment
@@ -826,7 +826,28 @@ def post_prefect_dbt_cli_profile_block(request):
                     deployment_name=deployment_name,
                     flow_name=deployment_name,
                     orgslug=orguser.org.slug,
-                    deployment_params={"config": {}},
+                    deployment_params={
+                        "config": {
+                            "tasks": [
+                                {
+                                    "slug": task.slug,
+                                    "type": DBTCORE,
+                                    "seq": 1,
+                                    "commands": [
+                                        f"{dbt_binary} {task.command} --target {target}"
+                                    ],
+                                    "env": {},
+                                    "working_dir": project_dir,
+                                    "profiles_dir": f"{project_dir}/profiles/",
+                                    "project_dir": project_dir,
+                                    "cli_profile_block": cli_block_response[
+                                        "block_name"
+                                    ],
+                                    "cli_args": [],
+                                }
+                            ]
+                        }
+                    },
                 )
             )
 
@@ -837,13 +858,17 @@ def post_prefect_dbt_cli_profile_block(request):
             if existing_dataflow:
                 existing_dataflow.delete()
 
-            # TODO also save the deployment parameters
-            OrgDataFlow.objects.create(
+            new_dataflow = OrgDataFlow.objects.create(
                 org=orguser.org,
                 name=deployment_name,
                 deployment_name=dataflow["deployment"]["name"],
                 deployment_id=dataflow["deployment"]["id"],
                 dataflow_type="manual",
+            )
+
+            DataflowOrgTask.objects.create(
+                dataflow=new_dataflow,
+                orgtask=org_task,
             )
 
     return {"success": 1}

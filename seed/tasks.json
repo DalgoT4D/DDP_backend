@@ -16,7 +16,7 @@
             "type": "dbt",
             "slug": "dbt-clean",
             "label": "DBT clean",
-            "command": "dbt clean"
+            "command": "clean"
         }
     },
     {
@@ -26,7 +26,7 @@
             "type": "dbt",
             "slug": "dbt-deps",
             "label": "DBT deps",
-            "command": "dbt deps"
+            "command": "deps"
         }
     },
     {
@@ -36,7 +36,7 @@
             "type": "dbt",
             "slug": "dbt-run",
             "label": "DBT run",
-            "command": "dbt run"
+            "command": "run"
         }
     },
     {
@@ -46,7 +46,7 @@
             "type": "dbt",
             "slug": "dbt-test",
             "label": "DBT test",
-            "command": "dbt test"
+            "command": "test"
         }
     },
     {
