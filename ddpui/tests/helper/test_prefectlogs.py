@@ -239,12 +239,12 @@ def test_parse_dbt_docs_generate_log():
 def test_rename_task_name():
     """tests rename_task_name"""
     assert rename_task_name("wait_for_completion-0") == "airbyte sync"
-    assert rename_task_name("gitpulljob-0") == "git pull"
-    assert rename_task_name("dbtjob-0") == "dbt clean"
-    assert rename_task_name("dbtjob-1") == "dbt deps"
-    assert rename_task_name("dbtjob-2") == "dbt run"
-    assert rename_task_name("dbtjob-3") == "dbt test"
-    assert rename_task_name("dbtjob-4") == "dbt docs generate"
+    assert rename_task_name("gitpull") == "git pull"
+    assert rename_task_name("dbtjob-clean") == "dbt clean"
+    assert rename_task_name("dbtjob-deps") == "dbt deps"
+    assert rename_task_name("dbtjob-run") == "dbt run"
+    assert rename_task_name("dbtjob-test") == "dbt test"
+    assert rename_task_name("dbtjob-docs") == "dbt docs"
 
 
 def test_parse_prefect_logs_1():
