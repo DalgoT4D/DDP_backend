@@ -1,0 +1,62 @@
+[
+    {
+        "model": "ddpui.Task",
+        "pk": 1,
+        "fields": {
+            "type": "git",
+            "slug": "git-pull",
+            "label": "GIT pull",
+            "command": "git pull"
+        }
+    },
+    {
+        "model": "ddpui.Task",
+        "pk": 2,
+        "fields": {
+            "type": "dbt",
+            "slug": "dbt-clean",
+            "label": "DBT clean",
+            "command": "dbt clean"
+        }
+    },
+    {
+        "model": "ddpui.Task",
+        "pk": 3,
+        "fields": { 
+            "type": "dbt",
+            "slug": "dbt-deps",
+            "label": "DBT deps",
+            "command": "dbt deps"
+        }
+    },
+    {
+        "model": "ddpui.Task",
+        "pk": 4,
+        "fields": {
+            "type": "dbt",
+            "slug": "dbt-run",
+            "label": "DBT run",
+            "command": "dbt run"
+        }
+    },
+    {
+        "model": "ddpui.Task",
+        "pk": 5,
+        "fields": {
+            "type": "dbt",
+            "slug": "dbt-test",
+            "label": "DBT test",
+            "command": "dbt test"
+        }
+    },
+    {
+        "model": "ddpui.Task",
+        "pk": 6,
+        "fields": {
+            "type": "airbyte",
+            "slug": "airbyte-sync",
+            "label": "AIRBYTE sync",
+            "command": null
+        }
+    }
+]
