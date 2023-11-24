@@ -10,6 +10,7 @@ from ddpui.ddpprefect.schema import (
     PrefectAirbyteConnectionSetup,
     PrefectAirbyteSync,
     PrefectDataFlowCreateSchema2,
+    PrefectDataFlowCreateSchema3,
     PrefectDbtCore,
     PrefectDataFlowUpdateSchema2,
     PrefectSecretBlockCreate,
@@ -395,6 +396,23 @@ def create_dataflow(payload: PrefectDataFlowCreateSchema2) -> dict:  # pragma: n
                 for conn in payload.connection_blocks
             ],
             "dbt_blocks": payload.dbt_blocks,
+            "cron": payload.cron,
+        },
+    )
+    return res
+
+
+def create_dataflow_v1(
+    payload: PrefectDataFlowCreateSchema3,
+) -> dict:  # pragma: no cover
+    """create a prefect deployment out of a flow and a cron schedule; to go away with the blocks"""
+    res = prefect_post(
+        "v1/deployments/",
+        {
+            "flow_name": payload.flow_name,
+            "deployment_name": payload.deployment_name,
+            "org_slug": payload.orgslug,
+            "deployment_params": payload.deployment_params,
             "cron": payload.cron,
         },
     )

@@ -201,6 +201,7 @@ setup_ab_logger()
 
 
 # Fixtures to seed data
+# python3 manage.py loaddata seed/tasks.json
 FIXTURE_DIRS = [
     "seed",
 ]

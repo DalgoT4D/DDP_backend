@@ -19,12 +19,14 @@ from ddpui.ddpprefect import DBTCORE, SHELLOPERATION, DBTCLIPROFILE, SECRET
 from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
 from ddpui.models.orgjobs import BlockLock, DataflowBlock
 from ddpui.models.org_user import OrgUser
+from ddpui.models.tasks import Task, DataflowOrgTask, OrgTask
 from ddpui.ddpprefect.schema import (
     PrefectAirbyteSync,
     PrefectDbtCore,
     PrefectDbtCoreSetup,
     PrefectDataFlowCreateSchema,
     PrefectDataFlowCreateSchema2,
+    PrefectDataFlowCreateSchema3,
     PrefectFlowRunSchema,
     PrefectDataFlowUpdateSchema,
     PrefectDataFlowUpdateSchema2,
@@ -715,7 +717,7 @@ def delete_prefect_dbt_run_block(request):
 
 @prefectapi.post("/blocks/dbtcli/profile/", auth=auth.CanManagePipelines())
 def post_prefect_dbt_cli_profile_block(request):
-    """Creates a prefect dbt cli profile block"""
+    """Creates a prefect dbt cli profile block and the tasks to be run on the transform page"""
     orguser: OrgUser = request.orguser
     if orguser.org.dbt is None:
         raise HttpError(400, "create a dbt workspace first")
@@ -808,14 +810,43 @@ def post_prefect_dbt_cli_profile_block(request):
             block_name=block_response["block_name"],
         )
 
-        return {
-            "success": 1,
-            "block_name": block_response["block_name"],
-            "block_id": block_response["block_id"],
-        }
     except Exception as error:
         logger.exception(error)
         raise HttpError(400, str(error)) from error
+
+    # create org tasks for the transformation page
+    for task in Task.objects.filter(type__in=["dbt", "git"]).all():
+        OrgTask.objects.create(org=orguser.org, task=task)
+
+        if task.slug == "dbt-run":
+            # create deployment
+            deployment_name = f"manual-{orguser.org.slug}-{task.slug}"
+            dataflow = prefect_service.create_dataflow_v1(
+                PrefectDataFlowCreateSchema3(
+                    deployment_name=deployment_name,
+                    flow_name=deployment_name,
+                    orgslug=orguser.org.slug,
+                    deployment_params={"config": {}},
+                )
+            )
+
+            # store deployment record in django db
+            existing_dataflow = OrgDataFlow.objects.filter(
+                deployment_id=dataflow["deployment"]["id"]
+            ).first()
+            if existing_dataflow:
+                existing_dataflow.delete()
+
+            # TODO also save the deployment parameters
+            OrgDataFlow.objects.create(
+                org=orguser.org,
+                name=deployment_name,
+                deployment_name=dataflow["deployment"]["name"],
+                deployment_id=dataflow["deployment"]["id"],
+                dataflow_type="manual",
+            )
+
+    return {"success": 1}
 
 
 @prefectapi.get("/flow_runs/{flow_run_id}/logs", auth=auth.CanManagePipelines())

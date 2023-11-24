@@ -163,6 +163,16 @@ class PrefectDataFlowCreateSchema2(Schema):
     cron: str = None
 
 
+class PrefectDataFlowCreateSchema3(Schema):
+    """Payload to be sent to the prefect-proxy to go away with prefect blocks"""
+
+    deployment_name: str
+    flow_name: str
+    orgslug: str
+    deployment_params: dict
+    cron: str = None
+
+
 class PrefectDataFlowUpdateSchema(Schema):
     """Edit the data flow"""
 
