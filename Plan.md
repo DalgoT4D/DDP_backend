@@ -77,6 +77,8 @@ Plan to go away from the prefect dbt core blocks & connection blocks
 
 #### Setup the api to save dbt cli profile
 
-- New api in prefect proxy to create dbt cli profile block `/proxy/blocks/dbtcli/profile/`
-
-- Api in Django backend `/blocks/dbtcli/profile/`. This api will be hit instead of `/blocks/dbt/`
+| Before                                                        | After                                                                                    |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Django: create dbt blocks api `POST /api/prefect/blocks/dbt/` | Django : api to create org tasks & cli profile blocks `POST /api/prefect/dbt/tasks/`     |
+| Django: get dbt blocks api `GET /api/prefect/blocks/dbt/`     | Django : api to get org tasks `GET /api/prefect/dbt/tasks/`                              |
+| Proxy: create dbt core block api `/proxy/blocks/dbtcore/`     | Proxy : new api in proxy to create dbt cli profile block `/proxy/blocks/dbtcli/profile/` |

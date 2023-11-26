@@ -38,6 +38,7 @@ from ddpui.utils.deploymentblocks import write_dataflowblocks
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
+from ddpui.utils.constants import TASK_DBTRUN
 
 prefectapi = NinjaAPI(urls_namespace="prefect")
 # http://127.0.0.1:8000/api/docs
@@ -715,9 +716,18 @@ def delete_prefect_dbt_run_block(request):
     return {"success": 1}
 
 
-@prefectapi.post("/blocks/dbtcli/profile/", auth=auth.CanManagePipelines())
-def post_prefect_dbt_cli_profile_block(request):
-    """Creates a prefect dbt cli profile block and the tasks to be run on the transform page"""
+@prefectapi.post("/dbt/tasks/", auth=auth.CanManagePipelines())
+def post_prefect_dbt_tasks(request):
+    """
+    - Create a git pull url secret block
+    - Create a dbt cli profile block
+    - Create dbt tasks
+        - git pull
+        - dbt deps
+        - dbt clean
+        - dbt run
+        - dbt test
+    """
     orguser: OrgUser = request.orguser
     if orguser.org.dbt is None:
         raise HttpError(400, "create a dbt workspace first")
@@ -818,7 +828,7 @@ def post_prefect_dbt_cli_profile_block(request):
     for task in Task.objects.filter(type__in=["dbt", "git"]).all():
         org_task = OrgTask.objects.create(org=orguser.org, task=task)
 
-        if task.slug == "dbt-run":
+        if task.slug == TASK_DBTRUN:
             # create deployment
             deployment_name = f"manual-{orguser.org.slug}-{task.slug}"
             dataflow = prefect_service.create_dataflow_v1(
@@ -872,6 +882,41 @@ def post_prefect_dbt_cli_profile_block(request):
             )
 
     return {"success": 1}
+
+
+@prefectapi.get("/dbt/tasks/", auth=auth.CanManagePipelines())
+def get_prefect_dbt_tasks(request):
+    """Fetch all dbt tasks for an org"""
+    orguser: OrgUser = request.orguser
+
+    org_tasks = []
+
+    for org_task in (
+        OrgTask.objects.filter(
+            org=orguser.org,
+            task__type__in=["git", "dbt"],
+        )
+        .order_by("task__id")
+        .all()
+    ):
+        # TODO: add task locking logic here later
+        org_tasks.append(
+            {
+                "label": org_task.task.label,
+                "slug": org_task.task.slug,
+                "id": org_task.id,
+                "deploymentId": None,
+            }
+        )
+
+        # fetch the manual deploymentId for the dbt run task
+        if org_task.task.slug == TASK_DBTRUN:
+            dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
+            org_tasks[-1]["deploymentId"] = (
+                dataflow_orgtask.dataflow.deployment_id if dataflow_orgtask else None
+            )
+
+    return org_tasks
 
 
 @prefectapi.get("/flow_runs/{flow_run_id}/logs", auth=auth.CanManagePipelines())
