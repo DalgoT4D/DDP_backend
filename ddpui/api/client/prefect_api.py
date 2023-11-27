@@ -725,12 +725,12 @@ def delete_prefect_dbt_run_block(request):
 @prefectapi.post("/tasks/{orgtask_id}/run/", auth=auth.CanManagePipelines())
 def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-argument
     """
-    Run dbt task in prefect
+    Run dbt task & git pull in prefect. All tasks without a deployment.
+    Basically short running tasks
     Can run
         - git pull
         - dbt deps
         - dbt clean
-        - dbt run
         - dbt test
     """
     orguser: OrgUser = request.orguser
@@ -748,6 +748,8 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
 
     dbtrepodir = Path(os.getenv("CLIENTDBT_ROOT")) / orguser.org.slug / "dbtrepo"
     project_dir = str(dbtrepodir)
+
+    # TODO: add task lock logic
 
     if org_task.task.slug == TASK_GITPULL:
         shell_env = {"secret-git-pull-url-block": ""}
@@ -776,7 +778,9 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
             result = prefect_service.run_shell_task_sync(payload)
         except Exception as error:
             logger.exception(error)
-            raise HttpError(400, f"failed to run the shell task {org_task.task.slug}") from error
+            raise HttpError(
+                400, f"failed to run the shell task {org_task.task.slug}"
+            ) from error
     else:
         dbt_env_dir = Path(orguser.org.dbt.dbt_venv)
         if not dbt_env_dir.exists():
@@ -816,8 +820,37 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
             logger.exception(error)
             raise HttpError(400, "failed to run dbt") from error
 
-
     return result
+
+
+@prefectapi.post(
+    "/task/{orgtask_id}/flows/{deployment_id}/flow_run", auth=auth.CanManagePipelines()
+)
+def post_run_prefect_org_deployment_task(request, orgtask_id, deployment_id):
+    """
+    Run deployment based task.
+    Can run
+        - airbtye sync
+        - dbt run
+    """
+    orguser: OrgUser = request.orguser
+
+    org_task = OrgTask.objects.filter(org=orguser.org, id=orgtask_id).first()
+
+    if org_task is None:
+        raise HttpError(400, "task not found")
+
+    if orguser.org is None:
+        raise HttpError(400, "register an organization first")
+
+    # TODO: add task lock logic
+    try:
+        res = prefect_service.create_deployment_flow_run(deployment_id)
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to start a run") from error
+
+    return res
 
 
 @prefectapi.post("/tasks/dbt/", auth=auth.CanManagePipelines())
