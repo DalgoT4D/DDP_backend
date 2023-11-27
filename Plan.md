@@ -73,12 +73,19 @@ Plan to go away from the prefect dbt core blocks & connection blocks
 
 - Final step is to migrate the current setup. For this we will write django commands(scripts) that help us go away with the blocks.
 
-### Tasks/steps
+### Change log
 
-#### Setup the api to save dbt cli profile
+#### <u>Blocks on transform page</u>
 
 | Before                                                        | After                                                                                    |
 | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Django: create dbt blocks api `POST /api/prefect/blocks/dbt/` | Django : api to create org tasks & cli profile blocks `POST /api/prefect/dbt/tasks/`     |
-| Django: get dbt blocks api `GET /api/prefect/blocks/dbt/`     | Django : api to get org tasks `GET /api/prefect/dbt/tasks/`                              |
+| Django: create dbt blocks api `POST /api/prefect/blocks/dbt/` | Django : api to create org tasks & cli profile blocks `POST /api/prefect/tasks/dbt/`     |
+| Django: get dbt blocks api `GET /api/prefect/blocks/dbt/`     | Django : api to get org tasks `GET /api/prefect/tasks/dbt/`                              |
 | Proxy: create dbt core block api `/proxy/blocks/dbtcore/`     | Proxy : new api in proxy to create dbt cli profile block `/proxy/blocks/dbtcli/profile/` |
+
+#### <u>Running blocks on transform page</u>
+
+| Before                                                                                                                                            | After                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Django: apis to run dbt core operations & git pull operations on transform can be deprecated `/api/prefect/flows/dbt_run/` & `/api/dbt/git_pull/` | Django : api to run tasks (dbt + shell operation(git pull)) `/api/prefect/tasks/{orgtask_id}/run/`    |
+|                                                                                                                                                   | Proxy : new api to run tasks (dbt + shell operation(git pull)) `/api/prefect/tasks/{orgtask_id}/run/` |

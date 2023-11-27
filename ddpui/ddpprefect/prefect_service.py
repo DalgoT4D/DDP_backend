@@ -14,6 +14,8 @@ from ddpui.ddpprefect.schema import (
     PrefectDbtCore,
     PrefectDataFlowUpdateSchema2,
     PrefectSecretBlockCreate,
+    PrefectShellTaskSetup,
+    PrefectDbtTaskSetup,
 )
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.orgjobs import BlockLock, DataflowBlock
@@ -378,6 +380,24 @@ def run_dbt_core_sync(run_flow: PrefectDbtCore) -> dict:  # pragma: no cover
     res = prefect_post(
         "flows/dbtcore/run/",
         json=run_flow.to_json(),
+    )
+    return res
+
+
+def run_dbt_task_sync(task: PrefectDbtTaskSetup) -> dict:  # pragma: no cover
+    """initiates a dbt job sync"""
+    res = prefect_post(
+        "flows/dbtcore/run/v1/",
+        json=task.to_json(),
+    )
+    return res
+
+
+def run_shell_task_sync(task: PrefectShellTaskSetup) -> dict:  # pragma: no cover
+    """initiates a shell task sync"""
+    res = prefect_post(
+        "flows/shell/run/",
+        json=task.to_json(),
     )
     return res
 
