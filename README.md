@@ -75,9 +75,11 @@ Django application for the DDP platform's management backend. Exposes API endpoi
 
 -   create a SQL database and populate its credentials into `.env`
 
--   Start Airbyte and populate connection info in `.env`
+-   [Start Airbyte](https://docs.airbyte.com/deploying-airbyte/local-deployment) and populate connection info in `.env`
 
--   Start Prefect and populate connection info in `.env`
+-   [Start Prefect](https://docs.prefect.io/latest/getting-started/installation/) and populate connection info in `.env`
+
+-   Make sure you run a Prefect Server (`prefect server start`) and a Prefect Agent (`prefect agent start -q ddp --pool default-agent-pool`)
 
 -   Set `DEV_SECRETS_DIR` in `.env` unless you want to use Amazon's Secrets Manager
 
