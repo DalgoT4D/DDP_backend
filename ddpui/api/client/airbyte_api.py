@@ -1006,3 +1006,34 @@ def get_job_status(request, job_id):
         "status": result["job"]["status"],
         "logs": logs,
     }
+
+
+@airbyteapi.get(
+    "/connections/{connection_block_id}/jobs", auth=auth.CanManagePipelines()
+)
+def get_latest_job_for_connection(request, connection_block_id):
+    """get the job info from airbyte for a connection"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    if org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    prefect_block = prefect_service.get_airbyte_connection_block_by_id(
+        connection_block_id
+    )
+    if prefect_block is None:
+        raise HttpError(400, "connection block not found")
+
+    connection_id = prefect_block["data"]["connection_id"]
+
+    # now we finally have the connection_id
+    result = airbyte_service.get_jobs_for_connection(connection_id)
+    if len(result["jobs"]) == 0:
+        return {
+            "status": "not found",
+        }
+    latest_job = result["jobs"][0]
+    job_info = airbyte_service.parse_job_info(latest_job)
+    logs = airbyte_service.get_logs_for_job(job_info["job_id"])
+    job_info["logs"] = logs["logs"]["logLines"]
+    return job_info

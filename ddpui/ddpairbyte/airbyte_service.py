@@ -843,3 +843,51 @@ def get_job_info(job_id: str) -> dict:
 
     res = abreq("jobs/get_debug_info", {"id": job_id})
     return res
+
+
+def get_jobs_for_connection(connection_id: str) -> int | None:
+    """
+    returns most recent job for a connection
+    possible configTypes are
+    - check_connection_source
+    - check_connection_destination
+    - discover_schema
+    - get_spec
+    - sync
+    - reset_connection
+    """
+    if not isinstance(connection_id, str):
+        raise HttpError(400, "connection_id must be a string")
+
+    result = abreq(
+        "jobs/list",
+        {
+            "configTypes": ["sync"],
+            "configId": connection_id,
+        },
+    )
+    return result
+
+
+def parse_job_info(jobinfo: dict) -> dict:
+    """extract summary info from job and successfull attempt"""
+    retval = {
+        "job_id": jobinfo["job"]["id"],
+        "status": jobinfo["job"]["status"],
+    }
+    for attempt in jobinfo["attempts"]:
+        if attempt["status"] == "succeeded":
+            retval["recordsSynced"] = attempt["recordsSynced"]
+            break
+    return retval
+
+
+def get_logs_for_job(job_id: int, attempt_number: int = 0) -> list:
+    """get logs for an airbyte job. do not make an API for this!"""
+    if not isinstance(job_id, int):
+        raise HttpError(400, "job_id must be an integer")
+
+    res = abreq(
+        "attempt/get_for_job", {"jobId": job_id, "attemptNumber": attempt_number}
+    )
+    return res
