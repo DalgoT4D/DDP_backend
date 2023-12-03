@@ -1475,6 +1475,12 @@ def test_get_jobs_for_connection():
         )
 
 
+def test_get_jobs_for_connection_raise():
+    with pytest.raises(HttpError) as excinfo:
+        get_jobs_for_connection(1)
+    assert str(excinfo.value) == "connection_id must be a string"
+
+
 def test_parse_job_info():
     ret = parse_job_info(
         {
@@ -1511,3 +1517,9 @@ def test_get_logs_for_job_1():
         mock_abreq_.assert_called_once_with(
             "attempt/get_for_job", {"jobId": 1, "attemptNumber": 1}
         )
+
+
+def test_get_logs_for_job_raise():
+    with pytest.raises(HttpError) as excinfo:
+        get_logs_for_job("str")
+    assert str(excinfo.value) == "job_id must be an integer"
