@@ -5,7 +5,7 @@ args to a command are specific to a deployment/flow & will be store as deploymen
 
 from django.db import models
 from ddpui.models.org import Org
-from ddpui.models.org import OrgDataFlow
+from ddpui.models.org import OrgDataFlowv1
 
 
 class Task(models.Model):
@@ -43,5 +43,5 @@ class OrgTask(models.Model):
 class DataflowOrgTask(models.Model):
     """Association of OrgPrefectBlocks to their deployments"""
 
-    dataflow = models.ForeignKey(OrgDataFlow, on_delete=models.CASCADE)
+    dataflow = models.ForeignKey(OrgDataFlowv1, on_delete=models.CASCADE)
     orgtask = models.ForeignKey(OrgTask, on_delete=models.CASCADE)
