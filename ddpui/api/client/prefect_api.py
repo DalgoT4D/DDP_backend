@@ -1072,6 +1072,24 @@ def get_flow_runs_logs(
     return result
 
 
+@prefectapi.get("/flow_runs/{flow_run_id}/logsummary", auth=auth.CanManagePipelines())
+def get_flow_runs_logsummary(request, flow_run_id):  # pylint: disable=unused-argument
+    """return the logs from a flow-run"""
+    try:
+        connection_info = {
+            "host": os.getenv("PREFECT_HOST"),
+            "port": os.getenv("PREFECT_PORT"),
+            "database": os.getenv("PREFECT_DB"),
+            "user": os.getenv("PREFECT_USER"),
+            "password": os.getenv("PREFECT_PASSWORD"),
+        }
+        result = parse_prefect_logs(connection_info, flow_run_id)
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to retrieve logs") from error
+    return result
+
+
 @prefectapi.get(
     "/flow_runs/{flow_run_id}",
     auth=auth.CanManagePipelines(),

@@ -132,6 +132,9 @@ dmypy.json
 # Vscode
 .vscode
 
+# mac stuff
+.DS_Store
+
 celeryworker.pid
 celerybeat.pid
 
@@ -141,3 +144,4 @@ data/
 celerybeat-schedule.db
 
 createsources.env
+parseprefectlogs.env
