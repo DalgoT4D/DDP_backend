@@ -16,7 +16,13 @@ from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service
 
 from ddpui.ddpprefect import DBTCORE, SHELLOPERATION, DBTCLIPROFILE, SECRET
-from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
+from ddpui.models.org import (
+    OrgPrefectBlock,
+    OrgWarehouse,
+    OrgDataFlow,
+    OrgDataFlowv1,
+    OrgPrefectBlockv1,
+)
 from ddpui.models.orgjobs import BlockLock, DataflowBlock
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import Task, DataflowOrgTask, OrgTask
@@ -827,7 +833,7 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
     if org_task.task.slug == TASK_GITPULL:
         shell_env = {"secret-git-pull-url-block": ""}
 
-        gitpull_secret_block = OrgPrefectBlock.objects.filter(
+        gitpull_secret_block = OrgPrefectBlockv1.objects.filter(
             org=orguser.org, block_type=SECRET, block_name__contains="git-pull"
         ).first()
 
@@ -926,8 +932,8 @@ def post_run_prefect_org_deployment_task(request, deployment_id):
     return res
 
 
-@prefectapi.post("/tasks/dbt/", auth=auth.CanManagePipelines())
-def post_prefect_dbt_tasks(request):
+@prefectapi.post("/tasks/transform/", auth=auth.CanManagePipelines())
+def post_prefect_transformation_tasks(request):
     """
     - Create a git pull url secret block
     - Create a dbt cli profile block
@@ -968,7 +974,7 @@ def post_prefect_dbt_tasks(request):
         gitrepo_access_token = secretsmanager.retrieve_github_token(orguser.org.dbt)
         gitrepo_url = orguser.org.dbt.gitrepo_url
 
-        if gitrepo_access_token is not None:
+        if gitrepo_access_token is not None or gitrepo_access_token != "":
             gitrepo_url = gitrepo_url.replace(
                 "github.com", "oauth2:" + gitrepo_access_token + "@github.com"
             )
@@ -981,7 +987,7 @@ def post_prefect_dbt_tasks(request):
             block_response = prefect_service.create_secret_block(secret_block)
 
             # store secret block name block_response["block_name"] in orgdbt
-            OrgPrefectBlock.objects.create(
+            OrgPrefectBlockv1.objects.create(
                 org=orguser.org,
                 block_type=SECRET,
                 block_id=block_response["block_id"],
@@ -1023,7 +1029,7 @@ def post_prefect_dbt_tasks(request):
         )
 
         # save the cli profile block in django db
-        OrgPrefectBlock.objects.create(
+        OrgPrefectBlockv1.objects.create(
             org=orguser.org,
             block_type=DBTCLIPROFILE,
             block_id=cli_block_response["block_id"],
@@ -1072,13 +1078,13 @@ def post_prefect_dbt_tasks(request):
             )
 
             # store deployment record in django db
-            existing_dataflow = OrgDataFlow.objects.filter(
+            existing_dataflow = OrgDataFlowv1.objects.filter(
                 deployment_id=dataflow["deployment"]["id"]
             ).first()
             if existing_dataflow:
                 existing_dataflow.delete()
 
-            new_dataflow = OrgDataFlow.objects.create(
+            new_dataflow = OrgDataFlowv1.objects.create(
                 org=orguser.org,
                 name=deployment_name,
                 deployment_name=dataflow["deployment"]["name"],
@@ -1094,8 +1100,8 @@ def post_prefect_dbt_tasks(request):
     return {"success": 1}
 
 
-@prefectapi.get("/tasks/dbt/", auth=auth.CanManagePipelines())
-def get_prefect_dbt_tasks(request):
+@prefectapi.get("/tasks/transform/", auth=auth.CanManagePipelines())
+def get_prefect_transformation_tasks(request):
     """Fetch all dbt tasks for an org"""
     orguser: OrgUser = request.orguser
 

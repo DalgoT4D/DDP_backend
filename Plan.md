@@ -75,13 +75,21 @@ Plan to go away from the prefect dbt core blocks & connection blocks
 
 ### Change log
 
+#### <u>User org client related</u>
+
+| Before                                                                     | After                                                                                     |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Django: create airbyte workspace `POST /api/airbyte/workspace/`            | Django : new api to create airbyte workspace `POST /api/airbyte/v1/workspace/`            |
+| Django: create organization `POST /api/organizations/`                     | Django : new api to create org `POST /api/v1/organizations/`                              |
+| Proxy: create organization warehouse `POST /api/organizations/warehouses/` | Proxy : new api to create organization warehouse `POST /api/v1/organizations/warehouses/` |
+
 #### <u>Blocks on transform page</u>
 
-| Before                                                        | After                                                                                    |
-| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Django: create dbt blocks api `POST /api/prefect/blocks/dbt/` | Django : api to create org tasks & cli profile blocks `POST /api/prefect/tasks/dbt/`     |
-| Django: get dbt blocks api `GET /api/prefect/blocks/dbt/`     | Django : api to get org tasks `GET /api/prefect/tasks/dbt/`                              |
-| Proxy: create dbt core block api `/proxy/blocks/dbtcore/`     | Proxy : new api in proxy to create dbt cli profile block `/proxy/blocks/dbtcli/profile/` |
+| Before                                                        | After                                                                                      |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Django: create dbt blocks api `POST /api/prefect/blocks/dbt/` | Django : api to create org tasks & cli profile blocks `POST /api/prefect/tasks/transform/` |
+| Django: get dbt blocks api `GET /api/prefect/blocks/dbt/`     | Django : api to get org tasks `GET /api/prefect/tasks/transform/`                          |
+| Proxy: create dbt core block api `/proxy/blocks/dbtcore/`     | Proxy : new api in proxy to create dbt cli profile block `/proxy/blocks/dbtcli/profile/`   |
 
 #### <u>Running blocks on transform page</u>
 

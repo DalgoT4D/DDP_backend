@@ -1006,3 +1006,21 @@ def get_job_status(request, job_id):
         "status": result["job"]["status"],
         "logs": logs,
     }
+
+
+# ==============================================================================
+# new apis to go away from the block architecture
+
+
+@airbyteapi.post(
+    "/v1/workspace/", response=AirbyteWorkspace, auth=auth.CanManagePipelines()
+)
+def post_airbyte_workspace_v1(request, payload: AirbyteWorkspaceCreate):
+    """Create an airbyte workspace"""
+    orguser: OrgUser = request.orguser
+    if orguser.org.airbyte_workspace_id is not None:
+        raise HttpError(400, "org already has a workspace")
+
+    workspace = airbytehelpers.setup_airbyte_workspace_v1(payload.name, orguser.org)
+
+    return workspace
