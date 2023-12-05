@@ -720,6 +720,78 @@ def delete_prefect_dbt_run_block(request):
 
 
 # =================================================================================================
+
+
+@prefectapi.get("/flow_runs/{flow_run_id}/logs", auth=auth.CanManagePipelines())
+def get_flow_runs_logs(
+    request, flow_run_id, offset: int = 0
+):  # pylint: disable=unused-argument
+    """return the logs from a flow-run"""
+    try:
+        result = prefect_service.get_flow_run_logs(flow_run_id, offset)
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to retrieve logs") from error
+    return result
+
+
+@prefectapi.get("/flow_runs/{flow_run_id}/logsummary", auth=auth.CanManagePipelines())
+def get_flow_runs_logsummary(request, flow_run_id):  # pylint: disable=unused-argument
+    """return the logs from a flow-run"""
+    try:
+        connection_info = {
+            "host": os.getenv("PREFECT_HOST"),
+            "port": os.getenv("PREFECT_PORT"),
+            "database": os.getenv("PREFECT_DB"),
+            "user": os.getenv("PREFECT_USER"),
+            "password": os.getenv("PREFECT_PASSWORD"),
+        }
+        result = parse_prefect_logs(connection_info, flow_run_id)
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to retrieve logs") from error
+    return result
+
+
+@prefectapi.get(
+    "/flow_runs/{flow_run_id}",
+    auth=auth.CanManagePipelines(),
+    response=PrefectFlowRunSchema,
+)
+def get_flow_run_by_id(request, flow_run_id):
+    # pylint: disable=unused-argument
+    """fetch a flow run from prefect"""
+    try:
+        flow_run = prefect_service.get_flow_run(flow_run_id)
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to retrieve logs") from error
+    return flow_run
+
+
+@prefectapi.get(
+    "/flows/{deployment_id}/flow_runs/history", auth=auth.CanManagePipelines()
+)
+def get_prefect_flow_runs_log_history(
+    request, deployment_id, limit: int = 0, fetchlogs=True
+):
+    # pylint: disable=unused-argument
+    """Fetch all flow runs for the deployment and the logs for each flow run"""
+    flow_runs = prefect_service.get_flow_runs_by_deployment_id(
+        deployment_id, limit=limit
+    )
+
+    if fetchlogs:
+        for flow_run in flow_runs:
+            logs_dict = prefect_service.get_flow_run_logs(flow_run["id"], 0)
+            flow_run["logs"] = (
+                logs_dict["logs"]["logs"] if "logs" in logs_dict["logs"] else []
+            )
+
+    return flow_runs
+
+
+# =================================================================================================
 # new apis to go away from the block architecture
 
 
@@ -826,7 +898,6 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
 
 @prefectapi.post("/v1/flows/{deployment_id}/flow_run", auth=auth.CanManagePipelines())
 def post_run_prefect_org_deployment_task(request, deployment_id):
-    # TODO: we dont need the orgtask_id here; just deployment id should be enough
     """
     Run deployment based task.
     Can run
@@ -1056,75 +1127,3 @@ def get_prefect_dbt_tasks(request):
             )
 
     return org_tasks
-
-
-# =================================================================================================
-
-
-@prefectapi.get("/flow_runs/{flow_run_id}/logs", auth=auth.CanManagePipelines())
-def get_flow_runs_logs(
-    request, flow_run_id, offset: int = 0
-):  # pylint: disable=unused-argument
-    """return the logs from a flow-run"""
-    try:
-        result = prefect_service.get_flow_run_logs(flow_run_id, offset)
-    except Exception as error:
-        logger.exception(error)
-        raise HttpError(400, "failed to retrieve logs") from error
-    return result
-
-
-@prefectapi.get("/flow_runs/{flow_run_id}/logsummary", auth=auth.CanManagePipelines())
-def get_flow_runs_logsummary(request, flow_run_id):  # pylint: disable=unused-argument
-    """return the logs from a flow-run"""
-    try:
-        connection_info = {
-            "host": os.getenv("PREFECT_HOST"),
-            "port": os.getenv("PREFECT_PORT"),
-            "database": os.getenv("PREFECT_DB"),
-            "user": os.getenv("PREFECT_USER"),
-            "password": os.getenv("PREFECT_PASSWORD"),
-        }
-        result = parse_prefect_logs(connection_info, flow_run_id)
-    except Exception as error:
-        logger.exception(error)
-        raise HttpError(400, "failed to retrieve logs") from error
-    return result
-
-
-@prefectapi.get(
-    "/flow_runs/{flow_run_id}",
-    auth=auth.CanManagePipelines(),
-    response=PrefectFlowRunSchema,
-)
-def get_flow_run_by_id(request, flow_run_id):
-    # pylint: disable=unused-argument
-    """fetch a flow run from prefect"""
-    try:
-        flow_run = prefect_service.get_flow_run(flow_run_id)
-    except Exception as error:
-        logger.exception(error)
-        raise HttpError(400, "failed to retrieve logs") from error
-    return flow_run
-
-
-@prefectapi.get(
-    "/flows/{deployment_id}/flow_runs/history", auth=auth.CanManagePipelines()
-)
-def get_prefect_flow_runs_log_history(
-    request, deployment_id, limit: int = 0, fetchlogs=True
-):
-    # pylint: disable=unused-argument
-    """Fetch all flow runs for the deployment and the logs for each flow run"""
-    flow_runs = prefect_service.get_flow_runs_by_deployment_id(
-        deployment_id, limit=limit
-    )
-
-    if fetchlogs:
-        for flow_run in flow_runs:
-            logs_dict = prefect_service.get_flow_run_logs(flow_run["id"], 0)
-            flow_run["logs"] = (
-                logs_dict["logs"]["logs"] if "logs" in logs_dict["logs"] else []
-            )
-
-    return flow_runs
