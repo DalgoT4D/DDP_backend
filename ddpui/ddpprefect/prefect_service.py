@@ -387,7 +387,7 @@ def run_dbt_core_sync(run_flow: PrefectDbtCore) -> dict:  # pragma: no cover
 def run_dbt_task_sync(task: PrefectDbtTaskSetup) -> dict:  # pragma: no cover
     """initiates a dbt job sync"""
     res = prefect_post(
-        "flows/dbtcore/run/v1/",
+        "v1/flows/dbtcore/run/",
         json=task.to_json(),
     )
     return res

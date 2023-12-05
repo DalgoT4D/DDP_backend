@@ -41,6 +41,7 @@ from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
 from ddpui.utils.constants import TASK_DBTRUN, TASK_GITPULL
+from ddpui.utils.prefectlogs import parse_prefect_logs
 
 prefectapi = NinjaAPI(urls_namespace="prefect")
 # http://127.0.0.1:8000/api/docs
@@ -823,10 +824,9 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
     return result
 
 
-@prefectapi.post(
-    "/task/{orgtask_id}/flows/{deployment_id}/flow_run", auth=auth.CanManagePipelines()
-)
-def post_run_prefect_org_deployment_task(request, orgtask_id, deployment_id):
+@prefectapi.post("/v1/flows/{deployment_id}/flow_run", auth=auth.CanManagePipelines())
+def post_run_prefect_org_deployment_task(request, deployment_id):
+    # TODO: we dont need the orgtask_id here; just deployment id should be enough
     """
     Run deployment based task.
     Can run
@@ -835,13 +835,15 @@ def post_run_prefect_org_deployment_task(request, orgtask_id, deployment_id):
     """
     orguser: OrgUser = request.orguser
 
-    org_task = OrgTask.objects.filter(org=orguser.org, id=orgtask_id).first()
-
-    if org_task is None:
-        raise HttpError(400, "task not found")
-
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
+
+    dataflow_orgtask = DataflowOrgTask.objects.filter(
+        dataflow__deployment_id=deployment_id
+    ).first()
+
+    if dataflow_orgtask is None:
+        raise HttpError(400, "no org task mapped to the deployment")
 
     # TODO: add task lock logic
     try:
