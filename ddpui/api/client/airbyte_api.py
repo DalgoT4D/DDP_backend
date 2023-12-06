@@ -1085,7 +1085,8 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
         org=org, task=task, connection_id=airbyte_conn["connectionId"]
     )
 
-    deployment_name = f"manual-{orguser.org.slug}-{task.slug}"
+    counter = OrgDataFlowv1.objects.last().id + 1
+    deployment_name = f"manual-{orguser.org.slug}-{task.slug}-{counter}"
     dataflow = prefect_service.create_dataflow_v1(
         PrefectDataFlowCreateSchema3(
             deployment_name=deployment_name,
@@ -1138,6 +1139,55 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
         "status": airbyte_conn["status"],
         "deploymentId": dataflow["deployment"]["id"],
         "normalize": payload.normalize,
+        "lastRun": None,  # TODO
+        "lock": None,  # TODO
     }
     logger.debug(res)
+    return res
+
+
+@airbyteapi.get(
+    "/v1/connections",
+    auth=auth.CanManagePipelines(),
+    response=List[AirbyteConnectionCreateResponse],
+)
+def get_airbyte_connections_v1(request):
+    """Fetch all airbyte connections in the user organization workspace"""
+    orguser: OrgUser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    org_tasks = OrgTask.objects.filter(org=orguser.org, task__type="airbyte").all()
+
+    res = []
+
+    for org_task in org_tasks:
+        # fetch the connection
+        connection = airbyte_service.get_connection(
+            orguser.org.airbyte_workspace_id, org_task.connection_id
+        )
+
+        sync_dataflow = DataflowOrgTask.objects.filter(orgtask=org_task).first()
+
+        res.append(
+            {
+                "name": connection["name"],
+                "connectionId": connection["connectionId"],
+                "source": connection["source"],
+                "destination": connection["destination"],
+                "catalogId": connection["catalogId"],
+                "syncCatalog": connection["syncCatalog"],
+                "status": connection["status"],
+                "deploymentId": sync_dataflow.dataflow.deployment_id
+                if sync_dataflow
+                else None,
+                "lastRun": None,  # TODO
+                "lock": None,  # TODO
+            }
+        )
+
+    # TODO: lock task logic
+    logger.info(res)
+
+    # by default normalization is going as False here because we dont do anything with it
     return res
