@@ -1385,3 +1385,49 @@ def put_airbyte_connection_v1(
     )
 
     return res
+
+
+@airbyteapi.delete("/v1/connections/{connection_id}", auth=auth.CanManagePipelines())
+def delete_airbyte_connection(request, connection_id):
+    """Update an airbyte connection in the user organization workspace"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    if org is None:
+        raise HttpError(400, "create an organization first")
+    if org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    org_task = OrgTask.objects.filter(
+        org=orguser.org,
+        connection_id=connection_id,
+    ).first()
+
+    if org_task is None:
+        raise HttpError(404, "connection not found")
+
+    dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
+
+    if dataflow_orgtask is None:
+        raise HttpError(422, "deployment not found")
+
+    # delete airbyte connection
+    logger.info("deleting airbyte connection")
+    airbyte_service.delete_connection(org.airbyte_workspace_id, connection_id)
+
+    # delete prefect deployment
+    logger.info("deleteing prefect deployment")
+    prefect_service.delete_deployment_by_id(dataflow_orgtask.dataflow.deployment_id)
+
+    # delete the org dataflow for manual deployment
+    logger.info("deleting org dataflow from db")
+    dataflow_orgtask.dataflow.delete()
+
+    # delete orgtask <-> dataflow mapping
+    logger.info("deleteing datafloworgtask mapping")
+    dataflow_orgtask.delete()
+
+    # delete orgtask
+    logger.info("deleteing orgtask")
+    org_task.delete()
+
+    return {"success": 1}

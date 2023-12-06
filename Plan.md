@@ -92,6 +92,8 @@ Plan to go away from the prefect dbt core blocks & connection blocks
 | Get all connections `GET /api/airbyte/connections`                                                      | Get all connections `GET /api/airbyte/v1/connections`                                                                                         |
 | Get a connection `POST /api/airbyte/connections/:connection_block_id`                                   | Get a connection `POST /api/airbyte/v1/connections/:connection_id`                                                                            |
 | Reset a connection `POST /api/airbyte/connections/:connection_block_id/reset`                           | Reset a connection `POST /api/airbyte/v1/connections/:connection_id/reset`                                                                    |
+| Update a connection `PUT /api/airbyte/connections/:connection_block_id/update`                          | Update a connection `PUT /api/airbyte/v1/connections/:connection_id/update`                                                                   |
+| Delete a connection `DELETE /api/airbyte/connections/:connection_block_id`                              | Delete a connection `DELETE /api/airbyte/v1/connections/:connection_id`                                                                       |
 
 #### <u>Blocks on transform page</u>
 
