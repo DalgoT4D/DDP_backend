@@ -30,6 +30,7 @@ from ddpui.ddpprefect.schema import (
     PrefectAirbyteConnectionBlockSchema,
     PrefectAirbyteSync,
     PrefectDataFlowCreateSchema2,
+    PrefectDataFlowCreateSchema3,
 )
 
 from ddpui.ddpprefect import (
@@ -38,12 +39,20 @@ from ddpui.ddpprefect import (
     DBTCORE,
 )
 from ddpui.ddpprefect import prefect_service
-from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
+from ddpui.models.org import (
+    OrgPrefectBlock,
+    OrgWarehouse,
+    OrgDataFlow,
+    OrgPrefectBlockv1,
+    OrgDataFlowv1,
+)
 from ddpui.models.orgjobs import DataflowBlock, BlockLock
+from ddpui.models.tasks import Task, DataflowOrgTask, OrgTask
 from ddpui.models.org_user import OrgUser
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
+from ddpui.utils.constants import TASK_AIRBYTESYNC
 
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
@@ -1024,3 +1033,111 @@ def post_airbyte_workspace_v1(request, payload: AirbyteWorkspaceCreate):
     workspace = airbytehelpers.setup_airbyte_workspace_v1(payload.name, orguser.org)
 
     return workspace
+
+
+@airbyteapi.post(
+    "/v1/connections/",
+    auth=auth.CanManagePipelines(),
+    response=PrefectAirbyteConnectionBlockSchema,
+)
+def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
+    """Create an airbyte connection in the user organization workspace"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    if org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    if len(payload.streams) == 0:
+        raise HttpError(400, "must specify stream names")
+
+    warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if warehouse is None:
+        raise HttpError(400, "need to set up a warehouse first")
+    if warehouse.airbyte_destination_id is None:
+        raise HttpError(400, "warehouse has no airbyte_destination_id")
+    payload.destinationId = warehouse.airbyte_destination_id
+
+    if warehouse.airbyte_norm_op_id is None:
+        warehouse.airbyte_norm_op_id = airbyte_service.create_normalization_operation(
+            org.airbyte_workspace_id
+        )["operationId"]
+        warehouse.save()
+
+    airbyte_conn = airbyte_service.create_connection(
+        org.airbyte_workspace_id, warehouse.airbyte_norm_op_id, payload
+    )
+
+    org_airbyte_server_block = OrgPrefectBlockv1.objects.filter(
+        org=org,
+        block_type=AIRBYTESERVER,
+    ).first()
+    if org_airbyte_server_block is None:
+        raise Exception(f"{org.slug} has no {AIRBYTESERVER} block in OrgPrefectBlock")
+
+    display_name = payload.name
+
+    task = Task.objects.filter(slug=TASK_AIRBYTESYNC).first()
+    if task is None:
+        raise HttpError(400, "task not supported")
+
+    org_task = OrgTask.objects.create(
+        org=org, task=task, connection_id=airbyte_conn["connectionId"]
+    )
+
+    deployment_name = f"manual-{orguser.org.slug}-{task.slug}"
+    dataflow = prefect_service.create_dataflow_v1(
+        PrefectDataFlowCreateSchema3(
+            deployment_name=deployment_name,
+            flow_name=deployment_name,
+            orgslug=orguser.org.slug,
+            deployment_params={
+                "config": {
+                    "tasks": [
+                        {
+                            "slug": task.slug,
+                            "type": AIRBYTECONNECTION,
+                            "seq": 1,
+                            "airbyte_server_block": org_airbyte_server_block.block_name,
+                            "connection_id": airbyte_conn["connectionId"],
+                            "timeout": 15,
+                        }
+                    ]
+                }
+            },
+        )
+    )
+
+    existing_dataflow = OrgDataFlowv1.objects.filter(
+        deployment_id=dataflow["deployment"]["id"]
+    ).first()
+    if existing_dataflow:
+        existing_dataflow.delete()
+
+    org_dataflow = OrgDataFlowv1.objects.create(
+        org=orguser.org,
+        name=deployment_name,
+        deployment_name=dataflow["deployment"]["name"],
+        deployment_id=dataflow["deployment"]["id"],
+        connection_id=airbyte_conn["connectionId"],
+        dataflow_type="manual",
+    )
+    DataflowOrgTask.objects.create(
+        dataflow=org_dataflow,
+        orgtask=org_task,
+    )
+
+    res = {
+        "name": display_name,
+        "connectionId": airbyte_conn["connectionId"],
+        "source": {"id": airbyte_conn["sourceId"]},
+        "destination": {
+            "id": airbyte_conn["destinationId"],
+        },
+        "catalogId": airbyte_conn["sourceCatalogId"],
+        "syncCatalog": airbyte_conn["syncCatalog"],
+        "status": airbyte_conn["status"],
+        "deploymentId": dataflow["deployment"]["id"],
+        "normalize": payload.normalize,
+    }
+    logger.debug(res)
+    return res
