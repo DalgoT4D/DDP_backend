@@ -1302,3 +1302,86 @@ def post_airbyte_connection_reset_v1(request, connection_id):
     airbyte_service.reset_connection(connection_id)
 
     return {"success": 1}
+
+
+@airbyteapi.put(
+    "/v1//connections/{connection_id}/update", auth=auth.CanManagePipelines()
+)
+def put_airbyte_connection_v1(
+    request, connection_id, payload: AirbyteConnectionUpdate
+):  # pylint: disable=unused-argument
+    """Update an airbyte connection in the user organization workspace"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    if org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    org_task = OrgTask.objects.filter(
+        org=orguser.org,
+        connection_id=connection_id,
+    ).first()
+
+    if org_task is None:
+        raise HttpError(404, "connection not found")
+
+    warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if warehouse is None:
+        raise HttpError(400, "need to set up a warehouse first")
+    if warehouse.airbyte_destination_id is None:
+        raise HttpError(400, "warehouse has no airbyte_destination_id")
+    payload.destinationId = warehouse.airbyte_destination_id
+
+    dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
+
+    if dataflow_orgtask is None:
+        raise HttpError(422, "deployment not found")
+
+    prefect_deployment = prefect_service.get_deployment(
+        dataflow_orgtask.dataflow.deployment_id
+    )
+
+    if (
+        "config" not in prefect_deployment["parameters"]
+        or "tasks" not in prefect_deployment["parameters"]["config"]
+        or len(prefect_deployment["parameters"]["config"]["tasks"]) < 1
+    ):
+        raise HttpError(500, "invalid deployment")
+
+    deployment_connection_id = prefect_deployment["parameters"]["config"]["tasks"][0][
+        "connection_id"
+    ]
+    if deployment_connection_id != connection_id:
+        raise HttpError(500, "connection is missing from the deployment")
+
+    if len(payload.streams) == 0:
+        raise HttpError(400, "must specify stream names")
+
+    # fetch connection by id from airbyte
+    connection = airbyte_service.get_connection(org.airbyte_workspace_id, connection_id)
+
+    # update normalization of data
+    if payload.normalize:
+        if "operationIds" not in connection or len(connection["operationIds"]) == 0:
+            warehouse.airbyte_norm_op_id = (
+                airbyte_service.create_normalization_operation(
+                    org.airbyte_workspace_id
+                )["operationId"]
+            )
+            warehouse.save()
+            connection["operationIds"] = [warehouse.airbyte_norm_op_id]
+    else:
+        connection["operationIds"] = []
+
+    # update name
+    if payload.name:
+        connection["name"] = payload.name
+
+    # always reset the connection
+    connection["skipReset"] = False
+
+    # update the airbyte connection
+    res = airbyte_service.update_connection(
+        org.airbyte_workspace_id, payload, connection
+    )
+
+    return res
