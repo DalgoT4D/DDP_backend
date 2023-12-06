@@ -14,6 +14,7 @@ from ddpui import auth
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import (
     AirbyteConnectionCreate,
+    AirbyteConnectionCreateResponse,
     AirbyteDestinationCreate,
     AirbyteDestinationUpdate,
     AirbyteSourceCreate,
@@ -1038,7 +1039,7 @@ def post_airbyte_workspace_v1(request, payload: AirbyteWorkspaceCreate):
 @airbyteapi.post(
     "/v1/connections/",
     auth=auth.CanManagePipelines(),
-    response=PrefectAirbyteConnectionBlockSchema,
+    response=AirbyteConnectionCreateResponse,
 )
 def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
     """Create an airbyte connection in the user organization workspace"""
@@ -1118,7 +1119,6 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
         name=deployment_name,
         deployment_name=dataflow["deployment"]["name"],
         deployment_id=dataflow["deployment"]["id"],
-        connection_id=airbyte_conn["connectionId"],
         dataflow_type="manual",
     )
     DataflowOrgTask.objects.create(
