@@ -1191,3 +1191,68 @@ def get_airbyte_connections_v1(request):
 
     # by default normalization is going as False here because we dont do anything with it
     return res
+
+
+@airbyteapi.get(
+    "/v1/connections/{connection_id}",
+    auth=auth.CanManagePipelines(),
+    response=AirbyteConnectionCreateResponse,
+)
+def get_airbyte_connection_v1(request, connection_id):
+    """Fetch a connection in the user organization workspace"""
+    orguser: OrgUser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    org_task = OrgTask.objects.filter(
+        org=orguser.org,
+        connection_id=connection_id,
+    ).first()
+
+    print("org_task", org_task)
+
+    if org_task is None or org_task.connection_id is None:
+        raise HttpError(404, "connection not found")
+
+    # fetch airbyte connection
+    airbyte_conn = airbyte_service.get_connection(
+        orguser.org.airbyte_workspace_id, org_task.connection_id
+    )
+
+    dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
+
+    if dataflow_orgtask is None:
+        raise HttpError(422, "deployment not found")
+
+    # TODO: task lock logic
+
+    # fetch the source and destination names
+    # the web_backend/connections/get fetches the source & destination objects also so we dont need to query again
+    source_name = airbyte_conn["source"]["sourceName"]
+
+    destination_name = airbyte_conn["destination"]["destinationName"]
+
+    res = {
+        "name": airbyte_conn["name"],
+        "connectionId": airbyte_conn["connectionId"],
+        "source": {"id": airbyte_conn["sourceId"], "name": source_name},
+        "destination": {"id": airbyte_conn["destinationId"], "name": destination_name},
+        "catalogId": airbyte_conn["catalogId"],
+        "syncCatalog": airbyte_conn["syncCatalog"],
+        "destinationSchema": airbyte_conn["namespaceFormat"]
+        if airbyte_conn["namespaceDefinition"] == "customformat"
+        else "",
+        "status": airbyte_conn["status"],
+        "deploymentId": dataflow_orgtask.dataflow.deployment_id
+        if dataflow_orgtask.dataflow
+        else None,
+        "normalize": airbyte_service.is_operation_normalization(
+            airbyte_conn["operationIds"][0]
+        )
+        if "operationIds" in airbyte_conn and len(airbyte_conn["operationIds"]) == 1
+        else False,
+        "lock": None,  # TODO
+    }
+
+    logger.debug(res)
+    return res
