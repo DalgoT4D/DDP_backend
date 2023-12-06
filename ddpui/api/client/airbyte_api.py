@@ -1212,8 +1212,6 @@ def get_airbyte_connection_v1(request, connection_id):
         connection_id=connection_id,
     ).first()
 
-    print("org_task", org_task)
-
     if org_task is None or org_task.connection_id is None:
         raise HttpError(404, "connection not found")
 
