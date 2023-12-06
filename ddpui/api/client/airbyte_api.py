@@ -1257,3 +1257,48 @@ def get_airbyte_connection_v1(request, connection_id):
 
     logger.debug(res)
     return res
+
+
+@airbyteapi.post(
+    "/v1/connections/{connection_id}/reset", auth=auth.CanManagePipelines()
+)
+def post_airbyte_connection_reset_v1(request, connection_id):
+    """Reset the data for connection at destination"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    if org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    org_task = OrgTask.objects.filter(
+        org=orguser.org,
+        connection_id=connection_id,
+    ).first()
+
+    if org_task is None:
+        raise HttpError(404, "connection not found")
+
+    dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
+
+    if dataflow_orgtask is None:
+        raise HttpError(422, "deployment not found")
+
+    prefect_deployment = prefect_service.get_deployment(
+        dataflow_orgtask.dataflow.deployment_id
+    )
+
+    if (
+        "config" not in prefect_deployment["parameters"]
+        or "tasks" not in prefect_deployment["parameters"]["config"]
+        or len(prefect_deployment["parameters"]["config"]["tasks"]) < 1
+    ):
+        raise HttpError(500, "invalid deployment")
+
+    deployment_connection_id = prefect_deployment["parameters"]["config"]["tasks"][0][
+        "connection_id"
+    ]
+    if deployment_connection_id != connection_id:
+        raise HttpError(500, "connection is missing from the deployment")
+
+    airbyte_service.reset_connection(connection_id)
+
+    return {"success": 1}

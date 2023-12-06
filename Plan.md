@@ -89,7 +89,9 @@ Plan to go away from the prefect dbt core blocks & connection blocks
 | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | Django: create airbyte conncetion `POST /api/airbyte/connections/`                                      | Django : new api to create airbyte connection `POST /api/airbyte/v1/connections/`                                                             |
 | Django: to sync a connection via the button `POST /api/airbyte/connections/{connection_block_id}/sync/` | Django : reusing api to sync connection via deployment (already created in prefect_api) `POST /api/prefect/v1/flows/{deployment_id}/flow_run` |
-| Proxy: create organization warehouse `POST /api/organizations/warehouses/`                              | Proxy : new api to create organization warehouse `POST /api/v1/organizations/warehouses/`                                                     |
+| Get all connections `GET /api/airbyte/connections`                                                      | Get all connections `GET /api/airbyte/v1/connections`                                                                                         |
+| Get a connection `POST /api/airbyte/connections/:connection_block_id`                                   | Get a connection `POST /api/airbyte/v1/connections/:connection_id`                                                                            |
+| Reset a connection `POST /api/airbyte/connections/:connection_block_id/reset`                           | Reset a connection `POST /api/airbyte/v1/connections/:connection_id/reset`                                                                    |
 
 #### <u>Blocks on transform page</u>
 
