@@ -48,6 +48,7 @@ from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
 from ddpui.utils.constants import TASK_DBTRUN, TASK_GITPULL
 from ddpui.utils.prefectlogs import parse_prefect_logs
+from ddpui.utils.helpers import generate_hash_id
 
 prefectapi = NinjaAPI(urls_namespace="prefect")
 # http://127.0.0.1:8000/api/docs
@@ -1046,7 +1047,8 @@ def post_prefect_transformation_tasks(request):
 
         if task.slug == TASK_DBTRUN:
             # create deployment
-            deployment_name = f"manual-{orguser.org.slug}-{task.slug}"
+            hash_code = generate_hash_id(8)
+            deployment_name = f"manual-{orguser.org.slug}-{task.slug}-{hash_code}"
             dataflow = prefect_service.create_dataflow_v1(
                 PrefectDataFlowCreateSchema3(
                     deployment_name=deployment_name,

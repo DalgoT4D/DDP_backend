@@ -54,6 +54,7 @@ from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils.constants import TASK_AIRBYTESYNC
+from ddpui.utils.helpers import generate_hash_id
 
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
@@ -1085,8 +1086,10 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
         org=org, task=task, connection_id=airbyte_conn["connectionId"]
     )
 
-    counter = OrgDataFlowv1.objects.last().id + 1
-    deployment_name = f"manual-{orguser.org.slug}-{task.slug}-{counter}"
+    hash_code = generate_hash_id(8)
+    logger.info(f"using the hash code {hash_code} for the deployment name")
+
+    deployment_name = f"manual-{orguser.org.slug}-{task.slug}-{hash_code}"
     dataflow = prefect_service.create_dataflow_v1(
         PrefectDataFlowCreateSchema3(
             deployment_name=deployment_name,
