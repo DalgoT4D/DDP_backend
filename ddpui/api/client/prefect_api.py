@@ -870,7 +870,7 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
         target = orguser.org.dbt.default_schema
 
         # fetch the cli profile block
-        cli_profile_block = OrgPrefectBlock.objects.filter(
+        cli_profile_block = OrgPrefectBlockv1.objects.filter(
             org=orguser.org, block_type=DBTCLIPROFILE
         ).first()
 
