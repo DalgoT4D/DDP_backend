@@ -1360,12 +1360,13 @@ def put_airbyte_connection_v1(
     # update normalization of data
     if payload.normalize:
         if "operationIds" not in connection or len(connection["operationIds"]) == 0:
-            warehouse.airbyte_norm_op_id = (
-                airbyte_service.create_normalization_operation(
-                    org.airbyte_workspace_id
-                )["operationId"]
-            )
-            warehouse.save()
+            if warehouse.airbyte_norm_op_id is None:
+                warehouse.airbyte_norm_op_id = (
+                    airbyte_service.create_normalization_operation(
+                        org.airbyte_workspace_id
+                    )["operationId"]
+                )
+                warehouse.save()
             connection["operationIds"] = [warehouse.airbyte_norm_op_id]
     else:
         connection["operationIds"] = []
