@@ -171,7 +171,7 @@ AIRBYTE_CUSTOM_SOURCES = {
     "tech4dev/source-kobotoolbox": {
         "name": "KoboToolbox",
         "docker_repository": "tech4dev/source-kobotoolbox",
-        "docker_image_tag": "0.1.0",
+        "docker_image_tag": "0.2.0",
         "documentation_url": "",
     },
     "tech4dev/source-commcare": {
@@ -189,7 +189,7 @@ AIRBYTE_CUSTOM_SOURCES = {
     "tech4dev/source-papersurvey": {
         "name": "PaperSurvey",
         "docker_repository": "tech4dev/source-papersurvey",
-        "docker_image_tag": "0.1.0",
+        "docker_image_tag": "0.1.1",
         "documentation_url": "",
     },
 }

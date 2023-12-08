@@ -48,6 +48,13 @@ from ddpui.ddpairbyte.airbyte_service import (
     get_airbyte_operation,
     is_operation_normalization,
     update_connection,
+    reset_connection,
+    delete_connection,
+    sync_connection,
+    get_job_info,
+    get_jobs_for_connection,
+    parse_job_info,
+    get_logs_for_job,
     schema,
 )
 
@@ -1409,3 +1416,110 @@ def test_update_connection_success():
             {"sourceId": "source-id", "syncCatalog": {"streams": []}},
         )
         assert res["connectionId"] == "connection-id"
+
+
+def test_reset_connection():
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.abreq",
+        return_value={"connectionId": "connection-id"},
+    ) as mock_abreq_:
+        reset_connection("connection-id")
+        mock_abreq_.assert_called_once_with(
+            "connections/reset", {"connectionId": "connection-id"}
+        )
+
+
+def test_delete_connection():
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.abreq",
+        return_value={"connectionId": "connection-id"},
+    ) as mock_abreq_:
+        delete_connection("wsid", "connection-id")
+        mock_abreq_.assert_called_once_with(
+            "connections/delete", {"connectionId": "connection-id"}
+        )
+
+
+def test_sync_connection():
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.abreq",
+        return_value={"connectionId": "connection-id"},
+    ) as mock_abreq_:
+        sync_connection("wsid", "connection-id")
+        mock_abreq_.assert_called_once_with(
+            "connections/sync", {"connectionId": "connection-id"}
+        )
+
+
+def test_get_job_info():
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.abreq",
+        return_value={"connectionId": "connection-id"},
+    ) as mock_abreq_:
+        get_job_info("jobid")
+        mock_abreq_.assert_called_once_with("jobs/get_debug_info", {"id": "jobid"})
+
+
+def test_get_jobs_for_connection():
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.abreq",
+        return_value={"connectionId": "connection-id"},
+    ) as mock_abreq_:
+        get_jobs_for_connection("connection_id")
+        mock_abreq_.assert_called_once_with(
+            "jobs/list",
+            {
+                "configTypes": ["sync"],
+                "configId": "connection_id",
+            },
+        )
+
+
+def test_get_jobs_for_connection_raise():
+    with pytest.raises(HttpError) as excinfo:
+        get_jobs_for_connection(1)
+    assert str(excinfo.value) == "connection_id must be a string"
+
+
+def test_parse_job_info():
+    ret = parse_job_info(
+        {
+            "job": {"id": "job-id", "status": "job-status"},
+            "attempts": [
+                {"status": "failed", "recordsSynced": 0},
+                {"status": "succeeded", "recordsSynced": 10},
+                {"status": "succeeded", "recordsSynced": 20},
+            ],
+        }
+    )
+    assert ret["job_id"] == "job-id"
+    assert ret["status"] == "job-status"
+    assert ret["recordsSynced"] == 10
+
+
+def test_get_logs_for_job():
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.abreq",
+        return_value={"connectionId": "connection-id"},
+    ) as mock_abreq_:
+        get_logs_for_job(1)
+        mock_abreq_.assert_called_once_with(
+            "attempt/get_for_job", {"jobId": 1, "attemptNumber": 0}
+        )
+
+
+def test_get_logs_for_job_1():
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.abreq",
+        return_value={"connectionId": "connection-id"},
+    ) as mock_abreq_:
+        get_logs_for_job(1, 1)
+        mock_abreq_.assert_called_once_with(
+            "attempt/get_for_job", {"jobId": 1, "attemptNumber": 1}
+        )
+
+
+def test_get_logs_for_job_raise():
+    with pytest.raises(HttpError) as excinfo:
+        get_logs_for_job("str")
+    assert str(excinfo.value) == "job_id must be an integer"
