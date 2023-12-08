@@ -1306,28 +1306,6 @@ def post_airbyte_connection_reset_v1(request, connection_id):
     if org_task is None:
         raise HttpError(404, "connection not found")
 
-    dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
-
-    if dataflow_orgtask is None:
-        raise HttpError(422, "deployment not found")
-
-    prefect_deployment = prefect_service.get_deployment(
-        dataflow_orgtask.dataflow.deployment_id
-    )
-
-    if (
-        "config" not in prefect_deployment["parameters"]
-        or "tasks" not in prefect_deployment["parameters"]["config"]
-        or len(prefect_deployment["parameters"]["config"]["tasks"]) < 1
-    ):
-        raise HttpError(500, "invalid deployment")
-
-    deployment_connection_id = prefect_deployment["parameters"]["config"]["tasks"][0][
-        "connection_id"
-    ]
-    if deployment_connection_id != connection_id:
-        raise HttpError(500, "connection is missing from the deployment")
-
     airbyte_service.reset_connection(connection_id)
 
     return {"success": 1}
@@ -1359,28 +1337,6 @@ def put_airbyte_connection_v1(
     if warehouse.airbyte_destination_id is None:
         raise HttpError(400, "warehouse has no airbyte_destination_id")
     payload.destinationId = warehouse.airbyte_destination_id
-
-    dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
-
-    if dataflow_orgtask is None:
-        raise HttpError(422, "deployment not found")
-
-    prefect_deployment = prefect_service.get_deployment(
-        dataflow_orgtask.dataflow.deployment_id
-    )
-
-    if (
-        "config" not in prefect_deployment["parameters"]
-        or "tasks" not in prefect_deployment["parameters"]["config"]
-        or len(prefect_deployment["parameters"]["config"]["tasks"]) < 1
-    ):
-        raise HttpError(500, "invalid deployment")
-
-    deployment_connection_id = prefect_deployment["parameters"]["config"]["tasks"][0][
-        "connection_id"
-    ]
-    if deployment_connection_id != connection_id:
-        raise HttpError(500, "connection is missing from the deployment")
 
     if len(payload.streams) == 0:
         raise HttpError(400, "must specify stream names")
@@ -1418,7 +1374,7 @@ def put_airbyte_connection_v1(
 
 
 @airbyteapi.delete("/v1/connections/{connection_id}", auth=auth.CanManagePipelines())
-def delete_airbyte_connection(request, connection_id):
+def delete_airbyte_connection_v1(request, connection_id):
     """Update an airbyte connection in the user organization workspace"""
     orguser: OrgUser = request.orguser
     org = orguser.org
