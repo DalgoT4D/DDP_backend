@@ -975,7 +975,7 @@ def post_prefect_transformation_tasks(request):
         gitrepo_access_token = secretsmanager.retrieve_github_token(orguser.org.dbt)
         gitrepo_url = orguser.org.dbt.gitrepo_url
 
-        if gitrepo_access_token is not None or gitrepo_access_token != "":
+        if gitrepo_access_token is not None and gitrepo_access_token != "":
             gitrepo_url = gitrepo_url.replace(
                 "github.com", "oauth2:" + gitrepo_access_token + "@github.com"
             )
