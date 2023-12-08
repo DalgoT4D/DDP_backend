@@ -26,7 +26,7 @@ from ddpui.models.org import (
     OrgPrefectBlock,
     OrgDataFlow,
     OrgDataFlowv1,
-    OrgPrefectBlockv1
+    OrgPrefectBlockv1,
 )
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
@@ -53,6 +53,7 @@ from ddpui.utils import secretsmanager
 from ddpui.utils import sendgrid
 from ddpui.utils import helpers
 from ddpui.utils import timezone
+from ddpui.utils.deleteorg import delete_warehouse_v1
 
 user_org_api = NinjaAPI(urls_namespace="userorg")
 # http://127.0.0.1:8000/api/docs
@@ -865,68 +866,6 @@ def delete_organization_warehouses_v1(request):
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
 
-    warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
-    if warehouse is None:
-        raise HttpError(400, "warehouse not created")
-
-    # delete prefect connection blocks
-    logger.info("Deleting prefect connection blocks")
-    for block in OrgPrefectBlockv1.objects.filter(
-        org=orguser.org, block_type=AIRBYTECONNECTION
-    ):
-        try:
-            prefect_service.delete_airbyte_connection_block(block.block_id)
-            logger.info(f"delete connecion block id - {block.block_id}")
-        except Exception:  # skipcq PYL-W0703
-            logger.error(
-                "failed to delete %s airbyte-connection-block %s in prefect, deleting from OrgPrefectBlock",
-                orguser.org.slug,
-                block.block_id,
-            )
-        block.delete()
-
-    logger.info("FINISHED Deleting prefect connection blocks")
-
-    # delete airbyte connections
-    logger.info("Deleting airbyte connections")
-    for connection in airbyte_service.get_connections(orguser.org.airbyte_workspace_id)[
-        "connections"
-    ]:
-        connection_id = connection["connectionId"]
-        airbyte_service.delete_connection(
-            orguser.org.airbyte_workspace_id, connection_id
-        )
-        logger.info(f"deleted connection in Airbyte - {connection_id}")
-
-    logger.info("FINISHED Deleting airbyte connections")
-
-    # delete airbyte destinations
-    logger.info("Deleting airbyte destinations")
-    for destination in airbyte_service.get_destinations(
-        orguser.org.airbyte_workspace_id
-    )["destinations"]:
-        destination_id = destination["destinationId"]
-        airbyte_service.delete_destination(
-            orguser.org.airbyte_workspace_id, destination_id
-        )
-        logger.info(f"deleted destination in Airbyte - {destination_id}")
-
-    logger.info("FINISHED Deleting airbyte destinations")
-
-    # delete django warehouse row
-    logger.info("Deleting django warehouse and the credentials in secrets manager")
-    secretsmanager.delete_warehouse_credentials(warehouse)
-    warehouse.delete()
-
-    # delete dbt workspace and blocks
-    dbt_service.delete_dbt_workspace(orguser.org)
-
-    # delete dataflows
-    logger.info("Deleting data flows")
-    for data_flow in OrgDataFlowv1.objects.filter(org=orguser.org):
-        prefect_service.delete_deployment_by_id(data_flow.deployment_id)
-        data_flow.delete()
-        logger.info(f"Deleted deployment - {data_flow.deployment_id}")
-    logger.info("FINISHED Deleting data flows")
+    delete_warehouse_v1(orguser.org)
 
     return {"success": 1}
