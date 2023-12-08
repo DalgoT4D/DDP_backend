@@ -1065,10 +1065,6 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
         )["operationId"]
         warehouse.save()
 
-    airbyte_conn = airbyte_service.create_connection(
-        org.airbyte_workspace_id, warehouse.airbyte_norm_op_id, payload
-    )
-
     org_airbyte_server_block = OrgPrefectBlockv1.objects.filter(
         org=org,
         block_type=AIRBYTESERVER,
@@ -1076,11 +1072,13 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
     if org_airbyte_server_block is None:
         raise Exception(f"{org.slug} has no {AIRBYTESERVER} block in OrgPrefectBlock")
 
-    display_name = payload.name
-
     task = Task.objects.filter(slug=TASK_AIRBYTESYNC).first()
     if task is None:
         raise HttpError(400, "task not supported")
+
+    airbyte_conn = airbyte_service.create_connection(
+        org.airbyte_workspace_id, warehouse.airbyte_norm_op_id, payload
+    )
 
     org_task = OrgTask.objects.create(
         org=org, task=task, connection_id=airbyte_conn["connectionId"]
@@ -1131,7 +1129,7 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
     )
 
     res = {
-        "name": display_name,
+        "name": payload.name,
         "connectionId": airbyte_conn["connectionId"],
         "source": {"id": airbyte_conn["sourceId"]},
         "destination": {
