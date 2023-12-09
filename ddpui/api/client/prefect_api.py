@@ -15,28 +15,40 @@ from ddpui import auth
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service
 
-from ddpui.ddpprefect import DBTCORE, SHELLOPERATION
-from ddpui.models.org import OrgPrefectBlock, OrgWarehouse, OrgDataFlow
+from ddpui.ddpprefect import DBTCORE, SHELLOPERATION, DBTCLIPROFILE, SECRET
+from ddpui.models.org import (
+    OrgPrefectBlock,
+    OrgWarehouse,
+    OrgDataFlow,
+    OrgDataFlowv1,
+    OrgPrefectBlockv1,
+)
 from ddpui.models.orgjobs import BlockLock, DataflowBlock
 from ddpui.models.org_user import OrgUser
+from ddpui.models.tasks import Task, DataflowOrgTask, OrgTask
 from ddpui.ddpprefect.schema import (
     PrefectAirbyteSync,
     PrefectDbtCore,
     PrefectDbtCoreSetup,
+    PrefectDbtTaskSetup,
     PrefectDataFlowCreateSchema,
     PrefectDataFlowCreateSchema2,
+    PrefectDataFlowCreateSchema3,
     PrefectFlowRunSchema,
     PrefectDataFlowUpdateSchema,
     PrefectDataFlowUpdateSchema2,
     PrefectShellSetup,
     PrefectSecretBlockCreate,
+    PrefectShellTaskSetup,
 )
 
 from ddpui.utils.deploymentblocks import write_dataflowblocks
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
+from ddpui.utils.constants import TASK_DBTRUN, TASK_GITPULL
 from ddpui.utils.prefectlogs import parse_prefect_logs
+from ddpui.utils.helpers import generate_hash_id
 
 prefectapi = NinjaAPI(urls_namespace="prefect")
 # http://127.0.0.1:8000/api/docs
@@ -714,6 +726,9 @@ def delete_prefect_dbt_run_block(request):
     return {"success": 1}
 
 
+# =================================================================================================
+
+
 @prefectapi.get("/flow_runs/{flow_run_id}/logs", auth=auth.CanManagePipelines())
 def get_flow_runs_logs(
     request, flow_run_id, offset: int = 0
@@ -781,3 +796,342 @@ def get_prefect_flow_runs_log_history(
             )
 
     return flow_runs
+
+
+# =================================================================================================
+# new apis to go away from the block architecture
+
+
+@prefectapi.post("/tasks/{orgtask_id}/run/", auth=auth.CanManagePipelines())
+def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-argument
+    """
+    Run dbt task & git pull in prefect. All tasks without a deployment.
+    Basically short running tasks
+    Can run
+        - git pull
+        - dbt deps
+        - dbt clean
+        - dbt test
+    """
+    orguser: OrgUser = request.orguser
+
+    org_task = OrgTask.objects.filter(org=orguser.org, id=orgtask_id).first()
+
+    if org_task is None:
+        raise HttpError(400, "task not found")
+
+    if org_task.task.type not in ["dbt", "git"]:
+        raise HttpError(400, "task not supported")
+
+    if orguser.org.dbt is None:
+        raise HttpError(400, "dbt is not configured for this client")
+
+    dbtrepodir = Path(os.getenv("CLIENTDBT_ROOT")) / orguser.org.slug / "dbtrepo"
+    project_dir = str(dbtrepodir)
+
+    # TODO: add task lock logic
+
+    if org_task.task.slug == TASK_GITPULL:
+        shell_env = {"secret-git-pull-url-block": ""}
+
+        gitpull_secret_block = OrgPrefectBlockv1.objects.filter(
+            org=orguser.org, block_type=SECRET, block_name__contains="git-pull"
+        ).first()
+
+        if gitpull_secret_block is not None:
+            shell_env["secret-git-pull-url-block"] = gitpull_secret_block.block_name
+
+        payload = PrefectShellTaskSetup(
+            commands=["git pull"],
+            working_dir=project_dir,
+            env=shell_env,
+            slug=org_task.task.slug,
+        )
+
+        if payload.flow_name is None:
+            payload.flow_name = f"{orguser.org.name}-gitpull"
+        if payload.flow_run_name is None:
+            now = timezone.as_ist(datetime.now())
+            payload.flow_run_name = f"{now.isoformat()}"
+
+        try:
+            result = prefect_service.run_shell_task_sync(payload)
+        except Exception as error:
+            logger.exception(error)
+            raise HttpError(
+                400, f"failed to run the shell task {org_task.task.slug}"
+            ) from error
+    else:
+        dbt_env_dir = Path(orguser.org.dbt.dbt_venv)
+        if not dbt_env_dir.exists():
+            raise HttpError(400, "create the dbt env first")
+
+        dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
+        target = orguser.org.dbt.default_schema
+
+        # fetch the cli profile block
+        cli_profile_block = OrgPrefectBlockv1.objects.filter(
+            org=orguser.org, block_type=DBTCLIPROFILE
+        ).first()
+
+        if cli_profile_block is None:
+            raise HttpError(400, "dbt cli profile block not found")
+
+        payload = PrefectDbtTaskSetup(
+            slug=org_task.task.slug,
+            commands=[f"{dbt_binary} {org_task.task.command} --target {target}"],
+            env={},
+            working_dir=project_dir,
+            profiles_dir=f"{project_dir}/profiles/",
+            project_dir=project_dir,
+            cli_profile_block=cli_profile_block.block_name,
+            cli_args=[],
+        )
+
+        if payload.flow_name is None:
+            payload.flow_name = f"{orguser.org.name}-{org_task.task.slug}"
+        if payload.flow_run_name is None:
+            now = timezone.as_ist(datetime.now())
+            payload.flow_run_name = f"{now.isoformat()}"
+
+        try:
+            result = prefect_service.run_dbt_task_sync(payload)
+        except Exception as error:
+            logger.exception(error)
+            raise HttpError(400, "failed to run dbt") from error
+
+    return result
+
+
+@prefectapi.post("/v1/flows/{deployment_id}/flow_run/", auth=auth.CanManagePipelines())
+def post_run_prefect_org_deployment_task(request, deployment_id):
+    """
+    Run deployment based task.
+    Can run
+        - airbtye sync
+        - dbt run
+    """
+    orguser: OrgUser = request.orguser
+
+    if orguser.org is None:
+        raise HttpError(400, "register an organization first")
+
+    dataflow_orgtask = DataflowOrgTask.objects.filter(
+        dataflow__deployment_id=deployment_id
+    ).first()
+
+    if dataflow_orgtask is None:
+        raise HttpError(400, "no org task mapped to the deployment")
+
+    # TODO: add task lock logic
+    try:
+        res = prefect_service.create_deployment_flow_run(deployment_id)
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to start a run") from error
+
+    return res
+
+
+@prefectapi.post("/tasks/transform/", auth=auth.CanManagePipelines())
+def post_prefect_transformation_tasks(request):
+    """
+    - Create a git pull url secret block
+    - Create a dbt cli profile block
+    - Create dbt tasks
+        - git pull
+        - dbt deps
+        - dbt clean
+        - dbt run
+        - dbt test
+    """
+    orguser: OrgUser = request.orguser
+    if orguser.org.dbt is None:
+        raise HttpError(400, "create a dbt workspace first")
+
+    warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if warehouse is None:
+        raise HttpError(400, "need to set up a warehouse first")
+    credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
+
+    if orguser.org.dbt.dbt_venv is None:
+        orguser.org.dbt.dbt_venv = os.getenv("DBT_VENV")
+        orguser.org.dbt.save()
+
+    dbt_env_dir = Path(orguser.org.dbt.dbt_venv)
+    if not dbt_env_dir.exists():
+        raise HttpError(400, "create the dbt env first")
+
+    dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
+    dbtrepodir = Path(os.getenv("CLIENTDBT_ROOT")) / orguser.org.slug / "dbtrepo"
+    project_dir = str(dbtrepodir)
+    dbt_project_filename = str(dbtrepodir / "dbt_project.yml")
+
+    if not os.path.exists(dbt_project_filename):
+        raise HttpError(400, dbt_project_filename + " is missing")
+
+    # create a secret block to save the github endpoint url along with token
+    try:
+        gitrepo_access_token = secretsmanager.retrieve_github_token(orguser.org.dbt)
+        gitrepo_url = orguser.org.dbt.gitrepo_url
+
+        if gitrepo_access_token is not None and gitrepo_access_token != "":
+            gitrepo_url = gitrepo_url.replace(
+                "github.com", "oauth2:" + gitrepo_access_token + "@github.com"
+            )
+
+            # store the git oauth endpoint with token in a prefect secret block
+            secret_block = PrefectSecretBlockCreate(
+                block_name=f"{orguser.org.slug}-git-pull-url",
+                secret=gitrepo_url,
+            )
+            block_response = prefect_service.create_secret_block(secret_block)
+
+            # store secret block name block_response["block_name"] in orgdbt
+            OrgPrefectBlockv1.objects.create(
+                org=orguser.org,
+                block_type=SECRET,
+                block_id=block_response["block_id"],
+                block_name=block_response["block_name"],
+            )
+
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, str(error)) from error
+
+    with open(dbt_project_filename, "r", encoding="utf-8") as dbt_project_file:
+        dbt_project = yaml.safe_load(dbt_project_file)
+        if "profile" not in dbt_project:
+            raise HttpError(400, "could not find 'profile:' in dbt_project.yml")
+
+    profile_name = dbt_project["profile"]
+    target = orguser.org.dbt.default_schema
+    logger.info("profile_name=%s target=%s", profile_name, target)
+
+    # get the dataset location if warehouse type is bigquery
+    bqlocation = None
+    if warehouse.wtype == "bigquery":
+        destination = airbyte_service.get_destination(
+            orguser.org.airbyte_workspace_id, warehouse.airbyte_destination_id
+        )
+        if destination.get("connectionConfiguration"):
+            bqlocation = destination["connectionConfiguration"]["dataset_location"]
+
+    # create a dbt cli profile block
+    try:
+        cli_block_name = f"{orguser.org.slug}_{profile_name}"
+        cli_block_response = prefect_service.create_dbt_cli_profile_block(
+            cli_block_name,
+            profile_name,
+            target,
+            warehouse.wtype,
+            bqlocation,
+            credentials,
+        )
+
+        # save the cli profile block in django db
+        OrgPrefectBlockv1.objects.create(
+            org=orguser.org,
+            block_type=DBTCLIPROFILE,
+            block_id=cli_block_response["block_id"],
+            block_name=cli_block_response["block_name"],
+        )
+
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, str(error)) from error
+
+    # create org tasks for the transformation page
+    for task in Task.objects.filter(type__in=["dbt", "git"]).all():
+        org_task = OrgTask.objects.create(org=orguser.org, task=task)
+
+        if task.slug == TASK_DBTRUN:
+            # create deployment
+            hash_code = generate_hash_id(8)
+            deployment_name = f"manual-{orguser.org.slug}-{task.slug}-{hash_code}"
+            dataflow = prefect_service.create_dataflow_v1(
+                PrefectDataFlowCreateSchema3(
+                    deployment_name=deployment_name,
+                    flow_name=deployment_name,
+                    orgslug=orguser.org.slug,
+                    deployment_params={
+                        "config": {
+                            "tasks": [
+                                {
+                                    "slug": task.slug,
+                                    "type": DBTCORE,
+                                    "seq": 1,
+                                    "commands": [
+                                        f"{dbt_binary} {task.command} --target {target}"
+                                    ],
+                                    "env": {},
+                                    "working_dir": project_dir,
+                                    "profiles_dir": f"{project_dir}/profiles/",
+                                    "project_dir": project_dir,
+                                    "cli_profile_block": cli_block_response[
+                                        "block_name"
+                                    ],
+                                    "cli_args": [],
+                                }
+                            ]
+                        }
+                    },
+                )
+            )
+
+            # store deployment record in django db
+            existing_dataflow = OrgDataFlowv1.objects.filter(
+                deployment_id=dataflow["deployment"]["id"]
+            ).first()
+            if existing_dataflow:
+                existing_dataflow.delete()
+
+            new_dataflow = OrgDataFlowv1.objects.create(
+                org=orguser.org,
+                name=deployment_name,
+                deployment_name=dataflow["deployment"]["name"],
+                deployment_id=dataflow["deployment"]["id"],
+                dataflow_type="manual",
+            )
+
+            DataflowOrgTask.objects.create(
+                dataflow=new_dataflow,
+                orgtask=org_task,
+            )
+
+    return {"success": 1}
+
+
+@prefectapi.get("/tasks/transform/", auth=auth.CanManagePipelines())
+def get_prefect_transformation_tasks(request):
+    """Fetch all dbt tasks for an org"""
+    orguser: OrgUser = request.orguser
+
+    org_tasks = []
+
+    for org_task in (
+        OrgTask.objects.filter(
+            org=orguser.org,
+            task__type__in=["git", "dbt"],
+        )
+        .order_by("task__id")
+        .all()
+    ):
+        # TODO: add task locking logic here later
+        org_tasks.append(
+            {
+                "label": org_task.task.label,
+                "slug": org_task.task.slug,
+                "id": org_task.id,
+                "deploymentId": None,
+            }
+        )
+
+        # fetch the manual deploymentId for the dbt run task
+        if org_task.task.slug == TASK_DBTRUN:
+            dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
+            org_tasks[-1]["deploymentId"] = (
+                dataflow_orgtask.dataflow.deployment_id if dataflow_orgtask else None
+            )
+
+    return org_tasks

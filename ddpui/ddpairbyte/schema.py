@@ -66,6 +66,23 @@ class AirbyteConnectionCreate(Schema):
     normalize: bool = False
 
 
+class AirbyteConnectionCreateResponse(Schema):
+    """Docstring"""
+
+    name: str
+    connectionId: str
+    source: dict
+    destination: dict
+    catalogId: str
+    syncCatalog: dict
+    status: str
+    deploymentId: str = None
+    lastRun: Optional[dict | None]
+    destinationSchema: str = ""
+    normalize: bool = False
+    lock: Optional[dict | None]
+
+
 class AirbyteConnectionUpdate(Schema):
     """Docstring"""
 

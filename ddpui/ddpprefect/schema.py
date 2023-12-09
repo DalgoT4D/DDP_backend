@@ -62,6 +62,38 @@ class PrefectDbtCoreSetup(Schema):
     commands: list
 
 
+class PrefectDbtTaskSetup(Schema):
+    """
+    request payload to trigger a dbt task (deps, clean, run, test) in prefect
+    """
+
+    slug: str
+    profiles_dir: str
+    project_dir: str
+    working_dir: str
+    env: dict
+    commands: list
+    cli_profile_block: str
+    cli_args: list = []
+    flow_name: str = None
+    flow_run_name: str = None
+
+    def to_json(self):
+        """JSON serialization"""
+        return {
+            "slug": self.slug,
+            "profiles_dir": self.profiles_dir,
+            "project_dir": self.project_dir,
+            "working_dir": self.working_dir,
+            "env": self.env,
+            "commands": self.commands,
+            "cli_profile_block": self.cli_profile_block,
+            "cli_args": self.cli_args,
+            "flow_name": self.flow_name,
+            "flow_run_name": self.flow_run_name,
+        }
+
+
 class DbtProfile(Schema):
     """Docstring"""
 
@@ -77,6 +109,28 @@ class PrefectShellSetup(Schema):
     commands: list
     workingDir: str
     env: dict
+
+
+class PrefectShellTaskSetup(Schema):
+    """Docstring"""
+
+    slug: str
+    commands: list
+    working_dir: str
+    env: dict
+    flow_name: str = None
+    flow_run_name: str = None
+
+    def to_json(self):
+        """JSON serialization"""
+        return {
+            "commands": self.commands,
+            "working_dir": self.working_dir,
+            "env": self.env,
+            "slug": self.slug,
+            "flow_name": self.flow_name,
+            "flow_run_name": self.flow_run_name,
+        }
 
 
 class PrefectSecretBlockCreate(Schema):
@@ -161,6 +215,16 @@ class PrefectDataFlowCreateSchema2(Schema):
     orgslug: str
     connection_blocks: list[PrefectFlowAirbyteConnection]
     dbt_blocks: list
+    cron: str = None
+
+
+class PrefectDataFlowCreateSchema3(Schema):
+    """Payload to be sent to the prefect-proxy to go away with prefect blocks"""
+
+    deployment_name: str
+    flow_name: str
+    orgslug: str
+    deployment_params: dict
     cron: str = None
 
 

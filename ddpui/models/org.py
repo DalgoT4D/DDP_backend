@@ -143,3 +143,44 @@ class OrgWarehouseSchema(Schema):
     name: str
     destinationDefId: str
     airbyteConfig: dict
+
+
+# ============================================================================================
+# new models to go away from blocks architecture
+
+
+class OrgPrefectBlockv1(models.Model):
+    """This containes the update version of the orgprefectblock model"""
+
+    org = models.ForeignKey(Org, on_delete=models.CASCADE)
+    block_type = models.CharField(max_length=25)  # all dbt blocks have the same type!
+    block_id = models.CharField(max_length=36, unique=True)
+    block_name = models.CharField(
+        max_length=100, unique=True
+    )  # use blockname to distinguish between different dbt commands
+
+    def __str__(self) -> str:
+        return f"OrgPrefectBlock[{self.org.name}|{self.block_type}|{self.block_name}]"
+
+
+class OrgDataFlowv1(models.Model):
+    """This contains the deployment id of an organization to schedule flows/pipelines"""
+
+    org = models.ForeignKey(Org, on_delete=models.CASCADE)
+    name = models.CharField(max_length=100)
+    deployment_name = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
+        max_length=100, null=True
+    )
+    deployment_id = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
+        max_length=36, unique=True, null=True
+    )
+    cron = models.CharField(max_length=36, null=True)  # skipcq: PTC-W0901, PTC-W0906
+
+    dataflow_type = models.CharField(
+        max_length=25,
+        choices=(("orchestrate", "orchestrate"), ("manual", "manual")),
+        default="orchestrate",
+    )  # skipcq: PTC-W0901, PTC-W0906
+
+    def __str__(self) -> str:
+        return f"OrgDataFlow[{self.name}|{self.deployment_name}|{self.deployment_id}|{self.cron}]"

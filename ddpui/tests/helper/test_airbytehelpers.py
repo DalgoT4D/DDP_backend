@@ -61,7 +61,7 @@ def test_upgrade_custom_sources(
     }
     upgrade_custom_sources("workspace_id")
     mock_add_custom_airbyte_connector.assert_any_call(
-        "workspace_id", "KoboToolbox", "tech4dev/source-kobotoolbox", "0.1.0", ""
+        "workspace_id", "KoboToolbox", "tech4dev/source-kobotoolbox", "0.2.0", ""
     )
     mock_add_custom_airbyte_connector.assert_any_call(
         "workspace_id", "Avni", "tech4dev/source-avni", "0.1.0", ""
@@ -87,7 +87,7 @@ def test_upgrade_custom_sources_add(
     mock_get_source_definitions.return_value = {"sourceDefinitions": []}
     upgrade_custom_sources("workspace_id")
     mock_add_custom_airbyte_connector.assert_any_call(
-        "workspace_id", "KoboToolbox", "tech4dev/source-kobotoolbox", "0.1.0", ""
+        "workspace_id", "KoboToolbox", "tech4dev/source-kobotoolbox", "0.2.0", ""
     )
     mock_add_custom_airbyte_connector.assert_any_call(
         "workspace_id", "Avni", "tech4dev/source-avni", "0.1.0", ""

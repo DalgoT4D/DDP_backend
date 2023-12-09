@@ -25,6 +25,8 @@ from ddpui.models.org import (
     OrgWarehouseSchema,
     OrgPrefectBlock,
     OrgDataFlow,
+    OrgDataFlowv1,
+    OrgPrefectBlockv1,
 )
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
@@ -51,6 +53,7 @@ from ddpui.utils import secretsmanager
 from ddpui.utils import sendgrid
 from ddpui.utils import helpers
 from ddpui.utils import timezone
+from ddpui.utils.deleteorg import delete_warehouse_v1
 
 user_org_api = NinjaAPI(urls_namespace="userorg")
 # http://127.0.0.1:8000/api/docs
@@ -808,5 +811,61 @@ def post_verify_email(
     # verify email for all the orgusers
     OrgUser.objects.filter(user_id=orguser.user.id).update(email_verified=True)
     UserAttributes.objects.filter(user=orguser.user).update(email_verified=True)
+
+    return {"success": 1}
+
+
+# ==============================================================================
+# new apis to go away from the block architecture
+
+
+@user_org_api.post("/v1/organizations/", response=OrgSchema, auth=auth.AnyOrgUser())
+def post_organization_v1(request, payload: OrgSchema):
+    """creates a new org & new orguser (if required) and attaches it to the requestor"""
+    userattributes = UserAttributes.objects.filter(user=request.orguser.user).first()
+    if userattributes is None or userattributes.can_create_orgs is False:
+        raise HttpError(403, "Insufficient permissions for this operation")
+
+    orguser: OrgUser = request.orguser
+    org = Org.objects.filter(name__iexact=payload.name).first()
+    if org:
+        raise HttpError(400, "client org with this name already exists")
+
+    org = Org(name=payload.name)
+    org.slug = slugify(org.name)[:20]
+    org.save()
+    logger.info(f"{orguser.user.email} created new org {org.name}")
+    try:
+        new_workspace = airbytehelpers.setup_airbyte_workspace_v1(org.slug, org)
+    except Exception as error:
+        # delete the org or we won't be able to create it once airbyte comes back up
+        org.delete()
+        raise HttpError(400, "could not create airbyte workspace") from error
+
+    # create a new orguser if the org is already there
+    if orguser.org is None:
+        orguser.org = org
+        orguser.save()
+    else:
+        orguser = OrgUser.objects.create(
+            user=orguser.user,
+            role=OrgUserRole.ACCOUNT_MANAGER,
+            email_verified=True,
+            org=org,
+        )
+
+    return OrgSchema(
+        name=org.name, airbyte_workspace_id=new_workspace.workspaceId, slug=org.slug
+    )
+
+
+@user_org_api.delete("/v1/organizations/warehouses/", auth=auth.CanManagePipelines())
+def delete_organization_warehouses_v1(request):
+    """deletes all (references to) data warehouses for the org"""
+    orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
+
+    delete_warehouse_v1(orguser.org)
 
     return {"success": 1}
