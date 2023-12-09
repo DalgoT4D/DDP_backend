@@ -903,7 +903,7 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
     return result
 
 
-@prefectapi.post("/v1/flows/{deployment_id}/flow_run", auth=auth.CanManagePipelines())
+@prefectapi.post("/v1/flows/{deployment_id}/flow_run/", auth=auth.CanManagePipelines())
 def post_run_prefect_org_deployment_task(request, deployment_id):
     """
     Run deployment based task.
