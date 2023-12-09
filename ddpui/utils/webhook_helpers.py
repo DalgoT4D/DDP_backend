@@ -5,6 +5,7 @@ from ddpui.models.org import OrgPrefectBlock, Org
 from ddpui.models.org_user import OrgUserRole, OrgUser
 from ddpui.utils.sendgrid import send_text_message
 from ddpui.api.client.prefect_api import prefect_service
+from ddpui.settings import PRODUCTION
 
 logger = CustomLogger("ddpui")
 
@@ -80,10 +81,11 @@ def generate_notification_email(
     orgname: str, flow_run_id: str, logmessages: list
 ) -> str:
     """until we make a sendgrid template"""
+    tag = " [STAGING]" if not PRODUCTION else ""
     email_body = f"""
-To the admins of {orgname},
+To the admins of {orgname}{tag},
 
-This is an automated notification from Dalgo.
+This is an automated notification from Dalgo{tag}.
 
 Flow run id: {flow_run_id}
 Logs:
@@ -94,6 +96,8 @@ Logs:
 
 def email_orgusers(org: Org, email_body: str):
     """sends a notificationemail to all OrgUsers"""
+    tag = " [STAGING]" if not PRODUCTION else ""
+    subject = f"Prefect notification{tag}"
     for orguser in OrgUser.objects.filter(
         org=org,
         role__in=[
@@ -102,7 +106,7 @@ def email_orgusers(org: Org, email_body: str):
         ],
     ):
         logger.info(f"sending prefect-notification email to {orguser.user.email}")
-        send_text_message(orguser.user.email, "Prefect notification", email_body)
+        send_text_message(orguser.user.email, subject, email_body)
 
 
 def email_flowrun_logs_to_orgusers(org: Org, flow_run_id: str):
