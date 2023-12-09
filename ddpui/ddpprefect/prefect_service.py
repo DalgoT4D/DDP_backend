@@ -10,9 +10,12 @@ from ddpui.ddpprefect.schema import (
     PrefectAirbyteConnectionSetup,
     PrefectAirbyteSync,
     PrefectDataFlowCreateSchema2,
+    PrefectDataFlowCreateSchema3,
     PrefectDbtCore,
     PrefectDataFlowUpdateSchema2,
     PrefectSecretBlockCreate,
+    PrefectShellTaskSetup,
+    PrefectDbtTaskSetup,
 )
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.orgjobs import BlockLock, DataflowBlock
@@ -317,6 +320,35 @@ def update_dbt_core_block_schema(block_name: str, target_configs_schema: str):
 # ================================================================================================
 
 
+def create_dbt_cli_profile_block(
+    block_name: str,
+    profilename: str,
+    target: str,
+    wtype: str,
+    bqlocation: str,
+    credentials: dict,
+) -> dict:
+    """Create a dbt cli profile block in that has the warehouse information"""
+    response = prefect_post(
+        "blocks/dbtcli/profile/",
+        {
+            "cli_profile_block_name": block_name,
+            "profile": {
+                "name": profilename,
+                "target": target,
+                "target_configs_schema": target,
+            },
+            "wtype": wtype,
+            "credentials": credentials,
+            "bqlocation": bqlocation,
+        },
+    )
+    return response
+
+
+# ================================================================================================
+
+
 def create_secret_block(secret_block: PrefectSecretBlockCreate):
     """This will create a secret block in the prefect to store any password like string"""
     response = prefect_post(
@@ -352,6 +384,24 @@ def run_dbt_core_sync(run_flow: PrefectDbtCore) -> dict:  # pragma: no cover
     return res
 
 
+def run_dbt_task_sync(task: PrefectDbtTaskSetup) -> dict:  # pragma: no cover
+    """initiates a dbt job sync"""
+    res = prefect_post(
+        "v1/flows/dbtcore/run/",
+        json=task.to_json(),
+    )
+    return res
+
+
+def run_shell_task_sync(task: PrefectShellTaskSetup) -> dict:  # pragma: no cover
+    """initiates a shell task sync"""
+    res = prefect_post(
+        "flows/shell/run/",
+        json=task.to_json(),
+    )
+    return res
+
+
 # Flows and deployments
 def create_dataflow(payload: PrefectDataFlowCreateSchema2) -> dict:  # pragma: no cover
     """create a prefect deployment out of a flow and a cron schedule"""
@@ -366,6 +416,23 @@ def create_dataflow(payload: PrefectDataFlowCreateSchema2) -> dict:  # pragma: n
                 for conn in payload.connection_blocks
             ],
             "dbt_blocks": payload.dbt_blocks,
+            "cron": payload.cron,
+        },
+    )
+    return res
+
+
+def create_dataflow_v1(
+    payload: PrefectDataFlowCreateSchema3,
+) -> dict:  # pragma: no cover
+    """create a prefect deployment out of a flow and a cron schedule; to go away with the blocks"""
+    res = prefect_post(
+        "v1/deployments/",
+        {
+            "flow_name": payload.flow_name,
+            "deployment_name": payload.deployment_name,
+            "org_slug": payload.orgslug,
+            "deployment_params": payload.deployment_params,
             "cron": payload.cron,
         },
     )

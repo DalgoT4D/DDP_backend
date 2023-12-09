@@ -1,6 +1,8 @@
 import shlex
 import subprocess
 import re
+import string
+import secrets
 
 
 def runcmd(cmd, cwd):
@@ -39,3 +41,13 @@ def isvalid_email(email: str) -> bool:
     regex = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b"
 
     return re.fullmatch(regex, email)
+
+
+def generate_hash_id(l: int) -> str:
+    """
+    this function generates a random hash id of length `l`
+    """
+
+    alphabet = string.ascii_lowercase + string.digits + string.ascii_uppercase
+
+    return "".join(secrets.choice(alphabet) for _ in range(l))
