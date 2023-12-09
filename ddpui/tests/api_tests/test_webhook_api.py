@@ -24,6 +24,7 @@ from ddpui.utils.webhook_helpers import (
 )
 from ddpui.models.org import Org, OrgPrefectBlock
 from ddpui.models.org_user import OrgUser, User, OrgUserRole
+from ddpui.settings import PRODUCTION
 
 pytestmark = pytest.mark.django_db
 
@@ -114,9 +115,9 @@ def test_email_orgusers():
         "ddpui.utils.webhook_helpers.send_text_message"
     ) as mock_send_text_message:
         email_orgusers(org, "hello")
-        mock_send_text_message.assert_called_once_with(
-            "useremail", "Prefect notification", "hello"
-        )
+        tag = " [STAGING]" if not PRODUCTION else ""
+        subject = f"Prefect notification{tag}"
+        mock_send_text_message.assert_called_once_with("useremail", subject, "hello")
 
 
 def test_email_orgusers_not_to_report_viewers():
@@ -151,9 +152,10 @@ def test_email_flowrun_logs_to_orgusers():
         }
         with patch("ddpui.utils.webhook_helpers.email_orgusers") as mock_email_orgusers:
             email_flowrun_logs_to_orgusers(org, "flow-run-id")
+            tag = " [STAGING]" if not PRODUCTION else ""
             mock_email_orgusers.assert_called_once_with(
                 org,
-                "\nTo the admins of temp,\n\nThis is an automated notification from Dalgo.\n\nFlow run id: flow-run-id\nLogs:\nlog-message-1\nlog-message-2",
+                f"\nTo the admins of temp{tag},\n\nThis is an automated notification from Dalgo{tag}.\n\nFlow run id: flow-run-id\nLogs:\nlog-message-1\nlog-message-2",
             )
 
 
