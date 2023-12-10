@@ -205,3 +205,5 @@ setup_ab_logger()
 FIXTURE_DIRS = [
     "seed",
 ]
+
+PRODUCTION = os.getenv("PRODUCTION", "") == "True"
