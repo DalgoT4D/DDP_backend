@@ -9,7 +9,7 @@ from faker import Faker
 import requests
 import yaml
 from dotenv import load_dotenv
-from testclient import TestClient
+from testclient.testclient import TestClient
 
 load_dotenv("testclient/.env.test")
 with open("testclient/config.yaml", "r", -1, "utf8") as configfile:
@@ -18,42 +18,34 @@ print(config)
 parser = argparse.ArgumentParser()
 parser.add_argument("-v", "--verbose", action="store_true")
 parser.add_argument(
-    "-p", "--port", required=True, help="port where app server is listening"
+    "--host",
+    default="localhost",
+    help="app server host",
 )
+parser.add_argument("-p", "--port", default=8002, help="app server port")
 args = parser.parse_args()
 
 
 DBT_PROFILE = os.getenv("DBT_PROFILE")
 DBT_TARGETCONFIGS_SCHEMA = os.getenv("DBT_TARGETCONFIGS_SCHEMA")
-DBT_CREDENTIALS_USERNAME = os.getenv("DBT_CREDENTIALS_USERNAME")
-DBT_CREDENTIALS_PASSWORD = os.getenv("DBT_CREDENTIALS_PASSWORD")
-DBT_CREDENTIALS_DATABASE = os.getenv("DBT_CREDENTIALS_DATABASE")
-DBT_CREDENTIALS_HOST = os.getenv("DBT_CREDENTIALS_HOST")
-DBT_BIGQUERY_SERVICE_ACCOUNT_CREDSFILE = os.getenv(
-    "DBT_BIGQUERY_SERVICE_ACCOUNT_CREDSFILE"
-)
-BIGQUERY_PROJECTID = os.getenv("BIGQUERY_PROJECTID")
-BIGQUERY_DATASETID = os.getenv("BIGQUERY_DATASETID")
-BIGQUERY_DATASETLOCATION = os.getenv("BIGQUERY_DATASETLOCATION")
 
 DBT_TEST_REPO = os.getenv("DBT_TEST_REPO")
 DBT_TEST_REPO_ACCESSTOKEN = os.getenv("DBT_TEST_REPO_ACCESSTOKEN")
 SIGNUPCODE = os.getenv("SIGNUPCODE")
 
 faker = Faker("en-IN")
-tester = TestClient(args.port, verbose=args.verbose)
+tester = TestClient(args.port, verbose=args.verbose, host=args.host)
 if config["org"]["create_new"]:
-    email = faker.email()
-    password = faker.password()
-    tester.clientpost(
-        "organizations/users/",
-        json={"email": email, "password": password, "signupcode": SIGNUPCODE},
-    )
+    email = os.getenv("DALGO_USER")
+    password = os.getenv("DALGO_PASSWORD")
+    # tester.clientpost(
+    #     "organizations/users/",
+    #     json={"email": email, "password": password, "signupcode": SIGNUPCODE},
+    # )
     tester.login(email, password)
     tester.clientget("currentuser")
     tester.clientpost(
-        "organizations/",
-        json={"name": config["org"]["name"]},
+        "v1/organizations/", json={"name": config["org"]["name"]}, timeout=30
     )
 else:
     tester.login(os.getenv("DALGO_USER"), os.getenv("DALGO_PASSWORD"))
@@ -61,57 +53,12 @@ else:
 tester.clientheaders["x-dalgo-org"] = config["org"]["name"]
 
 if config["warehouse"]["delete_existing"]:
-    tester.clientdelete("organizations/warehouses/")
+    tester.clientdelete("v1/organizations/warehouses/")
 
-WAREHOUSETYPE = config["warehouse"]["wtype"]
 destination_definitions = tester.clientget("airbyte/destination_definitions")
 
-if WAREHOUSETYPE == "postgres":
-    for destdef in destination_definitions:
-        if destdef["name"] == "Postgres":
-            destinationDefinitionId = destdef["destinationDefinitionId"]
-            break
-    dbtCredentials = {
-        "host": DBT_CREDENTIALS_HOST,
-        "port": 5432,
-        "username": DBT_CREDENTIALS_USERNAME,
-        "password": DBT_CREDENTIALS_PASSWORD,
-        "database": DBT_CREDENTIALS_DATABASE,
-    }
-    airbyteConfig = {
-        "host": DBT_CREDENTIALS_HOST,
-        "port": 5432,
-        "username": DBT_CREDENTIALS_USERNAME,
-        "password": DBT_CREDENTIALS_PASSWORD,
-        "database": DBT_CREDENTIALS_DATABASE,
-        "schema": DBT_TARGETCONFIGS_SCHEMA,
-    }
-elif WAREHOUSETYPE == "bigquery":
-    for destdef in destination_definitions:
-        if destdef["name"] == "BigQuery":
-            destinationDefinitionId = destdef["destinationDefinitionId"]
-            break
-    with open(DBT_BIGQUERY_SERVICE_ACCOUNT_CREDSFILE, "r", -1, "utf8") as credsfile:
-        dbtCredentials = json.load(credsfile)
-        # print(dbtCredentials)
-    airbyteConfig = {
-        "project_id": BIGQUERY_PROJECTID,
-        "dataset_id": BIGQUERY_DATASETID,
-        "dataset_location": BIGQUERY_DATASETLOCATION,
-        "credentials_json": json.dumps(dbtCredentials),
-    }
-else:
-    raise Exception("unknown WAREHOUSETYPE " + WAREHOUSETYPE)
-
 if config["org"]["create_new"]:
-    tester.clientpost(
-        "organizations/warehouse/",
-        json={
-            "wtype": WAREHOUSETYPE,
-            "destinationDefId": destinationDefinitionId,
-            "airbyteConfig": airbyteConfig,
-        },
-    )
+    tester.create_warehouse(config["warehouse"]["wtype"], destination_definitions)
 
 # ======
 source_definitions = tester.clientget("airbyte/source_definitions")
@@ -121,61 +68,29 @@ sources = tester.clientget("airbyte/sources")
 for src in config["airbyte"]["sources"]:
     if src["name"] in [s["name"] for s in sources]:
         print(f"source {src['name']} already exists")
-        continue
-    for sourceDef in source_definitions:
-        if sourceDef["name"] == src["stype"]:
-            sourceDefId = sourceDef["sourceDefinitionId"]
-            # add source
-            try:
-                source_creation_config = {
-                    "name": src["name"],
-                    "sourceDefId": sourceDefId,
-                    "config": src["config"],
-                }
-                source_creation_response = tester.clientpost(
-                    "airbyte/sources/",
-                    json=source_creation_config,
-                )
-                sources = tester.clientget("airbyte/sources")
-                break
-            except Exception as error:
-                print(error)
-                sys.exit(1)
+    else:
+        tester.create_source(
+            source_definitions, src["name"], src["stype"], src["config"]
+        )
 
-connections_response = tester.clientget("airbyte/connections")
-for connection in config["airbyte"]["connections"]:
-    if connection["name"] in [c["name"] for c in connections_response]:
-        print(f"connection {connection['name']} already exists")
+sources = tester.clientget("airbyte/sources")
+
+connections = tester.clientget("airbyte/v1/connections")
+for connection_config in config["airbyte"]["connections"]:
+    if connection_config["name"] in [c["name"] for c in connections]:
+        print(f"connection {connection_config['name']} already exists")
         continue
 
-    src = [s for s in sources if s["name"] == connection["source"]][0]
-    connPayload = {
-        "name": connection["name"],
-        "normalize": False,
-        "sourceId": src["sourceId"],
-        "streams": [],
-        "destinationSchema": connection["destinationSchema"],
-    }
-
-    schemaCatalog = tester.clientget(
-        f'airbyte/sources/{src["sourceId"]}/schema_catalog'
-    )
-
-    for streamData in schemaCatalog["catalog"]["streams"]:
-        for specStream in connection["streams"]:
-            if streamData["stream"]["name"] == specStream["name"]:
-                streamPayload = {
-                    "selected": True,
-                    "name": specStream["name"],
-                    "supportsIncremental": False,
-                    "destinationSyncMode": specStream["syncMode"],
-                    "syncMode": "full_refresh",
-                }
-                connPayload["streams"].append(streamPayload)
-
-    new_connection_response = tester.clientpost(
-        "airbyte/connections/", json=connPayload
-    )
+    created = False
+    for src in sources:
+        if src["name"] == connection_config["source"]:
+            tester.create_connection(connection_config, src["sourceId"])
+            created = True
+            break
+    if not created:
+        raise ValueError(
+            f"could not find source {src['name']} for connection {connection_config['name']}"
+        )
 
 # ======
 if config["dbt_workspace"]["setup_new"]:
