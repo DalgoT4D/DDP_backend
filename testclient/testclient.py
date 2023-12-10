@@ -223,3 +223,15 @@ class TestClient:
         )
         task_id = r["task_id"]
         return task_id
+
+    def run_dbtrun(self):
+        """run a prefect deployment for dbt run"""
+        tasks = self.clientget("prefect/tasks/transform/")
+
+        for task in tasks:
+            if task["slug"] == "dbt-run":
+                deployment_id = task["deploymentId"]
+                result = self.clientpost(f"prefect/v1/flows/{deployment_id}/flow_run/")
+                flow_run_id = result["flow_run_id"]
+                return flow_run_id
+        return None
