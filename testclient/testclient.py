@@ -212,3 +212,14 @@ class TestClient:
                     payload["streams"].append(stream_config)
 
         self.clientpost("airbyte/v1/connections/", json=payload, timeout=30)
+
+    def setup_dbt_workspace(self, dbt_workspace_config: dict):
+        """set up a dbt workspace"""
+        self.clientdelete("dbt/workspace/")
+        r = self.clientpost(
+            "dbt/workspace/",
+            json=dbt_workspace_config,
+            timeout=30,
+        )
+        task_id = r["task_id"]
+        return task_id
