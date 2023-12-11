@@ -25,8 +25,6 @@ from ddpui.models.org import (
     OrgWarehouseSchema,
     OrgPrefectBlock,
     OrgDataFlow,
-    OrgDataFlowv1,
-    OrgPrefectBlockv1,
 )
 from ddpui.models.org_user import (
     AcceptInvitationSchema,

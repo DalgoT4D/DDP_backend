@@ -318,8 +318,6 @@ def update_dbt_core_block_schema(block_name: str, target_configs_schema: str):
 
 
 # ================================================================================================
-
-
 def create_dbt_cli_profile_block(
     block_name: str,
     profilename: str,
@@ -346,6 +344,11 @@ def create_dbt_cli_profile_block(
     return response
 
 
+def delete_dbt_cli_profile_block(block_id) -> None:
+    """Delete dbt cli profile block in prefect"""
+    prefect_delete_a_block(block_id)
+
+
 # ================================================================================================
 
 
@@ -359,7 +362,7 @@ def create_secret_block(secret_block: PrefectSecretBlockCreate):
 
 
 def delete_secret_block(block_id) -> None:
-    """Delete airbyte connection block in prefect"""
+    """Delete secret block in prefect"""
     prefect_delete_a_block(block_id)
 
 
