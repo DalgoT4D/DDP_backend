@@ -1,4 +1,8 @@
 version: 2
+
+user:
+  create_new: false
+
 org:
   create_new: false
   name: testclient
@@ -34,5 +38,6 @@ dbt_workspace:
 prefect:
   dbt:
     delete_blocks: false
-    create_blocks: false
-    run_flow: false
+    delete_tasks: false
+    create_tasks: false
+    run_flow_dbtrun: true

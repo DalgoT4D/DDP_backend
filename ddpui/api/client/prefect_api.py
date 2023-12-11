@@ -1135,3 +1135,50 @@ def get_prefect_transformation_tasks(request):
             )
 
     return org_tasks
+
+
+@prefectapi.delete("/tasks/transform/", auth=auth.CanManagePipelines())
+def delete_prefect_transformation_tasks(request):
+    """delete tasks and related objects for an org"""
+    orguser: OrgUser = request.orguser
+
+    secret_block = OrgPrefectBlockv1.objects.filter(
+        org=orguser.org,
+        block_type=SECRET,
+    ).first()
+    if secret_block:
+        logger.info("deleting secret block %s", secret_block.block_name)
+        prefect_service.delete_secret_block(secret_block.block_id)
+        secret_block.delete()
+
+    cli_profile_block = OrgPrefectBlockv1.objects.filter(
+        org=orguser.org,
+        block_type=DBTCLIPROFILE,
+    ).first()
+    if cli_profile_block:
+        logger.info("deleting cli profile block %s", cli_profile_block.block_name)
+        prefect_service.delete_dbt_cli_profile_block(cli_profile_block.block_id)
+        cli_profile_block.delete()
+
+    org_tasks = OrgTask.objects.filter(org=orguser.org).all()
+
+    for org_task in org_tasks:
+        if org_task.task.slug == TASK_DBTRUN:
+            dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
+            if dataflow_orgtask:
+                # delete the manual deployment for this
+                dataflow = dataflow_orgtask.dataflow
+                logger.info("deleting manual deployment for dbt run")
+                # do this in try catch because it can fail & throw error
+                try:
+                    prefect_service.delete_deployment_by_id(dataflow.deployment_id)
+                except Exception:
+                    pass
+                logger.info("FINISHED deleting manual deployment for dbt run")
+                logger.info("deleting OrgDataFlowv1")
+                dataflow.delete()
+                logger.info("deleting DataflowOrgTask")
+                dataflow_orgtask.delete()
+
+        logger.info("deleting org task %s", org_task.task.slug)
+        org_task.delete()
