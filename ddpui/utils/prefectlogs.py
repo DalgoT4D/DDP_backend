@@ -10,23 +10,40 @@ logger = logging.getLogger()
 def fetch_logs_from_db(connection_info: dict, flow_run_id: str):
     """fetches the logs from the prefect database"""
 
-    connection = psycopg2.connect(**connection_info)
-    cursor = connection.cursor()
-    query = f"""
-        SELECT "log"."timestamp",
-            "task_run"."name",
-            "task_run"."state_name",
-            "task_run"."state_type",
-            "log"."message"
-        FROM "log"
-        JOIN "task_run"
-        ON "log"."task_run_id" = "task_run"."id"
-        WHERE "log"."flow_run_id" = '{flow_run_id}'
-        ORDER BY "timestamp"
-    """
-    cursor.execute(query)
-    records = cursor.fetchall()
-    cursor.close()
+    with psycopg2.connect(**connection_info) as connection:
+        cursor = connection.cursor()
+        query_tasks_from_flowrun = f"""
+            SELECT "log"."timestamp",
+                "task_run"."name",
+                "task_run"."state_name",
+                "task_run"."state_type",
+                "log"."message"
+            FROM "log"
+            JOIN "task_run"
+            ON "log"."task_run_id" = "task_run"."id"
+            WHERE "log"."flow_run_id" = '{flow_run_id}'
+            ORDER BY "timestamp"
+        """
+        cursor.execute(query_tasks_from_flowrun)
+        records = cursor.fetchall()
+
+        # for airbyte jobs the parent flow starts a subflow which runs the tasks
+        if len(records) == 0:
+            query_get_subflow_id = f"""
+                SELECT "flow_run"."id" 
+                FROM "flow_run" 
+                JOIN "task_run"
+                ON "task_run"."id" = "flow_run"."parent_task_run_id"
+                WHERE "task_run"."flow_run_id" = '{flow_run_id}'
+            """
+            cursor.execute(query_get_subflow_id)
+            records = cursor.fetchall()
+            if len(records) == 1:
+                subflow_id = records[0][0]
+                cursor.close()
+                return fetch_logs_from_db(connection_info, subflow_id)
+
+        cursor.close()
     connection.close()
     header = ["timestamp", "task_name", "state_name", "state_type", "message"]
 
@@ -79,11 +96,23 @@ def parse_airbyte_wait_for_completion_log(line: str):
             "pattern": "airbyte-sync-job-failed",
             "status": "failed",
         }
-    pattern_2 = re.compile(r"Job \d+ succeeded")
+    pattern_2 = re.compile(r"Job (\d+) succeeded")
     if pattern_2.match(line):
+        match = pattern_2.match(line)
+        job_id = int(match.groups()[0])
         return {
             "pattern": "airbyte-sync-job-succeeded",
             "status": "success",
+            "job_id": job_id,
+        }
+    pattern_3 = re.compile(r"Job (\d+) failed")
+    if pattern_3.match(line):
+        match = pattern_3.match(line)
+        job_id = int(match.groups()[0])
+        return {
+            "pattern": "airbyte-sync-job-failed",
+            "status": "failed",
+            "job_id": job_id,
         }
 
 
