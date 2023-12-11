@@ -1,4 +1,4 @@
-from unittest.mock import patch, Mock
+from unittest.mock import patch
 from ddpui.utils.prefectlogs import (
     remove_timestamps,
     skip_line,
@@ -53,6 +53,12 @@ def test_parse_airbyte_wait_for_completion_log():
     assert parse_airbyte_wait_for_completion_log("Job 123 succeeded") == {
         "pattern": "airbyte-sync-job-succeeded",
         "status": "success",
+        "job_id": 123,
+    }
+    assert parse_airbyte_wait_for_completion_log("Job 123 failed") == {
+        "pattern": "airbyte-sync-job-failed",
+        "status": "failed",
+        "job_id": 123,
     }
 
 
@@ -282,6 +288,7 @@ def test_parse_prefect_logs_3():
                 "log_lines": ["Job 23 succeeded"],
                 "pattern": "airbyte-sync-job-succeeded",
                 "status": "success",
+                "job_id": 23,
                 "task_name": "airbyte sync",
             }
         ]
