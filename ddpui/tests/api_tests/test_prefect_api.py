@@ -18,7 +18,6 @@ from ddpui.api.client.prefect_api import (
 )
 from ddpui.models.org import OrgDbt, Org, OrgWarehouse, OrgPrefectBlockv1
 from ddpui.models.tasks import Task, OrgTask, OrgDataFlowv1, DataflowOrgTask
-from ddpui.utils.constants import TASK_DBTRUN
 from ddpui.ddpprefect import DBTCLIPROFILE, SECRET
 
 

@@ -66,7 +66,7 @@ jobs:
           ddpui/tests/helper/test_dev_secretsmanager.py \
           ddpui/tests/helper/test_secretsmanager.py \
           ddpui/tests/helper/test_airbytehelpers.py \
-          ddpui/tests/helper/test_prefectlogs.py
+          ddpui/tests/helper/test_prefectlogs.py \
           ddpui/tests/api_tests/test_user_org_api.py \
           ddpui/tests/api_tests/test_warehouse_api.py \
           ddpui/tests/api_tests/test_dbt_api.py \
