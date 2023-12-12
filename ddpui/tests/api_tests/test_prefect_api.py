@@ -104,8 +104,6 @@ def org_with_transformation_tasks():
                 orgtask=org_task,
             )
 
-        print("fxiture", org_task)
-
     yield org
 
     org.delete()
