@@ -1312,7 +1312,7 @@ def post_airbyte_connection_reset_v1(request, connection_id):
 
 
 @airbyteapi.put(
-    "/v1//connections/{connection_id}/update", auth=auth.CanManagePipelines()
+    "/v1/connections/{connection_id}/update", auth=auth.CanManagePipelines()
 )
 def put_airbyte_connection_v1(
     request, connection_id, payload: AirbyteConnectionUpdate
