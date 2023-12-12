@@ -17,8 +17,9 @@ from ddpui.models.tasks import Task, OrgTask, OrgDataFlowv1, DataflowOrgTask
 from ddpui.api.client.airbyte_api import (
     get_airbyte_connection_v1,
     get_airbyte_connections_v1,
+    post_airbyte_connection_v1,
 )
-from ddpui.ddpairbyte.schema import AirbyteWorkspace
+from ddpui.ddpairbyte.schema import AirbyteWorkspace, AirbyteConnectionCreate
 from ddpui import ddpprefect
 
 pytestmark = pytest.mark.django_db
@@ -221,3 +222,264 @@ def test_get_airbyte_connections_success(org_with_workspace):
     assert result[0]["syncCatalog"] == "sync-catalog"
     assert result[0]["status"] == "conn-status"
     assert result[0]["deploymentId"] == "fake-deployment-id"
+
+
+# ================================================================================
+def test_post_airbyte_connection_v1_without_workspace(org_without_workspace):
+    """tests POST /v1/connections/ failure with no workspace"""
+    mock_orguser = Mock()
+    mock_orguser.org = org_without_workspace
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    payload = AirbyteConnectionCreate(
+        name="conn-name",
+        sourceId="source-id",
+        destinationId="dest-id",
+        destinationSchema="dest-schema",
+        streams=["stream-1", "stream-2"],
+        normalize=False,
+    )
+    with pytest.raises(HttpError) as excinfo:
+        post_airbyte_connection_v1(mock_request, payload)
+
+    assert str(excinfo.value) == "create an airbyte workspace first"
+
+
+def test_post_airbyte_connection_v1_without_stream_names(org_with_workspace):
+    """tests POST /v1/connections/ failure with no streams passed in payload"""
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_workspace
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    payload = AirbyteConnectionCreate(
+        name="conn-name",
+        sourceId="source-id",
+        destinationId="dest-id",
+        destinationSchema="dest-schema",
+        streams=[],
+        normalize=False,
+    )
+    with pytest.raises(HttpError) as excinfo:
+        post_airbyte_connection_v1(mock_request, payload)
+
+    assert str(excinfo.value) == "must specify stream names"
+
+
+def test_post_airbyte_connection_v1_without_warehouse(org_with_workspace):
+    """tests POST /v1/connections/ failure without warehouse"""
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_workspace
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    payload = AirbyteConnectionCreate(
+        name="conn-name",
+        sourceId="source-id",
+        destinationId="dest-id",
+        destinationSchema="dest-schema",
+        streams=["stream_1", "stream_2"],
+        normalize=False,
+    )
+    with pytest.raises(HttpError) as excinfo:
+        post_airbyte_connection_v1(mock_request, payload)
+
+    assert str(excinfo.value) == "need to set up a warehouse first"
+
+
+@pytest.fixture
+def warehouse_without_destination(org_with_workspace):
+    warehouse = OrgWarehouse.objects.create(org=org_with_workspace)
+    yield warehouse
+    warehouse.delete()
+
+
+@pytest.fixture
+def warehouse_with_destination(org_with_workspace):
+    warehouse = OrgWarehouse.objects.create(
+        org=org_with_workspace, airbyte_destination_id="destination-id"
+    )
+    yield warehouse
+    warehouse.delete()
+
+
+def test_post_airbyte_connection_v1_without_destination_id(
+    org_with_workspace, warehouse_without_destination
+):
+    """tests POST /v1/connections/ failure without warehouse"""
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_workspace
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    payload = AirbyteConnectionCreate(
+        name="conn-name",
+        sourceId="source-id",
+        destinationId="dest-id",
+        destinationSchema="dest-schema",
+        streams=["stream_1", "stream_2"],
+        normalize=False,
+    )
+    with pytest.raises(HttpError) as excinfo:
+        post_airbyte_connection_v1(mock_request, payload)
+
+    assert str(excinfo.value) == "warehouse has no airbyte_destination_id"
+
+
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    create_normalization_operation=Mock(
+        return_value={"operationId": "fake-operation-id"}
+    ),
+)
+def test_post_airbyte_connection_v1_without_server_block(
+    org_with_workspace, warehouse_with_destination
+):
+    """tests POST /v1/connections/ failure without server block"""
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_workspace
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    payload = AirbyteConnectionCreate(
+        name="conn-name",
+        sourceId="source-id",
+        destinationId="dest-id",
+        destinationSchema="dest-schema",
+        streams=["stream_1", "stream_2"],
+        normalize=False,
+    )
+    with pytest.raises(Exception) as excinfo:
+        post_airbyte_connection_v1(mock_request, payload)
+    assert (
+        str(excinfo.value)
+        == "test-org-slug has no Airbyte Server block in OrgPrefectBlock"
+    )
+
+
+@pytest.fixture
+def airbyte_server_block(org_with_workspace):
+    block = OrgPrefectBlockv1.objects.create(
+        org=org_with_workspace,
+        block_type=ddpprefect.AIRBYTESERVER,
+        block_id="fake-serverblock-id",
+        block_name="fake ab server block",
+    )
+    yield block
+    block.delete()
+
+
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    create_normalization_operation=Mock(
+        return_value={"operationId": "fake-operation-id"}
+    ),
+    create_connection=Mock(
+        return_value={
+            "sourceId": "fake-source-id",
+            "destinationId": "fake-destination-id",
+            "connectionId": "fake-connection-id",
+            "sourceCatalogId": "fake-source-catalog-id",
+            "syncCatalog": "sync-catalog",
+            "status": "running",
+        }
+    ),
+)
+def test_post_airbyte_connection_v1_task_not_supported(
+    org_with_workspace, warehouse_with_destination, airbyte_server_block
+):
+    """tests POST /v1/connections/ success"""
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_workspace
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    payload = AirbyteConnectionCreate(
+        name="conn-name",
+        sourceId="source-id",
+        destinationId="dest-id",
+        destinationSchema="dest-schema",
+        streams=["stream_1", "stream_2"],
+        normalize=False,
+    )
+
+    with pytest.raises(Exception) as excinfo:
+        post_airbyte_connection_v1(mock_request, payload)
+    assert str(excinfo.value) == "task not supported"
+
+
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    create_normalization_operation=Mock(
+        return_value={"operationId": "fake-operation-id"}
+    ),
+    create_connection=Mock(
+        return_value={
+            "sourceId": "fake-source-id",
+            "destinationId": "fake-destination-id",
+            "connectionId": "fake-connection-id",
+            "sourceCatalogId": "fake-source-catalog-id",
+            "syncCatalog": "sync-catalog",
+            "status": "running",
+        }
+    ),
+)
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    create_dataflow_v1=Mock(
+        return_value={
+            "deployment": {"id": "fake-deployment-id", "name": "fake-deployment-name"}
+        }
+    ),
+)
+def test_post_airbyte_connection_v1_success(
+    org_with_workspace, warehouse_with_destination, airbyte_server_block
+):
+    """tests POST /v1/connections/ success"""
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_workspace
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    payload = AirbyteConnectionCreate(
+        name="conn-name",
+        sourceId="source-id",
+        destinationId="dest-id",
+        destinationSchema="dest-schema",
+        streams=["stream_1", "stream_2"],
+        normalize=False,
+    )
+
+    # create the master task
+    airbyte_task_config = {
+        "type": "airbyte",
+        "slug": "airbyte-sync",
+        "label": "AIRBYTE sync",
+        "command": None,
+    }
+    Task.objects.create(**airbyte_task_config)
+
+    with patch("ddpui.api.client.airbyte_api.write_dataflowblocks"):
+        response = post_airbyte_connection_v1(mock_request, payload)
+
+    # reload the warehouse from the database
+    warehouse_with_destination = OrgWarehouse.objects.filter(
+        org=org_with_workspace, airbyte_destination_id="destination-id"
+    ).first()
+    assert warehouse_with_destination.airbyte_norm_op_id is not None
+
+    assert response["name"] == "conn-name"
+    assert response["connectionId"] == "fake-connection-id"
+    assert response["source"]["id"] == "fake-source-id"
+    assert response["destination"]["id"] == "fake-destination-id"
+    assert response["catalogId"] == "fake-source-catalog-id"
+    assert response["status"] == "running"
+    assert response["deploymentId"] == "fake-deployment-id"
