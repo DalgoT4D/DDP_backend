@@ -70,6 +70,8 @@ jobs:
           ddpui/tests/api_tests/test_user_org_api.py \
           ddpui/tests/api_tests/test_warehouse_api.py \
           ddpui/tests/api_tests/test_dbt_api.py \
+          ddpui/tests/api_tests/test_airbyte_api.py \
+          ddpui/tests/api_tests/test_airbyte_api_v1.py \
           ddpui/tests/api_tests/test_prefect_api.py 
           coverage report --fail-under=70
           coverage xml
