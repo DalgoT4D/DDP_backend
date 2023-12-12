@@ -18,6 +18,7 @@ from ddpui.api.client.airbyte_api import (
     get_airbyte_connection_v1,
     get_airbyte_connections_v1,
     post_airbyte_connection_v1,
+    post_airbyte_connection_reset_v1,
 )
 from ddpui.ddpairbyte.schema import AirbyteWorkspace, AirbyteConnectionCreate
 from ddpui import ddpprefect
@@ -483,3 +484,63 @@ def test_post_airbyte_connection_v1_success(
     assert response["catalogId"] == "fake-source-catalog-id"
     assert response["status"] == "running"
     assert response["deploymentId"] == "fake-deployment-id"
+
+
+# ================================================================================
+def test_post_airbyte_connection_reset_v1_no_workspace(org_without_workspace):
+    """tests POST /v1/connections/{connection_id}/reset failure with no workspace"""
+    mock_request = Mock()
+    mock_request.orguser = Mock()
+    mock_request.orguser.org = org_without_workspace
+
+    with pytest.raises(HttpError) as excinfo:
+        post_airbyte_connection_reset_v1(mock_request, "connection_id")
+    assert str(excinfo.value) == "create an airbyte workspace first"
+
+
+def test_post_airbyte_connection_reset_v1_no_connection_task(org_with_workspace):
+    """tests POST /v1/connections/{connection_id}/reset failure with connection task created"""
+    mock_request = Mock()
+    mock_request.orguser = Mock()
+    mock_request.orguser.org = org_with_workspace
+
+    with pytest.raises(HttpError) as excinfo:
+        post_airbyte_connection_reset_v1(mock_request, "connection_id")
+    assert str(excinfo.value) == "connection not found"
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    get_airbyte_connection_block_by_id=Mock(
+        return_value={"data": {"connection_id": "the-connection-id"}}
+    ),
+)
+def test_post_airbyte_connection_reset_v1_success(org_with_workspace):
+    """tests POST /v1/connections/{connection_id}/reset success"""
+    mock_request = Mock()
+    mock_request.orguser = Mock()
+    mock_request.orguser.org = org_with_workspace
+
+    connection_id = "connection_id"
+
+    airbyte_task_config = {
+        "type": "airbyte",
+        "slug": "airbyte-sync",
+        "label": "AIRBYTE sync",
+        "command": None,
+    }
+    task = Task.objects.create(**airbyte_task_config)
+
+    org_task = OrgTask.objects.create(
+        task=task, org=mock_request.orguser.org, connection_id=connection_id
+    )
+
+    reset_connection_mock = MagicMock()
+
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.reset_connection"
+    ) as reset_connection_mock:
+        result = post_airbyte_connection_reset_v1(mock_request, connection_id)
+        assert result["success"] == 1
+
+    reset_connection_mock.assert_called_once_with(connection_id)
