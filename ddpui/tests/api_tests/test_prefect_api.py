@@ -24,6 +24,24 @@ from ddpui.ddpprefect import DBTCLIPROFILE, SECRET
 pytestmark = pytest.mark.django_db
 
 
+def seed_tasks():
+    # seed data
+    for task in [
+        {"type": "git", "slug": "git-pull", "label": "GIT pull", "command": "git pull"},
+        {"type": "dbt", "slug": "dbt-clean", "label": "DBT clean", "command": "clean"},
+        {"type": "dbt", "slug": "dbt-deps", "label": "DBT deps", "command": "deps"},
+        {"type": "dbt", "slug": "dbt-run", "label": "DBT run", "command": "run"},
+        {"type": "dbt", "slug": "dbt-test", "label": "DBT test", "command": "test"},
+        {
+            "type": "airbyte",
+            "slug": "airbyte-sync",
+            "label": "AIRBYTE sync",
+            "command": None,
+        },
+    ]:
+        Task.objects.create(**task)
+
+
 # ================================================================================
 @pytest.fixture()
 def org_with_dbt_workspace(tmpdir_factory):
@@ -89,20 +107,7 @@ def org_with_transformation_tasks():
     )
 
     # seed data
-    for task in [
-        {"type": "git", "slug": "git-pull", "label": "GIT pull", "command": "git pull"},
-        {"type": "dbt", "slug": "dbt-clean", "label": "DBT clean", "command": "clean"},
-        {"type": "dbt", "slug": "dbt-deps", "label": "DBT deps", "command": "deps"},
-        {"type": "dbt", "slug": "dbt-run", "label": "DBT run", "command": "run"},
-        {"type": "dbt", "slug": "dbt-test", "label": "DBT test", "command": "test"},
-        {
-            "type": "airbyte",
-            "slug": "airbyte-sync",
-            "label": "AIRBYTE sync",
-            "command": None,
-        },
-    ]:
-        Task.objects.create(**task)
+    seed_tasks()
 
     for task in Task.objects.filter(type__in=["dbt", "git"]).all():
         org_task = OrgTask.objects.create(org=org, task=task)
@@ -190,6 +195,8 @@ def test_post_prefect_transformation_tasks_success_postgres_warehouse(
     mock_request = Mock()
     mock_request.orguser = mock_orguser
 
+    seed_tasks()
+
     OrgWarehouse.objects.create(org=org_with_dbt_workspace, wtype="postgres")
 
     post_prefect_transformation_tasks(mock_request)
@@ -237,6 +244,8 @@ def test_post_prefect_transformation_tasks_success_bigquery_warehouse(
 
     mock_request = Mock()
     mock_request.orguser = mock_orguser
+
+    seed_tasks()
 
     OrgWarehouse.objects.create(org=org_with_dbt_workspace, wtype="bigquery")
 
