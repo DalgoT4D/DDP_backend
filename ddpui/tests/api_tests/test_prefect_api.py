@@ -14,10 +14,12 @@ django.setup()
 from ddpui.api.client.prefect_api import (
     post_prefect_transformation_tasks,
     get_prefect_transformation_tasks,
+    delete_prefect_transformation_tasks,
 )
-from ddpui.models.org import OrgDbt, Org, OrgWarehouse
+from ddpui.models.org import OrgDbt, Org, OrgWarehouse, OrgPrefectBlockv1
 from ddpui.models.tasks import Task, OrgTask, OrgDataFlowv1, DataflowOrgTask
 from ddpui.utils.constants import TASK_DBTRUN
+from ddpui.ddpprefect import DBTCLIPROFILE, SECRET
 
 
 pytestmark = pytest.mark.django_db
@@ -69,6 +71,22 @@ def org_with_transformation_tasks():
         airbyte_workspace_id="FAKE-WORKSPACE-ID-1",
         slug=org_slug,
         name=org_slug,
+    )
+
+    # create secret block
+    OrgPrefectBlockv1.objects.create(
+        org=org,
+        block_type=SECRET,
+        block_id="secret-blk-id",
+        block_name="secret-blk-name",
+    )
+
+    # create cli block
+    OrgPrefectBlockv1.objects.create(
+        org=org,
+        block_type=DBTCLIPROFILE,
+        block_id="cliprofile-blk-id",
+        block_name="cliprofile-blk-name",
     )
 
     # seed data
@@ -227,15 +245,45 @@ def test_post_prefect_transformation_tasks_success_bigquery_warehouse(
 
 
 def test_get_prefect_transformation_tasks_success(org_with_transformation_tasks):
-    """tests GET /tasks/transform/ success with bigquery warehouse"""
+    """tests GET /tasks/transform/ success"""
     mock_orguser = Mock()
     mock_orguser.org = org_with_transformation_tasks
 
     mock_request = Mock()
     mock_request.orguser = mock_orguser
 
-    resp = get_prefect_transformation_tasks(mock_request)
-
-    print(resp)
+    get_prefect_transformation_tasks(mock_request)
 
     assert OrgTask.objects.filter(org=mock_orguser.org).count() == 5
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    delete_secret_block=Mock(return_value=True),
+    delete_dbt_cli_profile_block=Mock(return_value=True),
+    delete_deployment_by_id=Mock(return_value=True),
+)
+def test_delete_prefect_transformation_tasks_success(org_with_transformation_tasks):
+    """tests DELETE /tasks/transform/ success"""
+
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_transformation_tasks
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    delete_prefect_transformation_tasks(mock_request)
+
+    assert OrgTask.objects.filter(org=mock_orguser.org).count() == 0
+    assert (
+        OrgPrefectBlockv1.objects.filter(
+            org=mock_orguser.org, block_type=SECRET
+        ).count()
+        == 0
+    )
+    assert (
+        OrgPrefectBlockv1.objects.filter(
+            org=mock_orguser.org, block_type=DBTCLIPROFILE
+        ).count()
+        == 0
+    )
