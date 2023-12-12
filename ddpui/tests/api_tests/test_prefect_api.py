@@ -16,11 +16,12 @@ from ddpui.api.client.prefect_api import (
     get_prefect_transformation_tasks,
     delete_prefect_transformation_tasks,
     post_run_prefect_org_deployment_task,
+    post_run_prefect_org_task,
 )
 from ddpui.models.org import OrgDbt, Org, OrgWarehouse, OrgPrefectBlockv1
 from ddpui.models.tasks import Task, OrgTask, OrgDataFlowv1, DataflowOrgTask
 from ddpui.ddpprefect import DBTCLIPROFILE, SECRET
-from ddpui.utils.constants import TASK_DBTRUN
+from ddpui.utils.constants import TASK_DBTRUN, TASK_GITPULL, TASK_DBTDEPS
 
 
 pytestmark = pytest.mark.django_db
@@ -46,8 +47,24 @@ def seed_tasks():
 
 # ================================================================================
 @pytest.fixture()
+def org_without_dbt_workspace():
+    """org without dbt workspace"""
+    print("creating org")
+    org_slug = "test-org-slug"
+
+    org = Org.objects.create(
+        airbyte_workspace_id="FAKE-WORKSPACE-ID-1",
+        slug=org_slug,
+        name=org_slug,
+    )
+    yield org
+    print("deleting org")
+    org.delete()
+
+
+@pytest.fixture()
 def org_with_dbt_workspace(tmpdir_factory):
-    """a pytest fixture which creates an Org having an airbyte workspace"""
+    """a pytest fixture which creates an Org having an dbt workspace"""
     print("creating org_with_dbt_workspace")
     org_slug = "test-org-slug"
     client_dir = tmpdir_factory.mktemp("clients")
@@ -82,13 +99,35 @@ def org_with_dbt_workspace(tmpdir_factory):
 
 
 @pytest.fixture()
-def org_with_transformation_tasks():
+def org_with_transformation_tasks(tmpdir_factory):
+    """org having the transformation tasks and dbt workspace"""
     print("creating org with tasks")
 
     org_slug = "test-org-slug"
+    client_dir = tmpdir_factory.mktemp("clients")
+    org_dir = client_dir.mkdir(org_slug)
+    org_dir.mkdir("dbtrepo")
+
+    os.environ["CLIENTDBT_ROOT"] = str(client_dir)
+
+    # create dbt_project.yml file
+    yml_obj = {"profile": "dummy"}
+    with open(
+        str(org_dir / "dbtrepo" / "dbt_project.yml"), "w", encoding="utf-8"
+    ) as output:
+        yaml.safe_dump(yml_obj, output)
+
+    dbt = OrgDbt.objects.create(
+        gitrepo_url="dummy-git-url.github.com",
+        project_dir="tmp/",
+        dbt_venv=tmpdir_factory.mktemp("venv"),
+        target_type="postgres",
+        default_schema="prod",
+    )
     org = Org.objects.create(
         airbyte_workspace_id="FAKE-WORKSPACE-ID-1",
         slug=org_slug,
+        dbt=dbt,
         name=org_slug,
     )
 
@@ -313,13 +352,11 @@ def test_post_run_prefect_org_deployment_task_success(org_with_transformation_ta
     mock_request.orguser = mock_orguser
 
     dataflow_orgtask = None
-    for org_task in OrgTask.objects.filter(
-        org=mock_orguser.org,
-    ).all():
-        if org_task.task.slug == TASK_DBTRUN:
-            dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
-            if dataflow_orgtask:
-                break
+    org_task = OrgTask.objects.filter(
+        org=mock_orguser.org, task__slug=TASK_DBTRUN
+    ).first()
+    if org_task:
+        dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
 
     if dataflow_orgtask is None:
         raise Exception("Deployment not found")
@@ -327,3 +364,109 @@ def test_post_run_prefect_org_deployment_task_success(org_with_transformation_ta
     post_run_prefect_org_deployment_task(
         mock_orguser, dataflow_orgtask.dataflow.deployment_id
     )
+
+
+def test_post_run_prefect_org_task_invalid_task_id(org_with_transformation_tasks):
+    """tests POST /tasks/{orgtask_id}/run/ failure by invalid task id"""
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_transformation_tasks
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        post_run_prefect_org_task(mock_request, 0)
+    assert str(excinfo.value) == "task not found"
+
+
+def test_post_run_prefect_org_task_invalid_task_type(org_with_transformation_tasks):
+    """tests POST /tasks/{orgtask_id}/run/ failure by invalid task type"""
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_transformation_tasks
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    airbyte_task_config = {
+        "type": "airbyte",
+        "slug": "airbyte-sync",
+        "label": "AIRBYTE sync",
+        "command": None,
+    }
+    task = Task.objects.create(**airbyte_task_config)
+
+    org_task = OrgTask.objects.create(task=task, org=mock_orguser.org)
+
+    if org_task is None:
+        raise Exception("Task not found")
+
+    with pytest.raises(HttpError) as excinfo:
+        post_run_prefect_org_task(mock_request, org_task.id)
+    assert str(excinfo.value) == "task not supported"
+
+
+def test_post_run_prefect_org_task_no_dbt_workspace(org_with_transformation_tasks):
+    """tests POST /tasks/{orgtask_id}/run/ failure by not setting up dbt workspace"""
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_transformation_tasks
+    mock_orguser.org.dbt = None
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    org_task = OrgTask.objects.filter(
+        org=mock_orguser.org, task__slug=TASK_DBTDEPS
+    ).first()
+
+    if org_task is None:
+        raise Exception("Task not found")
+
+    with pytest.raises(HttpError) as excinfo:
+        post_run_prefect_org_task(mock_request, org_task.id)
+    assert str(excinfo.value) == "dbt is not configured for this client"
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    run_shell_task_sync=Mock(return_value=True),
+)
+def test_post_run_prefect_org_task_git_pull_success(org_with_transformation_tasks):
+    """tests POST /tasks/{orgtask_id}/run/ success"""
+
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_transformation_tasks
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    org_task = OrgTask.objects.filter(
+        org=mock_orguser.org, task__slug=TASK_GITPULL
+    ).first()
+
+    if org_task is None:
+        raise Exception("Task not found")
+
+    post_run_prefect_org_task(mock_request, org_task.id)
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    run_dbt_task_sync=Mock(return_value=True),
+)
+def test_post_run_prefect_org_task_dbt_deps_success(org_with_transformation_tasks):
+    """tests POST /tasks/{orgtask_id}/run/ success"""
+
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_transformation_tasks
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    org_task = OrgTask.objects.filter(
+        org=mock_orguser.org, task__slug=TASK_DBTDEPS
+    ).first()
+
+    if org_task is None:
+        raise Exception("Task not found")
+
+    post_run_prefect_org_task(mock_request, org_task.id)
