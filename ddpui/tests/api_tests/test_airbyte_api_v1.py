@@ -20,6 +20,7 @@ from ddpui.api.client.airbyte_api import (
     post_airbyte_connection_v1,
     post_airbyte_connection_reset_v1,
     put_airbyte_connection_v1,
+    delete_airbyte_connection_v1,
 )
 from ddpui.ddpairbyte.schema import (
     AirbyteWorkspace,
@@ -803,4 +804,96 @@ def test_put_airbyte_connection_v1_with_normalization_without_opids(org_with_wor
     payload.destinationId = warehouse.airbyte_destination_id
     update_connection_mock.assert_called_with(
         org_with_workspace.airbyte_workspace_id, payload, connection
+    )
+
+
+# ================================================================================
+def test_delete_airbyte_connection_v1_without_org():
+    """tests DELETE /v1/connections/{connection_id} failure without org"""
+    mock_orguser = Mock()
+    mock_orguser.org = None
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        delete_airbyte_connection_v1(mock_request, "conn-block-id")
+
+    assert str(excinfo.value) == "create an organization first"
+
+
+def test_delete_airbyte_connection_v1_without_workspace(org_without_workspace):
+    """tests DELETE /v1/connections/{connection_id} failure without workspace"""
+    mock_orguser = Mock()
+    mock_orguser.org = org_without_workspace
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        delete_airbyte_connection_v1(mock_request, "conn-id")
+
+    assert str(excinfo.value) == "create an airbyte workspace first"
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    delete_deployment_by_id=Mock(),
+)
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    delete_connection=Mock(),
+)
+def test_delete_airbyte_connection_success(org_with_workspace):
+    """tests DELETE /v1/connections/{connection_id} success"""
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_workspace
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    connection_id = "conn-1"
+
+    airbyte_task_config = {
+        "type": "airbyte",
+        "slug": "airbyte-sync",
+        "label": "AIRBYTE sync",
+        "command": None,
+    }
+    task = Task.objects.create(**airbyte_task_config)
+
+    org_task = OrgTask.objects.create(
+        task=task, org=mock_request.orguser.org, connection_id=connection_id
+    )
+
+    dataflow = OrgDataFlowv1.objects.create(
+        name="conn-deployment",
+        deployment_name="conn-deployment",
+        deployment_id="conn-deployment-id",
+        cron=None,
+        dataflow_type="manual",
+        org=mock_orguser.org,
+    )
+
+    DataflowOrgTask.objects.create(orgtask=org_task, dataflow=dataflow)
+
+    assert (
+        OrgTask.objects.filter(
+            org=org_with_workspace, task=task, connection_id=connection_id
+        ).count()
+        == 1
+    )
+    response = delete_airbyte_connection_v1(mock_request, connection_id)
+    assert response["success"] == 1
+    assert (
+        OrgTask.objects.filter(org=org_with_workspace).count()
+        == 0
+    )
+    assert (
+        OrgDataFlowv1.objects.filter(org=org_with_workspace).count()
+        == 0
+    )
+    assert (
+        DataflowOrgTask.objects.filter(orgtask__org=org_with_workspace).count()
+        == 0
     )
