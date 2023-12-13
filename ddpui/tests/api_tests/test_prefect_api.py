@@ -1,9 +1,8 @@
 import os
 import django
-from pathlib import Path
 import yaml
 
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 import pytest
 from ninja.errors import HttpError
 
@@ -314,7 +313,6 @@ def test_get_prefect_transformation_tasks_success(org_with_transformation_tasks)
 )
 def test_delete_prefect_transformation_tasks_success(org_with_transformation_tasks):
     """tests DELETE /tasks/transform/ success"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_transformation_tasks
 
@@ -344,7 +342,6 @@ def test_delete_prefect_transformation_tasks_success(org_with_transformation_tas
 )
 def test_post_run_prefect_org_deployment_task_success(org_with_transformation_tasks):
     """tests POST /v1/flows/{deployment_id}/flow_run/ success"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_transformation_tasks
 
@@ -455,7 +452,6 @@ def test_post_run_prefect_org_task_git_pull_success(org_with_transformation_task
 )
 def test_post_run_prefect_org_task_dbt_deps_success(org_with_transformation_tasks):
     """tests POST /tasks/{orgtask_id}/run/ success"""
-
     mock_orguser = Mock()
     mock_orguser.org = org_with_transformation_tasks
 

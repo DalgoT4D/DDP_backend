@@ -9,10 +9,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from ddpui.models.org_user import User, OrgUser
-from ddpui.models.org import Org, OrgPrefectBlock, OrgDataFlow, OrgWarehouse
-from ddpui.models.orgjobs import BlockLock, DataflowBlock
-from ddpui.models.org import OrgDbt, Org, OrgWarehouse, OrgPrefectBlockv1
+from ddpui.models.org import Org, OrgWarehouse, OrgPrefectBlockv1
 from ddpui.models.tasks import Task, OrgTask, OrgDataFlowv1, DataflowOrgTask
 from ddpui.api.client.airbyte_api import (
     get_airbyte_connection_v1,
@@ -23,7 +20,6 @@ from ddpui.api.client.airbyte_api import (
     delete_airbyte_connection_v1,
 )
 from ddpui.ddpairbyte.schema import (
-    AirbyteWorkspace,
     AirbyteConnectionCreate,
     AirbyteConnectionUpdate,
 )
@@ -885,15 +881,6 @@ def test_delete_airbyte_connection_success(org_with_workspace):
     )
     response = delete_airbyte_connection_v1(mock_request, connection_id)
     assert response["success"] == 1
-    assert (
-        OrgTask.objects.filter(org=org_with_workspace).count()
-        == 0
-    )
-    assert (
-        OrgDataFlowv1.objects.filter(org=org_with_workspace).count()
-        == 0
-    )
-    assert (
-        DataflowOrgTask.objects.filter(orgtask__org=org_with_workspace).count()
-        == 0
-    )
+    assert OrgTask.objects.filter(org=org_with_workspace).count() == 0
+    assert OrgDataFlowv1.objects.filter(org=org_with_workspace).count() == 0
+    assert DataflowOrgTask.objects.filter(orgtask__org=org_with_workspace).count() == 0
