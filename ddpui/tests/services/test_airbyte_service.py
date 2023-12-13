@@ -1,9 +1,7 @@
 import os
-from unittest import mock
 from unittest.mock import patch, Mock
 import requests
 import django
-from pydantic import ValidationError
 import pytest
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
