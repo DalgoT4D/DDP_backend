@@ -30,6 +30,7 @@ from ddpui.api.client.user_org_api import (
     get_invitations,
     post_resend_invitation,
     delete_invitation,
+    post_organization_accept_tnc,
 )
 from ddpui.models.org import Org, OrgSchema, OrgWarehouseSchema, OrgWarehouse
 from ddpui.models.org_user import (
@@ -47,6 +48,7 @@ from ddpui.models.org_user import (
     VerifyEmailSchema,
     DeleteOrgUserPayload,
 )
+from ddpui.models.orgtnc import OrgTnC
 from ddpui.ddpairbyte.schema import AirbyteWorkspace
 from ddpui.utils import timezone
 from django.contrib.auth.models import User
@@ -719,6 +721,7 @@ def test_post_organization_user_invite(mock_sendgrid, orguser):
         invited_by=None,
         invited_on=timezone.as_ist(datetime.now()),
         invite_code="invite_code",
+        can_accept_tnc=True,
     )
 
     mock_request = Mock()
@@ -743,6 +746,7 @@ def test_post_organization_user_invite(mock_sendgrid, orguser):
     assert response.invited_role == payload.invited_role
     assert response.invited_on == payload.invited_on
     assert response.invite_code == payload.invite_code
+    assert response.can_accept_tnc == payload.can_accept_tnc
     mock_sendgrid.assert_called_once()
 
 
@@ -760,6 +764,7 @@ def test_post_organization_user_invite_multiple_open_invites(mock_sendgrid, orgu
         invited_by=another_org_user,
         invited_on=timezone.as_ist(datetime.now()),
         invite_code="invite_code_existing",
+        can_accept_tnc=False,
     )
     payload = InvitationSchema(
         invited_email="inivted_email",
@@ -767,6 +772,7 @@ def test_post_organization_user_invite_multiple_open_invites(mock_sendgrid, orgu
         invited_by=None,
         invited_on=timezone.as_ist(datetime.now()),
         invite_code="invite_code",
+        can_accept_tnc=False,
     )
 
     mock_request = Mock()
@@ -791,6 +797,7 @@ def test_post_organization_user_invite_multiple_open_invites(mock_sendgrid, orgu
     assert response.invited_role == payload.invited_role
     assert response.invited_on == payload.invited_on
     assert response.invite_code == payload.invite_code
+    assert response.can_accept_tnc == payload.can_accept_tnc
     mock_sendgrid.assert_called_once()
 
 
@@ -803,6 +810,7 @@ def test_post_organization_user_invite_lowercase_email(mock_sendgrid, orguser: O
         invited_by=None,
         invited_on=timezone.as_ist(datetime.now()),
         invite_code="invite_code",
+        can_accept_tnc=True,
     )
 
     mock_request = Mock()
@@ -827,6 +835,7 @@ def test_post_organization_user_invite_lowercase_email(mock_sendgrid, orguser: O
     assert response.invited_role == payload.invited_role
     assert response.invited_on == payload.invited_on
     assert response.invite_code == payload.invite_code
+    assert response.can_accept_tnc == payload.can_accept_tnc
     mock_sendgrid.assert_called_once()
 
 
@@ -842,6 +851,7 @@ def test_post_organization_user_invite_user_exists(mock_sendgrid, orguser: OrgUs
         invited_by=None,
         invited_on=timezone.as_ist(datetime.now()),
         invite_code="invite_code",
+        can_accept_tnc=True,
     )
 
     mock_request = Mock()
@@ -853,6 +863,7 @@ def test_post_organization_user_invite_user_exists(mock_sendgrid, orguser: OrgUs
     assert OrgUser.objects.filter(user=user).count() == 1
     assert OrgUser.objects.filter(user=user, org=orguser.org).count() == 1
     assert response.invited_role == payload.invited_role
+    assert response.can_accept_tnc == payload.can_accept_tnc
 
 
 # ================================================================================
@@ -1162,3 +1173,72 @@ def test_delete_invitation(orguser):
     assert Invitation.objects.filter(id=invitation.id).exists()
     delete_invitation(mock_request, invitation.id)
     assert not Invitation.objects.filter(id=invitation.id).exists()
+
+
+def test_post_organization_accept_tnc_no_org(
+    orguser: OrgUser, org_without_workspace: Org
+):
+    """tests post_organization_accept_tnc"""
+    orguser.org = None
+    orguser.can_accept_tnc = False
+    orguser.save()
+
+    mock_request = Mock()
+    mock_request.orguser = orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        post_organization_accept_tnc(mock_request)
+    assert str(excinfo.value) == "create an organization first"
+
+
+def test_post_organization_accept_tnc_cannot(
+    orguser: OrgUser, org_without_workspace: Org
+):
+    """tests post_organization_accept_tnc"""
+    orguser.org = org_without_workspace
+    orguser.can_accept_tnc = False
+    orguser.save()
+
+    mock_request = Mock()
+    mock_request.orguser = orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        post_organization_accept_tnc(mock_request)
+    assert str(excinfo.value) == "user cannot accept tnc"
+
+
+def test_post_organization_accept_tnc_already_accepted(
+    orguser: OrgUser, org_without_workspace: Org
+):
+    """tests post_organization_accept_tnc"""
+    orguser.org = org_without_workspace
+    orguser.can_accept_tnc = True
+    orguser.save()
+
+    OrgTnC.objects.create(
+        org=orguser.org, tnc_accepted_by=orguser, tnc_accepted_on=datetime.now()
+    )
+
+    mock_request = Mock()
+    mock_request.orguser = orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        post_organization_accept_tnc(mock_request)
+    assert str(excinfo.value) == "tnc already accepted"
+
+
+def test_post_organization_accept_tnc(orguser: OrgUser, org_without_workspace: Org):
+    """tests post_organization_accept_tnc"""
+    orguser.org = org_without_workspace
+    orguser.can_accept_tnc = True
+    orguser.save()
+
+    assert OrgTnC.objects.filter(org=org_without_workspace).count() == 0
+
+    mock_request = Mock()
+    mock_request.orguser = orguser
+
+    response = post_organization_accept_tnc(mock_request)
+    assert response["success"] == 1
+
+    assert OrgTnC.objects.filter(org=org_without_workspace).count() == 1

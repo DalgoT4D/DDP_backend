@@ -42,6 +42,7 @@ from ddpui.models.org_user import (
     VerifyEmailSchema,
     DeleteOrgUserPayload,
 )
+from ddpui.models.orgtnc import OrgTnC
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 from ddpui.ddpdbt import dbt_service
@@ -551,13 +552,19 @@ def post_organization_user_invite(request, payload: InvitationSchema):
 
     if existing_user:
         logger.info("user exists, creating new OrgUser")
-        OrgUser.objects.create(user=existing_user, org=orguser.org, role=invited_role)
+        OrgUser.objects.create(
+            user=existing_user,
+            org=orguser.org,
+            role=invited_role,
+            can_accept_tnc=payload.can_accept_tnc,
+        )
         sendgrid.send_youve_been_added_email(
             invited_email, orguser.user.email, orguser.org.name
         )
         return InvitationSchema(
             invited_email=invited_email,
             invited_role_slug=payload.invited_role_slug,
+            can_accept_tnc=payload.can_accept_tnc,
         )
 
     invitation = Invitation.objects.filter(
@@ -586,6 +593,7 @@ def post_organization_user_invite(request, payload: InvitationSchema):
         invited_by=orguser,
         invited_on=payload.invited_on,
         invite_code=payload.invite_code,
+        can_accept_tnc=payload.can_accept_tnc,
     )
 
     # trigger an email to the user
@@ -638,7 +646,10 @@ def post_organization_user_accept_invite(
             )
             UserAttributes.objects.create(user=user, email_verified=True)
         orguser = OrgUser.objects.create(
-            user=user, org=invitation.invited_by.org, role=invitation.invited_role
+            user=user,
+            org=invitation.invited_by.org,
+            role=invitation.invited_role,
+            can_accept_tnc=invitation.can_accept_tnc,
         )
     invitation.delete()
     return OrgUserResponse.from_orguser(orguser)
@@ -865,5 +876,25 @@ def delete_organization_warehouses_v1(request):
         raise HttpError(400, "create an organization first")
 
     delete_warehouse_v1(orguser.org)
+
+    return {"success": 1}
+
+
+@user_org_api.post("/organizations/accept-tnc/", auth=auth.CanManagePipelines())
+def post_organization_accept_tnc(request):
+    """accept the terms and conditions"""
+    orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
+
+    if not orguser.can_accept_tnc:
+        raise HttpError(400, "user cannot accept tnc")
+
+    if OrgTnC.objects.filter(org=orguser.org).exists():
+        raise HttpError(400, "tnc already accepted")
+
+    OrgTnC.objects.create(
+        org=orguser.org, tnc_accepted_by=orguser, tnc_accepted_on=datetime.now()
+    )
 
     return {"success": 1}
