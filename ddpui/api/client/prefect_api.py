@@ -1422,3 +1422,57 @@ def get_prefect_dataflows_v1(request):
         )
 
     return res
+
+
+@prefectapi.get("/v1/flows/{deployment_id}", auth=auth.CanManagePipelines())
+def get_prefect_dataflow_v1(request, deployment_id):
+    """Fetch details of prefect deployment"""
+    orguser: OrgUser = request.orguser
+
+    if orguser.org is None:
+        raise HttpError(400, "register an organization first")
+
+    # remove the org data flow
+    org_data_flow = OrgDataFlowv1.objects.filter(
+        org=orguser.org, deployment_id=deployment_id
+    ).first()
+
+    if org_data_flow is None:
+        raise HttpError(404, "pipeline does not exist")
+
+    try:
+        deployment = prefect_service.get_deployment(deployment_id)
+        logger.info(deployment)
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to get deploymenet from prefect-proxy") from error
+
+    connections = [
+        {"id": task["connection_id"], "seq": task["seq"]}
+        for task in deployment["parameters"]["config"]["tasks"]
+        if task["type"] == AIRBYTECONNECTION
+    ]
+
+    has_transform = (
+        len(
+            [
+                task
+                for task in deployment["parameters"]["config"]["tasks"]
+                if task["type"] in [DBTCORE, SHELLOPERATION]
+            ]
+        )
+        > 0
+    )
+
+    # differentiate between deploymentName and name
+    deployment["deploymentName"] = deployment["name"]
+    deployment["name"] = org_data_flow.name
+
+    return {
+        "name": org_data_flow.name,
+        "deploymentName": deployment["deploymentName"],
+        "cron": deployment["cron"],
+        "connections": connections,
+        "dbtTransform": "yes" if has_transform else "no",
+        "isScheduleActive": deployment["isScheduleActive"],
+    }
