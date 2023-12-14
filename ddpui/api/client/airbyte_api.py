@@ -53,7 +53,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
-from ddpui.utils.constants import TASK_AIRBYTESYNC
+from ddpui.utils.constants import TASK_AIRBYTESYNC, AIRBYTE_SYNC_TIMEOUT
 from ddpui.utils.helpers import generate_hash_id
 
 
@@ -1133,7 +1133,7 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
                             "seq": 1,
                             "airbyte_server_block": org_airbyte_server_block.block_name,
                             "connection_id": airbyte_conn["connectionId"],
-                            "timeout": 15,
+                            "timeout": AIRBYTE_SYNC_TIMEOUT,
                         }
                     ]
                 }

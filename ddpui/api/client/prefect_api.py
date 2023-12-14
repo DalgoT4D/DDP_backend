@@ -15,7 +15,14 @@ from ddpui import auth
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service
 
-from ddpui.ddpprefect import DBTCORE, SHELLOPERATION, DBTCLIPROFILE, SECRET
+from ddpui.ddpprefect import (
+    DBTCORE,
+    SHELLOPERATION,
+    DBTCLIPROFILE,
+    SECRET,
+    AIRBYTECONNECTION,
+    AIRBYTESERVER,
+)
 from ddpui.models.org import (
     OrgPrefectBlock,
     OrgWarehouse,
@@ -40,13 +47,19 @@ from ddpui.ddpprefect.schema import (
     PrefectShellSetup,
     PrefectSecretBlockCreate,
     PrefectShellTaskSetup,
+    PrefectDataFlowCreateSchema4,
 )
 
 from ddpui.utils.deploymentblocks import write_dataflowblocks
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
-from ddpui.utils.constants import TASK_DBTRUN, TASK_GITPULL
+from ddpui.utils.constants import (
+    TASK_DBTRUN,
+    TASK_GITPULL,
+    TRANSFORM_TASKS_SEQ,
+    AIRBYTE_SYNC_TIMEOUT,
+)
 from ddpui.utils.prefectlogs import parse_prefect_logs
 from ddpui.utils.helpers import generate_hash_id
 
@@ -84,6 +97,7 @@ def ninja_default_error_handler(
     request, exc: Exception  # skipcq PYL-W0613
 ):  # pylint: disable=unused-argument
     """Handle any other exception raised in the apis"""
+    logger.info(exc)
     return Response({"detail": "something went wrong"}, status=500)
 
 
@@ -846,6 +860,7 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
             working_dir=project_dir,
             env=shell_env,
             slug=org_task.task.slug,
+            type=SHELLOPERATION,
         )
 
         if payload.flow_name is None:
@@ -886,6 +901,7 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
             project_dir=project_dir,
             cli_profile_block=cli_profile_block.block_name,
             cli_args=[],
+            type=DBTCORE,
         )
 
         if payload.flow_name is None:
@@ -1182,3 +1198,166 @@ def delete_prefect_transformation_tasks(request):
 
         logger.info("deleting org task %s", org_task.task.slug)
         org_task.delete()
+
+
+@prefectapi.post("/v1/flows/", auth=auth.CanManagePipelines())
+def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
+    """Create a prefect deployment i.e. a ddp dataflow"""
+    orguser: OrgUser = request.orguser
+
+    if orguser.org is None:
+        raise HttpError(400, "register an organization first")
+
+    if payload.name in [None, ""]:
+        raise HttpError(400, "must provide a name for the flow")
+
+    seq = 0  # global sequence for all tasks
+    tasks = []
+    map_org_tasks = []  # map org tasks to dataflow
+
+    # check if pipeline has airbyte syncs
+    if len(payload.connections) > 0:
+        org_server_block = OrgPrefectBlockv1.objects.filter(
+            org=orguser.org, block_type=AIRBYTESERVER
+        ).first()
+        if not org_server_block:
+            raise HttpError(400, "airbyte server block not found")
+
+        # push sync tasks to pipeline
+        payload.connections.sort(key=lambda conn: conn.seq)
+        for connection in payload.connections:
+            logger.info(connection)
+            org_task = OrgTask.objects.filter(
+                org=orguser.org, connection_id=connection.id
+            ).first()
+            if org_task is None:
+                logger.info(
+                    f"connection id {connection.id} not found in org tasks; ignoring this airbyte sync"
+                )
+                continue
+            # map this org task to dataflow
+            map_org_tasks.append(org_task)
+
+            logger.info(
+                f"connection id {connection.id} found in org tasks; pushing to pipeline"
+            )
+            seq += 1
+            task_config = {
+                "seq": seq,
+                "slug": org_task.task.slug,
+                "type": AIRBYTECONNECTION,
+                "airbyte_server_block": org_server_block.block_name,
+                "connection_id": connection.id,
+                "timeout": AIRBYTE_SYNC_TIMEOUT,
+            }
+            tasks.append(task_config)
+
+    logger.info(f"Pipline has {seq} airbyte syncs")
+
+    # check if pipeline has dbt transformation
+    if payload.dbtTransform == "yes":
+        logger.info(f"Dbt tasks being pushed to the pipeline")
+
+        # dbt params
+        dbt_env_dir = Path(orguser.org.dbt.dbt_venv)
+        if not dbt_env_dir.exists():
+            raise HttpError(400, "create the dbt env first")
+
+        dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
+        dbtrepodir = Path(os.getenv("CLIENTDBT_ROOT")) / orguser.org.slug / "dbtrepo"
+        project_dir = str(dbtrepodir)
+        target = orguser.org.dbt.default_schema
+
+        # dbt cli profile block
+        cli_block = OrgPrefectBlockv1.objects.filter(
+            org=orguser.org, block_type=DBTCLIPROFILE
+        ).first()
+        if not cli_block:
+            raise HttpError(400, "dbt cli profile not found")
+
+        # push dbt pipeline tasks
+        for org_task in OrgTask.objects.filter(task__type__in=["dbt", "git"]).all():
+            logger.info(
+                f"found transform task {org_task.task.slug}; pushing to pipeline"
+            )
+            # map this org task to dataflow
+            map_org_tasks.append(org_task)
+
+            dbt_core_task_setup = PrefectDbtTaskSetup(
+                seq = TRANSFORM_TASKS_SEQ[org_task.task.slug] + seq,
+                slug=org_task.task.slug,
+                commands=[f"{dbt_binary} {org_task.task.command} --target {target}"],
+                type=DBTCORE,
+                env={},
+                working_dir=project_dir,
+                profiles_dir=f"{project_dir}/profiles/",
+                project_dir=project_dir,
+                cli_profile_block=cli_block.block_name,
+                cli_args=[],
+            )
+
+            task_config = dict(dbt_core_task_setup)
+
+            # update task_config its a git pull task
+            if org_task.task.slug == TASK_GITPULL:
+                shell_env = {"secret-git-pull-url-block": ""}
+
+                gitpull_secret_block = OrgPrefectBlockv1.objects.filter(
+                    org=orguser.org, block_type=SECRET, block_name__contains="git-pull"
+                ).first()
+
+                if gitpull_secret_block is not None:
+                    shell_env[
+                        "secret-git-pull-url-block"
+                    ] = gitpull_secret_block.block_name
+
+                shell_task_setup = PrefectShellTaskSetup(
+                    commands=["git pull"],
+                    working_dir=project_dir,
+                    env=shell_env,
+                    slug=org_task.task.slug,
+                    type=SHELLOPERATION,
+                    seq=TRANSFORM_TASKS_SEQ[org_task.task.slug] + seq,
+                )
+
+                task_config = dict(shell_task_setup)
+
+            tasks.append(task_config)
+        logger.info(f"Dbt tasks pushed to the pipeline")
+
+    # create deployment
+    try:
+        hash_code = generate_hash_id(8)
+        deployment_name = f"pipeline-{orguser.org.slug}-{hash_code}"
+        dataflow = prefect_service.create_dataflow_v1(
+            PrefectDataFlowCreateSchema3(
+                deployment_name=deployment_name,
+                flow_name=deployment_name,
+                orgslug=orguser.org.slug,
+                deployment_params={"config": {"tasks": tasks}},
+                cron=payload.cron,
+            )
+        )
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to create a pipeline") from error
+
+    org_dataflow = OrgDataFlowv1.objects.create(
+        org=orguser.org,
+        name=payload.name,
+        deployment_name=dataflow["deployment"]["name"],
+        deployment_id=dataflow["deployment"]["id"],
+        cron=payload.cron,
+        dataflow_type="orchestrate",
+    )
+
+    for org_task in map_org_tasks:
+        DataflowOrgTask.objects.create(dataflow=org_dataflow, orgtask=org_task)
+
+    return {
+        "deploymentId": org_dataflow.deployment_id,
+        "name": org_dataflow.name,
+        "cron": org_dataflow.cron,
+    }
+        
+    return tasks
