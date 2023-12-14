@@ -1359,3 +1359,66 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
         "name": org_dataflow.name,
         "cron": org_dataflow.cron,
     }
+
+
+@prefectapi.get("/v1/flows/", auth=auth.CanManagePipelines())
+def get_prefect_dataflows_v1(request):
+    """Fetch all flows/pipelines created in an organization"""
+    orguser: OrgUser = request.orguser
+
+    if orguser.org is None:
+        raise HttpError(400, "register an organization first")
+
+    org_data_flows = OrgDataFlowv1.objects.filter(
+        org=orguser.org, dataflow_type="orchestrate"
+    ).all()
+
+    deployment_ids = [flow.deployment_id for flow in org_data_flows]
+
+    # dictionary to hold {"id": status}
+    is_deployment_active = {}
+
+    # setting active/inactive status based on if the schedule is set or not
+    for deployment in prefect_service.get_filtered_deployments(
+        orguser.org.slug, deployment_ids
+    ):
+        is_deployment_active[deployment["deploymentId"]] = (
+            deployment["isScheduleActive"]
+            if "isScheduleActive" in deployment
+            else False
+        )
+
+    res = []
+
+    for flow in org_data_flows:
+        # block_ids = DataflowBlock.objects.filter(dataflow=flow).values("opb__block_id")
+        # # if there is one there will typically be several - a sync,
+        # # a git-run, a git-test... we return the userinfo only for the first one
+        # lock = BlockLock.objects.filter(
+        #     opb__block_id__in=[x["opb__block_id"] for x in block_ids]
+        # ).first()
+
+        # TODO: task lock logic
+        lock = None
+        res.append(
+            {
+                "name": flow.name,
+                "deploymentId": flow.deployment_id,
+                "cron": flow.cron,
+                "deploymentName": flow.deployment_name,
+                "lastRun": prefect_service.get_last_flow_run_by_deployment_id(
+                    flow.deployment_id
+                ),
+                "status": is_deployment_active[flow.deployment_id]
+                if flow.deployment_id in is_deployment_active
+                else False,
+                "lock": {
+                    "lockedBy": lock.locked_by.user.email,
+                    "lockedAt": lock.locked_at,
+                }
+                if lock
+                else None,
+            }
+        )
+
+    return res
