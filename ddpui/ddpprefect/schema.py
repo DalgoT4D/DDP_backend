@@ -268,6 +268,16 @@ class PrefectDataFlowUpdateSchema2(Schema):
     cron: str = None
 
 
+class PrefectDataFlowUpdateSchema3(Schema):
+    """Edit the data flow"""
+
+    name: str
+    connections: list[PrefectFlowAirbyteConnection2]
+    dbtTransform: str
+    cron: str
+    deployment_params: dict = None
+
+
 class PrefectFlowRunSchema(Schema):
     """Schema for field of a flow run fetched"""
 

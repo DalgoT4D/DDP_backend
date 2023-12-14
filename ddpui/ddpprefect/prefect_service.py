@@ -16,6 +16,7 @@ from ddpui.ddpprefect.schema import (
     PrefectSecretBlockCreate,
     PrefectShellTaskSetup,
     PrefectDbtTaskSetup,
+    PrefectDataFlowUpdateSchema3,
 )
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.orgjobs import BlockLock, DataflowBlock
@@ -456,6 +457,17 @@ def update_dataflow(
             ],
             "dbt_blocks": payload.dbt_blocks,
         },
+    )
+    return res
+
+
+def update_dataflow_v1(
+    deployment_id: str, payload: PrefectDataFlowUpdateSchema3
+) -> dict:  # pragma: no cover
+    """update a prefect deployment with a new cron schedule"""
+    res = prefect_put(
+        f"v1/deployments/{deployment_id}",
+        {"cron": payload.cron, "deployment_params": payload.deployment_params},
     )
     return res
 
