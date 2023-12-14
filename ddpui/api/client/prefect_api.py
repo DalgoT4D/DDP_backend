@@ -1476,3 +1476,24 @@ def get_prefect_dataflow_v1(request, deployment_id):
         "dbtTransform": "yes" if has_transform else "no",
         "isScheduleActive": deployment["isScheduleActive"],
     }
+
+
+@prefectapi.delete("/v1/flows/{deployment_id}", auth=auth.CanManagePipelines())
+def delete_prefect_dataflow_v1(request, deployment_id):
+    """Delete a prefect deployment along with its org data flow"""
+    orguser: OrgUser = request.orguser
+
+    if orguser.org is None:
+        raise HttpError(400, "register an organization first")
+
+    prefect_service.delete_deployment_by_id(deployment_id)
+
+    # remove the org data flow
+    org_data_flow = OrgDataFlowv1.objects.filter(
+        org=orguser.org, deployment_id=deployment_id
+    ).first()
+
+    if org_data_flow:
+        org_data_flow.delete()
+
+    return {"success": 1}
