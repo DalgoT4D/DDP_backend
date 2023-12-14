@@ -1284,7 +1284,7 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
             map_org_tasks.append(org_task)
 
             dbt_core_task_setup = PrefectDbtTaskSetup(
-                seq = TRANSFORM_TASKS_SEQ[org_task.task.slug] + seq,
+                seq=TRANSFORM_TASKS_SEQ[org_task.task.slug] + seq,
                 slug=org_task.task.slug,
                 commands=[f"{dbt_binary} {org_task.task.command} --target {target}"],
                 type=DBTCORE,
@@ -1359,5 +1359,3 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
         "name": org_dataflow.name,
         "cron": org_dataflow.cron,
     }
-        
-    return tasks
