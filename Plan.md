@@ -41,9 +41,9 @@ Plan to go away from the prefect dbt core blocks & connection blocks
 
 ### Block lock logic replacement
 
-- Basically we will replace blocks by commands that we run. We will now have a command lock logic.
+- Basically we will replace blocks by tasks that we run. We will now have a task lock logic.
 
-- Each deployment will be running some command which can be locked or not.
+- Each deployment will be running some task which can be locked or not.
 
 ### Structural & schema changes
 
@@ -120,3 +120,39 @@ Plan to go away from the prefect dbt core blocks & connection blocks
 | Update a pipeline `PUT /api/prefect/flows/{deployment_id}`              | Update a pipeline `PUT /api/prefect/v1/flows/{deployment_id}`              |
 | Delete a pipeline `DELETE /api/prefect/flows/{deployment_id}`           | Update a connection `DELETE /api/prefect/v1/flows/{deployment_id}`         |
 | Proxy: update a deployment `PUT /api/proxy/deployments/{deployment_id}` | Proxy: update a deployment `PUT /api/proxy/v1/deployments/{deployment_id}` |
+
+## Data Migration
+
+#### <u>Phase1 - Airbyte sever & connections</u>
+
+- Move/copy all airbyte server blocks from `orgprefectblock` to `orgprefectblockv1`. No changes required on prefect side. Block Ids will remain the same.
+
+  ***
+
+  ### (Can take a break)
+
+  ***
+
+- Move/copy all the airbyte connections deployment with prefix as `manual-sync..` from `orgdataflow` to `orgdataflowv1`. Block name, block type and block ids remain the same.
+
+- For each copied deployment above, we need to update the delpoyment parameters. We will make the deployment have old params + new params. So the new deployment parameters
+
+  ```
+  {
+    airbyte_blocks: [], # old
+    dbt_blocks: [], # old
+    config: {} # new task dictionary
+  }
+  ```
+
+- Let the old architecture run for atleast one day to make sure its working.
+
+  ***
+
+  ### (Can take a break)
+
+  ***
+
+- Update the columns `path` and `entrypoint` in deployment table in prefect db to point it to the new flow in `prefect_flows.py`
+
+- Run and test the new architecture
