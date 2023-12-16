@@ -235,3 +235,23 @@ class TestClient:
                 flow_run_id = result["flow_run_id"]
                 return flow_run_id
         return None
+
+    def create_flow(self, connection_id: str):
+        """creates a v1 flow"""
+        payload = {
+            "name": "testflow",
+            "connections": [
+                {
+                    "seq": 0,
+                    "id": connection_id,
+                },
+            ],
+            "dbtTransform": "yes",
+            "cron": "",
+        }
+        res = self.clientpost("prefect/v1/flows/", json=payload)
+        return res
+
+    def get_flows(self):
+        """get flows"""
+        return self.clientget("prefect/v1/flows/")
