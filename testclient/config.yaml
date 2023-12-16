@@ -40,4 +40,6 @@ prefect:
     delete_blocks: false
     delete_tasks: false
     create_tasks: false
-    run_flow_dbtrun: true
+    run_flow_dbtrun: false
+  create_flow: false
+  delete_flows: false

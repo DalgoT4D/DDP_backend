@@ -41,9 +41,9 @@ Plan to go away from the prefect dbt core blocks & connection blocks
 
 ### Block lock logic replacement
 
-- Basically we will replace blocks by commands that we run. We will now have a command lock logic.
+- Basically we will replace blocks by tasks that we run. We will now have a task lock logic.
 
-- Each deployment will be running some command which can be locked or not.
+- Each deployment will be running some task which can be locked or not.
 
 ### Structural & schema changes
 
@@ -109,3 +109,50 @@ Plan to go away from the prefect dbt core blocks & connection blocks
 | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Django: apis to run dbt core operations & git pull operations on transform can be deprecated `/api/prefect/flows/dbt_run/` & `/api/dbt/git_pull/` | Django : api to run tasks (dbt + shell operation(git pull)) `/api/prefect/tasks/{orgtask_id}/run/` <br /> Proxy : new api to run tasks (dbt tasks) via updated flows `/proxy/v1/flows/dbtcore/run/` <br /> Proxy : new api to run shell operations (a general shell op; will be used for git pull for now) via updated flows `/proxy/flows/shell/run/` |
 | Django: api to run long tasks via deployment `/api/prefect/flows/{deployment_id}/flow_run`                                                        | Django: new api to run long running tasks via deployment `/api/prefect/v1/flows/{deployment_id}/flow_run`                                                                                                                                                                                                                                              |
+
+#### <u>Pipeline/orchestrate page</u>
+
+| Before                                                                  | After                                                                      |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Django: create dataflow/pipeline `POST /api/prefect/flows/`             | Django : new api to create dataflow/pipeline `POST /api/prefect/v1/flows/` |
+| Get all pipelines `GET /api/prefect/flows/`                             | Get all pipelines `GET /api/prefect/v1/flows/`                             |
+| Get a pipeline `GET /api/prefect/flows/{deployment_id}`                 | Get a pipeline `GET /api/airbyte/v1/flows/{deployment_id}`                 |
+| Update a pipeline `PUT /api/prefect/flows/{deployment_id}`              | Update a pipeline `PUT /api/prefect/v1/flows/{deployment_id}`              |
+| Delete a pipeline `DELETE /api/prefect/flows/{deployment_id}`           | Update a connection `DELETE /api/prefect/v1/flows/{deployment_id}`         |
+| Proxy: update a deployment `PUT /api/proxy/deployments/{deployment_id}` | Proxy: update a deployment `PUT /api/proxy/v1/deployments/{deployment_id}` |
+
+## Data Migration
+
+#### <u>Phase1 - Airbyte sever & connections</u>
+
+- Move/copy all airbyte server blocks from `orgprefectblock` to `orgprefectblockv1`. No changes required on prefect side. Block Ids will remain the same.
+
+  ***
+
+  ### (Can take a break)
+
+  ***
+
+- Move/copy all the airbyte connections deployment with prefix as `manual-sync..` from `orgdataflow` to `orgdataflowv1`. Block name, block type and block ids remain the same.
+
+- For each copied deployment above, we need to update the delpoyment parameters. We will make the deployment have old params + new params. So the new deployment parameters
+
+  ```
+  {
+    airbyte_blocks: [], # old
+    dbt_blocks: [], # old
+    config: {tasks: []} # new task dictionary
+  }
+  ```
+
+- Let the old architecture run for atleast one day to make sure its working.
+
+  ***
+
+  ### (Can take a break)
+
+  ***
+
+- Update the columns `path` and `entrypoint` in deployment table in prefect db to point it to the new flow in `prefect_flows.py`
+
+- Run and test the new architecture
