@@ -1,6 +1,4 @@
-from django.core import management
 from django.core.management.base import BaseCommand
-from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.org import (
     Org,
     OrgPrefectBlock,
@@ -14,7 +12,9 @@ from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask
 from ddpui.utils.constants import TASK_AIRBYTESYNC, AIRBYTE_SYNC_TIMEOUT
 from ddpui.ddpprefect import AIRBYTESERVER, AIRBYTECONNECTION
 
-logger = CustomLogger("ddpui")
+import logging
+
+logger = logging.getLogger("migration")
 
 
 class Command(BaseCommand):
@@ -27,7 +27,9 @@ class Command(BaseCommand):
     @staticmethod
     def migrate_airbyte_server_blocks(org: Org):
         """Create/update new server block"""
-        old_block = OrgPrefectBlock.objects.filter(org=org).first()
+        old_block = OrgPrefectBlock.objects.filter(
+            org=org, block_type=AIRBYTESERVER
+        ).first()
         if not old_block:
             logger.info(f"Server block not found for the org '{org.slug}'")
             return
@@ -72,10 +74,10 @@ class Command(BaseCommand):
             )
             return
 
-        logger.info(f"Found airbyte server block")
+        logger.info("Found airbyte server block")
 
-        task = Task.objects.filter(slug=TASK_AIRBYTESYNC).first()
-        if not task:
+        airbyte_sync_task = Task.objects.filter(slug=TASK_AIRBYTESYNC).first()
+        if not airbyte_sync_task:
             logger.info("run the tasks migration to populate the master table")
             return
 
@@ -90,14 +92,14 @@ class Command(BaseCommand):
 
             org_task = OrgTask.objects.filter(
                 org=org,
-                task=task,
+                task=airbyte_sync_task,
                 connection_id=old_dataflow.connection_id,
             ).first()
 
             if not org_task:
                 org_task = OrgTask.objects.create(
                     org=org,
-                    task=task,
+                    task=airbyte_sync_task,
                     connection_id=old_dataflow.connection_id,
                 )
 
@@ -131,7 +133,7 @@ class Command(BaseCommand):
 
             params = deployment["parameters"]
             task_config = {
-                "slug": task.slug,
+                "slug": airbyte_sync_task.slug,
                 "type": AIRBYTECONNECTION,
                 "seq": 1,
                 "airbyte_server_block": server_block.block_name,
