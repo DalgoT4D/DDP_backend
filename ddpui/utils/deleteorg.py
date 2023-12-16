@@ -200,8 +200,9 @@ def delete_one_org(org: Org, yes_really: bool):
         org=org, role=OrgUserRole.ACCOUNT_MANAGER
     ).first()
     logger.info(
-        "OrgName: %-25s Airbyte workspace ID: %-40s Admin: %s",
+        "OrgName: %-25s %-25s Airbyte workspace ID: %-40s Admin: %s",
         org.name,
+        org.slug,
         org.airbyte_workspace_id,
         account_admin.user.email if account_admin else "<unknonw>",
     )
