@@ -141,7 +141,7 @@ Plan to go away from the prefect dbt core blocks & connection blocks
   {
     airbyte_blocks: [], # old
     dbt_blocks: [], # old
-    config: {} # new task dictionary
+    config: {tasks: []} # new task dictionary
   }
   ```
 
