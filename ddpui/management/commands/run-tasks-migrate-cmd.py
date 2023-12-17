@@ -21,8 +21,7 @@ class Command(BaseCommand):
     help = "Process Commands in tasks-architecture folder"
 
     def add_arguments(self, parser):
-        parser.add_argument("--operation", type=str, required=True)
-        parser.add_argument("--orgs", nargs="*", type=str, default=[], action="append")
+        pass
 
     @staticmethod
     def migrate_airbyte_server_blocks(org: Org):
@@ -164,14 +163,7 @@ class Command(BaseCommand):
                 continue
 
     def handle(self, *args, **options):
-        for slug in options["orgs"][0]:
-            org = Org.objects.filter(slug=slug).first()
-            if not org:
-                logger.info(f"Org with slug '{slug}' not found")
-                continue
-            logger.info(f"Found org with slug '{slug}'")
-            if options["operation"] == "server-block":
-                Command.migrate_airbyte_server_blocks(org)
-            elif options["operation"] == "manual-sync-deployments":
-                logger.info("migrating manual sync conn deployments")
-                Command.migrate_manual_sync_conn_deployments(org)
+        for org in Org.objects.all():
+            logger.info(f"Found org with slug '{org.slug}'")
+            Command.migrate_airbyte_server_blocks(org)
+            Command.migrate_manual_sync_conn_deployments(org)
