@@ -214,7 +214,6 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         for org in Org.objects.all():
-            if org.slug == "test-local-dev-org":
-                logger.info(f"Found org with slug '{org.slug}'")
-                Command.migrate_airbyte_server_blocks(org)
-                Command.migrate_manual_sync_conn_deployments(org)
+            logger.info(f"Found org with slug '{org.slug}'")
+            Command.migrate_airbyte_server_blocks(org)
+            Command.migrate_manual_sync_conn_deployments(org)
