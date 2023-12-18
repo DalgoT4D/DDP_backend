@@ -56,17 +56,12 @@ class Command(BaseCommand):
             new_block.save()
 
         # assert server block creation
-        server_blk_cnt = OrgPrefectBlockv1.objects.filter(
+        cnt = OrgPrefectBlockv1.objects.filter(
             org=org, block_type=AIRBYTESERVER
         ).count()
-        if server_blk_cnt == 1:
-            logger.info(
-                f"SUCCESS: found 1 server block for org {org.slug} in orgprefectblockv1"
-            )
-        else:
-            logger.info(
-                f"FAILURE: found {server_blk_cnt} server blocks for the org {org.slug} in orgprefectblockv1"
-            )
+        logger.info(
+            f"{'SUCCESS' if cnt == 1 else 'FAILURE'}: found {cnt} server block for org {org.slug} in orgprefectblockv1"
+        )
 
         return new_block
 
@@ -121,10 +116,9 @@ class Command(BaseCommand):
                 task=airbyte_sync_task,
                 connection_id=old_dataflow.connection_id,
             ).count()
-            if cnt == 1:
-                logger.info(f"SUCCESS: found 1 orgtask in {org.slug}")
-            else:
-                logger.info(f"FAILURE: found {cnt} orgtask in {org.slug}")
+            logger.info(
+                f"{'SUCCESS' if cnt == 1 else 'FAILURE'}: found {cnt} orgtask in {org.slug}"
+            )
 
             if not new_dataflow:  # create
                 logger.info(
