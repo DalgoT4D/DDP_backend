@@ -941,12 +941,20 @@ def post_run_prefect_org_deployment_task(request, deployment_id):
     if dataflow_orgtask is None:
         raise HttpError(400, "no org task mapped to the deployment")
 
-    # TODO: add task lock logic
+    locks = prefect_service.lock_tasks_for_deployment(deployment_id, orguser)
+
     try:
         res = prefect_service.create_deployment_flow_run(deployment_id)
     except Exception as error:
+        for task_lock in locks:
+            logger.info("deleting TaskLock %s", task_lock.orgtask.task.slug)
+            task_lock.delete()
         logger.exception(error)
         raise HttpError(400, "failed to start a run") from error
+
+    for tasklock in locks:
+        tasklock.flow_run_id = res["flow_run_id"]
+        tasklock.save()
 
     return res
 
