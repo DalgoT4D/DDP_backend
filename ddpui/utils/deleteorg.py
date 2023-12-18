@@ -164,7 +164,10 @@ def delete_warehouse_v1(org: Org):  # skipcq: PYL-R0201
     # delete dataflows
     logger.info("Deleting data flows")
     for data_flow in OrgDataFlowv1.objects.filter(org=org):
-        prefect_service.delete_deployment_by_id(data_flow.deployment_id)
+        try:
+            prefect_service.delete_deployment_by_id(data_flow.deployment_id)
+        except HttpError:
+            pass
         data_flow.delete()
         logger.info(f"Deleted deployment - {data_flow.deployment_id}")
     logger.info("FINISHED Deleting data flows")
