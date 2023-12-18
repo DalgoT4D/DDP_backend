@@ -1,4 +1,5 @@
 from ninja.errors import HttpError
+import uuid
 from ddpui.models.org_user import Org, OrgUser, OrgUserRole
 from ddpui.models.org import OrgDataFlow, OrgPrefectBlock, OrgWarehouse
 from ddpui.models.org import OrgDataFlowv1, OrgPrefectBlockv1
@@ -11,6 +12,15 @@ from ddpui.utils import secretsmanager
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
+
+
+def is_valid_uuid(s):
+    """returns whether or not a string is a UUID"""
+    try:
+        uuid.UUID(s)
+        return True
+    except ValueError:
+        return False
 
 
 def delete_prefect_deployments(org: Org):  # skipcq: PYL-R0201
@@ -75,25 +85,28 @@ def delete_airbyte_workspace(org: Org):  # skipcq: PYL-R0201
         prefect_service.delete_airbyte_server_block(block.block_id)
         block.delete()
 
-    for connection in airbyte_service.get_connections(org.airbyte_workspace_id)[
-        "connections"
-    ]:
-        logger.info("deleting connection in Airbyte " + connection["connectionId"])
-        airbyte_service.delete_connection(
-            org.airbyte_workspace_id, connection["connectionId"]
-        )
+    if is_valid_uuid(org.airbyte_workspace_id):
+        for connection in airbyte_service.get_connections(org.airbyte_workspace_id)[
+            "connections"
+        ]:
+            logger.info("deleting connection in Airbyte " + connection["connectionId"])
+            airbyte_service.delete_connection(
+                org.airbyte_workspace_id, connection["connectionId"]
+            )
 
-    for destination in airbyte_service.get_destinations(org.airbyte_workspace_id)[
-        "destinations"
-    ]:
-        logger.info("deleting destination in Airbyte " + destination["destinationId"])
-        airbyte_service.delete_destination(
-            org.airbyte_workspace_id, destination["destinationId"]
-        )
+        for destination in airbyte_service.get_destinations(org.airbyte_workspace_id)[
+            "destinations"
+        ]:
+            logger.info(
+                "deleting destination in Airbyte " + destination["destinationId"]
+            )
+            airbyte_service.delete_destination(
+                org.airbyte_workspace_id, destination["destinationId"]
+            )
 
-    for source in airbyte_service.get_sources(org.airbyte_workspace_id)["sources"]:
-        logger.info("deleting source in Airbyte " + source["sourceId"])
-        airbyte_service.delete_source(org.airbyte_workspace_id, source["sourceId"])
+        for source in airbyte_service.get_sources(org.airbyte_workspace_id)["sources"]:
+            logger.info("deleting source in Airbyte " + source["sourceId"])
+            airbyte_service.delete_source(org.airbyte_workspace_id, source["sourceId"])
 
     for warehouse in OrgWarehouse.objects.filter(org=org):
         secretsmanager.delete_warehouse_credentials(warehouse)
@@ -135,23 +148,28 @@ def delete_warehouse_v1(org: Org):  # skipcq: PYL-R0201
 
     logger.info("FINISHED Deleting prefect connection blocks")
 
-    for connection in airbyte_service.get_connections(org.airbyte_workspace_id)[
-        "connections"
-    ]:
-        logger.info("deleting connection in Airbyte " + connection["connectionId"])
-        airbyte_service.delete_connection(
-            org.airbyte_workspace_id, connection["connectionId"]
-        )
-        logger.info(f"deleted connection in Airbyte - {connection['connectionId']}")
+    if is_valid_uuid(org.airbyte_workspace_id):
+        for connection in airbyte_service.get_connections(org.airbyte_workspace_id)[
+            "connections"
+        ]:
+            logger.info("deleting connection in Airbyte " + connection["connectionId"])
+            airbyte_service.delete_connection(
+                org.airbyte_workspace_id, connection["connectionId"]
+            )
+            logger.info(f"deleted connection in Airbyte - {connection['connectionId']}")
 
-    for destination in airbyte_service.get_destinations(org.airbyte_workspace_id)[
-        "destinations"
-    ]:
-        logger.info("deleting destination in Airbyte " + destination["destinationId"])
-        airbyte_service.delete_destination(
-            org.airbyte_workspace_id, destination["destinationId"]
-        )
-        logger.info(f"deleted destination in Airbyte - {destination['destinationId']}")
+        for destination in airbyte_service.get_destinations(org.airbyte_workspace_id)[
+            "destinations"
+        ]:
+            logger.info(
+                "deleting destination in Airbyte " + destination["destinationId"]
+            )
+            airbyte_service.delete_destination(
+                org.airbyte_workspace_id, destination["destinationId"]
+            )
+            logger.info(
+                f"deleted destination in Airbyte - {destination['destinationId']}"
+            )
 
     logger.info("Deleting django warehouse and the credentials in secrets manager")
     for warehouse in OrgWarehouse.objects.filter(org=org):
@@ -180,9 +198,10 @@ def delete_airbyte_workspace_v1(org: Org):  # skipcq: PYL-R0201
     """
     delete_warehouse_v1(org)
 
-    for source in airbyte_service.get_sources(org.airbyte_workspace_id)["sources"]:
-        logger.info("deleting source in Airbyte " + source["sourceId"])
-        airbyte_service.delete_source(org.airbyte_workspace_id, source["sourceId"])
+    if is_valid_uuid(org.airbyte_workspace_id):
+        for source in airbyte_service.get_sources(org.airbyte_workspace_id)["sources"]:
+            logger.info("deleting source in Airbyte " + source["sourceId"])
+            airbyte_service.delete_source(org.airbyte_workspace_id, source["sourceId"])
 
     try:
         airbyte_service.delete_workspace(org.airbyte_workspace_id)
