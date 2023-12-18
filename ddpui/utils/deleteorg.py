@@ -164,7 +164,10 @@ def delete_warehouse_v1(org: Org):  # skipcq: PYL-R0201
     # delete dataflows
     logger.info("Deleting data flows")
     for data_flow in OrgDataFlowv1.objects.filter(org=org):
-        prefect_service.delete_deployment_by_id(data_flow.deployment_id)
+        try:
+            prefect_service.delete_deployment_by_id(data_flow.deployment_id)
+        except HttpError:
+            pass
         data_flow.delete()
         logger.info(f"Deleted deployment - {data_flow.deployment_id}")
     logger.info("FINISHED Deleting data flows")
@@ -200,8 +203,9 @@ def delete_one_org(org: Org, yes_really: bool):
         org=org, role=OrgUserRole.ACCOUNT_MANAGER
     ).first()
     logger.info(
-        "OrgName: %-25s Airbyte workspace ID: %-40s Admin: %s",
+        "OrgName: %-25s %-25s Airbyte workspace ID: %-40s Admin: %s",
         org.name,
+        org.slug,
         org.airbyte_workspace_id,
         account_admin.user.email if account_admin else "<unknonw>",
     )
