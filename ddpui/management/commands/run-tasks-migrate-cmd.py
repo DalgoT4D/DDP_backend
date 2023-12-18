@@ -55,6 +55,14 @@ class Command(BaseCommand):
             new_block.block_name = old_block.block_name
             new_block.save()
 
+        # assert server block creation
+        cnt = OrgPrefectBlockv1.objects.filter(
+            org=org, block_type=AIRBYTESERVER
+        ).count()
+        logger.info(
+            f"{'SUCCESS' if cnt == 1 else 'FAILURE'}: found {cnt} server block for org {org.slug} in orgprefectblockv1"
+        )
+
         return new_block
 
     @staticmethod
@@ -102,6 +110,16 @@ class Command(BaseCommand):
                     connection_id=old_dataflow.connection_id,
                 )
 
+            # assert creation of orgtask
+            cnt = OrgTask.objects.filter(
+                org=org,
+                task=airbyte_sync_task,
+                connection_id=old_dataflow.connection_id,
+            ).count()
+            logger.info(
+                f"{'SUCCESS' if cnt == 1 else 'FAILURE'}: found {cnt} orgtask in {org.slug}"
+            )
+
             if not new_dataflow:  # create
                 logger.info(
                     f"Creating new dataflow with id '{old_dataflow.deployment_id}' in orgdataflowv1"
@@ -117,11 +135,26 @@ class Command(BaseCommand):
 
                 DataflowOrgTask.objects.create(dataflow=new_dataflow, orgtask=org_task)
 
+            # assert orgdataflowv1 creation
+            cnt = OrgDataFlowv1.objects.filter(
+                org=org,
+                dataflow_type="manual",
+                deployment_id=old_dataflow.deployment_id,
+            ).count()
+            logger.info(
+                f"{'SUCCESS' if cnt == 1 else 'FAILURE'}: found {cnt} dataflowv1 in {org.slug}"
+            )
+            cnt = DataflowOrgTask.objects.filter(
+                dataflow=new_dataflow, orgtask=org_task
+            ).count()
+            logger.info(
+                f"{'SUCCESS' if cnt == 1 else 'FAILURE'}: found {cnt} datafloworgtask in {org.slug}"
+            )
+
             # update deployment params
             deployment = None
             try:
                 deployment = get_deployment(new_dataflow.deployment_id)
-                logger.info(deployment)
             except Exception as error:
                 logger.info(
                     f"Something went wrong in fetching the deployment with id '{new_dataflow.deployment_id}'"
@@ -141,7 +174,6 @@ class Command(BaseCommand):
             }
             params["config"] = {"tasks": [task_config]}
             logger.info(f"PARAMS {new_dataflow.deployment_id}")
-            logger.info(params)
             try:
                 payload = PrefectDataFlowUpdateSchema3(
                     name=new_dataflow.name,  # wont be updated
@@ -157,6 +189,24 @@ class Command(BaseCommand):
             except Exception as error:
                 logger.info(
                     f"Something went wrong in updating the deployment params with id '{new_dataflow.deployment_id}'"
+                )
+                logger.exception(error)
+                logger.info("skipping to next loop")
+                continue
+
+            # assert deployment params updation
+            try:
+                deployment = get_deployment(new_dataflow.deployment_id)
+                if "config" not in deployment["parameters"]:
+                    raise Exception(
+                        "Didnt find the 'config' key in the deployment parameters"
+                    )
+                logger.info(
+                    f"SUCCESS: found correct deployment params for id with {new_dataflow.deployment_id} "
+                )
+            except Exception as error:
+                logger.info(
+                    f"Assertion failed for deployment with id '{new_dataflow.deployment_id}'"
                 )
                 logger.exception(error)
                 logger.info("skipping to next loop")
