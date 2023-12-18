@@ -103,8 +103,6 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
     if message_object is None and isinstance(message, dict):
         message_object = message
 
-    logger.info("MESSAGE OBJECT")
-    logger.info(message_object)
     flow_run_id = None
     if message_object:
         message_type = get_message_type(message_object)
