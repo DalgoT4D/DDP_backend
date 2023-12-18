@@ -18,19 +18,24 @@ logger = logging.getLogger("migration")
 
 
 class Command(BaseCommand):
+    """migrate from old blocks to new tasks"""
+
     help = "Process Commands in tasks-architecture folder"
+
+    def __init__(self):
+        self.failures = []
+        self.successes = []
 
     def add_arguments(self, parser):
         pass
 
-    @staticmethod
-    def migrate_airbyte_server_blocks(org: Org):
+    def migrate_airbyte_server_blocks(self, org: Org):
         """Create/update new server block"""
         old_block = OrgPrefectBlock.objects.filter(
             org=org, block_type=AIRBYTESERVER
         ).first()
         if not old_block:
-            logger.info(f"Server block not found for the org '{org.slug}'")
+            self.failures.append(f"Server block not found for the org '{org.slug}'")
             return
 
         new_block = OrgPrefectBlockv1.objects.filter(
@@ -38,7 +43,7 @@ class Command(BaseCommand):
         ).first()
 
         if not new_block:  # create
-            logger.info(
+            logger.debug(
                 f"Creating new server block with id '{old_block.block_id}' in orgprefectblockv1"
             )
             OrgPrefectBlockv1.objects.create(
@@ -48,17 +53,29 @@ class Command(BaseCommand):
                 block_type=AIRBYTESERVER,
             )
         else:  # update
-            logger.info(
+            logger.debug(
                 f"Updating the newly created server block with id '{old_block.block_id}' in orgprefectblockv1"
             )
             new_block.block_id = old_block.block_id
             new_block.block_name = old_block.block_name
             new_block.save()
 
+        # assert server block creation
+        cnt = OrgPrefectBlockv1.objects.filter(
+            org=org, block_type=AIRBYTESERVER
+        ).count()
+        if cnt == 0:
+            self.failures.append(
+                f"found 0 server blocks for org {org.slug} in orgprefectblockv1"
+            )
+        else:
+            self.successes.append(
+                f"found {cnt} server block(s) for org {org.slug} in orgprefectblockv1"
+            )
+
         return new_block
 
-    @staticmethod
-    def migrate_manual_sync_conn_deployments(org: Org):
+    def migrate_manual_sync_conn_deployments(self, org: Org):
         """
         Create/update airbyte connection's manual deployments
         """
@@ -68,16 +85,14 @@ class Command(BaseCommand):
             org=org, block_type=AIRBYTESERVER
         ).first()
         if not server_block:
-            logger.info(
-                "Skipping - migrating manual sync deployments because server block not found"
-            )
+            # self.failures.append(f"Server block not found for {org.slug}")
             return
 
-        logger.info("Found airbyte server block")
+        logger.debug("Found airbyte server block")
 
         airbyte_sync_task = Task.objects.filter(slug=TASK_AIRBYTESYNC).first()
         if not airbyte_sync_task:
-            logger.info("run the tasks migration to populate the master table")
+            self.failures.append("run the tasks migration to populate the master table")
             return
 
         for old_dataflow in OrgDataFlow.objects.filter(
@@ -102,6 +117,18 @@ class Command(BaseCommand):
                     connection_id=old_dataflow.connection_id,
                 )
 
+            # assert creation of orgtask
+            cnt = OrgTask.objects.filter(
+                org=org,
+                task=airbyte_sync_task,
+                connection_id=old_dataflow.connection_id,
+            ).count()
+            if cnt == 0:
+                self.failures.append(f"found 0 orgtasks in {org.slug}")
+                return
+            else:
+                self.successes.append(f"found {cnt} orgtasks in {org.slug}")
+
             if not new_dataflow:  # create
                 logger.info(
                     f"Creating new dataflow with id '{old_dataflow.deployment_id}' in orgdataflowv1"
@@ -117,11 +144,36 @@ class Command(BaseCommand):
 
                 DataflowOrgTask.objects.create(dataflow=new_dataflow, orgtask=org_task)
 
+            # assert orgdataflowv1 creation
+            cnt = OrgDataFlowv1.objects.filter(
+                org=org,
+                dataflow_type="manual",
+                deployment_id=old_dataflow.deployment_id,
+            ).count()
+            if cnt == 0:
+                self.failures.append(
+                    f"found 0 dataflowv1 in {org.slug} with deployment_id {old_dataflow.deployment_id}"
+                )
+            else:
+                self.successes.append(
+                    f"found {cnt} dataflowv1 in {org.slug} with deployment_id {old_dataflow.deployment_id}"
+                )
+            cnt = DataflowOrgTask.objects.filter(
+                dataflow=new_dataflow, orgtask=org_task
+            ).count()
+            if cnt == 0:
+                self.failures.append(
+                    f"found 0 datafloworgtask in {org.slug} with deployment_id {old_dataflow.deployment_id}"
+                )
+            else:
+                self.successes.append(
+                    f"found {cnt} datafloworgtask in {org.slug} with deployment_id {old_dataflow.deployment_id}"
+                )
+
             # update deployment params
             deployment = None
             try:
                 deployment = get_deployment(new_dataflow.deployment_id)
-                logger.info(deployment)
             except Exception as error:
                 logger.info(
                     f"Something went wrong in fetching the deployment with id '{new_dataflow.deployment_id}'"
@@ -141,7 +193,6 @@ class Command(BaseCommand):
             }
             params["config"] = {"tasks": [task_config]}
             logger.info(f"PARAMS {new_dataflow.deployment_id}")
-            logger.info(params)
             try:
                 payload = PrefectDataFlowUpdateSchema3(
                     name=new_dataflow.name,  # wont be updated
@@ -162,8 +213,38 @@ class Command(BaseCommand):
                 logger.info("skipping to next loop")
                 continue
 
+            # assert deployment params updation
+            try:
+                deployment = get_deployment(new_dataflow.deployment_id)
+                if "config" not in deployment["parameters"]:
+                    self.failures.append(
+                        f"Missing 'config' key in the deployment parameters for {org.slug} {new_dataflow.deployment_id}"
+                    )
+                else:
+                    self.successes.append(
+                        f"Found correct deployment params for for {org.slug} {new_dataflow.deployment_id}"
+                    )
+            except Exception as error:
+                self.failures.append(
+                    f"Failed to fetch deployment with id '{new_dataflow.deployment_id}' for {org.slug}"
+                )
+                logger.exception(error)
+                logger.info("skipping to next loop")
+                continue
+
     def handle(self, *args, **options):
         for org in Org.objects.all():
-            logger.info(f"Found org with slug '{org.slug}'")
-            Command.migrate_airbyte_server_blocks(org)
-            Command.migrate_manual_sync_conn_deployments(org)
+            self.migrate_airbyte_server_blocks(org)
+            self.migrate_manual_sync_conn_deployments(org)
+
+        # show summary
+        print("=" * 80)
+        print("SUCCESSES")
+        print("=" * 80)
+        for success in self.successes:
+            print("SUCCESS " + success)
+        print("=" * 80)
+        print("FAILURES")
+        print("=" * 80)
+        for failure in self.failures:
+            print("FAILURE " + failure)
