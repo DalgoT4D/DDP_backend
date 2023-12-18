@@ -1,9 +1,8 @@
 """test various dalgo services via client api"""
 import os
-import sys
+import json
 import argparse
 from time import sleep
-from uuid import uuid4
 from faker import Faker
 import requests
 import yaml
@@ -158,3 +157,19 @@ if config["prefect"]["dbt"]["run_flow_dbtrun"]:
             for log in r.json()["logs"]:
                 print(log["message"])
             print("=" * 80)
+
+flows = tester.get_flows()
+print(json.dumps(flows, indent=1))
+
+if len(flows) > 0:
+    deployment_id = flows[0]["deploymentId"]
+    fetched_flow = tester.clientget("prefect/v1/flows/" + deployment_id)
+
+if config["prefect"]["create_flow"]:
+    connection_id = connections[0]["connectionId"]
+    response = tester.create_flow(connection_id)
+    print(json.dumps(response, indent=1))
+
+if config["prefect"]["delete_flows"]:
+    for flow in flows:
+        tester.clientdelete("prefect/v1/flows/" + flow["deploymentId"])

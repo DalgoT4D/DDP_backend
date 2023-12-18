@@ -67,6 +67,7 @@ class PrefectDbtTaskSetup(Schema):
     request payload to trigger a dbt task (deps, clean, run, test) in prefect
     """
 
+    type: str
     slug: str
     profiles_dir: str
     project_dir: str
@@ -77,10 +78,12 @@ class PrefectDbtTaskSetup(Schema):
     cli_args: list = []
     flow_name: str = None
     flow_run_name: str = None
+    seq: int = 0
 
     def to_json(self):
         """JSON serialization"""
         return {
+            "type": self.type,
             "slug": self.slug,
             "profiles_dir": self.profiles_dir,
             "project_dir": self.project_dir,
@@ -91,6 +94,7 @@ class PrefectDbtTaskSetup(Schema):
             "cli_args": self.cli_args,
             "flow_name": self.flow_name,
             "flow_run_name": self.flow_run_name,
+            "seq": self.seq,
         }
 
 
@@ -114,16 +118,20 @@ class PrefectShellSetup(Schema):
 class PrefectShellTaskSetup(Schema):
     """Docstring"""
 
+    type: str
     slug: str
     commands: list
     working_dir: str
     env: dict
     flow_name: str = None
     flow_run_name: str = None
+    seq: int = 0
 
     def to_json(self):
         """JSON serialization"""
         return {
+            "seq": self.seq,
+            "type": self.type,
             "commands": self.commands,
             "working_dir": self.working_dir,
             "env": self.env,
@@ -197,6 +205,13 @@ class PrefectFlowAirbyteConnection(Schema):
     seq: int
 
 
+class PrefectFlowAirbyteConnection2(Schema):
+    """Validate the airbyte connection object in flow/pipeline create"""
+
+    id: str
+    seq: int
+
+
 class PrefectDataFlowCreateSchema(Schema):
     """Payload sent by the frontend to create a dataflow"""
 
@@ -227,6 +242,15 @@ class PrefectDataFlowCreateSchema3(Schema):
     cron: str = None
 
 
+class PrefectDataFlowCreateSchema4(Schema):
+    """Payload sent by the frontend to create a dataflow"""
+
+    name: str
+    connections: list[PrefectFlowAirbyteConnection2]
+    dbtTransform: str
+    cron: str
+
+
 class PrefectDataFlowUpdateSchema(Schema):
     """Edit the data flow"""
 
@@ -242,6 +266,16 @@ class PrefectDataFlowUpdateSchema2(Schema):
     connection_blocks: list[PrefectFlowAirbyteConnection]
     dbt_blocks: list
     cron: str = None
+
+
+class PrefectDataFlowUpdateSchema3(Schema):
+    """Edit the data flow"""
+
+    name: str
+    connections: list[PrefectFlowAirbyteConnection2]
+    dbtTransform: str
+    cron: str
+    deployment_params: dict = None
 
 
 class PrefectFlowRunSchema(Schema):
