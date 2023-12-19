@@ -32,7 +32,7 @@ from ddpui.models.org import (
 )
 from ddpui.models.orgjobs import BlockLock, DataflowBlock
 from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import Task, DataflowOrgTask, OrgTask
+from ddpui.models.tasks import Task, DataflowOrgTask, OrgTask, TaskLock
 from ddpui.ddpprefect.schema import (
     PrefectAirbyteSync,
     PrefectDbtCore,
@@ -1407,9 +1407,12 @@ def get_prefect_dataflows_v1(request):
         # lock = BlockLock.objects.filter(
         #     opb__block_id__in=[x["opb__block_id"] for x in block_ids]
         # ).first()
+        org_task_ids = DataflowOrgTask.objects.filter(dataflow=flow).values_list(
+            "id", flat=True
+        )
 
-        # TODO: task lock logic
-        lock = None
+        lock = TaskLock.objects.filter(orgtask_id__in=org_task_ids).first()
+
         res.append(
             {
                 "name": flow.name,
