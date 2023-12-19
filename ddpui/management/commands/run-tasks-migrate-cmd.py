@@ -255,7 +255,9 @@ class Command(BaseCommand):
 
     def migrate_transformation_blocks(self, org: Org):
         """
-        Migrate Dbt Core Operation & Shell Operation blocks to tasks
+        - Create the dbt cli profile block
+        - Create the secret block for git pull url if private repo & git token provided
+        - Migrate Dbt Core Operation & Shell Operation blocks to org tasks
         """
 
         # fetch warehouse and credentials
