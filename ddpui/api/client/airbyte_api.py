@@ -48,7 +48,7 @@ from ddpui.models.org import (
     OrgDataFlowv1,
 )
 from ddpui.models.orgjobs import DataflowBlock, BlockLock
-from ddpui.models.tasks import Task, DataflowOrgTask, OrgTask
+from ddpui.models.tasks import Task, DataflowOrgTask, OrgTask, TaskLock
 from ddpui.models.org_user import OrgUser
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
@@ -1199,7 +1199,28 @@ def get_airbyte_connections_v1(request):
             orguser.org.airbyte_workspace_id, org_task.connection_id
         )
 
+        # a single connection will have a manual deployment and (usually) a pipeline
+        # we want to show the last sync, from whichever
+        last_runs = []
+        for df_orgtask in DataflowOrgTask.objects.filter(
+            orgtask=org_task,
+        ):
+            run = prefect_service.get_last_flow_run_by_deployment_id(
+                df_orgtask.dataflow.deployment_id
+            )
+            if run:
+                last_runs.append(run)
+
+        last_runs.sort(
+            key=lambda run: run["startTime"]
+            if run["startTime"]
+            else run["expectedStartTime"]
+        )
+
         sync_dataflow = DataflowOrgTask.objects.filter(orgtask=org_task).first()
+
+        # is the task currently locked?
+        lock = TaskLock.objects.filter(orgtask=org_task).first()
 
         res.append(
             {
@@ -1213,12 +1234,16 @@ def get_airbyte_connections_v1(request):
                 "deploymentId": sync_dataflow.dataflow.deployment_id
                 if sync_dataflow
                 else None,
-                "lastRun": None,  # TODO
-                "lock": None,  # TODO
+                "lastRun": last_runs[-1] if len(last_runs) > 0 else None,
+                "lock": {
+                    "lockedBy": lock.locked_by.user.email,
+                    "lockedAt": lock.locked_at,
+                }
+                if lock
+                else None,
             }
         )
 
-    # TODO: lock task logic
     logger.info(res)
 
     # by default normalization is going as False here because we dont do anything with it
