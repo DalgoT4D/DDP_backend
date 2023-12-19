@@ -571,12 +571,190 @@ class Command(BaseCommand):
                 logger.info("skipping to next loop")
                 continue
 
+    def migrate_org_pipelines(self, org: Org):
+        """
+        Migrate 'orchestrate' type dataflows
+        """
+        # check if the server block exists or not
+        server_block = OrgPrefectBlockv1.objects.filter(
+            org=org, block_type=AIRBYTESERVER
+        ).first()
+        if not server_block:
+            self.failures.append(f"Server block not found for {org.slug}")
+            return
+        self.successes.append(f"Found airbyte server block: {server_block.block_name}")
+
+        # check if cli block is created
+        cli_profile_block = OrgPrefectBlockv1.objects.filter(
+            org=org, block_type=DBTCLIPROFILE
+        ).first()
+        if not cli_profile_block:
+            self.failures.append(
+                f"SKIPPING: Couldnt find the dbt cli profile block for org {org.slug}"
+            )
+            return
+        self.successes.append(
+            f"Found dbt cli profile block : {cli_profile_block.block_name}"
+        )
+
+        for old_dataflow in OrgDataFlow.objects.filter(
+            org=org, dataflow_type="orchestrate"
+        ).all():
+            new_dataflow = OrgDataFlowv1.objects.filter(
+                org=org, deployment_id=old_dataflow.deployment_id
+            ).first()
+            if not new_dataflow:
+                logger.info("Creating a new pipeline in orgdataflowv1")
+                new_dataflow = OrgDataFlowv1.objects.create(
+                    org=org,
+                    name=old_dataflow.name,
+                    deployment_name=old_dataflow.deployment_name,
+                    deployment_id=old_dataflow.deployment_id,
+                    cron=old_dataflow.cron,
+                    dataflow_type="orchestrate",
+                )
+                self.successes.append("Created pipeline in orgdataflowv1")
+
+            # assert new dataflow creation
+            cnt = OrgDataFlowv1.objects.filter(
+                org=org, deployment_id=old_dataflow.deployment_id
+            ).count()
+            if cnt == 1:
+                self.successes.append(
+                    f"Found {cnt} row(s) for orgdataflowv1 for deployment id {old_dataflow.deployment_id}"
+                )
+            else:
+                self.failures.append(
+                    f"Found {cnt} row(s) for orgdataflowv1 for deployment id {old_dataflow.deployment_id}"
+                )
+
+            # map orgtasks for this new deloyment in datafloworgtask table
+            for dataflow_blk in DataflowBlock.objects.filter(
+                dataflow=old_dataflow
+            ).all():
+                task = None
+                org_task = None
+                connection_id = None
+                if dataflow_blk.opb.block_type == AIRBYTECONNECTION:
+                    task = Task.objects.filter(slug=TASK_AIRBYTESYNC).first()
+                    if not task:
+                        self.failures.append(
+                            "SKIPPING: airbyte connection task not found"
+                        )
+                        continue
+                    # fetch the conn block for connection_id
+                    conn_block = None
+                    try:
+                        conn_block = prefect_service.get_airbyte_connection_block_by_id(
+                            dataflow_blk.opb.block_id
+                        )
+                    except Exception as error:
+                        logger.exception(error)
+
+                    if not conn_block or "data" not in conn_block:
+                        self.failures.append(
+                            f"SKIPPING: Couldnt find airbyte conn block {dataflow_blk.opb.block_name} in prefect & couldnt map orgtask to new pipeline {new_dataflow.name}"
+                        )
+                        continue
+
+                    if (
+                        "connection_id" not in conn_block["data"]
+                        or not conn_block["data"]["connection_id"]
+                    ):
+                        self.failures.append(
+                            f"SKIPPING: Couldnt find the connection_id in airbyte connection block {dataflow_blk.opb.block_name} "
+                        )
+                        continue
+
+                    self.successes.append(
+                        f"Found airbyte conn block in prefect {dataflow_blk.opb.block_name}. Will use connection_id from here to create orgtask mapping of pipeline"
+                    )
+                    connection_id = conn_block["data"]["connection_id"]
+
+                elif dataflow_blk.opb.block_type == SHELLOPERATION:
+                    task = Task.objects.filter(slug=TASK_GITPULL).first()
+                    if not task:
+                        self.failures.append("SKIPPING: shell operation task not found")
+                        continue
+
+                elif dataflow_blk.opb.block_type == DBTCORE:
+                    old_cmd = dataflow_blk.opb.block_name.split(
+                        f"{dataflow_blk.opb.dbt_target_schema}-"
+                    )[-1]
+                    task = Task.objects.filter(slug__endswith=old_cmd).first()
+                    if not task:
+                        self.failures.append(
+                            f"SKIPPING: dbt core task {old_cmd} not found"
+                        )
+                        continue
+
+                if task is None:
+                    logger.info("Unrecognized block_type")
+                    self.failures.append("Unrecognized block_type")
+                    continue
+
+                org_task = OrgTask.objects.filter(
+                    org=org,
+                    task=task,
+                    connection_id=connection_id,
+                ).first()
+                if not org_task:
+                    logger.info("Org task not found, creating a new one")
+                    org_task = OrgTask.objects.create(
+                        org=org,
+                        task=task,
+                        connection_id=connection_id,
+                    )
+                    self.successes.append(
+                        f"Created orgtask {org_task.task.slug} for new pipeline {new_dataflow.name}"
+                    )
+
+                # assert orgtask
+                cnt = OrgTask.objects.filter(
+                    org=org,
+                    task=task,
+                    connection_id=connection_id,
+                ).count()
+                if cnt == 1:
+                    self.successes.append(
+                        f"ASSERT: Found {cnt} orgtask record for new pipeline {new_dataflow.name} and its opb {dataflow_blk.opb.block_name}"
+                    )
+                else:
+                    self.failures.append(
+                        f"ASSERT: Found {cnt} orgtask record for new pipeline {new_dataflow.name} and its opb {dataflow_blk.opb.block_name}"
+                    )
+
+                # create orgtask mapping to dataflow
+                dataflow_orgtask = DataflowOrgTask.objects.filter(
+                    dataflow=new_dataflow, orgtask=org_task
+                ).first()
+                if not dataflow_orgtask:
+                    logger.info("Creating datafloworgtask")
+                    dataflow_orgtask = DataflowOrgTask.objects.create(
+                        dataflow=new_dataflow, orgtask=org_task
+                    )
+                    self.successes.append("Created datafloworgtask")
+
+                # assert datafloworgtask
+                cnt = DataflowOrgTask.objects.filter(
+                    dataflow=new_dataflow, orgtask=org_task
+                ).count()
+                if cnt == 1:
+                    self.successes.append(
+                        f"ASSERT: Found {cnt} datafloworgtask record for new pipeline {new_dataflow.name} and its opb {dataflow_blk.opb.block_name}"
+                    )
+                else:
+                    self.failures.append(
+                        f"ASSERT: Found {cnt} datafloworgtask record for new pipeline {new_dataflow.name} and its opb {dataflow_blk.opb.block_name}"
+                    )
+
     def handle(self, *args, **options):
         for org in Org.objects.all():
             self.migrate_airbyte_server_blocks(org)
             self.migrate_manual_sync_conn_deployments(org)
             self.migrate_transformation_blocks(org)
             self.migrate_manual_dbt_run_deployments(org)
+            self.migrate_org_pipelines(org)
 
         # show summary
         print("=" * 80)
