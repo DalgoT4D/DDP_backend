@@ -1171,8 +1171,6 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
         "status": airbyte_conn["status"],
         "deploymentId": dataflow["deployment"]["id"],
         "normalize": payload.normalize,
-        "lastRun": None,  # TODO
-        "lock": None,  # TODO
     }
     logger.debug(res)
     return res
