@@ -1279,7 +1279,8 @@ def get_airbyte_connection_v1(request, connection_id):
     if dataflow_orgtask is None:
         raise HttpError(422, "deployment not found")
 
-    # TODO: task lock logic
+    # check if the task is locked or not
+    lock = TaskLock.objects.filter(orgtask=org_task).first()
 
     # fetch the source and destination names
     # the web_backend/connections/get fetches the source & destination objects also so we dont need to query again
@@ -1306,7 +1307,12 @@ def get_airbyte_connection_v1(request, connection_id):
         )
         if "operationIds" in airbyte_conn and len(airbyte_conn["operationIds"]) == 1
         else False,
-        "lock": None,  # TODO
+        "lock": {
+            "lockedBy": lock.locked_by.user.email,
+            "lockedAt": lock.locked_at,
+        }
+        if lock
+        else None,
     }
 
     logger.debug(res)
