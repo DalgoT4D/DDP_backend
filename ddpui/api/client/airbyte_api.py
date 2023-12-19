@@ -1215,7 +1215,9 @@ def get_airbyte_connections_v1(request):
             else run["expectedStartTime"]
         )
 
-        sync_dataflow = DataflowOrgTask.objects.filter(orgtask=org_task).first()
+        sync_dataflow = DataflowOrgTask.objects.filter(
+            orgtask=org_task, dataflow__dataflow_type="manual"
+        ).first()
 
         # is the task currently locked?
         lock = TaskLock.objects.filter(orgtask=org_task).first()
@@ -1272,7 +1274,9 @@ def get_airbyte_connection_v1(request, connection_id):
         orguser.org.airbyte_workspace_id, org_task.connection_id
     )
 
-    dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
+    dataflow_orgtask = DataflowOrgTask.objects.filter(
+        orgtask=org_task, dataflow__dataflow_type="manual"
+    ).first()
 
     if dataflow_orgtask is None:
         raise HttpError(422, "deployment not found")
