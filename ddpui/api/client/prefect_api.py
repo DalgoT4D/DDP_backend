@@ -1157,13 +1157,21 @@ def get_prefect_transformation_tasks(request):
         .order_by("task__id")
         .all()
     ):
-        # TODO: add task locking logic here later
+        # check if task is locked
+        lock = TaskLock.objects.filter(orgtask=org_task).first()
+        
         org_tasks.append(
             {
                 "label": org_task.task.label,
                 "slug": org_task.task.slug,
                 "id": org_task.id,
                 "deploymentId": None,
+                "lock": {
+                    "lockedBy": lock.locked_by.user.email,
+                    "lockedAt": lock.locked_at,
+                }
+                if lock
+                else None,
             }
         )
 
