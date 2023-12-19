@@ -984,6 +984,7 @@ def post_prefect_transformation_tasks(request):
         - dbt clean
         - dbt run
         - dbt test
+        - dbt docs generate
     """
     orguser: OrgUser = request.orguser
     if orguser.org.dbt is None:
@@ -1059,7 +1060,7 @@ def post_prefect_transformation_tasks(request):
 
     # create a dbt cli profile block
     try:
-        cli_block_name = f"{orguser.org.slug}_{profile_name}"
+        cli_block_name = f"{orguser.org.slug}-{profile_name}"
         cli_block_response = prefect_service.create_dbt_cli_profile_block(
             cli_block_name,
             profile_name,
