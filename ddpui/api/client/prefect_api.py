@@ -845,7 +845,15 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
     dbtrepodir = Path(os.getenv("CLIENTDBT_ROOT")) / orguser.org.slug / "dbtrepo"
     project_dir = str(dbtrepodir)
 
-    # TODO: add task lock logic
+    # check if the task is locked
+    task_lock = TaskLock.objects.filter(orgtask=org_task).first()
+    if task_lock:
+        raise HttpError(
+            400, f"{task_lock.locked_by.user.email} is running this operation"
+        )
+
+    # lock the task
+    task_lock = TaskLock.objects.create(orgtask=org_task, locked_by=orguser)
 
     if org_task.task.slug == TASK_GITPULL:
         shell_env = {"secret-git-pull-url-block": ""}
@@ -874,6 +882,7 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
         try:
             result = prefect_service.run_shell_task_sync(payload)
         except Exception as error:
+            task_lock.delete()
             logger.exception(error)
             raise HttpError(
                 400, f"failed to run the shell task {org_task.task.slug}"
@@ -915,8 +924,13 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
         try:
             result = prefect_service.run_dbt_task_sync(payload)
         except Exception as error:
+            task_lock.delete()
             logger.exception(error)
             raise HttpError(400, "failed to run dbt") from error
+
+    # release the lock
+    task_lock.delete()
+    logger.info("released lock on task %s", org_task.task.slug)
 
     return result
 
