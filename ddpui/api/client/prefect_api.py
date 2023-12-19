@@ -1159,7 +1159,7 @@ def get_prefect_transformation_tasks(request):
     ):
         # check if task is locked
         lock = TaskLock.objects.filter(orgtask=org_task).first()
-        
+
         org_tasks.append(
             {
                 "label": org_task.task.label,

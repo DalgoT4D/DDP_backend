@@ -164,6 +164,16 @@ def test_get_airbyte_connections_v1_without_workspace(org_without_workspace):
         }
     ),
 )
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    get_last_flow_run_by_deployment_id=Mock(
+        return_value={
+            "flow-run-id": "00000",
+            "startTime": 0,
+            "expectedStartTime": 0,
+        }
+    ),
+)
 def test_get_airbyte_connections_success(org_with_workspace):
     """tests GET /v1/connections success"""
     mock_orguser = Mock()
@@ -198,24 +208,6 @@ def test_get_airbyte_connections_success(org_with_workspace):
     result = get_airbyte_connections_v1(mock_request)
     assert len(result) == 1
 
-    # assert result[0]["name"] == "fake-display-name"
-    # assert result[0]["blockId"] == "fake-block-id"
-    # assert result[0]["blockName"] == "fake-block-name"
-    # assert result[0]["blockData"]["connection_id"] == "fake-connection-id"
-    # assert result[0]["source"]["id"] == "fake-source-id-1"
-    # assert result[0]["source"]["sourceName"] == "fake-source-name-1"
-    # assert result[0]["destination"]["id"] == "fake-destination-id-1"
-    # assert result[0]["destination"]["destinationName"] == "fake-destination-name-1"
-    # assert result[0]["catalogId"] == "fake-source-catalog-id-1"
-    # assert result[0]["syncCatalog"] == "sync-catalog"
-    # assert result[0]["status"] == "conn-status"
-    # assert result[0]["deploymentId"] == "fake-deployment-id"
-    # assert result[0]["lastRun"] == {
-    #     "flow-run-id": "00000",
-    #     "startTime": 0,
-    #     "expectedStartTime": 0,
-    # }
-    # assert result[0]["lock"] is None
     assert result[0]["name"] == "fake-conn"
     assert result[0]["source"]["id"] == "fake-source-id-1"
     assert result[0]["source"]["name"] == "fake-source-name-1"
@@ -225,6 +217,12 @@ def test_get_airbyte_connections_success(org_with_workspace):
     assert result[0]["syncCatalog"] == "sync-catalog"
     assert result[0]["status"] == "conn-status"
     assert result[0]["deploymentId"] == "fake-deployment-id"
+    assert result[0]["lastRun"] == {
+        "flow-run-id": "00000",
+        "startTime": 0,
+        "expectedStartTime": 0,
+    }
+    assert result[0]["lock"] is None
 
 
 # ================================================================================
