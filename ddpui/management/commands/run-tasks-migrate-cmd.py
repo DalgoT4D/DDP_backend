@@ -344,7 +344,10 @@ class Command(BaseCommand):
         cnt = OrgPrefectBlockv1.objects.filter(
             org=org, block_type=DBTCLIPROFILE
         ).count()
-        self.successes.append(f"ASSERT: Found {cnt} dbt cli profile block")
+        if cnt == 1:
+            self.successes.append(f"ASSERT: Found {cnt} dbt cli profile block")
+        else:
+            self.failures.append(f"ASSERT: Found {cnt} dbt cli profile block")
 
         # create the secret block for git token url if needed
         secret_git_url_block = OrgPrefectBlockv1.objects.filter(
@@ -414,13 +417,166 @@ class Command(BaseCommand):
                 self.successes.append(f"Created orgtask for task {task.slug}")
 
             cnt = OrgTask.objects.filter(org=org, task=task).count()
-            self.successes.append(f"ASSERT: Found {cnt} orgtask for {task.slug}")
+            if cnt == 1:
+                self.successes.append(f"ASSERT: Found {cnt} orgtask for {task.slug}")
+            else:
+                self.failures.append(f"ASSERT: Found {cnt} orgtask for {task.slug}")
+
+    def migrate_manual_dbt_run_deployments(self, org: Org):
+        """
+        Migrate the manual deployment to execute dbt run command
+        """
+
+        # check if cli block is created
+        cli_profile_block = OrgPrefectBlockv1.objects.filter(
+            org=org, block_type=DBTCLIPROFILE
+        ).first()
+        if not cli_profile_block:
+            self.failures.append("SKIPPING: Couldnt find the dbt cli profile block")
+            return
+        self.successes.append(
+            f"Found dbt cli profile block : {cli_profile_block.block_name}"
+        )
+
+        # dbt related params
+        dbt_env_dir = Path(org.dbt.dbt_venv)
+        if not dbt_env_dir.exists():
+            self.failures.append("SKIPPING: couldnt find the dbt venv")
+            return
+        dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
+        dbtrepodir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug / "dbtrepo"
+        project_dir = str(dbtrepodir)
+        target = org.dbt.default_schema
+
+        org_task = OrgTask.objects.filter(org=org, task__slug=TASK_DBTRUN).first()
+
+        if not org_task:
+            self.failures.append("SKIPPING: couldnt find the orgtask for dbt-run")
+            return
+
+        for old_dataflow in OrgDataFlow.objects.filter(
+            org=org, deployment_name__startswith="manual-run", dataflow_type="manual"
+        ).all():
+            new_dataflow = OrgDataFlowv1.objects.filter(
+                org=org, deployment_id=old_dataflow.deployment_id
+            ).first()
+
+            if not new_dataflow:
+                logger.info("Creating a new dataflow for manual dbt run")
+                new_dataflow = OrgDataFlowv1.objects.create(
+                    org=org,
+                    name=old_dataflow.name,
+                    deployment_name=old_dataflow.deployment_name,
+                    deployment_id=old_dataflow.deployment_id,
+                    cron=old_dataflow.cron,
+                    dataflow_type="manual",
+                )
+                self.successes.append("Created dataflow in orgdataflowv1")
+
+            # assert new dataflow creation
+            cnt = OrgDataFlowv1.objects.filter(
+                org=org, deployment_id=old_dataflow.deployment_id
+            ).count()
+            if cnt == 1:
+                self.successes.append(
+                    f"Found {cnt} row(s) for orgdataflowv1 for deployment id {old_dataflow.deployment_id}"
+                )
+            else:
+                self.failures.append(
+                    f"Found {cnt} row(s) for orgdataflowv1 for deployment id {old_dataflow.deployment_id}"
+                )
+
+            # map dataflow to org task
+            df_orgtask = DataflowOrgTask.objects.filter(
+                dataflow=new_dataflow, orgtask=org_task
+            ).first()
+            if not df_orgtask:
+                logger.info("Creating dataflow orgtask mapping")
+                df_orgtask = DataflowOrgTask.objects.create(
+                    dataflow=new_dataflow, orgtask=org_task
+                )
+                logger.info("Created dataflow org task mapping")
+                self.successes.append("Created dataflow orgtask mapping")
+
+            cnt = DataflowOrgTask.objects.filter(
+                dataflow=new_dataflow, orgtask=org_task
+            ).count()
+            self.successes.append(
+                f"Found {1} row(s) for dataflow<->orgtask mapping for deployment id {old_dataflow.deployment_id}"
+            )
+
+            # update deployment params
+            deployment = None
+            try:
+                deployment = get_deployment(new_dataflow.deployment_id)
+            except Exception as error:
+                logger.info(
+                    f"Something went wrong in fetching the deployment with id '{new_dataflow.deployment_id}'"
+                )
+                logger.exception(error)
+                logger.info("skipping to next loop")
+                continue
+
+            params = deployment["parameters"]
+            task_config = {
+                "slug": org_task.task.slug,
+                "type": DBTCORE,
+                "seq": 1,
+                "commands": [f"{dbt_binary} {org_task.task.command} --target {target}"],
+                "env": {},
+                "working_dir": project_dir,
+                "profiles_dir": f"{project_dir}/profiles/",
+                "project_dir": project_dir,
+                "cli_profile_block": cli_profile_block.block_name,
+                "cli_args": [],
+            }
+            params["config"] = {"tasks": [task_config]}
+            logger.info(f"PARAMS {new_dataflow.deployment_id}")
+            try:
+                payload = PrefectDataFlowUpdateSchema3(
+                    name=new_dataflow.name,  # wont be updated
+                    connections=[],  # wont be updated
+                    dbtTransform="ignore",  # wont be updated
+                    cron=new_dataflow.cron if new_dataflow.cron else "",
+                    deployment_params=params,
+                )
+                update_dataflow_v1(new_dataflow.deployment_id, payload)
+                logger.info(
+                    f"updated deployment params for the deployment with id {new_dataflow.deployment_id}"
+                )
+            except Exception as error:
+                logger.info(
+                    f"Something went wrong in updating the deployment params with id '{new_dataflow.deployment_id}'"
+                )
+                logger.exception(error)
+                logger.info("skipping to next loop")
+                continue
+
+            # assert deployment params updation
+            try:
+                deployment = get_deployment(new_dataflow.deployment_id)
+                if "config" not in deployment["parameters"]:
+                    self.failures.append(
+                        f"Missing 'config' key in the deployment parameters for {org.slug} {new_dataflow.deployment_id}"
+                    )
+                else:
+                    self.successes.append(
+                        f"Found correct deployment params for for {org.slug} {new_dataflow.deployment_id}"
+                    )
+            except Exception as error:
+                self.failures.append(
+                    f"Failed to fetch deployment with id '{new_dataflow.deployment_id}' for {org.slug}"
+                )
+                logger.exception(error)
+                logger.info("skipping to next loop")
+                continue
 
     def handle(self, *args, **options):
         for org in Org.objects.all():
             self.migrate_airbyte_server_blocks(org)
             self.migrate_manual_sync_conn_deployments(org)
             self.migrate_transformation_blocks(org)
+            self.migrate_manual_dbt_run_deployments(org)
 
         # show summary
         print("=" * 80)
