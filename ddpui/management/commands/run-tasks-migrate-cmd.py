@@ -748,6 +748,18 @@ class Command(BaseCommand):
                         f"ASSERT: Found {cnt} datafloworgtask record for new pipeline {new_dataflow.name} and its opb {dataflow_blk.opb.block_name}"
                     )
 
+            # update deployment params
+            deployment = None
+            try:
+                deployment = get_deployment(new_dataflow.deployment_id)
+            except Exception as error:
+                logger.info(
+                    f"Something went wrong in fetching the deployment with id '{new_dataflow.deployment_id}'"
+                )
+                logger.exception(error)
+                logger.info("skipping to next loop")
+                continue
+
     def handle(self, *args, **options):
         for org in Org.objects.all():
             self.migrate_airbyte_server_blocks(org)
