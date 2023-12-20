@@ -662,34 +662,28 @@ class Command(BaseCommand):
                             "SKIPPING: airbyte connection task not found for {org.slug}"
                         )
                         continue
-                    # fetch the conn block for connection_id
-                    conn_block = None
-                    try:
-                        conn_block = prefect_service.get_airbyte_connection_block_by_id(
-                            dataflow_blk.opb.block_id
-                        )
-                    except Exception as error:
-                        logger.exception(error)
 
-                    if not conn_block or "data" not in conn_block:
+                    # fetch connection_id of the airbyte connection block from a manual dataflow
+                    manual_df_blk = DataflowBlock.objects.filter(
+                        opb=dataflow_blk.opb, dataflow__dataflow_type="manual"
+                    ).first()
+
+                    if not manual_df_blk:
                         self.failures.append(
-                            f"SKIPPING: Couldnt find airbyte conn block {dataflow_blk.opb.block_name} in prefect & couldnt map orgtask to new pipeline {new_dataflow.name} for {org.slug}"
+                            f"SKIPPING: Couldnt find the dataflowblock mapping for a manual dataflow with the same airbyte connection block - {dataflow_blk.opb.block_name}"
                         )
                         continue
 
-                    if (
-                        "connection_id" not in conn_block["data"]
-                        or not conn_block["data"]["connection_id"]
-                    ):
+                    if not manual_df_blk.dataflow.connection_id:
                         self.failures.append(
-                            f"SKIPPING: Couldnt find the connection_id in airbyte connection block {dataflow_blk.opb.block_name}  for {org.slug}"
+                            f"SKIPPING: Couldnt find the connection_id in related manual dataflow : {manual_df_blk.dataflow.name}"
                         )
                         continue
 
                     self.successes.append(
                         f"Found airbyte conn block in prefect {dataflow_blk.opb.block_name}. Will use connection_id from here to create orgtask mapping of pipeline for {org.slug}"
                     )
-                    connection_id = conn_block["data"]["connection_id"]
+                    connection_id = manual_df_blk.dataflow.connection_id
 
                 elif dataflow_blk.opb.block_type == SHELLOPERATION:
                     task = Task.objects.filter(slug=TASK_GITPULL).first()
@@ -970,12 +964,12 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         for org in Org.objects.all():
-            # self.migrate_airbyte_server_blocks(org)
-            # self.migrate_manual_sync_conn_deployments(org)
-            # self.create_cli_profile_and_secret_blocks(org)
-            # self.migrate_transformation_blocks(org)
+            self.migrate_airbyte_server_blocks(org)
+            self.migrate_manual_sync_conn_deployments(org)
+            self.create_cli_profile_and_secret_blocks(org)
+            self.migrate_transformation_blocks(org)
             self.migrate_manual_dbt_run_deployments(org)
-            # self.migrate_org_pipelines(org)
+            self.migrate_org_pipelines(org)
 
         # show summary
         print("=" * 80)
