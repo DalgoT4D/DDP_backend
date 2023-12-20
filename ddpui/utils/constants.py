@@ -4,6 +4,7 @@ TASK_DBTTEST = "dbt-test"
 TASK_DBTCLEAN = "dbt-clean"
 TASK_DBTDEPS = "dbt-deps"
 TASK_GITPULL = "git-pull"
+TASK_DOCSGENERATE = "docs-generate"
 TASK_AIRBYTESYNC = "airbyte-sync"
 
 
@@ -14,6 +15,7 @@ TRANSFORM_TASKS_SEQ = {
     TASK_DBTCLEAN: 3,
     TASK_DBTRUN: 4,
     TASK_DBTTEST: 5,
+    TASK_DOCSGENERATE: 6,
 }
 
 # airbyte sync timeout in deployment params

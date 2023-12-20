@@ -121,6 +121,12 @@ Plan to go away from the prefect dbt core blocks & connection blocks
 | Delete a pipeline `DELETE /api/prefect/flows/{deployment_id}`           | Update a connection `DELETE /api/prefect/v1/flows/{deployment_id}`         |
 | Proxy: update a deployment `PUT /api/proxy/deployments/{deployment_id}` | Proxy: update a deployment `PUT /api/proxy/v1/deployments/{deployment_id}` |
 
+#### <u>Task lock logic</u>
+
+- New function in prefect service to handle the logic `lock_tasks_for_deployment`
+
+- New api for prefect custom webhook `POST /webhooks/v1/notification/`. Need to setup this up in prefect UI.
+
 ## Data Migration
 
 #### <u>Phase1 - Airbyte sever & connections</u>
