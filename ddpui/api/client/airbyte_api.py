@@ -54,7 +54,7 @@ from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils.constants import TASK_AIRBYTESYNC, AIRBYTE_SYNC_TIMEOUT
-from ddpui.utils.helpers import generate_hash_id
+from ddpui.utils.helpers import generate_hash_id, cleaned_name_for_prefectblock
 
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
@@ -734,7 +734,9 @@ def post_airbyte_connection(request, payload: AirbyteConnectionCreate):
         prefect_airbyte_connection_block_names.append(block["name"])
 
     display_name = payload.name
-    block_name = base_block_name
+    block_name = cleaned_name_for_prefectblock(
+        base_block_name
+    )  # names fetched from prefect are cleaned, so we need to compare them against the cleaned one
     name_index = 0
     while block_name in prefect_airbyte_connection_block_names:
         name_index += 1

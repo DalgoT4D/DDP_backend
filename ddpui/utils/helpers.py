@@ -51,3 +51,9 @@ def generate_hash_id(l: int) -> str:
     alphabet = string.ascii_lowercase + string.digits + string.ascii_uppercase
 
     return "".join(secrets.choice(alphabet) for _ in range(l))
+
+
+def cleaned_name_for_prefectblock(blockname):
+    """removes characters which are not lowercase letters, digits or dashes. same helper from prefect-proxy"""
+    pattern = re.compile(r"[^\-a-z0-9]")
+    return re.sub(pattern, "", blockname.lower())
