@@ -20,6 +20,7 @@ from ddpui.utils.constants import (
     AIRBYTE_SYNC_TIMEOUT,
     TASK_DBTRUN,
     TASK_GITPULL,
+    TRANSFORM_TASKS_SEQ,
 )
 from ddpui.ddpprefect import (
     AIRBYTESERVER,
@@ -29,7 +30,11 @@ from ddpui.ddpprefect import (
     SECRET,
     SHELLOPERATION,
 )
-from ddpui.ddpprefect.schema import PrefectSecretBlockCreate
+from ddpui.ddpprefect.schema import (
+    PrefectSecretBlockCreate,
+    PrefectDbtTaskSetup,
+    PrefectShellTaskSetup,
+)
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service
 
@@ -469,7 +474,9 @@ class Command(BaseCommand):
             ).first()
 
             if not new_dataflow:
-                logger.info("Creating a new dataflow for manual dbt run for {org.slug}")
+                logger.info(
+                    f"Creating a new dataflow for manual dbt run for org {org.slug}"
+                )
                 new_dataflow = OrgDataFlowv1.objects.create(
                     org=org,
                     name=old_dataflow.name,
@@ -767,6 +774,10 @@ class Command(BaseCommand):
                         f"ASSERT: Found {cnt} datafloworgtask record for new pipeline {new_dataflow.name} and its opb {dataflow_blk.opb.block_name} for {org.slug}"
                     )
 
+            self.successes.append(
+                f"Fetching deployment params for dataflow {new_dataflow.deployment_name} & updating the params"
+            )
+
             # update deployment params
             deployment = None
             try:
@@ -779,14 +790,192 @@ class Command(BaseCommand):
                 logger.info("skipping to next loop")
                 continue
 
+            params = deployment["parameters"]
+            seq = 0
+            tasks = []
+            # convert airbyte block(s) to task config param & push
+            if "airbyte_blocks" in params and len(params["airbyte_blocks"]) > 0:
+                self.successes.append(
+                    f"Pipeline : {new_dataflow.deployment_name} has airbyte syncs. Processing them now"
+                )
+                for airbyte_block in sorted(
+                    params["airbyte_blocks"], key=lambda x: x["seq"]
+                ):
+                    airbyte_block_name = airbyte_block["blockName"]
+
+                    org_prefect_blk = OrgPrefectBlock.objects.filter(
+                        org=org, block_name=airbyte_block_name
+                    ).first()
+                    if not org_prefect_blk:
+                        self.failures.append(
+                            f"SKIPPING: couldnt convert airbyte block named {airbyte_block_name}, to task config params. orgprefectblock not found"
+                        )
+                        continue
+
+                    # fetch connection id for this block
+                    dataflow_block = DataflowBlock.objects.filter(
+                        opb=org_prefect_blk, dataflow__dataflow_type="manual"
+                    ).first()
+                    if not dataflow_block:
+                        self.failures.append(
+                            f"SKIPPING: couldnt fetch the connection_id of airbyte block named {airbyte_block_name}. dataflowblock mapping not found that has connection_id"
+                        )
+                        continue
+
+                    connection_id = dataflow_block.dataflow.connection_id
+                    if not connection_id:
+                        self.failures.append(
+                            f"SKIPPING: connection_id of airbyte block named {airbyte_block_name} is null in dataflowblock mapping"
+                        )
+                        continue
+
+                    org_task = OrgTask.objects.filter(
+                        org=org,
+                        task__slug=TASK_AIRBYTESYNC,
+                        connection_id=connection_id,
+                    ).first()
+
+                    if not org_task:
+                        self.failures.append(
+                            f"SKIPPING: orgtask not found for airbyte block named {airbyte_block_name} with connection_id {connection_id}"
+                        )
+                        continue
+
+                    seq += 1
+                    task_config = {
+                        "seq": seq,
+                        "slug": org_task.task.slug,
+                        "type": AIRBYTECONNECTION,
+                        "airbyte_server_block": server_block.block_name,
+                        "connection_id": connection_id,
+                        "timeout": AIRBYTE_SYNC_TIMEOUT,
+                    }
+                    tasks.append(task_config)
+
+            # convert airbyte block(s) to task config param & push
+            if "dbt_blocks" in params and len(params["dbt_blocks"]) > 0:
+                self.successes.append(
+                    f"Pipeline : {new_dataflow.deployment_name} has dbt transform on. Processing it now"
+                )
+
+                # dbt params
+                dbt_env_dir = Path(org.dbt.dbt_venv)
+                if not dbt_env_dir.exists():
+                    self.failures.append("dbt env not found")
+                    return
+
+                dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
+                dbtrepodir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug / "dbtrepo"
+                project_dir = str(dbtrepodir)
+                target = org.dbt.default_schema
+
+                for dbt_block in sorted(params["dbt_blocks"], key=lambda x: x["seq"]):
+                    dbt_block_name = dbt_block["blockName"]
+                    dbt_block_type = dbt_block["blockType"]
+
+                    org_prefect_blk = OrgPrefectBlock.objects.filter(
+                        org=org, block_name=dbt_block_name
+                    ).first()
+                    if not org_prefect_blk:
+                        self.failures.append(
+                            f"SKIPPING: couldnt convert dbt block named {dbt_block_name}, to task config params. orgprefectblock not found"
+                        )
+                        continue
+
+                    task = None
+                    if org_prefect_blk.block_name.endswith(
+                        "git-pull"
+                    ):  # its a git pull block
+                        task = Task.objects.filter(slug=TASK_GITPULL).first()
+                    else:  # its one of the dbt core block
+                        old_cmd = org_prefect_blk.block_name.split(
+                            f"{org_prefect_blk.dbt_target_schema}-"
+                        )[-1]
+                        task = Task.objects.filter(slug__endswith=old_cmd).first()
+
+                    if not task:
+                        self.failures.append(
+                            f"Couldnt find the task {old_cmd} for org {org.slug}, for dbt block named {dbt_block_name}"
+                        )
+                        self.failures.append(
+                            f"SKIPPING: couldnt convert dbt block named {dbt_block_name} to task config, master task not found"
+                        )
+                        continue
+
+                    org_task = OrgTask.objects.filter(org=org, task=task).first()
+                    if org_task.task.slug == TASK_DBTRUN:
+                        dbt_core_task_setup = PrefectDbtTaskSetup(
+                            seq=TRANSFORM_TASKS_SEQ[org_task.task.slug] + seq,
+                            slug=org_task.task.slug,
+                            commands=[
+                                f"{dbt_binary} {org_task.task.command} --target {target}"
+                            ],
+                            type=DBTCORE,
+                            env={},
+                            working_dir=project_dir,
+                            profiles_dir=f"{project_dir}/profiles/",
+                            project_dir=project_dir,
+                            cli_profile_block=cli_profile_block.block_name,
+                            cli_args=[],
+                        )
+
+                        task_config = dict(dbt_core_task_setup)
+                        tasks.append(task_config)
+
+                    elif org_task.task.slug == TASK_GITPULL:
+                        shell_env = {"secret-git-pull-url-block": ""}
+
+                        gitpull_secret_block = OrgPrefectBlockv1.objects.filter(
+                            org=org, block_type=SECRET, block_name__contains="git-pull"
+                        ).first()
+
+                        if gitpull_secret_block is not None:
+                            shell_env[
+                                "secret-git-pull-url-block"
+                            ] = gitpull_secret_block.block_name
+
+                        shell_task_setup = PrefectShellTaskSetup(
+                            commands=["git pull"],
+                            working_dir=project_dir,
+                            env=shell_env,
+                            slug=org_task.task.slug,
+                            type=SHELLOPERATION,
+                            seq=TRANSFORM_TASKS_SEQ[org_task.task.slug] + seq,
+                        )
+
+                        task_config = dict(shell_task_setup)
+                        tasks.append(task_config)
+
+            params["config"] = {"tasks": tasks}
+            logger.info(f"PARAMS {new_dataflow.deployment_id}")
+            try:
+                payload = PrefectDataFlowUpdateSchema3(
+                    name=new_dataflow.name,  # wont be updated
+                    connections=[],  # wont be updated
+                    dbtTransform="ignore",  # wont be updated
+                    cron=new_dataflow.cron if new_dataflow.cron else "",
+                    deployment_params=params,
+                )
+                update_dataflow_v1(new_dataflow.deployment_id, payload)
+                logger.info(
+                    f"updated deployment params for the deployment with id {new_dataflow.deployment_id} for {org.slug}"
+                )
+            except Exception as error:
+                logger.info(
+                    f"Something went wrong in updating the deployment params with id '{new_dataflow.deployment_id}' for {org.slug}"
+                )
+                logger.exception(error)
+                logger.debug("skipping to next loop")
+                continue
+
     def handle(self, *args, **options):
         for org in Org.objects.all():
-            self.migrate_airbyte_server_blocks(org)
-            self.migrate_manual_sync_conn_deployments(org)
-            self.create_cli_profile_and_secret_blocks(org)
-            self.migrate_transformation_blocks(org)
+            # self.migrate_airbyte_server_blocks(org)
+            # self.migrate_manual_sync_conn_deployments(org)
+            # self.create_cli_profile_and_secret_blocks(org)
+            # self.migrate_transformation_blocks(org)
             self.migrate_manual_dbt_run_deployments(org)
-            self.migrate_org_pipelines(org)
+            # self.migrate_org_pipelines(org)
 
         # show summary
         print("=" * 80)
