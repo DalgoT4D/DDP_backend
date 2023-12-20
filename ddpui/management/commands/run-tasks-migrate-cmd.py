@@ -253,99 +253,112 @@ class Command(BaseCommand):
                 logger.info("skipping to next loop")
                 continue
 
-    def migrate_transformation_blocks(self, org: Org):
+    def create_cli_profile_and_secret_blocks(self, org: Org):
         """
         - Create/Fetch the dbt cli profile block
         - Create/Fetch the secret block for git pull url if private repo & git token provided
-        - Migrate Dbt Core Operation & Shell Operation blocks to org tasks
         """
-
         # fetch warehouse and credentials
-        warehouse = OrgWarehouse.objects.filter(org=org).first()
-        if warehouse is None:
-            self.failures.append(f"SKIPPING: org {org.slug} does not have a warehouse")
-            return
-        try:
-            credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
-        except:
-            self.failures.append(
-                f"SKIPPING: couldnt retrieve the warehouse creds for {org.slug}"
-            )
-            return
+        # warehouse = OrgWarehouse.objects.filter(org=org).first()
+        # if warehouse is None:
+        #     self.failures.append(f"SKIPPING: org {org.slug} does not have a warehouse")
+        #     return
+        # try:
+        #     credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
+        # except:
+        #     self.failures.append(
+        #         f"SKIPPING: couldnt retrieve the warehouse creds for {org.slug}"
+        #     )
+        #     return
 
         # get the dataset location if warehouse type is bigquery
-        bqlocation = None
-        if warehouse.wtype == "bigquery":
-            try:
-                destination = airbyte_service.get_destination(
-                    org.airbyte_workspace_id, warehouse.airbyte_destination_id
-                )
-            except:
-                self.failures.append(
-                    f"SKIPPING: couldnt get bigquery warehouse location for {org.slug}"
-                )
-                return
-            if destination.get("connectionConfiguration"):
-                bqlocation = destination["connectionConfiguration"]["dataset_location"]
+        # bqlocation = None
+        # if warehouse.wtype == "bigquery":
+        #     try:
+        #         destination = airbyte_service.get_destination(
+        #             org.airbyte_workspace_id, warehouse.airbyte_destination_id
+        #         )
+        #     except:
+        #         self.failures.append(
+        #             f"SKIPPING: couldnt get bigquery warehouse location for {org.slug}"
+        #         )
+        #         return
+        #     if destination.get("connectionConfiguration"):
+        #         bqlocation = destination["connectionConfiguration"]["dataset_location"]
 
-        dbt_env_dir = Path(org.dbt.dbt_venv)
-        if not dbt_env_dir.exists():
-            self.failures.append("SKIPPING: couldnt find the dbt venv")
-            return
-        dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
-        dbtrepodir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug / "dbtrepo"
-        project_dir = str(dbtrepodir)
-        dbt_project_filename = str(dbtrepodir / "dbt_project.yml")
-        if not os.path.exists(dbt_project_filename):
-            self.failures.append(f"{dbt_project_filename} is missing")
-            return
+        # dbt_env_dir = Path(org.dbt.dbt_venv)
+        # if not dbt_env_dir.exists():
+        #     self.failures.append("SKIPPING: couldnt find the dbt venv")
+        #     return
+        # dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
+        # dbtrepodir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug / "dbtrepo"
+        # project_dir = str(dbtrepodir)
+        # dbt_project_filename = str(dbtrepodir / "dbt_project.yml")
+        # if not os.path.exists(dbt_project_filename):
+        #     self.failures.append(f"{dbt_project_filename} is missing")
+        #     return
 
-        with open(dbt_project_filename, "r", encoding="utf-8") as dbt_project_file:
-            dbt_project = yaml.safe_load(dbt_project_file)
-            if "profile" not in dbt_project:
-                self.failures.append(
-                    f"SKIPPING: could not find 'profile:' in dbt_project.yml for {org.slug}"
-                )
-                return
+        # with open(dbt_project_filename, "r", encoding="utf-8") as dbt_project_file:
+        #     dbt_project = yaml.safe_load(dbt_project_file)
+        #     if "profile" not in dbt_project:
+        #         self.failures.append(
+        #             f"SKIPPING: could not find 'profile:' in dbt_project.yml for {org.slug}"
+        #         )
+        #         return
 
-        profile_name = dbt_project["profile"]
-        target = org.dbt.default_schema
+        # profile_name = dbt_project["profile"]
+        # target = org.dbt.default_schema
 
         # create the dbt cli profile block
         cli_profile_block = OrgPrefectBlockv1.objects.filter(
             org=org, block_type=DBTCLIPROFILE
         ).first()
         if cli_profile_block is None:
-            try:
-                cli_block_name = f"{org.slug}-{profile_name}"
+            # look through the dbt core operation blocks & find the cli_profile block reference
+            # break as soon as find the dbt cli profile
+            for dbt_core_block in OrgPrefectBlock.objects.filter(
+                org=org, block_type=DBTCORE
+            ).all():
+                try:
+                    # get_airbyte_connection_block_by_id function fetches any block by id not just airbyte connection block
+                    res = prefect_service.get_airbyte_connection_block_by_id(
+                        dbt_core_block.block_id
+                    )
+                    if (
+                        "dbt_cli_profile" not in res["block_document_references"]
+                        or "block_document"
+                        not in res["block_document_references"]["dbt_cli_profile"]
+                    ):
+                        self.failures.append(
+                            f"Couldnt find dbt cli profile reference in dbt core block: {dbt_core_block.block_name}. Going to next"
+                        )
+                        continue
 
-                cli_block_response = prefect_service.create_dbt_cli_profile_block(
-                    cli_block_name,
-                    profile_name,
-                    target,
-                    warehouse.wtype,
-                    bqlocation,
-                    credentials,
-                )
+                    cli_profile_blk_id = res["block_document_references"][
+                        "dbt_cli_profile"
+                    ]["block_document"]["id"]
+                    cli_profile_blk_name = res["block_document_references"][
+                        "dbt_cli_profile"
+                    ]["block_document"]["name"]
+                    self.successes.append(
+                        f"Found the dbt cli profile block with name: {cli_profile_blk_name}, from dbt core block: {dbt_core_block.block_name}"
+                    )
 
-                # save the cli profile block in django db
-                cli_profile_block = OrgPrefectBlockv1.objects.create(
-                    org=org,
-                    block_type=DBTCLIPROFILE,
-                    block_id=cli_block_response["block_id"],
-                    block_name=cli_block_response["block_name"],
-                )
-            except Exception as error:
-                self.failures.append(
-                    f"FAILED to create the dbt cli profile block for {org.slug}"
-                )
-                logger.exception(error)
-                return
+                    cli_profile_block = OrgPrefectBlockv1.objects.create(
+                        org=org,
+                        block_type=DBTCLIPROFILE,
+                        block_name=cli_profile_blk_name,
+                        block_id=cli_profile_blk_id,
+                    )
+                    break
 
-            self.successes.append(
-                f"Created the dbt cli profile block for the org {org.slug}"
-            )
+                except Exception as error:
+                    self.failures.append(
+                        f"Couldnt fetch the dbt core operation block : {dbt_core_block.block_name}. Trying the next one."
+                    )
+                    logger.exception(error)
 
+        # assert cli profile block creation
         self.successes.append(
             f"Using the dbt cli profile block {cli_profile_block.block_name} for {org.slug}"
         )
@@ -354,60 +367,79 @@ class Command(BaseCommand):
         ).count()
         if cnt == 1:
             self.successes.append(
-                f"ASSERT: Found {cnt} dbt cli profile block for {org.slug}"
+                f"ASSERT: Found {cnt} dbt cli profile block for org {org.slug}"
             )
         else:
             self.failures.append(
-                f"ASSERT: Found {cnt} dbt cli profile block for {org.slug}"
+                f"ASSERT: Found {cnt} dbt cli profile block for org {org.slug}"
             )
 
-        # create the secret block for git token url if needed
+        # create the secret block
         secret_git_url_block = OrgPrefectBlockv1.objects.filter(
             org=org, block_type=SECRET
         ).first()
         if secret_git_url_block is None:
-            gitrepo_access_token = secretsmanager.retrieve_github_token(org.dbt)
-            gitrepo_url = org.dbt.gitrepo_url
+            shell_op_block = OrgPrefectBlock.objects.filter(
+                org=org, block_type=SHELLOPERATION
+            ).first()
 
-            if gitrepo_access_token is not None and gitrepo_access_token != "":
-                gitrepo_url = gitrepo_url.replace(
-                    "github.com", "oauth2:" + gitrepo_access_token + "@github.com"
+            if not shell_op_block:
+                self.successes.append(
+                    f"SKIPPING: Shell operation block not found for the org {org.slug}"
                 )
-                secret_block = PrefectSecretBlockCreate(
-                    block_name=f"{org.slug}-git-pull-url",
-                    secret=gitrepo_url,
+                return
+
+            try:
+                # get_airbyte_connection_block_by_id function fetches any block by id not just airbyte connection block
+                res = prefect_service.get_airbyte_connection_block_by_id(
+                    shell_op_block.block_id
                 )
-                try:
-                    block_response = prefect_service.create_secret_block(secret_block)
-                except:
+
+                # secret block name lies in the env of shell operation block
+                if "data" not in res or "env" not in res["data"]:
                     self.failures.append(
-                        "FAILED to create the secret git pull url block for {org.slug}"
+                        f"Couldnt find secret block in env of shell op block: {shell_op_block.block_name}"
                     )
-                    logger.exception(error)
                     return
 
+                if "secret-git-pull-url-block" not in res["data"]["env"]:
+                    self.successes.append(
+                        f"Secret block creation not needed, dbt repo for org {org.slug} seems to be public"
+                    )
+                    return
+
+                secret_blkname = res["data"]["env"]["secret-git-pull-url-block"]
+                res = prefect_service.get_secret_block_by_name(secret_blkname)
                 secret_git_url_block = OrgPrefectBlockv1.objects.create(
                     org=org,
                     block_type=SECRET,
-                    block_id=block_response["block_id"],
-                    block_name=block_response["block_name"],
+                    block_name=res["block_name"],
+                    block_id=res["block_id"],
                 )
-                self.successes.append("Created the secret git url block")
 
-        self.successes.append(
-            f"Org has a {'private repo' if secret_git_url_block else 'public repo'}"
-        )
+            except Exception as error:
+                self.failures.append(
+                    f"Couldnt create the secret block to store git token url for shell op operation block : {shell_op_block.block_name}"
+                )
+                logger.exception(error)
+
+        # assert secret block creation
         cnt = OrgPrefectBlockv1.objects.filter(org=org, block_type=SECRET).count()
-        self.successes.append(f"ASSERT: Found {cnt} secret block")
+        self.successes.append(f"ASSERT: Found {cnt} secret block for org {org.slug}")
+
+    def migrate_transformation_blocks(self, org: Org):
+        """
+        - Migrate Dbt Core Operation & Shell Operation blocks to org tasks
+        """
 
         # migrate dbt blocks ->  dbt tasks
+        # migrate git-pull block -> git pull task
         dbt_blocks = OrgPrefectBlock.objects.filter(
             org=org, block_type__in=[DBTCORE, SHELLOPERATION]
         ).all()
         for old_block in dbt_blocks:
-            # its a git pull block
             task = None
-            if old_block.block_name.endswith("git-pull"):
+            if old_block.block_name.endswith("git-pull"):  # its a git pull block
                 task = Task.objects.filter(slug=TASK_GITPULL).first()
             else:  # its one of the dbt core block
                 old_cmd = old_block.block_name.split(f"{old_block.dbt_target_schema}-")[
@@ -802,6 +834,7 @@ class Command(BaseCommand):
         for org in Org.objects.all():
             self.migrate_airbyte_server_blocks(org)
             self.migrate_manual_sync_conn_deployments(org)
+            self.create_cli_profile_and_secret_blocks(org)
             self.migrate_transformation_blocks(org)
             self.migrate_manual_dbt_run_deployments(org)
             self.migrate_org_pipelines(org)

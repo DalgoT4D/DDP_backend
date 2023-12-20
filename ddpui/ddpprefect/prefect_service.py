@@ -368,6 +368,12 @@ def delete_secret_block(block_id) -> None:
     prefect_delete_a_block(block_id)
 
 
+def get_secret_block_by_name(blockname: str) -> dict:
+    """Fetch secret block id and block name"""
+    response = prefect_get(f"blocks/secret/{blockname}")
+    return response
+
+
 # ================================================================================================
 def run_airbyte_connection_sync(
     run_flow: PrefectAirbyteSync,
