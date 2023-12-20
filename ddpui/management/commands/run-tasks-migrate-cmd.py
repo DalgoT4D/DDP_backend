@@ -263,12 +263,14 @@ class Command(BaseCommand):
         # fetch warehouse and credentials
         warehouse = OrgWarehouse.objects.filter(org=org).first()
         if warehouse is None:
-            self.failures.append("SKIPPING: org does not have a warehouse")
+            self.failures.append(f"SKIPPING: org {org.slug} does not have a warehouse")
             return
         try:
             credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
         except:
-            self.failures.append("SKIPPING: couldnt retrieve the warehouse creds")
+            self.failures.append(
+                f"SKIPPING: couldnt retrieve the warehouse creds for {org.slug}"
+            )
             return
 
         # get the dataset location if warehouse type is bigquery
@@ -279,7 +281,9 @@ class Command(BaseCommand):
                     org.airbyte_workspace_id, warehouse.airbyte_destination_id
                 )
             except:
-                self.failures.append("SKIPPING: couldnt bigquery warehouse location")
+                self.failures.append(
+                    f"SKIPPING: couldnt get bigquery warehouse location for {org.slug}"
+                )
                 return
             if destination.get("connectionConfiguration"):
                 bqlocation = destination["connectionConfiguration"]["dataset_location"]
@@ -300,7 +304,7 @@ class Command(BaseCommand):
             dbt_project = yaml.safe_load(dbt_project_file)
             if "profile" not in dbt_project:
                 self.failures.append(
-                    "SKIPPING: could not find 'profile:' in dbt_project.yml"
+                    f"SKIPPING: could not find 'profile:' in dbt_project.yml for {org.slug}"
                 )
                 return
 
@@ -332,22 +336,30 @@ class Command(BaseCommand):
                     block_name=cli_block_response["block_name"],
                 )
             except Exception as error:
-                self.failures.append("FAILED to create the dbt cli profile block")
+                self.failures.append(
+                    f"FAILED to create the dbt cli profile block for {org.slug}"
+                )
                 logger.exception(error)
                 return
 
-            self.successes.append("Created the dbt cli profile block for the org")
+            self.successes.append(
+                f"Created the dbt cli profile block for the org {org.slug}"
+            )
 
         self.successes.append(
-            f"Using the dbt cli profile block {cli_profile_block.block_name}"
+            f"Using the dbt cli profile block {cli_profile_block.block_name} for {org.slug}"
         )
         cnt = OrgPrefectBlockv1.objects.filter(
             org=org, block_type=DBTCLIPROFILE
         ).count()
         if cnt == 1:
-            self.successes.append(f"ASSERT: Found {cnt} dbt cli profile block")
+            self.successes.append(
+                f"ASSERT: Found {cnt} dbt cli profile block for {org.slug}"
+            )
         else:
-            self.failures.append(f"ASSERT: Found {cnt} dbt cli profile block")
+            self.failures.append(
+                f"ASSERT: Found {cnt} dbt cli profile block for {org.slug}"
+            )
 
         # create the secret block for git token url if needed
         secret_git_url_block = OrgPrefectBlockv1.objects.filter(
@@ -369,7 +381,7 @@ class Command(BaseCommand):
                     block_response = prefect_service.create_secret_block(secret_block)
                 except:
                     self.failures.append(
-                        "FAILED to create the secret git pull url block"
+                        "FAILED to create the secret git pull url block for {org.slug}"
                     )
                     logger.exception(error)
                     return
@@ -404,23 +416,35 @@ class Command(BaseCommand):
                 task = Task.objects.filter(slug__endswith=old_cmd).first()
 
             if not task:
-                self.failures.append(f"Couldnt find the task {old_cmd}")
-                self.failures.append(f"SKIPPING: migration of {old_block.block_name}")
+                self.failures.append(f"Couldnt find the task {old_cmd} for {org.slug}")
+                self.failures.append(
+                    f"SKIPPING: migration of {old_block.block_name} for {org.slug}"
+                )
                 continue
 
-            self.successes.append(f"Found corresponding task {task.slug}")
+            self.successes.append(
+                f"Found corresponding task {task.slug} for {org.slug}"
+            )
 
             org_task = OrgTask.objects.filter(org=org, task=task).first()
             if not org_task:
-                self.successes.append(f"Creating orgtask for task {task.slug}")
+                self.successes.append(
+                    f"Creating orgtask for task {task.slug} for {org.slug}"
+                )
                 org_task = OrgTask.objects.create(task=task, org=org)
-                self.successes.append(f"Created orgtask for task {task.slug}")
+                self.successes.append(
+                    f"Created orgtask for task {task.slug} for {org.slug}"
+                )
 
             cnt = OrgTask.objects.filter(org=org, task=task).count()
             if cnt == 1:
-                self.successes.append(f"ASSERT: Found {cnt} orgtask for {task.slug}")
+                self.successes.append(
+                    f"ASSERT: Found {cnt} orgtask for {task.slug} for {org.slug}"
+                )
             else:
-                self.failures.append(f"ASSERT: Found {cnt} orgtask for {task.slug}")
+                self.failures.append(
+                    f"ASSERT: Found {cnt} orgtask for {task.slug} for {org.slug}"
+                )
 
     def migrate_manual_dbt_run_deployments(self, org: Org):
         """
@@ -432,10 +456,12 @@ class Command(BaseCommand):
             org=org, block_type=DBTCLIPROFILE
         ).first()
         if not cli_profile_block:
-            self.failures.append("SKIPPING: Couldnt find the dbt cli profile block")
+            self.failures.append(
+                "SKIPPING: Couldnt find the dbt cli profile block for {org.slug}"
+            )
             return
         self.successes.append(
-            f"Found dbt cli profile block : {cli_profile_block.block_name}"
+            f"Found dbt cli profile block : {cli_profile_block.block_name} for {org.slug}"
         )
 
         # dbt related params
@@ -462,7 +488,7 @@ class Command(BaseCommand):
             ).first()
 
             if not new_dataflow:
-                logger.info("Creating a new dataflow for manual dbt run")
+                logger.info("Creating a new dataflow for manual dbt run for {org.slug}")
                 new_dataflow = OrgDataFlowv1.objects.create(
                     org=org,
                     name=old_dataflow.name,
@@ -471,7 +497,9 @@ class Command(BaseCommand):
                     cron=old_dataflow.cron,
                     dataflow_type="manual",
                 )
-                self.successes.append("Created dataflow in orgdataflowv1")
+                self.successes.append(
+                    "Created dataflow in orgdataflowv1 for {org.slug}"
+                )
 
             # assert new dataflow creation
             cnt = OrgDataFlowv1.objects.filter(
@@ -479,11 +507,11 @@ class Command(BaseCommand):
             ).count()
             if cnt == 1:
                 self.successes.append(
-                    f"Found {cnt} row(s) for orgdataflowv1 for deployment id {old_dataflow.deployment_id}"
+                    f"Found {cnt} row(s) for orgdataflowv1 for deployment id {old_dataflow.deployment_id} for {org.slug}"
                 )
             else:
                 self.failures.append(
-                    f"Found {cnt} row(s) for orgdataflowv1 for deployment id {old_dataflow.deployment_id}"
+                    f"Found {cnt} row(s) for orgdataflowv1 for deployment id {old_dataflow.deployment_id} for {org.slug}"
                 )
 
             # map dataflow to org task
@@ -491,18 +519,18 @@ class Command(BaseCommand):
                 dataflow=new_dataflow, orgtask=org_task
             ).first()
             if not df_orgtask:
-                logger.info("Creating dataflow orgtask mapping")
+                logger.info("Creating dataflow orgtask mapping for {org.slug}")
                 df_orgtask = DataflowOrgTask.objects.create(
                     dataflow=new_dataflow, orgtask=org_task
                 )
-                logger.info("Created dataflow org task mapping")
-                self.successes.append("Created dataflow orgtask mapping")
+                logger.info("Created dataflow org task mapping for {org.slug}")
+                self.successes.append("Created dataflow orgtask mapping for {org.slug}")
 
             cnt = DataflowOrgTask.objects.filter(
                 dataflow=new_dataflow, orgtask=org_task
             ).count()
             self.successes.append(
-                f"Found {1} row(s) for dataflow<->orgtask mapping for deployment id {old_dataflow.deployment_id}"
+                f"Found {1} row(s) for dataflow<->orgtask mapping for deployment id {old_dataflow.deployment_id} for {org.slug}"
             )
 
             # update deployment params
@@ -511,10 +539,10 @@ class Command(BaseCommand):
                 deployment = get_deployment(new_dataflow.deployment_id)
             except Exception as error:
                 logger.info(
-                    f"Something went wrong in fetching the deployment with id '{new_dataflow.deployment_id}'"
+                    f"Something went wrong in fetching the deployment with id '{new_dataflow.deployment_id}' for {org.slug}"
                 )
                 logger.exception(error)
-                logger.info("skipping to next loop")
+                logger.debug("skipping to next loop")
                 continue
 
             params = deployment["parameters"]
@@ -542,14 +570,14 @@ class Command(BaseCommand):
                 )
                 update_dataflow_v1(new_dataflow.deployment_id, payload)
                 logger.info(
-                    f"updated deployment params for the deployment with id {new_dataflow.deployment_id}"
+                    f"updated deployment params for the deployment with id {new_dataflow.deployment_id} for {org.slug}"
                 )
             except Exception as error:
                 logger.info(
-                    f"Something went wrong in updating the deployment params with id '{new_dataflow.deployment_id}'"
+                    f"Something went wrong in updating the deployment params with id '{new_dataflow.deployment_id}' for {org.slug}"
                 )
                 logger.exception(error)
-                logger.info("skipping to next loop")
+                logger.debug("skipping to next loop")
                 continue
 
             # assert deployment params updation
@@ -568,7 +596,7 @@ class Command(BaseCommand):
                     f"Failed to fetch deployment with id '{new_dataflow.deployment_id}' for {org.slug}"
                 )
                 logger.exception(error)
-                logger.info("skipping to next loop")
+                logger.debug("skipping to next loop")
                 continue
 
     def migrate_org_pipelines(self, org: Org):
@@ -582,7 +610,9 @@ class Command(BaseCommand):
         if not server_block:
             self.failures.append(f"Server block not found for {org.slug}")
             return
-        self.successes.append(f"Found airbyte server block: {server_block.block_name}")
+        self.successes.append(
+            f"Found airbyte server block: {server_block.block_name} for {org.slug}"
+        )
 
         # check if cli block is created
         cli_profile_block = OrgPrefectBlockv1.objects.filter(
@@ -594,7 +624,7 @@ class Command(BaseCommand):
             )
             return
         self.successes.append(
-            f"Found dbt cli profile block : {cli_profile_block.block_name}"
+            f"Found dbt cli profile block : {cli_profile_block.block_name} for {org.slug}"
         )
 
         for old_dataflow in OrgDataFlow.objects.filter(
@@ -604,7 +634,7 @@ class Command(BaseCommand):
                 org=org, deployment_id=old_dataflow.deployment_id
             ).first()
             if not new_dataflow:
-                logger.info("Creating a new pipeline in orgdataflowv1")
+                logger.info("Creating a new pipeline in orgdataflowv1 for {org.slug}")
                 new_dataflow = OrgDataFlowv1.objects.create(
                     org=org,
                     name=old_dataflow.name,
@@ -613,7 +643,9 @@ class Command(BaseCommand):
                     cron=old_dataflow.cron,
                     dataflow_type="orchestrate",
                 )
-                self.successes.append("Created pipeline in orgdataflowv1")
+                self.successes.append(
+                    "Created pipeline in orgdataflowv1 for {org.slug}"
+                )
 
             # assert new dataflow creation
             cnt = OrgDataFlowv1.objects.filter(
@@ -621,11 +653,11 @@ class Command(BaseCommand):
             ).count()
             if cnt == 1:
                 self.successes.append(
-                    f"Found {cnt} row(s) for orgdataflowv1 for deployment id {old_dataflow.deployment_id}"
+                    f"Found {cnt} row(s) for orgdataflowv1 for deployment id {old_dataflow.deployment_id} for {org.slug}"
                 )
             else:
                 self.failures.append(
-                    f"Found {cnt} row(s) for orgdataflowv1 for deployment id {old_dataflow.deployment_id}"
+                    f"Found {cnt} row(s) for orgdataflowv1 for deployment id {old_dataflow.deployment_id} for {org.slug}"
                 )
 
             # map orgtasks for this new deloyment in datafloworgtask table
@@ -639,7 +671,7 @@ class Command(BaseCommand):
                     task = Task.objects.filter(slug=TASK_AIRBYTESYNC).first()
                     if not task:
                         self.failures.append(
-                            "SKIPPING: airbyte connection task not found"
+                            "SKIPPING: airbyte connection task not found for {org.slug}"
                         )
                         continue
                     # fetch the conn block for connection_id
@@ -653,7 +685,7 @@ class Command(BaseCommand):
 
                     if not conn_block or "data" not in conn_block:
                         self.failures.append(
-                            f"SKIPPING: Couldnt find airbyte conn block {dataflow_blk.opb.block_name} in prefect & couldnt map orgtask to new pipeline {new_dataflow.name}"
+                            f"SKIPPING: Couldnt find airbyte conn block {dataflow_blk.opb.block_name} in prefect & couldnt map orgtask to new pipeline {new_dataflow.name} for {org.slug}"
                         )
                         continue
 
@@ -662,19 +694,21 @@ class Command(BaseCommand):
                         or not conn_block["data"]["connection_id"]
                     ):
                         self.failures.append(
-                            f"SKIPPING: Couldnt find the connection_id in airbyte connection block {dataflow_blk.opb.block_name} "
+                            f"SKIPPING: Couldnt find the connection_id in airbyte connection block {dataflow_blk.opb.block_name}  for {org.slug}"
                         )
                         continue
 
                     self.successes.append(
-                        f"Found airbyte conn block in prefect {dataflow_blk.opb.block_name}. Will use connection_id from here to create orgtask mapping of pipeline"
+                        f"Found airbyte conn block in prefect {dataflow_blk.opb.block_name}. Will use connection_id from here to create orgtask mapping of pipeline for {org.slug}"
                     )
                     connection_id = conn_block["data"]["connection_id"]
 
                 elif dataflow_blk.opb.block_type == SHELLOPERATION:
                     task = Task.objects.filter(slug=TASK_GITPULL).first()
                     if not task:
-                        self.failures.append("SKIPPING: shell operation task not found")
+                        self.failures.append(
+                            f"SKIPPING: shell operation task not found for {org.slug}"
+                        )
                         continue
 
                 elif dataflow_blk.opb.block_type == DBTCORE:
@@ -684,13 +718,15 @@ class Command(BaseCommand):
                     task = Task.objects.filter(slug__endswith=old_cmd).first()
                     if not task:
                         self.failures.append(
-                            f"SKIPPING: dbt core task {old_cmd} not found"
+                            f"SKIPPING: dbt core task {old_cmd} not found for {org.slug}"
                         )
                         continue
 
                 if task is None:
                     logger.info("Unrecognized block_type")
-                    self.failures.append("Unrecognized block_type")
+                    self.failures.append(
+                        f"Unrecognized block_type {dataflow_blk.opb.block_type} for {org.slug}"
+                    )
                     continue
 
                 org_task = OrgTask.objects.filter(
@@ -699,14 +735,16 @@ class Command(BaseCommand):
                     connection_id=connection_id,
                 ).first()
                 if not org_task:
-                    logger.info("Org task not found, creating a new one")
+                    logger.info(
+                        f"Org task not found, creating a new one for {org.slug}"
+                    )
                     org_task = OrgTask.objects.create(
                         org=org,
                         task=task,
                         connection_id=connection_id,
                     )
                     self.successes.append(
-                        f"Created orgtask {org_task.task.slug} for new pipeline {new_dataflow.name}"
+                        f"Created orgtask {org_task.task.slug} for new pipeline {new_dataflow.name} for {org.slug}"
                     )
 
                 # assert orgtask
@@ -717,11 +755,11 @@ class Command(BaseCommand):
                 ).count()
                 if cnt == 1:
                     self.successes.append(
-                        f"ASSERT: Found {cnt} orgtask record for new pipeline {new_dataflow.name} and its opb {dataflow_blk.opb.block_name}"
+                        f"ASSERT: Found {cnt} orgtask record for new pipeline {new_dataflow.name} and its opb {dataflow_blk.opb.block_name} for {org.slug}"
                     )
                 else:
                     self.failures.append(
-                        f"ASSERT: Found {cnt} orgtask record for new pipeline {new_dataflow.name} and its opb {dataflow_blk.opb.block_name}"
+                        f"ASSERT: Found {cnt} orgtask record for new pipeline {new_dataflow.name} and its opb {dataflow_blk.opb.block_name} for {org.slug}"
                     )
 
                 # create orgtask mapping to dataflow
@@ -733,7 +771,7 @@ class Command(BaseCommand):
                     dataflow_orgtask = DataflowOrgTask.objects.create(
                         dataflow=new_dataflow, orgtask=org_task
                     )
-                    self.successes.append("Created datafloworgtask")
+                    self.successes.append(f"Created datafloworgtask for {org.slug}")
 
                 # assert datafloworgtask
                 cnt = DataflowOrgTask.objects.filter(
@@ -741,11 +779,11 @@ class Command(BaseCommand):
                 ).count()
                 if cnt == 1:
                     self.successes.append(
-                        f"ASSERT: Found {cnt} datafloworgtask record for new pipeline {new_dataflow.name} and its opb {dataflow_blk.opb.block_name}"
+                        f"ASSERT: Found {cnt} datafloworgtask record for new pipeline {new_dataflow.name} and its opb {dataflow_blk.opb.block_name} for {org.slug}"
                     )
                 else:
                     self.failures.append(
-                        f"ASSERT: Found {cnt} datafloworgtask record for new pipeline {new_dataflow.name} and its opb {dataflow_blk.opb.block_name}"
+                        f"ASSERT: Found {cnt} datafloworgtask record for new pipeline {new_dataflow.name} and its opb {dataflow_blk.opb.block_name} for {org.slug}"
                     )
 
             # update deployment params
