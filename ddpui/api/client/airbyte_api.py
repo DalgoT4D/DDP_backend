@@ -48,7 +48,7 @@ from ddpui.models.org import (
     OrgDataFlowv1,
 )
 from ddpui.models.orgjobs import DataflowBlock, BlockLock
-from ddpui.models.tasks import Task, DataflowOrgTask, OrgTask
+from ddpui.models.tasks import Task, DataflowOrgTask, OrgTask, TaskLock
 from ddpui.models.org_user import OrgUser
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
@@ -1171,8 +1171,6 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
         "status": airbyte_conn["status"],
         "deploymentId": dataflow["deployment"]["id"],
         "normalize": payload.normalize,
-        "lastRun": None,  # TODO
-        "lock": None,  # TODO
     }
     logger.debug(res)
     return res
@@ -1199,7 +1197,30 @@ def get_airbyte_connections_v1(request):
             orguser.org.airbyte_workspace_id, org_task.connection_id
         )
 
-        sync_dataflow = DataflowOrgTask.objects.filter(orgtask=org_task).first()
+        # a single connection will have a manual deployment and (usually) a pipeline
+        # we want to show the last sync, from whichever
+        last_runs = []
+        for df_orgtask in DataflowOrgTask.objects.filter(
+            orgtask=org_task,
+        ):
+            run = prefect_service.get_last_flow_run_by_deployment_id(
+                df_orgtask.dataflow.deployment_id
+            )
+            if run:
+                last_runs.append(run)
+
+        last_runs.sort(
+            key=lambda run: run["startTime"]
+            if run["startTime"]
+            else run["expectedStartTime"]
+        )
+
+        sync_dataflow = DataflowOrgTask.objects.filter(
+            orgtask=org_task, dataflow__dataflow_type="manual"
+        ).first()
+
+        # is the task currently locked?
+        lock = TaskLock.objects.filter(orgtask=org_task).first()
 
         res.append(
             {
@@ -1213,12 +1234,16 @@ def get_airbyte_connections_v1(request):
                 "deploymentId": sync_dataflow.dataflow.deployment_id
                 if sync_dataflow
                 else None,
-                "lastRun": None,  # TODO
-                "lock": None,  # TODO
+                "lastRun": last_runs[-1] if len(last_runs) > 0 else None,
+                "lock": {
+                    "lockedBy": lock.locked_by.user.email,
+                    "lockedAt": lock.locked_at,
+                }
+                if lock
+                else None,
             }
         )
 
-    # TODO: lock task logic
     logger.info(res)
 
     # by default normalization is going as False here because we dont do anything with it
@@ -1249,12 +1274,15 @@ def get_airbyte_connection_v1(request, connection_id):
         orguser.org.airbyte_workspace_id, org_task.connection_id
     )
 
-    dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
+    dataflow_orgtask = DataflowOrgTask.objects.filter(
+        orgtask=org_task, dataflow__dataflow_type="manual"
+    ).first()
 
     if dataflow_orgtask is None:
         raise HttpError(422, "deployment not found")
 
-    # TODO: task lock logic
+    # check if the task is locked or not
+    lock = TaskLock.objects.filter(orgtask=org_task).first()
 
     # fetch the source and destination names
     # the web_backend/connections/get fetches the source & destination objects also so we dont need to query again
@@ -1281,7 +1309,12 @@ def get_airbyte_connection_v1(request, connection_id):
         )
         if "operationIds" in airbyte_conn and len(airbyte_conn["operationIds"]) == 1
         else False,
-        "lock": None,  # TODO
+        "lock": {
+            "lockedBy": lock.locked_by.user.email,
+            "lockedAt": lock.locked_at,
+        }
+        if lock
+        else None,
     }
 
     logger.debug(res)
