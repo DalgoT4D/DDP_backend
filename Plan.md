@@ -77,11 +77,10 @@ Plan to go away from the prefect dbt core blocks & connection blocks
 
 #### <u>User org client related</u>
 
-| Before                                                                     | After                                                                                     |
-| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| Django: create airbyte workspace `POST /api/airbyte/workspace/`            | Django : new api to create airbyte workspace `POST /api/airbyte/v1/workspace/`            |
-| Django: create organization `POST /api/organizations/`                     | Django : new api to create org `POST /api/v1/organizations/`                              |
-| Proxy: create organization warehouse `POST /api/organizations/warehouses/` | Proxy : new api to create organization warehouse `POST /api/v1/organizations/warehouses/` |
+| Before                                                          | After                                                                          |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Django: create airbyte workspace `POST /api/airbyte/workspace/` | Django : new api to create airbyte workspace `POST /api/airbyte/v1/workspace/` |
+| Django: create organization `POST /api/organizations/`          | Django : new api to create org `POST /api/v1/organizations/`                   |
 
 #### <u>Airbyte connections</u>
 
