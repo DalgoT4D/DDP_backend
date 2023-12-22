@@ -1484,7 +1484,13 @@ def get_prefect_dataflow_v1(request, deployment_id):
         raise HttpError(400, "failed to get deploymenet from prefect-proxy") from error
 
     connections = [
-        {"id": task["connection_id"], "seq": task["seq"]}
+        {
+            "id": task["connection_id"],
+            "seq": task["seq"],
+            "name": airbyte_service.get_connection(
+                orguser.org.airbyte_workspace_id, task["connection_id"]
+            )["name"],
+        }
         for task in deployment["parameters"]["config"]["tasks"]
         if task["type"] == AIRBYTECONNECTION
     ]
