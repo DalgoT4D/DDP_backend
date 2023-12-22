@@ -1564,6 +1564,7 @@ def put_prefect_dataflow_v1(
     seq = 0  # global sequence for all tasks
     tasks = []
     map_org_tasks = []  # map org tasks to dataflow
+    delete_dataflow_orgtask_type = []
 
     # check if pipeline has airbyte syncs
     if len(payload.connections) > 0:
@@ -1574,9 +1575,7 @@ def put_prefect_dataflow_v1(
             raise HttpError(400, "airbyte server block not found")
 
         # delete all airbyte sync DataflowOrgTask
-        DataflowOrgTask.objects.filter(
-            dataflow=org_data_flow, orgtask__task__type="airbyte"
-        ).delete()
+        delete_dataflow_orgtask_type.append("airbyte")
 
         # push sync tasks to pipeline
         payload.connections.sort(key=lambda conn: conn.seq)
@@ -1631,12 +1630,13 @@ def put_prefect_dataflow_v1(
             raise HttpError(400, "dbt cli profile not found")
 
         # delete all transform related DataflowOrgTask
-        DataflowOrgTask.objects.filter(
-            dataflow=org_data_flow, orgtask__task__type__in=["dbt", "git"]
-        ).delete()
+        delete_dataflow_orgtask_type.append("dbt")
+        delete_dataflow_orgtask_type.append("git")
 
         # push dbt pipeline tasks
-        for org_task in OrgTask.objects.filter(task__type__in=["dbt", "git"]).all():
+        for org_task in OrgTask.objects.filter(
+            org=orguser.org, task__type__in=["dbt", "git"]
+        ).all():
             logger.info(
                 f"found transform task {org_task.task.slug}; pushing to pipeline"
             )
@@ -1693,6 +1693,12 @@ def put_prefect_dataflow_v1(
         logger.exception(error)
         raise HttpError(400, "failed to update a pipeline") from error
 
+    # Delete mapping
+    DataflowOrgTask.objects.filter(
+        dataflow=org_data_flow, orgtask__task__type__in=delete_dataflow_orgtask_type
+    ).delete()
+
+    # create mapping
     for org_task in map_org_tasks:
         DataflowOrgTask.objects.create(dataflow=org_data_flow, orgtask=org_task)
 
