@@ -1232,7 +1232,13 @@ def test_post_organization_accept_tnc(orguser: OrgUser, org_without_workspace: O
     mock_request = Mock()
     mock_request.orguser = orguser
 
+    currentuserv2response = get_current_user_v2(mock_request)
+    assert currentuserv2response[0].org.tnc_accepted is False
+
     response = post_organization_accept_tnc(mock_request)
     assert response["success"] == 1
 
     assert OrgTnC.objects.filter(org=org_without_workspace).count() == 1
+
+    currentuserv2response = get_current_user_v2(mock_request)
+    assert currentuserv2response[0].org.tnc_accepted is True

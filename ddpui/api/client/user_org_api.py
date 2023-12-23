@@ -53,6 +53,7 @@ from ddpui.utils import sendgrid
 from ddpui.utils import helpers
 from ddpui.utils import timezone
 from ddpui.utils.deleteorg import delete_warehouse_v1
+from ddpui.utils.orguserhelpers import from_orguser, from_invitation
 
 user_org_api = NinjaAPI(urls_namespace="userorg")
 # http://127.0.0.1:8000/api/docs
@@ -98,7 +99,7 @@ def get_current_user(request):
     """return the OrgUser making this request"""
     orguser: OrgUser = request.orguser
     if orguser is not None:
-        return OrgUserResponse.from_orguser(orguser)
+        return from_orguser(orguser)
     raise HttpError(400, "requestor is not an OrgUser")
 
 
@@ -110,10 +111,7 @@ def get_current_user_v2(request):
     if request.orguser is None:
         raise HttpError(400, "requestor is not an OrgUser")
     user = request.orguser.user
-    return [
-        OrgUserResponse.from_orguser(orguser)
-        for orguser in OrgUser.objects.filter(user=user)
-    ]
+    return [from_orguser(orguser) for orguser in OrgUser.objects.filter(user=user)]
 
 
 @user_org_api.post("/organizations/users/", response=OrgUserResponse)
@@ -159,7 +157,7 @@ def post_organization_user(
         sendgrid.send_signup_email(payload.email, reset_url)
     except Exception as error:
         raise HttpError(400, "failed to send email") from error
-    return OrgUserResponse.from_orguser(orguser)
+    return from_orguser(orguser)
 
 
 @user_org_api.post("/login/")
@@ -209,7 +207,7 @@ def get_organization_users(request):
     if orguser.org is None:
         raise HttpError(400, "no associated org")
     query = OrgUser.objects.filter(org=orguser.org)
-    return [OrgUserResponse.from_orguser(orguser) for orguser in query]
+    return [from_orguser(orguser) for orguser in query]
 
 
 @user_org_api.post("/organizations/users/delete", auth=auth.CanManageUsers())
@@ -257,7 +255,7 @@ def put_organization_user_self(request, payload: OrgUserUpdate):
     orguser.user.save()
 
     logger.info(f"updated self {orguser.user.email}")
-    return OrgUserResponse.from_orguser(orguser)
+    return from_orguser(orguser)
 
 
 @user_org_api.put(
@@ -288,7 +286,7 @@ def put_organization_user(request, payload: OrgUserUpdate):
     orguser.user.save()
 
     logger.info(f"updated orguser {orguser.user.email}")
-    return OrgUserResponse.from_orguser(orguser)
+    return from_orguser(orguser)
 
 
 @user_org_api.post(
@@ -329,7 +327,7 @@ def post_transfer_ownership(request, payload: OrgUserNewOwner):
         logger.exception(error)
         raise HttpError(400, "failed to transfer ownership") from error
 
-    return OrgUserResponse.from_orguser(requestor_orguser)
+    return from_orguser(requestor_orguser)
 
 
 @user_org_api.post("/organizations/", response=OrgSchema, auth=auth.AnyOrgUser())
@@ -576,9 +574,9 @@ def post_organization_user_invite(request, payload: InvitationSchema):
             f"Resent invitation to {invited_email} to join {orguser.org.name} "
             f"with invite code {invitation.invite_code}",
         )
-        return InvitationSchema.from_invitation(invitation)
+        return from_invitation(invitation)
 
-    payload.invited_by = OrgUserResponse.from_orguser(orguser)
+    payload.invited_by = from_orguser(orguser)
     payload.invited_on = timezone.as_utc(datetime.utcnow())
     payload.invite_code = str(uuid4())
 
@@ -643,7 +641,7 @@ def post_organization_user_accept_invite(
             user=user, org=invitation.invited_by.org, role=invitation.invited_role
         )
     invitation.delete()
-    return OrgUserResponse.from_orguser(orguser)
+    return from_orguser(orguser)
 
 
 @user_org_api.get("/users/invitations/", auth=auth.AnyOrgUser())
