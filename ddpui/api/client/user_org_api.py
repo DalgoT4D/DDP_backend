@@ -194,6 +194,7 @@ def post_login(request):
             "email_verified": userattributes.email_verified,
             "active": user.is_active,
             "can_create_orgs": userattributes.can_create_orgs,
+            "is_consultant": userattributes.is_consultant,
         }
 
     return token
@@ -556,7 +557,6 @@ def post_organization_user_invite(request, payload: InvitationSchema):
             user=existing_user,
             org=orguser.org,
             role=invited_role,
-            can_accept_tnc=payload.can_accept_tnc,
         )
         sendgrid.send_youve_been_added_email(
             invited_email, orguser.user.email, orguser.org.name
@@ -564,7 +564,6 @@ def post_organization_user_invite(request, payload: InvitationSchema):
         return InvitationSchema(
             invited_email=invited_email,
             invited_role_slug=payload.invited_role_slug,
-            can_accept_tnc=payload.can_accept_tnc,
         )
 
     invitation = Invitation.objects.filter(
@@ -593,7 +592,6 @@ def post_organization_user_invite(request, payload: InvitationSchema):
         invited_by=orguser,
         invited_on=payload.invited_on,
         invite_code=payload.invite_code,
-        can_accept_tnc=payload.can_accept_tnc,
     )
 
     # trigger an email to the user
@@ -649,7 +647,6 @@ def post_organization_user_accept_invite(
             user=user,
             org=invitation.invited_by.org,
             role=invitation.invited_role,
-            can_accept_tnc=invitation.can_accept_tnc,
         )
     invitation.delete()
     return OrgUserResponse.from_orguser(orguser)
@@ -887,7 +884,8 @@ def post_organization_accept_tnc(request):
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
 
-    if not orguser.can_accept_tnc:
+    userattributes = UserAttributes.objects.filter(user=orguser.user).first()
+    if userattributes and userattributes.is_consultant:
         raise HttpError(400, "user cannot accept tnc")
 
     if OrgTnC.objects.filter(org=orguser.org).exists():

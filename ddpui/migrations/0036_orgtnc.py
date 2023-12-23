@@ -6,7 +6,7 @@ import django.db.models.deletion
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("ddpui", "0035_invitation_can_accept_tnc_orguser_can_accept_tnc"),
+        ("ddpui", "0035_tasklock"),
     ]
 
     operations = [

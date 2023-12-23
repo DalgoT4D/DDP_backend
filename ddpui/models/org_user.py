@@ -18,6 +18,7 @@ class UserAttributes(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     email_verified = models.BooleanField(default=False)
     can_create_orgs = models.BooleanField(default=False)
+    is_consultant = models.BooleanField(default=False)
 
 
 class OrgUserRole(IntEnum):
@@ -51,7 +52,6 @@ class OrgUser(models.Model):
         choices=OrgUserRole.choices(), default=OrgUserRole.REPORT_VIEWER
     )
     email_verified = models.BooleanField(default=False)
-    can_accept_tnc = models.BooleanField(default=False)
 
     def __str__(self):
         return self.user.email  # pylint: disable=no-member
@@ -99,7 +99,6 @@ class OrgUserResponse(Schema):
             email=orguser.user.email,
             org=orguser.org,
             active=orguser.user.is_active,
-            can_accept_tnc=orguser.can_accept_tnc,
             role=orguser.role,
             role_slug=slugify(OrgUserRole(orguser.role).name),
             wtype=warehouse.wtype if warehouse else None,
@@ -107,10 +106,7 @@ class OrgUserResponse(Schema):
 
 
 class Invitation(models.Model):
-    """
-    can_accept_tnc is only relevant for new users from the org being invited by
-    t4d or one of our partners
-    """
+    """Invitation to join an org"""
 
     invited_email = models.CharField(max_length=50)
     invited_role = models.IntegerField(
@@ -119,7 +115,6 @@ class Invitation(models.Model):
     invited_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE)
     invited_on = models.DateTimeField()
     invite_code = models.CharField(max_length=36)
-    can_accept_tnc = models.BooleanField(default=False)
 
 
 class InvitationSchema(Schema):
@@ -131,7 +126,6 @@ class InvitationSchema(Schema):
     invited_by: OrgUserResponse = None
     invited_on: datetime = None
     invite_code: str = None
-    can_accept_tnc: bool = None
 
     @staticmethod
     def from_invitation(invitation: Invitation):
@@ -143,7 +137,6 @@ class InvitationSchema(Schema):
             invited_by=OrgUserResponse.from_orguser(invitation.invited_by),
             invited_on=invitation.invited_on,
             invite_code=invitation.invite_code,
-            can_accept_tnc=invitation.can_accept_tnc,
         )
 
 

@@ -721,7 +721,6 @@ def test_post_organization_user_invite(mock_sendgrid, orguser):
         invited_by=None,
         invited_on=timezone.as_ist(datetime.now()),
         invite_code="invite_code",
-        can_accept_tnc=True,
     )
 
     mock_request = Mock()
@@ -746,7 +745,6 @@ def test_post_organization_user_invite(mock_sendgrid, orguser):
     assert response.invited_role == payload.invited_role
     assert response.invited_on == payload.invited_on
     assert response.invite_code == payload.invite_code
-    assert response.can_accept_tnc == payload.can_accept_tnc
     mock_sendgrid.assert_called_once()
 
 
@@ -764,7 +762,6 @@ def test_post_organization_user_invite_multiple_open_invites(mock_sendgrid, orgu
         invited_by=another_org_user,
         invited_on=timezone.as_ist(datetime.now()),
         invite_code="invite_code_existing",
-        can_accept_tnc=False,
     )
     payload = InvitationSchema(
         invited_email="inivted_email",
@@ -772,7 +769,6 @@ def test_post_organization_user_invite_multiple_open_invites(mock_sendgrid, orgu
         invited_by=None,
         invited_on=timezone.as_ist(datetime.now()),
         invite_code="invite_code",
-        can_accept_tnc=False,
     )
 
     mock_request = Mock()
@@ -797,7 +793,6 @@ def test_post_organization_user_invite_multiple_open_invites(mock_sendgrid, orgu
     assert response.invited_role == payload.invited_role
     assert response.invited_on == payload.invited_on
     assert response.invite_code == payload.invite_code
-    assert response.can_accept_tnc == payload.can_accept_tnc
     mock_sendgrid.assert_called_once()
 
 
@@ -810,7 +805,6 @@ def test_post_organization_user_invite_lowercase_email(mock_sendgrid, orguser: O
         invited_by=None,
         invited_on=timezone.as_ist(datetime.now()),
         invite_code="invite_code",
-        can_accept_tnc=True,
     )
 
     mock_request = Mock()
@@ -835,7 +829,6 @@ def test_post_organization_user_invite_lowercase_email(mock_sendgrid, orguser: O
     assert response.invited_role == payload.invited_role
     assert response.invited_on == payload.invited_on
     assert response.invite_code == payload.invite_code
-    assert response.can_accept_tnc == payload.can_accept_tnc
     mock_sendgrid.assert_called_once()
 
 
@@ -851,7 +844,6 @@ def test_post_organization_user_invite_user_exists(mock_sendgrid, orguser: OrgUs
         invited_by=None,
         invited_on=timezone.as_ist(datetime.now()),
         invite_code="invite_code",
-        can_accept_tnc=True,
     )
 
     mock_request = Mock()
@@ -863,7 +855,6 @@ def test_post_organization_user_invite_user_exists(mock_sendgrid, orguser: OrgUs
     assert OrgUser.objects.filter(user=user).count() == 1
     assert OrgUser.objects.filter(user=user, org=orguser.org).count() == 1
     assert response.invited_role == payload.invited_role
-    assert response.can_accept_tnc == payload.can_accept_tnc
 
 
 # ================================================================================
@@ -1180,7 +1171,6 @@ def test_post_organization_accept_tnc_no_org(
 ):
     """tests post_organization_accept_tnc"""
     orguser.org = None
-    orguser.can_accept_tnc = False
     orguser.save()
 
     mock_request = Mock()
@@ -1196,8 +1186,14 @@ def test_post_organization_accept_tnc_cannot(
 ):
     """tests post_organization_accept_tnc"""
     orguser.org = org_without_workspace
-    orguser.can_accept_tnc = False
     orguser.save()
+
+    userattributes = UserAttributes.objects.filter(user=orguser.user).first()
+    if userattributes is None:
+        userattributes = UserAttributes.objects.create(user=orguser.user)
+
+    userattributes.is_consultant = True
+    userattributes.save()
 
     mock_request = Mock()
     mock_request.orguser = orguser
@@ -1212,7 +1208,6 @@ def test_post_organization_accept_tnc_already_accepted(
 ):
     """tests post_organization_accept_tnc"""
     orguser.org = org_without_workspace
-    orguser.can_accept_tnc = True
     orguser.save()
 
     OrgTnC.objects.create(
@@ -1230,7 +1225,6 @@ def test_post_organization_accept_tnc_already_accepted(
 def test_post_organization_accept_tnc(orguser: OrgUser, org_without_workspace: Org):
     """tests post_organization_accept_tnc"""
     orguser.org = org_without_workspace
-    orguser.can_accept_tnc = True
     orguser.save()
 
     assert OrgTnC.objects.filter(org=org_without_workspace).count() == 0
