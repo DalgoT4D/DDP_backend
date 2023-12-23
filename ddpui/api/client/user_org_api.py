@@ -553,11 +553,7 @@ def post_organization_user_invite(request, payload: InvitationSchema):
 
     if existing_user:
         logger.info("user exists, creating new OrgUser")
-        OrgUser.objects.create(
-            user=existing_user,
-            org=orguser.org,
-            role=invited_role,
-        )
+        OrgUser.objects.create(user=existing_user, org=orguser.org, role=invited_role)
         sendgrid.send_youve_been_added_email(
             invited_email, orguser.user.email, orguser.org.name
         )
@@ -644,9 +640,7 @@ def post_organization_user_accept_invite(
             )
             UserAttributes.objects.create(user=user, email_verified=True)
         orguser = OrgUser.objects.create(
-            user=user,
-            org=invitation.invited_by.org,
-            role=invitation.invited_role,
+            user=user, org=invitation.invited_by.org, role=invitation.invited_role
         )
     invitation.delete()
     return OrgUserResponse.from_orguser(orguser)
