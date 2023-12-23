@@ -6,6 +6,7 @@ args to a command are specific to a deployment/flow & will be store as deploymen
 from django.db import models
 from ddpui.models.org import Org
 from ddpui.models.org import OrgDataFlowv1
+from ddpui.models.org_user import OrgUser
 
 
 class Task(models.Model):
@@ -45,3 +46,12 @@ class DataflowOrgTask(models.Model):
 
     dataflow = models.ForeignKey(OrgDataFlowv1, on_delete=models.CASCADE)
     orgtask = models.ForeignKey(OrgTask, on_delete=models.CASCADE)
+
+
+class TaskLock(models.Model):
+    """A locking implementation for OrgTask"""
+
+    orgtask = models.OneToOneField(OrgTask, on_delete=models.CASCADE)
+    flow_run_id = models.TextField(max_length=36, blank=True, default="")
+    locked_at = models.DateTimeField(auto_now_add=True)
+    locked_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE)
