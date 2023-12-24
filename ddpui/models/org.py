@@ -111,6 +111,7 @@ class OrgSchema(Schema):
     airbyte_workspace_id: str = None
     viz_url: str = None
     viz_login_type: str = None
+    tnc_accepted: bool = None
 
 
 class OrgWarehouse(models.Model):

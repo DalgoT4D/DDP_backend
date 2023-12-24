@@ -13,6 +13,7 @@ from ddpui.models.org import Org, OrgSchema
 
 from ddpui.models.org_user import OrgUser, OrgUserResponse, OrgUserUpdate
 from ddpui.models.admin_user import AdminUserResponse
+from ddpui.utils.orguserhelpers import from_orguser
 
 adminapi = NinjaAPI(urls_namespace="admin")
 
@@ -72,7 +73,7 @@ def get_organization_users(
     query = OrgUser.objects.filter(user__is_active=True)
     if orgname:
         query = query.filter(org__name=orgname)
-    return [OrgUserResponse.from_orguser(orguser) for orguser in query]
+    return [from_orguser(orguser) for orguser in query]
 
 
 @adminapi.put(
