@@ -30,6 +30,7 @@ from ddpui.api.client.user_org_api import (
     get_invitations,
     post_resend_invitation,
     delete_invitation,
+    post_organization_accept_tnc,
 )
 from ddpui.models.org import Org, OrgSchema, OrgWarehouseSchema, OrgWarehouse
 from ddpui.models.org_user import (
@@ -47,6 +48,7 @@ from ddpui.models.org_user import (
     VerifyEmailSchema,
     DeleteOrgUserPayload,
 )
+from ddpui.models.orgtnc import OrgTnC
 from ddpui.ddpairbyte.schema import AirbyteWorkspace
 from ddpui.utils import timezone
 from django.contrib.auth.models import User
@@ -1162,3 +1164,81 @@ def test_delete_invitation(orguser):
     assert Invitation.objects.filter(id=invitation.id).exists()
     delete_invitation(mock_request, invitation.id)
     assert not Invitation.objects.filter(id=invitation.id).exists()
+
+
+def test_post_organization_accept_tnc_no_org(
+    orguser: OrgUser, org_without_workspace: Org
+):
+    """tests post_organization_accept_tnc"""
+    orguser.org = None
+    orguser.save()
+
+    mock_request = Mock()
+    mock_request.orguser = orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        post_organization_accept_tnc(mock_request)
+    assert str(excinfo.value) == "create an organization first"
+
+
+def test_post_organization_accept_tnc_cannot(
+    orguser: OrgUser, org_without_workspace: Org
+):
+    """tests post_organization_accept_tnc"""
+    orguser.org = org_without_workspace
+    orguser.save()
+
+    userattributes = UserAttributes.objects.filter(user=orguser.user).first()
+    if userattributes is None:
+        userattributes = UserAttributes.objects.create(user=orguser.user)
+
+    userattributes.is_consultant = True
+    userattributes.save()
+
+    mock_request = Mock()
+    mock_request.orguser = orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        post_organization_accept_tnc(mock_request)
+    assert str(excinfo.value) == "user cannot accept tnc"
+
+
+def test_post_organization_accept_tnc_already_accepted(
+    orguser: OrgUser, org_without_workspace: Org
+):
+    """tests post_organization_accept_tnc"""
+    orguser.org = org_without_workspace
+    orguser.save()
+
+    OrgTnC.objects.create(
+        org=orguser.org, tnc_accepted_by=orguser, tnc_accepted_on=datetime.now()
+    )
+
+    mock_request = Mock()
+    mock_request.orguser = orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        post_organization_accept_tnc(mock_request)
+    assert str(excinfo.value) == "tnc already accepted"
+
+
+def test_post_organization_accept_tnc(orguser: OrgUser, org_without_workspace: Org):
+    """tests post_organization_accept_tnc"""
+    orguser.org = org_without_workspace
+    orguser.save()
+
+    assert OrgTnC.objects.filter(org=org_without_workspace).count() == 0
+
+    mock_request = Mock()
+    mock_request.orguser = orguser
+
+    currentuserv2response = get_current_user_v2(mock_request)
+    assert currentuserv2response[0].org.tnc_accepted is False
+
+    response = post_organization_accept_tnc(mock_request)
+    assert response["success"] == 1
+
+    assert OrgTnC.objects.filter(org=org_without_workspace).count() == 1
+
+    currentuserv2response = get_current_user_v2(mock_request)
+    assert currentuserv2response[0].org.tnc_accepted is True

@@ -9,7 +9,7 @@ from django.contrib.auth.models import User
 from ninja import Schema
 from pydantic import SecretStr
 
-from ddpui.models.org import Org, OrgSchema, OrgWarehouse
+from ddpui.models.org import Org, OrgSchema
 
 
 class UserAttributes(models.Model):
@@ -18,6 +18,7 @@ class UserAttributes(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     email_verified = models.BooleanField(default=False)
     can_create_orgs = models.BooleanField(default=False)
+    is_consultant = models.BooleanField(default=False)
 
 
 class OrgUserRole(IntEnum):
@@ -90,22 +91,9 @@ class OrgUserResponse(Schema):
     role_slug: str
     wtype: str | None
 
-    @staticmethod
-    def from_orguser(orguser: OrgUser):
-        """helper to turn an OrgUser into an OrgUserResponse"""
-        warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
-        return OrgUserResponse(
-            email=orguser.user.email,
-            org=orguser.org,
-            active=orguser.user.is_active,
-            role=orguser.role,
-            role_slug=slugify(OrgUserRole(orguser.role).name),
-            wtype=warehouse.wtype if warehouse else None,
-        )
-
 
 class Invitation(models.Model):
-    """Docstring"""
+    """Invitation to join an org"""
 
     invited_email = models.CharField(max_length=50)
     invited_role = models.IntegerField(
@@ -125,18 +113,6 @@ class InvitationSchema(Schema):
     invited_by: OrgUserResponse = None
     invited_on: datetime = None
     invite_code: str = None
-
-    @staticmethod
-    def from_invitation(invitation: Invitation):
-        """Docstring"""
-        return InvitationSchema(
-            invited_email=invitation.invited_email,
-            invited_role=invitation.invited_role,
-            invited_role_slug=slugify(OrgUserRole(invitation.invited_role).name),
-            invited_by=OrgUserResponse.from_orguser(invitation.invited_by),
-            invited_on=invitation.invited_on,
-            invite_code=invitation.invite_code,
-        )
 
 
 class AcceptInvitationSchema(Schema):

@@ -24,6 +24,7 @@ from ddpui.celeryworkers.tasks import (
 )
 from ddpui.ddpdbt import dbt_service
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.orguserhelpers import from_orguser
 
 dbtapi = NinjaAPI(urls_namespace="dbt")
 logger = CustomLogger("ddpui")
@@ -127,7 +128,7 @@ def dbt_delete(request):
 
     dbt_service.delete_dbt_workspace(orguser.org)
 
-    return OrgUserResponse.from_orguser(orguser)
+    return from_orguser(orguser)
 
 
 @dbtapi.get("/dbt_workspace", auth=auth.CanManagePipelines())
