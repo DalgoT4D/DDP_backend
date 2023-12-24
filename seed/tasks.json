@@ -58,5 +58,15 @@
             "label": "AIRBYTE sync",
             "command": null
         }
+    },
+    {
+        "model": "ddpui.Task",
+        "pk": 7,
+        "fields": {
+            "type": "dbt",
+            "slug": "dbt-docs-generate",
+            "label": "DBT docs generate",
+            "command": "docs generate"
+        }
     }
 ]

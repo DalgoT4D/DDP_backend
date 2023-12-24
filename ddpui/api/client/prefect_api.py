@@ -32,7 +32,7 @@ from ddpui.models.org import (
 )
 from ddpui.models.orgjobs import BlockLock, DataflowBlock
 from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import Task, DataflowOrgTask, OrgTask
+from ddpui.models.tasks import Task, DataflowOrgTask, OrgTask, TaskLock
 from ddpui.ddpprefect.schema import (
     PrefectAirbyteSync,
     PrefectDbtCore,
@@ -845,7 +845,15 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
     dbtrepodir = Path(os.getenv("CLIENTDBT_ROOT")) / orguser.org.slug / "dbtrepo"
     project_dir = str(dbtrepodir)
 
-    # TODO: add task lock logic
+    # check if the task is locked
+    task_lock = TaskLock.objects.filter(orgtask=org_task).first()
+    if task_lock:
+        raise HttpError(
+            400, f"{task_lock.locked_by.user.email} is running this operation"
+        )
+
+    # lock the task
+    task_lock = TaskLock.objects.create(orgtask=org_task, locked_by=orguser)
 
     if org_task.task.slug == TASK_GITPULL:
         shell_env = {"secret-git-pull-url-block": ""}
@@ -874,6 +882,7 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
         try:
             result = prefect_service.run_shell_task_sync(payload)
         except Exception as error:
+            task_lock.delete()
             logger.exception(error)
             raise HttpError(
                 400, f"failed to run the shell task {org_task.task.slug}"
@@ -915,8 +924,13 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
         try:
             result = prefect_service.run_dbt_task_sync(payload)
         except Exception as error:
+            task_lock.delete()
             logger.exception(error)
             raise HttpError(400, "failed to run dbt") from error
+
+    # release the lock
+    task_lock.delete()
+    logger.info("released lock on task %s", org_task.task.slug)
 
     return result
 
@@ -941,12 +955,20 @@ def post_run_prefect_org_deployment_task(request, deployment_id):
     if dataflow_orgtask is None:
         raise HttpError(400, "no org task mapped to the deployment")
 
-    # TODO: add task lock logic
+    locks = prefect_service.lock_tasks_for_deployment(deployment_id, orguser)
+
     try:
         res = prefect_service.create_deployment_flow_run(deployment_id)
     except Exception as error:
+        for task_lock in locks:
+            logger.info("deleting TaskLock %s", task_lock.orgtask.task.slug)
+            task_lock.delete()
         logger.exception(error)
         raise HttpError(400, "failed to start a run") from error
+
+    for tasklock in locks:
+        tasklock.flow_run_id = res["flow_run_id"]
+        tasklock.save()
 
     return res
 
@@ -962,6 +984,7 @@ def post_prefect_transformation_tasks(request):
         - dbt clean
         - dbt run
         - dbt test
+        - dbt docs generate
     """
     orguser: OrgUser = request.orguser
     if orguser.org.dbt is None:
@@ -1037,7 +1060,7 @@ def post_prefect_transformation_tasks(request):
 
     # create a dbt cli profile block
     try:
-        cli_block_name = f"{orguser.org.slug}_{profile_name}"
+        cli_block_name = f"{orguser.org.slug}-{profile_name}"
         cli_block_response = prefect_service.create_dbt_cli_profile_block(
             cli_block_name,
             profile_name,
@@ -1135,13 +1158,21 @@ def get_prefect_transformation_tasks(request):
         .order_by("task__id")
         .all()
     ):
-        # TODO: add task locking logic here later
+        # check if task is locked
+        lock = TaskLock.objects.filter(orgtask=org_task).first()
+
         org_tasks.append(
             {
                 "label": org_task.task.label,
                 "slug": org_task.task.slug,
                 "id": org_task.id,
                 "deploymentId": None,
+                "lock": {
+                    "lockedBy": lock.locked_by.user.email,
+                    "lockedAt": lock.locked_at,
+                }
+                if lock
+                else None,
             }
         )
 
@@ -1399,9 +1430,12 @@ def get_prefect_dataflows_v1(request):
         # lock = BlockLock.objects.filter(
         #     opb__block_id__in=[x["opb__block_id"] for x in block_ids]
         # ).first()
+        org_task_ids = DataflowOrgTask.objects.filter(dataflow=flow).values_list(
+            "id", flat=True
+        )
 
-        # TODO: task lock logic
-        lock = None
+        lock = TaskLock.objects.filter(orgtask_id__in=org_task_ids).first()
+
         res.append(
             {
                 "name": flow.name,
