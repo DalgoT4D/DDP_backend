@@ -73,10 +73,13 @@ class Command(BaseCommand):
                     prefect_service.prefect_delete_a_block(new_block.block_id)
                     new_block.delete()
                     self.successes.append(
-                        f"Server Block for the org {org.slug} deleted successfully"
+                        f"ROLL BACK: Server Block for the org {org.slug} deleted successfully"
                     )
                 except Exception as error:
                     logger.info(error)
+                    self.failures.append(
+                        f"ROLL BACK: something wrong deleting server Block for the org {org.slug}"
+                    )
 
             return
 
@@ -123,7 +126,7 @@ class Command(BaseCommand):
             org=org, block_type=AIRBYTESERVER
         ).first()
         if not server_block:
-            # self.failures.append(f"Server block not found for {org.slug}")
+            self.failures.append(f"Server block not found for {org.slug}")
             return
 
         logger.debug("Found airbyte server block")
@@ -269,6 +272,54 @@ class Command(BaseCommand):
                 logger.exception(error)
                 logger.info("skipping to next loop")
                 continue
+
+    def roll_back_sync_conn_deployments(self, org: Org):
+        """
+        Delete airbyte connection's manual deployments if not found in old org architecture
+        """
+
+        airbyte_sync_task = Task.objects.filter(slug=TASK_AIRBYTESYNC).first()
+        if not airbyte_sync_task:
+            self.failures.append("run the tasks migration to populate the master table")
+            return
+
+        for new_dataflow in OrgDataFlowv1.objects.filter(
+            org=org,
+            dataflow_type="manual",
+        ).all():
+            # filter out the manual sync connection tasks
+            tasks = DataflowOrgTask.objects.filter(
+                dataflow=new_dataflow, orgtask__task_slug=TASK_AIRBYTESYNC
+            ).count()
+
+            if (
+                tasks < 1 or tasks > 1
+            ):  # ambigious deployment/dataflow or a pipeline with more than one task
+                self.successes.append(
+                    f"ambigious deployment/dataflow or a pipeline with more than one task; deployment_id: {new_dataflow.deployment_id}"
+                )
+                continue
+
+            # delete if not present in old blocks architecture
+            old_dataflow = OrgDataFlow.objects.filter(
+                org=org, deployment_id=new_dataflow.deployment_id
+            ).first()
+
+            if not old_dataflow:
+                self.successes.append(
+                    f"ROLL BACK: ....rolling.... back manual sync deployment {new_dataflow.deployment_id}"
+                )
+                try:
+                    prefect_service.delete_deployment_by_id(new_dataflow.deployment_id)
+                    new_dataflow.delete()
+                    self.successes.append(
+                        f"ROLL BACK: rolled back manual sync deployment {new_dataflow.deployment_id}"
+                    )
+                except Exception as error:
+                    logger.info(error)
+                    self.failures.append(
+                        f"ROLL BACK: something wrong deleting deployment {new_dataflow.deployment_id}"
+                    )
 
     def create_cli_profile_and_secret_blocks(self, org: Org):
         """
