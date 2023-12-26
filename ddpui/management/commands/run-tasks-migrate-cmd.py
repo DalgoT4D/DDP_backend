@@ -60,13 +60,25 @@ class Command(BaseCommand):
         old_block = OrgPrefectBlock.objects.filter(
             org=org, block_type=AIRBYTESERVER
         ).first()
-        if not old_block:
-            self.failures.append(f"Server block not found for the org '{org.slug}'")
-            return
 
         new_block = OrgPrefectBlockv1.objects.filter(
             org=org, block_type=AIRBYTESERVER
         ).first()
+
+        if not old_block:
+            self.failures.append(f"Server block not found for the org '{org.slug}'")
+            if new_block:  # delete
+                self.failures.append(f"Deleting the server block")
+                try:
+                    prefect_service.prefect_delete_a_block(new_block.block_id)
+                    new_block.delete()
+                    self.successes.append(
+                        f"Server Block for the org {org.slug} deleted successfully"
+                    )
+                except Exception as error:
+                    logger.info(error)
+
+            return
 
         if not new_block:  # create
             logger.debug(
