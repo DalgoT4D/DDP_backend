@@ -446,7 +446,7 @@ class Command(BaseCommand):
 
     def migrate_transformation_blocks(self, org: Org):
         """
-        - Migrate Dbt Core Operation & Shell Operation blocks to org tasks
+        Migrate Dbt Core Operation & Shell Operation blocks to org tasks
         """
 
         # migrate dbt blocks ->  dbt tasks
@@ -697,6 +697,10 @@ class Command(BaseCommand):
                 self.successes.append(
                     "Created pipeline in orgdataflowv1 for {org.slug}"
                 )
+            else:  # update
+                new_dataflow.cron = old_dataflow.cron
+                new_dataflow.name = old_dataflow.name
+                new_dataflow.save()
 
             # assert new dataflow creation
             cnt = OrgDataFlowv1.objects.filter(
@@ -1024,6 +1028,44 @@ class Command(BaseCommand):
                 logger.exception(error)
                 logger.debug("skipping to next loop")
                 continue
+
+    def roll_back_org_pipelines(self, org: Org):
+        """
+        Delete or roll back piplines not being used.
+        """
+        for new_dataflow in OrgDataFlowv1.objects.filter(
+            org=org, dataflow_type="orchestrate"
+        ).all():
+            tasks = DataflowOrgTask.objects.filter(
+                org=org, dataflow=new_dataflow
+            ).count()
+
+            if tasks == 0:  # do nothing
+                self.successes.append(
+                    f"ROLL BACK: ambiguous pipeline with no mapping of orgtask, id: {new_dataflow.deployment_id}"
+                )
+                continue
+
+            # delete if not present in the old architecture data
+            old_dataflow = OrgDataFlow.objects.filter(
+                org=org, deployment_id=new_dataflow.deployment_id
+            ).first()
+
+            if not old_dataflow:  # delete
+                self.successes.append(
+                    f"ROLL BACK: ....rolling.... back pipeline deployment {new_dataflow.deployment_id}"
+                )
+                try:
+                    prefect_service.delete_deployment_by_id(new_dataflow.deployment_id)
+                    new_dataflow.delete()
+                    self.successes.append(
+                        f"ROLL BACK: rolled back pipeline deployment {new_dataflow.deployment_id}"
+                    )
+                except Exception as error:
+                    logger.info(error)
+                    self.failures.append(
+                        f"ROLL BACK: something wrong deleting deployment {new_dataflow.deployment_id}"
+                    )
 
     def handle(self, *args, **options):
         for org in Org.objects.all():
