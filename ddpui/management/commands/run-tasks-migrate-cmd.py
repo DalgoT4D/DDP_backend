@@ -1042,7 +1042,7 @@ class Command(BaseCommand):
 
             if tasks == 0:  # do nothing
                 self.successes.append(
-                    f"ROLL BACK: ambiguous pipeline with no mapping of orgtask, id: {new_dataflow.deployment_id}"
+                    f"ROLL BACK: ambiguous pipeline with no mapping of orgtask, id: {new_dataflow.deployment_id}. Skipping to next"
                 )
                 continue
 
@@ -1076,6 +1076,7 @@ class Command(BaseCommand):
             self.migrate_transformation_blocks(org)
             self.migrate_manual_dbt_run_deployments(org)
             self.migrate_org_pipelines(org)
+            self.roll_back_org_pipelines(org)
 
         # show summary
         print("=" * 80)
