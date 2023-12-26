@@ -273,7 +273,7 @@ class Command(BaseCommand):
                 logger.info("skipping to next loop")
                 continue
 
-    def roll_back_sync_conn_deployments(self, org: Org):
+    def roll_back_manual_sync_conn_deployments(self, org: Org):
         """
         Delete airbyte connection's manual deployments if not found in old org architecture
         """
@@ -1029,6 +1029,7 @@ class Command(BaseCommand):
         for org in Org.objects.all():
             self.migrate_airbyte_server_blocks(org)
             self.migrate_manual_sync_conn_deployments(org)
+            self.roll_back_manual_sync_conn_deployments(org)
             self.create_cli_profile_and_secret_blocks(org)
             self.migrate_transformation_blocks(org)
             self.migrate_manual_dbt_run_deployments(org)
