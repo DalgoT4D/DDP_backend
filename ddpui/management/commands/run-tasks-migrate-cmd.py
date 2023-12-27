@@ -93,7 +93,10 @@ class Command(BaseCommand):
                 block_name=old_block.block_name,
                 block_type=AIRBYTESERVER,
             )
-        else:  # update
+        elif (
+            new_block.block_id != old_block.block_id
+            or new_block.block_name != old_block.block_name
+        ):  # update
             logger.debug(
                 f"Updating the newly created server block with id '{old_block.block_id}' in orgprefectblockv1"
             )
@@ -105,12 +108,12 @@ class Command(BaseCommand):
         cnt = OrgPrefectBlockv1.objects.filter(
             org=org, block_type=AIRBYTESERVER
         ).count()
-        if cnt == 0:
-            self.failures.append(
-                f"found 0 server blocks for org {org.slug} in orgprefectblockv1"
+        if cnt == 1:
+            self.successes.append(
+                f"found 1 server block for org {org.slug} in orgprefectblockv1"
             )
         else:
-            self.successes.append(
+            self.failures.append(
                 f"found {cnt} server block(s) for org {org.slug} in orgprefectblockv1"
             )
 
@@ -139,12 +142,7 @@ class Command(BaseCommand):
         for old_dataflow in OrgDataFlow.objects.filter(
             org=org, dataflow_type="manual", deployment_name__startswith="manual-sync"
         ).all():
-            new_dataflow = OrgDataFlowv1.objects.filter(
-                org=org,
-                dataflow_type="manual",
-                deployment_id=old_dataflow.deployment_id,
-            ).first()
-
+            # ensure the orgtask for the sync exists
             org_task = OrgTask.objects.filter(
                 org=org,
                 task=airbyte_sync_task,
@@ -164,11 +162,19 @@ class Command(BaseCommand):
                 task=airbyte_sync_task,
                 connection_id=old_dataflow.connection_id,
             ).count()
-            if cnt == 0:
-                self.failures.append(f"found 0 orgtasks in {org.slug}")
-                return
+            if cnt == 1:
+                self.successes.append(f"found 1 airbyte-sync orgtask in {org.slug}")
             else:
-                self.successes.append(f"found {cnt} orgtasks in {org.slug}")
+                self.failures.append(
+                    f"found {cnt} != 1 airbyte-sync orgtasks in {org.slug}"
+                )
+                return
+
+            new_dataflow = OrgDataFlowv1.objects.filter(
+                org=org,
+                dataflow_type="manual",
+                deployment_id=old_dataflow.deployment_id,
+            ).first()
 
             if not new_dataflow:  # create
                 logger.info(
@@ -183,31 +189,35 @@ class Command(BaseCommand):
                     dataflow_type="manual",
                 )
 
-                DataflowOrgTask.objects.create(dataflow=new_dataflow, orgtask=org_task)
-
             # assert orgdataflowv1 creation
             cnt = OrgDataFlowv1.objects.filter(
                 org=org,
                 dataflow_type="manual",
                 deployment_id=old_dataflow.deployment_id,
             ).count()
-            if cnt == 0:
-                self.failures.append(
-                    f"found 0 dataflowv1 in {org.slug} with deployment_id {old_dataflow.deployment_id}"
+            if cnt == 1:
+                self.successes.append(
+                    f"found 1 dataflowv1 in {org.slug} with deployment_id {old_dataflow.deployment_id}"
                 )
             else:
-                self.successes.append(
+                self.failures.append(
                     f"found {cnt} dataflowv1 in {org.slug} with deployment_id {old_dataflow.deployment_id}"
                 )
+
+            if not DataflowOrgTask.objects.filter(
+                dataflow=new_dataflow, orgtask=org_task
+            ).exists():
+                DataflowOrgTask.objects.create(dataflow=new_dataflow, orgtask=org_task)
+
             cnt = DataflowOrgTask.objects.filter(
                 dataflow=new_dataflow, orgtask=org_task
             ).count()
-            if cnt == 0:
-                self.failures.append(
+            if cnt == 1:
+                self.successes.append(
                     f"found 0 datafloworgtask in {org.slug} with deployment_id {old_dataflow.deployment_id}"
                 )
             else:
-                self.successes.append(
+                self.failures.append(
                     f"found {cnt} datafloworgtask in {org.slug} with deployment_id {old_dataflow.deployment_id}"
                 )
 
@@ -289,13 +299,13 @@ class Command(BaseCommand):
         ).all():
             # filter out the manual sync connection tasks
             tasks = DataflowOrgTask.objects.filter(
-                dataflow=new_dataflow, orgtask__task_slug=TASK_AIRBYTESYNC
+                dataflow=new_dataflow, orgtask__task=airbyte_sync_task
             ).count()
 
             if (
-                tasks < 1 or tasks > 1
+                tasks != 1
             ):  # ambigious deployment/dataflow or a pipeline with more than one task
-                self.successes.append(
+                self.failures.append(
                     f"ambigious deployment/dataflow or a pipeline with more than one task; deployment_id: {new_dataflow.deployment_id}"
                 )
                 continue
@@ -312,6 +322,12 @@ class Command(BaseCommand):
                 try:
                     prefect_service.delete_deployment_by_id(new_dataflow.deployment_id)
                     new_dataflow.delete()
+                    assert (
+                        DataflowOrgTask.objects.filter(
+                            dataflow=new_dataflow, orgtask__task=airbyte_sync_task
+                        ).count()
+                        == 0
+                    )
                     self.successes.append(
                         f"ROLL BACK: rolled back manual sync deployment {new_dataflow.deployment_id}"
                     )
@@ -580,9 +596,14 @@ class Command(BaseCommand):
             cnt = DataflowOrgTask.objects.filter(
                 dataflow=new_dataflow, orgtask=org_task
             ).count()
-            self.successes.append(
-                f"Found {1} row(s) for dataflow<->orgtask mapping for deployment id {old_dataflow.deployment_id} for {org.slug}"
-            )
+            if cnt == 1:
+                self.successes.append(
+                    f"Found 1 row for dataflow<->orgtask mapping for deployment id {old_dataflow.deployment_id} for {org.slug}"
+                )
+            else:
+                self.failures.append(
+                    f"Found {cnt} row(s) for dataflow<->orgtask mapping for deployment id {old_dataflow.deployment_id} for {org.slug}"
+                )
 
             # update deployment params
             deployment = None
@@ -726,7 +747,7 @@ class Command(BaseCommand):
                     task = Task.objects.filter(slug=TASK_AIRBYTESYNC).first()
                     if not task:
                         self.failures.append(
-                            "SKIPPING: airbyte connection task not found for {org.slug}"
+                            "SKIPPING: airbyte connection Task not found"
                         )
                         continue
 
@@ -755,9 +776,7 @@ class Command(BaseCommand):
                 elif dataflow_blk.opb.block_type == SHELLOPERATION:
                     task = Task.objects.filter(slug=TASK_GITPULL).first()
                     if not task:
-                        self.failures.append(
-                            f"SKIPPING: shell operation task not found for {org.slug}"
-                        )
+                        self.failures.append("SKIPPING: shell operation Task not found")
                         continue
 
                 elif dataflow_blk.opb.block_type == DBTCORE:
@@ -767,7 +786,7 @@ class Command(BaseCommand):
                     task = Task.objects.filter(slug__endswith=old_cmd).first()
                     if not task:
                         self.failures.append(
-                            f"SKIPPING: dbt core task {old_cmd} not found for {org.slug}"
+                            f"SKIPPING: dbt core Task for {old_cmd} not found"
                         )
                         continue
 
@@ -820,7 +839,9 @@ class Command(BaseCommand):
                     dataflow_orgtask = DataflowOrgTask.objects.create(
                         dataflow=new_dataflow, orgtask=org_task
                     )
-                    self.successes.append(f"Created datafloworgtask for {org.slug}")
+                    self.successes.append(
+                        f"Created datafloworgtask {org_task.task.slug} for {org.slug}"
+                    )
 
                 # assert datafloworgtask
                 cnt = DataflowOrgTask.objects.filter(
