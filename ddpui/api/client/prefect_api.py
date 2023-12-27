@@ -1567,44 +1567,43 @@ def put_prefect_dataflow_v1(
     delete_dataflow_orgtask_type = []
 
     # check if pipeline has airbyte syncs
-    if len(payload.connections) >= 0:
-        org_server_block = OrgPrefectBlockv1.objects.filter(
-            org=orguser.org, block_type=AIRBYTESERVER
+    org_server_block = OrgPrefectBlockv1.objects.filter(
+        org=orguser.org, block_type=AIRBYTESERVER
+    ).first()
+    if not org_server_block:
+        raise HttpError(400, "airbyte server block not found")
+
+    # delete all airbyte sync DataflowOrgTask
+    delete_dataflow_orgtask_type.append("airbyte")
+
+    # push sync tasks to pipeline
+    payload.connections.sort(key=lambda conn: conn.seq)
+    for connection in payload.connections:
+        logger.info(connection)
+        org_task = OrgTask.objects.filter(
+            org=orguser.org, connection_id=connection.id
         ).first()
-        if not org_server_block:
-            raise HttpError(400, "airbyte server block not found")
-
-        # delete all airbyte sync DataflowOrgTask
-        delete_dataflow_orgtask_type.append("airbyte")
-
-        # push sync tasks to pipeline
-        payload.connections.sort(key=lambda conn: conn.seq)
-        for connection in payload.connections:
-            logger.info(connection)
-            org_task = OrgTask.objects.filter(
-                org=orguser.org, connection_id=connection.id
-            ).first()
-            if org_task is None:
-                logger.info(
-                    f"connection id {connection.id} not found in org tasks; ignoring this airbyte sync"
-                )
-                continue
-            # map this org task to dataflow
-            map_org_tasks.append(org_task)
-
+        if org_task is None:
             logger.info(
-                f"connection id {connection.id} found in org tasks; pushing to pipeline"
+                f"connection id {connection.id} not found in org tasks; ignoring this airbyte sync"
             )
-            seq += 1
-            task_config = {
-                "seq": seq,
-                "slug": org_task.task.slug,
-                "type": AIRBYTECONNECTION,
-                "airbyte_server_block": org_server_block.block_name,
-                "connection_id": connection.id,
-                "timeout": AIRBYTE_SYNC_TIMEOUT,
-            }
-            tasks.append(task_config)
+            continue
+        # map this org task to dataflow
+        map_org_tasks.append(org_task)
+
+        logger.info(
+            f"connection id {connection.id} found in org tasks; pushing to pipeline"
+        )
+        seq += 1
+        task_config = {
+            "seq": seq,
+            "slug": org_task.task.slug,
+            "type": AIRBYTECONNECTION,
+            "airbyte_server_block": org_server_block.block_name,
+            "connection_id": connection.id,
+            "timeout": AIRBYTE_SYNC_TIMEOUT,
+        }
+        tasks.append(task_config)
 
     logger.info(f"Pipline has {seq} airbyte syncs")
 
