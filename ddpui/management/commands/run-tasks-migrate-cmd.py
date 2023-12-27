@@ -229,7 +229,7 @@ class Command(BaseCommand):
             # update deployment params
             deployment = None
             try:
-                deployment = get_deployment(new_dataflow.deployment_id)
+                deployment = prefect_service.get_deployment(new_dataflow.deployment_id)
             except Exception as error:
                 logger.info(
                     f"Something went wrong in fetching the deployment with id '{new_dataflow.deployment_id}'"
@@ -271,7 +271,7 @@ class Command(BaseCommand):
 
             # assert deployment params updation
             try:
-                deployment = get_deployment(new_dataflow.deployment_id)
+                deployment = prefect_service.get_deployment(new_dataflow.deployment_id)
                 if "config" not in deployment["parameters"]:
                     self.failures.append(
                         f"Missing 'config' key in the deployment parameters for {org.slug} {new_dataflow.deployment_id}"
@@ -613,7 +613,7 @@ class Command(BaseCommand):
             # update deployment params
             deployment = None
             try:
-                deployment = get_deployment(new_dataflow.deployment_id)
+                deployment = prefect_service.get_deployment(new_dataflow.deployment_id)
             except Exception as error:
                 logger.info(
                     f"Something went wrong in fetching the deployment with id '{new_dataflow.deployment_id}' for {org.slug}"
@@ -659,7 +659,7 @@ class Command(BaseCommand):
 
             # assert deployment params updation
             try:
-                deployment = get_deployment(new_dataflow.deployment_id)
+                deployment = prefect_service.get_deployment(new_dataflow.deployment_id)
                 if "config" not in deployment["parameters"]:
                     self.failures.append(
                         f"Missing 'config' key in the deployment parameters for {org.slug} {new_dataflow.deployment_id}"
@@ -868,7 +868,7 @@ class Command(BaseCommand):
             # update deployment params
             deployment = None
             try:
-                deployment = get_deployment(new_dataflow.deployment_id)
+                deployment = prefect_service.get_deployment(new_dataflow.deployment_id)
             except Exception as error:
                 logger.info(
                     f"Something went wrong in fetching the deployment with id '{new_dataflow.deployment_id}'"
@@ -1062,9 +1062,7 @@ class Command(BaseCommand):
         for new_dataflow in OrgDataFlowv1.objects.filter(
             org=org, dataflow_type="orchestrate"
         ).all():
-            tasks = DataflowOrgTask.objects.filter(
-                org=org, dataflow=new_dataflow
-            ).count()
+            tasks = DataflowOrgTask.objects.filter(dataflow=new_dataflow).count()
 
             if tasks == 0:  # do nothing
                 self.successes.append(
