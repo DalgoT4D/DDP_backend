@@ -53,7 +53,12 @@ class Command(BaseCommand):
         self.successes = []
 
     def add_arguments(self, parser):
-        pass
+        parser.add_argument(
+            "--slug",
+            required=False,
+            default="all",
+            help="By default it will run for all organization. To run for an org; pass the slug here",
+        )
 
     def migrate_airbyte_server_blocks(self, org: Org):
         """Create/update new server block"""
@@ -1089,7 +1094,14 @@ class Command(BaseCommand):
                     )
 
     def handle(self, *args, **options):
-        for org in Org.objects.all():
+        slug = options["slug"]
+        query = Org.objects
+        if slug != "all":
+            query = query.filter(slug=slug)
+
+        self.successes.append(f"Running the script for {slug} org")
+        for org in query.all():
+            self.successes.append(f"Starting scripts for {org.slug}")
             self.migrate_airbyte_server_blocks(org)
             self.migrate_manual_sync_conn_deployments(org)
             self.roll_back_manual_sync_conn_deployments(org)
