@@ -1452,3 +1452,23 @@ def delete_airbyte_connection_v1(request, connection_id):
     org_task.delete()
 
     return {"success": 1}
+
+
+@airbyteapi.get("/v1/connections/{connection_id}/jobs", auth=auth.CanManagePipelines())
+def get_latest_job_for_connection(request, connection_id):
+    """get the job info from airbyte for a connection"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    if org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    result = airbyte_service.get_jobs_for_connection(connection_id)
+    if len(result["jobs"]) == 0:
+        return {
+            "status": "not found",
+        }
+    latest_job = result["jobs"][0]
+    job_info = airbyte_service.parse_job_info(latest_job)
+    logs = airbyte_service.get_logs_for_job(job_info["job_id"])
+    job_info["logs"] = logs["logs"]["logLines"]
+    return job_info

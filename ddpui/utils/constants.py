@@ -4,7 +4,7 @@ TASK_DBTTEST = "dbt-test"
 TASK_DBTCLEAN = "dbt-clean"
 TASK_DBTDEPS = "dbt-deps"
 TASK_GITPULL = "git-pull"
-TASK_DOCSGENERATE = "docs-generate"
+TASK_DOCSGENERATE = "dbt-docs-generate"
 TASK_AIRBYTESYNC = "airbyte-sync"
 
 
