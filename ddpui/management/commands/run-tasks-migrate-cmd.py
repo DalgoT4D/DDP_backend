@@ -310,7 +310,7 @@ class Command(BaseCommand):
                 tasks != 1
             ):  # ambigious deployment/dataflow or a pipeline with more than one task
                 self.failures.append(
-                    f"ambigious deployment/dataflow or a pipeline with more than one task; deployment_id: {new_dataflow.deployment_id}"
+                    f"ambigious deployment/dataflow or a pipeline with more than one task; deployment_id: {new_dataflow.deployment_id}. Could be a manual dbt run deployment, skipping this"
                 )
                 continue
 
