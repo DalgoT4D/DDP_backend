@@ -1567,7 +1567,7 @@ def put_prefect_dataflow_v1(
     delete_dataflow_orgtask_type = []
 
     # check if pipeline has airbyte syncs
-    if len(payload.connections) > 0:
+    if len(payload.connections) >= 0:
         org_server_block = OrgPrefectBlockv1.objects.filter(
             org=orguser.org, block_type=AIRBYTESERVER
         ).first()
