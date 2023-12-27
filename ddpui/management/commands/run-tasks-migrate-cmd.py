@@ -13,7 +13,6 @@ from ddpui.models.org import (
 from ddpui.models.orgjobs import DataflowBlock
 from ddpui.utils import secretsmanager
 from ddpui.ddpprefect.schema import PrefectDataFlowUpdateSchema3
-from ddpui.ddpprefect.prefect_service import get_deployment, update_dataflow_v1
 from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask
 from ddpui.utils.constants import (
     TASK_AIRBYTESYNC,
@@ -257,7 +256,7 @@ class Command(BaseCommand):
                     cron=new_dataflow.cron if new_dataflow.cron else "",
                     deployment_params=params,
                 )
-                update_dataflow_v1(new_dataflow.deployment_id, payload)
+                prefect_service.update_dataflow_v1(new_dataflow.deployment_id, payload)
                 logger.info(
                     f"updated deployment params for the deployment with id {new_dataflow.deployment_id}"
                 )
@@ -645,7 +644,7 @@ class Command(BaseCommand):
                     cron=new_dataflow.cron if new_dataflow.cron else "",
                     deployment_params=params,
                 )
-                update_dataflow_v1(new_dataflow.deployment_id, payload)
+                prefect_service.update_dataflow_v1(new_dataflow.deployment_id, payload)
                 logger.info(
                     f"updated deployment params for the deployment with id {new_dataflow.deployment_id} for {org.slug}"
                 )
@@ -1043,7 +1042,7 @@ class Command(BaseCommand):
                     cron=new_dataflow.cron if new_dataflow.cron else "",
                     deployment_params=params,
                 )
-                update_dataflow_v1(new_dataflow.deployment_id, payload)
+                prefect_service.update_dataflow_v1(new_dataflow.deployment_id, payload)
                 logger.info(
                     f"updated deployment params for the deployment with id {new_dataflow.deployment_id} for {org.slug}"
                 )
