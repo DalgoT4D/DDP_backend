@@ -445,14 +445,17 @@ class Command(BaseCommand):
                     )
                     return
 
-                secret_blkname = res["data"]["env"]["secret-git-pull-url-block"]
-                res = prefect_service.get_secret_block_by_name(secret_blkname)
-                secret_git_url_block = OrgPrefectBlockv1.objects.create(
-                    org=org,
-                    block_type=SECRET,
-                    block_name=res["block_name"],
-                    block_id=res["block_id"],
-                )
+                secret_blkname = res["data"]["env"][
+                    "secret-git-pull-url-block"
+                ]  # this will be an empty string for public repo
+                if len(secret_blkname) > 0:
+                    res = prefect_service.get_secret_block_by_name(secret_blkname)
+                    secret_git_url_block = OrgPrefectBlockv1.objects.create(
+                        org=org,
+                        block_type=SECRET,
+                        block_name=res["block_name"],
+                        block_id=res["block_id"],
+                    )
 
             except Exception as error:
                 self.failures.append(
