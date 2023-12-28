@@ -1,6 +1,7 @@
 import os
-import yaml
 from pathlib import Path
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from django.core.management.base import BaseCommand
 from ddpui.models.org import (
     Org,
@@ -8,10 +9,8 @@ from ddpui.models.org import (
     OrgPrefectBlockv1,
     OrgDataFlow,
     OrgDataFlowv1,
-    OrgWarehouse,
 )
 from ddpui.models.orgjobs import DataflowBlock
-from ddpui.utils import secretsmanager
 from ddpui.ddpprefect.schema import PrefectDataFlowUpdateSchema3
 from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask
 from ddpui.utils.constants import (
@@ -30,12 +29,10 @@ from ddpui.ddpprefect import (
     SHELLOPERATION,
 )
 from ddpui.ddpprefect.schema import (
-    PrefectSecretBlockCreate,
     PrefectDbtTaskSetup,
     PrefectShellTaskSetup,
 )
 from ddpui.ddpprefect import prefect_service
-from ddpui.ddpairbyte import airbyte_service
 
 import logging
 
@@ -413,20 +410,25 @@ class Command(BaseCommand):
                     )
                     logger.exception(error)
 
-        # assert cli profile block creation
-        self.successes.append(
-            f"Using the dbt cli profile block {cli_profile_block.block_name} for {org.slug}"
-        )
-        cnt = OrgPrefectBlockv1.objects.filter(
-            org=org, block_type=DBTCLIPROFILE
-        ).count()
-        if cnt == 1:
+        if cli_profile_block:
+            # assert cli profile block creation
             self.successes.append(
-                f"ASSERT: Found {cnt} dbt cli profile block for org {org.slug}"
+                f"Using the dbt cli profile block {cli_profile_block.block_name} for {org.slug}"
             )
+            cnt = OrgPrefectBlockv1.objects.filter(
+                org=org, block_type=DBTCLIPROFILE
+            ).count()
+            if cnt == 1:
+                self.successes.append(
+                    f"ASSERT: Found {cnt} dbt cli profile block for org {org.slug}"
+                )
+            else:
+                self.failures.append(
+                    f"ASSERT: Found {cnt} dbt cli profile block for org {org.slug}"
+                )
         else:
             self.failures.append(
-                f"ASSERT: Found {cnt} dbt cli profile block for org {org.slug}"
+                f"Couldnt create the cli block from dbt core operations. Looks like a new org that hasn't setup things on transform page"
             )
 
         # create the secret block
@@ -1127,6 +1129,8 @@ class Command(BaseCommand):
         if slug != "all":
             query = query.filter(slug=slug)
 
+        logger.info("STARTED AT: " + str(datetime.now(tz=ZoneInfo("Asia/Kolkata"))))
+
         self.successes.append(f"Running the script for {slug} org")
         for org in query.all():
             self.successes.append(f"Starting scripts for {org.slug}")
@@ -1150,3 +1154,5 @@ class Command(BaseCommand):
         print("=" * 80)
         for failure in self.failures:
             print("FAILURE " + failure)
+
+        logger.info("ENDED AT: " + str(datetime.now(tz=ZoneInfo("Asia/Kolkata"))))
