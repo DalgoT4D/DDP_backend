@@ -9,6 +9,7 @@ from ddpui.celery import app
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.models.orgjobs import BlockLock
+from ddpui.models.tasks import TaskLock
 from ddpui.utils.helpers import runcmd
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
@@ -166,9 +167,25 @@ def delete_old_blocklocks():
     BlockLock.objects.filter(locked_at__lt=onehourago).delete()
 
 
+@app.task()
+def delete_old_tasklocks():
+    """delete task locks which were created over an hour ago"""
+    logger.info("deleting old task locks")
+    onehourago = UTC.localize(datetime.utcnow() - timedelta(seconds=3600))
+    logger.info(
+        TaskLock.objects.filter(locked_at__lt=onehourago).values(
+            "orgtask__org__slug", "orgtask__task__slug"
+        )
+    )
+    TaskLock.objects.filter(locked_at__lt=onehourago).delete()
+
+
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender, **kwargs):
     """check for old blocks every minute"""
     sender.add_periodic_task(
         60 * 1.0, delete_old_blocklocks.s(), name="remove old blocklocks"
+    )
+    sender.add_periodic_task(
+        60 * 1.0, delete_old_tasklocks.s(), name="remove old tasklocks"
     )

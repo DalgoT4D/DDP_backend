@@ -77,11 +77,10 @@ Plan to go away from the prefect dbt core blocks & connection blocks
 
 #### <u>User org client related</u>
 
-| Before                                                                     | After                                                                                     |
-| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| Django: create airbyte workspace `POST /api/airbyte/workspace/`            | Django : new api to create airbyte workspace `POST /api/airbyte/v1/workspace/`            |
-| Django: create organization `POST /api/organizations/`                     | Django : new api to create org `POST /api/v1/organizations/`                              |
-| Proxy: create organization warehouse `POST /api/organizations/warehouses/` | Proxy : new api to create organization warehouse `POST /api/v1/organizations/warehouses/` |
+| Before                                                          | After                                                                          |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Django: create airbyte workspace `POST /api/airbyte/workspace/` | Django : new api to create airbyte workspace `POST /api/airbyte/v1/workspace/` |
+| Django: create organization `POST /api/organizations/`          | Django : new api to create org `POST /api/v1/organizations/`                   |
 
 #### <u>Airbyte connections</u>
 
@@ -108,7 +107,7 @@ Plan to go away from the prefect dbt core blocks & connection blocks
 | Before                                                                                                                                            | After                                                                                                                                                                                                                                                                                                                                                  |
 | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Django: apis to run dbt core operations & git pull operations on transform can be deprecated `/api/prefect/flows/dbt_run/` & `/api/dbt/git_pull/` | Django : api to run tasks (dbt + shell operation(git pull)) `/api/prefect/tasks/{orgtask_id}/run/` <br /> Proxy : new api to run tasks (dbt tasks) via updated flows `/proxy/v1/flows/dbtcore/run/` <br /> Proxy : new api to run shell operations (a general shell op; will be used for git pull for now) via updated flows `/proxy/flows/shell/run/` |
-| Django: api to run long tasks via deployment `/api/prefect/flows/{deployment_id}/flow_run`                                                        | Django: new api to run long running tasks via deployment `/api/prefect/v1/flows/{deployment_id}/flow_run`                                                                                                                                                                                                                                              |
+| Django: api to run long tasks via deployment `/api/prefect/flows/{deployment_id}/flow_run`                                                        | Django: new api to run long running tasks via deployment `/api/prefect/v1/flows/{deployment_id}/flow_run/`                                                                                                                                                                                                                                             |
 
 #### <u>Pipeline/orchestrate page</u>
 
