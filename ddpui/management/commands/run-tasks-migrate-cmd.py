@@ -413,20 +413,25 @@ class Command(BaseCommand):
                     )
                     logger.exception(error)
 
-        # assert cli profile block creation
-        self.successes.append(
-            f"Using the dbt cli profile block {cli_profile_block.block_name} for {org.slug}"
-        )
-        cnt = OrgPrefectBlockv1.objects.filter(
-            org=org, block_type=DBTCLIPROFILE
-        ).count()
-        if cnt == 1:
+        if cli_profile_block:
+            # assert cli profile block creation
             self.successes.append(
-                f"ASSERT: Found {cnt} dbt cli profile block for org {org.slug}"
+                f"Using the dbt cli profile block {cli_profile_block.block_name} for {org.slug}"
             )
+            cnt = OrgPrefectBlockv1.objects.filter(
+                org=org, block_type=DBTCLIPROFILE
+            ).count()
+            if cnt == 1:
+                self.successes.append(
+                    f"ASSERT: Found {cnt} dbt cli profile block for org {org.slug}"
+                )
+            else:
+                self.failures.append(
+                    f"ASSERT: Found {cnt} dbt cli profile block for org {org.slug}"
+                )
         else:
             self.failures.append(
-                f"ASSERT: Found {cnt} dbt cli profile block for org {org.slug}"
+                f"Couldnt create the cli block from dbt core operations. Looks like a new org that hasn't setup things on transform page"
             )
 
         # create the secret block
