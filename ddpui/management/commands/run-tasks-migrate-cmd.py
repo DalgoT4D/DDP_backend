@@ -323,8 +323,17 @@ class Command(BaseCommand):
                 self.successes.append(
                     f"ROLL BACK: ....rolling.... back manual sync deployment {new_dataflow.deployment_id}"
                 )
+                # delete deployment from prefect
                 try:
+                    prefect_service.get_deployment(new_dataflow.deployment_id)
                     prefect_service.delete_deployment_by_id(new_dataflow.deployment_id)
+                except Exception as error:
+                    logger.info(error)
+                    self.failures.append(
+                        f"ROLL BACK: couldn't fetch the deployment {new_dataflow.deployment_id}. Looks like its been deleted from prefect"
+                    )
+
+                try:
                     new_dataflow.delete()
                     assert (
                         DataflowOrgTask.objects.filter(
@@ -338,7 +347,7 @@ class Command(BaseCommand):
                 except Exception as error:
                     logger.info(error)
                     self.failures.append(
-                        f"ROLL BACK: something wrong deleting deployment {new_dataflow.deployment_id}"
+                        f"ROLL BACK: something wrong deleting deployment {new_dataflow.deployment_id} from django db"
                     )
 
     def create_cli_profile_and_secret_blocks(self, org: Org):
@@ -1081,8 +1090,18 @@ class Command(BaseCommand):
                 self.successes.append(
                     f"ROLL BACK: ....rolling.... back pipeline deployment {new_dataflow.deployment_id}"
                 )
+                # delete deployment from prefect
                 try:
+                    prefect_service.get_deployment(new_dataflow.deployment_id)
                     prefect_service.delete_deployment_by_id(new_dataflow.deployment_id)
+                except Exception as error:
+                    logger.info(error)
+                    self.failures.append(
+                        f"ROLL BACK: couldn't fetch the deployment {new_dataflow.deployment_id}. Looks like its been deleted from prefect"
+                    )
+
+                # delete from db
+                try:
                     new_dataflow.delete()
                     self.successes.append(
                         f"ROLL BACK: rolled back pipeline deployment {new_dataflow.deployment_id}"
@@ -1090,7 +1109,7 @@ class Command(BaseCommand):
                 except Exception as error:
                     logger.info(error)
                     self.failures.append(
-                        f"ROLL BACK: something wrong deleting deployment {new_dataflow.deployment_id}"
+                        f"ROLL BACK: something wrong deleting deployment {new_dataflow.deployment_id} from django db"
                     )
 
     def handle(self, *args, **options):
