@@ -334,7 +334,16 @@ class Command(BaseCommand):
                     )
 
                 try:
+                    # remove the dataflow
                     new_dataflow.delete()
+
+                    # remove the connection orgtasks
+                    orgtasks = OrgTask.objects.filter(connection_id__isnull=False).all()
+                    for orgtask in orgtasks:
+                        # delete if no mapping found with dataflow
+                        if DataflowOrgTask.objects.filter(orgtask=orgtask).count() == 0:
+                            orgtask.delete()
+
                     assert (
                         DataflowOrgTask.objects.filter(
                             dataflow=new_dataflow, orgtask__task=airbyte_sync_task
