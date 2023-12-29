@@ -502,9 +502,7 @@ class Command(BaseCommand):
             if old_block.block_name.endswith("git-pull"):  # its a git pull block
                 task = Task.objects.filter(slug=TASK_GITPULL).first()
             else:  # its one of the dbt core block
-                old_cmd = old_block.block_name.split(f"{old_block.dbt_target_schema}-")[
-                    -1
-                ]
+                old_cmd = "dbt-" + str(old_block.command)
                 task = Task.objects.filter(slug__endswith=old_cmd).first()
 
             if not task:
@@ -807,9 +805,8 @@ class Command(BaseCommand):
                         continue
 
                 elif dataflow_blk.opb.block_type == DBTCORE:
-                    old_cmd = dataflow_blk.opb.block_name.split(
-                        f"{dataflow_blk.opb.dbt_target_schema}-"
-                    )[-1]
+                    old_cmd = "dbt-" + str(dataflow_blk.opb.command)
+
                     task = Task.objects.filter(slug__endswith=old_cmd).first()
                     if not task:
                         self.failures.append(
@@ -997,9 +994,8 @@ class Command(BaseCommand):
                     ):  # its a git pull block
                         task = Task.objects.filter(slug=TASK_GITPULL).first()
                     else:  # its one of the dbt core block
-                        old_cmd = org_prefect_blk.block_name.split(
-                            f"{org_prefect_blk.dbt_target_schema}-"
-                        )[-1]
+                        old_cmd = "dbt-" + str(org_prefect_blk.command)
+
                         task = Task.objects.filter(slug__endswith=old_cmd).first()
 
                     if not task:
