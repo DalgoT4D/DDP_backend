@@ -19,9 +19,12 @@ class Command(BaseCommand):
     def show_orgprefectblocks(self, org: Org):
         """shows all OrgPrefectBlocks for an org"""
         for opb in OrgPrefectBlock.objects.filter(org=org):
-            print(
-                f"{org.slug:20} BLOCK      [{opb.block_type:20}] {opb.block_name:60} {opb.command}"
-            )
+            if opb.block_type.find("Airbyte") == 0:
+                print(f"{org.slug:20} BLOCK   {opb.block_type}")
+            elif opb.block_type.find("Shell") == 0:
+                print(f"{org.slug:20} BLOCK   shell {opb.command}")
+            else:
+                print(f"{org.slug:20} BLOCK   dbt {opb.command}")
 
     def show_orgdataflows(self, org: Org):
         """shows all OrgDataFlows for an org"""
@@ -29,7 +32,7 @@ class Command(BaseCommand):
             for dfb in DataflowBlock.objects.filter(dataflow=dataflow):
                 opb = dfb.opb
                 print(
-                    f"{org.slug:20} DEPLOYMENT {dataflow.dataflow_type:11} [{opb.block_type:20}] {dataflow.deployment_name:50} {opb.block_name:60} {opb.command}"
+                    f"{org.slug:20} DEPLOYMENT {dataflow.dataflow_type:11} {dataflow.deployment_name:50} [{opb.block_type:20}] {opb.block_name:60} {opb.command}"
                 )
 
     def show_org_entities(self, org: Org):
