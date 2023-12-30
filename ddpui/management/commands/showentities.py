@@ -18,21 +18,36 @@ class Command(BaseCommand):
 
     def show_orgprefectblocks(self, org: Org):
         """shows all OrgPrefectBlocks for an org"""
-        for opb in OrgPrefectBlock.objects.filter(org=org):
+        print("Blocks for " + org.slug + ":")
+        for opb in OrgPrefectBlock.objects.filter(org=org).order_by("block_type"):
             if opb.block_type.find("Airbyte") == 0:
-                print(f"{org.slug:20} BLOCK   {opb.block_type}")
+                print(f"  {opb.block_type}")
             elif opb.block_type.find("Shell") == 0:
-                print(f"{org.slug:20} BLOCK   shell {opb.command}")
+                print(f"  {opb.command}")
             else:
-                print(f"{org.slug:20} BLOCK   dbt {opb.command}")
+                print(f"  dbt {opb.command}")
 
     def show_orgdataflows(self, org: Org):
         """shows all OrgDataFlows for an org"""
-        for dataflow in OrgDataFlow.objects.filter(org=org):
+        print("Manual Dataflows for " + org.slug + ":")
+        for dataflow in OrgDataFlow.objects.filter(org=org).filter(
+            dataflow_type="manual"
+        ):
             for dfb in DataflowBlock.objects.filter(dataflow=dataflow):
                 opb = dfb.opb
                 print(
-                    f"{org.slug:20} DEPLOYMENT {dataflow.dataflow_type:11} {dataflow.deployment_name:50} [{opb.block_type:20}] {opb.block_name:60} {opb.command}"
+                    f"  {dataflow.deployment_name:50} [{opb.block_type:20}] {opb.command}"
+                )
+            print("")
+
+        print("Orchestrated Dataflows for " + org.slug + ":")
+        for dataflow in OrgDataFlow.objects.filter(org=org).filter(
+            dataflow_type="orchestrate"
+        ):
+            for dfb in DataflowBlock.objects.filter(dataflow=dataflow):
+                opb = dfb.opb
+                print(
+                    f"  {dataflow.deployment_name:50} [{opb.block_type:20}] {opb.command}"
                 )
 
     def show_org_entities(self, org: Org):
