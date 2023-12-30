@@ -112,10 +112,11 @@ def delete_airbyte_workspace(org: Org):  # skipcq: PYL-R0201
         secretsmanager.delete_warehouse_credentials(warehouse)
         warehouse.delete()
 
-    try:
-        airbyte_service.delete_workspace(org.airbyte_workspace_id)
-    except Exception:
-        pass
+    if is_valid_uuid(org.airbyte_workspace_id):
+        try:
+            airbyte_service.delete_workspace(org.airbyte_workspace_id)
+        except Exception:
+            pass
 
 
 def delete_warehouse_v1(org: Org):  # skipcq: PYL-R0201
@@ -203,10 +204,10 @@ def delete_airbyte_workspace_v1(org: Org):  # skipcq: PYL-R0201
             logger.info("deleting source in Airbyte " + source["sourceId"])
             airbyte_service.delete_source(org.airbyte_workspace_id, source["sourceId"])
 
-    try:
-        airbyte_service.delete_workspace(org.airbyte_workspace_id)
-    except Exception:
-        pass
+        try:
+            airbyte_service.delete_workspace(org.airbyte_workspace_id)
+        except Exception:
+            pass
 
 
 def delete_orgusers(org: Org):  # skipcq: PYL-R0201
@@ -216,8 +217,8 @@ def delete_orgusers(org: Org):  # skipcq: PYL-R0201
         # this deletes the orguser as well via CASCADE
 
 
-def delete_one_org(org: Org, yes_really: bool):
-    """delete one org"""
+def display_org(org: Org):
+    """show org"""
     account_admin = OrgUser.objects.filter(
         org=org, role=OrgUserRole.ACCOUNT_MANAGER
     ).first()
@@ -228,12 +229,15 @@ def delete_one_org(org: Org, yes_really: bool):
         org.airbyte_workspace_id,
         account_admin.user.email if account_admin else "<unknonw>",
     )
-    if yes_really:
-        delete_prefect_deployments(org)
-        delete_dbt_workspace(org)
-        if org.airbyte_workspace_id:
-            delete_airbyte_workspace(org)
-            delete_airbyte_workspace_v1(org)
-        delete_prefect_shell_blocks(org)
-        delete_orgusers(org)
-        org.delete()
+
+
+def delete_one_org(org: Org):
+    """delete one org"""
+    delete_prefect_deployments(org)
+    delete_dbt_workspace(org)
+    if org.airbyte_workspace_id:
+        delete_airbyte_workspace(org)
+        delete_airbyte_workspace_v1(org)
+    delete_prefect_shell_blocks(org)
+    delete_orgusers(org)
+    org.delete()
