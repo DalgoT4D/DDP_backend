@@ -20,8 +20,10 @@ class Command(BaseCommand):
         """shows all OrgPrefectBlocks for an org"""
         print("Blocks for " + org.slug + ":")
         for opb in OrgPrefectBlock.objects.filter(org=org).order_by("block_type"):
-            if opb.block_type.find("Airbyte") == 0:
+            if opb.block_type == "Airbyte Server":
                 print(f"  {opb.block_type}")
+            elif opb.block_type == "Airbyte Connection":
+                print(f"  {opb.block_name}")
             elif opb.block_type.find("Shell") == 0:
                 print(f"  {opb.command}")
             else:
@@ -38,7 +40,6 @@ class Command(BaseCommand):
                 print(
                     f"  {dataflow.deployment_name:50} [{opb.block_type:20}] {opb.command}"
                 )
-            print("")
 
         print("Orchestrated Dataflows for " + org.slug + ":")
         for dataflow in OrgDataFlow.objects.filter(org=org).filter(
@@ -49,6 +50,7 @@ class Command(BaseCommand):
                 print(
                     f"  {dataflow.deployment_name:50} [{opb.block_type:20}] {opb.command}"
                 )
+            print("")
 
     def show_org_entities(self, org: Org):
         """shows all entities for an org"""
@@ -60,7 +62,7 @@ class Command(BaseCommand):
         self.show_orgprefectblocks(org)
         print("")
         self.show_orgdataflows(org)
-        print("")
+        print("=" * 80)
 
     def handle(self, *args, **options):
         """filters on --org if provided"""
