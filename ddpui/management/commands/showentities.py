@@ -20,18 +20,16 @@ class Command(BaseCommand):
         """shows all OrgPrefectBlocks for an org"""
         for opb in OrgPrefectBlock.objects.filter(org=org):
             print(
-                f"{org.slug:20} [{opb.block_type:20}] {opb.block_name:50} {opb.command}"
+                f"{org.slug:20} BLOCK [{opb.block_type:20}] {opb.block_name:50} {opb.command}"
             )
 
     def show_orgdataflows(self, org: Org):
         """shows all OrgDataFlows for an org"""
         for dataflow in OrgDataFlow.objects.filter(org=org):
-            assert DataflowBlock.objects.filter(dataflow=dataflow).count() <= 1
-            dfb = DataflowBlock.objects.filter(dataflow=dataflow).first()
-            if dfb:
+            for dfb in DataflowBlock.objects.filter(dataflow=dataflow):
                 opb = dfb.opb
                 print(
-                    f"{org.slug:20} {dataflow.deployment_name:20} {dataflow.dataflow_type:11} [{opb.block_type:20}] {opb.block_name:50} {opb.command}"
+                    f"{org.slug:20} DEPLOYMENT {dataflow.dataflow_type:11} {dataflow.deployment_name:20} [{opb.block_type:20}] {opb.block_name:50} {opb.command}"
                 )
 
     def show_org_entities(self, org: Org):
