@@ -4,6 +4,7 @@ from django.utils.text import slugify
 
 from ddpui.models.orgjobs import DataflowBlock
 from ddpui.models.org import Org, OrgPrefectBlock, OrgDataFlow
+from ddpui.models.tasks import OrgTask, OrgDataFlowv1
 
 
 class Command(BaseCommand):
@@ -29,18 +30,20 @@ class Command(BaseCommand):
             else:
                 print(f"  dbt {opb.command}")
 
-    def show_orgdataflows(self, org: Org):
-        """shows all OrgDataFlows for an org"""
+    def show_manual_dataflows(self, org: Org):
+        """shows all manual OrgDataFlows for an org"""
         print("Manual Dataflows for " + org.slug + ":")
         for dataflow in OrgDataFlow.objects.filter(org=org).filter(
             dataflow_type="manual"
         ):
-            for dfb in DataflowBlock.objects.filter(dataflow=dataflow):
-                opb = dfb.opb
-                print(
-                    f"  {dataflow.deployment_name:50} [{opb.block_type:20}] {opb.command}"
-                )
+            assert DataflowBlock.objects.filter(dataflow=dataflow).count() == 1
+            dfb = DataflowBlock.objects.filter(dataflow=dataflow).first()
+            print(
+                f"  {dataflow.deployment_name:50} [{dfb.opb.block_type:20}] {dfb.opb.command}"
+            )
 
+    def show_orchestrated_dataflows(self, org: Org):
+        """shows all orchestrated OrgDataFlows for an org"""
         print("Orchestrated Dataflows for " + org.slug + ":")
         for dataflow in OrgDataFlow.objects.filter(org=org).filter(
             dataflow_type="orchestrate"
@@ -52,6 +55,28 @@ class Command(BaseCommand):
                 )
             print("")
 
+    def show_org_tasks(self, org: Org):
+        """shows all tasks for an org"""
+        print("OrgTasks for " + org.slug + ":")
+        for orgtask in OrgTask.objects.filter(org=org):
+            print(f"  {orgtask.task.type} {orgtask.task.label} {orgtask.connection_id}")
+
+    def show_v1_manual_dataflows(self, org: Org):
+        """show the v1 dataflows"""
+        print("v1 Manual Dataflows for " + org.slug + ":")
+        for dataflow in OrgDataFlowv1.objects.filter(org=org).filter(
+            dataflow_type="manual"
+        ):
+            print(f"  {dataflow.deployment_name:50} ")
+
+    def show_v1_orchestrated_dataflows(self, org: Org):
+        """show the v1 dataflows"""
+        print("v1 orchestrated Dataflows for " + org.slug + ":")
+        for dataflow in OrgDataFlowv1.objects.filter(org=org).filter(
+            dataflow_type="orchestrate"
+        ):
+            print(f"  {dataflow.deployment_name:50} ")
+
     def show_org_entities(self, org: Org):
         """shows all entities for an org"""
 
@@ -61,7 +86,15 @@ class Command(BaseCommand):
         print(f"{org.slug}")
         self.show_orgprefectblocks(org)
         print("")
-        self.show_orgdataflows(org)
+        self.show_manual_dataflows(org)
+        print("")
+        self.show_orchestrated_dataflows(org)
+        print("")
+        self.show_org_tasks(org)
+        print("")
+        self.show_v1_manual_dataflows(org)
+        print("")
+        self.show_v1_orchestrated_dataflows(org)
         print("=" * 80)
 
     def handle(self, *args, **options):
