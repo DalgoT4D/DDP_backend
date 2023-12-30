@@ -48,11 +48,19 @@ class Command(BaseCommand):
         for dataflow in OrgDataFlow.objects.filter(org=org).filter(
             dataflow_type="orchestrate"
         ):
-            for dfb in DataflowBlock.objects.filter(dataflow=dataflow):
-                opb = dfb.opb
-                print(
-                    f"  {dataflow.deployment_name:50} [{opb.block_type:20}] {opb.command}"
-                )
+            q_dfdfb = DataflowBlock.objects.filter(dataflow=dataflow)
+            if (
+                q_dfdfb.filter(opb__block_type="Airbyte Connection").count() == 1
+                and q_dfdfb.filter(opb__block_type="Shell Operation").count() == 1
+                and q_dfdfb.filter(opb__block_type="dbt Core Operation").count() == 5
+            ):
+                print(f"  {dataflow.deployment_name:50} [with all 7 blocks]")
+            else:
+                for dfb in q_dfdfb:
+                    opb = dfb.opb
+                    print(
+                        f"  {dataflow.deployment_name:50} [{opb.block_type:20}] {opb.command}"
+                    )
             print("")
 
     def show_org_tasks(self, org: Org):
