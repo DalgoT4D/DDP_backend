@@ -59,7 +59,9 @@ class Command(BaseCommand):
         """shows all tasks for an org"""
         print("OrgTasks for " + org.slug + ":")
         for orgtask in OrgTask.objects.filter(org=org):
-            print(f"  {orgtask.task.type} {orgtask.task.label} {orgtask.connection_id}")
+            print(
+                f"  {orgtask.task.type} {orgtask.task.label} {orgtask.connection_id if orgtask.connection_id else ''}"
+            )
 
     def show_v1_manual_dataflows(self, org: Org):
         """show the v1 dataflows"""
