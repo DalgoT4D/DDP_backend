@@ -20,7 +20,7 @@ class Command(BaseCommand):
         """shows all OrgPrefectBlocks for an org"""
         for opb in OrgPrefectBlock.objects.filter(org=org):
             print(
-                f"{org.slug:20} BLOCK [{opb.block_type:20}] {opb.block_name:50} {opb.command}"
+                f"{org.slug:20} BLOCK      [{opb.block_type:20}] {opb.block_name:60} {opb.command}"
             )
 
     def show_orgdataflows(self, org: Org):
@@ -29,7 +29,7 @@ class Command(BaseCommand):
             for dfb in DataflowBlock.objects.filter(dataflow=dataflow):
                 opb = dfb.opb
                 print(
-                    f"{org.slug:20} DEPLOYMENT {dataflow.dataflow_type:11} {dataflow.deployment_name:20} [{opb.block_type:20}] {opb.block_name:50} {opb.command}"
+                    f"{org.slug:20} DEPLOYMENT {dataflow.dataflow_type:11} [{opb.block_type:20}] {dataflow.deployment_name:50} {opb.block_name:60} {opb.command}"
                 )
 
     def show_org_entities(self, org: Org):
@@ -40,6 +40,7 @@ class Command(BaseCommand):
             org.save()
         print(f"{org.slug}")
         self.show_orgprefectblocks(org)
+        print("")
         self.show_orgdataflows(org)
         print("")
 
