@@ -34,11 +34,7 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
 )
 
-from ddpui.ddpprefect import (
-    AIRBYTESERVER,
-    AIRBYTECONNECTION,
-    DBTCORE,
-)
+from ddpui.ddpprefect import AIRBYTESERVER, AIRBYTECONNECTION, DBTCORE, DBTCLIPROFILE
 from ddpui.ddpprefect import prefect_service
 from ddpui.models.org import (
     OrgPrefectBlock,
@@ -1472,3 +1468,79 @@ def get_latest_job_for_connection(request, connection_id):
     logs = airbyte_service.get_logs_for_job(job_info["job_id"])
     job_info["logs"] = logs["logs"]["logLines"]
     return job_info
+
+
+@airbyteapi.put("/v1/destinations/{destination_id}/", auth=auth.CanManagePipelines())
+def put_airbyte_destination_v1(
+    request, destination_id: str, payload: AirbyteDestinationUpdate
+):
+    """Update an airbyte destination in the user organization workspace"""
+    orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    destination = airbyte_service.update_destination(
+        destination_id, payload.name, payload.config, payload.destinationDefId
+    )
+    logger.info("updated destination having id " + destination["destinationId"])
+    warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+
+    if warehouse.name != payload.name:
+        warehouse.name = payload.name
+        warehouse.save()
+
+    dbt_credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
+
+    if warehouse.wtype == "postgres":
+        aliases = {
+            "dbname": "database",
+        }
+        for config_key in ["host", "port", "username", "password", "database"]:
+            if (
+                config_key in payload.config
+                and isinstance(payload.config[config_key], str)
+                and len(payload.config[config_key]) > 0
+                and list(set(payload.config[config_key]))[0] != "*"
+            ):
+                dbt_credentials[aliases.get(config_key, config_key)] = payload.config[
+                    config_key
+                ]
+
+    elif warehouse.wtype == "bigquery":
+        dbt_credentials = json.loads(payload.config["credentials_json"])
+    elif warehouse.wtype == "snowflake":
+        if (
+            "credentials" in payload.config
+            and "password" in payload.config["credentials"]
+            and isinstance(payload.config["credentials"]["password"], str)
+            and len(payload.config["credentials"]["password"]) > 0
+            and list(set(payload.config["credentials"]["password"])) != "*"
+        ):
+            dbt_credentials["credentials"]["password"] = payload.config["credentials"][
+                "password"
+            ]
+
+    else:
+        raise HttpError(400, "unknown warehouse type " + warehouse.wtype)
+
+    secretsmanager.update_warehouse_credentials(warehouse, dbt_credentials)
+
+    cli_profile_block = OrgPrefectBlockv1.objects.filter(
+        org=orguser.org, block_type=DBTCLIPROFILE
+    ).first()
+
+    if cli_profile_block:
+        logger.info(f"Updating the cli profile block : {cli_profile_block.block_name}")
+        prefect_service.update_dbt_cli_profile_block(
+            block_name=cli_profile_block.block_name,
+            wtype=warehouse.wtype,
+            credentials=dbt_credentials,
+            bqlocation=payload.config["dataset_location"]
+            if "dataset_location" in payload.config
+            else None,
+        )
+        logger.info(f"Successfully updated the cli profile block : {cli_profile_block.block_name}")
+
+    return {"destinationId": destination["destinationId"]}
