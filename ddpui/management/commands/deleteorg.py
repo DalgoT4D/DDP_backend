@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 from django.core.management.base import BaseCommand
 
 from ddpui.models.org_user import Org
-from ddpui.utils.deleteorg import delete_one_org
+from ddpui.utils.deleteorg import delete_one_org, display_org
 
 
 load_dotenv()
@@ -25,7 +25,7 @@ class Command(BaseCommand):
         """Docstring"""
         if options["org_name"] == "ALL":
             for org in Org.objects.all():
-                delete_one_org(org, options["yes_really"])
+                display_org(org)
         else:
             org = Org.objects.filter(name=options["org_name"]).first()
             if org is None:
@@ -34,4 +34,6 @@ class Command(BaseCommand):
                 print("no such org")
                 return
 
-            delete_one_org(org, options["yes_really"])
+            display_org(org)
+            if options["yes_really"]:
+                delete_one_org(org)

@@ -9,8 +9,9 @@ from ddpui.ddpprefect import prefect_service
 from ddpui import auth
 
 # models
-from ddpui.models.org import OrgDataFlow
+from ddpui.models.org import OrgDataFlow, OrgDataFlowv1
 from ddpui.models.orgjobs import BlockLock, DataflowBlock
+from ddpui.models.tasks import DataflowOrgTask, TaskLock
 
 
 dashboardapi = NinjaAPI(urls_namespace="dashboard")
@@ -65,6 +66,48 @@ def get_dashboard(request):
         lock = BlockLock.objects.filter(
             opb__block_id__in=[x["opb__block_id"] for x in block_ids]
         ).first()
+        res.append(
+            {
+                "name": flow.name,
+                "deploymentId": flow.deployment_id,
+                "cron": flow.cron,
+                "deploymentName": flow.deployment_name,
+                "runs": prefect_service.get_flow_runs_by_deployment_id(
+                    flow.deployment_id, 50
+                ),
+                "lock": {
+                    "lockedBy": lock.locked_by.user.email,
+                    "lockedAt": lock.locked_at,
+                }
+                if lock
+                else None,
+            }
+        )
+
+    # we might add more stuff here , system logs etc.
+
+    return res
+
+
+@dashboardapi.get("/v1", auth=auth.CanManagePipelines())
+def get_dashboard_v1(request):
+    """Fetch all flows/pipelines created in an organization"""
+    orguser = request.orguser
+
+    org_data_flows = OrgDataFlowv1.objects.filter(
+        org=orguser.org, dataflow_type="orchestrate"
+    ).all()
+
+    res = []
+
+    # fetch 50 (default limit) flow runs for each flow
+    for flow in org_data_flows:
+        orgtask_ids = DataflowOrgTask.objects.filter(dataflow=flow).values_list(
+            "orgtask__id", flat=True
+        )
+        # if there is one there will typically be several - a sync,
+        # a git-run, a git-test... we return the userinfo only for the first one
+        lock = TaskLock.objects.filter(orgtask__id__in=orgtask_ids).first()
         res.append(
             {
                 "name": flow.name,
