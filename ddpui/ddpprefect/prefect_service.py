@@ -346,6 +346,34 @@ def create_dbt_cli_profile_block(
     return response
 
 
+def update_dbt_cli_profile_block(
+    block_name: str,
+    wtype: str,
+    profilename: str = None,
+    target: str = None,
+    credentials: dict = None,
+    bqlocation: str = None,
+    new_block_name: str = None,
+):
+    """Update the dbt cli profile for an org"""
+    response = prefect_put(
+        "blocks/dbtcli/profile/",
+        {
+            "cli_profile_block_name": block_name,
+            "wtype": wtype,
+            "profile": {
+                "name": profilename,
+                "target": target,
+                "target_configs_schema": target,
+            },
+            "credentials": credentials,
+            "bqlocation": bqlocation,
+            "new_block_name": new_block_name,
+        },
+    )
+    return response
+
+
 def delete_dbt_cli_profile_block(block_id) -> None:
     """Delete dbt cli profile block in prefect"""
     prefect_delete_a_block(block_id)
