@@ -102,14 +102,12 @@ def get_dashboard_v1(request):
 
     # fetch 50 (default limit) flow runs for each flow
     for flow in org_data_flows:
-        task_ids = DataflowOrgTask.objects.filter(dataflow=flow).values(
-            "orgtask__task__id"
+        orgtask_ids = DataflowOrgTask.objects.filter(dataflow=flow).values_list(
+            "orgtask__id", flat=True
         )
         # if there is one there will typically be several - a sync,
         # a git-run, a git-test... we return the userinfo only for the first one
-        lock = TaskLock.objects.filter(
-            orgtask__task__id__in=[x["orgtask__task__id"] for x in task_ids]
-        ).first()
+        lock = TaskLock.objects.filter(orgtask__id__in=orgtask_ids).first()
         res.append(
             {
                 "name": flow.name,
