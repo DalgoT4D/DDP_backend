@@ -13,8 +13,8 @@ from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from ddpui import auth
 from ddpui.ddpprefect.schema import OrgDbtSchema, OrgDbtGitHub, OrgDbtTarget
 from ddpui.models.org_user import OrgUserResponse, OrgUser
-from ddpui.models.org import OrgPrefectBlock
-from ddpui.ddpprefect import DBTCORE
+from ddpui.models.org import OrgPrefectBlock, OrgPrefectBlockv1
+from ddpui.ddpprefect import DBTCORE, DBTCLIPROFILE
 from ddpui.utils.helpers import runcmd
 from ddpui.utils.dbtdocs import create_single_html
 from ddpui.celeryworkers.tasks import (
@@ -23,6 +23,7 @@ from ddpui.celeryworkers.tasks import (
     update_dbt_core_block_schema_task,
 )
 from ddpui.ddpdbt import dbt_service
+from ddpui.ddpprefect import prefect_service
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.orguserhelpers import from_orguser
 
@@ -196,3 +197,34 @@ def post_dbt_makedocs(request):
     redis.expire(redis_key, 3600 * 24)
 
     return {"token": token.hex}
+
+
+@dbtapi.put("/v1/schema/", auth=auth.CanManagePipelines())
+def put_dbt_schema_v1(request, payload: OrgDbtTarget):
+    """Update the target_configs.schema for the dbt cli profile block"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    if org.dbt is None:
+        raise HttpError(400, "create a dbt workspace first")
+
+    org.dbt.default_schema = payload.target_configs_schema
+    org.dbt.save()
+    logger.info("updated orgdbt")
+
+    cli_profile_block = OrgPrefectBlockv1.objects.filter(
+        org=orguser.org, block_type=DBTCLIPROFILE
+    ).first()
+
+    if cli_profile_block:
+        logger.info(
+            f"Updating the cli profile block's schema : {cli_profile_block.block_name}"
+        )
+        prefect_service.update_dbt_cli_profile_block(
+            block_name=cli_profile_block.block_name,
+            target=payload.target_configs_schema,
+        )
+        logger.info(
+            f"Successfully updated the cli profile block's schema : {cli_profile_block.block_name}"
+        )
+
+    return {"success": 1}

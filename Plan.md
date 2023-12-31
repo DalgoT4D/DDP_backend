@@ -82,6 +82,13 @@ Plan to go away from the prefect dbt core blocks & connection blocks
 | Django: create airbyte workspace `POST /api/airbyte/workspace/` | Django : new api to create airbyte workspace `POST /api/airbyte/v1/workspace/` |
 | Django: create organization `POST /api/organizations/`          | Django : new api to create org `POST /api/v1/organizations/`                   |
 
+#### <u>Warehouse and cli profile</u>
+
+| Before                                                                            | After                                                                                                |
+| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Django: put airbyte destination `PUT /api/airbyte/destinations/{destination_id}/` | Django : new api to create airbyte destination `POST /api/airbyte/v1/destinations/{destination_id}/` |
+|                                                                                   | Proxy: update cli profile block `PUT /proxy/blocks/dbtcli/profile/`                                  |
+
 #### <u>Airbyte connections</u>
 
 | Before                                                                                                  | After                                                                                                                                         |
