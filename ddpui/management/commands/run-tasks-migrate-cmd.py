@@ -711,19 +711,6 @@ class Command(BaseCommand):
             f"Found airbyte server block: {server_block.block_name} for {org.slug}"
         )
 
-        # check if cli block is created
-        cli_profile_block = OrgPrefectBlockv1.objects.filter(
-            org=org, block_type=DBTCLIPROFILE
-        ).first()
-        if not cli_profile_block:
-            self.failures.append(
-                f"SKIPPING: Couldnt find the dbt cli profile block for org {org.slug}"
-            )
-            return
-        self.successes.append(
-            f"Found dbt cli profile block : {cli_profile_block.block_name} for {org.slug}"
-        )
-
         for old_dataflow in OrgDataFlow.objects.filter(
             org=org, dataflow_type="orchestrate"
         ).all():
@@ -964,11 +951,24 @@ class Command(BaseCommand):
                     f"Pipeline : {new_dataflow.deployment_name} has dbt transform on. Processing it now"
                 )
 
+                # check if cli block is created
+                cli_profile_block = OrgPrefectBlockv1.objects.filter(
+                    org=org, block_type=DBTCLIPROFILE
+                ).first()
+                if not cli_profile_block:
+                    self.failures.append(
+                        f"SKIPPING: Couldnt find the dbt cli profile block for org {org.slug}"
+                    )
+                    continue
+                self.successes.append(
+                    f"Found dbt cli profile block : {cli_profile_block.block_name} for {org.slug}"
+                )
+
                 # dbt params
                 dbt_env_dir = Path(org.dbt.dbt_venv)
                 if not dbt_env_dir.exists():
                     self.failures.append("dbt env not found")
-                    return
+                    continue
 
                 dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
                 dbtrepodir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug / "dbtrepo"
@@ -977,7 +977,6 @@ class Command(BaseCommand):
 
                 for dbt_block in sorted(params["dbt_blocks"], key=lambda x: x["seq"]):
                     dbt_block_name = dbt_block["blockName"]
-                    dbt_block_type = dbt_block["blockType"]
 
                     org_prefect_blk = OrgPrefectBlock.objects.filter(
                         org=org, block_name=dbt_block_name

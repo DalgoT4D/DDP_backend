@@ -84,10 +84,11 @@ Plan to go away from the prefect dbt core blocks & connection blocks
 
 #### <u>Warehouse and cli profile</u>
 
-| Before                                                                            | After                                                                                                |
-| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Django: put airbyte destination `PUT /api/airbyte/destinations/{destination_id}/` | Django : new api to create airbyte destination `POST /api/airbyte/v1/destinations/{destination_id}/` |
-|                                                                                   | Proxy: update cli profile block `PUT /proxy/blocks/dbtcli/profile/`                                  |
+| Before                                                                                 | After                                                                                                |
+| -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Django: put airbyte destination `PUT /api/airbyte/destinations/{destination_id}/`      | Django : new api to create airbyte destination `POST /api/airbyte/v1/destinations/{destination_id}/` |
+|                                                                                        | Proxy: update cli profile block `PUT /proxy/blocks/dbtcli/profile/`                                  |
+| Django: api to update target config schema of cli profile block `PUT /api/dbt/schema/` | Django: new api to update target config schema of cli profile block `PUT /api/dbt/v1/schema/`        |
 
 #### <u>Airbyte connections</u>
 
