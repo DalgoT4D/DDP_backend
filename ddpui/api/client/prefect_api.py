@@ -1309,7 +1309,7 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
             raise HttpError(400, "dbt cli profile not found")
 
         # push dbt pipeline tasks
-        for org_task in OrgTask.objects.filter(task__type__in=["dbt", "git"]).all():
+        for org_task in OrgTask.objects.filter(org=orguser.org, task__type__in=["dbt", "git"]).all():
             logger.info(
                 f"found transform task {org_task.task.slug}; pushing to pipeline"
             )
