@@ -1431,7 +1431,7 @@ def get_prefect_dataflows_v1(request):
         #     opb__block_id__in=[x["opb__block_id"] for x in block_ids]
         # ).first()
         org_task_ids = DataflowOrgTask.objects.filter(dataflow=flow).values_list(
-            "id", flat=True
+            "orgtask_id", flat=True
         )
 
         lock = TaskLock.objects.filter(orgtask_id__in=org_task_ids).first()
