@@ -19,7 +19,6 @@ from ddpui.api.airbyte_api import (
     post_airbyte_check_source_for_update,
     get_airbyte_sources,
     get_airbyte_source,
-    delete_airbyte_source,
     get_airbyte_source_schema_catalog,
     get_airbyte_destination_definitions,
     get_airbyte_destination_definition_specifications,
@@ -403,97 +402,6 @@ def test_get_airbyte_source_success(org_with_workspace):
     result = get_airbyte_source(mock_request, "fake-source-id")
 
     assert result["fake-key"] == "fake-val"
-
-
-# ================================================================================
-def test_delete_airbyte_source_without_workspace(org_without_workspace):
-    """tests GET /source_definitions"""
-    mock_orguser = Mock()
-    mock_orguser.org = org_without_workspace
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
-
-    with pytest.raises(HttpError) as excinfo:
-        delete_airbyte_source(mock_request, "fake-source-id")
-
-    assert str(excinfo.value) == "create an airbyte workspace first"
-
-
-@patch.multiple(
-    "ddpui.ddpairbyte.airbyte_service",
-    get_connections=Mock(
-        return_value={"connections": [{"sourceId": "fake-source-id-1"}]}
-    ),
-    delete_source=Mock(),
-)
-@patch.multiple(
-    "ddpui.ddpprefect.prefect_service",
-    get_airbye_connection_blocks=Mock(return_value=[]),
-    post_prefect_blocks_bulk_delete=Mock(),
-)
-def test_delete_airbyte_source_1(org_with_workspace):
-    """tests GET /source_definitions"""
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_workspace
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
-
-    result = delete_airbyte_source(mock_request, "fake-source-id")
-
-    assert result["success"] == 1
-
-
-@patch.multiple(
-    "ddpui.ddpairbyte.airbyte_service",
-    get_connections=Mock(
-        return_value={
-            "connections": [
-                {"sourceId": "fake-source-id-1", "connectionId": "fake-connection-id-1"}
-            ]
-        }
-    ),
-    delete_source=Mock(),
-)
-@patch.multiple(
-    "ddpui.ddpprefect.prefect_service",
-    get_airbye_connection_blocks=Mock(
-        return_value=[{"connectionId": "fake-connection-id-1", "id": "fake-block-id-1"}]
-    ),
-    post_prefect_blocks_bulk_delete=Mock(),
-)
-def test_delete_airbyte_source_2(org_with_workspace):
-    """tests GET /source_definitions"""
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_workspace
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
-
-    OrgPrefectBlock.objects.create(
-        org=org_with_workspace,
-        block_type=ddpprefect.AIRBYTECONNECTION,
-        block_id="fake-block-id-1",
-        block_name="fake-block-name-1",
-    )
-    assert OrgPrefectBlock.objects.filter(
-        org=org_with_workspace,
-        block_type=ddpprefect.AIRBYTECONNECTION,
-        block_id="fake-block-id-1",
-        block_name="fake-block-name-1",
-    ).exists()
-
-    result = delete_airbyte_source(mock_request, "fake-source-id-1")
-
-    assert not OrgPrefectBlock.objects.filter(
-        org=org_with_workspace,
-        block_type=ddpprefect.AIRBYTECONNECTION,
-        block_id="fake-block-id-1",
-        block_name="fake-block-name-1",
-    ).exists()
-
-    assert result["success"] == 1
 
 
 # ================================================================================
