@@ -19,7 +19,6 @@ from ddpui.api.user_org_api import (
     put_organization_user_self,
     put_organization_user,
     post_transfer_ownership,
-    post_organization,
     post_organization_warehouse,
     get_organizations_warehouses,
     post_organization_user_invite,
@@ -32,7 +31,7 @@ from ddpui.api.user_org_api import (
     delete_invitation,
     post_organization_accept_tnc,
 )
-from ddpui.models.org import Org, OrgSchema, OrgWarehouseSchema, OrgWarehouse
+from ddpui.models.org import Org, OrgWarehouseSchema, OrgWarehouse
 from ddpui.models.org_user import (
     OrgUser,
     OrgUserCreate,
@@ -49,7 +48,6 @@ from ddpui.models.org_user import (
     DeleteOrgUserPayload,
 )
 from ddpui.models.orgtnc import OrgTnC
-from ddpui.ddpairbyte.schema import AirbyteWorkspace
 from ddpui.utils import timezone
 from django.contrib.auth.models import User
 
@@ -499,58 +497,6 @@ def test_post_transfer_ownership_db_error(
     with pytest.raises(HttpError) as excinfo:
         post_transfer_ownership(mock_request, payload)
     assert str(excinfo.value) == "failed to transfer ownership"
-
-
-# ================================================================================
-def test_post_organization_orgexists(orguserwithoutorg, org_without_workspace):
-    """failing test, org name is already in use"""
-    mock_request = Mock()
-    UserAttributes.objects.create(user=orguserwithoutorg.user, can_create_orgs=True)
-    mock_request.orguser = orguserwithoutorg
-
-    payload = OrgSchema(name=org_without_workspace.name)
-    with pytest.raises(HttpError) as excinfo:
-        post_organization(mock_request, payload)
-    assert str(excinfo.value) == "client org with this name already exists"
-
-
-def test_post_organization_no_create_org(orguserwithoutorg, org_without_workspace):
-    """failing test, org name is already in use"""
-    mock_request = Mock()
-    mock_request.orguser = orguserwithoutorg
-
-    payload = OrgSchema(name=org_without_workspace.name)
-    with pytest.raises(HttpError) as excinfo:
-        post_organization(mock_request, payload)
-    assert str(excinfo.value) == "Insufficient permissions for this operation"
-
-
-@patch(
-    "ddpui.ddpairbyte.airbytehelpers.setup_airbyte_workspace",
-    Mock(
-        return_value=AirbyteWorkspace(
-            name="workspace-name",
-            workspaceId="workspace-id",
-            initialSetupComplete=False,
-        )
-    ),
-)
-def test_post_organization(orguserwithoutorg):
-    """success test for org creation"""
-    mock_request = Mock()
-    mock_request.orguser = orguserwithoutorg
-    UserAttributes.objects.create(user=orguserwithoutorg.user, can_create_orgs=True)
-
-    payload = OrgSchema(name="newname")
-    response = post_organization(mock_request, payload)
-    assert response.name == payload.name
-
-    # now we have an org
-    orguserwithoutorg = OrgUser.objects.filter(user=orguserwithoutorg.user).first()
-    assert orguserwithoutorg.org is not None
-    assert orguserwithoutorg.org.name == "newname"
-
-    orguserwithoutorg.org.delete()
 
 
 # ================================================================================

@@ -468,8 +468,7 @@ def test_post_airbyte_connection_v1_success(
     }
     Task.objects.create(**airbyte_task_config)
 
-    with patch("ddpui.api.airbyte_api.write_dataflowblocks"):
-        response = post_airbyte_connection_v1(mock_request, payload)
+    response = post_airbyte_connection_v1(mock_request, payload)
 
     # reload the warehouse from the database
     warehouse_with_destination = OrgWarehouse.objects.filter(
