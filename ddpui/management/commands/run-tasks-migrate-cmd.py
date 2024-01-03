@@ -1007,26 +1007,7 @@ class Command(BaseCommand):
                         continue
 
                     org_task = OrgTask.objects.filter(org=org, task=task).first()
-                    if org_task.task.slug == TASK_DBTRUN:
-                        dbt_core_task_setup = PrefectDbtTaskSetup(
-                            seq=TRANSFORM_TASKS_SEQ[org_task.task.slug] + seq,
-                            slug=org_task.task.slug,
-                            commands=[
-                                f"{dbt_binary} {org_task.task.command} --target {target}"
-                            ],
-                            type=DBTCORE,
-                            env={},
-                            working_dir=project_dir,
-                            profiles_dir=f"{project_dir}/profiles/",
-                            project_dir=project_dir,
-                            cli_profile_block=cli_profile_block.block_name,
-                            cli_args=[],
-                        )
-
-                        task_config = dict(dbt_core_task_setup)
-                        tasks.append(task_config)
-
-                    elif org_task.task.slug == TASK_GITPULL:
+                    if org_task.task.slug == TASK_GITPULL:
                         shell_env = {"secret-git-pull-url-block": ""}
 
                         gitpull_secret_block = OrgPrefectBlockv1.objects.filter(
@@ -1048,6 +1029,24 @@ class Command(BaseCommand):
                         )
 
                         task_config = dict(shell_task_setup)
+                        tasks.append(task_config)
+                    else:
+                        dbt_core_task_setup = PrefectDbtTaskSetup(
+                            seq=TRANSFORM_TASKS_SEQ[org_task.task.slug] + seq,
+                            slug=org_task.task.slug,
+                            commands=[
+                                f"{dbt_binary} {org_task.task.command} --target {target}"
+                            ],
+                            type=DBTCORE,
+                            env={},
+                            working_dir=project_dir,
+                            profiles_dir=f"{project_dir}/profiles/",
+                            project_dir=project_dir,
+                            cli_profile_block=cli_profile_block.block_name,
+                            cli_args=[],
+                        )
+
+                        task_config = dict(dbt_core_task_setup)
                         tasks.append(task_config)
 
             params["config"] = {"tasks": tasks}
