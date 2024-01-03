@@ -477,7 +477,7 @@ def test_post_transfer_ownership_not_pipeline_mgr(authuser, org_with_workspace):
 
 
 @patch(
-    "ddpui.api.user_org_api.transaction.atomic",
+    "ddpui.orguser.orguserfunctions.transaction.atomic",
     Mock(side_effect=Exception("db error")),
 )
 def test_post_transfer_ownership_db_error(
