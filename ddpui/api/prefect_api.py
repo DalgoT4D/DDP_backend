@@ -30,7 +30,7 @@ from ddpui.models.org import (
     OrgDataFlowv1,
     OrgPrefectBlockv1,
 )
-from ddpui.models.orgjobs import BlockLock, DataflowBlock
+from ddpui.models.orgjobs import BlockLock
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import Task, DataflowOrgTask, OrgTask, TaskLock
 from ddpui.ddpprefect.schema import (
@@ -38,12 +38,9 @@ from ddpui.ddpprefect.schema import (
     PrefectDbtCore,
     PrefectDbtCoreSetup,
     PrefectDbtTaskSetup,
-    PrefectDataFlowCreateSchema,
     PrefectDataFlowCreateSchema2,
     PrefectDataFlowCreateSchema3,
     PrefectFlowRunSchema,
-    PrefectDataFlowUpdateSchema,
-    PrefectDataFlowUpdateSchema2,
     PrefectDataFlowUpdateSchema3,
     PrefectShellSetup,
     PrefectSecretBlockCreate,
@@ -60,7 +57,6 @@ from ddpui.utils.constants import (
     TASK_GITPULL,
     TRANSFORM_TASKS_SEQ,
     AIRBYTE_SYNC_TIMEOUT,
-    TASK_AIRBYTESYNC,
 )
 from ddpui.utils.prefectlogs import parse_prefect_logs
 from ddpui.utils.helpers import generate_hash_id
@@ -101,274 +97,6 @@ def ninja_default_error_handler(
     """Handle any other exception raised in the apis"""
     logger.info(exc)
     return Response({"detail": "something went wrong"}, status=500)
-
-
-@prefectapi.post("/flows/", auth=auth.CanManagePipelines())
-def post_prefect_dataflow(request, payload: PrefectDataFlowCreateSchema):
-    """Create a prefect deployment i.e. a ddp dataflow"""
-    orguser: OrgUser = request.orguser
-
-    if orguser.org is None:
-        raise HttpError(400, "register an organization first")
-
-    if payload.name in [None, ""]:
-        raise HttpError(400, "must provide a name for the flow")
-
-    name_components = [orguser.org.slug]
-
-    # check if pipeline has airbyte syncs
-    if len(payload.connectionBlocks) > 0:
-        name_components.append("airbyte")
-
-    # check if pipeline has dbt transformation
-    dbt_blocks = []
-    if payload.dbtTransform == "yes":
-        name_components.append("dbt")
-        for dbt_block in OrgPrefectBlock.objects.filter(
-            org=orguser.org, block_type__in=[DBTCORE, SHELLOPERATION]
-        ).order_by("seq"):
-            dbt_blocks.append(
-                {
-                    "blockName": dbt_block.block_name,
-                    "seq": dbt_block.seq,
-                    "blockType": dbt_block.block_type,
-                }
-            )
-
-    # fetch all deployment names to compute a unique one
-    deployment_names = []
-    for orgdataflow in OrgDataFlow.objects.filter(org=orguser.org):
-        deployment_names.append(orgdataflow.deployment_name)
-
-    # deployment name should be unique
-    name_index = 0
-    base_deployment_name = "-".join(name_components + ["deployment"])
-    deployment_name = base_deployment_name
-    while deployment_name in deployment_names:
-        name_index += 1
-        deployment_name = base_deployment_name + f"-{name_index}"
-
-    flow_name = "-".join(name_components + ["flow"])
-
-    try:
-        res = prefect_service.create_dataflow(
-            PrefectDataFlowCreateSchema2(
-                deployment_name=deployment_name,
-                flow_name=flow_name,
-                orgslug=orguser.org.slug,
-                connection_blocks=payload.connectionBlocks,
-                dbt_blocks=dbt_blocks,
-                cron=payload.cron,
-            )
-        )
-    except Exception as error:
-        logger.exception(error)
-        raise HttpError(400, "failed to create a dataflow") from error
-
-    org_data_flow = OrgDataFlow.objects.create(
-        org=orguser.org,
-        name=payload.name,
-        deployment_name=res["deployment"]["name"],
-        deployment_id=res["deployment"]["id"],
-        cron=payload.cron,
-        dataflow_type="orchestrate",
-    )
-
-    write_dataflowblocks(org_data_flow)
-
-    return {
-        "deploymentId": org_data_flow.deployment_id,
-        "name": org_data_flow.name,
-        "cron": org_data_flow.cron,
-    }
-
-
-@prefectapi.get("/flows/", auth=auth.CanManagePipelines())
-def get_prefect_dataflows(request):
-    """Fetch all flows/pipelines created in an organization"""
-    orguser: OrgUser = request.orguser
-
-    if orguser.org is None:
-        raise HttpError(400, "register an organization first")
-
-    org_data_flows = OrgDataFlow.objects.filter(
-        org=orguser.org, dataflow_type="orchestrate"
-    ).all()
-
-    deployment_ids = [flow.deployment_id for flow in org_data_flows]
-
-    # dictionary to hold {"id": status}
-    is_deployment_active = {}
-
-    # setting active/inactive status based on if the schedule is set or not
-    for deployment in prefect_service.get_filtered_deployments(
-        orguser.org.slug, deployment_ids
-    ):
-        is_deployment_active[deployment["deploymentId"]] = (
-            deployment["isScheduleActive"]
-            if "isScheduleActive" in deployment
-            else False
-        )
-
-    res = []
-
-    for flow in org_data_flows:
-        block_ids = DataflowBlock.objects.filter(dataflow=flow).values("opb__block_id")
-        # if there is one there will typically be several - a sync,
-        # a git-run, a git-test... we return the userinfo only for the first one
-        lock = BlockLock.objects.filter(
-            opb__block_id__in=[x["opb__block_id"] for x in block_ids]
-        ).first()
-        res.append(
-            {
-                "name": flow.name,
-                "deploymentId": flow.deployment_id,
-                "cron": flow.cron,
-                "deploymentName": flow.deployment_name,
-                "lastRun": prefect_service.get_last_flow_run_by_deployment_id(
-                    flow.deployment_id
-                ),
-                "status": is_deployment_active[flow.deployment_id]
-                if flow.deployment_id in is_deployment_active
-                else False,
-                "lock": {
-                    "lockedBy": lock.locked_by.user.email,
-                    "lockedAt": lock.locked_at,
-                }
-                if lock
-                else None,
-            }
-        )
-
-    return res
-
-
-@prefectapi.put("/flows/{deployment_id}", auth=auth.CanManagePipelines())
-def put_prefect_dataflow(request, deployment_id, payload: PrefectDataFlowUpdateSchema):
-    """Edit the data flow / prefect deployment. For now only the schedules can be edited"""
-    orguser: OrgUser = request.orguser
-
-    if orguser.org is None:
-        raise HttpError(400, "register an organization first")
-
-    org_data_flow = OrgDataFlow.objects.filter(
-        org=orguser.org, deployment_id=deployment_id
-    ).first()
-
-    if org_data_flow is None:
-        raise HttpError(404, "Pipeline not found")
-
-    # check if pipeline has dbt transformation
-    dbt_blocks = []
-    if payload.dbtTransform == "yes":
-        for dbt_block in OrgPrefectBlock.objects.filter(
-            org=orguser.org, block_type__in=[DBTCORE, SHELLOPERATION]
-        ).order_by("seq"):
-            dbt_blocks.append(
-                {
-                    "blockName": dbt_block.block_name,
-                    "seq": dbt_block.seq,
-                    "blockType": dbt_block.block_type,
-                }
-            )
-
-    prefect_service.update_dataflow(
-        deployment_id,
-        PrefectDataFlowUpdateSchema2(
-            dbt_blocks=dbt_blocks,
-            connection_blocks=payload.connectionBlocks,
-            cron=payload.cron,
-        ),
-    )
-
-    org_data_flow.cron = payload.cron if payload.cron else None
-    org_data_flow.name = payload.name
-    org_data_flow.save()
-
-    return {"success": 1}
-
-
-@prefectapi.get("/flows/{deployment_id}", auth=auth.CanManagePipelines())
-def get_prefect_dataflow(request, deployment_id):
-    """Fetch details of prefect deployment"""
-    orguser: OrgUser = request.orguser
-
-    if orguser.org is None:
-        raise HttpError(400, "register an organization first")
-
-    # remove the org data flow
-    org_data_flow = OrgDataFlow.objects.filter(
-        org=orguser.org, deployment_id=deployment_id
-    ).first()
-
-    if org_data_flow is None:
-        raise HttpError(404, "flow does not exist")
-
-    try:
-        res = prefect_service.get_deployment(deployment_id)
-    except Exception as error:
-        logger.exception(error)
-        raise HttpError(400, "failed to get deploymenet from prefect-proxy") from error
-
-    if "parameters" in res and "airbyte_blocks" in res["parameters"]:
-        for airbyte_block in res["parameters"]["airbyte_blocks"]:
-            conn = airbyte_service.get_connection(
-                orguser.org.airbyte_workspace_id, airbyte_block["connectionId"]
-            )
-            airbyte_block["name"] = conn["name"]
-
-    # differentiate between deploymentName and name
-    res["deploymentName"] = res["name"]
-    res["name"] = org_data_flow.name
-
-    return res
-
-
-@prefectapi.delete("/flows/{deployment_id}", auth=auth.CanManagePipelines())
-def delete_prefect_dataflow(request, deployment_id):
-    """Delete a prefect deployment along with its org data flow"""
-    orguser: OrgUser = request.orguser
-
-    if orguser.org is None:
-        raise HttpError(400, "register an organization first")
-
-    prefect_service.delete_deployment_by_id(deployment_id)
-
-    # remove the org data flow
-    org_data_flow = OrgDataFlow.objects.filter(
-        org=orguser.org, deployment_id=deployment_id
-    ).first()
-
-    if org_data_flow:
-        org_data_flow.delete()
-
-    return {"success": 1}
-
-
-@prefectapi.post("/flows/{deployment_id}/flow_run", auth=auth.CanManagePipelines())
-def post_prefect_dataflow_quick_run(request, deployment_id):
-    """Delete a prefect deployment along with its org data flow"""
-    orguser: OrgUser = request.orguser
-
-    if orguser.org is None:
-        raise HttpError(400, "register an organization first")
-
-    locks = prefect_service.lock_blocks_for_deployment(deployment_id, orguser)
-
-    try:
-        res = prefect_service.create_deployment_flow_run(deployment_id)
-    except Exception as error:
-        logger.exception(error)
-        for blocklock in locks:
-            logger.info("deleting BlockLock %s", blocklock.opb.block_name)
-            blocklock.delete()
-        raise HttpError(400, "failed to start a run") from error
-
-    for blocklock in locks:
-        blocklock.flow_run_id = res["flow_run_id"]
-        blocklock.save()
-
-    return res
 
 
 @prefectapi.post(
@@ -1309,7 +1037,9 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
             raise HttpError(400, "dbt cli profile not found")
 
         # push dbt pipeline tasks
-        for org_task in OrgTask.objects.filter(org=orguser.org, task__type__in=["dbt", "git"]).all():
+        for org_task in OrgTask.objects.filter(
+            org=orguser.org, task__type__in=["dbt", "git"]
+        ).all():
             logger.info(
                 f"found transform task {org_task.task.slug}; pushing to pipeline"
             )
