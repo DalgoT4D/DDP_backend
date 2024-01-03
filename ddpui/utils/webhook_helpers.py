@@ -4,7 +4,7 @@ from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.org import OrgPrefectBlock, Org
 from ddpui.models.org_user import OrgUserRole, OrgUser
 from ddpui.utils.sendgrid import send_text_message
-from ddpui.api.client.prefect_api import prefect_service
+from ddpui.api.prefect_api import prefect_service
 from ddpui.settings import PRODUCTION
 
 logger = CustomLogger("ddpui")

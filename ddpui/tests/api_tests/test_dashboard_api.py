@@ -12,7 +12,7 @@ from ddpui.models.org import Org, OrgPrefectBlock
 from ddpui.models.org_user import User, OrgUser
 from ddpui.models.orgjobs import OrgDataFlow, DataflowBlock, BlockLock
 from ddpui.models.tasks import Task, DataflowOrgTask, TaskLock, OrgTask, OrgDataFlowv1
-from ddpui.api.client.dashboard_api import get_dashboard, get_dashboard_v1
+from ddpui.api.dashboard_api import get_dashboard, get_dashboard_v1
 
 pytestmark = pytest.mark.django_db
 
@@ -38,7 +38,7 @@ def test_get_dashboard():
     BlockLock.objects.create(opb=opb, locked_by=orguser)
 
     with patch(
-        "ddpui.api.client.dashboard_api.prefect_service.get_flow_runs_by_deployment_id"
+        "ddpui.api.dashboard_api.prefect_service.get_flow_runs_by_deployment_id"
     ) as mock_get_flow_runs_by_deployment_id:
         mock_get_flow_runs_by_deployment_id.return_value = []
         result = get_dashboard(request)
@@ -74,7 +74,7 @@ def test_get_dashboard_v1():
     TaskLock.objects.create(orgtask=orgtask, locked_by=orguser)
 
     with patch(
-        "ddpui.api.client.dashboard_api.prefect_service.get_flow_runs_by_deployment_id"
+        "ddpui.api.dashboard_api.prefect_service.get_flow_runs_by_deployment_id"
     ) as mock_get_flow_runs_by_deployment_id:
         mock_get_flow_runs_by_deployment_id.return_value = []
         result = get_dashboard_v1(request)

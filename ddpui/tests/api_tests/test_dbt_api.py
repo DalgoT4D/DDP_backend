@@ -14,7 +14,7 @@ from django.contrib.auth.models import User
 from ddpui.models.org import Org, OrgDbt, OrgPrefectBlock
 from ddpui.models.org_user import OrgUser, OrgUserRole
 from ddpui.ddpprefect import DBTCORE
-from ddpui.api.client.dbt_api import (
+from ddpui.api.dbt_api import (
     post_dbt_workspace,
     put_dbt_github,
     put_dbt_schema,
@@ -218,7 +218,7 @@ def test_post_dbt_git_pull_no_env(orguser: OrgUser):
 
 @patch.multiple("os.path", exists=Mock(return_value=True))
 @patch.multiple(
-    "ddpui.api.client.dbt_api", runcmd=Mock(side_effect=Exception("runcmd failed"))
+    "ddpui.api.dbt_api", runcmd=Mock(side_effect=Exception("runcmd failed"))
 )
 def test_post_dbt_git_pull_gitpull_failed(orguser: OrgUser):
     """fail - dbt not configured"""
@@ -241,7 +241,7 @@ def test_post_dbt_git_pull_gitpull_failed(orguser: OrgUser):
 
 
 @patch.multiple("os.path", exists=Mock(return_value=True))
-@patch.multiple("ddpui.api.client.dbt_api", runcmd=Mock(return_value=True))
+@patch.multiple("ddpui.api.dbt_api", runcmd=Mock(return_value=True))
 def test_post_dbt_git_pull_succes(orguser: OrgUser):
     """fail - dbt not configured"""
     request = Mock()
@@ -289,12 +289,12 @@ def test_post_dbt_makedocs_no_target(orguser: OrgUser):
 
 @patch("os.path.exists", mock_exists=Mock(side_effect=[True, True]))
 @patch(
-    "ddpui.api.client.dbt_api.create_single_html",
+    "ddpui.api.dbt_api.create_single_html",
     mock_create_single_html=Mock(return_value="html"),
 )
 @patch("builtins.open", mock_open=Mock(write=Mock(), close=Mock()))
 @patch(
-    "ddpui.api.client.dbt_api.Redis",
+    "ddpui.api.dbt_api.Redis",
     mock_Redis=Mock(return_value=Mock(set=Mock(), expire=Mock())),
 )
 def test_post_dbt_makedocs(

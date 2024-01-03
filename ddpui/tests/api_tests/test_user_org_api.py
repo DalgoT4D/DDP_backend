@@ -10,7 +10,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from ddpui.api.client.user_org_api import (
+from ddpui.api.user_org_api import (
     get_current_user,
     get_current_user_v2,
     post_organization_user,
@@ -479,7 +479,7 @@ def test_post_transfer_ownership_not_pipeline_mgr(authuser, org_with_workspace):
 
 
 @patch(
-    "ddpui.api.client.user_org_api.transaction.atomic",
+    "ddpui.api.user_org_api.transaction.atomic",
     Mock(side_effect=Exception("db error")),
 )
 def test_post_transfer_ownership_db_error(
