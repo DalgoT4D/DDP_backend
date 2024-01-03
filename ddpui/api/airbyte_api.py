@@ -203,62 +203,6 @@ def get_airbyte_source(request, source_id):
     return res
 
 
-@airbyteapi.delete("/sources/{source_id}", auth=auth.CanManagePipelines())
-def delete_airbyte_source(request, source_id):
-    """Fetch a single airbyte source in the user organization workspace"""
-    logger.info("deleting source started")
-
-    orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    # Fetch all org prefect connection blocks
-    org_blocks = OrgPrefectBlock.objects.filter(
-        org=orguser.org,
-        block_type=AIRBYTECONNECTION,
-    ).all()
-
-    logger.info("fetched airbyte connections block of this org")
-
-    connections = airbyte_service.get_connections(orguser.org.airbyte_workspace_id)[
-        "connections"
-    ]
-    connections_of_source = [
-        conn["connectionId"] for conn in connections if conn["sourceId"] == source_id
-    ]
-
-    # delete the connection prefect blocks that has connections
-    # built on the source i.e. connections_of_source
-    prefect_conn_blocks = prefect_service.get_airbye_connection_blocks(
-        block_names=[block.block_name for block in org_blocks]
-    )
-    logger.info(
-        "fetched prefect connection blocks based on the names stored in "
-        "django orgprefectblocks"
-    )
-    delete_block_ids = []
-    for block in prefect_conn_blocks:
-        if block["connectionId"] in connections_of_source:
-            delete_block_ids.append(block["id"])
-
-    # delete the prefect conn blocks
-    prefect_service.post_prefect_blocks_bulk_delete(delete_block_ids)
-    logger.info("deleted prefect blocks")
-
-    # delete airbyte connection blocks in django orgprefectblock table
-    for block in OrgPrefectBlock.objects.filter(
-        org=orguser.org, block_type=AIRBYTECONNECTION, block_id__in=delete_block_ids
-    ).all():
-        block.delete()
-    logger.info("deleted airbyte connection blocks from django database")
-
-    # delete the source
-    airbyte_service.delete_source(orguser.org.airbyte_workspace_id, source_id)
-    logger.info(f"deleted airbyte source {source_id}")
-
-    return {"success": 1}
-
-
 @airbyteapi.get("/sources/{source_id}/schema_catalog", auth=auth.CanManagePipelines())
 def get_airbyte_source_schema_catalog(request, source_id):
     """Fetch schema catalog for a source in the user organization workspace"""
@@ -907,7 +851,7 @@ def put_airbyte_destination_v1(
     return {"destinationId": destination["destinationId"]}
 
 
-@airbyteapi.delete("/v1/sources/{source_id}", auth=auth.CanManagePipelines())
+@airbyteapi.delete("/sources/{source_id}", auth=auth.CanManagePipelines())
 def delete_airbyte_source_v1(request, source_id):
     """Delete a single airbyte source in the user organization workspace"""
     logger.info("deleting source started")
