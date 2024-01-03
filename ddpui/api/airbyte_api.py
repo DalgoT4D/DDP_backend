@@ -905,3 +905,57 @@ def put_airbyte_destination_v1(
         )
 
     return {"destinationId": destination["destinationId"]}
+
+
+@airbyteapi.delete("/v1/sources/{source_id}", auth=auth.CanManagePipelines())
+def delete_airbyte_source_v1(request, source_id):
+    """Delete a single airbyte source in the user organization workspace"""
+    logger.info("deleting source started")
+
+    orguser: OrgUser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    connections = airbyte_service.get_connections(orguser.org.airbyte_workspace_id)[
+        "connections"
+    ]
+    connections_of_source = [
+        conn["connectionId"] for conn in connections if conn["sourceId"] == source_id
+    ]
+
+    # Fetch org tasks and deployments mapped to each connection_id
+    org_tasks = OrgTask.objects.filter(
+        org=orguser.org, connection_id__in=connections_of_source
+    ).all()
+
+    # Fetch dataflows(manual or pipelines)
+    df_orgtasks = DataflowOrgTask.objects.filter(orgtask__in=org_tasks).all()
+    dataflows = [df_orgtask.dataflow for df_orgtask in df_orgtasks]
+
+    # Delete the deployments
+    logger.info("Deleting the deployemtns from prefect and django")
+    for dataflow in dataflows:
+        try:
+            # delete from prefect
+            prefect_service.delete_deployment_by_id(dataflow.deployment_id)
+            logger.info(f"delete deployment: {dataflow.deployment_id} from prefect")
+
+            # delete from django
+            dataflow.delete()
+        except Exception as error:
+            logger.info(
+                f"something went wrong deleting the prefect deplyment {dataflow.deployment_id}"
+            )
+            logger.exception(error)
+            continue
+
+    # Delete the orgtasks
+    logger.info("Deleting org tasks related to connections in this source")
+    for org_task in org_tasks:
+        org_task.delete()
+
+    # delete the source from airbyte
+    airbyte_service.delete_source(orguser.org.airbyte_workspace_id, source_id)
+    logger.info(f"deleted airbyte source {source_id}")
+
+    return {"success": 1}
