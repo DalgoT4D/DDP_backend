@@ -31,7 +31,6 @@ from ddpui.ddpprefect.schema import (
 from ddpui.ddpprefect import AIRBYTESERVER, AIRBYTECONNECTION, DBTCLIPROFILE
 from ddpui.ddpprefect import prefect_service
 from ddpui.models.org import (
-    OrgPrefectBlock,
     OrgWarehouse,
     OrgPrefectBlockv1,
     OrgDataFlowv1,
