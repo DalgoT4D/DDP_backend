@@ -1,7 +1,7 @@
 import os
+from uuid import uuid4
 from pathlib import Path
 from redis import Redis
-from uuid import uuid4
 
 from ninja import NinjaAPI
 from ninja.errors import HttpError
@@ -13,14 +13,13 @@ from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from ddpui import auth
 from ddpui.ddpprefect.schema import OrgDbtSchema, OrgDbtGitHub, OrgDbtTarget
 from ddpui.models.org_user import OrgUserResponse, OrgUser
-from ddpui.models.org import OrgPrefectBlock, OrgPrefectBlockv1
-from ddpui.ddpprefect import DBTCORE, DBTCLIPROFILE
+from ddpui.models.org import OrgPrefectBlockv1
+from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.utils.helpers import runcmd
 from ddpui.utils.dbtdocs import create_single_html
 from ddpui.celeryworkers.tasks import (
     setup_dbtworkspace,
     clone_github_repo,
-    update_dbt_core_block_schema_task,
 )
 from ddpui.ddpdbt import dbt_service
 from ddpui.ddpprefect import prefect_service
@@ -95,29 +94,6 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
     )
 
     return {"task_id": task.id}
-
-
-@dbtapi.put("/schema/", auth=auth.CanManagePipelines())
-def put_dbt_schema(request, payload: OrgDbtTarget):
-    """Update the target_configs.schema for all dbt-core-op blocks"""
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-    if org.dbt is None:
-        raise HttpError(400, "create a dbt workspace first")
-
-    org.dbt.default_schema = payload.target_configs_schema
-    org.dbt.save()
-    logger.info("updated orgdbt")
-
-    for dbtblock in OrgPrefectBlock.objects.filter(org=org, block_type=DBTCORE):
-        logger.info(
-            "updating schema of %s to %s",
-            dbtblock.block_name,
-            org.dbt.default_schema,
-        )
-        update_dbt_core_block_schema_task.delay(
-            dbtblock.block_name, org.dbt.default_schema
-        )
 
 
 @dbtapi.delete("/workspace/", response=OrgUserResponse, auth=auth.CanManagePipelines())
