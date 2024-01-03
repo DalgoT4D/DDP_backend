@@ -9,7 +9,6 @@ from ninja.errors import HttpError
 from ninja.errors import ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
-from django.utils.text import slugify
 
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
@@ -30,25 +29,19 @@ from ddpui.models.org import (
     OrgDataFlowv1,
     OrgPrefectBlockv1,
 )
-from ddpui.models.orgjobs import BlockLock
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import Task, DataflowOrgTask, OrgTask, TaskLock
 from ddpui.ddpprefect.schema import (
     PrefectAirbyteSync,
-    PrefectDbtCore,
-    PrefectDbtCoreSetup,
     PrefectDbtTaskSetup,
-    PrefectDataFlowCreateSchema2,
     PrefectDataFlowCreateSchema3,
     PrefectFlowRunSchema,
     PrefectDataFlowUpdateSchema3,
-    PrefectShellSetup,
     PrefectSecretBlockCreate,
     PrefectShellTaskSetup,
     PrefectDataFlowCreateSchema4,
 )
 
-from ddpui.utils.deploymentblocks import write_dataflowblocks
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
@@ -99,32 +92,6 @@ def ninja_default_error_handler(
     return Response({"detail": "something went wrong"}, status=500)
 
 
-@prefectapi.post("/flows/{deployment_id}/flow_run", auth=auth.CanManagePipelines())
-def post_prefect_dataflow_quick_run(request, deployment_id):
-    """Delete a prefect deployment along with its org data flow"""
-    orguser: OrgUser = request.orguser
-
-    if orguser.org is None:
-        raise HttpError(400, "register an organization first")
-
-    locks = prefect_service.lock_blocks_for_deployment(deployment_id, orguser)
-
-    try:
-        res = prefect_service.create_deployment_flow_run(deployment_id)
-    except Exception as error:
-        logger.exception(error)
-        for blocklock in locks:
-            logger.info("deleting BlockLock %s", blocklock.opb.block_name)
-            blocklock.delete()
-        raise HttpError(400, "failed to start a run") from error
-
-    for blocklock in locks:
-        blocklock.flow_run_id = res["flow_run_id"]
-        blocklock.save()
-
-    return res
-
-
 @prefectapi.post(
     "/flows/{deployment_id}/set_schedule/{status}", auth=auth.CanManagePipelines()
 )
@@ -168,283 +135,6 @@ def post_prefect_airbyte_sync_flow(request, payload: PrefectAirbyteSync):
         logger.exception(error)
         raise HttpError(400, "failed to run sync") from error
     return result
-
-
-@prefectapi.post("/flows/dbt_run/", auth=auth.CanManagePipelines())
-def post_prefect_dbt_core_run_flow(
-    request, payload: PrefectDbtCore
-):  # pylint: disable=unused-argument
-    """Run dbt flow in prefect"""
-    orguser: OrgUser = request.orguser
-
-    orgprefectblock = OrgPrefectBlock.objects.filter(
-        org=orguser.org, block_name=payload.blockName
-    ).first()
-    if orgprefectblock is None:
-        logger.error("block name %s not found", payload.blockName)
-        raise HttpError(400, "block name not found")
-
-    blocklock = BlockLock.objects.filter(opb=orgprefectblock).first()
-    if blocklock:
-        raise HttpError(
-            400, f"{blocklock.locked_by.user.email} is running this operation"
-        )
-
-    try:
-        blocklock = BlockLock.objects.create(opb=orgprefectblock, locked_by=orguser)
-    except Exception as error:
-        raise HttpError(400, "someone else is running this operation") from error
-
-    dbt = orguser.org.dbt
-    profile_file = Path(dbt.project_dir) / "dbtrepo/profiles/profiles.yml"
-    if os.path.exists(profile_file):
-        os.unlink(profile_file)
-
-    if payload.flowName is None:
-        payload.flowName = f"{orguser.org.name}-dbt"
-    if payload.flowRunName is None:
-        now = timezone.as_ist(datetime.now())
-        payload.flowRunName = f"{now.isoformat()}"
-
-    # save into some table
-    try:
-        result = prefect_service.run_dbt_core_sync(payload)
-    except Exception as error:
-        blocklock.delete()
-        logger.exception(error)
-        raise HttpError(400, "failed to run dbt") from error
-
-    blocklock.delete()
-    logger.info("released lock on block %s", payload.blockName)
-    return result
-
-
-@prefectapi.post("/blocks/dbt/", auth=auth.CanManagePipelines())
-def post_prefect_dbt_core_block(request):
-    """Create five prefect dbt core blocks:
-    - dbt clean
-    - dbt deps
-    - dbt run
-    - dbt test
-    - dbt docs generate
-    and Create one shell block to do git pull
-    - git pull
-    for a ddp-dbt-profile
-    """
-    orguser: OrgUser = request.orguser
-    if orguser.org.dbt is None:
-        raise HttpError(400, "create a dbt workspace first")
-
-    warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
-    if warehouse is None:
-        raise HttpError(400, "need to set up a warehouse first")
-    credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
-
-    if orguser.org.dbt.dbt_venv is None:
-        orguser.org.dbt.dbt_venv = os.getenv("DBT_VENV")
-        orguser.org.dbt.save()
-
-    dbt_env_dir = Path(orguser.org.dbt.dbt_venv)
-    if not dbt_env_dir.exists():
-        raise HttpError(400, "create the dbt env first")
-
-    dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
-    dbtrepodir = Path(os.getenv("CLIENTDBT_ROOT")) / orguser.org.slug / "dbtrepo"
-    project_dir = str(dbtrepodir)
-    dbt_project_filename = str(dbtrepodir / "dbt_project.yml")
-
-    if not os.path.exists(dbt_project_filename):
-        raise HttpError(400, dbt_project_filename + " is missing")
-
-    # create the git pull shell block
-    try:
-        gitrepo_access_token = secretsmanager.retrieve_github_token(orguser.org.dbt)
-        gitrepo_url = orguser.org.dbt.gitrepo_url
-        command = "git pull"
-
-        # make sure this key is always present in the env of git pull shell command
-        shell_env = {"secret-git-pull-url-block": ""}
-
-        if gitrepo_access_token is not None:
-            gitrepo_url = gitrepo_url.replace(
-                "github.com", "oauth2:" + gitrepo_access_token + "@github.com"
-            )
-
-            # store the git oauth endpoint with token in a prefect secret block
-            secret_block = PrefectSecretBlockCreate(
-                block_name=f"{orguser.org.slug}-git-pull-url",
-                secret=gitrepo_url,
-            )
-            block_response = prefect_service.create_secret_block(secret_block)
-
-            # store the prefect secret block in the git pull shell command
-            shell_env["secret-git-pull-url-block"] = block_response["block_name"]
-
-        block_name = f"{orguser.org.slug}-" f"{slugify(command)}"
-        shell_cmd = PrefectShellSetup(
-            blockname=block_name,
-            commands=[command],
-            workingDir=project_dir,
-            env=shell_env,
-        )
-        block_response = prefect_service.create_shell_block(shell_cmd)
-
-        # store prefect shell block in database
-        shellprefectblock = OrgPrefectBlock(
-            org=orguser.org,
-            block_type=SHELLOPERATION,
-            block_id=block_response["block_id"],
-            block_name=block_response["block_name"],
-            display_name=block_name,
-            seq=0,
-            command=slugify(command),
-        )
-        shellprefectblock.save()
-
-    except Exception as error:
-        logger.exception(error)
-        raise HttpError(400, str(error)) from error
-
-    with open(dbt_project_filename, "r", encoding="utf-8") as dbt_project_file:
-        dbt_project = yaml.safe_load(dbt_project_file)
-        if "profile" not in dbt_project:
-            raise HttpError(400, "could not find 'profile:' in dbt_project.yml")
-
-    profile_name = dbt_project["profile"]
-    target = orguser.org.dbt.default_schema
-    logger.info("profile_name=%s target=%s", profile_name, target)
-
-    # get the bigquery location if warehouse is bq
-    bqlocation = None
-    if warehouse.wtype == "bigquery":
-        destination = airbyte_service.get_destination(
-            orguser.org.airbyte_workspace_id, warehouse.airbyte_destination_id
-        )
-        if destination.get("connectionConfiguration"):
-            bqlocation = destination["connectionConfiguration"]["dataset_location"]
-
-    block_names = []
-    for sequence_number, command in enumerate(
-        ["clean", "deps", "run", "test", "docs generate"]
-    ):
-        block_name = (
-            f"{orguser.org.slug}-"
-            f"{slugify(profile_name)}-"
-            f"{slugify(target)}-"
-            f"{slugify(command)}"
-        )
-        block_data = PrefectDbtCoreSetup(
-            block_name=block_name,
-            profiles_dir=f"{project_dir}/profiles/",
-            project_dir=project_dir,
-            working_dir=project_dir,
-            env={},
-            commands=[f"{dbt_binary} {command} --target {target}"],
-        )
-
-        try:
-            block_response = prefect_service.create_dbt_core_block(
-                block_data,
-                profile_name,
-                f"{orguser.org.slug}_{profile_name}",
-                target,
-                warehouse.wtype,
-                credentials,
-                bqlocation,
-            )
-        except Exception as error:
-            logger.exception(error)
-            raise HttpError(400, str(error)) from error
-
-        coreprefectblock = OrgPrefectBlock(
-            org=orguser.org,
-            block_type=DBTCORE,
-            block_id=block_response["block_id"],
-            block_name=block_response["block_name"],
-            display_name=block_name,
-            seq=sequence_number
-            + 1,  # shell command would be at zero, dbt commands starts from 1
-            command=slugify(command),
-            dbt_target_schema=target,
-        )
-
-        # cleaned name from the prefect-proxy
-        block_name = block_response["block_name"]
-
-        # for the command dbt run create a deployment
-        if command == "run":
-            # create deployment
-            dataflow = prefect_service.create_dataflow(
-                PrefectDataFlowCreateSchema2(
-                    deployment_name=f"manual-run-{block_name}",
-                    flow_name=f"manual-run-{block_name}",
-                    orgslug=orguser.org.slug,
-                    connection_blocks=[],
-                    dbt_blocks=[
-                        {"blockName": block_name, "blockType": DBTCORE, "seq": 0}
-                    ],
-                )
-            )
-
-            # store deployment record in django db
-            existing_dataflow = OrgDataFlow.objects.filter(
-                deployment_id=dataflow["deployment"]["id"]
-            ).first()
-            if existing_dataflow:
-                existing_dataflow.delete()
-
-            manual_run_dataflow = OrgDataFlow.objects.create(
-                org=orguser.org,
-                name=f"manual-run-{block_name}",
-                deployment_name=dataflow["deployment"]["name"],
-                deployment_id=dataflow["deployment"]["id"],
-                dataflow_type="manual",
-            )
-            write_dataflowblocks(manual_run_dataflow)
-
-        coreprefectblock.save()
-        block_names.append(block_name)
-
-    return {"success": 1, "block_names": block_names}
-
-
-@prefectapi.get("/blocks/dbt/", auth=auth.CanManagePipelines())
-def get_prefect_dbt_run_blocks(request):
-    """Fetch all prefect dbt run blocks for an organization"""
-    orguser: OrgUser = request.orguser
-
-    blocks = []
-
-    for prefect_block in OrgPrefectBlock.objects.filter(
-        org=orguser.org, block_type=DBTCORE
-    ):
-        # is the block currently locked?
-        lock = BlockLock.objects.filter(opb=prefect_block).first()
-        block = {
-            "blockType": prefect_block.block_type,
-            "blockId": prefect_block.block_id,
-            "blockName": prefect_block.block_name,
-            "action": prefect_block.command,
-            "target": prefect_block.dbt_target_schema,
-            "deploymentId": None,
-            "lock": {
-                "lockedBy": lock.locked_by.user.email,
-                "lockedAt": lock.locked_at,
-            }
-            if lock
-            else None,
-        }
-
-        # fetch the manual deploymentId for the dbt run block
-        if prefect_block.block_type == DBTCORE and prefect_block.command == "run":
-            dataflow = OrgDataFlow.objects.filter(
-                org=orguser.org, cron=None, connection_id=None
-            ).first()
-            block["deploymentId"] = dataflow.deployment_id if dataflow else None
-
-        blocks.append(block)
-
-    return blocks
 
 
 @prefectapi.delete("/blocks/dbt/", auth=auth.CanManagePipelines())
