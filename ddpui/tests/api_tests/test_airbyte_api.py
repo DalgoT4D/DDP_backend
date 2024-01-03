@@ -12,7 +12,7 @@ django.setup()
 from ddpui.models.org_user import User, OrgUser
 from ddpui.models.org import Org, OrgPrefectBlock, OrgDataFlow, OrgWarehouse
 from ddpui.models.orgjobs import BlockLock, DataflowBlock
-from ddpui.api.client.airbyte_api import (
+from ddpui.api.airbyte_api import (
     post_airbyte_detach_workspace,
     post_airbyte_workspace,
     get_airbyte_source_definitions,
@@ -1538,7 +1538,7 @@ def test_post_airbyte_connection_success(
         normalize=False,
     )
 
-    with patch("ddpui.api.client.airbyte_api.write_dataflowblocks"):
+    with patch("ddpui.api.airbyte_api.write_dataflowblocks"):
         response = post_airbyte_connection(mock_request, payload)
 
     # reload the warehouse from the database

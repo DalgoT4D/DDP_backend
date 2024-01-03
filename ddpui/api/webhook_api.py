@@ -4,7 +4,7 @@ from ninja import NinjaAPI
 
 from ninja.errors import HttpError
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.api.client.prefect_api import prefect_service
+from ddpui.api.prefect_api import prefect_service
 from ddpui.models.orgjobs import BlockLock
 from ddpui.models.tasks import TaskLock
 from ddpui.models.org_user import OrgUser
