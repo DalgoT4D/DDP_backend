@@ -99,6 +99,32 @@ def ninja_default_error_handler(
     return Response({"detail": "something went wrong"}, status=500)
 
 
+@prefectapi.post("/flows/{deployment_id}/flow_run", auth=auth.CanManagePipelines())
+def post_prefect_dataflow_quick_run(request, deployment_id):
+    """Delete a prefect deployment along with its org data flow"""
+    orguser: OrgUser = request.orguser
+
+    if orguser.org is None:
+        raise HttpError(400, "register an organization first")
+
+    locks = prefect_service.lock_blocks_for_deployment(deployment_id, orguser)
+
+    try:
+        res = prefect_service.create_deployment_flow_run(deployment_id)
+    except Exception as error:
+        logger.exception(error)
+        for blocklock in locks:
+            logger.info("deleting BlockLock %s", blocklock.opb.block_name)
+            blocklock.delete()
+        raise HttpError(400, "failed to start a run") from error
+
+    for blocklock in locks:
+        blocklock.flow_run_id = res["flow_run_id"]
+        blocklock.save()
+
+    return res
+
+
 @prefectapi.post(
     "/flows/{deployment_id}/set_schedule/{status}", auth=auth.CanManagePipelines()
 )
