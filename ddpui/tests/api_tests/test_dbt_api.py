@@ -11,19 +11,17 @@ django.setup()
 
 from django.contrib.auth.models import User
 
-from ddpui.models.org import Org, OrgDbt, OrgPrefectBlock
+from ddpui.models.org import Org, OrgDbt
 from ddpui.models.org_user import OrgUser, OrgUserRole
-from ddpui.ddpprefect import DBTCORE
 from ddpui.api.dbt_api import (
     post_dbt_workspace,
     put_dbt_github,
-    put_dbt_schema,
     dbt_delete,
     get_dbt_workspace,
     post_dbt_git_pull,
     post_dbt_makedocs,
 )
-from ddpui.ddpprefect.schema import DbtProfile, OrgDbtSchema, OrgDbtGitHub, OrgDbtTarget
+from ddpui.ddpprefect.schema import DbtProfile, OrgDbtSchema, OrgDbtGitHub
 
 pytestmark = pytest.mark.django_db
 
@@ -118,36 +116,6 @@ def test_put_dbt_github(orguser):
         )
         assert request.orguser.org.dbt.gitrepo_url == "new-url"
         assert request.orguser.org.dbt.gitrepo_access_token_secret == "new-access-token"
-
-
-def test_put_dbt_schema(orguser):
-    """
-    verifies that the orgdbt.default_schema is updated
-    verifies that the celery tasks are called on the dbt blocks
-    """
-    request = Mock()
-    request.orguser = orguser
-    orgdbt = OrgDbt.objects.create()
-    request.orguser.org.dbt = orgdbt
-    request.orguser.org.save()
-
-    payload = OrgDbtTarget(target_configs_schema="target_configs_schema")
-
-    OrgPrefectBlock.objects.create(
-        org=orguser.org,
-        block_type=DBTCORE,
-        block_name="block-name-1",
-    )
-
-    mocked_task = Mock()
-    mocked_task.id = "task-id"
-    with patch(
-        "ddpui.celeryworkers.tasks.update_dbt_core_block_schema_task.delay",
-        return_value=mocked_task,
-    ) as delay:
-        put_dbt_schema(request, payload)
-        delay.assert_called_once_with("block-name-1", "target_configs_schema")
-        assert request.orguser.org.dbt.default_schema == "target_configs_schema"
 
 
 def test_dbt_delete_no_org(orguser):

@@ -1,3 +1,8 @@
+"""
+Airbyte service module
+Functions which communicate with Airbyte
+These functions do not access the Dalgo database
+"""
 import os
 from typing import Dict, List
 import requests

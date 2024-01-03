@@ -4,7 +4,7 @@ from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import AirbyteWorkspace
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpprefect import AIRBYTESERVER
-from ddpui.models.org import OrgPrefectBlock, OrgPrefectBlockv1
+from ddpui.models.org import OrgPrefectBlockv1
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("airbyte")
@@ -80,72 +80,6 @@ def upgrade_custom_sources(workspace_id: str) -> None:
                 custom_source_info["docker_image_tag"],
                 custom_source_info["documentation_url"],
             )
-
-
-def setup_airbyte_workspace(wsname, org) -> AirbyteWorkspace:
-    """creates an airbyte workspace and attaches it to the org
-    also creates an airbyte server block in prefect if there isn't one already
-    we don't need to update any existing server block because it does not hold
-    the workspace id... only the connection details of the airbyte server
-    """
-    workspace = airbyte_service.create_workspace(wsname)
-
-    org.airbyte_workspace_id = workspace["workspaceId"]
-    org.save()
-
-    try:
-        for custom_source_info in settings.AIRBYTE_CUSTOM_SOURCES.values():
-            add_custom_airbyte_connector(
-                workspace["workspaceId"],
-                custom_source_info["name"],
-                custom_source_info["docker_repository"],
-                custom_source_info["docker_image_tag"],
-                custom_source_info["documentation_url"],
-            )
-    except Exception as error:
-        logger.error("Error creating custom source definitions: %s", str(error))
-        raise error
-
-    # Airbyte server block details. prefect doesn't know the workspace id
-    block_name = f"{org.slug}-{slugify(AIRBYTESERVER)}"
-    display_name = wsname
-
-    airbyte_server_block_cleaned_name = block_name
-    try:
-        airbyte_server_block_id = prefect_service.get_airbyte_server_block_id(
-            block_name
-        )
-    except Exception as exc:
-        raise Exception("could not connect to prefect-proxy") from exc
-
-    if airbyte_server_block_id is None:
-        (
-            airbyte_server_block_id,
-            airbyte_server_block_cleaned_name,
-        ) = prefect_service.create_airbyte_server_block(block_name)
-        logger.info(f"Created Airbyte server block with ID {airbyte_server_block_id}")
-
-    if not OrgPrefectBlock.objects.filter(org=org, block_type=AIRBYTESERVER).exists():
-        org_airbyte_server_block = OrgPrefectBlock(
-            org=org,
-            block_type=AIRBYTESERVER,
-            block_id=airbyte_server_block_id,
-            block_name=airbyte_server_block_cleaned_name,
-            display_name=display_name,
-        )
-        try:
-            org_airbyte_server_block.save()
-        except Exception as error:
-            prefect_service.delete_airbyte_server_block(airbyte_server_block_id)
-            raise Exception(
-                "could not create orgprefectblock for airbyte-server"
-            ) from error
-
-    return AirbyteWorkspace(
-        name=workspace["name"],
-        workspaceId=workspace["workspaceId"],
-        initialSetupComplete=workspace["initialSetupComplete"],
-    )
 
 
 def setup_airbyte_workspace_v1(wsname, org) -> AirbyteWorkspace:

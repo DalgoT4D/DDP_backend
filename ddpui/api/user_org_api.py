@@ -23,8 +23,6 @@ from ddpui.models.org import (
     OrgSchema,
     OrgWarehouse,
     OrgWarehouseSchema,
-    OrgPrefectBlock,
-    OrgDataFlow,
 )
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
@@ -43,10 +41,7 @@ from ddpui.models.org_user import (
     DeleteOrgUserPayload,
 )
 from ddpui.models.orgtnc import OrgTnC
-from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers
-from ddpui.ddpdbt import dbt_service
-from ddpui.ddpprefect import AIRBYTECONNECTION
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils import sendgrid
@@ -330,46 +325,6 @@ def post_transfer_ownership(request, payload: OrgUserNewOwner):
     return from_orguser(requestor_orguser)
 
 
-@user_org_api.post("/organizations/", response=OrgSchema, auth=auth.AnyOrgUser())
-def post_organization(request, payload: OrgSchema):
-    """creates a new org & new orguser (if required) and attaches it to the requestor"""
-    userattributes = UserAttributes.objects.filter(user=request.orguser.user).first()
-    if userattributes is None or userattributes.can_create_orgs is False:
-        raise HttpError(403, "Insufficient permissions for this operation")
-
-    orguser: OrgUser = request.orguser
-    org = Org.objects.filter(name__iexact=payload.name).first()
-    if org:
-        raise HttpError(400, "client org with this name already exists")
-
-    org = Org(name=payload.name)
-    org.slug = slugify(org.name)[:20]
-    org.save()
-    logger.info(f"{orguser.user.email} created new org {org.name}")
-    try:
-        new_workspace = airbytehelpers.setup_airbyte_workspace(org.slug, org)
-    except Exception as error:
-        # delete the org or we won't be able to create it once airbyte comes back up
-        org.delete()
-        raise HttpError(400, "could not create airbyte workspace") from error
-
-    # create a new orguser if the org is already there
-    if orguser.org is None:
-        orguser.org = org
-        orguser.save()
-    else:
-        orguser = OrgUser.objects.create(
-            user=orguser.user,
-            role=OrgUserRole.ACCOUNT_MANAGER,
-            email_verified=True,
-            org=org,
-        )
-
-    return OrgSchema(
-        name=org.name, airbyte_workspace_id=new_workspace.workspaceId, slug=org.slug
-    )
-
-
 @user_org_api.post("/organizations/warehouse/", auth=auth.CanManagePipelines())
 def post_organization_warehouse(request, payload: OrgWarehouseSchema):
     """registers a data warehouse for the org"""
@@ -421,80 +376,6 @@ def post_organization_warehouse(request, payload: OrgWarehouseSchema):
     )
     warehouse.credentials = credentials_lookupkey
     warehouse.save()
-    return {"success": 1}
-
-
-@user_org_api.delete("/organizations/warehouses/", auth=auth.CanManagePipelines())
-def delete_organization_warehouses(request):
-    """deletes all (references to) data warehouses for the org"""
-    orguser: OrgUser = request.orguser
-    if orguser.org is None:
-        raise HttpError(400, "create an organization first")
-
-    warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
-    if warehouse is None:
-        raise HttpError(400, "warehouse not created")
-
-    # delete prefect connection blocks
-    logger.info("Deleting prefect connection blocks")
-    for block in OrgPrefectBlock.objects.filter(
-        org=orguser.org, block_type=AIRBYTECONNECTION
-    ):
-        try:
-            prefect_service.delete_airbyte_connection_block(block.block_id)
-            logger.info(f"delete connecion block id - {block.block_id}")
-        except Exception:  # skipcq PYL-W0703
-            logger.error(
-                "failed to delete %s airbyte-connection-block %s in prefect, deleting from OrgPrefectBlock",
-                orguser.org.slug,
-                block.block_id,
-            )
-        block.delete()
-
-    logger.info("FINISHED Deleting prefect connection blocks")
-
-    # delete airbyte connections
-    logger.info("Deleting airbyte connections")
-    for connection in airbyte_service.get_connections(orguser.org.airbyte_workspace_id)[
-        "connections"
-    ]:
-        connection_id = connection["connectionId"]
-        airbyte_service.delete_connection(
-            orguser.org.airbyte_workspace_id, connection_id
-        )
-        logger.info(f"deleted connection in Airbyte - {connection_id}")
-
-    logger.info("FINISHED Deleting airbyte connections")
-
-    # delete airbyte destinations
-    logger.info("Deleting airbyte destinations")
-    for destination in airbyte_service.get_destinations(
-        orguser.org.airbyte_workspace_id
-    )["destinations"]:
-        destination_id = destination["destinationId"]
-        airbyte_service.delete_destination(
-            orguser.org.airbyte_workspace_id, destination_id
-        )
-        logger.info(f"deleted destination in Airbyte - {destination_id}")
-
-    logger.info("FINISHED Deleting airbyte destinations")
-
-    # delete django warehouse row
-    logger.info("Deleting django warehouse and the credentials in secrets manager")
-    secretsmanager.delete_warehouse_credentials(warehouse)
-    warehouse.delete()
-
-    # delete dbt workspace and blocks
-    dbt_service.delete_dbt_workspace(orguser.org)
-
-    # delete dataflows
-    logger.info("Deleting data flows")
-    for data_flow in OrgDataFlow.objects.filter(org=orguser.org):
-        prefect_service.delete_deployment_by_id(data_flow.deployment_id)
-        data_flow.delete()
-        logger.info(f"Deleted deployment - {data_flow.deployment_id}")
-    logger.info("FINISHED Deleting data flows")
-
     return {"success": 1}
 
 

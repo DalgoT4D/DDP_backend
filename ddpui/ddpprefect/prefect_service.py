@@ -348,7 +348,7 @@ def create_dbt_cli_profile_block(
 
 def update_dbt_cli_profile_block(
     block_name: str,
-    wtype: str,
+    wtype: str = None,
     profilename: str = None,
     target: str = None,
     credentials: dict = None,
