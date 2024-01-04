@@ -62,6 +62,34 @@ class PrefectDbtCoreSetup(Schema):
     commands: list
 
 
+class PrefectAirbyteSyncTaskSetup(Schema):
+    """
+    task config payload in prefect for a airbyte sync task
+    """
+
+    slug: str
+    airbyte_server_block: str
+    connection_id: str
+    timeout: int
+    type: str
+    flow_name: str = None
+    flow_run_name: str = None
+    seq: int = 0
+
+    def to_json(self):
+        """JSON serialization"""
+        return {
+            "slug": self.slug,
+            "airbyte_server_block": self.airbyte_server_block,
+            "connection_id": self.connection_id,
+            "timeout": self.timeout,
+            "type": self.type,
+            "flow_name": self.flow_name,
+            "flow_run_name": self.flow_run_name,
+            "seq": self.seq,
+        }
+
+
 class PrefectDbtTaskSetup(Schema):
     """
     request payload to trigger a dbt task (deps, clean, run, test) in prefect
