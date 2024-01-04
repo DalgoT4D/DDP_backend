@@ -137,58 +137,6 @@ def post_prefect_airbyte_sync_flow(request, payload: PrefectAirbyteSync):
     return result
 
 
-@prefectapi.delete("/blocks/dbt/", auth=auth.CanManagePipelines())
-def delete_prefect_dbt_run_block(request):
-    """Delete prefect dbt run block for an organization"""
-    orguser: OrgUser = request.orguser
-
-    org_dbt_blocks = OrgPrefectBlock.objects.filter(
-        org=orguser.org, block_type__in=[DBTCORE, SHELLOPERATION]
-    ).all()
-
-    for dbt_block in org_dbt_blocks:
-        # Delete block in prefect
-        try:
-            if dbt_block.block_type == DBTCORE:
-                prefect_service.delete_dbt_core_block(dbt_block.block_id)
-
-            if dbt_block.block_type == SHELLOPERATION:
-                prefect_service.delete_shell_block(dbt_block.block_id)
-
-        except Exception as error:
-            logger.exception(error)
-            # may have deleted the block via the prefect ui, continue
-
-        # Delete block row from database
-        dbt_block.delete()
-
-        # For the run block, also delete the manual deployment for this
-        if dbt_block.command == "run":
-            while True:
-                dataflow = OrgDataFlow.objects.filter(
-                    org=orguser.org, cron=None, connection_id=None
-                ).first()
-                if dataflow:
-                    logger.info("deleting manual deployment for dbt run")
-                    # do this in try catch because it can fail & throw error
-                    try:
-                        prefect_service.delete_deployment_by_id(dataflow.deployment_id)
-                    except Exception:  # skipcq: PYL-W0703
-                        logger.exception("could not delete prefect deployment")
-                        continue
-
-                    # delete manual dbt run deployment
-                    dataflow.delete()
-                    logger.info("FINISHED deleting manual deployment for dbt run")
-                else:
-                    break
-
-    return {"success": 1}
-
-
-# =================================================================================================
-
-
 @prefectapi.get("/flow_runs/{flow_run_id}/logs", auth=auth.CanManagePipelines())
 def get_flow_runs_logs(
     request, flow_run_id, offset: int = 0
@@ -256,10 +204,6 @@ def get_prefect_flow_runs_log_history(
             )
 
     return flow_runs
-
-
-# =================================================================================================
-# new apis to go away from the block architecture
 
 
 @prefectapi.post("/tasks/{orgtask_id}/run/", auth=auth.CanManagePipelines())
