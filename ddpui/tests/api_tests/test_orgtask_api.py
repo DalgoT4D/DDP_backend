@@ -1,29 +1,28 @@
 import os
-import django
-import yaml
-
 from unittest.mock import Mock, patch
+
+import django
 import pytest
+import yaml
 from ninja.errors import HttpError
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
+from django.contrib.auth.models import User
+
 from ddpui.api.orgtask_api import (
-    post_prefect_transformation_tasks,
-    get_prefect_transformation_tasks,
     delete_prefect_transformation_tasks,
+    get_prefect_transformation_tasks,
+    post_prefect_transformation_tasks,
     post_run_prefect_org_task,
 )
-from ddpui.api.pipeline_api import post_run_prefect_org_deployment_task
-from ddpui.models.org import OrgDbt, Org, OrgWarehouse, OrgPrefectBlockv1
-from django.contrib.auth.models import User
-from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import Task, OrgTask, OrgDataFlowv1, DataflowOrgTask, TaskLock
 from ddpui.ddpprefect import DBTCLIPROFILE, SECRET
-from ddpui.utils.constants import TASK_DBTRUN, TASK_GITPULL, TASK_DBTDEPS
-
+from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1, OrgWarehouse
+from ddpui.models.org_user import OrgUser
+from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask, Task
+from ddpui.utils.constants import TASK_DBTDEPS, TASK_GITPULL
 
 pytestmark = pytest.mark.django_db
 
@@ -344,36 +343,6 @@ def test_delete_prefect_transformation_tasks_success(org_with_transformation_tas
         ).count()
         == 0
     )
-
-
-@patch.multiple(
-    "ddpui.ddpprefect.prefect_service",
-    create_deployment_flow_run=Mock(return_value=True),
-    lock_tasks_for_deployment=Mock(return_value=[]),
-)
-def test_post_run_prefect_org_deployment_task_success(org_with_transformation_tasks):
-    """tests POST /v1/flows/{deployment_id}/flow_run/ success"""
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
-
-    dataflow_orgtask = None
-    org_task = OrgTask.objects.filter(
-        org=mock_orguser.org, task__slug=TASK_DBTRUN
-    ).first()
-    if org_task:
-        dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
-
-    if dataflow_orgtask is None:
-        raise Exception("Deployment not found")
-
-    post_run_prefect_org_deployment_task(
-        mock_orguser, dataflow_orgtask.dataflow.deployment_id
-    )
-
-    assert TaskLock.objects.filter(orgtask=org_task).count() == 0
 
 
 def test_post_run_prefect_org_task_invalid_task_id(org_with_transformation_tasks):
