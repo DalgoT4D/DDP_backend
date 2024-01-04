@@ -1,13 +1,15 @@
 """functions for working with Orgs"""
 
 import json
+from django.utils.text import slugify
 
-from ddpui.ddpairbyte import airbyte_service
+from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 from ddpui.utils import secretsmanager
 from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.models.org import (
     Org,
+    OrgSchema,
     OrgWarehouse,
     OrgWarehouseSchema,
 )
@@ -17,6 +19,9 @@ logger = CustomLogger("ddpui")
 
 def create_warehouse(org: Org, payload: OrgWarehouseSchema):
     """creates a warehouse for an org"""
+
+    if payload.wtype not in ["postgres", "bigquery", "snowflake"]:
+        return None, "unrecognized warehouse type " + payload.wtype
 
     destination = airbyte_service.create_destination(
         org.airbyte_workspace_id,
@@ -64,3 +69,41 @@ def create_warehouse(org: Org, payload: OrgWarehouseSchema):
     warehouse.save()
 
     return None, None
+
+
+def get_warehouses(org: Org):
+    """return list of warehouses for an Org"""
+    warehouses = [
+        {
+            "wtype": warehouse.wtype,
+            # "credentials": warehouse.credentials,
+            "name": warehouse.name,
+            "airbyte_destination": airbyte_service.get_destination(
+                org.airbyte_workspace_id, warehouse.airbyte_destination_id
+            ),
+        }
+        for warehouse in OrgWarehouse.objects.filter(org=org)
+    ]
+    return warehouses, None
+
+
+def create_organization(payload: OrgSchema):
+    """creates a new Org"""
+    org = Org.objects.filter(name__iexact=payload.name).first()
+    if org:
+        return None, "client org with this name already exists"
+
+    org = Org(name=payload.name)
+    org.slug = slugify(org.name)[:20]
+    org.save()
+
+    try:
+        airbytehelpers.setup_airbyte_workspace_v1(org.slug, org)
+    except Exception:
+        # delete the org or we won't be able to create it once airbyte comes back up
+        org.delete()
+        return None, "could not create airbyte workspace"
+
+    org.refresh_from_db()
+
+    return org, None

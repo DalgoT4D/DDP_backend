@@ -1,9 +1,7 @@
-from datetime import datetime
 from typing import List
 import json
 from dotenv import load_dotenv
 
-from django.utils.text import slugify
 
 from ninja import NinjaAPI
 from ninja.errors import HttpError
@@ -15,9 +13,7 @@ from rest_framework.authtoken import views
 
 from ddpui import auth
 from ddpui.models.org import (
-    Org,
     OrgSchema,
-    OrgWarehouse,
     OrgWarehouseSchema,
 )
 from ddpui.models.org_user import (
@@ -36,8 +32,8 @@ from ddpui.models.org_user import (
     VerifyEmailSchema,
     DeleteOrgUserPayload,
 )
-from ddpui.models.orgtnc import OrgTnC
-from ddpui.ddpairbyte import airbyte_service, airbytehelpers
+
+
 from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.utils.deleteorg import delete_warehouse_v1
@@ -203,8 +199,8 @@ def put_organization_user(request, payload: OrgUserUpdate):
 )
 def post_transfer_ownership(request, payload: OrgUserNewOwner):
     """update another OrgUser"""
-    requestor_orguser: OrgUser = request.orguser
-    retval, error = orguserfunctions.transfer_ownership(requestor_orguser, payload)
+    orguser: OrgUser = request.orguser
+    retval, error = orguserfunctions.transfer_ownership(orguser, payload)
     if error:
         raise HttpError(400, error)
     return retval
@@ -214,9 +210,6 @@ def post_transfer_ownership(request, payload: OrgUserNewOwner):
 def post_organization_warehouse(request, payload: OrgWarehouseSchema):
     """registers a data warehouse for the org"""
     orguser: OrgUser = request.orguser
-    if payload.wtype not in ["postgres", "bigquery", "snowflake"]:
-        raise HttpError(400, "unrecognized warehouse type " + payload.wtype)
-
     _, error = orgfunctions.create_warehouse(orguser.org, payload)
     if error:
         raise HttpError(400, error)
@@ -228,18 +221,10 @@ def post_organization_warehouse(request, payload: OrgWarehouseSchema):
 def get_organizations_warehouses(request):
     """returns all warehouses associated with this org"""
     orguser: OrgUser = request.orguser
-    warehouses = [
-        {
-            "wtype": warehouse.wtype,
-            # "credentials": warehouse.credentials,
-            "name": warehouse.name,
-            "airbyte_destination": airbyte_service.get_destination(
-                orguser.org.airbyte_workspace_id, warehouse.airbyte_destination_id
-            ),
-        }
-        for warehouse in OrgWarehouse.objects.filter(org=orguser.org)
-    ]
-    return {"warehouses": warehouses}
+    result, error = orgfunctions.get_warehouses(orguser.org)
+    if error:
+        raise HttpError(400, error)
+    return {"warehouses": result}
 
 
 @user_org_api.post(
@@ -250,7 +235,6 @@ def get_organizations_warehouses(request):
 def post_organization_user_invite(request, payload: InvitationSchema):
     """Send an invitation to a user to join platform"""
     orguser: OrgUser = request.orguser
-
     retval, error = orguserfunctions.invite_user(orguser, payload)
     if error:
         raise HttpError(400, error)
@@ -338,7 +322,6 @@ def post_reset_password(
 @user_org_api.get("/users/verify_email/resend", auth=auth.AnyOrgUser())
 def get_verify_email_resend(request):  # pylint: disable=unused-argument
     """this api is hit when the user is logged in but the email is still not verified"""
-
     _, error = orguserfunctions.resend_verification_email(
         request.orguser, request.user.email
     )
@@ -365,40 +348,22 @@ def post_verify_email(
 @user_org_api.post("/v1/organizations/", response=OrgSchema, auth=auth.AnyOrgUser())
 def post_organization_v1(request, payload: OrgSchema):
     """creates a new org & new orguser (if required) and attaches it to the requestor"""
-    userattributes = UserAttributes.objects.filter(user=request.orguser.user).first()
+    orguser: OrgUser = request.orguser
+
+    userattributes = UserAttributes.objects.filter(user=orguser.user).first()
     if userattributes is None or userattributes.can_create_orgs is False:
         raise HttpError(403, "Insufficient permissions for this operation")
 
-    orguser: OrgUser = request.orguser
-    org = Org.objects.filter(name__iexact=payload.name).first()
-    if org:
-        raise HttpError(400, "client org with this name already exists")
-
-    org = Org(name=payload.name)
-    org.slug = slugify(org.name)[:20]
-    org.save()
-    logger.info(f"{orguser.user.email} created new org {org.name}")
-    try:
-        new_workspace = airbytehelpers.setup_airbyte_workspace_v1(org.slug, org)
-    except Exception as error:
-        # delete the org or we won't be able to create it once airbyte comes back up
-        org.delete()
-        raise HttpError(400, "could not create airbyte workspace") from error
+    org, error = orgfunctions.create_organization(payload)
+    if error:
+        raise HttpError(400, error)
 
     # create a new orguser if the org is already there
-    if orguser.org is None:
-        orguser.org = org
-        orguser.save()
-    else:
-        orguser = OrgUser.objects.create(
-            user=orguser.user,
-            role=OrgUserRole.ACCOUNT_MANAGER,
-            email_verified=True,
-            org=org,
-        )
+    orguserfunctions.ensure_orguser_for_org(orguser, org)
 
+    logger.info(f"{orguser.user.email} created new org {org.name}")
     return OrgSchema(
-        name=org.name, airbyte_workspace_id=new_workspace.workspaceId, slug=org.slug
+        name=org.name, airbyte_workspace_id=org.airbyte_workspace_id, slug=org.slug
     )
 
 
@@ -418,18 +383,7 @@ def delete_organization_warehouses_v1(request):
 def post_organization_accept_tnc(request):
     """accept the terms and conditions"""
     orguser: OrgUser = request.orguser
-    if orguser.org is None:
-        raise HttpError(400, "create an organization first")
-
-    userattributes = UserAttributes.objects.filter(user=orguser.user).first()
-    if userattributes and userattributes.is_consultant:
-        raise HttpError(400, "user cannot accept tnc")
-
-    if OrgTnC.objects.filter(org=orguser.org).exists():
-        raise HttpError(400, "tnc already accepted")
-
-    OrgTnC.objects.create(
-        org=orguser.org, tnc_accepted_by=orguser, tnc_accepted_on=datetime.now()
-    )
-
+    _, error = orguserfunctions.accept_tnc(orguser)
+    if error:
+        raise HttpError(400, error)
     return {"success": 1}

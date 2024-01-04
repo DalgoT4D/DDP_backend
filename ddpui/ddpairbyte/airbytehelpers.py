@@ -4,7 +4,7 @@ from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import AirbyteWorkspace
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpprefect import AIRBYTESERVER
-from ddpui.models.org import OrgPrefectBlockv1
+from ddpui.models.org import Org, OrgPrefectBlockv1
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("airbyte")
@@ -82,7 +82,7 @@ def upgrade_custom_sources(workspace_id: str) -> None:
             )
 
 
-def setup_airbyte_workspace_v1(wsname, org) -> AirbyteWorkspace:
+def setup_airbyte_workspace_v1(wsname: str, org: Org) -> AirbyteWorkspace:
     """creates an airbyte workspace and attaches it to the org
     also creates an airbyte server block in prefect if there isn't one already
     we don't need to update any existing server block because it does not hold
