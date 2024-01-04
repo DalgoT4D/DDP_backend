@@ -1,7 +1,4 @@
 import os
-from pathlib import Path
-from datetime import datetime
-import yaml
 
 from ninja import NinjaAPI
 from ninja.errors import HttpError
@@ -18,39 +15,22 @@ from ddpui.ddpprefect import (
     DBTCORE,
     SHELLOPERATION,
     DBTCLIPROFILE,
-    SECRET,
     AIRBYTECONNECTION,
     AIRBYTESERVER,
 )
 from ddpui.models.org import (
-    OrgPrefectBlock,
-    OrgWarehouse,
-    OrgDataFlow,
     OrgDataFlowv1,
     OrgPrefectBlockv1,
 )
 from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import Task, DataflowOrgTask, OrgTask, TaskLock
+from ddpui.models.tasks import Task, DataflowOrgTask, TaskLock
 from ddpui.ddpprefect.schema import (
-    PrefectAirbyteSync,
-    PrefectDbtTaskSetup,
     PrefectDataFlowCreateSchema3,
     PrefectFlowRunSchema,
     PrefectDataFlowUpdateSchema3,
-    PrefectSecretBlockCreate,
-    PrefectShellTaskSetup,
     PrefectDataFlowCreateSchema4,
 )
-from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils import secretsmanager
-from ddpui.utils import timezone
-from ddpui.utils.constants import (
-    TASK_DBTRUN,
-    TASK_GITPULL,
-    TRANSFORM_TASKS_SEQ,
-    AIRBYTE_SYNC_TIMEOUT,
-)
 from ddpui.utils.prefectlogs import parse_prefect_logs
 from ddpui.utils.helpers import generate_hash_id
 from ddpui.core.pipelinefunctions import pipeline_sync_tasks, pipeline_dbt_git_tasks

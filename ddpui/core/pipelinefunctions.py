@@ -3,7 +3,6 @@ functions to work with pipelies/dataflows
 do not raise http errors here
 """
 
-from redis import Redis
 from ddpui.models.tasks import OrgTask
 from ddpui.models.org import Org, OrgPrefectBlockv1
 from ddpui.utils.custom_logger import CustomLogger
