@@ -10,13 +10,13 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from ddpui.api.prefect_api import (
+from ddpui.api.orgtask_api import (
     post_prefect_transformation_tasks,
     get_prefect_transformation_tasks,
     delete_prefect_transformation_tasks,
-    post_run_prefect_org_deployment_task,
     post_run_prefect_org_task,
 )
+from ddpui.api.pipeline_api import post_run_prefect_org_deployment_task
 from ddpui.models.org import OrgDbt, Org, OrgWarehouse, OrgPrefectBlockv1
 from django.contrib.auth.models import User
 from ddpui.models.org_user import OrgUser
