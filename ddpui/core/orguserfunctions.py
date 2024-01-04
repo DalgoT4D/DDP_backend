@@ -27,6 +27,7 @@ from ddpui.models.org_user import (
     VerifyEmailSchema,
     DeleteOrgUserPayload,
 )
+from ddpui.models.orgtnc import OrgTnC
 from ddpui.utils import sendgrid
 from ddpui.utils import helpers
 from ddpui.utils import timezone
@@ -426,5 +427,42 @@ def verify_email(payload: VerifyEmailSchema):
     # verify email for all the orgusers
     OrgUser.objects.filter(user_id=orguser.user.id).update(email_verified=True)
     UserAttributes.objects.filter(user=orguser.user).update(email_verified=True)
+
+    return None, None
+
+
+def ensure_orguser_for_org(orguser: OrgUser, org):
+    """
+    adds the org to the orguser if there isn't one already
+    otherwise create a new orguser for this org
+    """
+    if orguser.org is None:
+        orguser.org = org
+        orguser.save()
+    else:
+        OrgUser.objects.create(
+            user=orguser.user,
+            role=OrgUserRole.ACCOUNT_MANAGER,
+            email_verified=True,
+            org=org,
+        )
+    return None, None
+
+
+def accept_tnc(orguser: OrgUser):
+    """accept the terms and conditions"""
+    if orguser.org is None:
+        return None, "create an organization first"
+
+    userattributes = UserAttributes.objects.filter(user=orguser.user).first()
+    if userattributes and userattributes.is_consultant:
+        return None, "user cannot accept tnc"
+
+    if OrgTnC.objects.filter(org=orguser.org).exists():
+        return None, "tnc already accepted"
+
+    OrgTnC.objects.create(
+        org=orguser.org, tnc_accepted_by=orguser, tnc_accepted_on=datetime.now()
+    )
 
     return None, None
