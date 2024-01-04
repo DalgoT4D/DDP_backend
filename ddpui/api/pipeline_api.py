@@ -53,7 +53,8 @@ from ddpui.utils.constants import (
 )
 from ddpui.utils.prefectlogs import parse_prefect_logs
 from ddpui.utils.helpers import generate_hash_id
-from ddpui.core.pipelinefunctions import pipeline_sync_tasks
+from ddpui.core.pipelinefunctions import pipeline_sync_tasks, pipeline_dbt_git_tasks
+from ddpui.core.dbtfunctions import gather_dbt_project_params
 
 pipelineapi = NinjaAPI(urls_namespace="pipeline")
 # http://127.0.0.1:8000/api/docs
@@ -116,9 +117,11 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
             raise HttpError(400, "airbyte server block not found")
 
         # push sync tasks to pipeline
-        org_tasks, task_configs = pipeline_sync_tasks(
+        (org_tasks, task_configs), error = pipeline_sync_tasks(
             orguser.org, payload.connections, org_server_block
         )
+        if error:
+            raise HttpError(400, error)
         tasks += task_configs
         map_org_tasks += org_tasks
 
@@ -130,14 +133,9 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
         logger.info(f"Dbt tasks being pushed to the pipeline")
 
         # dbt params
-        dbt_env_dir = Path(orguser.org.dbt.dbt_venv)
-        if not dbt_env_dir.exists():
-            raise HttpError(400, "create the dbt env first")
-
-        dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
-        dbtrepodir = Path(os.getenv("CLIENTDBT_ROOT")) / orguser.org.slug / "dbtrepo"
-        project_dir = str(dbtrepodir)
-        target = orguser.org.dbt.default_schema
+        dbt_project_params, error = gather_dbt_project_params(orguser.org)
+        if error:
+            raise HttpError(400, error)
 
         # dbt cli profile block
         cli_block = OrgPrefectBlockv1.objects.filter(
@@ -147,55 +145,14 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
             raise HttpError(400, "dbt cli profile not found")
 
         # push dbt pipeline tasks
-        for org_task in OrgTask.objects.filter(
-            org=orguser.org, task__type__in=["dbt", "git"]
-        ).all():
-            logger.info(
-                f"found transform task {org_task.task.slug}; pushing to pipeline"
-            )
-            # map this org task to dataflow
-            map_org_tasks.append(org_task)
+        (org_tasks, task_configs), error = pipeline_dbt_git_tasks(
+            orguser.org, cli_block, dbt_project_params, seq
+        )
+        if error:
+            raise HttpError(400, error)
+        tasks += task_configs
+        map_org_tasks += org_tasks
 
-            dbt_core_task_setup = PrefectDbtTaskSetup(
-                seq=TRANSFORM_TASKS_SEQ[org_task.task.slug] + seq,
-                slug=org_task.task.slug,
-                commands=[f"{dbt_binary} {org_task.task.command} --target {target}"],
-                type=DBTCORE,
-                env={},
-                working_dir=project_dir,
-                profiles_dir=f"{project_dir}/profiles/",
-                project_dir=project_dir,
-                cli_profile_block=cli_block.block_name,
-                cli_args=[],
-            )
-
-            task_config = dict(dbt_core_task_setup)
-
-            # update task_config its a git pull task
-            if org_task.task.slug == TASK_GITPULL:
-                shell_env = {"secret-git-pull-url-block": ""}
-
-                gitpull_secret_block = OrgPrefectBlockv1.objects.filter(
-                    org=orguser.org, block_type=SECRET, block_name__contains="git-pull"
-                ).first()
-
-                if gitpull_secret_block is not None:
-                    shell_env[
-                        "secret-git-pull-url-block"
-                    ] = gitpull_secret_block.block_name
-
-                shell_task_setup = PrefectShellTaskSetup(
-                    commands=["git pull"],
-                    working_dir=project_dir,
-                    env=shell_env,
-                    slug=org_task.task.slug,
-                    type=SHELLOPERATION,
-                    seq=TRANSFORM_TASKS_SEQ[org_task.task.slug] + seq,
-                )
-
-                task_config = dict(shell_task_setup)
-
-            tasks.append(task_config)
         logger.info(f"Dbt tasks pushed to the pipeline")
 
     # create deployment
