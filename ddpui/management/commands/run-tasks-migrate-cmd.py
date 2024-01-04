@@ -711,19 +711,6 @@ class Command(BaseCommand):
             f"Found airbyte server block: {server_block.block_name} for {org.slug}"
         )
 
-        # check if cli block is created
-        cli_profile_block = OrgPrefectBlockv1.objects.filter(
-            org=org, block_type=DBTCLIPROFILE
-        ).first()
-        if not cli_profile_block:
-            self.failures.append(
-                f"SKIPPING: Couldnt find the dbt cli profile block for org {org.slug}"
-            )
-            return
-        self.successes.append(
-            f"Found dbt cli profile block : {cli_profile_block.block_name} for {org.slug}"
-        )
-
         for old_dataflow in OrgDataFlow.objects.filter(
             org=org, dataflow_type="orchestrate"
         ).all():
@@ -964,11 +951,24 @@ class Command(BaseCommand):
                     f"Pipeline : {new_dataflow.deployment_name} has dbt transform on. Processing it now"
                 )
 
+                # check if cli block is created
+                cli_profile_block = OrgPrefectBlockv1.objects.filter(
+                    org=org, block_type=DBTCLIPROFILE
+                ).first()
+                if not cli_profile_block:
+                    self.failures.append(
+                        f"SKIPPING: Couldnt find the dbt cli profile block for org {org.slug}"
+                    )
+                    continue
+                self.successes.append(
+                    f"Found dbt cli profile block : {cli_profile_block.block_name} for {org.slug}"
+                )
+
                 # dbt params
                 dbt_env_dir = Path(org.dbt.dbt_venv)
                 if not dbt_env_dir.exists():
                     self.failures.append("dbt env not found")
-                    return
+                    continue
 
                 dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
                 dbtrepodir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug / "dbtrepo"
@@ -977,7 +977,6 @@ class Command(BaseCommand):
 
                 for dbt_block in sorted(params["dbt_blocks"], key=lambda x: x["seq"]):
                     dbt_block_name = dbt_block["blockName"]
-                    dbt_block_type = dbt_block["blockType"]
 
                     org_prefect_blk = OrgPrefectBlock.objects.filter(
                         org=org, block_name=dbt_block_name
@@ -1008,26 +1007,7 @@ class Command(BaseCommand):
                         continue
 
                     org_task = OrgTask.objects.filter(org=org, task=task).first()
-                    if org_task.task.slug == TASK_DBTRUN:
-                        dbt_core_task_setup = PrefectDbtTaskSetup(
-                            seq=TRANSFORM_TASKS_SEQ[org_task.task.slug] + seq,
-                            slug=org_task.task.slug,
-                            commands=[
-                                f"{dbt_binary} {org_task.task.command} --target {target}"
-                            ],
-                            type=DBTCORE,
-                            env={},
-                            working_dir=project_dir,
-                            profiles_dir=f"{project_dir}/profiles/",
-                            project_dir=project_dir,
-                            cli_profile_block=cli_profile_block.block_name,
-                            cli_args=[],
-                        )
-
-                        task_config = dict(dbt_core_task_setup)
-                        tasks.append(task_config)
-
-                    elif org_task.task.slug == TASK_GITPULL:
+                    if org_task.task.slug == TASK_GITPULL:
                         shell_env = {"secret-git-pull-url-block": ""}
 
                         gitpull_secret_block = OrgPrefectBlockv1.objects.filter(
@@ -1049,6 +1029,24 @@ class Command(BaseCommand):
                         )
 
                         task_config = dict(shell_task_setup)
+                        tasks.append(task_config)
+                    else:
+                        dbt_core_task_setup = PrefectDbtTaskSetup(
+                            seq=TRANSFORM_TASKS_SEQ[org_task.task.slug] + seq,
+                            slug=org_task.task.slug,
+                            commands=[
+                                f"{dbt_binary} {org_task.task.command} --target {target}"
+                            ],
+                            type=DBTCORE,
+                            env={},
+                            working_dir=project_dir,
+                            profiles_dir=f"{project_dir}/profiles/",
+                            project_dir=project_dir,
+                            cli_profile_block=cli_profile_block.block_name,
+                            cli_args=[],
+                        )
+
+                        task_config = dict(dbt_core_task_setup)
                         tasks.append(task_config)
 
             params["config"] = {"tasks": tasks}

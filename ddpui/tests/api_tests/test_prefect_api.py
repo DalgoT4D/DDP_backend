@@ -10,7 +10,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from ddpui.api.client.prefect_api import (
+from ddpui.api.prefect_api import (
     post_prefect_transformation_tasks,
     get_prefect_transformation_tasks,
     delete_prefect_transformation_tasks,

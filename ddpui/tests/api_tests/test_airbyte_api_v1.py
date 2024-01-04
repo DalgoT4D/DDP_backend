@@ -11,7 +11,7 @@ django.setup()
 
 from ddpui.models.org import Org, OrgWarehouse, OrgPrefectBlockv1
 from ddpui.models.tasks import Task, OrgTask, OrgDataFlowv1, DataflowOrgTask
-from ddpui.api.client.airbyte_api import (
+from ddpui.api.airbyte_api import (
     get_airbyte_connection_v1,
     get_airbyte_connections_v1,
     post_airbyte_connection_v1,
@@ -468,8 +468,7 @@ def test_post_airbyte_connection_v1_success(
     }
     Task.objects.create(**airbyte_task_config)
 
-    with patch("ddpui.api.client.airbyte_api.write_dataflowblocks"):
-        response = post_airbyte_connection_v1(mock_request, payload)
+    response = post_airbyte_connection_v1(mock_request, payload)
 
     # reload the warehouse from the database
     warehouse_with_destination = OrgWarehouse.objects.filter(
