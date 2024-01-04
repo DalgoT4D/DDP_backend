@@ -33,8 +33,9 @@ from ddpui.ddpprefect.schema import (
     PrefectSecretBlockCreate,
     PrefectShellTaskSetup,
 )
+from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.core.dbtfunctions import gather_dbt_project_params
-
+from ddpui.core.orgtaskfunctions import create_transform_tasks
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
@@ -74,6 +75,7 @@ def pydantic_validation_error_handler(
     These are raised during response payload validation
     exc.errors() is correct
     """
+    print(exc)
     return Response({"detail": exc.errors()}, status=500)
 
 
@@ -112,14 +114,10 @@ def post_prefect_transformation_tasks(request):
         orguser.org.dbt.dbt_venv = os.getenv("DBT_VENV")
         orguser.org.dbt.save()
 
-    dbt_env_dir = Path(orguser.org.dbt.dbt_venv)
-    if not dbt_env_dir.exists():
-        raise HttpError(400, "create the dbt env first")
-
-    dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
-    dbtrepodir = Path(os.getenv("CLIENTDBT_ROOT")) / orguser.org.slug / "dbtrepo"
-    project_dir = str(dbtrepodir)
-    dbt_project_filename = str(dbtrepodir / "dbt_project.yml")
+    dbt_project_params, error = gather_dbt_project_params(orguser.org)
+    if error:
+        raise HttpError(400, error)
+    dbt_project_filename = str(dbt_project_params.dbt_repo_dir / "dbt_project.yml")
 
     if not os.path.exists(dbt_project_filename):
         raise HttpError(400, dbt_project_filename + " is missing")
@@ -159,8 +157,8 @@ def post_prefect_transformation_tasks(request):
             raise HttpError(400, "could not find 'profile:' in dbt_project.yml")
 
     profile_name = dbt_project["profile"]
-    target = orguser.org.dbt.default_schema
-    logger.info("profile_name=%s target=%s", profile_name, target)
+    # target = orguser.org.dbt.default_schema
+    logger.info("profile_name=%s target=%s", profile_name, dbt_project_params.target)
 
     # get the dataset location if warehouse type is bigquery
     bqlocation = None
@@ -177,14 +175,14 @@ def post_prefect_transformation_tasks(request):
         cli_block_response = prefect_service.create_dbt_cli_profile_block(
             cli_block_name,
             profile_name,
-            target,
+            dbt_project_params.target,
             warehouse.wtype,
             bqlocation,
             credentials,
         )
 
         # save the cli profile block in django db
-        OrgPrefectBlockv1.objects.create(
+        cli_profile_block = OrgPrefectBlockv1.objects.create(
             org=orguser.org,
             block_type=DBTCLIPROFILE,
             block_id=cli_block_response["block_id"],
@@ -196,62 +194,11 @@ def post_prefect_transformation_tasks(request):
         raise HttpError(400, str(error)) from error
 
     # create org tasks for the transformation page
-    for task in Task.objects.filter(type__in=["dbt", "git"]).all():
-        org_task = OrgTask.objects.create(org=orguser.org, task=task)
-
-        if task.slug == TASK_DBTRUN:
-            # create deployment
-            hash_code = generate_hash_id(8)
-            deployment_name = f"manual-{orguser.org.slug}-{task.slug}-{hash_code}"
-            dataflow = prefect_service.create_dataflow_v1(
-                PrefectDataFlowCreateSchema3(
-                    deployment_name=deployment_name,
-                    flow_name=deployment_name,
-                    orgslug=orguser.org.slug,
-                    deployment_params={
-                        "config": {
-                            "tasks": [
-                                {
-                                    "slug": task.slug,
-                                    "type": DBTCORE,
-                                    "seq": 1,
-                                    "commands": [
-                                        f"{dbt_binary} {task.command} --target {target}"
-                                    ],
-                                    "env": {},
-                                    "working_dir": project_dir,
-                                    "profiles_dir": f"{project_dir}/profiles/",
-                                    "project_dir": project_dir,
-                                    "cli_profile_block": cli_block_response[
-                                        "block_name"
-                                    ],
-                                    "cli_args": [],
-                                }
-                            ]
-                        }
-                    },
-                )
-            )
-
-            # store deployment record in django db
-            existing_dataflow = OrgDataFlowv1.objects.filter(
-                deployment_id=dataflow["deployment"]["id"]
-            ).first()
-            if existing_dataflow:
-                existing_dataflow.delete()
-
-            new_dataflow = OrgDataFlowv1.objects.create(
-                org=orguser.org,
-                name=deployment_name,
-                deployment_name=dataflow["deployment"]["name"],
-                deployment_id=dataflow["deployment"]["id"],
-                dataflow_type="manual",
-            )
-
-            DataflowOrgTask.objects.create(
-                dataflow=new_dataflow,
-                orgtask=org_task,
-            )
+    _, error = create_transform_tasks(
+        orguser.org, cli_profile_block, dbt_project_params
+    )
+    if error:
+        raise HttpError(400, error)
 
     return {"success": 1}
 
