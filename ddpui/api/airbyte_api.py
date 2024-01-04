@@ -1,6 +1,5 @@
 """Dalgo API for Airbyte"""
 import os
-import json
 from typing import List
 from ninja import NinjaAPI
 from ninja.errors import HttpError
@@ -24,24 +23,11 @@ from ddpui.ddpairbyte.schema import (
     AirbyteDestinationUpdateCheckConnection,
     AirbyteConnectionUpdate,
 )
-from ddpui.ddpprefect.schema import (
-    PrefectDataFlowCreateSchema3,
-)
 
-from ddpui.ddpprefect import AIRBYTESERVER, AIRBYTECONNECTION, DBTCLIPROFILE
-from ddpui.ddpprefect import prefect_service
-from ddpui.models.org import (
-    OrgWarehouse,
-    OrgPrefectBlockv1,
-    OrgDataFlowv1,
-)
-from ddpui.models.tasks import Task, DataflowOrgTask, OrgTask, TaskLock
+
 from ddpui.models.org_user import OrgUser
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils import secretsmanager
-from ddpui.utils.constants import TASK_AIRBYTESYNC, AIRBYTE_SYNC_TIMEOUT
-from ddpui.utils.helpers import generate_hash_id
 
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
@@ -383,95 +369,10 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
     if len(payload.streams) == 0:
         raise HttpError(400, "must specify stream names")
 
-    warehouse = OrgWarehouse.objects.filter(org=org).first()
-    if warehouse is None:
-        raise HttpError(400, "need to set up a warehouse first")
-    if warehouse.airbyte_destination_id is None:
-        raise HttpError(400, "warehouse has no airbyte_destination_id")
-    payload.destinationId = warehouse.airbyte_destination_id
+    res, error = airbytehelpers.create_connection(org, payload)
+    if error:
+        raise HttpError(400, error)
 
-    if warehouse.airbyte_norm_op_id is None:
-        warehouse.airbyte_norm_op_id = airbyte_service.create_normalization_operation(
-            org.airbyte_workspace_id
-        )["operationId"]
-        warehouse.save()
-
-    org_airbyte_server_block = OrgPrefectBlockv1.objects.filter(
-        org=org,
-        block_type=AIRBYTESERVER,
-    ).first()
-    if org_airbyte_server_block is None:
-        raise Exception(f"{org.slug} has no {AIRBYTESERVER} block in OrgPrefectBlock")
-
-    task = Task.objects.filter(slug=TASK_AIRBYTESYNC).first()
-    if task is None:
-        raise HttpError(400, "task not supported")
-
-    airbyte_conn = airbyte_service.create_connection(
-        org.airbyte_workspace_id, warehouse.airbyte_norm_op_id, payload
-    )
-
-    org_task = OrgTask.objects.create(
-        org=org, task=task, connection_id=airbyte_conn["connectionId"]
-    )
-
-    hash_code = generate_hash_id(8)
-    logger.info(f"using the hash code {hash_code} for the deployment name")
-
-    deployment_name = f"manual-{orguser.org.slug}-{task.slug}-{hash_code}"
-    dataflow = prefect_service.create_dataflow_v1(
-        PrefectDataFlowCreateSchema3(
-            deployment_name=deployment_name,
-            flow_name=deployment_name,
-            orgslug=orguser.org.slug,
-            deployment_params={
-                "config": {
-                    "tasks": [
-                        {
-                            "slug": task.slug,
-                            "type": AIRBYTECONNECTION,
-                            "seq": 1,
-                            "airbyte_server_block": org_airbyte_server_block.block_name,
-                            "connection_id": airbyte_conn["connectionId"],
-                            "timeout": AIRBYTE_SYNC_TIMEOUT,
-                        }
-                    ]
-                }
-            },
-        )
-    )
-
-    existing_dataflow = OrgDataFlowv1.objects.filter(
-        deployment_id=dataflow["deployment"]["id"]
-    ).first()
-    if existing_dataflow:
-        existing_dataflow.delete()
-
-    org_dataflow = OrgDataFlowv1.objects.create(
-        org=orguser.org,
-        name=deployment_name,
-        deployment_name=dataflow["deployment"]["name"],
-        deployment_id=dataflow["deployment"]["id"],
-        dataflow_type="manual",
-    )
-    DataflowOrgTask.objects.create(
-        dataflow=org_dataflow,
-        orgtask=org_task,
-    )
-
-    res = {
-        "name": payload.name,
-        "connectionId": airbyte_conn["connectionId"],
-        "source": {"id": airbyte_conn["sourceId"]},
-        "destination": {
-            "id": airbyte_conn["destinationId"],
-        },
-        "catalogId": airbyte_conn["sourceCatalogId"],
-        "syncCatalog": airbyte_conn["syncCatalog"],
-        "status": airbyte_conn["status"],
-        "deploymentId": dataflow["deployment"]["id"],
-        "normalize": payload.normalize,
-    }
     logger.debug(res)
     return res
 
@@ -487,64 +388,10 @@ def get_airbyte_connections_v1(request):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    org_tasks = OrgTask.objects.filter(org=orguser.org, task__type="airbyte").all()
-
-    res = []
-
-    for org_task in org_tasks:
-        # fetch the connection
-        connection = airbyte_service.get_connection(
-            orguser.org.airbyte_workspace_id, org_task.connection_id
-        )
-
-        # a single connection will have a manual deployment and (usually) a pipeline
-        # we want to show the last sync, from whichever
-        last_runs = []
-        for df_orgtask in DataflowOrgTask.objects.filter(
-            orgtask=org_task,
-        ):
-            run = prefect_service.get_last_flow_run_by_deployment_id(
-                df_orgtask.dataflow.deployment_id
-            )
-            if run:
-                last_runs.append(run)
-
-        last_runs.sort(
-            key=lambda run: run["startTime"]
-            if run["startTime"]
-            else run["expectedStartTime"]
-        )
-
-        sync_dataflow = DataflowOrgTask.objects.filter(
-            orgtask=org_task, dataflow__dataflow_type="manual"
-        ).first()
-
-        # is the task currently locked?
-        lock = TaskLock.objects.filter(orgtask=org_task).first()
-
-        res.append(
-            {
-                "name": connection["name"],
-                "connectionId": connection["connectionId"],
-                "source": connection["source"],
-                "destination": connection["destination"],
-                "catalogId": connection["catalogId"],
-                "syncCatalog": connection["syncCatalog"],
-                "status": connection["status"],
-                "deploymentId": sync_dataflow.dataflow.deployment_id
-                if sync_dataflow
-                else None,
-                "lastRun": last_runs[-1] if len(last_runs) > 0 else None,
-                "lock": {
-                    "lockedBy": lock.locked_by.user.email,
-                    "lockedAt": lock.locked_at,
-                }
-                if lock
-                else None,
-            }
-        )
-
-    logger.info(res)
+    res, error = airbytehelpers.get_connections(orguser.org)
+    if error:
+        raise HttpError(400, error)
+    logger.debug(res)
 
     # by default normalization is going as False here because we dont do anything with it
     return res
@@ -561,62 +408,9 @@ def get_airbyte_connection_v1(request, connection_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    org_task = OrgTask.objects.filter(
-        org=orguser.org,
-        connection_id=connection_id,
-    ).first()
-
-    if org_task is None or org_task.connection_id is None:
-        raise HttpError(404, "connection not found")
-
-    # fetch airbyte connection
-    airbyte_conn = airbyte_service.get_connection(
-        orguser.org.airbyte_workspace_id, org_task.connection_id
-    )
-
-    dataflow_orgtask = DataflowOrgTask.objects.filter(
-        orgtask=org_task, dataflow__dataflow_type="manual"
-    ).first()
-
-    if dataflow_orgtask is None:
-        raise HttpError(422, "deployment not found")
-
-    # check if the task is locked or not
-    lock = TaskLock.objects.filter(orgtask=org_task).first()
-
-    # fetch the source and destination names
-    # the web_backend/connections/get fetches the source & destination objects also so we dont need to query again
-    source_name = airbyte_conn["source"]["sourceName"]
-
-    destination_name = airbyte_conn["destination"]["destinationName"]
-
-    res = {
-        "name": airbyte_conn["name"],
-        "connectionId": airbyte_conn["connectionId"],
-        "source": {"id": airbyte_conn["sourceId"], "name": source_name},
-        "destination": {"id": airbyte_conn["destinationId"], "name": destination_name},
-        "catalogId": airbyte_conn["catalogId"],
-        "syncCatalog": airbyte_conn["syncCatalog"],
-        "destinationSchema": airbyte_conn["namespaceFormat"]
-        if airbyte_conn["namespaceDefinition"] == "customformat"
-        else "",
-        "status": airbyte_conn["status"],
-        "deploymentId": dataflow_orgtask.dataflow.deployment_id
-        if dataflow_orgtask.dataflow
-        else None,
-        "normalize": airbyte_service.is_operation_normalization(
-            airbyte_conn["operationIds"][0]
-        )
-        if "operationIds" in airbyte_conn and len(airbyte_conn["operationIds"]) == 1
-        else False,
-        "lock": {
-            "lockedBy": lock.locked_by.user.email,
-            "lockedAt": lock.locked_at,
-        }
-        if lock
-        else None,
-    }
-
+    res, error = airbytehelpers.get_one_connection(orguser.org, connection_id)
+    if error:
+        raise HttpError(400, error)
     logger.debug(res)
     return res
 
@@ -631,16 +425,9 @@ def post_airbyte_connection_reset_v1(request, connection_id):
     if org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    org_task = OrgTask.objects.filter(
-        org=orguser.org,
-        connection_id=connection_id,
-    ).first()
-
-    if org_task is None:
-        raise HttpError(404, "connection not found")
-
-    airbyte_service.reset_connection(connection_id)
-
+    _, error = airbytehelpers.reset_connection(org, connection_id)
+    if error:
+        raise HttpError(400, error)
     return {"success": 1}
 
 
@@ -656,52 +443,9 @@ def put_airbyte_connection_v1(
     if org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    org_task = OrgTask.objects.filter(
-        org=orguser.org,
-        connection_id=connection_id,
-    ).first()
-
-    if org_task is None:
-        raise HttpError(404, "connection not found")
-
-    warehouse = OrgWarehouse.objects.filter(org=org).first()
-    if warehouse is None:
-        raise HttpError(400, "need to set up a warehouse first")
-    if warehouse.airbyte_destination_id is None:
-        raise HttpError(400, "warehouse has no airbyte_destination_id")
-    payload.destinationId = warehouse.airbyte_destination_id
-
-    if len(payload.streams) == 0:
-        raise HttpError(400, "must specify stream names")
-
-    # fetch connection by id from airbyte
-    connection = airbyte_service.get_connection(org.airbyte_workspace_id, connection_id)
-
-    # update normalization of data
-    if payload.normalize:
-        if "operationIds" not in connection or len(connection["operationIds"]) == 0:
-            if warehouse.airbyte_norm_op_id is None:
-                warehouse.airbyte_norm_op_id = (
-                    airbyte_service.create_normalization_operation(
-                        org.airbyte_workspace_id
-                    )["operationId"]
-                )
-                warehouse.save()
-            connection["operationIds"] = [warehouse.airbyte_norm_op_id]
-    else:
-        connection["operationIds"] = []
-
-    # update name
-    if payload.name:
-        connection["name"] = payload.name
-
-    # always reset the connection
-    connection["skipReset"] = False
-
-    # update the airbyte connection
-    res = airbyte_service.update_connection(
-        org.airbyte_workspace_id, payload, connection
-    )
+    res, error = airbytehelpers.update_connection(org, connection_id, payload)
+    if error:
+        raise HttpError(400, error)
 
     return res
 
@@ -716,38 +460,9 @@ def delete_airbyte_connection_v1(request, connection_id):
     if org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    org_task = OrgTask.objects.filter(
-        org=orguser.org,
-        connection_id=connection_id,
-    ).first()
-
-    if org_task is None:
-        raise HttpError(404, "connection not found")
-
-    dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
-
-    if dataflow_orgtask is None:
-        raise HttpError(422, "deployment not found")
-
-    # delete airbyte connection
-    logger.info("deleting airbyte connection")
-    airbyte_service.delete_connection(org.airbyte_workspace_id, connection_id)
-
-    # delete prefect deployment
-    logger.info("deleteing prefect deployment")
-    prefect_service.delete_deployment_by_id(dataflow_orgtask.dataflow.deployment_id)
-
-    # delete the org dataflow for manual deployment
-    logger.info("deleting org dataflow from db")
-    dataflow_orgtask.dataflow.delete()
-
-    # delete orgtask <-> dataflow mapping
-    logger.info("deleteing datafloworgtask mapping")
-    dataflow_orgtask.delete()
-
-    # delete orgtask
-    logger.info("deleteing orgtask")
-    org_task.delete()
+    _, error = airbytehelpers.delete_connection(org, connection_id)
+    if error:
+        raise HttpError(400, error)
 
     return {"success": 1}
 
@@ -760,15 +475,9 @@ def get_latest_job_for_connection(request, connection_id):
     if org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    result = airbyte_service.get_jobs_for_connection(connection_id)
-    if len(result["jobs"]) == 0:
-        return {
-            "status": "not found",
-        }
-    latest_job = result["jobs"][0]
-    job_info = airbyte_service.parse_job_info(latest_job)
-    logs = airbyte_service.get_logs_for_job(job_info["job_id"])
-    job_info["logs"] = logs["logs"]["logLines"]
+    job_info, error = airbytehelpers.get_job_info_for_connection(org, connection_id)
+    if error:
+        raise HttpError(400, error)
     return job_info
 
 
@@ -783,69 +492,11 @@ def put_airbyte_destination_v1(
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    destination = airbyte_service.update_destination(
-        destination_id, payload.name, payload.config, payload.destinationDefId
+    destination, error = airbytehelpers.update_destination(
+        orguser.org, destination_id, payload
     )
-    logger.info("updated destination having id " + destination["destinationId"])
-    warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
-
-    if warehouse.name != payload.name:
-        warehouse.name = payload.name
-        warehouse.save()
-
-    dbt_credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
-
-    if warehouse.wtype == "postgres":
-        aliases = {
-            "dbname": "database",
-        }
-        for config_key in ["host", "port", "username", "password", "database"]:
-            if (
-                config_key in payload.config
-                and isinstance(payload.config[config_key], str)
-                and len(payload.config[config_key]) > 0
-                and list(set(payload.config[config_key]))[0] != "*"
-            ):
-                dbt_credentials[aliases.get(config_key, config_key)] = payload.config[
-                    config_key
-                ]
-
-    elif warehouse.wtype == "bigquery":
-        dbt_credentials = json.loads(payload.config["credentials_json"])
-    elif warehouse.wtype == "snowflake":
-        if (
-            "credentials" in payload.config
-            and "password" in payload.config["credentials"]
-            and isinstance(payload.config["credentials"]["password"], str)
-            and len(payload.config["credentials"]["password"]) > 0
-            and list(set(payload.config["credentials"]["password"])) != "*"
-        ):
-            dbt_credentials["credentials"]["password"] = payload.config["credentials"][
-                "password"
-            ]
-
-    else:
-        raise HttpError(400, "unknown warehouse type " + warehouse.wtype)
-
-    secretsmanager.update_warehouse_credentials(warehouse, dbt_credentials)
-
-    cli_profile_block = OrgPrefectBlockv1.objects.filter(
-        org=orguser.org, block_type=DBTCLIPROFILE
-    ).first()
-
-    if cli_profile_block:
-        logger.info(f"Updating the cli profile block : {cli_profile_block.block_name}")
-        prefect_service.update_dbt_cli_profile_block(
-            block_name=cli_profile_block.block_name,
-            wtype=warehouse.wtype,
-            credentials=dbt_credentials,
-            bqlocation=payload.config["dataset_location"]
-            if "dataset_location" in payload.config
-            else None,
-        )
-        logger.info(
-            f"Successfully updated the cli profile block : {cli_profile_block.block_name}"
-        )
+    if error:
+        raise HttpError(400, error)
 
     return {"destinationId": destination["destinationId"]}
 
@@ -859,46 +510,8 @@ def delete_airbyte_source_v1(request, source_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    connections = airbyte_service.get_connections(orguser.org.airbyte_workspace_id)[
-        "connections"
-    ]
-    connections_of_source = [
-        conn["connectionId"] for conn in connections if conn["sourceId"] == source_id
-    ]
-
-    # Fetch org tasks and deployments mapped to each connection_id
-    org_tasks = OrgTask.objects.filter(
-        org=orguser.org, connection_id__in=connections_of_source
-    ).all()
-
-    # Fetch dataflows(manual or pipelines)
-    df_orgtasks = DataflowOrgTask.objects.filter(orgtask__in=org_tasks).all()
-    dataflows = [df_orgtask.dataflow for df_orgtask in df_orgtasks]
-
-    # Delete the deployments
-    logger.info("Deleting the deployemtns from prefect and django")
-    for dataflow in dataflows:
-        try:
-            # delete from prefect
-            prefect_service.delete_deployment_by_id(dataflow.deployment_id)
-            logger.info(f"delete deployment: {dataflow.deployment_id} from prefect")
-
-            # delete from django
-            dataflow.delete()
-        except Exception as error:
-            logger.info(
-                f"something went wrong deleting the prefect deplyment {dataflow.deployment_id}"
-            )
-            logger.exception(error)
-            continue
-
-    # Delete the orgtasks
-    logger.info("Deleting org tasks related to connections in this source")
-    for org_task in org_tasks:
-        org_task.delete()
-
-    # delete the source from airbyte
-    airbyte_service.delete_source(orguser.org.airbyte_workspace_id, source_id)
-    logger.info(f"deleted airbyte source {source_id}")
+    _, error = airbytehelpers.delete_source(orguser.org, source_id)
+    if error:
+        raise HttpError(400, error)
 
     return {"success": 1}
