@@ -19,28 +19,21 @@ from ddpui.ddpprefect import (
     SHELLOPERATION,
     DBTCLIPROFILE,
     SECRET,
-    AIRBYTECONNECTION,
-    AIRBYTESERVER,
 )
 from ddpui.models.org import (
-    OrgPrefectBlock,
     OrgWarehouse,
-    OrgDataFlow,
     OrgDataFlowv1,
     OrgPrefectBlockv1,
 )
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import Task, DataflowOrgTask, OrgTask, TaskLock
 from ddpui.ddpprefect.schema import (
-    PrefectAirbyteSync,
     PrefectDbtTaskSetup,
     PrefectDataFlowCreateSchema3,
-    PrefectFlowRunSchema,
-    PrefectDataFlowUpdateSchema3,
     PrefectSecretBlockCreate,
     PrefectShellTaskSetup,
-    PrefectDataFlowCreateSchema4,
 )
+from ddpui.core.dbtfunctions import gather_dbt_project_params
 
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
@@ -48,11 +41,12 @@ from ddpui.utils import timezone
 from ddpui.utils.constants import (
     TASK_DBTRUN,
     TASK_GITPULL,
-    TRANSFORM_TASKS_SEQ,
-    AIRBYTE_SYNC_TIMEOUT,
 )
-from ddpui.utils.prefectlogs import parse_prefect_logs
 from ddpui.utils.helpers import generate_hash_id
+from ddpui.core.pipelinefunctions import (
+    setup_dbt_core_task_config,
+    setup_git_pull_shell_task_config,
+)
 
 orgtaskapi = NinjaAPI(urls_namespace="orgtask")
 # http://127.0.0.1:8000/api/docs
@@ -376,8 +370,7 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
     if orguser.org.dbt is None:
         raise HttpError(400, "dbt is not configured for this client")
 
-    dbtrepodir = Path(os.getenv("CLIENTDBT_ROOT")) / orguser.org.slug / "dbtrepo"
-    project_dir = str(dbtrepodir)
+    dbt_project_params, error = gather_dbt_project_params(orguser.org)
 
     # check if the task is locked
     task_lock = TaskLock.objects.filter(orgtask=org_task).first()
@@ -390,31 +383,24 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
     task_lock = TaskLock.objects.create(orgtask=org_task, locked_by=orguser)
 
     if org_task.task.slug == TASK_GITPULL:
-        shell_env = {"secret-git-pull-url-block": ""}
-
         gitpull_secret_block = OrgPrefectBlockv1.objects.filter(
             org=orguser.org, block_type=SECRET, block_name__contains="git-pull"
         ).first()
 
-        if gitpull_secret_block is not None:
-            shell_env["secret-git-pull-url-block"] = gitpull_secret_block.block_name
-
-        payload = PrefectShellTaskSetup(
-            commands=["git pull"],
-            working_dir=project_dir,
-            env=shell_env,
-            slug=org_task.task.slug,
-            type=SHELLOPERATION,
+        task_config = setup_git_pull_shell_task_config(
+            org_task,
+            dbt_project_params.project_dir,
+            gitpull_secret_block,
         )
 
-        if payload.flow_name is None:
-            payload.flow_name = f"{orguser.org.name}-gitpull"
-        if payload.flow_run_name is None:
+        if task_config.flow_name is None:
+            task_config.flow_name = f"{orguser.org.name}-gitpull"
+        if task_config.flow_run_name is None:
             now = timezone.as_ist(datetime.now())
-            payload.flow_run_name = f"{now.isoformat()}"
+            task_config.flow_run_name = f"{now.isoformat()}"
 
         try:
-            result = prefect_service.run_shell_task_sync(payload)
+            result = prefect_service.run_shell_task_sync(task_config)
         except Exception as error:
             task_lock.delete()
             logger.exception(error)
@@ -426,9 +412,6 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
         if not dbt_env_dir.exists():
             raise HttpError(400, "create the dbt env first")
 
-        dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
-        target = orguser.org.dbt.default_schema
-
         # fetch the cli profile block
         cli_profile_block = OrgPrefectBlockv1.objects.filter(
             org=orguser.org, block_type=DBTCLIPROFILE
@@ -437,26 +420,18 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
         if cli_profile_block is None:
             raise HttpError(400, "dbt cli profile block not found")
 
-        payload = PrefectDbtTaskSetup(
-            slug=org_task.task.slug,
-            commands=[f"{dbt_binary} {org_task.task.command} --target {target}"],
-            env={},
-            working_dir=project_dir,
-            profiles_dir=f"{project_dir}/profiles/",
-            project_dir=project_dir,
-            cli_profile_block=cli_profile_block.block_name,
-            cli_args=[],
-            type=DBTCORE,
+        task_config = setup_dbt_core_task_config(
+            org_task, cli_profile_block, dbt_project_params
         )
 
-        if payload.flow_name is None:
-            payload.flow_name = f"{orguser.org.name}-{org_task.task.slug}"
-        if payload.flow_run_name is None:
+        if task_config.flow_name is None:
+            task_config.flow_name = f"{orguser.org.name}-{org_task.task.slug}"
+        if task_config.flow_run_name is None:
             now = timezone.as_ist(datetime.now())
-            payload.flow_run_name = f"{now.isoformat()}"
+            task_config.flow_run_name = f"{now.isoformat()}"
 
         try:
-            result = prefect_service.run_dbt_task_sync(payload)
+            result = prefect_service.run_dbt_task_sync(task_config)
         except Exception as error:
             task_lock.delete()
             logger.exception(error)
