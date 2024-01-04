@@ -117,26 +117,6 @@ def post_deployment_set_schedule(request, deployment_id, status):
     return {"success": 1}
 
 
-@prefectapi.post("/flows/airbyte_sync/", auth=auth.CanManagePipelines())
-def post_prefect_airbyte_sync_flow(request, payload: PrefectAirbyteSync):
-    """Run airbyte sync flow in prefect"""
-    orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    if payload.flowName is None:
-        payload.flowName = f"{orguser.org.name}-airbytesync"
-    if payload.flowRunName is None:
-        now = timezone.as_ist(datetime.now())
-        payload.flowRunName = f"{now.isoformat()}"
-    try:
-        result = prefect_service.run_airbyte_connection_sync(payload)
-    except Exception as error:
-        logger.exception(error)
-        raise HttpError(400, "failed to run sync") from error
-    return result
-
-
 @prefectapi.get("/flow_runs/{flow_run_id}/logs", auth=auth.CanManagePipelines())
 def get_flow_runs_logs(
     request, flow_run_id, offset: int = 0
