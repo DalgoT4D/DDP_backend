@@ -53,6 +53,7 @@ from ddpui.utils.constants import (
 )
 from ddpui.utils.prefectlogs import parse_prefect_logs
 from ddpui.utils.helpers import generate_hash_id
+from ddpui.core.pipelinefunctions import pipeline_sync_tasks
 
 pipelineapi = NinjaAPI(urls_namespace="pipeline")
 # http://127.0.0.1:8000/api/docs
@@ -103,7 +104,6 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
     if payload.name in [None, ""]:
         raise HttpError(400, "must provide a name for the flow")
 
-    seq = 0  # global sequence for all tasks
     tasks = []
     map_org_tasks = []  # map org tasks to dataflow
 
@@ -116,34 +116,13 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
             raise HttpError(400, "airbyte server block not found")
 
         # push sync tasks to pipeline
-        payload.connections.sort(key=lambda conn: conn.seq)
-        for connection in payload.connections:
-            logger.info(connection)
-            org_task = OrgTask.objects.filter(
-                org=orguser.org, connection_id=connection.id
-            ).first()
-            if org_task is None:
-                logger.info(
-                    f"connection id {connection.id} not found in org tasks; ignoring this airbyte sync"
-                )
-                continue
-            # map this org task to dataflow
-            map_org_tasks.append(org_task)
+        org_tasks, task_configs = pipeline_sync_tasks(
+            orguser.org, payload.connections, org_server_block
+        )
+        tasks += task_configs
+        map_org_tasks += org_tasks
 
-            logger.info(
-                f"connection id {connection.id} found in org tasks; pushing to pipeline"
-            )
-            seq += 1
-            task_config = {
-                "seq": seq,
-                "slug": org_task.task.slug,
-                "type": AIRBYTECONNECTION,
-                "airbyte_server_block": org_server_block.block_name,
-                "connection_id": connection.id,
-                "timeout": AIRBYTE_SYNC_TIMEOUT,
-            }
-            tasks.append(task_config)
-
+    seq = len(tasks)
     logger.info(f"Pipline has {seq} airbyte syncs")
 
     # check if pipeline has dbt transformation
@@ -285,12 +264,6 @@ def get_prefect_dataflows_v1(request):
     res = []
 
     for flow in org_data_flows:
-        # block_ids = DataflowBlock.objects.filter(dataflow=flow).values("opb__block_id")
-        # # if there is one there will typically be several - a sync,
-        # # a git-run, a git-test... we return the userinfo only for the first one
-        # lock = BlockLock.objects.filter(
-        #     opb__block_id__in=[x["opb__block_id"] for x in block_ids]
-        # ).first()
         org_task_ids = DataflowOrgTask.objects.filter(dataflow=flow).values_list(
             "orgtask_id", flat=True
         )
