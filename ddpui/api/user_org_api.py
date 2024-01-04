@@ -39,11 +39,11 @@ from ddpui.models.org_user import (
 from ddpui.models.orgtnc import OrgTnC
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils import secretsmanager
 
 from ddpui.utils.deleteorg import delete_warehouse_v1
 from ddpui.utils.orguserhelpers import from_orguser
-from ddpui.orguser import orguserfunctions
+from ddpui.core import orguserfunctions
+from ddpui.core import orgfunctions
 
 user_org_api = NinjaAPI(urls_namespace="userorg")
 # http://127.0.0.1:8000/api/docs
@@ -217,50 +217,10 @@ def post_organization_warehouse(request, payload: OrgWarehouseSchema):
     if payload.wtype not in ["postgres", "bigquery", "snowflake"]:
         raise HttpError(400, "unrecognized warehouse type " + payload.wtype)
 
-    destination = airbyte_service.create_destination(
-        orguser.org.airbyte_workspace_id,
-        f"{payload.wtype}-warehouse",
-        payload.destinationDefId,
-        payload.airbyteConfig,
-    )
-    logger.info("created destination having id " + destination["destinationId"])
+    _, error = orgfunctions.create_warehouse(orguser.org, payload)
+    if error:
+        raise HttpError(400, error)
 
-    # prepare the dbt credentials from airbyteConfig
-    dbt_credentials = None
-    if payload.wtype == "postgres":
-        dbt_credentials = {
-            "host": payload.airbyteConfig["host"],
-            "port": payload.airbyteConfig["port"],
-            "username": payload.airbyteConfig["username"],
-            "password": payload.airbyteConfig["password"],
-            "database": payload.airbyteConfig["database"],
-        }
-
-    elif payload.wtype == "bigquery":
-        dbt_credentials = json.loads(payload.airbyteConfig["credentials_json"])
-    elif payload.wtype == "snowflake":
-        dbt_credentials = {
-            "host": payload.airbyteConfig["host"],
-            "role": payload.airbyteConfig["role"],
-            "warehouse": payload.airbyteConfig["warehouse"],
-            "database": payload.airbyteConfig["database"],
-            "schema": payload.airbyteConfig["schema"],
-            "username": payload.airbyteConfig["username"],
-            "credentials": payload.airbyteConfig["credentials"],
-        }
-
-    warehouse = OrgWarehouse(
-        org=orguser.org,
-        name=payload.name,
-        wtype=payload.wtype,
-        credentials="",
-        airbyte_destination_id=destination["destinationId"],
-    )
-    credentials_lookupkey = secretsmanager.save_warehouse_credentials(
-        warehouse, dbt_credentials
-    )
-    warehouse.credentials = credentials_lookupkey
-    warehouse.save()
     return {"success": 1}
 
 
