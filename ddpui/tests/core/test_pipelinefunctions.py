@@ -61,7 +61,7 @@ def generate_sync_org_tasks(create_master_sync_task, org_with_server_block):
 
 
 def test_pipeline_sync_tasks_success(org_with_server_block, generate_sync_org_tasks):
-    """tests if it successfully returns all of sync tasks config for sync org tasks"""
+    """tests if function successfully returns all of sync tasks config for sync org tasks"""
     connections = [
         PrefectFlowAirbyteConnection2(id=conn_id, seq=(i + 1))
         for i, conn_id in enumerate(CONNECTION_IDS)
@@ -73,5 +73,30 @@ def test_pipeline_sync_tasks_success(org_with_server_block, generate_sync_org_ta
 
     assert len(org_tasks) == len(CONNECTION_IDS)
     assert len(task_configs) == len(CONNECTION_IDS)
+    assert task_configs[0]["connection_id"] == CONNECTION_IDS[0]
+    assert task_configs[1]["connection_id"] == CONNECTION_IDS[1]
+
+
+def test_pipeline_sync_tasks_success2(org_with_server_block, generate_sync_org_tasks):
+    """tests if function returns only those of sync tasks config that match with org tasks"""
+    connections = [
+        PrefectFlowAirbyteConnection2(id=conn_id, seq=(i + 1))
+        for i, conn_id in enumerate(CONNECTION_IDS)
+    ]
+
+    # add another connection id not present in our org tasks
+    connections.append(
+        PrefectFlowAirbyteConnection2(
+            id="some-fake-conn-id-123", seq=len(connections) + 1
+        )
+    )
+    server_block = OrgPrefectBlockv1.objects.filter(org=org_with_server_block).first()
+    (org_tasks, task_configs), error = pipeline_sync_tasks(
+        org_with_server_block, connections, server_block
+    )
+
+    assert len(org_tasks) == len(CONNECTION_IDS)
+    assert len(task_configs) == len(CONNECTION_IDS)
+    assert len(task_configs) != len(connections)
     assert task_configs[0]["connection_id"] == CONNECTION_IDS[0]
     assert task_configs[1]["connection_id"] == CONNECTION_IDS[1]
