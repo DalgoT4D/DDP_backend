@@ -17,13 +17,14 @@ from ddpui.ddpairbyte.schema import (
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
 )
-from ddpui.ddpprefect import AIRBYTESERVER, AIRBYTECONNECTION
+from ddpui.ddpprefect import AIRBYTESERVER
 from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.models.org import OrgDataFlowv1, OrgWarehouse
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskLock
-from ddpui.utils.constants import TASK_AIRBYTESYNC, AIRBYTE_SYNC_TIMEOUT
+from ddpui.utils.constants import TASK_AIRBYTESYNC
 from ddpui.utils.helpers import generate_hash_id
 from ddpui.utils import secretsmanager
+from ddpui.core.pipelinefunctions import setup_airbyte_sync_task_config
 
 logger = CustomLogger("airbyte")
 
@@ -210,14 +211,9 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
             deployment_params={
                 "config": {
                     "tasks": [
-                        {
-                            "slug": task.slug,
-                            "type": AIRBYTECONNECTION,
-                            "seq": 1,
-                            "airbyte_server_block": org_airbyte_server_block.block_name,
-                            "connection_id": airbyte_conn["connectionId"],
-                            "timeout": AIRBYTE_SYNC_TIMEOUT,
-                        }
+                        setup_airbyte_sync_task_config(
+                            org_task, org_airbyte_server_block
+                        ).to_json()
                     ]
                 }
             },
