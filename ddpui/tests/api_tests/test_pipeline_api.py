@@ -22,6 +22,7 @@ from ddpui.api.pipeline_api import (
     get_prefect_dataflows_v1,
     get_prefect_dataflow_v1,
     delete_prefect_dataflow_v1,
+    put_prefect_dataflow_v1,
 )
 from ddpui.ddpprefect import (
     DBTCLIPROFILE,
@@ -34,6 +35,7 @@ from ddpui.ddpprefect import (
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema4,
     PrefectFlowAirbyteConnection2,
+    PrefectDataFlowUpdateSchema3,
 )
 from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
@@ -269,6 +271,12 @@ def test_post_prefect_dataflow_v1_success(org_with_transformation_tasks):
     assert deployment["name"] == payload.name
     assert deployment["cron"] == payload.cron
 
+    # cleanup
+    OrgTask.objects.filter(
+        org=org_with_transformation_tasks,
+        connection_id__in=["test-conn-id-1", "test-conn-id-1"],
+    ).delete()
+
 
 @patch.multiple(
     "ddpui.ddpprefect.prefect_service",
@@ -280,7 +288,7 @@ def test_post_prefect_dataflow_v1_success2(org_with_transformation_tasks):
     """tests the success of creating dataflow with connections and dbt transform yes"""
     connections = [
         PrefectFlowAirbyteConnection2(id="test-conn-id-1", seq=1),
-        PrefectFlowAirbyteConnection2(id="test-conn-id-2", seq=1),
+        PrefectFlowAirbyteConnection2(id="test-conn-id-2", seq=2),
     ]
     # create org tasks for these connections
     for conn in connections:
@@ -306,6 +314,12 @@ def test_post_prefect_dataflow_v1_success2(org_with_transformation_tasks):
     assert deployment["deploymentId"] == "test-deploy-id"
     assert deployment["name"] == payload.name
     assert deployment["cron"] == payload.cron
+
+    # cleanup
+    OrgTask.objects.filter(
+        org=org_with_transformation_tasks,
+        connection_id__in=["test-conn-id-1", "test-conn-id-1"],
+    ).delete()
 
 
 def test_get_prefect_dataflows_v1_failure():
@@ -389,6 +403,12 @@ def test_get_prefect_dataflows_v1_success2(org_with_transformation_tasks):
     assert dataflows[1]["status"] is False
     assert dataflows[1]["deploymentId"] == flow1.deployment_id
 
+    # cleanup
+    OrgDataFlowv1.objects.filter(
+        org=org_with_transformation_tasks,
+        deployment_id__in=["test-dep-id-1", "test-dep-id-2"],
+    ).delete()
+
 
 def test_get_prefect_dataflow_v1_failure():
     """tests failure in fetching a dataflow due to missing org"""
@@ -444,6 +464,11 @@ def test_get_prefect_dataflow_v1_failure3(org_with_transformation_tasks):
 
     assert str(excinfo.value) == "failed to get deploymenet from prefect-proxy"
 
+    # cleanup
+    OrgDataFlowv1.objects.filter(
+        org=org_with_transformation_tasks, deployment_id="test-dep-id-1"
+    ).delete()
+
 
 @patch.multiple(
     "ddpui.ddpprefect.prefect_service",
@@ -487,7 +512,7 @@ def test_get_prefect_dataflow_v1_failure3(org_with_transformation_tasks):
 def test_get_prefect_dataflow_v1_success(org_with_transformation_tasks):
     """tests success in fetching a dataflow with both transformation tasks and airbyte syncs"""
     # create the dataflow to be fetched
-    OrgDataFlowv1.objects.create(
+    dataflow = OrgDataFlowv1.objects.create(
         org=org_with_transformation_tasks,
         name="flow-1",
         deployment_name="prefect-flow-1",
@@ -509,6 +534,11 @@ def test_get_prefect_dataflow_v1_success(org_with_transformation_tasks):
     assert len(dataflow["connections"]) == 2
     assert dataflow["dbtTransform"] == "yes"
     assert dataflow["isScheduleActive"] is True
+
+    # cleanup
+    OrgDataFlowv1.objects.filter(
+        org=org_with_transformation_tasks, deployment_id="test-dep-id-1"
+    ).delete()
 
 
 def test_delete_prefect_dataflow_v1_failure():
@@ -546,7 +576,7 @@ def test_delete_prefect_dataflow_v1_failure2(org_with_transformation_tasks):
 def test_delete_prefect_dataflow_v1_success(org_with_transformation_tasks):
     """tests success in deleting a dataflow"""
     # create dataflow to delete
-    OrgDataFlowv1.objects.create(
+    dataflow = OrgDataFlowv1.objects.create(
         org=org_with_transformation_tasks,
         name="flow-1",
         deployment_name="prefect-flow-1",
@@ -567,6 +597,152 @@ def test_delete_prefect_dataflow_v1_success(org_with_transformation_tasks):
             org=org_with_transformation_tasks, deployment_id="test-dep-id-1"
         ).count()
         == 0
+    )
+
+
+def test_put_prefect_dataflow_v1_failure():
+    """tests failure in update dataflow due to missing org"""
+    payload = PrefectDataFlowUpdateSchema3(
+        name="put-dataflow",
+        connections=[],
+        dbtTransform="yes",
+        cron="",
+    )
+    mock_orguser = Mock()
+    mock_orguser.org = None
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        put_prefect_dataflow_v1(mock_request, "deployment-id", payload)
+
+    assert str(excinfo.value) == "register an organization first"
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    update_dataflow_v1=Mock(return_value=[]),
+)
+def test_put_prefect_dataflow_v1_success(org_with_transformation_tasks):
+    """tests success in update dataflow; remove all connection syncs & keep the transform on"""
+    # create pipeline with airbyte syncs + dbt transform
+    dataflow = OrgDataFlowv1.objects.create(
+        org=org_with_transformation_tasks,
+        name="flow-1",
+        deployment_name="prefect-flow-1",
+        deployment_id="test-dep-id-1",
+        dataflow_type="orchestrate",
+    )
+
+    # create connection sync org tasks
+    task = Task.objects.filter(type="airbyte").first()
+    connection_ids = ["test-conn-id-1", "test-conn-id-2"]
+    for connection_id in connection_ids:
+        OrgTask.objects.create(
+            org=org_with_transformation_tasks, task=task, connection_id=connection_id
+        )
+
+    # dataflow orgtask mapping
+    for org_task in OrgTask.objects.filter(org=org_with_transformation_tasks).all():
+        DataflowOrgTask.objects.create(orgtask=org_task, dataflow=dataflow)
+
+    payload = PrefectDataFlowUpdateSchema3(
+        name="put-dataflow",
+        connections=[],
+        dbtTransform="yes",
+        cron="",
+    )
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_transformation_tasks
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    put_prefect_dataflow_v1(mock_request, "test-dep-id-1", payload)
+
+    assert (
+        DataflowOrgTask.objects.filter(
+            dataflow=dataflow, orgtask__task__type="airbyte"
+        ).count()
+        == 0
+    )
+    assert (
+        DataflowOrgTask.objects.filter(
+            dataflow=dataflow, orgtask__task__type="git"
+        ).count()
+        == 1
+    )
+    assert (
+        DataflowOrgTask.objects.filter(
+            dataflow=dataflow, orgtask__task__type="dbt"
+        ).count()
+        >= 1
+    )
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    update_dataflow_v1=Mock(return_value=[]),
+)
+def test_put_prefect_dataflow_v1_success2(org_with_transformation_tasks):
+    """tests success in update dataflow; add connection syncs & keep the transform on"""
+    # create pipeline with airbyte syncs + dbt transform
+    dataflow = OrgDataFlowv1.objects.create(
+        org=org_with_transformation_tasks,
+        name="flow-1",
+        deployment_name="prefect-flow-1",
+        deployment_id="test-dep-id-1",
+        dataflow_type="orchestrate",
+    )
+
+    # create connection sync org tasks
+    task = Task.objects.filter(type="airbyte").first()
+    connection_ids = ["test-conn-id-1", "test-conn-id-2"]
+    for connection_id in connection_ids:
+        OrgTask.objects.create(
+            org=org_with_transformation_tasks, task=task, connection_id=connection_id
+        )
+
+    # dataflow orgtask mapping
+    for org_task in OrgTask.objects.filter(org=org_with_transformation_tasks).all():
+        DataflowOrgTask.objects.create(orgtask=org_task, dataflow=dataflow)
+
+    payload = PrefectDataFlowUpdateSchema3(
+        name="put-dataflow",
+        connections=[
+            PrefectFlowAirbyteConnection2(id=conn_id, seq=i + 1)
+            for i, conn_id in enumerate(connection_ids)
+        ],
+        dbtTransform="yes",
+        cron="",
+    )
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_transformation_tasks
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    put_prefect_dataflow_v1(mock_request, "test-dep-id-1", payload)
+
+    assert (
+        DataflowOrgTask.objects.filter(
+            dataflow=dataflow, orgtask__task__type="airbyte"
+        ).count()
+        == 2
+    )
+
+    assert (
+        DataflowOrgTask.objects.filter(
+            dataflow=dataflow, orgtask__task__type="git"
+        ).count()
+        == 1
+    )
+    assert (
+        DataflowOrgTask.objects.filter(
+            dataflow=dataflow, orgtask__task__type="dbt"
+        ).count()
+        >= 1
     )
 
 
