@@ -21,6 +21,7 @@ from ddpui.api.pipeline_api import (
     post_prefect_dataflow_v1,
     get_prefect_dataflows_v1,
     get_prefect_dataflow_v1,
+    delete_prefect_dataflow_v1,
 )
 from ddpui.ddpprefect import (
     DBTCLIPROFILE,
@@ -508,6 +509,65 @@ def test_get_prefect_dataflow_v1_success(org_with_transformation_tasks):
     assert len(dataflow["connections"]) == 2
     assert dataflow["dbtTransform"] == "yes"
     assert dataflow["isScheduleActive"] is True
+
+
+def test_delete_prefect_dataflow_v1_failure():
+    """tests failure in deleting a dataflow due to missing org"""
+    mock_orguser = Mock()
+    mock_orguser.org = None
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        delete_prefect_dataflow_v1(mock_request, "deployment-id")
+
+    assert str(excinfo.value) == "register an organization first"
+
+
+def test_delete_prefect_dataflow_v1_failure2(org_with_transformation_tasks):
+    """tests failure in deleting a dataflow due to not found error"""
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_transformation_tasks
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        delete_prefect_dataflow_v1(mock_request, "deployment-id")
+
+    assert str(excinfo.value) == "pipeline not found"
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    delete_deployment_by_id=Mock(return_value=True),
+)
+def test_delete_prefect_dataflow_v1_success(org_with_transformation_tasks):
+    """tests success in deleting a dataflow"""
+    # create dataflow to delete
+    OrgDataFlowv1.objects.create(
+        org=org_with_transformation_tasks,
+        name="flow-1",
+        deployment_name="prefect-flow-1",
+        deployment_id="test-dep-id-1",
+        dataflow_type="orchestrate",
+    )
+
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_transformation_tasks
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    delete_prefect_dataflow_v1(mock_request, "test-dep-id-1")
+
+    assert (
+        OrgDataFlowv1.objects.filter(
+            org=org_with_transformation_tasks, deployment_id="test-dep-id-1"
+        ).count()
+        == 0
+    )
 
 
 @patch.multiple(
