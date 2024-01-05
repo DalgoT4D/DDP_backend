@@ -23,6 +23,7 @@ from ddpui.api.pipeline_api import (
     get_prefect_dataflow_v1,
     delete_prefect_dataflow_v1,
     put_prefect_dataflow_v1,
+    post_deployment_set_schedule,
 )
 from ddpui.ddpprefect import (
     DBTCLIPROFILE,
@@ -744,6 +745,76 @@ def test_put_prefect_dataflow_v1_success2(org_with_transformation_tasks):
         ).count()
         >= 1
     )
+
+
+def test_post_deployment_set_schedule_failure():
+    """tests failure in setting schedule for dataflow due to missing org"""
+    mock_orguser = Mock()
+    mock_orguser.org = None
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        post_deployment_set_schedule(mock_request, "deployment-id", "active")
+
+    assert str(excinfo.value) == "register an organization first"
+
+
+def test_post_deployment_set_schedule_failure2(org_with_transformation_tasks):
+    """tests failure in setting schedule for dataflow due to incorrect status value"""
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_transformation_tasks
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        post_deployment_set_schedule(
+            mock_request, "deployment-id", "some-fake-status-value"
+        )
+
+    assert str(excinfo.value) == "incorrect status value"
+
+    with pytest.raises(HttpError) as excinfo:
+        post_deployment_set_schedule(mock_request, "deployment-id", None)
+
+    assert str(excinfo.value) == "incorrect status value"
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    set_deployment_schedule=Mock(side_effect=Exception("error")),
+)
+def test_post_deployment_set_schedule_failure3(org_with_transformation_tasks):
+    """tests failure in setting schedule for dataflow due to error from prefect"""
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_transformation_tasks
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        post_deployment_set_schedule(mock_request, "deployment-id", "active")
+
+    assert str(excinfo.value) == "failed to change flow state"
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    set_deployment_schedule=Mock(return_value=True),
+)
+def test_post_deployment_set_schedule_success(org_with_transformation_tasks):
+    """tests success in setting schedule for dataflow"""
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_transformation_tasks
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    res = post_deployment_set_schedule(mock_request, "deployment-id", "active")
+
+    assert res["success"] == 1
 
 
 @patch.multiple(
