@@ -15,25 +15,18 @@ from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service
 
 from ddpui.ddpprefect import (
-    DBTCORE,
-    SHELLOPERATION,
     DBTCLIPROFILE,
     SECRET,
 )
 from ddpui.models.org import (
     OrgWarehouse,
-    OrgDataFlowv1,
     OrgPrefectBlockv1,
 )
 from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import Task, DataflowOrgTask, OrgTask, TaskLock
+from ddpui.models.tasks import DataflowOrgTask, OrgTask, TaskLock
 from ddpui.ddpprefect.schema import (
-    PrefectDbtTaskSetup,
-    PrefectDataFlowCreateSchema3,
     PrefectSecretBlockCreate,
-    PrefectShellTaskSetup,
 )
-from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.core.dbtfunctions import gather_dbt_project_params
 from ddpui.core.orgtaskfunctions import create_transform_tasks
 from ddpui.utils.custom_logger import CustomLogger
@@ -43,7 +36,6 @@ from ddpui.utils.constants import (
     TASK_DBTRUN,
     TASK_GITPULL,
 )
-from ddpui.utils.helpers import generate_hash_id
 from ddpui.core.pipelinefunctions import (
     setup_dbt_core_task_config,
     setup_git_pull_shell_task_config,
