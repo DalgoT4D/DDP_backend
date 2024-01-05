@@ -20,8 +20,16 @@ from ddpui.api.pipeline_api import (
     post_run_prefect_org_deployment_task,
     post_prefect_dataflow_v1,
     get_prefect_dataflows_v1,
+    get_prefect_dataflow_v1,
 )
-from ddpui.ddpprefect import DBTCLIPROFILE, SECRET, AIRBYTESERVER
+from ddpui.ddpprefect import (
+    DBTCLIPROFILE,
+    SECRET,
+    AIRBYTESERVER,
+    AIRBYTECONNECTION,
+    DBTCORE,
+    SHELLOPERATION,
+)
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema4,
     PrefectFlowAirbyteConnection2,
@@ -379,6 +387,127 @@ def test_get_prefect_dataflows_v1_success2(org_with_transformation_tasks):
 
     assert dataflows[1]["status"] is False
     assert dataflows[1]["deploymentId"] == flow1.deployment_id
+
+
+def test_get_prefect_dataflow_v1_failure():
+    """tests failure in fetching a dataflow due to missing org"""
+    mock_orguser = Mock()
+    mock_orguser.org = None
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        get_prefect_dataflow_v1(mock_request, "deployment-id")
+
+    assert str(excinfo.value) == "register an organization first"
+
+
+def test_get_prefect_dataflow_v1_failure2(org_with_transformation_tasks):
+    """tests failure in fetching a dataflow that does not exist"""
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_transformation_tasks
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        get_prefect_dataflow_v1(mock_request, "deployment-id")
+
+    assert str(excinfo.value) == "pipeline does not exist"
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    get_deployment=Mock(side_effect=Exception("not found")),
+)
+def test_get_prefect_dataflow_v1_failure3(org_with_transformation_tasks):
+    """tests failure in fetching a dataflow which prefect failed to fetch"""
+    # create the dataflow to be fetched
+    OrgDataFlowv1.objects.create(
+        org=org_with_transformation_tasks,
+        name="flow-1",
+        deployment_name="prefect-flow-1",
+        deployment_id="test-dep-id-1",
+        dataflow_type="orchestrate",
+    )
+
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_transformation_tasks
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        get_prefect_dataflow_v1(mock_request, "test-dep-id-1")
+
+    assert str(excinfo.value) == "failed to get deploymenet from prefect-proxy"
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    get_deployment=Mock(
+        return_value={
+            "name": "deployment-name",
+            "cron": "cron-time",
+            "isScheduleActive": True,
+            "parameters": {
+                "config": {
+                    "tasks": [
+                        {"type": AIRBYTECONNECTION, "seq": 1, "connection_id": "id-1"},
+                        {"type": AIRBYTECONNECTION, "seq": 2, "connection_id": "id-2"},
+                        {"type": SHELLOPERATION, "seq": 3},
+                        {"type": DBTCORE, "seq": 4},
+                    ]
+                }
+            },
+        }
+    ),
+)
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    get_connection=Mock(
+        return_value={
+            "name": "fake-conn",
+            "sourceId": "fake-source-id-1",
+            "connectionId": "fake-connection-id-1",
+            "destinationId": "fake-destination-id-1",
+            "catalogId": "fake-source-catalog-id-1",
+            "syncCatalog": "sync-catalog",
+            "status": "conn-status",
+            "source": {"id": "fake-source-id-1", "name": "fake-source-name-1"},
+            "destination": {
+                "id": "fake-destination-id-1",
+                "name": "fake-destination-name-1",
+            },
+        }
+    ),
+)
+def test_get_prefect_dataflow_v1_success(org_with_transformation_tasks):
+    """tests success in fetching a dataflow with both transformation tasks and airbyte syncs"""
+    # create the dataflow to be fetched
+    OrgDataFlowv1.objects.create(
+        org=org_with_transformation_tasks,
+        name="flow-1",
+        deployment_name="prefect-flow-1",
+        deployment_id="test-dep-id-1",
+        dataflow_type="orchestrate",
+    )
+
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_transformation_tasks
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    dataflow = get_prefect_dataflow_v1(mock_request, "test-dep-id-1")
+
+    assert dataflow["name"] == "flow-1"
+    assert dataflow["deploymentName"] == "deployment-name"
+    assert dataflow["cron"] == dataflow["cron"]
+    assert len(dataflow["connections"]) == 2
+    assert dataflow["dbtTransform"] == "yes"
+    assert dataflow["isScheduleActive"] is True
 
 
 @patch.multiple(
