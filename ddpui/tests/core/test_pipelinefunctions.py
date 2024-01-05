@@ -141,7 +141,7 @@ def test_pipeline_dbt_git_tasks_success(
     assert seqs == [i + 1 for i in range(len(dbt_git_tasks))]
 
 
-def test_pipeline_dbt_git_tasks_success(
+def test_pipeline_dbt_git_tasks_success2(
     org_with_server_block, generate_transform_org_tasks
 ):
     """tests the sequence of tasks based on a different start offset"""
