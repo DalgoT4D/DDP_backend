@@ -4,6 +4,9 @@ from unittest.mock import Mock, patch
 import django
 import pytest
 import yaml
+import json
+from pathlib import Path
+from django.apps import apps
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
@@ -21,25 +24,17 @@ from ddpui.utils.constants import TASK_DBTRUN
 pytestmark = pytest.mark.django_db
 
 
-def seed_tasks():
-    # seed data
-    for task in [
-        {"type": "git", "slug": "git-pull", "label": "GIT pull", "command": "git pull"},
-        {"type": "dbt", "slug": "dbt-clean", "label": "DBT clean", "command": "clean"},
-        {"type": "dbt", "slug": "dbt-deps", "label": "DBT deps", "command": "deps"},
-        {"type": "dbt", "slug": "dbt-run", "label": "DBT run", "command": "run"},
-        {"type": "dbt", "slug": "dbt-test", "label": "DBT test", "command": "test"},
-        {
-            "type": "airbyte",
-            "slug": "airbyte-sync",
-            "label": "AIRBYTE sync",
-            "command": None,
-        },
-    ]:
-        Task.objects.create(**task)
-
-
 # ================================================================================
+@pytest.fixture
+def seed_master_tasks():
+    app_dir = os.path.join(Path(apps.get_app_config("ddpui").path), "..")
+    seed_dir = os.path.abspath(os.path.join(app_dir, "seed"))
+    f = open(os.path.join(seed_dir, "tasks.json"))
+    tasks = json.load(f)
+    for task in tasks:
+        Task.objects.create(**task["fields"])
+
+
 @pytest.fixture()
 def org_without_dbt_workspace():
     """org without dbt workspace"""
@@ -57,7 +52,7 @@ def org_without_dbt_workspace():
 
 
 @pytest.fixture()
-def org_with_dbt_workspace(tmpdir_factory):
+def org_with_dbt_workspace(tmpdir_factory, seed_master_tasks):
     """a pytest fixture which creates an Org having an dbt workspace"""
     print("creating org_with_dbt_workspace")
     org_slug = "test-org-slug"
@@ -148,9 +143,6 @@ def org_with_transformation_tasks(tmpdir_factory):
         block_id="cliprofile-blk-id",
         block_name="cliprofile-blk-name",
     )
-
-    # seed data
-    seed_tasks()
 
     for task in Task.objects.filter(type__in=["dbt", "git"]).all():
         org_task = OrgTask.objects.create(org=org, task=task)
