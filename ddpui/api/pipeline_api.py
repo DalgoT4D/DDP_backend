@@ -23,7 +23,7 @@ from ddpui.models.org import (
     OrgPrefectBlockv1,
 )
 from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import Task, DataflowOrgTask, TaskLock
+from ddpui.models.tasks import DataflowOrgTask, TaskLock
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
     PrefectFlowRunSchema,
