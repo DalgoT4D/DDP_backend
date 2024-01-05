@@ -19,6 +19,7 @@ from django.contrib.auth.models import User
 from ddpui.api.pipeline_api import (
     post_run_prefect_org_deployment_task,
     post_prefect_dataflow_v1,
+    get_prefect_dataflows_v1,
 )
 from ddpui.ddpprefect import DBTCLIPROFILE, SECRET, AIRBYTESERVER
 from ddpui.ddpprefect.schema import (
@@ -296,6 +297,88 @@ def test_post_prefect_dataflow_v1_success2(org_with_transformation_tasks):
     assert deployment["deploymentId"] == "test-deploy-id"
     assert deployment["name"] == payload.name
     assert deployment["cron"] == payload.cron
+
+
+def test_get_prefect_dataflows_v1_failure():
+    """tests failure in get dataflows due to missing org"""
+    mock_orguser = Mock()
+    mock_orguser.org = None
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        get_prefect_dataflows_v1(mock_request)
+
+    assert str(excinfo.value) == "register an organization first"
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    get_filtered_deployments=Mock(return_value=[]),
+)
+def test_get_prefect_dataflows_v1_success(org_with_transformation_tasks):
+    """tests success with 0 dataflows for the org"""
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_transformation_tasks
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    dataflows = get_prefect_dataflows_v1(mock_request)
+
+    assert len(dataflows) == 0
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    get_filtered_deployments=Mock(
+        return_value=[
+            {"deploymentId": "test-dep-id-1", "isScheduleActive": True},
+            {"deploymentId": "test-dep-id-2", "isScheduleActive": False},
+        ]
+    ),
+    get_last_flow_run_by_deployment_id=Mock(
+        return_value="some-last-run-prefect-object"
+    ),
+)
+def test_get_prefect_dataflows_v1_success2(org_with_transformation_tasks):
+    """tests success with atleast 1 dataflow/pipeline for the org"""
+    # setup two pipelines to fetch for the org
+    flow0 = OrgDataFlowv1.objects.create(
+        org=org_with_transformation_tasks,
+        name="flow-1",
+        deployment_name="prefect-flow-1",
+        deployment_id="test-dep-id-1",
+        dataflow_type="orchestrate",
+    )
+    flow1 = OrgDataFlowv1.objects.create(
+        org=org_with_transformation_tasks,
+        name="flow-2",
+        deployment_name="prefect-flow-2",
+        deployment_id="test-dep-id-2",
+        dataflow_type="orchestrate",
+    )
+
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_transformation_tasks
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    dataflows = get_prefect_dataflows_v1(mock_request)
+
+    assert len(dataflows) == 2
+    assert dataflows[0]["deploymentId"] == flow0.deployment_id
+    assert dataflows[0]["name"] == flow0.name
+    assert dataflows[0]["cron"] == flow0.cron
+    assert dataflows[0]["deploymentName"] == flow0.deployment_name
+    assert dataflows[0]["lastRun"] == "some-last-run-prefect-object"
+    assert dataflows[0]["status"] is True
+    assert dataflows[0]["lock"] is None
+
+    assert dataflows[1]["status"] is False
+    assert dataflows[1]["deploymentId"] == flow1.deployment_id
 
 
 @patch.multiple(
