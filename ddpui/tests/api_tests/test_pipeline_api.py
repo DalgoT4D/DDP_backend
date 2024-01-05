@@ -7,6 +7,8 @@ import yaml
 import json
 from pathlib import Path
 from django.apps import apps
+from ninja.errors import HttpError
+
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
@@ -14,8 +16,15 @@ django.setup()
 
 from django.contrib.auth.models import User
 
-from ddpui.api.pipeline_api import post_run_prefect_org_deployment_task
-from ddpui.ddpprefect import DBTCLIPROFILE, SECRET
+from ddpui.api.pipeline_api import (
+    post_run_prefect_org_deployment_task,
+    post_prefect_dataflow_v1,
+)
+from ddpui.ddpprefect import DBTCLIPROFILE, SECRET, AIRBYTESERVER
+from ddpui.ddpprefect.schema import (
+    PrefectDataFlowCreateSchema4,
+    PrefectFlowAirbyteConnection2,
+)
 from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask, Task, TaskLock
@@ -36,7 +45,7 @@ def seed_master_tasks():
 
 
 @pytest.fixture()
-def org_without_dbt_workspace():
+def org_without_dbt_workspace(seed_master_tasks):
     """org without dbt workspace"""
     print("creating org")
     org_slug = "test-org-slug"
@@ -88,7 +97,7 @@ def org_with_dbt_workspace(tmpdir_factory, seed_master_tasks):
 
 
 @pytest.fixture()
-def org_with_transformation_tasks(tmpdir_factory):
+def org_with_transformation_tasks(tmpdir_factory, seed_master_tasks):
     """org having the transformation tasks and dbt workspace"""
     print("creating org with tasks")
 
@@ -128,6 +137,14 @@ def org_with_transformation_tasks(tmpdir_factory):
     )
     OrgUser.objects.create(org=org, user=user, role=3, email_verified=True)
 
+    # server block
+    OrgPrefectBlockv1.objects.create(
+        org=org,
+        block_type=AIRBYTESERVER,
+        block_id="server-blk-id",
+        block_name="server-blk-name",
+    )
+
     # create secret block
     OrgPrefectBlockv1.objects.create(
         org=org,
@@ -164,6 +181,121 @@ def org_with_transformation_tasks(tmpdir_factory):
     yield org
 
     org.delete()
+
+
+# ================================================================================
+
+
+def test_post_prefect_dataflow_v1_failure1():
+    """tests the failure due to missing organization"""
+    connections = [PrefectFlowAirbyteConnection2(id="test-conn-id", seq=1)]
+    payload = PrefectDataFlowCreateSchema4(
+        name="test-dataflow", connections=connections, dbtTransform="yes", cron=""
+    )
+    mock_orguser = Mock()
+    mock_orguser.org = None
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        post_prefect_dataflow_v1(mock_request, payload)
+
+    assert str(excinfo.value) == "register an organization first"
+
+
+def test_post_prefect_dataflow_v1_failure2(org_with_transformation_tasks):
+    """tests the failure due to missing name of the dataflow in the payload"""
+    connections = [PrefectFlowAirbyteConnection2(id="test-conn-id", seq=1)]
+    payload = PrefectDataFlowCreateSchema4(
+        name="", connections=connections, dbtTransform="yes", cron=""
+    )
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_transformation_tasks
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        post_prefect_dataflow_v1(mock_request, payload)
+
+    assert str(excinfo.value) == "must provide a name for the flow"
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    create_dataflow_v1=Mock(
+        return_value={"deployment": {"name": "test-deploy", "id": "test-deploy-id"}}
+    ),
+)
+def test_post_prefect_dataflow_v1_success(org_with_transformation_tasks):
+    """tests the success of creating dataflow with only connections and no transform"""
+    connections = [
+        PrefectFlowAirbyteConnection2(id="test-conn-id-1", seq=1),
+        PrefectFlowAirbyteConnection2(id="test-conn-id-2", seq=1),
+    ]
+    # create org tasks for these connections
+    for conn in connections:
+        OrgTask.objects.create(
+            org=org_with_transformation_tasks,
+            task=Task.objects.filter(type__in=["airbyte"]).first(),
+            connection_id=conn.id,
+        )
+    payload = PrefectDataFlowCreateSchema4(
+        name="test-dataflow",
+        connections=connections,
+        dbtTransform="no",
+        cron="test-cron",
+    )
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_transformation_tasks
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    deployment = post_prefect_dataflow_v1(mock_request, payload)
+
+    assert deployment["deploymentId"] == "test-deploy-id"
+    assert deployment["name"] == payload.name
+    assert deployment["cron"] == payload.cron
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    create_dataflow_v1=Mock(
+        return_value={"deployment": {"name": "test-deploy", "id": "test-deploy-id"}}
+    ),
+)
+def test_post_prefect_dataflow_v1_success2(org_with_transformation_tasks):
+    """tests the success of creating dataflow with connections and dbt transform yes"""
+    connections = [
+        PrefectFlowAirbyteConnection2(id="test-conn-id-1", seq=1),
+        PrefectFlowAirbyteConnection2(id="test-conn-id-2", seq=1),
+    ]
+    # create org tasks for these connections
+    for conn in connections:
+        OrgTask.objects.create(
+            org=org_with_transformation_tasks,
+            task=Task.objects.filter(type__in=["airbyte"]).first(),
+            connection_id=conn.id,
+        )
+    payload = PrefectDataFlowCreateSchema4(
+        name="test-dataflow",
+        connections=connections,
+        dbtTransform="yes",
+        cron="test-cron",
+    )
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_transformation_tasks
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    deployment = post_prefect_dataflow_v1(mock_request, payload)
+
+    assert deployment["deploymentId"] == "test-deploy-id"
+    assert deployment["name"] == payload.name
+    assert deployment["cron"] == payload.cron
 
 
 @patch.multiple(
