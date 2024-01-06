@@ -28,7 +28,7 @@ class Command(BaseCommand):
             for job in response["jobs"]:
                 for attempt in job["attempts"]:
                     timestamp = datetime.fromtimestamp(attempt["createdAt"])
-                    bytes_synced = attempt["bytesSynced"]
+                    bytes_synced = attempt.get("bytesSynced", 0)
                     yyyymmdd = timestamp.strftime("%Y-%m-%d")
                     hhmm = timestamp.strftime("%H:%M:%S")
                     print(f"{org.slug:20} {yyyymmdd:20} {hhmm:6} {bytes_synced}")
