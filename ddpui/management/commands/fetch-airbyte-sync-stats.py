@@ -15,6 +15,9 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument("--org", type=str, help="org slug")
+        parser.add_argument(
+            "--megabytes", action="store_true", help="display in megabytes"
+        )
 
     def handle(self, *args, **options):
         """for each org, fetch orchestration pipeline(s) for airbyte sync"""
@@ -31,4 +34,6 @@ class Command(BaseCommand):
                     bytes_synced = attempt.get("bytesSynced", 0)
                     yyyymmdd = timestamp.strftime("%Y-%m-%d")
                     hhmm = timestamp.strftime("%H:%M:%S")
-                    print(f"{org.slug:20} {yyyymmdd:20} {hhmm:6} {bytes_synced}")
+                    if options["megabytes"]:
+                        bytes_synced = bytes_synced / 1024 / 1024
+                    print(f"{org.slug:20} {yyyymmdd:20} {hhmm:20} {bytes_synced}")
