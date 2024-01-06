@@ -30,4 +30,5 @@ class Command(BaseCommand):
                     timestamp = datetime.fromtimestamp(attempt["createdAt"])
                     bytes_synced = attempt["bytesSynced"]
                     yyyymmdd = timestamp.strftime("%Y-%m-%d")
-                    print(f"{org.slug:20} {yyyymmdd:20} {bytes_synced}")
+                    hhmm = timestamp.strftime("%H:%M:%S")
+                    print(f"{org.slug:20} {yyyymmdd:20} {hhmm:6} {bytes_synced}")
