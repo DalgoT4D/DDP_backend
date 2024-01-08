@@ -11,8 +11,8 @@ TASK_AIRBYTESYNC = "airbyte-sync"
 # Dbt transformation sequence task slugs; we can always take this from the user/frontend also
 TRANSFORM_TASKS_SEQ = {
     TASK_GITPULL: 1,
-    TASK_DBTDEPS: 2,
-    TASK_DBTCLEAN: 3,
+    TASK_DBTCLEAN: 2,
+    TASK_DBTDEPS: 3,
     TASK_DBTRUN: 4,
     TASK_DBTTEST: 5,
     TASK_DOCSGENERATE: 6,
