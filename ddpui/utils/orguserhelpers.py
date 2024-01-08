@@ -18,6 +18,7 @@ def from_orguser(orguser: OrgUser):
         role=orguser.role,
         role_slug=slugify(OrgUserRole(orguser.role).name),
         wtype=warehouse.wtype if warehouse else None,
+        is_demo=orguser.org.is_demo if orguser.org else False,
     )
     if orguser.org:
         response.org.tnc_accepted = OrgTnC.objects.filter(org=orguser.org).exists()

@@ -374,6 +374,9 @@ def delete_organization_warehouses_v1(request):
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
 
+    if orguser.org.is_demo:
+        raise HttpError(403, "insufficient permissions")
+
     delete_warehouse_v1(orguser.org)
 
     return {"success": 1}

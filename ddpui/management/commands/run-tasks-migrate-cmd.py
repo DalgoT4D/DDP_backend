@@ -18,6 +18,8 @@ from ddpui.utils.constants import (
     AIRBYTE_SYNC_TIMEOUT,
     TASK_DBTRUN,
     TASK_GITPULL,
+    TASK_DBTCLEAN,
+    TASK_DBTDEPS,
     TRANSFORM_TASKS_SEQ,
 )
 from ddpui.ddpprefect import (
@@ -1117,6 +1119,78 @@ class Command(BaseCommand):
                         f"ROLL BACK: something wrong deleting deployment {new_dataflow.deployment_id} from django db"
                     )
 
+    def fix_dbt_clean_deps_task_seq_pipelines(self, org: Org):
+        """
+        Fix the sequence between dbt clean & dbt deps. Dbt clean should run before dbt deps
+        """
+        for new_dataflow in OrgDataFlowv1.objects.filter(
+            org=org, dataflow_type="orchestrate"
+        ).all():
+            # update deployment params
+            deployment = None
+            try:
+                deployment = prefect_service.get_deployment(new_dataflow.deployment_id)
+            except Exception as error:
+                logger.info(
+                    f"Something went wrong in fetching the deployment with id '{new_dataflow.deployment_id}' for {org.slug}"
+                )
+                logger.exception(error)
+                logger.debug("skipping to next deployment")
+                continue
+
+            params = deployment["parameters"]
+            logger.info(f"FOUND PARAMS for {new_dataflow.deployment_id}")
+            try:
+                deps_task_seq = None
+                clean_task_seq = None
+                for task_config in params["config"]["tasks"]:
+                    if task_config["slug"] == TASK_DBTCLEAN:
+                        clean_task_seq = task_config["seq"]
+
+                    if task_config["slug"] == TASK_DBTDEPS:
+                        deps_task_seq = task_config["seq"]
+
+                if not (deps_task_seq and clean_task_seq):
+                    logger.info("SKIPPING; seq number for either clean or deps is None")
+                    self.successes.append(
+                        f"SKIPPING; seq number for either clean or deps is None;  deps : {deps_task_seq}, clean : {clean_task_seq}"
+                    )
+                    continue
+
+                # update seq
+                for task_config in params["config"]["tasks"]:
+                    if task_config["slug"] == TASK_DBTCLEAN:
+                        task_config["seq"] = min(deps_task_seq, clean_task_seq)
+
+                    if task_config["slug"] == TASK_DBTDEPS:
+                        task_config["seq"] = max(deps_task_seq, clean_task_seq)
+
+                logger.info(
+                    f"successfully updated sequence for dbts & clean task for deployment {new_dataflow.deployment_id}"
+                )
+                self.successes.append(
+                    f"successfully updated sequence for dbts & clean task for deployment {new_dataflow.deployment_id}"
+                )
+
+                payload = PrefectDataFlowUpdateSchema3(
+                    name=new_dataflow.name,  # wont be updated
+                    connections=[],  # wont be updated
+                    dbtTransform="ignore",  # wont be updated
+                    cron=new_dataflow.cron if new_dataflow.cron else "",
+                    deployment_params=params,
+                )
+                prefect_service.update_dataflow_v1(new_dataflow.deployment_id, payload)
+                logger.info(
+                    f"updated sequence of clean/deps in deployment params for the deployment with id {new_dataflow.deployment_id} for {org.slug}"
+                )
+            except Exception as error:
+                logger.info(
+                    f"Something went wrong in updating sequence of clean/deps in the deployment params with id '{new_dataflow.deployment_id}' for {org.slug}"
+                )
+                logger.exception(error)
+                logger.debug("skipping to next loop")
+                continue
+
     def handle(self, *args, **options):
         slug = options["slug"]
         query = Org.objects
@@ -1128,14 +1202,7 @@ class Command(BaseCommand):
         self.successes.append(f"Running the script for {slug} org")
         for org in query.all():
             self.successes.append(f"Starting scripts for {org.slug}")
-            self.migrate_airbyte_server_blocks(org)
-            self.migrate_manual_sync_conn_deployments(org)
-            self.roll_back_manual_sync_conn_deployments(org)
-            self.create_cli_profile_and_secret_blocks(org)
-            self.migrate_transformation_blocks(org)
-            self.migrate_manual_dbt_run_deployments(org)
-            self.migrate_org_pipelines(org)
-            self.roll_back_org_pipelines(org)
+            self.fix_dbt_clean_deps_task_seq_pipelines(org)
 
         # show summary
         print("=" * 80)
