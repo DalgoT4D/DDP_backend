@@ -51,7 +51,7 @@ class Org(models.Model):
     is_demo = models.BooleanField(default=False)
 
     def __str__(self) -> str:
-        demostr = "demo-" + ("yes" if self.is_demo else "no")
+        demostr = "demo=" + ("yes" if self.is_demo else "no")
         return f"Org[{self.slug}|{self.name}|{self.airbyte_workspace_id}|{demostr}]"
 
 
