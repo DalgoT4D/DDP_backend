@@ -114,6 +114,7 @@ class OrgSchema(Schema):
     viz_url: str = None
     viz_login_type: str = None
     tnc_accepted: bool = None
+    is_demo: bool = False
 
 
 class OrgWarehouse(models.Model):
