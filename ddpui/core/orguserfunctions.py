@@ -27,6 +27,7 @@ from ddpui.models.org_user import (
     VerifyEmailSchema,
     DeleteOrgUserPayload,
 )
+from ddpui.models.org import Org
 from ddpui.models.orgtnc import OrgTnC
 from ddpui.utils import sendgrid
 from ddpui.utils import helpers
@@ -70,7 +71,7 @@ def signup_orguser(payload: OrgUserCreate):
     """create an orguser and send an email"""
 
     signupcode = payload.signupcode
-    if signupcode != os.getenv("SIGNUPCODE"):
+    if signupcode not in [os.getenv("SIGNUPCODE"), os.getenv("DEMO_SIGNUPCODE")]:
         return None, "That is not the right signup code"
 
     if User.objects.filter(email=payload.email).exists():
@@ -82,11 +83,20 @@ def signup_orguser(payload: OrgUserCreate):
     if not helpers.isvalid_email(payload.email):
         return None, "that is not a valid email address"
 
+    is_demo = True if (signupcode == os.getenv("DEMO_SIGNUPCODE")) else False
+    demo_org = None  # common demo org
+    if is_demo:
+        demo_org = Org.objects.filter(is_demo=True).first()
+        if demo_org is None:
+            return None, "demo org has not been setup"
+
     user = User.objects.create_user(
         username=payload.email, email=payload.email, password=payload.password
     )
     UserAttributes.objects.create(user=user)
-    orguser = OrgUser.objects.create(user=user, role=OrgUserRole.ACCOUNT_MANAGER)
+    orguser = OrgUser.objects.create(
+        user=user, role=OrgUserRole.ACCOUNT_MANAGER, org=demo_org
+    )
     orguser.save()
     logger.info(
         f"created user [account-manager] "
@@ -106,6 +116,7 @@ def signup_orguser(payload: OrgUserCreate):
         sendgrid.send_signup_email(payload.email, reset_url)
     except Exception:
         return None, "failed to send email"
+
     return from_orguser(orguser), None
 
 
@@ -427,6 +438,12 @@ def verify_email(payload: VerifyEmailSchema):
     # verify email for all the orgusers
     OrgUser.objects.filter(user_id=orguser.user.id).update(email_verified=True)
     UserAttributes.objects.filter(user=orguser.user).update(email_verified=True)
+
+    if orguser.org.is_demo:
+        try:
+            sendgrid.send_demo_account_post_verify_email(orguser.user.email)
+        except Exception:
+            return None, "failed to send email"
 
     return None, None
 

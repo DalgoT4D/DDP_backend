@@ -90,6 +90,7 @@ class OrgUserResponse(Schema):
     role: int
     role_slug: str
     wtype: str | None
+    is_demo: bool = False
 
 
 class Invitation(models.Model):

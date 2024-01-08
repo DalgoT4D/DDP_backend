@@ -87,3 +87,20 @@ def send_youve_been_added_email(to_email: str, added_by: str, org_name: str) -> 
             "url": os.getenv("FRONTEND_URL"),
         },
     )
+
+
+def send_demo_account_post_verify_email(to_email: str) -> None:
+    """
+    sends the following in the email
+    - the demo superset credentials for the demo account
+    - data source credentials
+    - link to documentation
+    """
+    send_template_message(
+        os.getenv("DEMO_SENDGRID_SIGNUP_TEMPLATE"),
+        to_email,
+        {
+            "username": os.getenv("DEMO_SUPERSET_USERNAME"),
+            "password": os.getenv("DEMO_SUPERSET_PASSWORD"),
+        },
+    )
