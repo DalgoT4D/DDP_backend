@@ -48,9 +48,11 @@ class Org(models.Model):
     viz_login_type = models.CharField(
         choices=OrgVizLoginType.choices(), max_length=50, null=True
     )
+    is_demo = models.BooleanField(default=False)
 
     def __str__(self) -> str:
-        return f"Org[{self.slug}|{self.name}|{self.airbyte_workspace_id}]"
+        demostr = "demo-" + ("yes" if self.is_demo else "no")
+        return f"Org[{self.slug}|{self.name}|{self.airbyte_workspace_id}|{demostr}]"
 
 
 class OrgPrefectBlock(models.Model):
