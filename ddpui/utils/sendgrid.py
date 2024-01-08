@@ -89,9 +89,12 @@ def send_youve_been_added_email(to_email: str, added_by: str, org_name: str) -> 
     )
 
 
-def send_demo_account_signup_email(to_email: str) -> None:
+def send_demo_account_post_verify_email(to_email: str) -> None:
     """
-    sends an email to pass the demo superset credentials for the demo account
+    sends the following in the email
+    - the demo superset credentials for the demo account
+    - data source credentials
+    - link to documentation
     """
     send_template_message(
         os.getenv("DEMO_SENDGRID_SIGNUP_TEMPLATE"),
