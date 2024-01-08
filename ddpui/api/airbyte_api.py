@@ -76,7 +76,7 @@ def get_airbyte_source_definitions(request):
 
     # filter source definitions for demo account
     allowed_sources = os.getenv("DEMO_AIRBYTE_SOURCE_TYPES")
-    if orguser.org.is_demo and allowed_sources:
+    if orguser.org.is_demo is True and allowed_sources:
         res = [
             source_def
             for source_def in res

@@ -83,7 +83,13 @@ def test_get_airbyte_source_definitions_without_airbyte_workspace(
 
 @patch(
     "ddpui.ddpairbyte.airbyte_service.get_source_definitions",
-    return_value={"sourceDefinitions": [1, 2, 3]},
+    return_value={
+        "sourceDefinitions": [
+            {"name": "name1"},
+            {"name": "name2"},
+            {"name": "name3"},
+        ]
+    },
 )
 def test_get_airbyte_source_definitions_success(org_with_workspace):
     """tests GET /source_definitions"""
