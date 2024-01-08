@@ -87,3 +87,17 @@ def send_youve_been_added_email(to_email: str, added_by: str, org_name: str) -> 
             "url": os.getenv("FRONTEND_URL"),
         },
     )
+
+
+def send_demo_account_signup_email(to_email: str) -> None:
+    """
+    sends an email to pass the demo superset credentials for the demo account
+    """
+    send_template_message(
+        os.getenv("DEMO_SENDGRID_SIGNUP_TEMPLATE"),
+        to_email,
+        {
+            "username": os.getenv("DEMO_SUPERSET_USERNAME"),
+            "password": os.getenv("DEMO_SUPERSET_PASSWORD"),
+        },
+    )

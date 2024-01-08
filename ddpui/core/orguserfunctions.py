@@ -439,6 +439,13 @@ def verify_email(payload: VerifyEmailSchema):
     OrgUser.objects.filter(user_id=orguser.user.id).update(email_verified=True)
     UserAttributes.objects.filter(user=orguser.user).update(email_verified=True)
 
+    # send the demo user email with superset creds
+    if orguser.org.is_demo:
+        try:
+            sendgrid.send_demo_account_signup_email(orguser.user.email)
+        except Exception:
+            return None, "failed to send email"
+
     return None, None
 
 
