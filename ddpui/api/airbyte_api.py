@@ -73,6 +73,15 @@ def get_airbyte_source_definitions(request):
         raise HttpError(400, "create an airbyte workspace first")
 
     res = airbyte_service.get_source_definitions(orguser.org.airbyte_workspace_id)
+
+    # filter source definitions for demo account
+    allowed_sources = os.getenv("DEMO_AIRBYTE_SOURCE_TYPES")
+    if orguser.org.is_demo and allowed_sources:
+        res = [
+            source_def
+            for source_def in res
+            if source_def["name"] in allowed_sources.split(",")
+        ]
     logger.debug(res)
     return res["sourceDefinitions"]
 
