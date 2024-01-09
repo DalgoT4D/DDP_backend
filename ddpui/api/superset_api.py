@@ -63,9 +63,22 @@ def post_fetch_embed_token(request, dashboard_uuid):  # pylint: disable=unused-a
     if warehouse is None:
         raise HttpError(400, "create a warehouse first")
 
+    if orguser.org.viz_url is None:
+        raise HttpError(
+            400,
+            "your superset subscription is not active, please contact the Dalgo team",
+        )
+
+    superset_creds = os.getenv("SUPERSET_USAGE_CREDS_SECRET_ID")
+    if superset_creds is None:
+        raise HttpError(
+            400,
+            "superset usage credentials are missing",
+        )
+
     # {username: "", password: "", first_name: "", last_name: ""} # skipcq: PY-W0069
     credentials = secretsmanager.retrieve_superset_usage_dashboard_credentials(
-        warehouse
+        superset_creds
     )
     if credentials is None:
         raise HttpError(400, "superset usage credentials are missing")
