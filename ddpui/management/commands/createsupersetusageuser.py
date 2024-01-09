@@ -26,18 +26,8 @@ class Command(BaseCommand):
         parser.add_argument("--password", required=True)
 
     def handle(self, *args, **options):
-        """adds credentials to secrets manager"""
-        org = Org.objects.filter(slug=options["org"]).first()
-        if not org:
-            logger.error("org not found")
-            return
-        warehouse = OrgWarehouse.objects.filter(org=org).first()
-        if not warehouse:
-            logger.error("warehouse not found")
-            return
-
+        """adds superset credentials to secrets manager"""
         secret_id = save_superset_usage_dashboard_credentials(
-            warehouse,
             {
                 "username": options["username"],
                 "first_name": options["first_name"],
@@ -45,6 +35,4 @@ class Command(BaseCommand):
                 "password": options["password"],
             },
         )
-        warehouse.superset_creds = secret_id
-        warehouse.save()
-        logger.info("credentials saved")
+        logger.info(f"credentials saved to secretId = {secret_id}")

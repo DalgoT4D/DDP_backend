@@ -32,9 +32,9 @@ def test_generate_warehouse_credentials_name():
 
 @patch("ddpui.utils.secretsmanager.uuid4", Mock(return_value="unique-val"))
 def test_generate_superset_credentials_name():
-    org = Org(name="temporg", slug="temporg")
-    response = generate_superset_credentials_name(org)
-    assert response == "supersetCreds-temporg-unique-val"
+    response = generate_superset_credentials_name()
+    assert response == "supersetCreds-unique-val"
+    assert response.startswith("supersetCreds")
 
 
 @patch(
@@ -133,10 +133,7 @@ def test_delete_warehouse_credentials(
 def test_save_superset_usage_dashboard_credentials(mock_getclient: Mock):
     create_secret_mock = Mock(return_value={"Name": "supersetcreds"})
     mock_getclient.return_value = Mock(create_secret=create_secret_mock)
-    warehouse = Mock(org=Mock())
-    response = save_superset_usage_dashboard_credentials(
-        warehouse, {"credkey": "credval"}
-    )
+    response = save_superset_usage_dashboard_credentials({"credkey": "credval"})
     assert response == "supersetcreds"
     create_secret_mock.assert_called_once_with(
         Name="supersetcreds", SecretString='{"credkey": "credval"}'
@@ -149,6 +146,5 @@ def test_retrieve_superset_usage_dashboard_credentials(
 ):
     get_secret_value = Mock(return_value={"SecretString": '{"credkey": "credval"}'})
     mock_getclient.return_value = Mock(get_secret_value=get_secret_value)
-    warehouse = Mock(superset_creds="credentialskey")
-    retrieve_superset_usage_dashboard_credentials(warehouse)
+    retrieve_superset_usage_dashboard_credentials("credentialskey")
     get_secret_value.assert_called_once_with(SecretId="credentialskey")
