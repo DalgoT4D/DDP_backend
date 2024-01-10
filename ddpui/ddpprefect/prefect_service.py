@@ -555,6 +555,12 @@ def get_last_flow_run_by_deployment_id(deployment_id: str):  # pragma: no cover
     return None
 
 
+def get_running_flow_run_by_deployment_id(deployment_id: str):  # pragma: no cover
+    """Fetch most recent flow run of a deployment that is RUNNING"""
+    res = prefect_get(f"running_flow_runs/{deployment_id}", timeout=60)
+    return res["flow_runs"]
+
+
 def set_deployment_schedule(deployment_id: str, status: str):
     """activates / deactivates a deployment"""
     prefect_post(f"deployments/{deployment_id}/set_schedule/{status}", {})

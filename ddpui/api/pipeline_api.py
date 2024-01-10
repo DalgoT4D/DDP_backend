@@ -206,6 +206,14 @@ def get_prefect_dataflows_v1(request):
         )
 
         lock = TaskLock.objects.filter(orgtask_id__in=org_task_ids).first()
+        this_flow_is_running = (
+            len(
+                prefect_service.get_running_flow_run_by_deployment_id(
+                    flow.deployment_id
+                )
+            )
+            > 0
+        )
 
         res.append(
             {
@@ -225,6 +233,7 @@ def get_prefect_dataflows_v1(request):
                 }
                 if lock
                 else None,
+                "isRunning": this_flow_is_running,
             }
         )
 
