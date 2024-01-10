@@ -290,6 +290,21 @@ def get_connections(org: Org):
 
         # is the task currently locked?
         lock = TaskLock.objects.filter(orgtask=org_task).first()
+        this_sync_is_running = False
+        if lock:
+            for df_orgtask in DataflowOrgTask.objects.filter(
+                orgtask=org_task,
+            ):
+                this_sync_is_running = (
+                    len(
+                        prefect_service.get_running_flow_run_by_deployment_id(
+                            df_orgtask.dataflow.deployment_id
+                        )
+                    )
+                    > 0
+                )
+                if this_sync_is_running:
+                    break
 
         res.append(
             {
@@ -310,6 +325,7 @@ def get_connections(org: Org):
                 }
                 if lock
                 else None,
+                "isRunning": this_sync_is_running,
             }
         )
 
