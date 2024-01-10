@@ -145,3 +145,6 @@ celerybeat-schedule.db
 
 createsources.env
 parseprefectlogs.env
+
+# yml configs
+whitelist.py
