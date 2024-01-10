@@ -365,6 +365,7 @@ def test_get_prefect_dataflows_v1_success(org_with_transformation_tasks):
     get_last_flow_run_by_deployment_id=Mock(
         return_value="some-last-run-prefect-object"
     ),
+    get_running_flow_run_by_deployment_id=Mock(return_value=[]),
 )
 def test_get_prefect_dataflows_v1_success2(org_with_transformation_tasks):
     """tests success with atleast 1 dataflow/pipeline for the org"""
