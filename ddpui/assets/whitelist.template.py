@@ -25,7 +25,9 @@ DEMO_WHITELIST_SOURCES = [
             "port": 5432,
             "ssl_mode": {"mode": "disable"},
             "schemas": ["schema1", "schema2"],
-            "tunnel_method": "NO_TUNNEL",
+            "tunnel_method": {
+                "tunnel_method": "NO_TUNNEL",
+            },
         },
     },
 ]
