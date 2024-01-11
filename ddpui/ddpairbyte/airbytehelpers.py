@@ -24,6 +24,7 @@ from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskLock
 from ddpui.utils.constants import TASK_AIRBYTESYNC
 from ddpui.utils.helpers import generate_hash_id
 from ddpui.utils import secretsmanager
+from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
 from ddpui.core.pipelinefunctions import setup_airbyte_sync_task_config
 
 logger = CustomLogger("airbyte")
@@ -592,6 +593,20 @@ def update_destination(
         )
 
     return destination, None
+
+
+def get_demo_whitelisted_source_config(type: str):
+    """Returns the config of whitelisted source based on type"""
+    ret_src = None
+    for src in DEMO_WHITELIST_SOURCES:
+        if src["type"] == type:
+            ret_src = src
+            break
+
+    if not ret_src:
+        return ret_src, "source not found"
+
+    return ret_src["config"], None
 
 
 def delete_source(org: Org, source_id: str):
