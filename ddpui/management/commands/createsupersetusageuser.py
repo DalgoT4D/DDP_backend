@@ -19,7 +19,6 @@ class Command(BaseCommand):
     help = "Writes the DataflowBlock table"
 
     def add_arguments(self, parser):  # skipcq: PYL-R0201
-        parser.add_argument("--org", required=True)
         parser.add_argument("--username", required=True)
         parser.add_argument("--first-name", required=True)
         parser.add_argument("--last-name", required=True)

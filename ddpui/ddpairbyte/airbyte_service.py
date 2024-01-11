@@ -124,6 +124,26 @@ def delete_workspace(workspace_id: str):
     return res
 
 
+def get_source_definition(workspace_id: str, sourcedef_id: str) -> dict:
+    """Fetch source definition for an airbtye workspace"""
+    if not isinstance(workspace_id, str):
+        raise HttpError(400, "Invalid workspace ID")
+
+    if not isinstance(sourcedef_id, str):
+        raise HttpError(400, "Invalid source definition ID")
+
+    res = abreq(
+        "source_definitions/get_for_workspace",
+        {"sourceDefinitionId": sourcedef_id, "workspaceId": workspace_id},
+    )
+    if "sourceDefinitionId" not in res:
+        error_message = f"Source definition : {sourcedef_id} not found for workspace: {workspace_id}"
+        logger.error(error_message)
+        raise HttpError(404, error_message)
+
+    return res
+
+
 def get_source_definitions(workspace_id: str) -> List[Dict]:
     """Fetch source definitions for an airbyte workspace"""
     if not isinstance(workspace_id, str):

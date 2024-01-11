@@ -30,6 +30,8 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - name: Create whitelist.py
+        run: cp ddpui/assets/whitelist.template.py ddpui/assets/whitelist.py
       - name: Create known_hosts file
         run: |
           mkdir -p ~/.ssh
