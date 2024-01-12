@@ -30,6 +30,8 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - name: Create whitelist.py
+        run: cp ddpui/assets/whitelist.template.py ddpui/assets/whitelist.py
       - name: Create known_hosts file
         run: |
           mkdir -p ~/.ssh
@@ -73,7 +75,8 @@ jobs:
           ddpui/tests/api_tests/test_airbyte_api.py \
           ddpui/tests/api_tests/test_airbyte_api_v1.py \
           ddpui/tests/api_tests/test_pipeline_api.py \
-          ddpui/tests/api_tests/test_orgtask_api.py 
+          ddpui/tests/api_tests/test_orgtask_api.py \
+          ddpui/tests/core/test_pipelinefunctions.py
           coverage report --fail-under=70
           coverage xml
       - name: Check coverage percentage

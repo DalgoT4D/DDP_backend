@@ -28,6 +28,7 @@ from ddpui.ddpairbyte.schema import (
 from ddpui.models.org_user import OrgUser
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
 
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
@@ -73,6 +74,15 @@ def get_airbyte_source_definitions(request):
         raise HttpError(400, "create an airbyte workspace first")
 
     res = airbyte_service.get_source_definitions(orguser.org.airbyte_workspace_id)
+
+    # filter source definitions for demo account
+    allowed_sources = os.getenv("DEMO_AIRBYTE_SOURCE_TYPES")
+    if orguser.org.is_demo is True and allowed_sources:
+        res["sourceDefinitions"] = [
+            source_def
+            for source_def in res["sourceDefinitions"]
+            if source_def["name"] in allowed_sources.split(",")
+        ]
     logger.debug(res)
     return res["sourceDefinitions"]
 
@@ -104,6 +114,21 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
+    if orguser.org.is_demo:
+        logger.info("Demo account user")
+        source_def = airbyte_service.get_source_definition(
+            orguser.org.airbyte_workspace_id, payload.sourceDefId
+        )
+        # replace the payload config with the correct whitelisted source config
+        whitelisted_config, error = airbytehelpers.get_demo_whitelisted_source_config(
+            source_def["name"]
+        )
+        if error:
+            raise HttpError(400, error)
+
+        payload.config = whitelisted_config
+        logger.info("whitelisted the source config")
+
     source = airbyte_service.create_source(
         orguser.org.airbyte_workspace_id,
         payload.name,
@@ -123,6 +148,20 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
+    if orguser.org.is_demo:
+        logger.info("Demo account user")
+        source = airbyte_service.get_source(orguser.org.airbyte_workspace_id, source_id)
+        
+        # replace the payload config with the correct whitelisted source config
+        whitelisted_config, error = airbytehelpers.get_demo_whitelisted_source_config(
+            source["sourceName"]
+        )
+        if error:
+            raise HttpError(400, error)
+
+        payload.config = whitelisted_config
+        logger.info("whitelisted the source config for update")
+
     source = airbyte_service.update_source(
         source_id, payload.name, payload.config, payload.sourceDefId
     )
@@ -136,6 +175,21 @@ def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
+
+    if orguser.org.is_demo:
+        logger.info("Demo account user")
+        source_def = airbyte_service.get_source_definition(
+            orguser.org.airbyte_workspace_id, payload.sourceDefId
+        )
+        # replace the payload config with the correct whitelisted source config
+        whitelisted_config, error = airbytehelpers.get_demo_whitelisted_source_config(
+            source_def["name"]
+        )
+        if error:
+            raise HttpError(400, error)
+
+        payload.config = whitelisted_config
+        logger.info("whitelisted the source config")
 
     response = airbyte_service.check_source_connection(
         orguser.org.airbyte_workspace_id, payload
@@ -156,6 +210,20 @@ def post_airbyte_check_source_for_update(
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
+
+    if orguser.org.is_demo:
+        logger.info("Demo account user")
+        source = airbyte_service.get_source(orguser.org.airbyte_workspace_id, source_id)
+        
+        # replace the payload config with the correct whitelisted source config
+        whitelisted_config, error = airbytehelpers.get_demo_whitelisted_source_config(
+            source["sourceName"]
+        )
+        if error:
+            raise HttpError(400, error)
+
+        payload.config = whitelisted_config
+        logger.info("whitelisted the source config for update")
 
     response = airbyte_service.check_source_connection_for_update(source_id, payload)
     return {

@@ -48,9 +48,11 @@ class Org(models.Model):
     viz_login_type = models.CharField(
         choices=OrgVizLoginType.choices(), max_length=50, null=True
     )
+    is_demo = models.BooleanField(default=False)
 
     def __str__(self) -> str:
-        return f"Org[{self.slug}|{self.name}|{self.airbyte_workspace_id}]"
+        demostr = "demo=" + ("yes" if self.is_demo else "no")
+        return f"Org[{self.slug}|{self.name}|{self.airbyte_workspace_id}|{demostr}]"
 
 
 class OrgPrefectBlock(models.Model):
@@ -112,6 +114,7 @@ class OrgSchema(Schema):
     viz_url: str = None
     viz_login_type: str = None
     tnc_accepted: bool = None
+    is_demo: bool = False
 
 
 class OrgWarehouse(models.Model):
@@ -126,9 +129,6 @@ class OrgWarehouse(models.Model):
     )
     airbyte_norm_op_id = models.TextField(  # skipcq: PTC-W0901, PTC-W0906
         max_length=36, null=True
-    )
-    superset_creds = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
-        max_length=200, null=True
     )
 
     def __str__(self) -> str:

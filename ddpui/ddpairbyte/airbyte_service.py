@@ -46,10 +46,10 @@ def abreq(endpoint, req=None, **kwargs):
 
     try:
         result_obj = remove_nested_attribute(res.json(), "icon")
-        logger.info("Response from Airbyte server:")
-        logger.info(result_obj)
+        logger.debug("Response from Airbyte server:")
+        logger.debug(result_obj)
     except ValueError:
-        logger.info("Response from Airbyte server: %s", res.text)
+        logger.debug("Response from Airbyte server: %s", res.text)
 
     try:
         res.raise_for_status()
@@ -121,6 +121,26 @@ def create_workspace(name: str) -> dict:
 def delete_workspace(workspace_id: str):
     """Deletes an airbyte workspace"""
     res = abreq("workspaces/delete", {"workspaceId": workspace_id})
+    return res
+
+
+def get_source_definition(workspace_id: str, sourcedef_id: str) -> dict:
+    """Fetch source definition for an airbtye workspace"""
+    if not isinstance(workspace_id, str):
+        raise HttpError(400, "Invalid workspace ID")
+
+    if not isinstance(sourcedef_id, str):
+        raise HttpError(400, "Invalid source definition ID")
+
+    res = abreq(
+        "source_definitions/get_for_workspace",
+        {"sourceDefinitionId": sourcedef_id, "workspaceId": workspace_id},
+    )
+    if "sourceDefinitionId" not in res:
+        error_message = f"Source definition : {sourcedef_id} not found for workspace: {workspace_id}"
+        logger.error(error_message)
+        raise HttpError(404, error_message)
+
     return res
 
 
