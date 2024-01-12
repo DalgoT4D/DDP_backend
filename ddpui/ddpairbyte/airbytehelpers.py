@@ -311,6 +311,9 @@ def get_connections(org: Org):
                 }
                 if lock
                 else None,
+                "isRunning": lock.locking_dataflow == sync_dataflow.dataflow
+                if lock
+                else False,
             }
         )
 

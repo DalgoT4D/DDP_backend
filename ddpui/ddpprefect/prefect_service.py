@@ -662,7 +662,9 @@ def lock_tasks_for_deployment(deployment_id: str, orguser: OrgUser):
         with transaction.atomic():
             for df_orgtask in dataflow_orgtasks:
                 task_lock = TaskLock.objects.create(
-                    orgtask=df_orgtask.orgtask, locked_by=orguser
+                    orgtask=df_orgtask.orgtask,
+                    locked_by=orguser,
+                    locking_dataflow=df_orgtask.dataflow,
                 )
                 locks.append(task_lock)
     except Exception as error:

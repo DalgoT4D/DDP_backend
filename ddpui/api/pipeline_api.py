@@ -225,6 +225,7 @@ def get_prefect_dataflows_v1(request):
                 }
                 if lock
                 else None,
+                "isRunning": lock and lock.locking_dataflow == flow,
             }
         )
 

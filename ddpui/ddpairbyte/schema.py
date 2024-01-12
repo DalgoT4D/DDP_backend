@@ -81,6 +81,7 @@ class AirbyteConnectionCreateResponse(Schema):
     destinationSchema: str = ""
     normalize: bool = False
     lock: Optional[dict | None]
+    isRunning: bool = False
 
 
 class AirbyteConnectionUpdate(Schema):
