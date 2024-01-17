@@ -51,8 +51,12 @@ def get_org_from_flow_run(flow_run: dict) -> Org | None:
 
     org_slug is embedded in the parameters of flow run now
     """
-    if "parameters" in flow_run and "org_slug" in flow_run["parameters"]:
-        org = Org.objects.filter(slug=flow_run["parameters"]["org_slug"]).first()
+    if (
+        "parameters" in flow_run
+        and "config" in flow_run["parameters"]
+        and "org_slug" in flow_run["parameters"]["config"]
+    ):
+        org = Org.objects.filter(slug=flow_run["parameters"]["config"]["org_slug"]).first()
 
         if org is not None:
             logger.info(f"found the org slug {org.slug} inside the webhook function")
