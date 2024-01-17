@@ -56,13 +56,15 @@ def get_org_from_flow_run(flow_run: dict) -> Org | None:
         and "config" in flow_run["parameters"]
         and "org_slug" in flow_run["parameters"]["config"]
     ):
-        org = Org.objects.filter(slug=flow_run["parameters"]["config"]["org_slug"]).first()
+        org = Org.objects.filter(
+            slug=flow_run["parameters"]["config"]["org_slug"]
+        ).first()
 
         if org is not None:
             logger.info(f"found the org slug {org.slug} inside the webhook function")
             return org
 
-    logger.info("didn't find the org slug inside the webhook function")
+    logger.error("didn't find the org slug inside the webhook function")
 
     return None
 
