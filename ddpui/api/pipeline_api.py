@@ -144,7 +144,7 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
                 deployment_name=deployment_name,
                 flow_name=deployment_name,
                 orgslug=orguser.org.slug,
-                deployment_params={"config": {"tasks": tasks}},
+                deployment_params={"config": {"tasks": tasks,  "org_slug": orguser.org.slug}},
                 cron=payload.cron,
             )
         )
@@ -388,7 +388,7 @@ def put_prefect_dataflow_v1(
         logger.info(f"Dbt tasks pushed to the pipeline")
 
     # update deployment
-    payload.deployment_params = {"config": {"tasks": tasks}}
+    payload.deployment_params = {"config": {"tasks": tasks, "org_slug": orguser.org.slug}}
     try:
         prefect_service.update_dataflow_v1(deployment_id, payload)
     except Exception as error:

@@ -211,6 +211,7 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
             orgslug=org.slug,
             deployment_params={
                 "config": {
+                    "org_slug": org.slug,
                     "tasks": [
                         setup_airbyte_sync_task_config(
                             org_task, org_airbyte_server_block
