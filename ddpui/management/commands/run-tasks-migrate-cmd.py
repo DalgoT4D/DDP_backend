@@ -1191,6 +1191,60 @@ class Command(BaseCommand):
                 logger.debug("skipping to next loop")
                 continue
 
+    def add_org_slug_to_deployment_params(self, org: Org):
+        """Add org slug to config: {org_slug: "slug", tasks: []} of each deployment"""
+        for dataflow in OrgDataFlowv1.objects.filter(
+            org=org,
+        ).all():
+            # update deployment params
+            deployment = None
+            try:
+                deployment = prefect_service.get_deployment(dataflow.deployment_id)
+            except Exception as error:
+                logger.info(
+                    f"Something went wrong in fetching the deployment with id '{dataflow.deployment_id}' for {org.slug}"
+                )
+                logger.exception(error)
+                logger.debug("skipping to next deployment")
+                continue
+
+            params = deployment["parameters"]
+            logger.info(f"PARAMS {dataflow.deployment_id}")
+            if "config" not in params:
+                logger.info(
+                    f"SKIPPING: Didnt find 'config' parameter in delpoyment {dataflow.deployment_id} "
+                )
+                self.successes.append(
+                    f"SKIPPING: Didnt find 'config' parameter in delpoyment {dataflow.deployment_id} "
+                )
+                continue
+            try:
+                params["config"]["org_slug"] = org.slug
+                payload = PrefectDataFlowUpdateSchema3(
+                    name=dataflow.name,  # wont be updated
+                    connections=[],  # wont be updated
+                    dbtTransform="ignore",  # wont be updated
+                    cron=dataflow.cron if dataflow.cron else "",
+                    deployment_params=params,
+                )
+                prefect_service.update_dataflow_v1(dataflow.deployment_id, payload)
+                logger.info(
+                    f"added org slug {org.slug} to deployment params for the deployment with id {dataflow.deployment_id}"
+                )
+                self.successes.append(
+                    f"added org slug {org.slug} to deployment params for the deployment with id {dataflow.deployment_id}"
+                )
+            except Exception as error:
+                self.failures.append(
+                    f"Something went wrong in updating the deployment params with id {dataflow.deployment_id}"
+                )
+                logger.info(
+                    f"Something went wrong in updating the deployment params with id {dataflow.deployment_id}"
+                )
+                logger.exception(error)
+                logger.debug("skipping to next loop")
+                continue
+
     def handle(self, *args, **options):
         slug = options["slug"]
         query = Org.objects
@@ -1202,7 +1256,7 @@ class Command(BaseCommand):
         self.successes.append(f"Running the script for {slug} org")
         for org in query.all():
             self.successes.append(f"Starting scripts for {org.slug}")
-            self.fix_dbt_clean_deps_task_seq_pipelines(org)
+            self.add_org_slug_to_deployment_params(org)
 
         # show summary
         print("=" * 80)
