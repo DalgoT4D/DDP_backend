@@ -43,7 +43,8 @@ def create_transform_tasks(
                                 setup_dbt_core_task_config(
                                     org_task, cli_profile_block, dbt_project_params
                                 ).to_json()
-                            ]
+                            ],
+                            "org_slug": org.slug,
                         }
                     },
                 )
