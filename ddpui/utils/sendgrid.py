@@ -96,11 +96,12 @@ def send_demo_account_post_verify_email(to_email: str) -> None:
     - data source credentials
     - link to documentation
     """
-    send_template_message(
-        os.getenv("DEMO_SENDGRID_SIGNUP_TEMPLATE"),
-        to_email,
-        {
-            "username": os.getenv("DEMO_SUPERSET_USERNAME"),
-            "password": os.getenv("DEMO_SUPERSET_PASSWORD"),
-        },
-    )
+    if os.getenv("DEMO_SENDGRID_SIGNUP_TEMPLATE"):
+        send_template_message(
+            os.getenv("DEMO_SENDGRID_SIGNUP_TEMPLATE"),
+            to_email,
+            {
+                "username": os.getenv("DEMO_SUPERSET_USERNAME"),
+                "password": os.getenv("DEMO_SUPERSET_PASSWORD"),
+            },
+        )
