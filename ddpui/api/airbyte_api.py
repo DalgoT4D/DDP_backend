@@ -28,7 +28,6 @@ from ddpui.ddpairbyte.schema import (
 from ddpui.models.org_user import OrgUser
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
 
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
