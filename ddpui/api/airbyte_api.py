@@ -81,7 +81,7 @@ def get_airbyte_source_definitions(request):
         res["sourceDefinitions"] = [
             source_def
             for source_def in res["sourceDefinitions"]
-            if source_def["name"] in allowed_sources.split(",")
+            if source_def["name"] in allowed_sources.split("|")
         ]
     logger.debug(res)
     return res["sourceDefinitions"]
@@ -151,7 +151,7 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
     if orguser.org.is_demo:
         logger.info("Demo account user")
         source = airbyte_service.get_source(orguser.org.airbyte_workspace_id, source_id)
-        
+
         # replace the payload config with the correct whitelisted source config
         whitelisted_config, error = airbytehelpers.get_demo_whitelisted_source_config(
             source["sourceName"]
@@ -214,7 +214,7 @@ def post_airbyte_check_source_for_update(
     if orguser.org.is_demo:
         logger.info("Demo account user")
         source = airbyte_service.get_source(orguser.org.airbyte_workspace_id, source_id)
-        
+
         # replace the payload config with the correct whitelisted source config
         whitelisted_config, error = airbytehelpers.get_demo_whitelisted_source_config(
             source["sourceName"]
