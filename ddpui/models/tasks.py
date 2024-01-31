@@ -36,9 +36,34 @@ class OrgTask(models.Model):
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     task = models.ForeignKey(Task, on_delete=models.CASCADE)
     connection_id = models.CharField(max_length=36, unique=True, null=True)
+    parameters = models.JSONField(default=dict, blank=True)
 
     def __str__(self) -> str:
         return f"OrgTask[{self.org.name}|{self.task.type}|{self.task.label}]"
+
+    def flags(self):
+        """parameters = {"flags": ['f1', 'f2'], "options": {"o1": "v1", "o2": "v2"}"""
+        if self.parameters:
+            return self.parameters.get("flags")
+
+    def options(self):
+        """parameters = {"flags": ['f1', 'f2'], "options": {"o1": "v1", "o2": "v2"}"""
+        if self.parameters:
+            return self.parameters.get("options")
+
+    def get_dbt_parameters(self):
+        """
+        returns the command line parameters for this task
+        for git-pull this would be wrong... returning "git pull" instead of just "pull"
+        """
+        retval = self.task.command
+        if self.flags():
+            for flag in self.flags():
+                retval += " --" + flag
+        if self.options():
+            for optname, optval in self.options().items():
+                retval += f" --{optname} {optval}"
+        return retval
 
 
 class DataflowOrgTask(models.Model):

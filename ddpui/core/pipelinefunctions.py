@@ -28,6 +28,7 @@ logger = CustomLogger("ddpui")
 def setup_airbyte_sync_task_config(
     org_task: OrgTask, server_block: OrgPrefectBlockv1, seq: int = 1
 ):
+    """constructs the prefect payload for an airbyte sync"""
     return PrefectAirbyteSyncTaskSetup(
         seq=seq,
         slug=org_task.task.slug,
@@ -44,11 +45,12 @@ def setup_dbt_core_task_config(
     dbt_project_params: DbtProjectParams,
     seq: int = 1,
 ):
+    """constructs the prefect payload for a dbt job"""
     return PrefectDbtTaskSetup(
         seq=seq,
         slug=org_task.task.slug,
         commands=[
-            f"{dbt_project_params.dbt_binary} {org_task.task.command} --target {dbt_project_params.target}"
+            f"{dbt_project_params.dbt_binary} {org_task.get_dbt_parameters()} --target {dbt_project_params.target}"
         ],
         type=DBTCORE,
         env={},
@@ -66,6 +68,7 @@ def setup_git_pull_shell_task_config(
     gitpull_secret_block: OrgPrefectBlockv1,
     seq: int = 1,
 ):
+    """constructs the prefect payload for a git pull"""
     shell_env = {"secret-git-pull-url-block": ""}
 
     if gitpull_secret_block is not None:
