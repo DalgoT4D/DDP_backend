@@ -213,6 +213,11 @@ def get_prefect_transformation_tasks(request):
         # check if task is locked
         lock = TaskLock.objects.filter(orgtask=org_task).first()
 
+        if org_task.task.type == "git":
+            command = "git pull"
+        elif org_task.task.type == "dbt":
+            command = "dbt " + org_task.get_dbt_parameters()
+
         org_tasks.append(
             {
                 "label": org_task.task.label,
@@ -225,6 +230,7 @@ def get_prefect_transformation_tasks(request):
                 }
                 if lock
                 else None,
+                "command": command,
             }
         )
 
