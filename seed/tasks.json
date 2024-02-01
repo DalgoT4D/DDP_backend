@@ -68,5 +68,15 @@
             "label": "DBT docs generate",
             "command": "docs generate"
         }
+    },
+    {
+        "model": "ddpui.Task",
+        "pk": 8,
+        "fields": {
+            "type": "dbt",
+            "slug": "dbt-seed",
+            "label": "DBT seed",
+            "command": "seed"
+        }
     }
 ]
