@@ -59,7 +59,7 @@ def generate_sync_org_tasks(seed_master_tasks, org_with_server_block):
 
 @pytest.fixture()
 def generate_transform_org_tasks(seed_master_tasks, org_with_server_block):
-    for task in Task.objects.filter(type__in=["dbt", "git"]).all():
+    for task in Task.objects.filter(type__in=["dbt", "git"]).exclude(slug="dbt-seed"):
         OrgTask.objects.create(task=task, org=org_with_server_block)
 
 
