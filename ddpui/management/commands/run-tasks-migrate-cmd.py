@@ -12,7 +12,7 @@ from ddpui.models.org import (
 )
 from ddpui.models.orgjobs import DataflowBlock
 from ddpui.ddpprefect.schema import PrefectDataFlowUpdateSchema3
-from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask
+from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask, OrgTaskGeneratedBy
 from ddpui.utils.constants import (
     TASK_AIRBYTESYNC,
     AIRBYTE_SYNC_TIMEOUT,
@@ -1245,6 +1245,19 @@ class Command(BaseCommand):
                 logger.debug("skipping to next loop")
                 continue
 
+    def update_orgtasks_generated_by(self, org: Org):
+        """update the generated_by field in orgtask; whether it is created by 'system' or 'client'"""
+        for org_task in OrgTask.objects.filter(org=org).all():
+            # all dbt tasks are system generated
+            if org_task.connection_id:
+                org_task.generated_by = OrgTaskGeneratedBy.CLIENT
+                org_task.save()
+
+        self.successes.append(
+            f"Updated generated_by field in orgtask for the org {org.slug}"
+        )
+        logger.info(f"Updated generated_by field in orgtask for the org {org.slug}")
+
     def handle(self, *args, **options):
         slug = options["slug"]
         query = Org.objects
@@ -1256,7 +1269,7 @@ class Command(BaseCommand):
         self.successes.append(f"Running the script for {slug} org")
         for org in query.all():
             self.successes.append(f"Starting scripts for {org.slug}")
-            self.add_org_slug_to_deployment_params(org)
+            self.update_orgtasks_generated_by(org)
 
         # show summary
         print("=" * 80)

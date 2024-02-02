@@ -50,7 +50,7 @@ def setup_dbt_core_task_config(
         seq=seq,
         slug=org_task.task.slug,
         commands=[
-            f"{dbt_project_params.dbt_binary} {org_task.get_dbt_parameters()} --target {dbt_project_params.target}"
+            f"{dbt_project_params.dbt_binary} {org_task.get_task_parameters()} --target {dbt_project_params.target}"
         ],
         type=DBTCORE,
         env={},
@@ -75,7 +75,7 @@ def setup_git_pull_shell_task_config(
         shell_env["secret-git-pull-url-block"] = gitpull_secret_block.block_name
 
     return PrefectShellTaskSetup(
-        commands=["git pull"],
+        commands=[f"git {org_task.get_task_parameters()}"],
         working_dir=project_dir,
         env=shell_env,
         slug=org_task.task.slug,
@@ -130,8 +130,9 @@ def pipeline_dbt_git_tasks(
     task_configs = []
     org_tasks = []  # org tasks found related to the dbt, git
 
+    # add only the default org task
     for org_task in OrgTask.objects.filter(
-        org=org, task__type__in=["dbt", "git"]
+        org=org, task__type__in=["dbt", "git"], task__is_system=True
     ).all():
         logger.info(f"found transform task {org_task.task.slug}; pushing to pipeline")
         # map this org task to dataflow

@@ -50,7 +50,7 @@ def test_get_flowrun_id_and_state():
 def test_get_org_from_flow_run_by_blockname():
     """tests get_org_from_flow_run"""
     blockname = str(uuid4())
-    flow_run = {"parameters": {"block_name": blockname}}
+    flow_run = {"parameters": {"block_name": blockname, "config": {"org_slug": "temp"}}}
     org = Org.objects.create(name="temp", slug="temp")
     OrgPrefectBlock.objects.create(
         org=org, block_name=blockname, block_type="fake-type", block_id="12345"
@@ -62,7 +62,12 @@ def test_get_org_from_flow_run_by_blockname():
 def test_get_org_from_flow_run_by_connection():
     """tests get_org_from_flow_run"""
     blockid = str(uuid4())
-    flow_run = {"parameters": {"airbyte_connection": {"_block_document_id": blockid}}}
+    flow_run = {
+        "parameters": {
+            "airbyte_connection": {"_block_document_id": blockid},
+            "config": {"org_slug": "temp"},
+        }
+    }
     org = Org.objects.create(name="temp", slug="temp")
     OrgPrefectBlock.objects.create(
         org=org, block_name="tempblockname", block_type="fake-type", block_id=blockid
@@ -74,7 +79,12 @@ def test_get_org_from_flow_run_by_connection():
 def test_get_org_from_flow_run_by_airbyte_blocks():
     """tests get_org_from_flow_run"""
     blockname = str(uuid4())
-    flow_run = {"parameters": {"airbyte_blocks": [{"blockName": blockname}]}}
+    flow_run = {
+        "parameters": {
+            "airbyte_blocks": [{"blockName": blockname}],
+            "config": {"org_slug": "temp"},
+        }
+    }
     org = Org.objects.create(name="temp", slug="temp")
     OrgPrefectBlock.objects.create(
         org=org, block_name=blockname, block_type="fake-type", block_id="blockid"
@@ -86,7 +96,12 @@ def test_get_org_from_flow_run_by_airbyte_blocks():
 def test_get_org_from_flow_run_by_dbt_blocks():
     """tests get_org_from_flow_run"""
     blockname = str(uuid4())
-    flow_run = {"parameters": {"dbt_blocks": [{"blockName": blockname}]}}
+    flow_run = {
+        "parameters": {
+            "dbt_blocks": [{"blockName": blockname}],
+            "config": {"org_slug": "temp"},
+        }
+    }
     org = Org.objects.create(name="temp", slug="temp")
     OrgPrefectBlock.objects.create(
         org=org, block_name=blockname, block_type="fake-type", block_id="blockid"

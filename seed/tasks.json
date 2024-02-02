@@ -6,7 +6,8 @@
             "type": "git",
             "slug": "git-pull",
             "label": "GIT pull",
-            "command": "git pull"
+            "command": "pull",
+            "is_system": true
         }
     },
     {
@@ -16,7 +17,8 @@
             "type": "dbt",
             "slug": "dbt-clean",
             "label": "DBT clean",
-            "command": "clean"
+            "command": "clean",
+            "is_system": true
         }
     },
     {
@@ -26,7 +28,8 @@
             "type": "dbt",
             "slug": "dbt-deps",
             "label": "DBT deps",
-            "command": "deps"
+            "command": "deps",
+            "is_system": true
         }
     },
     {
@@ -36,7 +39,8 @@
             "type": "dbt",
             "slug": "dbt-run",
             "label": "DBT run",
-            "command": "run"
+            "command": "run",
+            "is_system": true
         }
     },
     {
@@ -46,7 +50,8 @@
             "type": "dbt",
             "slug": "dbt-test",
             "label": "DBT test",
-            "command": "test"
+            "command": "test",
+            "is_system": true
         }
     },
     {
@@ -56,7 +61,8 @@
             "type": "airbyte",
             "slug": "airbyte-sync",
             "label": "AIRBYTE sync",
-            "command": null
+            "command": null,
+            "is_system": false
         }
     },
     {
@@ -66,7 +72,19 @@
             "type": "dbt",
             "slug": "dbt-docs-generate",
             "label": "DBT docs generate",
-            "command": "docs generate"
+            "command": "docs generate",
+            "is_system": true
+        }
+    },
+    {
+        "model": "ddpui.Task",
+        "pk": 8,
+        "fields": {
+            "type": "dbt",
+            "slug": "dbt-seed",
+            "label": "DBT seed",
+            "command": "seed",
+            "is_system": false
         }
     }
 ]

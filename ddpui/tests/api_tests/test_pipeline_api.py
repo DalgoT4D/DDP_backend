@@ -174,7 +174,7 @@ def org_with_transformation_tasks(tmpdir_factory, seed_master_tasks):
         block_name="cliprofile-blk-name",
     )
 
-    for task in Task.objects.filter(type__in=["dbt", "git"]).all():
+    for task in Task.objects.filter(type__in=["dbt", "git"], is_system=True).all():
         org_task = OrgTask.objects.create(org=org, task=task)
 
         if task.slug == "dbt-run":

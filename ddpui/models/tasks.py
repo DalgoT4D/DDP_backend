@@ -2,11 +2,23 @@
 master table to store all operations/commands that a prefect deployment can run
 args to a command are specific to a deployment/flow & will be store as deployment/flow parameters
 """
-
+from enum import Enum
 from django.db import models
 from ddpui.models.org import Org
 from ddpui.models.org import OrgDataFlowv1
 from ddpui.models.org_user import OrgUser
+
+
+class OrgTaskGeneratedBy(str, Enum):
+    """an enum for roles assignable to org-users"""
+
+    SYSTEM = "system"
+    CLIENT = "client"
+
+    @classmethod
+    def choices(cls):
+        """django model definition needs an iterable for `choices`"""
+        return [(key.value, key.name) for key in cls]
 
 
 class Task(models.Model):
@@ -16,6 +28,9 @@ class Task(models.Model):
     slug = models.CharField(max_length=100, null=False, blank=False)
     label = models.CharField(max_length=100, null=False, blank=False)
     command = models.CharField(max_length=100, null=True)
+    is_system = models.BooleanField(
+        default=True
+    )  # to mark the tasks created by platform by default
 
     def __str__(self) -> str:
         """string representation"""
@@ -27,6 +42,7 @@ class Task(models.Model):
             "type": self.type,
             "label": self.label,
             "command": self.command,
+            "is_system": self.is_system,
         }
 
 
@@ -37,6 +53,9 @@ class OrgTask(models.Model):
     task = models.ForeignKey(Task, on_delete=models.CASCADE)
     connection_id = models.CharField(max_length=36, unique=True, null=True)
     parameters = models.JSONField(default=dict, blank=True)
+    generated_by = models.CharField(
+        choices=OrgTaskGeneratedBy.choices(), max_length=50, default="system"
+    )
 
     def __str__(self) -> str:
         return f"OrgTask[{self.org.name}|{self.task.type}|{self.task.label}]"
@@ -51,10 +70,9 @@ class OrgTask(models.Model):
         if self.parameters:
             return self.parameters.get("options")
 
-    def get_dbt_parameters(self):
+    def get_task_parameters(self):
         """
         returns the command line parameters for this task
-        for git-pull this would be wrong... returning "git pull" instead of just "pull"
         """
         retval = self.task.command
         if self.flags():
