@@ -214,9 +214,12 @@ def get_prefect_transformation_tasks(request):
         lock = TaskLock.objects.filter(orgtask=org_task).first()
 
         if org_task.task.type == "git":
-            command = "git pull"
+            command = "git " + org_task.get_task_parameters()
         elif org_task.task.type == "dbt":
-            command = "dbt " + org_task.get_dbt_parameters()
+            command = "dbt " + org_task.get_task_parameters()
+
+        # "git "/"dbt " + "run --full-refresh"/"pull"
+        command = org_task.task.type + " " + org_task.get_task_parameters() 
 
         org_tasks.append(
             {

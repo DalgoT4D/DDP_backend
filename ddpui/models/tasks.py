@@ -51,10 +51,9 @@ class OrgTask(models.Model):
         if self.parameters:
             return self.parameters.get("options")
 
-    def get_dbt_parameters(self):
+    def get_task_parameters(self):
         """
         returns the command line parameters for this task
-        for git-pull this would be wrong... returning "git pull" instead of just "pull"
         """
         retval = self.task.command
         if self.flags():

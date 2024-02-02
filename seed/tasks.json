@@ -6,7 +6,7 @@
             "type": "git",
             "slug": "git-pull",
             "label": "GIT pull",
-            "command": "git pull"
+            "command": "pull"
         }
     },
     {
