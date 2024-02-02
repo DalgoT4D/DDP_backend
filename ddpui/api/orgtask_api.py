@@ -5,6 +5,7 @@ import yaml
 
 from ninja import NinjaAPI
 from ninja.errors import HttpError
+from django.forms.models import model_to_dict
 
 from ninja.errors import ValidationError
 from ninja.responses import Response
@@ -23,12 +24,16 @@ from ddpui.models.org import (
     OrgPrefectBlockv1,
 )
 from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import DataflowOrgTask, OrgTask, TaskLock
+from ddpui.models.tasks import DataflowOrgTask, OrgTask, TaskLock, Task
 from ddpui.ddpprefect.schema import (
     PrefectSecretBlockCreate,
 )
+from ddpui.schemas.org_task_schema import CreateOrgTaskPayload
 from ddpui.core.dbtfunctions import gather_dbt_project_params
-from ddpui.core.orgtaskfunctions import create_transform_tasks
+from ddpui.core.orgtaskfunctions import (
+    create_transform_tasks,
+    create_prefect_deployment_for_dbtcore_task,
+)
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
@@ -78,6 +83,57 @@ def ninja_default_error_handler(
     """Handle any other exception raised in the apis"""
     logger.info(exc)
     return Response({"detail": "something went wrong"}, status=500)
+
+
+@orgtaskapi.post("/", auth=auth.CanManagePipelines())
+def post_org_task(request, payload: CreateOrgTaskPayload):
+    """Create a custom client org task (dbt or git). If base task is dbt run create a deployment"""
+    orguser: OrgUser = request.orguser
+    if orguser.org.dbt is None:
+        raise HttpError(400, "create a dbt workspace first")
+
+    task = Task.objects.filter(slug=payload.task_slug).first()
+
+    if task is None:
+        raise HttpError(404, "task not found")
+
+    parameters = {}
+    if payload.flags and len(payload.flags) > 0:
+        parameters["flags"] = payload.flags
+
+    if payload.options and len(payload.options.keys()) > 0:
+        parameters["options"] = payload.options
+
+    # create a deployment if the task type is run
+    orgtask = OrgTask.objects.create(
+        org=orguser.org, task=task, parameters=parameters, generated_by="client"
+    )
+
+    dataflow = None
+    if task.slug == TASK_DBTRUN:
+        dbt_project_params, error = gather_dbt_project_params(orguser.org)
+        if error:
+            raise HttpError(400, error)
+
+        # fetch the cli profile block
+        cli_profile_block = OrgPrefectBlockv1.objects.filter(
+            org=orguser.org, block_type=DBTCLIPROFILE
+        ).first()
+
+        if cli_profile_block is None:
+            raise HttpError(400, "dbt cli profile block not found")
+
+        dataflow = create_prefect_deployment_for_dbtcore_task(
+            orgtask, cli_profile_block, dbt_project_params
+        )
+
+    return {
+        **model_to_dict(orgtask, fields=["parameters"]),
+        "task_slug": orgtask.task.slug,
+        "dataflow": (
+            {**model_to_dict(dataflow, exclude=["id", "org"])} if dataflow else None
+        ),
+    }
 
 
 @orgtaskapi.post("transform/", auth=auth.CanManagePipelines())
@@ -213,13 +269,8 @@ def get_prefect_transformation_tasks(request):
         # check if task is locked
         lock = TaskLock.objects.filter(orgtask=org_task).first()
 
-        if org_task.task.type == "git":
-            command = "git " + org_task.get_task_parameters()
-        elif org_task.task.type == "dbt":
-            command = "dbt " + org_task.get_task_parameters()
-
         # "git "/"dbt " + "run --full-refresh"/"pull"
-        command = org_task.task.type + " " + org_task.get_task_parameters() 
+        command = org_task.task.type + " " + org_task.get_task_parameters()
 
         org_tasks.append(
             {
@@ -227,12 +278,14 @@ def get_prefect_transformation_tasks(request):
                 "slug": org_task.task.slug,
                 "id": org_task.id,
                 "deploymentId": None,
-                "lock": {
-                    "lockedBy": lock.locked_by.user.email,
-                    "lockedAt": lock.locked_at,
-                }
-                if lock
-                else None,
+                "lock": (
+                    {
+                        "lockedBy": lock.locked_by.user.email,
+                        "lockedAt": lock.locked_at,
+                    }
+                    if lock
+                    else None
+                ),
                 "command": command,
             }
         )
