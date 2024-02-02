@@ -108,7 +108,7 @@ def test_pipeline_sync_tasks_success2(org_with_server_block, generate_sync_org_t
     assert task_configs[1]["connection_id"] == CONNECTION_IDS[1]
 
 
-def test_pipeline_dbt_git_tasks_success(
+def test_system_default_pipeline_dbt_git_tasks_success(
     org_with_server_block, generate_transform_org_tasks
 ):
     """tests if function returns all configs for the org tasks related to git & dbt"""
@@ -132,7 +132,7 @@ def test_pipeline_dbt_git_tasks_success(
         org_with_server_block, cli_profile_block, dbt_project_params
     )
 
-    dbt_git_tasks = Task.objects.filter(type__in=["dbt", "git"]).all()
+    dbt_git_tasks = Task.objects.filter(type__in=["dbt", "git"], is_system=True).all()
     assert len(task_configs) == len(dbt_git_tasks)
     assert len(org_tasks) == len(org_tasks)
 
@@ -141,7 +141,7 @@ def test_pipeline_dbt_git_tasks_success(
     assert seqs == [i + 1 for i in range(len(dbt_git_tasks))]
 
 
-def test_pipeline_dbt_git_tasks_success2(
+def test_system_default_pipeline_dbt_git_tasks_success2(
     org_with_server_block, generate_transform_org_tasks
 ):
     """tests the sequence of tasks based on a different start offset"""
@@ -166,7 +166,7 @@ def test_pipeline_dbt_git_tasks_success2(
         org_with_server_block, cli_profile_block, dbt_project_params, offset
     )
 
-    dbt_git_tasks = Task.objects.filter(type__in=["dbt", "git"]).all()
+    dbt_git_tasks = Task.objects.filter(type__in=["dbt", "git"], is_system=True).all()
     assert len(task_configs) == len(dbt_git_tasks)
     assert len(org_tasks) == len(org_tasks)
 

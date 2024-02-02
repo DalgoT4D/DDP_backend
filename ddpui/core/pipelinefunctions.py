@@ -130,8 +130,9 @@ def pipeline_dbt_git_tasks(
     task_configs = []
     org_tasks = []  # org tasks found related to the dbt, git
 
+    # add only the default org task
     for org_task in OrgTask.objects.filter(
-        org=org, task__type__in=["dbt", "git"]
+        org=org, task__type__in=["dbt", "git"], task__is_system=True
     ).all():
         logger.info(f"found transform task {org_task.task.slug}; pushing to pipeline")
         # map this org task to dataflow
