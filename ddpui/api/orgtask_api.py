@@ -24,7 +24,13 @@ from ddpui.models.org import (
     OrgPrefectBlockv1,
 )
 from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import DataflowOrgTask, OrgTask, TaskLock, Task, OrgTaskGeneratedBy
+from ddpui.models.tasks import (
+    DataflowOrgTask,
+    OrgTask,
+    TaskLock,
+    Task,
+    OrgTaskGeneratedBy,
+)
 from ddpui.ddpprefect.schema import (
     PrefectSecretBlockCreate,
 )
@@ -264,7 +270,7 @@ def get_prefect_transformation_tasks(request):
             org=orguser.org,
             task__type__in=["git", "dbt"],
         )
-        .order_by("task__id")
+        .order_by("-generated_by")
         .all()
     ):
         # check if task is locked
