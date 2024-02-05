@@ -12,9 +12,7 @@ from ddpui.ddpprefect.schema import (
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpprefect import prefect_service
 from ddpui.core.pipelinefunctions import setup_dbt_core_task_config
-from ddpui.utils.constants import (
-    TASK_DBTRUN,
-)
+from ddpui.utils.constants import TASK_DBTRUN, TASK_AIRBYTESYNC
 from ddpui.utils.helpers import generate_hash_id
 from ddpui.ddpdbt.schema import DbtProjectParams
 
@@ -83,3 +81,33 @@ def create_prefect_deployment_for_dbtcore_task(
     )
 
     return new_dataflow
+
+
+def delete_orgtask(org_task: OrgTask):
+    """Delete an orgtask; along with its deployment if its there"""
+
+    for dataflow_orgtask in DataflowOrgTask.objects.filter(
+        orgtask=org_task
+    ).all():  # only long running task like TASK_DBTRUN, TASK_AIRBYTESYNC will have dataflow
+
+        # delete the manual deployment for this
+        dataflow = dataflow_orgtask.dataflow
+        if dataflow:
+            logger.info(f"deleting manual deployment for {org_task.task.slug}")
+
+            # do this in try catch because it can fail & throw error
+            try:
+                prefect_service.delete_deployment_by_id(dataflow.deployment_id)
+            except Exception:
+                pass
+            logger.info("FINISHED deleting manual deployment for dbt run")
+            logger.info("deleting OrgDataFlowv1")
+            dataflow.delete()
+
+        logger.info("deleting DataflowOrgTask")
+        dataflow_orgtask.delete()
+
+    logger.info("deleting org task %s", org_task.task.slug)
+    org_task.delete()
+
+    return None, None
