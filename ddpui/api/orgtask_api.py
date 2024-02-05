@@ -31,7 +31,7 @@ from ddpui.ddpprefect.schema import (
 from ddpui.schemas.org_task_schema import CreateOrgTaskPayload
 from ddpui.core.dbtfunctions import gather_dbt_project_params
 from ddpui.core.orgtaskfunctions import (
-    create_transform_tasks,
+    create_default_transform_tasks,
     create_prefect_deployment_for_dbtcore_task,
 )
 from ddpui.utils.custom_logger import CustomLogger
@@ -242,7 +242,7 @@ def post_prefect_transformation_tasks(request):
         raise HttpError(400, str(error)) from error
 
     # create org tasks for the transformation page
-    _, error = create_transform_tasks(
+    _, error = create_default_transform_tasks(
         orguser.org, cli_profile_block, dbt_project_params
     )
     if error:
@@ -287,6 +287,7 @@ def get_prefect_transformation_tasks(request):
                     else None
                 ),
                 "command": command,
+                "generated_by": org_task.generated_by,
             }
         )
 

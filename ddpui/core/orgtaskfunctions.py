@@ -21,11 +21,11 @@ from ddpui.ddpdbt.schema import DbtProjectParams
 logger = CustomLogger("ddpui")
 
 
-def create_transform_tasks(
+def create_default_transform_tasks(
     org: Org, cli_profile_block: OrgPrefectBlockv1, dbt_project_params: DbtProjectParams
 ):
     """Create all the transform (git, dbt) tasks"""
-    for task in Task.objects.filter(type__in=["dbt", "git"]).all():
+    for task in Task.objects.filter(type__in=["dbt", "git"], is_system=True).all():
         org_task = OrgTask.objects.create(org=org, task=task)
 
         if task.slug == TASK_DBTRUN:
