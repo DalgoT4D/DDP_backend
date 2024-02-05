@@ -1,9 +1,9 @@
 import re
 from ddpui.utils.custom_logger import CustomLogger
 
-from ddpui.models.org import OrgPrefectBlock, Org
+from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUserRole, OrgUser
-from ddpui.utils.sendgrid import send_text_message
+from ddpui.utils.awsses import send_text_message
 from ddpui.ddpprefect import prefect_service
 from ddpui.settings import PRODUCTION
 
