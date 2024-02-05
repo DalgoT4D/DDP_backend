@@ -276,7 +276,8 @@ def get_prefect_transformation_tasks(request):
         # check if task is locked
         lock = TaskLock.objects.filter(orgtask=org_task).first()
 
-        # "git "/"dbt " + "run --full-refresh"/"pull"
+        # git pull               : "git" + " " + "pull"
+        # dbt run --full-refresh : "dbt" + " " + "run --full-refresh"
         command = org_task.task.type + " " + org_task.get_task_parameters()
 
         org_tasks.append(
@@ -466,6 +467,10 @@ def post_delete_orgtask(request, orgtask_id):  # pylint: disable=unused-argument
             400,
             f"Cannot delete, {task_lock.locked_by.user.email} is running this operation",
         )
+
+    # make sure the org task is not part of a orchestrate pipeline
+    if DataflowOrgTask.objects.filter(orgtask=org_task, dataflow__dataflow_type='orchestrate').count() > 0:
+        raise HttpError(403, "Cannot delete the orgtask since its part of a pipeline")
 
     _, error = delete_orgtask(org_task)
 
