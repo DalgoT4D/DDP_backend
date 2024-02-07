@@ -1,6 +1,7 @@
 import os
 import shutil
 from ddpui.models.org_user import Org
+from ddpui.models.tasks import Task
 from ddpui.models.org import OrgPrefectBlock
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpprefect import DBTCORE, SHELLOPERATION
@@ -35,3 +36,17 @@ def delete_dbt_workspace(org: Org):
             shellblock.delete()
 
     secretsmanager.delete_github_token(org)
+
+
+def task_config_params(task: Task):
+    """Return the config dictionary to setup parameters on this task"""
+
+    # dbt task config parameters
+    TASK_CONIF_PARAM = {
+        "dbt-deps": {"flags": ["upgrade"], "options": ["add-package"]},
+        "dbt-run": {"flags": ["full-refresh"], "options": ["select", "exclude"]},
+        "dbt-test": {"flags": [], "options": ["select", "exclude"]},
+        "dbt-seed": {"flags": [], "options": ["select"]},
+    }
+
+    return TASK_CONIF_PARAM[task.slug] if task.slug in TASK_CONIF_PARAM else None
