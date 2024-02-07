@@ -12,12 +12,14 @@ from ddpui.html.docs import get_dbt_docs
 from ddpui.api.webhook_api import webhookapi
 from ddpui.api.superset_api import supersetapi
 from ddpui.api.pipeline_api import pipelineapi
+from ddpui.api.data_api import dataapi
 from ddpui.healthcheck import healthcheck
 
 urlpatterns = [
     # path("admin/", admin.site.urls), # Uncomment if you want to use django-admin app
     path("api/dashboard/", dashboardapi.urls),
     path("api/airbyte/", airbyteapi.urls),
+    path("api/data/", dataapi.urls),
     path("api/dbt/", dbtapi.urls),
     path("api/prefect/tasks/", orgtaskapi.urls),
     path("api/prefect/", pipelineapi.urls),
