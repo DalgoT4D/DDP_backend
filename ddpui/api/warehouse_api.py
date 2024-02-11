@@ -74,6 +74,8 @@ def get_warehouse_data(request, data_type: str, **kwargs):
                 table=kwargs["table_name"],
                 limit=kwargs["limit"],
                 page=kwargs["page"],
+                order_by=kwargs["order_by"],
+                order=kwargs["order"],
             )
     except Exception as error:
         logger.exception(f"Exception occurred in get_{data_type}: {error}")
