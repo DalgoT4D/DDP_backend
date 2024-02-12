@@ -66,7 +66,10 @@ def create_warehouse(org: Org, payload: OrgWarehouseSchema):
         warehouse, dbt_credentials
     )
     warehouse.credentials = credentials_lookupkey
-    warehouse.bq_location = destination["connectionConfiguration"]["dataset_location"]
+    if "dataset_location" in destination["connectionConfiguration"]:
+        warehouse.bq_location = destination["connectionConfiguration"][
+            "dataset_location"
+        ]
     warehouse.save()
 
     return None, None
