@@ -1,19 +1,33 @@
+import json
 import os
 import shutil
 import subprocess
 from pathlib import Path
 
 import yaml
+from dbt_automation.operations.scaffold import scaffold
+from dbt_automation.operations.syncsources import sync_sources
+from dbt_automation.utils.warehouseclient import get_client
 from dotenv import load_dotenv
 from ninja import NinjaAPI
-from ninja.errors import ValidationError
+from ninja.errors import HttpError, ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from ddpui import auth
-from ddpui.ddpprefect.schema import DBTProjectSchema
+from ddpui.api.dbt_api import post_dbt_workspace
+from ddpui.api.orgtask_api import post_system_transformation_tasks
+from ddpui.core.dbtfunctions import gather_dbt_project_params
+from ddpui.core.orgtaskfunctions import create_default_transform_tasks
+from ddpui.ddpairbyte import airbyte_service
+from ddpui.ddpprefect import DBTCLIPROFILE, prefect_service
+from ddpui.ddpprefect.schema import OrgDbtSchema
+from ddpui.models.org import OrgDbt, OrgPrefectBlockv1, OrgWarehouse
 from ddpui.models.org_user import OrgUser
+from ddpui.schemas.org_task_schema import DbtProjectSchema
+from ddpui.utils import secretsmanager
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.setup_dbt_workspace import setup_local_dbt_workspace
 
 transformapi = NinjaAPI(urls_namespace="transform")
 
@@ -61,61 +75,45 @@ def handle_value_error(request, exc):
     return Response({"detail": str(exc)}, status=400)
 
 
-@transformapi.post("/v1/dbt_project/", auth=auth.CanManagePipelines())
-def create_dbt_project(request, payload: DBTProjectSchema):
+def create_dbt_venv(dbt_venv_path):
+    """
+    Create a virtual environment and install dbt.
+    """
+    # Example commands to create venv and install dbt
+    subprocess.run(["python3", "-m", "venv", str(dbt_venv_path)])
+    subprocess.run([str(dbt_venv_path / "bin" / "pip"), "install", "dbt"])
+
+
+@transformapi.post("/dbt_project/", auth=auth.CanManagePipelines())
+def create_dbt_project(request, payload: DbtProjectSchema):
     """
     Create a new dbt project.
     """
     orguser: OrgUser = request.orguser
     org = orguser.org
-    project_name = payload.project_name
-    adapter = payload.adapter
+
+    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    wtype = org_warehouse.wtype
+    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+    warehouse = get_client(wtype, credentials)
 
     project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
     project_dir.mkdir(parents=True, exist_ok=True)
 
-    existing_projects = [p.stem for p in project_dir.iterdir() if p.is_dir()]
-    if project_name in existing_projects:
-        raise ValueError(f"A project called {project_name} already exists here.")
-
     os.chdir(project_dir)
 
-    profile_path = os.path.expanduser("~/.dbt/profiles.yml")
-    if os.path.exists(profile_path):
-        with open(profile_path, "r") as file:
-            profiles = yaml.safe_load(file)
-            if profiles is None:
-                profiles = {}
-    else:
-        profiles = {}
+    # Call the post_dbt_workspace function
+    try:
+        setup_local_dbt_workspace(org.id, payload.dict())
+    except Exception as e:
+        raise Exception(f"post_dbt_workspace failed with error: {str(e)}")
 
-    profiles[project_name] = {
-        "outputs": {
-            "dev": {
-                "type": adapter,
-                "threads": 1,
-                "host": payload.host,
-                "port": payload.port,
-                "user": payload.user,
-                "pass": payload.password,
-                "dbname": payload.dbname,
-                "schema": payload.schema_,
-            }
-        },
-        "target": "dev",
-    }
+    try:
+        scaffold(payload.dict(), warehouse, project_dir)
+    except Exception as e:
+        raise Exception(f"scaffold failed with error: {str(e)}")
 
-    with open(profile_path, "w") as file:
-        yaml.safe_dump(profiles, file)
-
-    result = subprocess.run(
-        ["dbt", "init", project_name, "--skip-profile-setup"], capture_output=True
-    )
-
-    if result.returncode != 0:
-        raise Exception(f"dbt init command failed with return code {result.returncode}")
-
-    return {"message": f"Project {project_name} created successfully"}
+    return {"message": f"Project {org.slug} created successfully"}
 
 
 @transformapi.get("/v1/dbt_project/{project_name}", auth=auth.CanManagePipelines())
@@ -186,3 +184,27 @@ def delete_dbt_project(request, project_name: str):
         yaml.safe_dump(profiles, file)
 
     return {"message": f"Project {project_name} deleted successfully"}
+
+
+@transformapi.get("/v1/sync_sources", auth=auth.CanManagePipelines())
+def sync_sources_api(request, source_schema, source_name, project_dir):
+    """
+    API function to sync sources from a schema.
+    """
+    org_user = request.orguser
+    org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).first()
+    wtype = org_warehouse.wtype
+    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+
+    if wtype == "bigquery":
+        credentials = json.loads(credentials)
+
+    warehouse_client = get_client(wtype, credentials)
+
+    sync_sources(
+        config={"source_schema": source_schema, "source_name": source_name},
+        warehouse=warehouse_client,
+        project_dir=project_dir,
+    )
+
+    return {"message": "Sources synced successfully."}
