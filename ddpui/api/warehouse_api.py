@@ -57,11 +57,8 @@ def get_warehouse_data(request, data_type: str, **kwargs):
         wtype = org_warehouse.wtype
         credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
 
-        if wtype == "bigquery":
-            credentials = json.loads(credentials)
-
         data = []
-        client = get_client(wtype, credentials)
+        client = get_client(wtype, credentials, org_warehouse.bq_location)
         if data_type == "tables":
             data = client.get_tables(kwargs["schema_name"])
         elif data_type == "schemas":
