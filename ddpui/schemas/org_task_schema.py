@@ -1,4 +1,4 @@
-from ninja import Schema, Field
+from ninja import Field, Schema
 
 
 class CreateOrgTaskPayload(Schema):
@@ -9,3 +9,9 @@ class CreateOrgTaskPayload(Schema):
     task_slug: str
     flags: list | None
     options: dict | None
+
+
+class DbtProjectSchema(Schema):
+
+    project_name: str
+    default_schema: str
