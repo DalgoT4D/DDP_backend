@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 from ninja import NinjaAPI
-from ninja.errors import ValidationError, HttpError
+from ninja.errors import HttpError, ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
@@ -82,71 +82,35 @@ def create_dbt_project(request, payload: DbtProjectSchema):
     return {"message": f"Project {org.slug} created successfully"}
 
 
-@transformapi.get("/dbt_project/{project_name}", auth=auth.CanManagePipelines())
-def get_dbt_project(request, project_name: str):
-    """
-    Get the details of a dbt project.
-    """
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-
-    project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
-    if not project_dir.exists():
-        raise ValueError(f"No projects found for organization {org.slug}.")
-
-    existing_projects = [p.stem for p in project_dir.iterdir() if p.is_dir()]
-    if project_name not in existing_projects:
-        raise ValueError(f"A project called {project_name} does not exist.")
-
-    profile_path = os.path.expanduser("~/.dbt/profiles.yml")
-    if not os.path.exists(profile_path):
-        raise ValueError("No dbt profiles found.")
-
-    with open(profile_path, "r") as file:
-        profiles = yaml.safe_load(file)
-
-    if project_name not in profiles:
-        raise ValueError(f"No profile found for project {project_name}.")
-
-    project_profile = profiles[project_name]
-
-    return {
-        "message": f"Project {project_name} details retrieved successfully",
-        "profile": project_profile,
-    }
-
-
 @transformapi.delete("/dbt_project/{project_name}", auth=auth.CanManagePipelines())
 def delete_dbt_project(request, project_name: str):
     """
-    Delete a dbt project.
+    Delete a dbt project in this org
     """
     orguser: OrgUser = request.orguser
     org = orguser.org
 
     project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
+
     if not project_dir.exists():
-        raise ValueError(f"No projects found for organization {org.slug}.")
+        return {"error": f"Organization {org.slug} does not have any projects"}
 
-    existing_projects = [p.stem for p in project_dir.iterdir() if p.is_dir()]
-    if project_name not in existing_projects:
-        raise ValueError(f"A project called {project_name} does not exist.")
+    dbtrepo_dir: Path = project_dir / project_name
 
-    profile_path = os.path.expanduser("~/.dbt/profiles.yml")
-    if not os.path.exists(profile_path):
-        raise ValueError("No dbt profiles found.")
+    if not dbtrepo_dir.exists():
+        return {
+            "error": f"Project {project_name} does not exist in organization {org.slug}"
+        }
 
-    with open(profile_path, "r") as file:
-        profiles = yaml.safe_load(file)
+    if org.dbt:
+        dbt = org.dbt
+        org.dbt = None
+        org.save()
 
-    if project_name not in profiles:
-        raise ValueError(f"No profile found for project {project_name}.")
+        dbt.delete()
 
-    shutil.rmtree(project_dir / project_name)
+    shutil.rmtree(dbtrepo_dir)
 
-    del profiles[project_name]
-
-    with open(profile_path, "w") as file:
-        yaml.safe_dump(profiles, file)
-
-    return {"message": f"Project {project_name} deleted successfully"}
+    return {
+        "message": f"Project {project_name} in organization {org.slug} deleted successfully"
+    }
