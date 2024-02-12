@@ -7,6 +7,7 @@ import json
 import yaml
 from dotenv import load_dotenv
 from django.forms.models import model_to_dict
+from django.utils.text import slugify
 from ninja import NinjaAPI
 from ninja.errors import ValidationError, HttpError
 from ninja.responses import Response
@@ -224,7 +225,7 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
 
     orgdbt_model = OrgDbtModel.objects.create(
         orgdbt=orgdbt,
-        name=payload.name,
+        name=slugify(payload.name),
         display_name=payload.display_name,
         sql_path=sql_path,
     )
