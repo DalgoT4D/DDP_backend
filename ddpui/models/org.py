@@ -130,6 +130,7 @@ class OrgWarehouse(models.Model):
     airbyte_norm_op_id = models.TextField(  # skipcq: PTC-W0901, PTC-W0906
         max_length=36, null=True
     )
+    bq_location = models.CharField(max_length=100, null=True)
 
     def __str__(self) -> str:
         return (
