@@ -88,6 +88,11 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
             cwd=project_dir,
         )
 
+        # Delete example models
+        example_models_dir = dbtrepo_dir / "models" / "example"
+        if example_models_dir.exists():
+            shutil.rmtree(example_models_dir)
+
     except subprocess.CalledProcessError as e:
         logger.error(f"dbt init failed with {e.returncode}")
         return None, "Something went wrong while setting up workspace"
