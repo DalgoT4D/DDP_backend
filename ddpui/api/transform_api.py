@@ -1,33 +1,19 @@
-import json
 import os
 import shutil
-import subprocess
 from pathlib import Path
 
 import yaml
-from dbt_automation.operations.scaffold import scaffold
-from dbt_automation.operations.syncsources import sync_sources
-from dbt_automation.utils.warehouseclient import get_client
 from dotenv import load_dotenv
 from ninja import NinjaAPI
-from ninja.errors import HttpError, ValidationError
+from ninja.errors import ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from ddpui import auth
-from ddpui.api.dbt_api import post_dbt_workspace
-from ddpui.api.orgtask_api import post_system_transformation_tasks
-from ddpui.core.dbtfunctions import gather_dbt_project_params
-from ddpui.core.orgtaskfunctions import create_default_transform_tasks
-from ddpui.ddpairbyte import airbyte_service
-from ddpui.ddpprefect import DBTCLIPROFILE, prefect_service
-from ddpui.ddpprefect.schema import OrgDbtSchema
-from ddpui.models.org import OrgDbt, OrgPrefectBlockv1, OrgWarehouse
+from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.org_task_schema import DbtProjectSchema
-from ddpui.utils import secretsmanager
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.setup_dbt_workspace import setup_local_dbt_workspace
 
 transformapi = NinjaAPI(urls_namespace="transform")
 
@@ -83,11 +69,6 @@ def create_dbt_project(request, payload: DbtProjectSchema):
     orguser: OrgUser = request.orguser
     org = orguser.org
 
-    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
-    wtype = org_warehouse.wtype
-    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
-    warehouse = get_client(wtype, credentials)
-
     project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
     project_dir.mkdir(parents=True, exist_ok=True)
 
@@ -95,14 +76,14 @@ def create_dbt_project(request, payload: DbtProjectSchema):
 
     # Call the post_dbt_workspace function
     try:
-        setup_local_dbt_workspace(org.id, payload.dict())
+        result = setup_local_dbt_workspace(
+            org, project_name="dbtrepo", default_schema=payload.default_schema
+        )
     except Exception as e:
         raise Exception(f"post_dbt_workspace failed with error: {str(e)}")
 
-    try:
-        scaffold(payload.dict(), warehouse, project_dir)
-    except Exception as e:
-        raise Exception(f"scaffold failed with error: {str(e)}")
+    if result.returncode != 0:
+        raise Exception(f"dbt init command failed with return code {result.returncode}")
 
     return {"message": f"Project {org.slug} created successfully"}
 
