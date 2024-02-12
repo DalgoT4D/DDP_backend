@@ -217,9 +217,8 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
 
     # get and connect to org warehouse
     credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
-    if org_warehouse.wtype == "bigquery":
-        credentials = json.loads(credentials)
 
+    # TODO: make sure to pass bq location
     wclient = warehouseclient.get_client(
         org_warehouse.wtype,
         credentials,
