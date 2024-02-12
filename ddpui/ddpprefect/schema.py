@@ -1,5 +1,7 @@
-from typing import Optional
+from typing import List, Optional
+
 from ninja import Schema
+from pydantic import Field
 
 
 class PrefectAirbyteSync(Schema):
