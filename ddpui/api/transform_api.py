@@ -2,18 +2,25 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+import json
 
 import yaml
 from dotenv import load_dotenv
+from django.forms.models import model_to_dict
 from ninja import NinjaAPI
-from ninja.errors import ValidationError
+from ninja.errors import ValidationError, HttpError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from ddpui import auth
 from ddpui.ddpprefect.schema import DBTProjectSchema
 from ddpui.models.org_user import OrgUser
+from ddpui.models.org import OrgDbt, OrgWarehouse
+from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils import secretsmanager
+from ddpui.schemas.dbt_workflow_schema import CreateDbtModelPayload
+from dbt_automation.utils import warehouseclient
 
 transformapi = NinjaAPI(urls_namespace="transform")
 
@@ -186,3 +193,42 @@ def delete_dbt_project(request, project_name: str):
         yaml.safe_dump(profiles, file)
 
     return {"message": f"Project {project_name} deleted successfully"}
+
+
+########################## Models #############################################
+
+
+@transformapi.post("/model", auth=auth.CanManagePipelines())
+def post_dbt_model(request, payload: CreateDbtModelPayload):
+    """
+    Create a model on local disk and save configuration to django db
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    # TODO: make sure the orgdbt here is the one we create
+    orgdbt = OrgDbt.objects.filter(org=org).first()
+    if not orgdbt:
+        raise HttpError(404, "dbt project not setup")
+
+    # get and connect to org warehouse
+    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+    if org_warehouse.wtype == "bigquery":
+        credentials = json.loads(credentials)
+
+    wclient = warehouseclient.get_client(
+        org_warehouse.wtype,
+        credentials,
+    )
+
+    # TODO: call the operation and create the model on disk
+
+    orgdbt_model = OrgDbtModel.objects.create(
+        orgdbt=orgdbt, name=payload.name, display_name=payload.display_name
+    )
+
+    return model_to_dict(orgdbt_model, exclude=["orgdbt", "id"])
