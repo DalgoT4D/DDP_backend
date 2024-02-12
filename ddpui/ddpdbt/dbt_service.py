@@ -68,10 +68,33 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
         org.save()
 
     # this client'a dbt setup happens here
-    project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
+    project_dir: Path = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
+    dbtrepo_dir: Path = project_dir / project_name
+    if dbtrepo_dir.exists():
+        return None, f"Project {project_name} already exists"
+
+    if not project_dir.exists():
+        project_dir.mkdir()
+        logger.info("created project_dir %s", project_dir)
+
+    try:
+        subprocess.check_call(
+            [
+                Path(os.getenv("DBT_VENV")) / "venv/bin/dbt",
+                "init",
+                project_name,
+                "--skip-profile-setup",
+            ],
+            cwd=project_dir,
+        )
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"dbt init failed with {e.returncode}")
+        return None, "Something went wrong while setting up workspace"
+
+    logger.info(f"starting to setup local dbt workspace at {project_dir}")
 
     dbt = OrgDbt(
-        gitrepo_url="",
         project_dir=str(project_dir),
         dbt_venv=os.getenv("DBT_VENV"),
         target_type=warehouse.wtype,
@@ -85,16 +108,4 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
 
     logger.info("set dbt workspace completed for org %s", org.name)
 
-    try:
-        subprocess.check_call(
-            [
-                Path(os.getenv("DBT_VENV")) / ".venv/bin/dbt",
-                "init",
-                project_name,
-                "--skip-profile-setup",
-            ],
-        )
-
-    except subprocess.CalledProcessError as e:
-        logger.error(f"dbt init failed with {e.returncode}")
-        raise Exception("Something went wrong while setting up workspace")
+    return None, None

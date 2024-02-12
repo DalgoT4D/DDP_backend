@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 from ninja import NinjaAPI
-from ninja.errors import ValidationError
+from ninja.errors import ValidationError, HttpError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
@@ -72,18 +72,12 @@ def create_dbt_project(request, payload: DbtProjectSchema):
     project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
     project_dir.mkdir(parents=True, exist_ok=True)
 
-    os.chdir(project_dir)
-
     # Call the post_dbt_workspace function
-    try:
-        result = setup_local_dbt_workspace(
-            org, project_name="dbtrepo", default_schema=payload.default_schema
-        )
-    except Exception as e:
-        raise Exception(f"post_dbt_workspace failed with error: {str(e)}")
-
-    if result.returncode != 0:
-        raise Exception(f"dbt init command failed with return code {result.returncode}")
+    _, error = setup_local_dbt_workspace(
+        org, project_name="dbtrepo", default_schema=payload.default_schema
+    )
+    if error:
+        raise HttpError(422, error)
 
     return {"message": f"Project {org.slug} created successfully"}
 
