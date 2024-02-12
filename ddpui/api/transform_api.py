@@ -75,15 +75,6 @@ def handle_value_error(request, exc):
     return Response({"detail": str(exc)}, status=400)
 
 
-def create_dbt_venv(dbt_venv_path):
-    """
-    Create a virtual environment and install dbt.
-    """
-    # Example commands to create venv and install dbt
-    subprocess.run(["python3", "-m", "venv", str(dbt_venv_path)])
-    subprocess.run([str(dbt_venv_path / "bin" / "pip"), "install", "dbt"])
-
-
 @transformapi.post("/dbt_project/", auth=auth.CanManagePipelines())
 def create_dbt_project(request, payload: DbtProjectSchema):
     """
@@ -116,7 +107,7 @@ def create_dbt_project(request, payload: DbtProjectSchema):
     return {"message": f"Project {org.slug} created successfully"}
 
 
-@transformapi.get("/v1/dbt_project/{project_name}", auth=auth.CanManagePipelines())
+@transformapi.get("/dbt_project/{project_name}", auth=auth.CanManagePipelines())
 def get_dbt_project(request, project_name: str):
     """
     Get the details of a dbt project.
@@ -150,7 +141,7 @@ def get_dbt_project(request, project_name: str):
     }
 
 
-@transformapi.delete("/v1/dbt_project/{project_name}", auth=auth.CanManagePipelines())
+@transformapi.delete("/dbt_project/{project_name}", auth=auth.CanManagePipelines())
 def delete_dbt_project(request, project_name: str):
     """
     Delete a dbt project.
@@ -184,27 +175,3 @@ def delete_dbt_project(request, project_name: str):
         yaml.safe_dump(profiles, file)
 
     return {"message": f"Project {project_name} deleted successfully"}
-
-
-@transformapi.get("/v1/sync_sources", auth=auth.CanManagePipelines())
-def sync_sources_api(request, source_schema, source_name, project_dir):
-    """
-    API function to sync sources from a schema.
-    """
-    org_user = request.orguser
-    org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).first()
-    wtype = org_warehouse.wtype
-    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
-
-    if wtype == "bigquery":
-        credentials = json.loads(credentials)
-
-    warehouse_client = get_client(wtype, credentials)
-
-    sync_sources(
-        config={"source_schema": source_schema, "source_name": source_name},
-        warehouse=warehouse_client,
-        project_dir=project_dir,
-    )
-
-    return {"message": "Sources synced successfully."}
