@@ -212,10 +212,10 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
     if not org_warehouse:
         raise HttpError(404, "please setup your warehouse first")
 
-    # TODO: make sure the orgdbt here is the one we create
-    orgdbt = OrgDbt.objects.filter(org=org).first()
+    # make sure the orgdbt here is the one we create locally
+    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
     if not orgdbt:
-        raise HttpError(404, "dbt project not setup")
+        raise HttpError(404, "dbt workspace not setup")
 
     sql_path, error = dbtautomation_service.create_dbt_model_in_project(
         orgdbt, org_warehouse, payload.op_type, payload.config
