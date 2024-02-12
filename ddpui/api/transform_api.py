@@ -82,6 +82,26 @@ def create_dbt_project(request, payload: DbtProjectSchema):
     return {"message": f"Project {org.slug} created successfully"}
 
 
+@transformapi.get("/dbt_project/", auth=auth.CanManagePipelines())
+def get_dbt_project(request):
+    """
+    Get information about the dbt project in this org.
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    if not org.dbt:
+        return {"message": f"No dbt project found in organization {org.slug}"}
+
+    dbt_info = {
+        "target_type": org.dbt.target_type,
+        "default_schema": org.dbt.default_schema,
+        "gitrepo_url": org.dbt.gitrepo_url,
+    }
+
+    return dbt_info
+
+
 @transformapi.delete("/dbt_project/{project_name}", auth=auth.CanManagePipelines())
 def delete_dbt_project(request, project_name: str):
     """
