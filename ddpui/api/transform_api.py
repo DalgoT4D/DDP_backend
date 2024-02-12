@@ -21,6 +21,7 @@ from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.schemas.dbt_workflow_schema import CreateDbtModelPayload
 from dbt_automation.utils import warehouseclient
+from ddpui.core import dbtautomation_service
 
 transformapi = NinjaAPI(urls_namespace="transform")
 
@@ -215,19 +216,17 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
     if not orgdbt:
         raise HttpError(404, "dbt project not setup")
 
-    # get and connect to org warehouse
-    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
-
-    # TODO: make sure to pass bq location
-    wclient = warehouseclient.get_client(
-        org_warehouse.wtype,
-        credentials,
+    sql_path, error = dbtautomation_service.create_dbt_model_in_project(
+        orgdbt, org_warehouse, payload.op_type, payload.config
     )
-
-    # TODO: call the operation and create the model on disk
+    if error:
+        raise HttpError(422, error)
 
     orgdbt_model = OrgDbtModel.objects.create(
-        orgdbt=orgdbt, name=payload.name, display_name=payload.display_name
+        orgdbt=orgdbt,
+        name=payload.name,
+        display_name=payload.display_name,
+        sql_path=sql_path,
     )
 
     return model_to_dict(orgdbt_model, exclude=["orgdbt", "id"])

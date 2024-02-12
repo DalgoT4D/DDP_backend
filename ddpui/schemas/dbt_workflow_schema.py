@@ -9,3 +9,4 @@ class CreateDbtModelPayload(Schema):
     name: str
     display_name: str
     config: dict
+    op_type: str
