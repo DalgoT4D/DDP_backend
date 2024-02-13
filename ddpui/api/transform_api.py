@@ -174,6 +174,7 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
         name=slugify(payload.name),
         display_name=payload.display_name,
         sql_path=sql_path,
+        config=payload.config,
     )
 
     return model_to_dict(orgdbt_model, exclude=["orgdbt", "id"])
