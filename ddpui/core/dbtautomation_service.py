@@ -1,3 +1,4 @@
+from pathlib import Path
 from ddpui.models.org import OrgWarehouse, OrgDbt
 from ddpui.utils import secretsmanager
 from dbt_automation.utils.warehouseclient import get_client
@@ -45,7 +46,9 @@ def create_dbt_model_in_project(
         return None, "Operation not found"
 
     sql_file_path = OPERATIONS_DICT[op_type](
-        config=config, warehouse=wclient, project_dir=orgdbt.project_dir
+        config=config,
+        warehouse=wclient,
+        project_dir=Path(orgdbt.project_dir) / "dbtrepo",
     )
 
-    return sql_file_path
+    return str(sql_file_path), None

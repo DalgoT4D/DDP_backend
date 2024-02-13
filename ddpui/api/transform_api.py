@@ -143,6 +143,13 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
+    output_name = slugify(payload.name)
+    # output_name should not be repeated
+    if OrgDbtModel.objects.filter(name=output_name).count() > 0:
+        raise HttpError(422, "model output name must be unique")
+
+    payload.config["output_name"] = output_name
+
     sql_path, error = dbtautomation_service.create_dbt_model_in_project(
         orgdbt, org_warehouse, payload.op_type, payload.config
     )
@@ -151,7 +158,7 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
 
     orgdbt_model = OrgDbtModel.objects.create(
         orgdbt=orgdbt,
-        name=slugify(payload.name),
+        name=output_name,
         display_name=payload.display_name,
         sql_path=sql_path,
         config=payload.config,
