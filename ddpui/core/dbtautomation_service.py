@@ -1,19 +1,22 @@
+import os
 from pathlib import Path
-from ddpui.models.org import OrgWarehouse, OrgDbt
-from ddpui.utils import secretsmanager
-from dbt_automation.utils.warehouseclient import get_client
 
-# operations
-from dbt_automation.operations.flattenjson import flattenjson
 from dbt_automation.operations.arithmetic import arithmetic
 from dbt_automation.operations.castdatatypes import cast_datatypes
 from dbt_automation.operations.coalescecolumns import coalesce_columns
 from dbt_automation.operations.concatcolumns import concat_columns
 from dbt_automation.operations.droprenamecolumns import drop_columns, rename_columns
 from dbt_automation.operations.flattenairbyte import flatten_operation
+
+# operations
+from dbt_automation.operations.flattenjson import flattenjson
 from dbt_automation.operations.mergetables import union_tables
 from dbt_automation.operations.regexextraction import regex_extraction
+from dbt_automation.operations.syncsources import sync_sources
+from dbt_automation.utils.warehouseclient import get_client
 
+from ddpui.models.org import OrgDbt, OrgWarehouse
+from ddpui.utils import secretsmanager
 
 OPERATIONS_DICT = {
     "flatten": flatten_operation,
@@ -52,3 +55,18 @@ def create_dbt_model_in_project(
     )
 
     return str(sql_file_path), None
+
+
+def sync_sources_to_dbt(schema_name, source_name, org, org_warehouse):
+    """
+    Sync sources from a given schema to dbt.
+    """
+    warehouse_client = _get_wclient(org_warehouse)
+
+    sources_file_path = sync_sources(
+        config={"source_schema": schema_name, "source_name": source_name},
+        warehouse=warehouse_client,
+        project_dir=Path(os.getenv("CLIENTDBT_ROOT")) / org.slug / source_name,
+    )
+
+    return str(sources_file_path), None
