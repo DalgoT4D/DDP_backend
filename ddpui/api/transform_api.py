@@ -1,9 +1,7 @@
 import os
 import shutil
 from pathlib import Path
-import json
 
-import yaml
 from dotenv import load_dotenv
 from django.forms.models import model_to_dict
 from django.utils.text import slugify
@@ -18,10 +16,10 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgDbt, OrgWarehouse
 from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils import secretsmanager
+
 from ddpui.schemas.org_task_schema import DbtProjectSchema
 from ddpui.schemas.dbt_workflow_schema import CreateDbtModelPayload
-from dbt_automation.utils import warehouseclient
+
 from ddpui.core import dbtautomation_service
 
 transformapi = NinjaAPI(urls_namespace="transform")
