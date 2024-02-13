@@ -1,19 +1,28 @@
 import os
 import shutil
 from pathlib import Path
+import json
 
 import yaml
 from dotenv import load_dotenv
+from django.forms.models import model_to_dict
+from django.utils.text import slugify
 from ninja import NinjaAPI
-from ninja.errors import HttpError, ValidationError
+from ninja.errors import ValidationError, HttpError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from ddpui import auth
 from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
 from ddpui.models.org_user import OrgUser
-from ddpui.schemas.org_task_schema import DbtProjectSchema
+from ddpui.models.org import OrgDbt, OrgWarehouse
+from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils import secretsmanager
+from ddpui.schemas.org_task_schema import DbtProjectSchema
+from ddpui.schemas.dbt_workflow_schema import CreateDbtModelPayload
+from dbt_automation.utils import warehouseclient
+from ddpui.core import dbtautomation_service
 
 transformapi = NinjaAPI(urls_namespace="transform")
 
@@ -82,26 +91,6 @@ def create_dbt_project(request, payload: DbtProjectSchema):
     return {"message": f"Project {org.slug} created successfully"}
 
 
-@transformapi.get("/dbt_project/", auth=auth.CanManagePipelines())
-def get_dbt_project(request):
-    """
-    Get information about the dbt project in this org.
-    """
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-
-    if not org.dbt:
-        return {"message": f"No dbt project found in organization {org.slug}"}
-
-    dbt_info = {
-        "target_type": org.dbt.target_type,
-        "default_schema": org.dbt.default_schema,
-        "gitrepo_url": org.dbt.gitrepo_url,
-    }
-
-    return dbt_info
-
-
 @transformapi.delete("/dbt_project/{project_name}", auth=auth.CanManagePipelines())
 def delete_dbt_project(request, project_name: str):
     """
@@ -131,6 +120,48 @@ def delete_dbt_project(request, project_name: str):
 
     shutil.rmtree(dbtrepo_dir)
 
-    return {
-        "message": f"Project {project_name} in organization {org.slug} deleted successfully"
-    }
+    return {"message": f"Project {project_name} deleted successfully"}
+
+
+########################## Models #############################################
+
+
+@transformapi.post("/model", auth=auth.CanManagePipelines())
+def post_dbt_model(request, payload: CreateDbtModelPayload):
+    """
+    Create a model on local disk and save configuration to django db
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    # make sure the orgdbt here is the one we create locally
+    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    output_name = slugify(payload.name)
+    # output_name should not be repeated
+    if OrgDbtModel.objects.filter(name=output_name).count() > 0:
+        raise HttpError(422, "model output name must be unique")
+
+    payload.config["output_name"] = output_name
+
+    sql_path, error = dbtautomation_service.create_dbt_model_in_project(
+        orgdbt, org_warehouse, payload.op_type, payload.config
+    )
+    if error:
+        raise HttpError(422, error)
+
+    orgdbt_model = OrgDbtModel.objects.create(
+        orgdbt=orgdbt,
+        name=output_name,
+        display_name=payload.display_name,
+        sql_path=sql_path,
+        config=payload.config,
+    )
+
+    return model_to_dict(orgdbt_model, exclude=["orgdbt", "id"])
