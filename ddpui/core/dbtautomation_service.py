@@ -57,7 +57,9 @@ def create_dbt_model_in_project(
     return str(sql_file_path), None
 
 
-def sync_sources_to_dbt(schema_name, source_name, org, org_warehouse):
+def sync_sources_to_dbt(
+    schema_name: str, source_name: str, org: str, org_warehouse: str
+):
     """
     Sync sources from a given schema to dbt.
     """
