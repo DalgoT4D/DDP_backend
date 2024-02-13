@@ -19,6 +19,7 @@ from ddpui.models.org import OrgDbt, OrgWarehouse
 from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
+from ddpui.schemas.org_task_schema import DbtProjectSchema
 from ddpui.schemas.dbt_workflow_schema import CreateDbtModelPayload
 from dbt_automation.utils import warehouseclient
 from ddpui.core import dbtautomation_service
