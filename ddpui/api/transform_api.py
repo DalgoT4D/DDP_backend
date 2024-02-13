@@ -18,7 +18,7 @@ from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.schemas.org_task_schema import DbtProjectSchema
-from ddpui.schemas.dbt_workflow_schema import CreateDbtModelPayload
+from ddpui.schemas.dbt_workflow_schema import CreateDbtModelPayload, SyncSourcesSchema
 
 from ddpui.core import dbtautomation_service
 
