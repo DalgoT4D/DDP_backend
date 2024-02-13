@@ -1,29 +1,26 @@
-import json
 import os
 import shutil
 from pathlib import Path
 
-import yaml
-from dbt_automation.operations.syncsources import sync_sources
-from dbt_automation.utils.warehouseclient import get_client
+from dotenv import load_dotenv
 from django.forms.models import model_to_dict
 from django.utils.text import slugify
-from dotenv import load_dotenv
 from ninja import NinjaAPI
-from ninja.errors import HttpError, ValidationError
+from ninja.errors import ValidationError, HttpError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from ddpui import auth
-from ddpui.core import dbtautomation_service
 from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
-from ddpui.models.dbt_workflow import OrgDbtModel
-from ddpui.models.org import OrgDbt, OrgWarehouse
 from ddpui.models.org_user import OrgUser
-from ddpui.schemas.dbt_workflow_schema import CreateDbtModelPayload, SyncSourcesSchema
-from ddpui.schemas.org_task_schema import DbtProjectSchema
-from ddpui.utils import secretsmanager
+from ddpui.models.org import OrgDbt, OrgWarehouse
+from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.utils.custom_logger import CustomLogger
+
+from ddpui.schemas.org_task_schema import DbtProjectSchema
+from ddpui.schemas.dbt_workflow_schema import CreateDbtModelPayload
+
+from ddpui.core import dbtautomation_service
 
 transformapi = NinjaAPI(urls_namespace="transform")
 
