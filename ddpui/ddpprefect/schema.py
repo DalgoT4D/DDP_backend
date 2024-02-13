@@ -317,14 +317,3 @@ class PrefectFlowRunSchema(Schema):
     flow_id: str
     state_type: str
     state_name: str
-
-
-class DBTProjectSchema(Schema):
-    project_name: str
-    adapter: str
-    host: str
-    user: str
-    port: str
-    password: str
-    dbname: str
-    schema_: str = Field(alias="schema")

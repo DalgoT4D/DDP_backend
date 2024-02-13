@@ -1,11 +1,18 @@
 import os
 import shutil
+import subprocess
+from pathlib import Path
+
+import slugify
+
+from ddpui.ddpprefect import DBTCORE, SHELLOPERATION, prefect_service
+from ddpui.models.org import OrgDbt, OrgPrefectBlock, OrgWarehouse
 from ddpui.models.org_user import Org
 from ddpui.models.tasks import Task
-from ddpui.models.org import OrgPrefectBlock
-from ddpui.ddpprefect import prefect_service
-from ddpui.ddpprefect import DBTCORE, SHELLOPERATION
 from ddpui.utils import secretsmanager
+from ddpui.utils.custom_logger import CustomLogger
+
+logger = CustomLogger("ddpui")
 
 
 def delete_dbt_workspace(org: Org):
@@ -50,3 +57,60 @@ def task_config_params(task: Task):
     }
 
     return TASK_CONIF_PARAM[task.slug] if task.slug in TASK_CONIF_PARAM else None
+
+
+def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) -> str:
+    """sets up an org's dbt workspace, recreating it if it already exists"""
+    warehouse = OrgWarehouse.objects.filter(org=org).first()
+
+    if org.slug is None:
+        org.slug = slugify(org.name)
+        org.save()
+
+    # this client'a dbt setup happens here
+    project_dir: Path = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
+    dbtrepo_dir: Path = project_dir / project_name
+    if dbtrepo_dir.exists():
+        return None, f"Project {project_name} already exists"
+
+    if not project_dir.exists():
+        project_dir.mkdir()
+        logger.info("created project_dir %s", project_dir)
+
+    try:
+        subprocess.check_call(
+            [
+                Path(os.getenv("DBT_VENV")) / "venv/bin/dbt",
+                "init",
+                project_name,
+                "--skip-profile-setup",
+            ],
+            cwd=project_dir,
+        )
+
+        # Delete example models
+        example_models_dir = dbtrepo_dir / "models" / "example"
+        if example_models_dir.exists():
+            shutil.rmtree(example_models_dir)
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"dbt init failed with {e.returncode}")
+        return None, "Something went wrong while setting up workspace"
+
+    logger.info(f"starting to setup local dbt workspace at {project_dir}")
+
+    dbt = OrgDbt(
+        project_dir=str(project_dir),
+        dbt_venv=os.getenv("DBT_VENV"),
+        target_type=warehouse.wtype,
+        default_schema=default_schema,
+    )
+    dbt.save()
+    logger.info("created orgdbt for org %s", org.name)
+    org.dbt = dbt
+    org.save()
+    logger.info("set org.dbt for org %s", org.name)
+
+    logger.info("set dbt workspace completed for org %s", org.name)
+
+    return None, None
