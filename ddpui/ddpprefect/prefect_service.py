@@ -604,11 +604,16 @@ def get_flow_run(flow_run_id: str) -> dict:
     return res
 
 
-def create_deployment_flow_run(deployment_id: str) -> dict:  # pragma: no cover
+def create_deployment_flow_run(
+    deployment_id: str, flow_run_params: dict = None
+) -> dict:  # pragma: no cover
     """
     Proxy call to create a flow run for deployment.
     """
-    res = prefect_post(f"deployments/{deployment_id}/flow_run", {})
+    res = prefect_post(
+        f"deployments/{deployment_id}/flow_run",
+        flow_run_params if flow_run_params else {},
+    )
     return res
 
 
