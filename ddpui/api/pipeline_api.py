@@ -489,7 +489,8 @@ def post_run_prefect_org_deployment_task(
         ):
             logger.info("sending custom flow run params to the deployment run")
             orgtask = dataflow_orgtask.orgtask
-            # dont save this
+
+            # save orgtask params to memory and not db
             orgtask.parameters = dict(payload)
 
             # fetch cli block
