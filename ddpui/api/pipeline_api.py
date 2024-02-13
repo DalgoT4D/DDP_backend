@@ -30,10 +30,16 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowUpdateSchema3,
     PrefectDataFlowCreateSchema4,
 )
+from ddpui.utils.constants import TASK_DBTRUN
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.schemas.org_task_schema import TaskParameters
 from ddpui.utils.prefectlogs import parse_prefect_logs
 from ddpui.utils.helpers import generate_hash_id
-from ddpui.core.pipelinefunctions import pipeline_sync_tasks, pipeline_dbt_git_tasks
+from ddpui.core.pipelinefunctions import (
+    pipeline_sync_tasks,
+    pipeline_dbt_git_tasks,
+    setup_dbt_core_task_config,
+)
 from ddpui.core.dbtfunctions import gather_dbt_project_params
 
 pipelineapi = NinjaAPI(urls_namespace="pipeline")
@@ -144,7 +150,9 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
                 deployment_name=deployment_name,
                 flow_name=deployment_name,
                 orgslug=orguser.org.slug,
-                deployment_params={"config": {"tasks": tasks,  "org_slug": orguser.org.slug}},
+                deployment_params={
+                    "config": {"tasks": tasks, "org_slug": orguser.org.slug}
+                },
                 cron=payload.cron,
             )
         )
@@ -216,15 +224,19 @@ def get_prefect_dataflows_v1(request):
                 "lastRun": prefect_service.get_last_flow_run_by_deployment_id(
                     flow.deployment_id
                 ),
-                "status": is_deployment_active[flow.deployment_id]
-                if flow.deployment_id in is_deployment_active
-                else False,
-                "lock": {
-                    "lockedBy": lock.locked_by.user.email,
-                    "lockedAt": lock.locked_at,
-                }
-                if lock
-                else None,
+                "status": (
+                    is_deployment_active[flow.deployment_id]
+                    if flow.deployment_id in is_deployment_active
+                    else False
+                ),
+                "lock": (
+                    {
+                        "lockedBy": lock.locked_by.user.email,
+                        "lockedAt": lock.locked_at,
+                    }
+                    if lock
+                    else None
+                ),
                 "isRunning": lock and lock.locking_dataflow == flow,
             }
         )
@@ -388,7 +400,9 @@ def put_prefect_dataflow_v1(
         logger.info(f"Dbt tasks pushed to the pipeline")
 
     # update deployment
-    payload.deployment_params = {"config": {"tasks": tasks, "org_slug": orguser.org.slug}}
+    payload.deployment_params = {
+        "config": {"tasks": tasks, "org_slug": orguser.org.slug}
+    }
     try:
         prefect_service.update_dataflow_v1(deployment_id, payload)
     except Exception as error:
@@ -440,7 +454,9 @@ def post_deployment_set_schedule(request, deployment_id, status):
 
 
 @pipelineapi.post("v1/flows/{deployment_id}/flow_run/", auth=auth.CanManagePipelines())
-def post_run_prefect_org_deployment_task(request, deployment_id):
+def post_run_prefect_org_deployment_task(
+    request, deployment_id, payload: TaskParameters = None
+):
     """
     Run deployment based task.
     Can run
@@ -463,7 +479,42 @@ def post_run_prefect_org_deployment_task(request, deployment_id):
     locks = prefect_service.lock_tasks_for_deployment(deployment_id, orguser)
 
     try:
-        res = prefect_service.create_deployment_flow_run(deployment_id)
+        # allow parameter passing only for manual dbt runs and if the there are parameters being passed
+        flow_run_params = None
+        if (
+            dataflow_orgtask.dataflow.dataflow_type == "manual"
+            and dataflow_orgtask.orgtask.task.slug == TASK_DBTRUN
+            and payload
+            and (payload.flags or payload.options)
+        ):
+            logger.info("sending custom flow run params to the deployment run")
+            orgtask = dataflow_orgtask.orgtask
+            # dont save this
+            orgtask.parameters = dict(payload)
+
+            # fetch cli block
+            cli_profile_block = OrgPrefectBlockv1.objects.filter(
+                org=orguser.org, block_type=DBTCLIPROFILE
+            ).first()
+            dbt_project_params, error = gather_dbt_project_params(orguser.org)
+
+            # dont set any parameters if cli block is not present or there is an error
+            if cli_profile_block and not error:
+                logger.info("found cli profile block")
+                flow_run_params = {
+                    "config": {
+                        "tasks": [
+                            setup_dbt_core_task_config(
+                                orgtask,
+                                cli_profile_block,
+                                dbt_project_params,
+                            ).to_json()
+                        ],
+                        "org_slug": orguser.org.slug,
+                    }
+                }
+
+        res = prefect_service.create_deployment_flow_run(deployment_id, flow_run_params)
     except Exception as error:
         for task_lock in locks:
             logger.info("deleting TaskLock %s", task_lock.orgtask.task.slug)
