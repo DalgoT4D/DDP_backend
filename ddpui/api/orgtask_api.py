@@ -34,7 +34,7 @@ from ddpui.models.tasks import (
 from ddpui.ddpprefect.schema import (
     PrefectSecretBlockCreate,
 )
-from ddpui.schemas.org_task_schema import CreateOrgTaskPayload
+from ddpui.schemas.org_task_schema import CreateOrgTaskPayload, TaskParameters
 from ddpui.core.dbtfunctions import gather_dbt_project_params
 from ddpui.core.orgtaskfunctions import (
     create_default_transform_tasks,
@@ -343,7 +343,9 @@ def delete_system_transformation_tasks(request):
 
 
 @orgtaskapi.post("{orgtask_id}/run/", auth=auth.CanManagePipelines())
-def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-argument
+def post_run_prefect_org_task(
+    request, orgtask_id, payload: TaskParameters = None
+):  # pylint: disable=unused-argument
     """
     Run dbt task & git pull in prefect. All tasks without a deployment.
     Basically short running tasks
@@ -416,6 +418,10 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
         if cli_profile_block is None:
             raise HttpError(400, "dbt cli profile block not found")
 
+        # save orgtask params to memory and not db
+        if payload:
+            org_task.parameters = dict(payload)
+
         task_config = setup_dbt_core_task_config(
             org_task, cli_profile_block, dbt_project_params
         )
@@ -469,7 +475,12 @@ def post_delete_orgtask(request, orgtask_id):  # pylint: disable=unused-argument
         )
 
     # make sure the org task is not part of a orchestrate pipeline
-    if DataflowOrgTask.objects.filter(orgtask=org_task, dataflow__dataflow_type='orchestrate').count() > 0:
+    if (
+        DataflowOrgTask.objects.filter(
+            orgtask=org_task, dataflow__dataflow_type="orchestrate"
+        ).count()
+        > 0
+    ):
         raise HttpError(403, "Cannot delete the orgtask since its part of a pipeline")
 
     _, error = delete_orgtask(org_task)
