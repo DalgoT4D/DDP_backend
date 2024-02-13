@@ -1,28 +1,29 @@
+import json
 import os
 import shutil
 from pathlib import Path
-import json
 
 import yaml
-from dotenv import load_dotenv
+from dbt_automation.operations.syncsources import sync_sources
+from dbt_automation.utils.warehouseclient import get_client
 from django.forms.models import model_to_dict
 from django.utils.text import slugify
+from dotenv import load_dotenv
 from ninja import NinjaAPI
-from ninja.errors import ValidationError, HttpError
+from ninja.errors import HttpError, ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from ddpui import auth
-from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
-from ddpui.models.org_user import OrgUser
-from ddpui.models.org import OrgDbt, OrgWarehouse
-from ddpui.models.dbt_workflow import OrgDbtModel
-from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils import secretsmanager
-from ddpui.schemas.org_task_schema import DbtProjectSchema
-from ddpui.schemas.dbt_workflow_schema import CreateDbtModelPayload
-from dbt_automation.utils import warehouseclient
 from ddpui.core import dbtautomation_service
+from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
+from ddpui.models.dbt_workflow import OrgDbtModel
+from ddpui.models.org import OrgDbt, OrgWarehouse
+from ddpui.models.org_user import OrgUser
+from ddpui.schemas.dbt_workflow_schema import CreateDbtModelPayload, SyncSourcesSchema
+from ddpui.schemas.org_task_schema import DbtProjectSchema
+from ddpui.utils import secretsmanager
+from ddpui.utils.custom_logger import CustomLogger
 
 transformapi = NinjaAPI(urls_namespace="transform")
 
@@ -121,6 +122,32 @@ def delete_dbt_project(request, project_name: str):
     shutil.rmtree(dbtrepo_dir)
 
     return {"message": f"Project {project_name} deleted successfully"}
+
+
+@transformapi.post("/sync_sources/", auth=auth.CanManagePipelines())
+def sync_sources(request, payload: SyncSourcesSchema):
+    """
+    Sync sources from a given schema.
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(status_code=404, detail="Please set up your warehouse first")
+
+    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    if not orgdbt:
+        raise HttpError(status_code=404, detail="DBT workspace not set up")
+
+    sources_file_path, error = dbtautomation_service.sync_sources_to_dbt(
+        payload.schema_name, payload.source_name, org, org_warehouse
+    )
+
+    if error:
+        raise HttpError(status_code=422, detail=error)
+
+    return {"sources_file_path": str(sources_file_path)}
 
 
 ########################## Models #############################################
