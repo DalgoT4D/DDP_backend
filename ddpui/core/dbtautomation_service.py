@@ -69,7 +69,7 @@ def sync_sources_to_dbt(
     sources_file_path = sync_sources(
         config={"source_schema": schema_name, "source_name": source_name},
         warehouse=warehouse_client,
-        dbtproject=dbtProject(Path(os.getenv("CLIENTDBT_ROOT")) / org.slug / "dbtrepo"),
+        project_dir=Path(os.getenv("CLIENTDBT_ROOT")) / org.slug / "dbtrepo",
     )
 
     return str(sources_file_path), None
