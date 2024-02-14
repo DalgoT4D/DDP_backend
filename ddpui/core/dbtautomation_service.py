@@ -15,6 +15,7 @@ from dbt_automation.operations.regexextraction import regex_extraction
 from dbt_automation.operations.syncsources import sync_sources
 from dbt_automation.utils.warehouseclient import get_client
 from dbt_automation.utils.dbtproject import dbtProject
+from dbt_automation.utils.dbtsources import read_sources
 
 from ddpui.models.org import OrgDbt, OrgWarehouse
 from ddpui.utils import secretsmanager
@@ -73,3 +74,9 @@ def sync_sources_to_dbt(
     )
 
     return str(sources_file_path), None
+
+
+def read_dbt_sources_in_project(orgdbt: OrgDbt):
+    """Read the sources from .yml files in the dbt project"""
+
+    return read_sources(Path(orgdbt.project_dir) / "dbtrepo")

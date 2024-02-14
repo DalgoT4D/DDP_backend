@@ -184,8 +184,44 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
         orgdbt=orgdbt,
         name=output_name,
         display_name=payload.display_name,
+        schema=(
+            payload.config["dest_schema"] if "dest_schema" in payload.config else None
+        ),
         sql_path=sql_path,
         config=payload.config,
     )
 
     return model_to_dict(orgdbt_model, exclude=["orgdbt", "id"])
+
+
+@transformapi.get("/dbt_project/sources_models/", auth=auth.CanManagePipelines())
+def get_input_sources_and_models(request, schema_name: str = None):
+    """
+    Fetches all sources and models in a dbt project
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    # make sure the orgdbt here is the one we create locally
+    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    sources = dbtautomation_service.read_dbt_sources_in_project(orgdbt)
+
+    models = []
+    for orgdbt_model in OrgDbtModel.objects.filter(orgdbt=orgdbt).all():
+        models.append(
+            {
+                "source_name": None,
+                "input_name": orgdbt_model.name,
+                "input_type": "model",
+                "schema": orgdbt_model.schema,
+            }
+        )
+
+    return [ref for ref in sources + models if ref["schema"] == schema_name]
