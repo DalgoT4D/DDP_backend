@@ -131,18 +131,18 @@ def sync_sources(request, payload: SyncSourcesSchema):
 
     org_warehouse = OrgWarehouse.objects.filter(org=org).first()
     if not org_warehouse:
-        raise HttpError(status_code=404, detail="Please set up your warehouse first")
+        raise HttpError(404, "Please set up your warehouse first")
 
     orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
     if not orgdbt:
-        raise HttpError(status_code=404, detail="DBT workspace not set up")
+        raise HttpError(404, "DBT workspace not set up")
 
     sources_file_path, error = dbtautomation_service.sync_sources_to_dbt(
         payload.schema_name, payload.source_name, org, org_warehouse
     )
 
     if error:
-        raise HttpError(status_code=422, detail=error)
+        raise HttpError(422, error)
 
     return {"sources_file_path": str(sources_file_path)}
 
@@ -150,7 +150,7 @@ def sync_sources(request, payload: SyncSourcesSchema):
 ########################## Models #############################################
 
 
-@transformapi.post("/model", auth=auth.CanManagePipelines())
+@transformapi.post("/model/", auth=auth.CanManagePipelines())
 def post_dbt_model(request, payload: CreateDbtModelPayload):
     """
     Create a model on local disk and save configuration to django db
