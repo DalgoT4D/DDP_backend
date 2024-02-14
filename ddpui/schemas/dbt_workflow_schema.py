@@ -1,4 +1,4 @@
-from ninja import Schema, Field
+from ninja import Field, Schema
 
 
 class CreateDbtModelPayload(Schema):
@@ -10,3 +10,12 @@ class CreateDbtModelPayload(Schema):
     display_name: str
     config: dict
     op_type: str
+
+
+class SyncSourcesSchema(Schema):
+    """
+    schema to sync sources from the schema
+    """
+
+    schema_name: str
+    source_name: str
