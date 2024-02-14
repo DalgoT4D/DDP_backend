@@ -121,7 +121,7 @@ def delete_dbt_project(request, project_name: str):
     return {"message": f"Project {project_name} deleted successfully"}
 
 
-@transformapi.post("/sync_sources/", auth=auth.CanManagePipelines())
+@transformapi.post("/dbt_project/sync_sources/", auth=auth.CanManagePipelines())
 def sync_sources(request, payload: SyncSourcesSchema):
     """
     Sync sources from a given schema.
@@ -147,10 +147,10 @@ def sync_sources(request, payload: SyncSourcesSchema):
     return {"sources_file_path": str(sources_file_path)}
 
 
-########################## Models #############################################
+########################## Models & Sources #############################################
 
 
-@transformapi.post("/model/", auth=auth.CanManagePipelines())
+@transformapi.post("/dbt_project/model/", auth=auth.CanManagePipelines())
 def post_dbt_model(request, payload: CreateDbtModelPayload):
     """
     Create a model on local disk and save configuration to django db
