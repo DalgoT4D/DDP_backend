@@ -14,6 +14,7 @@ from dbt_automation.operations.mergetables import union_tables
 from dbt_automation.operations.regexextraction import regex_extraction
 from dbt_automation.operations.syncsources import sync_sources
 from dbt_automation.utils.warehouseclient import get_client
+from dbt_automation.utils.dbtproject import dbtProject
 
 from ddpui.models.org import OrgDbt, OrgWarehouse
 from ddpui.utils import secretsmanager
@@ -68,7 +69,7 @@ def sync_sources_to_dbt(
     sources_file_path = sync_sources(
         config={"source_schema": schema_name, "source_name": source_name},
         warehouse=warehouse_client,
-        project_dir=Path(os.getenv("CLIENTDBT_ROOT")) / org.slug / "dbtrepo",
+        dbtproject=dbtProject(Path(os.getenv("CLIENTDBT_ROOT")) / org.slug / "dbtrepo"),
     )
 
     return str(sources_file_path), None
