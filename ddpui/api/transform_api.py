@@ -173,6 +173,7 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
         raise HttpError(422, "model output name must be unique")
 
     payload.config["output_name"] = output_name
+    payload.config["dest_schema"] = payload.dest_schema
 
     sql_path, error = dbtautomation_service.create_dbt_model_in_project(
         orgdbt, org_warehouse, payload.op_type, payload.config
@@ -184,9 +185,7 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
         orgdbt=orgdbt,
         name=output_name,
         display_name=payload.display_name,
-        schema=(
-            payload.config["dest_schema"] if "dest_schema" in payload.config else None
-        ),
+        schema=payload.dest_schema,
         sql_path=sql_path,
         config=payload.config,
     )
