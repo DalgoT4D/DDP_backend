@@ -13,6 +13,7 @@ class OrgDbtModel(models.Model):
     orgdbt = models.ForeignKey(OrgDbt, on_delete=models.CASCADE)
     name = models.CharField(max_length=100)
     display_name = models.CharField(max_length=100)
+    schema = models.CharField(max_length=100, null=True)
     sql_path = models.CharField(max_length=200, null=True)
     config = models.JSONField(null=True)
 

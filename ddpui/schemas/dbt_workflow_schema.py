@@ -8,6 +8,7 @@ class CreateDbtModelPayload(Schema):
 
     name: str
     display_name: str
+    dest_schema: str
     config: dict
     op_type: str
 

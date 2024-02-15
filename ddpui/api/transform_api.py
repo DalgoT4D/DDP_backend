@@ -121,7 +121,7 @@ def delete_dbt_project(request, project_name: str):
     return {"message": f"Project {project_name} deleted successfully"}
 
 
-@transformapi.post("/sync_sources/", auth=auth.CanManagePipelines())
+@transformapi.post("/dbt_project/sync_sources/", auth=auth.CanManagePipelines())
 def sync_sources(request, payload: SyncSourcesSchema):
     """
     Sync sources from a given schema.
@@ -147,10 +147,10 @@ def sync_sources(request, payload: SyncSourcesSchema):
     return {"sources_file_path": str(sources_file_path)}
 
 
-########################## Models #############################################
+########################## Models & Sources #############################################
 
 
-@transformapi.post("/model/", auth=auth.CanManagePipelines())
+@transformapi.post("/dbt_project/model/", auth=auth.CanManagePipelines())
 def post_dbt_model(request, payload: CreateDbtModelPayload):
     """
     Create a model on local disk and save configuration to django db
@@ -173,6 +173,7 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
         raise HttpError(422, "model output name must be unique")
 
     payload.config["output_name"] = output_name
+    payload.config["dest_schema"] = payload.dest_schema
 
     sql_path, error = dbtautomation_service.create_dbt_model_in_project(
         orgdbt, org_warehouse, payload.op_type, payload.config
@@ -184,8 +185,42 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
         orgdbt=orgdbt,
         name=output_name,
         display_name=payload.display_name,
+        schema=payload.dest_schema,
         sql_path=sql_path,
         config=payload.config,
     )
 
     return model_to_dict(orgdbt_model, exclude=["orgdbt", "id"])
+
+
+@transformapi.get("/dbt_project/sources_models/", auth=auth.CanManagePipelines())
+def get_input_sources_and_models(request, schema_name: str = None):
+    """
+    Fetches all sources and models in a dbt project
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    # make sure the orgdbt here is the one we create locally
+    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    sources = dbtautomation_service.read_dbt_sources_in_project(orgdbt)
+
+    models = []
+    for orgdbt_model in OrgDbtModel.objects.filter(orgdbt=orgdbt).all():
+        models.append(
+            {
+                "source_name": None,
+                "input_name": orgdbt_model.name,
+                "input_type": "model",
+                "schema": orgdbt_model.schema,
+            }
+        )
+
+    return [ref for ref in sources + models if ref["schema"] == schema_name]
