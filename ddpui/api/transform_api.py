@@ -223,4 +223,8 @@ def get_input_sources_and_models(request, schema_name: str = None):
             }
         )
 
-    return [ref for ref in sources + models if ref["schema"] == schema_name]
+    return (
+        [ref for ref in sources + models if ref["schema"] == schema_name]
+        if schema_name
+        else sources + models
+    )
