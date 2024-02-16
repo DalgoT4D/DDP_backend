@@ -6,10 +6,17 @@ import yaml
 
 import slugify
 
-from ddpui.ddpprefect import DBTCORE, SHELLOPERATION, prefect_service
+from ddpui.ddpprefect import (
+    DBTCORE,
+    SHELLOPERATION,
+    prefect_service,
+    DBTCLIPROFILE,
+    SECRET,
+)
 from ddpui.models.org import OrgDbt, OrgPrefectBlock, OrgWarehouse
 from ddpui.models.org_user import Org
-from ddpui.models.tasks import Task
+from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask
+from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.utils import secretsmanager
 from ddpui.utils.custom_logger import CustomLogger
 from dbt_automation import assets
@@ -19,32 +26,80 @@ logger = CustomLogger("ddpui")
 
 def delete_dbt_workspace(org: Org):
     """deletes the dbt workspace on disk as well as in prefect"""
+
+    # we no longer have dbt core operation blocks
+    # for dbtblock in OrgPrefectBlock.objects.filter(org=org, block_type=DBTCORE):
+    #     try:
+    #         prefect_service.delete_dbt_core_block(dbtblock.block_id)
+    #     except Exception:  # pylint:disable=broad-exception-caught
+    #         pass
+    #     dbtblock.delete()
+
+    # we no longer have shell operation blocks
+    # for shellblock in OrgPrefectBlock.objects.filter(
+    #     org=org, block_type=SHELLOPERATION
+    # ):
+    #     if shellblock.block_name.find("-git-pull") > -1:
+    #         try:
+    #             prefect_service.delete_shell_block(shellblock.block_id)
+    #         except Exception:  # pylint:disable=broad-exception-caught
+    #             pass
+    #         shellblock.delete()
+
+    # remove transform tasks
+    org_tasks_delete = []
+    for org_task in OrgTask.objects.filter(org=org, connection_id__isnull=True).all():
+        if (
+            DataflowOrgTask.objects.filter(
+                orgtask=org_task, dataflow__dataflow_type="orchestrate"
+            ).count()
+            > 0
+        ):
+            raise Exception(f"{str(org_task)} is being used in a deployment")
+        org_tasks_delete.append(org_task)
+
+    logger.info("deleting orgtasks")
+    for org_task in org_tasks_delete:
+        for dataflow_orgtask in DataflowOrgTask.objects.filter(orgtask=org_task).all():
+            dataflow_orgtask.dataflow.delete()
+        org_task.delete()
+
+    logger.info("deleting dbt cli profile")
+    for dbt_cli_block in OrgPrefectBlock.objects.filter(
+        org=org, block_type=DBTCLIPROFILE
+    ):
+        try:
+            prefect_service.delete_dbt_cli_profile_block(dbt_cli_block.block_id)
+        except Exception:  # pylint:disable=broad-exception-caught
+            pass
+        dbt_cli_block.delete()
+
+    logger.info("deleting git secret block")
+    # remove git token uri block
+    for secret_block in OrgPrefectBlock.objects.filter(org=org, block_type=SECRET):
+        try:
+            prefect_service.delete_secret_block(secret_block.block_id)
+        except Exception:  # pylint:disable=broad-exception-caught
+            pass
+        secret_block.delete()
+
+    secretsmanager.delete_github_token(org)
+
+    logger.info("deleting orgdbt, orgdbtmodel and reference to org")
     if org.dbt:
         dbt = org.dbt
+
+        # remove org dbt models
+        OrgDbtModel.objects.filter(orgdbt=dbt).delete()
+
+        # remove dbt reference from the org
         org.dbt = None
         org.save()
+
+        # remove dbt project dir and OrgDbt model
         if os.path.exists(dbt.project_dir):
             shutil.rmtree(dbt.project_dir)
         dbt.delete()
-
-    for dbtblock in OrgPrefectBlock.objects.filter(org=org, block_type=DBTCORE):
-        try:
-            prefect_service.delete_dbt_core_block(dbtblock.block_id)
-        except Exception:  # pylint:disable=broad-exception-caught
-            pass
-        dbtblock.delete()
-
-    for shellblock in OrgPrefectBlock.objects.filter(
-        org=org, block_type=SHELLOPERATION
-    ):
-        if shellblock.block_name.find("-git-pull") > -1:
-            try:
-                prefect_service.delete_shell_block(shellblock.block_id)
-            except Exception:  # pylint:disable=broad-exception-caught
-                pass
-            shellblock.delete()
-
-    secretsmanager.delete_github_token(org)
 
 
 def task_config_params(task: Task):
