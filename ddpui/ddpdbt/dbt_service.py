@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+import yaml
 
 import slugify
 
@@ -11,6 +12,7 @@ from ddpui.models.org_user import Org
 from ddpui.models.tasks import Task
 from ddpui.utils import secretsmanager
 from ddpui.utils.custom_logger import CustomLogger
+from dbt_automation import assets
 
 logger = CustomLogger("ddpui")
 
@@ -77,6 +79,9 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
         project_dir.mkdir()
         logger.info("created project_dir %s", project_dir)
 
+    logger.info(f"starting to setup local dbt workspace at {project_dir}")
+
+    # dbt init
     try:
         subprocess.check_call(
             [
@@ -97,7 +102,20 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
         logger.error(f"dbt init failed with {e.returncode}")
         return None, "Something went wrong while setting up workspace"
 
-    logger.info(f"starting to setup local dbt workspace at {project_dir}")
+    # setup packages.yml
+    dbtpackages_filename = Path(project_dir) / "packages.yml"
+    with open(dbtpackages_filename, "w", encoding="utf-8") as dbtpackgesfile:
+        yaml.safe_dump(
+            {"packages": [{"package": "dbt-labs/dbt_utils", "version": "1.1.1"}]},
+            dbtpackgesfile,
+        )
+
+    # copy generate schema macro file
+    custom_schema_target = Path(project_dir) / "macros" / "generate_schema_name.sql"
+    source_schema_name_macro_path = os.path.abspath(
+        os.path.join(os.path.abspath(assets.__file__), "..", "generate_schema_name.sql")
+    )
+    shutil.copy(source_schema_name_macro_path, custom_schema_target)
 
     dbt = OrgDbt(
         project_dir=str(project_dir),
