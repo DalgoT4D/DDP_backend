@@ -13,7 +13,7 @@ from ddpui.ddpprefect import (
     DBTCLIPROFILE,
     SECRET,
 )
-from ddpui.models.org import OrgDbt, OrgPrefectBlock, OrgWarehouse
+from ddpui.models.org import OrgDbt, OrgPrefectBlockv1, OrgWarehouse
 from ddpui.models.org_user import Org
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask
 from ddpui.models.dbt_workflow import OrgDbtModel
@@ -65,9 +65,9 @@ def delete_dbt_workspace(org: Org):
         org_task.delete()
 
     logger.info("deleting dbt cli profile")
-    for dbt_cli_block in OrgPrefectBlock.objects.filter(
+    for dbt_cli_block in OrgPrefectBlockv1.objects.filter(
         org=org, block_type=DBTCLIPROFILE
-    ):
+    ).all():
         try:
             prefect_service.delete_dbt_cli_profile_block(dbt_cli_block.block_id)
         except Exception:  # pylint:disable=broad-exception-caught
@@ -76,7 +76,9 @@ def delete_dbt_workspace(org: Org):
 
     logger.info("deleting git secret block")
     # remove git token uri block
-    for secret_block in OrgPrefectBlock.objects.filter(org=org, block_type=SECRET):
+    for secret_block in OrgPrefectBlockv1.objects.filter(
+        org=org, block_type=SECRET
+    ).all():
         try:
             prefect_service.delete_secret_block(secret_block.block_id)
         except Exception:  # pylint:disable=broad-exception-caught
@@ -158,7 +160,7 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
         return None, "Something went wrong while setting up workspace"
 
     # setup packages.yml
-    dbtpackages_filename = Path(project_dir) / "packages.yml"
+    dbtpackages_filename = Path(dbtrepo_dir) / "packages.yml"
     with open(dbtpackages_filename, "w", encoding="utf-8") as dbtpackgesfile:
         yaml.safe_dump(
             {"packages": [{"package": "dbt-labs/dbt_utils", "version": "1.1.1"}]},
@@ -166,7 +168,7 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
         )
 
     # copy generate schema macro file
-    custom_schema_target = Path(project_dir) / "macros" / "generate_schema_name.sql"
+    custom_schema_target = Path(dbtrepo_dir) / "macros" / "generate_schema_name.sql"
     source_schema_name_macro_path = os.path.abspath(
         os.path.join(os.path.abspath(assets.__file__), "..", "generate_schema_name.sql")
     )
