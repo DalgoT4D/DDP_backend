@@ -48,7 +48,9 @@ def delete_dbt_workspace(org: Org):
 
     # remove transform tasks
     org_tasks_delete = []
-    for org_task in OrgTask.objects.filter(org=org, connection_id__isnull=True).all():
+    for org_task in OrgTask.objects.filter(
+        org=org, task__type__in=["dbt", "git"]
+    ).all():
         if (
             DataflowOrgTask.objects.filter(
                 orgtask=org_task, dataflow__dataflow_type="orchestrate"
