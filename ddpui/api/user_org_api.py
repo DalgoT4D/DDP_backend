@@ -139,11 +139,8 @@ def get_organization_users(request):
     query = OrgUser.objects.filter(org=orguser.org)
     orgusers = []
     for orguser in query:
-        if (
-            not UserAttributes.objects.filter(user=orguser.user)
-            .first()
-            .is_platform_admin
-        ):
+        userattributes = UserAttributes.objects.filter(user=orguser.user).first()
+        if not (userattributes and userattributes.is_platform_admin):
             orgusers.append(from_orguser(orguser))
     return orgusers
 
