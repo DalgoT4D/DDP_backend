@@ -1,6 +1,7 @@
 """
 functions which work with airbyte and with the dalgo database
 """
+
 import json
 from django.utils.text import slugify
 from django.conf import settings
@@ -216,7 +217,7 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
                         setup_airbyte_sync_task_config(
                             org_task, org_airbyte_server_block
                         ).to_json()
-                    ]
+                    ],
                 }
             },
         )
@@ -281,9 +282,9 @@ def get_connections(org: Org):
                 last_runs.append(run)
 
         last_runs.sort(
-            key=lambda run: run["startTime"]
-            if run["startTime"]
-            else run["expectedStartTime"]
+            key=lambda run: (
+                run["startTime"] if run["startTime"] else run["expectedStartTime"]
+            )
         )
 
         sync_dataflow = DataflowOrgTask.objects.filter(
@@ -302,19 +303,21 @@ def get_connections(org: Org):
                 "catalogId": connection["catalogId"],
                 "syncCatalog": connection["syncCatalog"],
                 "status": connection["status"],
-                "deploymentId": sync_dataflow.dataflow.deployment_id
-                if sync_dataflow
-                else None,
+                "deploymentId": (
+                    sync_dataflow.dataflow.deployment_id if sync_dataflow else None
+                ),
                 "lastRun": last_runs[-1] if len(last_runs) > 0 else None,
-                "lock": {
-                    "lockedBy": lock.locked_by.user.email,
-                    "lockedAt": lock.locked_at,
-                }
-                if lock
-                else None,
-                "isRunning": lock.locking_dataflow == sync_dataflow.dataflow
-                if lock
-                else False,
+                "lock": (
+                    {
+                        "lockedBy": lock.locked_by.user.email,
+                        "lockedAt": lock.locked_at,
+                    }
+                    if lock
+                    else None
+                ),
+                "isRunning": (
+                    lock.locking_dataflow == sync_dataflow.dataflow if lock else False
+                ),
             }
         )
 
@@ -359,24 +362,30 @@ def get_one_connection(org: Org, connection_id: str):
         "destination": {"id": airbyte_conn["destinationId"], "name": destination_name},
         "catalogId": airbyte_conn["catalogId"],
         "syncCatalog": airbyte_conn["syncCatalog"],
-        "destinationSchema": airbyte_conn["namespaceFormat"]
-        if airbyte_conn["namespaceDefinition"] == "customformat"
-        else "",
+        "destinationSchema": (
+            airbyte_conn["namespaceFormat"]
+            if airbyte_conn["namespaceDefinition"] == "customformat"
+            else ""
+        ),
         "status": airbyte_conn["status"],
-        "deploymentId": dataflow_orgtask.dataflow.deployment_id
-        if dataflow_orgtask.dataflow
-        else None,
-        "normalize": airbyte_service.is_operation_normalization(
-            airbyte_conn["operationIds"][0]
-        )
-        if "operationIds" in airbyte_conn and len(airbyte_conn["operationIds"]) == 1
-        else False,
-        "lock": {
-            "lockedBy": lock.locked_by.user.email,
-            "lockedAt": lock.locked_at,
-        }
-        if lock
-        else None,
+        "deploymentId": (
+            dataflow_orgtask.dataflow.deployment_id
+            if dataflow_orgtask.dataflow
+            else None
+        ),
+        "normalize": (
+            airbyte_service.is_operation_normalization(airbyte_conn["operationIds"][0])
+            if "operationIds" in airbyte_conn and len(airbyte_conn["operationIds"]) == 1
+            else False
+        ),
+        "lock": (
+            {
+                "lockedBy": lock.locked_by.user.email,
+                "lockedAt": lock.locked_at,
+            }
+            if lock
+            else None
+        ),
     }
 
     return res, None
@@ -462,24 +471,22 @@ def delete_connection(org: Org, connection_id: str):
 
     dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
 
-    if dataflow_orgtask is None:
-        return None, "deployment not found"
-
     # delete airbyte connection
     logger.info("deleting airbyte connection")
     airbyte_service.delete_connection(org.airbyte_workspace_id, connection_id)
 
-    # delete prefect deployment
-    logger.info("deleteing prefect deployment")
-    prefect_service.delete_deployment_by_id(dataflow_orgtask.dataflow.deployment_id)
+    if dataflow_orgtask:
+        # delete prefect deployment
+        logger.info("deleteing prefect deployment")
+        prefect_service.delete_deployment_by_id(dataflow_orgtask.dataflow.deployment_id)
 
-    # delete the org dataflow for manual deployment
-    logger.info("deleting org dataflow from db")
-    dataflow_orgtask.dataflow.delete()
+        # delete the org dataflow for manual deployment
+        logger.info("deleting org dataflow from db")
+        dataflow_orgtask.dataflow.delete()
 
-    # delete orgtask <-> dataflow mapping
-    logger.info("deleteing datafloworgtask mapping")
-    dataflow_orgtask.delete()
+        # delete orgtask <-> dataflow mapping
+        logger.info("deleteing datafloworgtask mapping")
+        dataflow_orgtask.delete()
 
     # delete orgtask
     logger.info("deleteing orgtask")
@@ -572,9 +579,11 @@ def update_destination(
             block_name=cli_profile_block.block_name,
             wtype=warehouse.wtype,
             credentials=dbt_credentials,
-            bqlocation=payload.config["dataset_location"]
-            if "dataset_location" in payload.config
-            else None,
+            bqlocation=(
+                payload.config["dataset_location"]
+                if "dataset_location" in payload.config
+                else None
+            ),
         )
         logger.info(
             f"Successfully updated the cli profile block : {cli_profile_block.block_name}"
