@@ -161,15 +161,16 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
         logger.error(f"dbt init failed with {e.returncode}")
         return None, "Something went wrong while setting up workspace"
 
-    # setup packages.yml
-    dbtpackages_filename = Path(dbtrepo_dir) / "packages.yml"
-    with open(dbtpackages_filename, "w", encoding="utf-8") as dbtpackgesfile:
-        yaml.safe_dump(
-            {"packages": [{"package": "dbt-labs/dbt_utils", "version": "1.1.1"}]},
-            dbtpackgesfile,
-        )
+    # copy packages.yml
+    logger.info("copying packages.yml from assets")
+    target_packages_yml = Path(dbtrepo_dir) / "packages.yml"
+    source_packages_yml = os.path.abspath(
+        os.path.join(os.path.abspath(assets.__file__), "..", "packages.yml")
+    )
+    shutil.copy(source_packages_yml, target_packages_yml)
 
     # copy generate schema macro file
+    logger.info("copying generate schema macro from assets")
     custom_schema_target = Path(dbtrepo_dir) / "macros" / "generate_schema_name.sql"
     source_schema_name_macro_path = os.path.abspath(
         os.path.join(os.path.abspath(assets.__file__), "..", "generate_schema_name.sql")
