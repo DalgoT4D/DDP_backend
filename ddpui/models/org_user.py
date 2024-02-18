@@ -13,12 +13,26 @@ from ddpui.models.org import Org, OrgSchema
 
 
 class UserAttributes(models.Model):
-    """extensions to the django User object"""
+    """
+    extensions to the django User object
+    please update the `manage-user-attributes` management command
+      when modifying this list
+    """
 
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     email_verified = models.BooleanField(default=False)
     can_create_orgs = models.BooleanField(default=False)
     is_consultant = models.BooleanField(default=False)
+    is_platform_admin = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"""
+{self.user.email}
+  email_verified={self.email_verified}
+  can_create_orgs={self.can_create_orgs}
+  is_consultant={self.is_consultant}
+  is_platform_admin={self.is_platform_admin}
+"""  # pylint: disable=no-member
 
 
 class OrgUserRole(IntEnum):

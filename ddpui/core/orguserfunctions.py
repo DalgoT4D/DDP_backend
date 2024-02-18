@@ -64,6 +64,7 @@ def lookup_user(email: str):
         "active": user.is_active,
         "can_create_orgs": userattributes.can_create_orgs,
         "is_consultant": userattributes.is_consultant,
+        "is_platform_admin": userattributes.is_platform_admin,
     }
 
 
