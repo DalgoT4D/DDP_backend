@@ -17,6 +17,7 @@ from ddpui.utils.constants import (
     AIRBYTE_SYNC_TIMEOUT,
     TRANSFORM_TASKS_SEQ,
     TASK_GITPULL,
+    TASK_AIRBYTESYNC,
 )
 from ddpui.ddpdbt.schema import DbtProjectParams
 
@@ -158,3 +159,42 @@ def pipeline_dbt_git_tasks(
         task_configs.append(task_config)
 
     return (org_tasks, task_configs), None
+
+
+def pipeline_with_orgtasks(
+    org: Org,
+    org_tasks: list[OrgTask],
+    server_block: OrgPrefectBlockv1 = None,
+    cli_block: OrgPrefectBlockv1 = None,
+    dbt_project_params: DbtProjectParams = None,
+    start_seq: int = 0,
+):
+    """
+    Returns a list of task configs for a pipeline;
+    This assumes the list of orgtasks is in the correct sequence
+    """
+    task_configs = []
+
+    for org_task in org_tasks:
+        if org_task.task.slug == TASK_AIRBYTESYNC:
+            task_config = setup_airbyte_sync_task_config(
+                org_task, server_block
+            ).to_json()
+        elif org_task.task.slug == TASK_GITPULL:
+            gitpull_secret_block = OrgPrefectBlockv1.objects.filter(
+                org=org, block_type=SECRET, block_name__contains="git-pull"
+            ).first()
+
+            task_config = setup_git_pull_shell_task_config(
+                org_task, dbt_project_params.project_dir, gitpull_secret_block
+            ).to_json()
+        else:
+            task_config = setup_dbt_core_task_config(
+                org_task, cli_block, dbt_project_params
+            ).to_json()
+
+        task_configs.append(task_config)
+        task_config["seq"] = start_seq
+        start_seq += 1
+
+    return task_configs, None
