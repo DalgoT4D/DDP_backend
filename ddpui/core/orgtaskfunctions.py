@@ -13,9 +13,8 @@ from ddpui.ddpprefect.schema import (
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpprefect import prefect_service
 from ddpui.core.pipelinefunctions import setup_dbt_core_task_config
-from ddpui.utils.constants import TASK_DBTRUN, TASK_AIRBYTESYNC
+from ddpui.utils.constants import TASK_DBTRUN
 from ddpui.utils.helpers import generate_hash_id
-from ddpui.ddpdbt.schema import DbtProjectParams
 
 logger = CustomLogger("ddpui")
 
@@ -41,6 +40,9 @@ def create_prefect_deployment_for_dbtcore_task(
     cli_profile_block: OrgPrefectBlockv1,
     dbt_project_params: DbtProjectParams,
 ):
+    """
+    create a prefect deployment for a single dbt command and save the deployment id to an OrgDataFlowv1 object
+    """
     hash_code = generate_hash_id(8)
     deployment_name = f"manual-{org_task.org.slug}-{org_task.task.slug}-{hash_code}"
     dataflow = prefect_service.create_dataflow_v1(
