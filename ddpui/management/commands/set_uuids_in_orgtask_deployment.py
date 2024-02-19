@@ -102,6 +102,7 @@ class Command(BaseCommand):
                     connections=[],  # wont be updated
                     dbtTransform="ignore",  # wont be updated
                     cron=dataflow.cron if dataflow.cron else "",
+                    transformTasks=[],  # wont be updated
                     deployment_params=params,
                 )
                 prefect_service.update_dataflow_v1(dataflow.deployment_id, payload)
