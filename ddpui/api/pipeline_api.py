@@ -305,34 +305,21 @@ def get_prefect_dataflow_v1(request, deployment_id):
         logger.exception(error)
         raise HttpError(400, "failed to get deploymenet from prefect-proxy") from error
 
-    # connections = [
-    #     {
-    #         "id": task["connection_id"],
-    #         "seq": task["seq"],
-    #         "name": airbyte_service.get_connection(
-    #             orguser.org.airbyte_workspace_id, task["connection_id"]
-    #         )["name"],
-    #     }
-    #     for task in deployment["parameters"]["config"]["tasks"]
-    #     if task["type"] == AIRBYTECONNECTION
-    # ]
-
-    # has_transform = (
-    #     len(
-    #         [
-    #             task
-    #             for task in deployment["parameters"]["config"]["tasks"]
-    #             if task["type"] in [DBTCORE, SHELLOPERATION]
-    #         ]
-    #     )
-    #     > 0
-    # )
-
     connections = [
-        {"id": dataflow_orgtask.orgtask.connection_id, "seq": dataflow_orgtask.seq}
+        {
+            "id": dataflow_orgtask.orgtask.connection_id,
+            "seq": dataflow_orgtask.seq,
+            "name": airbyte_service.get_connection(
+                orguser.org.airbyte_workspace_id, dataflow_orgtask.orgtask.connection_id
+            )[
+                "name"
+            ],  # TODO: this call can be removed once the logic at frontend is updated
+        }
         for dataflow_orgtask in DataflowOrgTask.objects.filter(
             dataflow=org_data_flow, orgtask__task__slug=TASK_AIRBYTESYNC
-        ).all().order_by("seq")
+        )
+        .all()
+        .order_by("seq")
     ]
 
     transformTasks = [
