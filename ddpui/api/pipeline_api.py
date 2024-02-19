@@ -23,7 +23,7 @@ from ddpui.models.org import (
     OrgPrefectBlockv1,
 )
 from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import DataflowOrgTask, TaskLock
+from ddpui.models.tasks import DataflowOrgTask, TaskLock, OrgTask
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
     PrefectFlowRunSchema,
@@ -39,6 +39,7 @@ from ddpui.core.pipelinefunctions import (
     pipeline_sync_tasks,
     pipeline_dbt_git_tasks,
     setup_dbt_core_task_config,
+    pipeline_with_orgtasks,
 )
 from ddpui.core.dbtfunctions import gather_dbt_project_params
 
@@ -92,9 +93,10 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
         raise HttpError(400, "must provide a name for the flow")
 
     tasks = []
-    map_org_tasks = []  # map org tasks to dataflow
+    map_org_tasks = []  # seq of org tasks to be mapped in pipelin/ dataflow
 
-    # check if pipeline has airbyte syncs
+    # push conection orgtasks in pipelin
+    sync_orgtasks = []
     if len(payload.connections) > 0:
         org_server_block = OrgPrefectBlockv1.objects.filter(
             org=orguser.org, block_type=AIRBYTESERVER
@@ -102,20 +104,39 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
         if not org_server_block:
             raise HttpError(400, "airbyte server block not found")
 
-        # push sync tasks to pipeline
-        (org_tasks, task_configs), error = pipeline_sync_tasks(
-            orguser.org, payload.connections, org_server_block
+        logger.info(f"Connections being pushed to the pipeline")
+
+        # only connections with org task will be pushed to pipeline
+        for connection in payload.connections:
+            logger.info(connection)
+            org_task = OrgTask.objects.filter(
+                org=orguser.org, connection_id=connection.id
+            ).first()
+            if org_task is None:
+                logger.info(
+                    f"connection id {connection.id} not found in org tasks; ignoring this airbyte sync"
+                )
+                continue
+            # map this org task to dataflow
+            sync_orgtasks.append(org_task)
+
+        # get the deployment task configs
+        task_configs, error = pipeline_with_orgtasks(
+            orguser.org,
+            sync_orgtasks,
+            server_block=org_server_block,
         )
         if error:
             raise HttpError(400, error)
         tasks += task_configs
-        map_org_tasks += org_tasks
 
-    seq = len(tasks)
-    logger.info(f"Pipline has {seq} airbyte syncs")
+    map_org_tasks += sync_orgtasks
+    logger.info(f"Pipline has {len(sync_orgtasks)} airbyte syncs")
 
-    # check if pipeline has dbt transformation
-    if payload.dbtTransform == "yes":
+    # push dbt pipeline orgtasks
+    dbt_project_params = None
+    dbt_git_orgtasks = []
+    if payload.transform_tasks and len(payload.transform_tasks) > 0:
         logger.info(f"Dbt tasks being pushed to the pipeline")
 
         # dbt params
@@ -130,16 +151,32 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
         if not cli_block:
             raise HttpError(400, "dbt cli profile not found")
 
-        # push dbt pipeline tasks
-        (org_tasks, task_configs), error = pipeline_dbt_git_tasks(
-            orguser.org, cli_block, dbt_project_params, seq
+        payload.transform_tasks.sort(key=lambda task: task.seq)  # sort the tasks by seq
+
+        for transform_task in payload.transform_tasks:
+            org_task = OrgTask.objects.filter(uuid=transform_task.uuid).first()
+            if org_task is None:
+                logger.error(f"org task with {transform_task.uuid} not found")
+                continue
+
+            # map this org task to dataflow
+            dbt_git_orgtasks.append(org_task)
+
+        # get the deployment task configs
+        task_configs, error = pipeline_with_orgtasks(
+            orguser.org,
+            dbt_git_orgtasks,
+            cli_block=cli_block,
+            dbt_project_params=dbt_project_params,
+            start_seq=len(tasks),
         )
+        logger.info("HERE")
+        logger.info(task_configs)
         if error:
             raise HttpError(400, error)
         tasks += task_configs
-        map_org_tasks += org_tasks
 
-        logger.info(f"Dbt tasks pushed to the pipeline")
+    map_org_tasks += dbt_git_orgtasks
 
     # create deployment
     try:
@@ -169,12 +206,13 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
         dataflow_type="orchestrate",
     )
 
-    for org_task in map_org_tasks:
-        DataflowOrgTask.objects.create(dataflow=org_dataflow, orgtask=org_task)
+    for idx, org_task in enumerate(map_org_tasks):
+        DataflowOrgTask.objects.create(dataflow=org_dataflow, orgtask=org_task, seq=idx)
 
     return {
         "deploymentId": org_dataflow.deployment_id,
         "name": org_dataflow.name,
+        "deploymentName": org_dataflow.deployment_name,
         "cron": org_dataflow.cron,
     }
 
@@ -293,6 +331,8 @@ def get_prefect_dataflow_v1(request, deployment_id):
     # differentiate between deploymentName and name
     deployment["deploymentName"] = deployment["name"]
     deployment["name"] = org_data_flow.name
+
+    # TODO: instead of dbt transform yes or not; send the transform org tasks as list with sequence
 
     return {
         "name": org_data_flow.name,
