@@ -30,7 +30,7 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowUpdateSchema3,
     PrefectDataFlowCreateSchema4,
 )
-from ddpui.utils.constants import TASK_DBTRUN
+from ddpui.utils.constants import TASK_DBTRUN, TASK_AIRBYTESYNC
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.schemas.org_task_schema import TaskParameters
 from ddpui.utils.prefectlogs import parse_prefect_logs
@@ -136,7 +136,7 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
     # push dbt pipeline orgtasks
     dbt_project_params = None
     dbt_git_orgtasks = []
-    if payload.transform_tasks and len(payload.transform_tasks) > 0:
+    if payload.transformTasks and len(payload.transformTasks) > 0:
         logger.info(f"Dbt tasks being pushed to the pipeline")
 
         # dbt params
@@ -151,9 +151,9 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
         if not cli_block:
             raise HttpError(400, "dbt cli profile not found")
 
-        payload.transform_tasks.sort(key=lambda task: task.seq)  # sort the tasks by seq
+        payload.transformTasks.sort(key=lambda task: task.seq)  # sort the tasks by seq
 
-        for transform_task in payload.transform_tasks:
+        for transform_task in payload.transformTasks:
             org_task = OrgTask.objects.filter(uuid=transform_task.uuid).first()
             if org_task is None:
                 logger.error(f"org task with {transform_task.uuid} not found")
@@ -305,34 +305,50 @@ def get_prefect_dataflow_v1(request, deployment_id):
         logger.exception(error)
         raise HttpError(400, "failed to get deploymenet from prefect-proxy") from error
 
+    # connections = [
+    #     {
+    #         "id": task["connection_id"],
+    #         "seq": task["seq"],
+    #         "name": airbyte_service.get_connection(
+    #             orguser.org.airbyte_workspace_id, task["connection_id"]
+    #         )["name"],
+    #     }
+    #     for task in deployment["parameters"]["config"]["tasks"]
+    #     if task["type"] == AIRBYTECONNECTION
+    # ]
+
+    # has_transform = (
+    #     len(
+    #         [
+    #             task
+    #             for task in deployment["parameters"]["config"]["tasks"]
+    #             if task["type"] in [DBTCORE, SHELLOPERATION]
+    #         ]
+    #     )
+    #     > 0
+    # )
+
     connections = [
-        {
-            "id": task["connection_id"],
-            "seq": task["seq"],
-            "name": airbyte_service.get_connection(
-                orguser.org.airbyte_workspace_id, task["connection_id"]
-            )["name"],
-        }
-        for task in deployment["parameters"]["config"]["tasks"]
-        if task["type"] == AIRBYTECONNECTION
+        {"id": dataflow_orgtask.orgtask.connection_id, "seq": dataflow_orgtask.seq}
+        for dataflow_orgtask in DataflowOrgTask.objects.filter(
+            dataflow=org_data_flow, orgtask__task__slug=TASK_AIRBYTESYNC
+        ).all().order_by("seq")
     ]
 
-    has_transform = (
-        len(
-            [
-                task
-                for task in deployment["parameters"]["config"]["tasks"]
-                if task["type"] in [DBTCORE, SHELLOPERATION]
-            ]
+    transformTasks = [
+        {"uuid": dataflow_orgtask.orgtask.uuid, "seq": dataflow_orgtask.seq}
+        for dataflow_orgtask in DataflowOrgTask.objects.filter(
+            dataflow=org_data_flow, orgtask__task__type__in=["git", "dbt"]
         )
-        > 0
-    )
+        .all()
+        .order_by("seq")
+    ]
+
+    has_transform = len(transformTasks) > 0
 
     # differentiate between deploymentName and name
     deployment["deploymentName"] = deployment["name"]
     deployment["name"] = org_data_flow.name
-
-    # TODO: instead of dbt transform yes or not; send the transform org tasks as list with sequence
 
     return {
         "name": org_data_flow.name,
@@ -340,6 +356,7 @@ def get_prefect_dataflow_v1(request, deployment_id):
         "cron": deployment["cron"],
         "connections": connections,
         "dbtTransform": "yes" if has_transform else "no",
+        "transformTasks": transformTasks,
         "isScheduleActive": deployment["isScheduleActive"],
     }
 

@@ -291,7 +291,7 @@ class PrefectDataFlowCreateSchema4(Schema):
     name: str
     connections: list[PrefectFlowAirbyteConnection2]
     cron: str
-    transform_tasks: list[PrefectDataFlowOrgTasks]
+    transformTasks: list[PrefectDataFlowOrgTasks]
 
 
 class PrefectDataFlowUpdateSchema(Schema):
