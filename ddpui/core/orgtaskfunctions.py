@@ -3,6 +3,7 @@ functions to work with transform related tasks or orgtasks in general
 do not raise http errors here
 """
 
+import uuid
 from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask
 from ddpui.models.org import Org, OrgPrefectBlockv1, OrgDataFlowv1
 from ddpui.utils.custom_logger import CustomLogger
@@ -24,7 +25,7 @@ def create_default_transform_tasks(
 ):
     """Create all the transform (git, dbt) tasks"""
     for task in Task.objects.filter(type__in=["dbt", "git"], is_system=True).all():
-        org_task = OrgTask.objects.create(org=org, task=task)
+        org_task = OrgTask.objects.create(org=org, task=task, uuid=uuid.uuid4())
 
         if task.slug == TASK_DBTRUN:
             # create deployment

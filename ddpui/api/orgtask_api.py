@@ -1,3 +1,4 @@
+import uuid
 import os
 from pathlib import Path
 from datetime import datetime
@@ -44,10 +45,7 @@ from ddpui.core.orgtaskfunctions import (
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
-from ddpui.utils.constants import (
-    TASK_DBTRUN,
-    TASK_GITPULL,
-)
+from ddpui.utils.constants import TASK_DBTRUN, TASK_GITPULL, TRANSFORM_TASKS_SEQ
 from ddpui.core.pipelinefunctions import (
     setup_dbt_core_task_config,
     setup_git_pull_shell_task_config,
@@ -113,7 +111,11 @@ def post_orgtask(request, payload: CreateOrgTaskPayload):
 
     # create a deployment if the task type is run
     orgtask = OrgTask.objects.create(
-        org=orguser.org, task=task, parameters=parameters, generated_by="client"
+        org=orguser.org,
+        task=task,
+        parameters=parameters,
+        generated_by="client",
+        uuid=uuid.uuid4(),
     )
 
     dataflow = None
@@ -285,6 +287,7 @@ def get_prefect_transformation_tasks(request):
                 "label": org_task.task.label,
                 "slug": org_task.task.slug,
                 "id": org_task.id,
+                "uuid": org_task.uuid,
                 "deploymentId": None,
                 "lock": (
                     {
@@ -296,6 +299,7 @@ def get_prefect_transformation_tasks(request):
                 ),
                 "command": command,
                 "generated_by": org_task.generated_by,
+                "seq": TRANSFORM_TASKS_SEQ[org_task.task.slug],
             }
         )
 
@@ -342,9 +346,9 @@ def delete_system_transformation_tasks(request):
             continue
 
 
-@orgtaskapi.post("{orgtask_id}/run/", auth=auth.CanManagePipelines())
+@orgtaskapi.post("{orgtask_uuid}/run/", auth=auth.CanManagePipelines())
 def post_run_prefect_org_task(
-    request, orgtask_id, payload: TaskParameters = None
+    request, orgtask_uuid, payload: TaskParameters = None
 ):  # pylint: disable=unused-argument
     """
     Run dbt task & git pull in prefect. All tasks without a deployment.
@@ -357,7 +361,12 @@ def post_run_prefect_org_task(
     """
     orguser: OrgUser = request.orguser
 
-    org_task = OrgTask.objects.filter(org=orguser.org, id=orgtask_id).first()
+    try:
+        uuid.UUID(str(orgtask_uuid))
+    except ValueError:
+        raise HttpError(400, "invalid input type")
+
+    org_task = OrgTask.objects.filter(org=orguser.org, uuid=orgtask_uuid).first()
 
     if org_task is None:
         raise HttpError(400, "task not found")
@@ -446,13 +455,18 @@ def post_run_prefect_org_task(
     return result
 
 
-@orgtaskapi.delete("{orgtask_id}/", auth=auth.CanManagePipelines())
-def post_delete_orgtask(request, orgtask_id):  # pylint: disable=unused-argument
+@orgtaskapi.delete("{orgtask_uuid}/", auth=auth.CanManagePipelines())
+def post_delete_orgtask(request, orgtask_uuid):  # pylint: disable=unused-argument
     """Delete client generated orgtask"""
 
     orguser: OrgUser = request.orguser
 
-    org_task = OrgTask.objects.filter(org=orguser.org, id=orgtask_id).first()
+    try:
+        uuid.UUID(str(orgtask_uuid))
+    except ValueError:
+        raise HttpError(400, "invalid input type")
+
+    org_task = OrgTask.objects.filter(org=orguser.org, uuid=orgtask_uuid).first()
 
     if org_task is None:
         raise HttpError(400, "task not found")
