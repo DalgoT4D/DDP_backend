@@ -126,7 +126,7 @@ class Command(BaseCommand):
                 if "config" in params and "tasks" in params["config"]:
                     for task_config in params["config"]["tasks"]:
                         if "orgtask_uuid" not in task_config:
-                            logger.info(
+                            raise Exception(
                                 f"uuid not found in task config {task_config['slug']} of deployment with id {dataflow.deployment_id}"
                             )
 
@@ -175,12 +175,12 @@ class Command(BaseCommand):
                                 orgtask=org_task, dataflow=dataflow
                             ).update(seq=task_config["seq"])
                         else:
-                            logger.error(
+                            raise Exception(
                                 f"Did not find orgtask with uuid {task_config['orgtask_uuid']} in task config of deployment for slug {task_config['slug']} in {dataflow.deployment_id}"
                             )
 
                     else:
-                        logger.error(
+                        raise Exception(
                             f"Did not find orgtask_uuid in task config of deployment for slug {task_config['slug']} in {dataflow.deployment_id}"
                         )
                 logger.info(
