@@ -316,8 +316,8 @@ class PrefectDataFlowUpdateSchema3(Schema):
 
     name: str
     connections: list[PrefectFlowAirbyteConnection2]
-    dbtTransform: str
     cron: str
+    transformTasks: list[PrefectDataFlowOrgTasks]
     deployment_params: dict = None
 
 

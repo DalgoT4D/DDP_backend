@@ -36,8 +36,6 @@ from ddpui.schemas.org_task_schema import TaskParameters
 from ddpui.utils.prefectlogs import parse_prefect_logs
 from ddpui.utils.helpers import generate_hash_id
 from ddpui.core.pipelinefunctions import (
-    pipeline_sync_tasks,
-    pipeline_dbt_git_tasks,
     setup_dbt_core_task_config,
     pipeline_with_orgtasks,
 )
@@ -107,6 +105,7 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
         logger.info(f"Connections being pushed to the pipeline")
 
         # only connections with org task will be pushed to pipeline
+        payload.connections.sort(key=lambda conn: conn.seq)
         for connection in payload.connections:
             logger.info(connection)
             org_task = OrgTask.objects.filter(
@@ -375,7 +374,7 @@ def delete_prefect_dataflow_v1(request, deployment_id):
 def put_prefect_dataflow_v1(
     request, deployment_id, payload: PrefectDataFlowUpdateSchema3
 ):
-    """Edit the data flow / prefect deployment. For now only the schedules can be edited"""
+    """Edit the data flow / prefect deployment"""
     orguser: OrgUser = request.orguser
 
     if orguser.org is None:
@@ -390,38 +389,51 @@ def put_prefect_dataflow_v1(
         raise HttpError(404, "pipeline not found")
 
     tasks = []
-    map_org_tasks = []  # map org tasks to dataflow
-    delete_dataflow_orgtask_type = []
-
-    # check if pipeline has airbyte syncs
-    org_server_block = OrgPrefectBlockv1.objects.filter(
-        org=orguser.org, block_type=AIRBYTESERVER
-    ).first()
-    if not org_server_block:
-        raise HttpError(400, "airbyte server block not found")
-
-    # delete all airbyte sync DataflowOrgTask
-    delete_dataflow_orgtask_type.append("airbyte")
+    map_org_tasks = []  # seq of org tasks to be mapped in pipeline/ dataflow
 
     # push sync tasks to pipeline
-    (org_tasks, task_configs), error = pipeline_sync_tasks(
-        orguser.org, payload.connections, org_server_block
-    )
-    if error:
-        raise HttpError(400, error)
-    tasks += task_configs
-    map_org_tasks += org_tasks
+    sync_orgtasks = []
 
-    seq = len(tasks)
-    logger.info(f"Pipline has {seq} airbyte syncs")
+    if len(payload.connections) > 0:
+        # check if pipeline has airbyte syncs
+        org_server_block = OrgPrefectBlockv1.objects.filter(
+            org=orguser.org, block_type=AIRBYTESERVER
+        ).first()
+        if not org_server_block:
+            raise HttpError(400, "airbyte server block not found")
 
-    # check if pipeline has dbt transformation
-    if payload.dbtTransform == "yes":
+        payload.connections.sort(key=lambda conn: conn.seq)
+        for connection in payload.connections:
+            logger.info(connection)
+            org_task = OrgTask.objects.filter(
+                org=orguser.org, connection_id=connection.id
+            ).first()
+            if org_task is None:
+                logger.info(
+                    f"connection id {connection.id} not found in org tasks; ignoring this airbyte sync"
+                )
+                continue
+            # map this org task to dataflow
+            sync_orgtasks.append(org_task)
+
+        # get the deployment task configs
+        task_configs, error = pipeline_with_orgtasks(
+            orguser.org,
+            sync_orgtasks,
+            server_block=org_server_block,
+        )
+        if error:
+            raise HttpError(400, error)
+        tasks += task_configs
+
+    map_org_tasks += sync_orgtasks
+    logger.info(f"Updating pipline to have {len(sync_orgtasks)} airbyte syncs")
+
+    # push dbt pipeline orgtasks
+    dbt_project_params = None
+    dbt_git_orgtasks = []
+    if payload.transformTasks and len(payload.transformTasks) > 0:
         logger.info(f"Dbt tasks being pushed to the pipeline")
-
-        # delete all transform related DataflowOrgTask
-        delete_dataflow_orgtask_type.append("dbt")
-        delete_dataflow_orgtask_type.append("git")
 
         # dbt params
         dbt_project_params, error = gather_dbt_project_params(orguser.org)
@@ -435,13 +447,32 @@ def put_prefect_dataflow_v1(
         if not cli_block:
             raise HttpError(400, "dbt cli profile not found")
 
-        # push dbt pipeline tasks
-        (org_tasks, task_configs), error = pipeline_dbt_git_tasks(
-            orguser.org, cli_block, dbt_project_params, seq
+        payload.transformTasks.sort(key=lambda task: task.seq)  # sort the tasks by seq
+
+        for transform_task in payload.transformTasks:
+            org_task = OrgTask.objects.filter(uuid=transform_task.uuid).first()
+            if org_task is None:
+                logger.error(f"org task with {transform_task.uuid} not found")
+                continue
+
+            # map this org task to dataflow
+            dbt_git_orgtasks.append(org_task)
+
+        # get the deployment task configs
+        task_configs, error = pipeline_with_orgtasks(
+            orguser.org,
+            dbt_git_orgtasks,
+            cli_block=cli_block,
+            dbt_project_params=dbt_project_params,
+            start_seq=len(tasks),
         )
-        map_org_tasks += org_tasks
+        logger.info("HERE")
+        logger.info(task_configs)
+        if error:
+            raise HttpError(400, error)
         tasks += task_configs
-        logger.info(f"Dbt tasks pushed to the pipeline")
+
+    map_org_tasks += dbt_git_orgtasks
 
     # update deployment
     payload.deployment_params = {
@@ -454,13 +485,13 @@ def put_prefect_dataflow_v1(
         raise HttpError(400, "failed to update a pipeline") from error
 
     # Delete mapping
-    DataflowOrgTask.objects.filter(
-        dataflow=org_data_flow, orgtask__task__type__in=delete_dataflow_orgtask_type
-    ).delete()
+    DataflowOrgTask.objects.filter(dataflow=org_data_flow).delete()
 
-    # create mapping
-    for org_task in map_org_tasks:
-        DataflowOrgTask.objects.create(dataflow=org_data_flow, orgtask=org_task)
+    # re-map orgtasks to dataflow
+    for idx, org_task in enumerate(map_org_tasks):
+        DataflowOrgTask.objects.create(
+            dataflow=org_data_flow, orgtask=org_task, seq=idx
+        )
 
     org_data_flow.cron = payload.cron if payload.cron else None
     org_data_flow.name = payload.name
