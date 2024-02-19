@@ -92,7 +92,7 @@ class Command(BaseCommand):
                     f"updated deployment params for {dataflow.name}|{dataflow.deployment_id}"
                 )
             else:
-                logger.info(
+                raise Exception(
                     f"no tasks key found in deployment params for {dataflow.deployment_id}"
                 )
 
@@ -185,7 +185,7 @@ class Command(BaseCommand):
                     f"updated deployment params seq for {dataflow.name}|{dataflow.deployment_id}"
                 )
             else:
-                logger.info(
+                raise Exception(
                     f"no tasks key found in deployment params for {dataflow.deployment_id}"
                 )
 
