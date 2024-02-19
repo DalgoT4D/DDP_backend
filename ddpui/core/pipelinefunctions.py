@@ -7,7 +7,6 @@ from ddpui.models.tasks import OrgTask
 from ddpui.models.org import Org, OrgPrefectBlockv1
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpprefect.schema import (
-    PrefectFlowAirbyteConnection2,
     PrefectDbtTaskSetup,
     PrefectShellTaskSetup,
     PrefectAirbyteSyncTaskSetup,
@@ -15,7 +14,6 @@ from ddpui.ddpprefect.schema import (
 from ddpui.ddpprefect import AIRBYTECONNECTION, DBTCORE, SECRET, SHELLOPERATION
 from ddpui.utils.constants import (
     AIRBYTE_SYNC_TIMEOUT,
-    TRANSFORM_TASKS_SEQ,
     TASK_GITPULL,
     TASK_AIRBYTESYNC,
 )
