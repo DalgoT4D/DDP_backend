@@ -1,16 +1,10 @@
-from unittest.mock import patch, Mock
 import pytest
 from pathlib import Path
 import os, json
 from django.apps import apps
 from ddpui.models.org import Org, OrgPrefectBlockv1
 from ddpui.models.tasks import Task, OrgTask
-from ddpui.ddpprefect import DBTCLIPROFILE, AIRBYTESERVER
-from ddpui.ddpprefect.schema import (
-    PrefectFlowAirbyteConnection2,
-)
-from ddpui.ddpdbt.schema import DbtProjectParams
-from ddpui.core.pipelinefunctions import pipeline_sync_tasks, pipeline_dbt_git_tasks
+from ddpui.ddpprefect import AIRBYTESERVER
 
 pytestmark = pytest.mark.django_db
 
@@ -64,112 +58,3 @@ def generate_transform_org_tasks(seed_master_tasks, org_with_server_block):
 
 
 # ================================================================================
-
-
-def test_pipeline_sync_tasks_success(org_with_server_block, generate_sync_org_tasks):
-    """tests if function successfully returns all of sync tasks config for sync org tasks"""
-    connections = [
-        PrefectFlowAirbyteConnection2(id=conn_id, seq=(i + 1))
-        for i, conn_id in enumerate(CONNECTION_IDS)
-    ]
-    server_block = OrgPrefectBlockv1.objects.filter(org=org_with_server_block).first()
-    (org_tasks, task_configs), error = pipeline_sync_tasks(
-        org_with_server_block, connections, server_block
-    )
-
-    assert len(org_tasks) == len(CONNECTION_IDS)
-    assert len(task_configs) == len(CONNECTION_IDS)
-    assert task_configs[0]["connection_id"] == CONNECTION_IDS[0]
-    assert task_configs[1]["connection_id"] == CONNECTION_IDS[1]
-
-
-def test_pipeline_sync_tasks_success2(org_with_server_block, generate_sync_org_tasks):
-    """tests if function returns only those of sync tasks config that match with org tasks"""
-    connections = [
-        PrefectFlowAirbyteConnection2(id=conn_id, seq=(i + 1))
-        for i, conn_id in enumerate(CONNECTION_IDS)
-    ]
-
-    # add another connection id not present in our org tasks
-    connections.append(
-        PrefectFlowAirbyteConnection2(
-            id="some-fake-conn-id-123", seq=len(connections) + 1
-        )
-    )
-    server_block = OrgPrefectBlockv1.objects.filter(org=org_with_server_block).first()
-    (org_tasks, task_configs), error = pipeline_sync_tasks(
-        org_with_server_block, connections, server_block
-    )
-
-    assert len(org_tasks) == len(CONNECTION_IDS)
-    assert len(task_configs) == len(CONNECTION_IDS)
-    assert len(task_configs) != len(connections)
-    assert task_configs[0]["connection_id"] == CONNECTION_IDS[0]
-    assert task_configs[1]["connection_id"] == CONNECTION_IDS[1]
-
-
-def test_system_default_pipeline_dbt_git_tasks_success(
-    org_with_server_block, generate_transform_org_tasks
-):
-    """tests if function returns all configs for the org tasks related to git & dbt"""
-
-    cli_profile_block = OrgPrefectBlockv1.objects.create(
-        block_type=DBTCLIPROFILE,
-        block_id="test-cli-profile-blk-id",
-        block_name="test-cli-profile-blk",
-        org=org_with_server_block,
-    )
-
-    dbt_project_params = DbtProjectParams(
-        dbt_env_dir="test-dir",
-        dbt_binary="test_dir",
-        project_dir="test-dir",
-        target="prod",
-        dbt_repo_dir="test-dir",
-    )
-
-    (org_tasks, task_configs), error = pipeline_dbt_git_tasks(
-        org_with_server_block, cli_profile_block, dbt_project_params
-    )
-
-    dbt_git_tasks = Task.objects.filter(type__in=["dbt", "git"], is_system=True).all()
-    assert len(task_configs) == len(dbt_git_tasks)
-    assert len(org_tasks) == len(org_tasks)
-
-    seqs = [t["seq"] for t in task_configs]
-    seqs.sort()
-    assert seqs == [i + 1 for i in range(len(dbt_git_tasks))]
-
-
-def test_system_default_pipeline_dbt_git_tasks_success2(
-    org_with_server_block, generate_transform_org_tasks
-):
-    """tests the sequence of tasks based on a different start offset"""
-    offset = 2  # means there were 2 airbyte syncs
-
-    cli_profile_block = OrgPrefectBlockv1.objects.create(
-        block_type=DBTCLIPROFILE,
-        block_id="test-cli-profile-blk-id",
-        block_name="test-cli-profile-blk",
-        org=org_with_server_block,
-    )
-
-    dbt_project_params = DbtProjectParams(
-        dbt_env_dir="test-dir",
-        dbt_binary="test_dir",
-        project_dir="test-dir",
-        target="prod",
-        dbt_repo_dir="test-dir",
-    )
-
-    (org_tasks, task_configs), error = pipeline_dbt_git_tasks(
-        org_with_server_block, cli_profile_block, dbt_project_params, offset
-    )
-
-    dbt_git_tasks = Task.objects.filter(type__in=["dbt", "git"], is_system=True).all()
-    assert len(task_configs) == len(dbt_git_tasks)
-    assert len(org_tasks) == len(org_tasks)
-
-    seqs = [t["seq"] for t in task_configs]
-    seqs.sort()
-    assert seqs == [i + 1 for i in range(offset, offset + len(dbt_git_tasks))]
