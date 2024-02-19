@@ -74,6 +74,7 @@ class PrefectAirbyteSyncTaskSetup(Schema):
     connection_id: str
     timeout: int
     type: str
+    orgtask_uuid: str
     flow_name: str = None
     flow_run_name: str = None
     seq: int = 0
@@ -86,6 +87,7 @@ class PrefectAirbyteSyncTaskSetup(Schema):
             "connection_id": self.connection_id,
             "timeout": self.timeout,
             "type": self.type,
+            "orgtask_uuid": self.orgtask_uuid,
             "flow_name": self.flow_name,
             "flow_run_name": self.flow_run_name,
             "seq": self.seq,
@@ -102,6 +104,7 @@ class PrefectDbtTaskSetup(Schema):
     profiles_dir: str
     project_dir: str
     working_dir: str
+    orgtask_uuid: str
     env: dict
     commands: list
     cli_profile_block: str
@@ -118,6 +121,7 @@ class PrefectDbtTaskSetup(Schema):
             "profiles_dir": self.profiles_dir,
             "project_dir": self.project_dir,
             "working_dir": self.working_dir,
+            "orgtask_uuid": self.orgtask_uuid,
             "env": self.env,
             "commands": self.commands,
             "cli_profile_block": self.cli_profile_block,
@@ -153,6 +157,7 @@ class PrefectShellTaskSetup(Schema):
     commands: list
     working_dir: str
     env: dict
+    orgtask_uuid: str
     flow_name: str = None
     flow_run_name: str = None
     seq: int = 0
@@ -165,6 +170,7 @@ class PrefectShellTaskSetup(Schema):
             "commands": self.commands,
             "working_dir": self.working_dir,
             "env": self.env,
+            "orgtask_uuid": self.orgtask_uuid,
             "slug": self.slug,
             "flow_name": self.flow_name,
             "flow_run_name": self.flow_run_name,
@@ -272,13 +278,20 @@ class PrefectDataFlowCreateSchema3(Schema):
     cron: str = None
 
 
+class PrefectDataFlowOrgTasks(Schema):
+    """Org tasks related to the data flow"""
+
+    uuid: str
+    seq: int
+
+
 class PrefectDataFlowCreateSchema4(Schema):
     """Payload sent by the frontend to create a dataflow"""
 
     name: str
     connections: list[PrefectFlowAirbyteConnection2]
-    dbtTransform: str
     cron: str
+    transform_tasks: list[PrefectDataFlowOrgTasks]
 
 
 class PrefectDataFlowUpdateSchema(Schema):

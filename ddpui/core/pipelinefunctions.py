@@ -37,6 +37,7 @@ def setup_airbyte_sync_task_config(
         airbyte_server_block=server_block.block_name,
         connection_id=org_task.connection_id,
         timeout=AIRBYTE_SYNC_TIMEOUT,
+        orgtask_uuid=str(org_task.uuid),
     )
 
 
@@ -60,6 +61,7 @@ def setup_dbt_core_task_config(
         project_dir=dbt_project_params.project_dir,
         cli_profile_block=cli_profile_block.block_name,
         cli_args=[],
+        orgtask_uuid=str(org_task.uuid),
     )
 
 
@@ -82,6 +84,7 @@ def setup_git_pull_shell_task_config(
         slug=org_task.task.slug,
         type=SHELLOPERATION,
         seq=seq,
+        orgtask_uuid=str(org_task.uuid),
     )
 
 
@@ -176,6 +179,7 @@ def pipeline_with_orgtasks(
     task_configs = []
 
     for org_task in org_tasks:
+        task_config = None
         if org_task.task.slug == TASK_AIRBYTESYNC:
             task_config = setup_airbyte_sync_task_config(
                 org_task, server_block
@@ -185,6 +189,10 @@ def pipeline_with_orgtasks(
                 org=org, block_type=SECRET, block_name__contains="git-pull"
             ).first()
 
+            if not gitpull_secret_block:
+                logger.info(
+                    f"secret block for {org_task.task.slug} not found in org prefect blocks;"
+                )
             task_config = setup_git_pull_shell_task_config(
                 org_task, dbt_project_params.project_dir, gitpull_secret_block
             ).to_json()
@@ -193,8 +201,9 @@ def pipeline_with_orgtasks(
                 org_task, cli_block, dbt_project_params
             ).to_json()
 
-        task_configs.append(task_config)
-        task_config["seq"] = start_seq
-        start_seq += 1
+        if task_config:
+            task_configs.append(task_config)
+            task_config["seq"] = start_seq
+            start_seq += 1
 
     return task_configs, None
