@@ -3,7 +3,6 @@ master table to store all operations/commands that a prefect deployment can run
 args to a command are specific to a deployment/flow & will be store as deployment/flow parameters
 """
 
-import uuid
 from enum import Enum
 from django.db import models
 from ddpui.models.org import Org
