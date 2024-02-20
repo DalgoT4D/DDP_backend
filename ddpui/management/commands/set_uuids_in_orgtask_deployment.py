@@ -75,7 +75,7 @@ class Command(BaseCommand):
                         org_task = OrgTask.objects.filter(
                             org=org,
                             task__slug=task_config["slug"],
-                            parameters__in=["", "{}"],
+                            parameters__in=["", {}],
                         )
                         if "connection_id" in task_config:
                             org_task = org_task.filter(
