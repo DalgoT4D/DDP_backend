@@ -169,8 +169,6 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
             dbt_project_params=dbt_project_params,
             start_seq=len(tasks),
         )
-        logger.info("HERE")
-        logger.info(task_configs)
         if error:
             raise HttpError(400, error)
         tasks += task_configs
