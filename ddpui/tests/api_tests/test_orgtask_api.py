@@ -1,4 +1,4 @@
-import os
+import os, uuid
 from unittest.mock import Mock, patch
 
 import django
@@ -159,7 +159,7 @@ def org_with_transformation_tasks(tmpdir_factory):
     seed_tasks()
 
     for task in Task.objects.filter(type__in=["dbt", "git"]).all():
-        org_task = OrgTask.objects.create(org=org, task=task)
+        org_task = OrgTask.objects.create(org=org, task=task, uuid=uuid.uuid4())
 
         if task.slug == "dbt-run":
             new_dataflow = OrgDataFlowv1.objects.create(
@@ -346,7 +346,7 @@ def test_delete_system_transformation_tasks_success(org_with_transformation_task
 
 
 def test_post_run_prefect_org_task_invalid_task_id(org_with_transformation_tasks):
-    """tests POST /tasks/{orgtask_id}/run/ failure by invalid task id"""
+    """tests POST /tasks/{orgtask_uuid}/run/ failure by invalid task id"""
     mock_orguser = Mock()
     mock_orguser.org = org_with_transformation_tasks
 
@@ -355,11 +355,21 @@ def test_post_run_prefect_org_task_invalid_task_id(org_with_transformation_tasks
 
     with pytest.raises(HttpError) as excinfo:
         post_run_prefect_org_task(mock_request, 0)
+    assert str(excinfo.value) == "invalid input type"
+
+    mock_orguser = Mock()
+    mock_orguser.org = org_with_transformation_tasks
+
+    mock_request = Mock()
+    mock_request.orguser = mock_orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        post_run_prefect_org_task(mock_request, uuid.uuid4())
     assert str(excinfo.value) == "task not found"
 
 
 def test_post_run_prefect_org_task_invalid_task_type(org_with_transformation_tasks):
-    """tests POST /tasks/{orgtask_id}/run/ failure by invalid task type"""
+    """tests POST /tasks/{orgtask_uuid}/run/ failure by invalid task type"""
     mock_orguser = Mock()
     mock_orguser.org = org_with_transformation_tasks
 
@@ -374,18 +384,20 @@ def test_post_run_prefect_org_task_invalid_task_type(org_with_transformation_tas
     }
     task = Task.objects.create(**airbyte_task_config)
 
-    org_task = OrgTask.objects.create(task=task, org=mock_orguser.org)
+    org_task = OrgTask.objects.create(
+        task=task, org=mock_orguser.org, uuid=uuid.uuid4()
+    )
 
     if org_task is None:
         raise Exception("Task not found")
 
     with pytest.raises(HttpError) as excinfo:
-        post_run_prefect_org_task(mock_request, org_task.id)
+        post_run_prefect_org_task(mock_request, org_task.uuid)
     assert str(excinfo.value) == "task not supported"
 
 
 def test_post_run_prefect_org_task_no_dbt_workspace(org_with_transformation_tasks):
-    """tests POST /tasks/{orgtask_id}/run/ failure by not setting up dbt workspace"""
+    """tests POST /tasks/{orgtask_uuid}/run/ failure by not setting up dbt workspace"""
     mock_orguser = Mock()
     mock_orguser.org = org_with_transformation_tasks
     mock_orguser.org.dbt = None
@@ -401,7 +413,7 @@ def test_post_run_prefect_org_task_no_dbt_workspace(org_with_transformation_task
         raise Exception("Task not found")
 
     with pytest.raises(HttpError) as excinfo:
-        post_run_prefect_org_task(mock_request, org_task.id)
+        post_run_prefect_org_task(mock_request, org_task.uuid)
     assert str(excinfo.value) == "dbt is not configured for this client"
 
 
@@ -425,7 +437,7 @@ def test_post_run_prefect_org_task_git_pull_success(org_with_transformation_task
     if org_task is None:
         raise Exception("Task not found")
 
-    post_run_prefect_org_task(mock_request, org_task.id)
+    post_run_prefect_org_task(mock_request, org_task.uuid)
 
 
 @patch.multiple(
@@ -433,7 +445,7 @@ def test_post_run_prefect_org_task_git_pull_success(org_with_transformation_task
     run_dbt_task_sync=Mock(return_value=True),
 )
 def test_post_run_prefect_org_task_dbt_deps_success(org_with_transformation_tasks):
-    """tests POST /tasks/{orgtask_id}/run/ success"""
+    """tests POST /tasks/{orgtask_uuid}/run/ success"""
 
     mock_request = Mock()
     mock_request.org = org_with_transformation_tasks
@@ -448,4 +460,4 @@ def test_post_run_prefect_org_task_dbt_deps_success(org_with_transformation_task
     if org_task is None:
         raise Exception("Task not found")
 
-    post_run_prefect_org_task(mock_request, org_task.id)
+    post_run_prefect_org_task(mock_request, org_task.uuid)
