@@ -2,6 +2,7 @@
 master table to store all operations/commands that a prefect deployment can run
 args to a command are specific to a deployment/flow & will be store as deployment/flow parameters
 """
+
 from enum import Enum
 from django.db import models
 from ddpui.models.org import Org
@@ -49,6 +50,7 @@ class Task(models.Model):
 class OrgTask(models.Model):
     """Docstring"""
 
+    uuid = models.UUIDField(editable=False, unique=True, null=True)
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     task = models.ForeignKey(Task, on_delete=models.CASCADE)
     connection_id = models.CharField(max_length=36, unique=True, null=True)
@@ -89,6 +91,7 @@ class DataflowOrgTask(models.Model):
 
     dataflow = models.ForeignKey(OrgDataFlowv1, on_delete=models.CASCADE)
     orgtask = models.ForeignKey(OrgTask, on_delete=models.CASCADE)
+    seq = models.IntegerField(default=1)
 
 
 class TaskLock(models.Model):
