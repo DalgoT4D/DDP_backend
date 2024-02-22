@@ -23,7 +23,7 @@ from ddpui.utils.webhook_helpers import (
     email_flowrun_logs_to_orgusers,
 )
 from ddpui.models.org import Org, OrgPrefectBlock
-from ddpui.models.org_user import OrgUser, User, OrgUserRole
+from ddpui.models.org_user import OrgUser, User, OrgUserRole, UserAttributes
 from ddpui.settings import PRODUCTION
 
 pytestmark = pytest.mark.django_db
@@ -126,6 +126,7 @@ def test_email_orgusers():
     org = Org.objects.create(name="temp", slug="temp")
     user = User.objects.create(username="username", email="useremail")
     OrgUser.objects.create(org=org, role=OrgUserRole.ACCOUNT_MANAGER, user=user)
+    UserAttributes.objects.create(user=user, is_platform_admin=True)
     with patch(
         "ddpui.utils.webhook_helpers.send_text_message"
     ) as mock_send_text_message:
@@ -133,6 +134,18 @@ def test_email_orgusers():
         tag = " [STAGING]" if not PRODUCTION else ""
         subject = f"Prefect notification{tag}"
         mock_send_text_message.assert_called_once_with("useremail", subject, "hello")
+
+
+def test_email_orgusers_not_non_admins():
+    """tests the email_orgusers function"""
+    org = Org.objects.create(name="temp", slug="temp")
+    user = User.objects.create(username="username", email="useremail")
+    OrgUser.objects.create(org=org, role=OrgUserRole.ACCOUNT_MANAGER, user=user)
+    with patch(
+        "ddpui.utils.webhook_helpers.send_text_message"
+    ) as mock_send_text_message:
+        email_orgusers(org, "hello")
+        mock_send_text_message.assert_not_called()
 
 
 def test_email_orgusers_not_to_report_viewers():
