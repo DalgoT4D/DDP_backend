@@ -1,3 +1,4 @@
+import uuid
 import os
 from pathlib import Path
 from datetime import datetime
@@ -5,6 +6,7 @@ import yaml
 
 from ninja import NinjaAPI
 from ninja.errors import HttpError
+from django.forms.models import model_to_dict
 
 from ninja.errors import ValidationError
 from ninja.responses import Response
@@ -23,19 +25,27 @@ from ddpui.models.org import (
     OrgPrefectBlockv1,
 )
 from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import DataflowOrgTask, OrgTask, TaskLock
+from ddpui.models.tasks import (
+    DataflowOrgTask,
+    OrgTask,
+    TaskLock,
+    Task,
+    OrgTaskGeneratedBy,
+)
 from ddpui.ddpprefect.schema import (
     PrefectSecretBlockCreate,
 )
+from ddpui.schemas.org_task_schema import CreateOrgTaskPayload, TaskParameters
 from ddpui.core.dbtfunctions import gather_dbt_project_params
-from ddpui.core.orgtaskfunctions import create_transform_tasks
+from ddpui.core.orgtaskfunctions import (
+    create_default_transform_tasks,
+    create_prefect_deployment_for_dbtcore_task,
+    delete_orgtask,
+)
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
-from ddpui.utils.constants import (
-    TASK_DBTRUN,
-    TASK_GITPULL,
-)
+from ddpui.utils.constants import TASK_DBTRUN, TASK_GITPULL, TRANSFORM_TASKS_SEQ
 from ddpui.core.pipelinefunctions import (
     setup_dbt_core_task_config,
     setup_git_pull_shell_task_config,
@@ -80,8 +90,63 @@ def ninja_default_error_handler(
     return Response({"detail": "something went wrong"}, status=500)
 
 
+@orgtaskapi.post("/", auth=auth.CanManagePipelines())
+def post_orgtask(request, payload: CreateOrgTaskPayload):
+    """Create a custom client org task (dbt or git). If base task is dbt run create a deployment"""
+    orguser: OrgUser = request.orguser
+    if orguser.org.dbt is None:
+        raise HttpError(400, "create a dbt workspace first")
+
+    task = Task.objects.filter(slug=payload.task_slug).first()
+
+    if task is None:
+        raise HttpError(404, "task not found")
+
+    parameters = {}
+    if payload.flags and len(payload.flags) > 0:
+        parameters["flags"] = payload.flags
+
+    if payload.options and len(payload.options.keys()) > 0:
+        parameters["options"] = payload.options
+
+    # create a deployment if the task type is run
+    orgtask = OrgTask.objects.create(
+        org=orguser.org,
+        task=task,
+        parameters=parameters,
+        generated_by="client",
+        uuid=uuid.uuid4(),
+    )
+
+    dataflow = None
+    if task.slug == TASK_DBTRUN:
+        dbt_project_params, error = gather_dbt_project_params(orguser.org)
+        if error:
+            raise HttpError(400, error)
+
+        # fetch the cli profile block
+        cli_profile_block = OrgPrefectBlockv1.objects.filter(
+            org=orguser.org, block_type=DBTCLIPROFILE
+        ).first()
+
+        if cli_profile_block is None:
+            raise HttpError(400, "dbt cli profile block not found")
+
+        dataflow = create_prefect_deployment_for_dbtcore_task(
+            orgtask, cli_profile_block, dbt_project_params
+        )
+
+    return {
+        **model_to_dict(orgtask, fields=["parameters"]),
+        "task_slug": orgtask.task.slug,
+        "dataflow": (
+            {**model_to_dict(dataflow, exclude=["id", "org"])} if dataflow else None
+        ),
+    }
+
+
 @orgtaskapi.post("transform/", auth=auth.CanManagePipelines())
-def post_prefect_transformation_tasks(request):
+def post_system_transformation_tasks(request):
     """
     - Create a git pull url secret block
     - Create a dbt cli profile block
@@ -186,7 +251,7 @@ def post_prefect_transformation_tasks(request):
         raise HttpError(400, str(error)) from error
 
     # create org tasks for the transformation page
-    _, error = create_transform_tasks(
+    _, error = create_default_transform_tasks(
         orguser.org, cli_profile_block, dbt_project_params
     )
     if error:
@@ -197,7 +262,7 @@ def post_prefect_transformation_tasks(request):
 
 @orgtaskapi.get("transform/", auth=auth.CanManagePipelines())
 def get_prefect_transformation_tasks(request):
-    """Fetch all dbt tasks for an org"""
+    """Fetch all dbt tasks for an org; client or system"""
     orguser: OrgUser = request.orguser
 
     org_tasks = []
@@ -207,24 +272,34 @@ def get_prefect_transformation_tasks(request):
             org=orguser.org,
             task__type__in=["git", "dbt"],
         )
-        .order_by("task__id")
+        .order_by("-generated_by")
         .all()
     ):
         # check if task is locked
         lock = TaskLock.objects.filter(orgtask=org_task).first()
+
+        # git pull               : "git" + " " + "pull"
+        # dbt run --full-refresh : "dbt" + " " + "run --full-refresh"
+        command = org_task.task.type + " " + org_task.get_task_parameters()
 
         org_tasks.append(
             {
                 "label": org_task.task.label,
                 "slug": org_task.task.slug,
                 "id": org_task.id,
+                "uuid": org_task.uuid,
                 "deploymentId": None,
-                "lock": {
-                    "lockedBy": lock.locked_by.user.email,
-                    "lockedAt": lock.locked_at,
-                }
-                if lock
-                else None,
+                "lock": (
+                    {
+                        "lockedBy": lock.locked_by.user.email,
+                        "lockedAt": lock.locked_at,
+                    }
+                    if lock
+                    else None
+                ),
+                "command": command,
+                "generated_by": org_task.generated_by,
+                "seq": TRANSFORM_TASKS_SEQ[org_task.task.slug],
             }
         )
 
@@ -239,7 +314,7 @@ def get_prefect_transformation_tasks(request):
 
 
 @orgtaskapi.delete("transform/", auth=auth.CanManagePipelines())
-def delete_prefect_transformation_tasks(request):
+def delete_system_transformation_tasks(request):
     """delete tasks and related objects for an org"""
     orguser: OrgUser = request.orguser
 
@@ -261,32 +336,20 @@ def delete_prefect_transformation_tasks(request):
         prefect_service.delete_dbt_cli_profile_block(cli_profile_block.block_id)
         cli_profile_block.delete()
 
-    org_tasks = OrgTask.objects.filter(org=orguser.org).all()
+    for org_task in OrgTask.objects.filter(org=orguser.org, task__is_system=True).all():
+        _, error = delete_orgtask(org_task)
 
-    for org_task in org_tasks:
-        if org_task.task.slug == TASK_DBTRUN:
-            dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
-            if dataflow_orgtask:
-                # delete the manual deployment for this
-                dataflow = dataflow_orgtask.dataflow
-                logger.info("deleting manual deployment for dbt run")
-                # do this in try catch because it can fail & throw error
-                try:
-                    prefect_service.delete_deployment_by_id(dataflow.deployment_id)
-                except Exception:
-                    pass
-                logger.info("FINISHED deleting manual deployment for dbt run")
-                logger.info("deleting OrgDataFlowv1")
-                dataflow.delete()
-                logger.info("deleting DataflowOrgTask")
-                dataflow_orgtask.delete()
-
-        logger.info("deleting org task %s", org_task.task.slug)
-        org_task.delete()
+        if error:
+            logger.info(
+                f"Failed deleting orgtask with id {org_task.id} of type {org_task.task.slug}. Skipping and continuing to next task deletion"
+            )
+            continue
 
 
-@orgtaskapi.post("{orgtask_id}/run/", auth=auth.CanManagePipelines())
-def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-argument
+@orgtaskapi.post("{orgtask_uuid}/run/", auth=auth.CanManagePipelines())
+def post_run_prefect_org_task(
+    request, orgtask_uuid, payload: TaskParameters = None
+):  # pylint: disable=unused-argument
     """
     Run dbt task & git pull in prefect. All tasks without a deployment.
     Basically short running tasks
@@ -298,7 +361,12 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
     """
     orguser: OrgUser = request.orguser
 
-    org_task = OrgTask.objects.filter(org=orguser.org, id=orgtask_id).first()
+    try:
+        uuid.UUID(str(orgtask_uuid))
+    except ValueError:
+        raise HttpError(400, "invalid input type")
+
+    org_task = OrgTask.objects.filter(org=orguser.org, uuid=orgtask_uuid).first()
 
     if org_task is None:
         raise HttpError(400, "task not found")
@@ -359,6 +427,10 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
         if cli_profile_block is None:
             raise HttpError(400, "dbt cli profile block not found")
 
+        # save orgtask params to memory and not db
+        if payload:
+            org_task.parameters = dict(payload)
+
         task_config = setup_dbt_core_task_config(
             org_task, cli_profile_block, dbt_project_params
         )
@@ -381,3 +453,56 @@ def post_run_prefect_org_task(request, orgtask_id):  # pylint: disable=unused-ar
     logger.info("released lock on task %s", org_task.task.slug)
 
     return result
+
+
+@orgtaskapi.delete("{orgtask_uuid}/", auth=auth.CanManagePipelines())
+def post_delete_orgtask(request, orgtask_uuid):  # pylint: disable=unused-argument
+    """Delete client generated orgtask"""
+
+    orguser: OrgUser = request.orguser
+
+    try:
+        uuid.UUID(str(orgtask_uuid))
+    except ValueError:
+        raise HttpError(400, "invalid input type")
+
+    org_task = OrgTask.objects.filter(org=orguser.org, uuid=orgtask_uuid).first()
+
+    if org_task is None:
+        raise HttpError(400, "task not found")
+
+    if org_task.task.type not in ["dbt", "git"]:
+        raise HttpError(400, "task not supported")
+
+    if orguser.org.dbt is None:
+        raise HttpError(400, "dbt is not configured for this client")
+
+    if org_task.generated_by == OrgTaskGeneratedBy.SYSTEM:
+        raise HttpError(400, "cannot delete system generated tasks")
+
+    # check if the task is locked
+    task_lock = TaskLock.objects.filter(orgtask=org_task).first()
+    if task_lock:
+        raise HttpError(
+            400,
+            f"Cannot delete, {task_lock.locked_by.user.email} is running this operation",
+        )
+
+    # make sure the org task is not part of a orchestrate pipeline
+    if (
+        DataflowOrgTask.objects.filter(
+            orgtask=org_task, dataflow__dataflow_type="orchestrate"
+        ).count()
+        > 0
+    ):
+        raise HttpError(403, "Cannot delete the orgtask since its part of a pipeline")
+
+    _, error = delete_orgtask(org_task)
+
+    if error:
+        logger.info(
+            f"Failed deleting orgtask with id {org_task.id} of type {org_task.task.slug}. Skipping and continuing to next task deletion"
+        )
+        raise HttpError(400, error)
+
+    return {"success": 1}

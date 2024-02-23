@@ -23,7 +23,7 @@ from ddpui.utils.webhook_helpers import (
     email_flowrun_logs_to_orgusers,
 )
 from ddpui.models.org import Org, OrgPrefectBlock
-from ddpui.models.org_user import OrgUser, User, OrgUserRole
+from ddpui.models.org_user import OrgUser, User, OrgUserRole, UserAttributes
 from ddpui.settings import PRODUCTION
 
 pytestmark = pytest.mark.django_db
@@ -50,7 +50,7 @@ def test_get_flowrun_id_and_state():
 def test_get_org_from_flow_run_by_blockname():
     """tests get_org_from_flow_run"""
     blockname = str(uuid4())
-    flow_run = {"parameters": {"block_name": blockname}}
+    flow_run = {"parameters": {"block_name": blockname, "config": {"org_slug": "temp"}}}
     org = Org.objects.create(name="temp", slug="temp")
     OrgPrefectBlock.objects.create(
         org=org, block_name=blockname, block_type="fake-type", block_id="12345"
@@ -62,7 +62,12 @@ def test_get_org_from_flow_run_by_blockname():
 def test_get_org_from_flow_run_by_connection():
     """tests get_org_from_flow_run"""
     blockid = str(uuid4())
-    flow_run = {"parameters": {"airbyte_connection": {"_block_document_id": blockid}}}
+    flow_run = {
+        "parameters": {
+            "airbyte_connection": {"_block_document_id": blockid},
+            "config": {"org_slug": "temp"},
+        }
+    }
     org = Org.objects.create(name="temp", slug="temp")
     OrgPrefectBlock.objects.create(
         org=org, block_name="tempblockname", block_type="fake-type", block_id=blockid
@@ -74,7 +79,12 @@ def test_get_org_from_flow_run_by_connection():
 def test_get_org_from_flow_run_by_airbyte_blocks():
     """tests get_org_from_flow_run"""
     blockname = str(uuid4())
-    flow_run = {"parameters": {"airbyte_blocks": [{"blockName": blockname}]}}
+    flow_run = {
+        "parameters": {
+            "airbyte_blocks": [{"blockName": blockname}],
+            "config": {"org_slug": "temp"},
+        }
+    }
     org = Org.objects.create(name="temp", slug="temp")
     OrgPrefectBlock.objects.create(
         org=org, block_name=blockname, block_type="fake-type", block_id="blockid"
@@ -86,7 +96,12 @@ def test_get_org_from_flow_run_by_airbyte_blocks():
 def test_get_org_from_flow_run_by_dbt_blocks():
     """tests get_org_from_flow_run"""
     blockname = str(uuid4())
-    flow_run = {"parameters": {"dbt_blocks": [{"blockName": blockname}]}}
+    flow_run = {
+        "parameters": {
+            "dbt_blocks": [{"blockName": blockname}],
+            "config": {"org_slug": "temp"},
+        }
+    }
     org = Org.objects.create(name="temp", slug="temp")
     OrgPrefectBlock.objects.create(
         org=org, block_name=blockname, block_type="fake-type", block_id="blockid"
@@ -111,6 +126,7 @@ def test_email_orgusers():
     org = Org.objects.create(name="temp", slug="temp")
     user = User.objects.create(username="username", email="useremail")
     OrgUser.objects.create(org=org, role=OrgUserRole.ACCOUNT_MANAGER, user=user)
+    UserAttributes.objects.create(user=user, is_platform_admin=True)
     with patch(
         "ddpui.utils.webhook_helpers.send_text_message"
     ) as mock_send_text_message:
@@ -118,6 +134,18 @@ def test_email_orgusers():
         tag = " [STAGING]" if not PRODUCTION else ""
         subject = f"Prefect notification{tag}"
         mock_send_text_message.assert_called_once_with("useremail", subject, "hello")
+
+
+def test_email_orgusers_not_non_admins():
+    """tests the email_orgusers function"""
+    org = Org.objects.create(name="temp", slug="temp")
+    user = User.objects.create(username="username", email="useremail")
+    OrgUser.objects.create(org=org, role=OrgUserRole.ACCOUNT_MANAGER, user=user)
+    with patch(
+        "ddpui.utils.webhook_helpers.send_text_message"
+    ) as mock_send_text_message:
+        email_orgusers(org, "hello")
+        mock_send_text_message.assert_not_called()
 
 
 def test_email_orgusers_not_to_report_viewers():

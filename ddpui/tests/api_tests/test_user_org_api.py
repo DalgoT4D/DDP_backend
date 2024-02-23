@@ -520,9 +520,7 @@ def test_post_organization_warehouse_unknownwtype(orguser):
 @patch.multiple(
     "ddpui.ddpairbyte.airbyte_service",
     create_destination=Mock(
-        return_value={
-            "destinationId": "destination-id",
-        }
+        return_value={"destinationId": "destination-id", "connectionConfiguration": {}}
     ),
 )
 @patch.multiple(

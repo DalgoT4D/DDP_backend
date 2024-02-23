@@ -137,7 +137,12 @@ def get_organization_users(request):
     if orguser.org is None:
         raise HttpError(400, "no associated org")
     query = OrgUser.objects.filter(org=orguser.org)
-    return [from_orguser(orguser) for orguser in query]
+    orgusers = []
+    for orguser in query:
+        userattributes = UserAttributes.objects.filter(user=orguser.user).first()
+        if not (userattributes and userattributes.is_platform_admin):
+            orgusers.append(from_orguser(orguser))
+    return orgusers
 
 
 @user_org_api.post("/organizations/users/delete", auth=auth.CanManageUsers())

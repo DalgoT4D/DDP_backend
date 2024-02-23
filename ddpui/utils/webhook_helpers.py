@@ -1,11 +1,12 @@
 import re
 from ddpui.utils.custom_logger import CustomLogger
 
-from ddpui.models.org import OrgPrefectBlock, Org
+from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUserRole, OrgUser
-from ddpui.utils.sendgrid import send_text_message
+from ddpui.utils.awsses import send_text_message
 from ddpui.ddpprefect import prefect_service
 from ddpui.settings import PRODUCTION
+from ddpui.models.org_user import UserAttributes
 
 logger = CustomLogger("ddpui")
 
@@ -42,38 +43,30 @@ def get_flowrun_id_and_state(message: str) -> tuple:
 
 def get_org_from_flow_run(flow_run: dict) -> Org | None:
     """
+    (**deprecated
     given a flow-run, inspect its parameters
     if it has parameters and one of them is `airbyte_connection`, then
     look up the OrgPrefectBlock by its prefect block-document id
     now we have the org
+    )
+
+    org_slug is embedded in the parameters of flow run now
     """
-    opb = None
-    if "parameters" in flow_run:
-        parameters = flow_run["parameters"]
+    if (
+        "parameters" in flow_run
+        and "config" in flow_run["parameters"]
+        and "org_slug" in flow_run["parameters"]["config"]
+    ):
+        org = Org.objects.filter(
+            slug=flow_run["parameters"]["config"]["org_slug"]
+        ).first()
 
-        if "block_name" in parameters:
-            opb = OrgPrefectBlock.objects.filter(
-                block_name=parameters["block_name"]
-            ).first()
+        if org is not None:
+            logger.info(f"found the org slug {org.slug} inside the webhook function")
+            return org
 
-        if opb is None and "airbyte_connection" in parameters:
-            block_id = parameters["airbyte_connection"]["_block_document_id"]
-            opb = OrgPrefectBlock.objects.filter(block_id=block_id).first()
+    logger.error("didn't find the org slug inside the webhook function")
 
-        if opb is None and "airbyte_blocks" in parameters:
-            if len(parameters["airbyte_blocks"]) > 0:
-                opb = OrgPrefectBlock.objects.filter(
-                    block_name=parameters["airbyte_blocks"][0]["blockName"]
-                ).first()
-
-        if opb is None and "dbt_blocks" in parameters:
-            if len(parameters["dbt_blocks"]) > 0:
-                opb = OrgPrefectBlock.objects.filter(
-                    block_name=parameters["dbt_blocks"][0]["blockName"]
-                ).first()
-    if opb:
-        logger.info(opb)
-        return opb.org
     return None
 
 
@@ -105,8 +98,11 @@ def email_orgusers(org: Org, email_body: str):
             OrgUserRole.PIPELINE_MANAGER,
         ],
     ):
-        logger.info(f"sending prefect-notification email to {orguser.user.email}")
-        send_text_message(orguser.user.email, subject, email_body)
+        if UserAttributes.objects.filter(
+            user=orguser.user, is_platform_admin=True
+        ).exists():
+            logger.info(f"sending prefect-notification email to {orguser.user.email}")
+            send_text_message(orguser.user.email, subject, email_body)
 
 
 def email_flowrun_logs_to_orgusers(org: Org, flow_run_id: str):

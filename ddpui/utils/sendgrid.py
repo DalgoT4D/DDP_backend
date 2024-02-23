@@ -1,33 +1,12 @@
 import os
 from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail, Content
+from sendgrid.helpers.mail import Mail
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
 
 SENDGRID_APIKEY = os.getenv("SENDGRID_APIKEY")
 SENDGRID_SENDER = os.getenv("SENDGRID_SENDER")
-
-
-def send_text_message(to_email, subject, message):
-    """
-    send a plain-text email using sendgrid
-    """
-    sendgrid_client = SendGridAPIClient(SENDGRID_APIKEY)
-
-    content = Content("text/plain", message)
-    message = Mail(
-        SENDGRID_SENDER,
-        to_email,
-        subject,
-        content,
-    )
-
-    try:
-        sendgrid_client.send(message)
-    except Exception as error:
-        logger.exception(error)
-        raise
 
 
 def send_template_message(template_id: str, to_email: str, template_vars: dict) -> None:
@@ -96,11 +75,12 @@ def send_demo_account_post_verify_email(to_email: str) -> None:
     - data source credentials
     - link to documentation
     """
-    send_template_message(
-        os.getenv("DEMO_SENDGRID_SIGNUP_TEMPLATE"),
-        to_email,
-        {
-            "username": os.getenv("DEMO_SUPERSET_USERNAME"),
-            "password": os.getenv("DEMO_SUPERSET_PASSWORD"),
-        },
-    )
+    if os.getenv("DEMO_SENDGRID_SIGNUP_TEMPLATE"):
+        send_template_message(
+            os.getenv("DEMO_SENDGRID_SIGNUP_TEMPLATE"),
+            to_email,
+            {
+                "username": os.getenv("DEMO_SUPERSET_USERNAME"),
+                "password": os.getenv("DEMO_SUPERSET_PASSWORD"),
+            },
+        )

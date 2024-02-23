@@ -57,11 +57,8 @@ def get_warehouse_data(request, data_type: str, **kwargs):
         wtype = org_warehouse.wtype
         credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
 
-        if wtype == "bigquery":
-            credentials = json.loads(credentials)
-
         data = []
-        client = get_client(wtype, credentials)
+        client = get_client(wtype, credentials, org_warehouse.bq_location)
         if data_type == "tables":
             data = client.get_tables(kwargs["schema_name"])
         elif data_type == "schemas":
@@ -69,9 +66,13 @@ def get_warehouse_data(request, data_type: str, **kwargs):
         elif data_type == "table_columns":
             data = client.get_table_columns(kwargs["schema_name"], kwargs["table_name"])
         elif data_type == "table_data":
-            limit = 10
             data = client.get_table_data(
-                kwargs["schema_name"], kwargs["table_name"], limit
+                schema=kwargs["schema_name"],
+                table=kwargs["table_name"],
+                limit=kwargs["limit"],
+                page=kwargs["page"],
+                order_by=kwargs["order_by"],
+                order=kwargs["order"],
             )
     except Exception as error:
         logger.exception(f"Exception occurred in get_{data_type}: {error}")
@@ -105,8 +106,23 @@ def get_table_columns(request, schema_name: str, table_name: str):
 @warehouseapi.get(
     "/table_data/{schema_name}/{table_name}", auth=auth.CanManagePipelines()
 )
-def get_table_data(request, schema_name: str, table_name: str):
+def get_table_data(
+    request,
+    schema_name: str,
+    table_name: str,
+    page: int = 1,
+    limit: int = 10,
+    order_by: str = None,
+    order: int = 1,
+):
     """Fetches data from a specific table in a warehouse"""
     return get_warehouse_data(
-        request, "table_data", schema_name=schema_name, table_name=table_name
+        request,
+        "table_data",
+        schema_name=schema_name,
+        table_name=table_name,
+        page=page,
+        limit=limit,
+        order_by=order_by,
+        order=order,
     )
