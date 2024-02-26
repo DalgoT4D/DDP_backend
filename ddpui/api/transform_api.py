@@ -147,7 +147,6 @@ def sync_sources(request, payload: SyncSourcesSchema):
     # sync sources to django db
     logger.info("synced sources in dbt, saving to db now")
     sources = dbtautomation_service.read_dbt_sources_in_project(orgdbt)
-    OrgDbtModel.objects.filter(orgdbt=orgdbt, type="source").delete()
     for source in sources:
         OrgDbtModel.objects.create(
             uuid=uuid.uuid4(),
