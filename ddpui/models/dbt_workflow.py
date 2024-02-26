@@ -24,6 +24,7 @@ class OrgDbtModel(models.Model):
     """Model to store dbt models/sources in a project"""
 
     orgdbt = models.ForeignKey(OrgDbt, on_delete=models.CASCADE)
+    uuid = models.UUIDField(editable=False, unique=True, null=True)
     name = models.CharField(max_length=100)
     display_name = models.CharField(max_length=100)
     schema = models.CharField(max_length=100, null=True)
