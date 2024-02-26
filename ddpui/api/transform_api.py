@@ -216,6 +216,7 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
         for input in input_models
     ]
 
+    # input according to dbt_automation package
     if len(input_arr) == 1:  # single input operation
         payload.config["input"] = input_arr[0]
     else:  # multi inputs operation
