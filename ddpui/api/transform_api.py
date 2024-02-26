@@ -183,6 +183,9 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
+    if len(payload.input_uuids) == 0:
+        raise HttpError(422, "no input provided")
+
     input_models = OrgDbtModel.objects.filter(uuid__in=payload.input_uuids).all()
     if len(input_models) != len(payload.input_uuids):
         raise HttpError(404, "input not found")
