@@ -148,17 +148,24 @@ def sync_sources(request, payload: SyncSourcesSchema):
     logger.info("synced sources in dbt, saving to db now")
     sources = dbtautomation_service.read_dbt_sources_in_project(orgdbt)
     for source in sources:
-        OrgDbtModel.objects.create(
-            uuid=uuid.uuid4(),
-            orgdbt=orgdbt,
-            name=source["input_name"],
-            display_name=source[
-                "source_name"
-            ],  # saving the source_name in display_name
-            schema=source["schema"],
-            sql_path=sources_file_path,
-            type="source",
-        )
+        orgdbt_source = OrgDbtModel.objects.filter(
+            source_name=source["source_name"], name=source["input_name"], type="source"
+        ).first()
+
+        if not orgdbt_source:
+            orgdbt_source = OrgDbtModel(
+                uuid=uuid.uuid4(),
+                orgdbt=orgdbt,
+                source_name=source["source_name"],
+                name=source["input_name"],
+                display_name=source["input_name"],
+                type="source",
+            )
+
+        orgdbt_source.schema = source["schema"]
+        orgdbt_source.sql_path = sources_file_path
+
+        orgdbt_source.save()
 
     return {"sources_file_path": str(sources_file_path)}
 
