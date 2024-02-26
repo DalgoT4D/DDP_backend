@@ -15,10 +15,9 @@ class OrgDbtModel(models.Model):
     display_name = models.CharField(max_length=100)
     schema = models.CharField(max_length=100, null=True)
     sql_path = models.CharField(max_length=200, null=True)
-    config = models.JSONField(null=True)
 
     def __str__(self) -> str:
-        return f"DbtModel[{self.name} | {self.orgdbt.project_dir}]"
+        return f"DbtModel[{self.schema}.{self.name} | {self.orgdbt.project_dir}]"
 
 
 class DbtEdge(models.Model):
