@@ -183,6 +183,9 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
+    if payload.op_type not in dbtautomation_service.OPERATIONS_DICT.keys():
+        raise HttpError(422, "Operation not found")
+
     if len(payload.input_uuids) == 0:
         raise HttpError(422, "no input provided")
 
@@ -259,10 +262,11 @@ def get_input_sources_and_models(request, schema_name: str = None):
     for orgdbt_model in query.all():
         res.append(
             {
-                "uuid": orgdbt_model.uuid,
+                "id": orgdbt_model.uuid,
                 "source_name": orgdbt_model.source_name(),
                 "input_name": orgdbt_model.name,
                 "input_type": orgdbt_model.type,
+                "schema": orgdbt_model.schema,
             }
         )
 

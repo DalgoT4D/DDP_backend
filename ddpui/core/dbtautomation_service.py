@@ -23,7 +23,7 @@ from ddpui.utils import secretsmanager
 OPERATIONS_DICT = {
     "flatten": flatten_operation,
     "flattenjson": flattenjson,
-    "unionall": union_tables,
+    # "unionall": union_tables,
     "castdatatypes": cast_datatypes,
     "coalescecolumns": coalesce_columns,
     "arithmetic": arithmetic,
@@ -49,6 +49,11 @@ def create_dbt_model_in_project(
     wclient = _get_wclient(org_warehouse)
     if op_type not in OPERATIONS_DICT:
         return None, "Operation not found"
+
+    # fetch input columns of the model
+    config["source_columns"] = wclient.get_table_columns(
+        config["dest_schema"], config["input"]["input_name"]
+    )
 
     sql_file_path = OPERATIONS_DICT[op_type](
         config=config,
