@@ -1,4 +1,5 @@
 from ninja import Field, Schema
+import uuid
 
 
 class CreateDbtModelPayload(Schema):
@@ -9,6 +10,7 @@ class CreateDbtModelPayload(Schema):
     name: str
     display_name: str
     dest_schema: str
+    input_uuids: list[uuid.UUID]
     config: dict
     op_type: str
 

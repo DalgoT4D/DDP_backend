@@ -36,6 +36,11 @@ class OrgDbtModel(models.Model):
     def __str__(self) -> str:
         return f"DbtModel[{self.type} | {self.schema}.{self.name} | {self.orgdbt.project_dir}]"
 
+    def source_name(self):
+        if self.type == "source":
+            return self.display_name
+        return None
+
 
 class DbtEdge(models.Model):
     """Edge to help generate the DAG of a dbt project. Edge is between two OrgDbtModel(s)"""

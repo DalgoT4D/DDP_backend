@@ -14,7 +14,7 @@ from ddpui import auth
 from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgDbt, OrgWarehouse
-from ddpui.models.dbt_workflow import OrgDbtModel
+from ddpui.models.dbt_workflow import OrgDbtModel, DbtEdge
 from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.schemas.org_task_schema import DbtProjectSchema
@@ -183,6 +183,10 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
+    input_models = OrgDbtModel.objects.filter(uuid__in=payload.input_uuids).all()
+    if len(input_models) != len(payload.input_uuids):
+        raise HttpError(404, "input not found")
+
     output_name = slugify(payload.name)
     # output_name should not be repeated
     if OrgDbtModel.objects.filter(name=output_name).count() > 0:
@@ -190,6 +194,16 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
 
     payload.config["output_name"] = output_name
     payload.config["dest_schema"] = payload.dest_schema
+    payload.config["input"] = [
+        {
+            "input_name": input.name,
+            "input_type": input.type,
+            "source_name": input.source_name(),
+        }
+        for input in input_models
+    ]
+    if len(payload.config["input"]) == 1:
+        payload.config["input"] = payload.config["input"][0]
 
     sql_path, error = dbtautomation_service.create_dbt_model_in_project(
         orgdbt, org_warehouse, payload.op_type, payload.config
@@ -203,8 +217,15 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
         display_name=payload.display_name,
         schema=payload.dest_schema,
         sql_path=sql_path,
-        config=payload.config,
+        uuid=uuid.uuid4(),
     )
+
+    # create the dbt edge(s)
+    payload.config["op_type"] = payload.op_type  # add op_type to config
+    for source in input_models:
+        DbtEdge.objects.create(
+            source=source, target=orgdbt_model, config=payload.config
+        )
 
     return model_to_dict(orgdbt_model, exclude=["orgdbt", "id"])
 
@@ -226,21 +247,20 @@ def get_input_sources_and_models(request, schema_name: str = None):
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
-    sources = dbtautomation_service.read_dbt_sources_in_project(orgdbt)
+    query = OrgDbtModel.objects.filter(orgdbt=orgdbt)
 
-    models = []
-    for orgdbt_model in OrgDbtModel.objects.filter(orgdbt=orgdbt).all():
-        models.append(
+    if schema_name:
+        query = query.filter(schema=schema_name)
+
+    res = []
+    for orgdbt_model in query.all():
+        res.append(
             {
-                "source_name": None,
+                "uuid": orgdbt_model.uuid,
+                "source_name": orgdbt_model.source_name(),
                 "input_name": orgdbt_model.name,
-                "input_type": "model",
-                "schema": orgdbt_model.schema,
+                "input_type": orgdbt_model.type,
             }
         )
 
-    return (
-        [ref for ref in sources + models if ref["schema"] == schema_name]
-        if schema_name
-        else sources + models
-    )
+    return res
