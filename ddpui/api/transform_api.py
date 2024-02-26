@@ -207,16 +207,19 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
 
     payload.config["output_name"] = output_name
     payload.config["dest_schema"] = payload.dest_schema
-    payload.config["input"] = [
+    input_arr = [
         {
             "input_name": input.name,
             "input_type": input.type,
-            "source_name": input.source_name(),
+            "source_name": input.source_name,
         }
         for input in input_models
     ]
-    if len(payload.config["input"]) == 1:
-        payload.config["input"] = payload.config["input"][0]
+
+    if len(input_arr) == 1:  # single input operation
+        payload.config["input"] = input_arr[0]
+    else:  # multi inputs operation
+        payload.config["input"] = input_arr
 
     sql_path, error = dbtautomation_service.create_dbt_model_in_project(
         orgdbt, org_warehouse, payload.op_type, payload.config
@@ -224,20 +227,22 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
     if error:
         raise HttpError(422, error)
 
+    payload.config["op_type"] = payload.op_type  # add op_type to config
     orgdbt_model = OrgDbtModel.objects.create(
         orgdbt=orgdbt,
         name=output_name,
         display_name=payload.display_name,
         schema=payload.dest_schema,
         sql_path=sql_path,
+        config=payload.config,
         uuid=uuid.uuid4(),
     )
 
     # create the dbt edge(s)
-    payload.config["op_type"] = payload.op_type  # add op_type to config
     for source in input_models:
         DbtEdge.objects.create(
-            source=source, target=orgdbt_model, config=payload.config
+            from_node=source,
+            to_node=orgdbt_model,
         )
 
     return model_to_dict(orgdbt_model, exclude=["orgdbt", "id"])
@@ -270,7 +275,7 @@ def get_input_sources_and_models(request, schema_name: str = None):
         res.append(
             {
                 "id": orgdbt_model.uuid,
-                "source_name": orgdbt_model.source_name(),
+                "source_name": orgdbt_model.source_name,
                 "input_name": orgdbt_model.name,
                 "input_type": orgdbt_model.type,
                 "schema": orgdbt_model.schema,
