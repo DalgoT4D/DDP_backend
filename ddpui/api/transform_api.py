@@ -1,4 +1,4 @@
-import os
+import os, uuid
 import shutil
 from pathlib import Path
 
@@ -143,6 +143,23 @@ def sync_sources(request, payload: SyncSourcesSchema):
 
     if error:
         raise HttpError(422, error)
+
+    # sync sources to django db
+    logger.info("synced sources in dbt, saving to db now")
+    sources = dbtautomation_service.read_dbt_sources_in_project(orgdbt)
+    OrgDbtModel.objects.filter(orgdbt=orgdbt, type="source").delete()
+    for source in sources:
+        OrgDbtModel.objects.create(
+            uuid=uuid.uuid4(),
+            orgdbt=orgdbt,
+            name=source["input_name"],
+            display_name=source[
+                "source_name"
+            ],  # saving the source_name in display_name
+            schema=source["schema"],
+            sql_path=sources_file_path,
+            type="source",
+        )
 
     return {"sources_file_path": str(sources_file_path)}
 
