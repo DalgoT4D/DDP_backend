@@ -246,7 +246,13 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
             to_node=orgdbt_model,
         )
 
-    return model_to_dict(orgdbt_model, exclude=["orgdbt", "id"])
+    return {
+        "id": orgdbt_model.uuid,
+        "source_name": orgdbt_model.source_name,
+        "input_name": orgdbt_model.name,
+        "input_type": orgdbt_model.type,
+        "schema": orgdbt_model.schema,
+    }
 
 
 @transformapi.get("/dbt_project/sources_models/", auth=auth.CanManagePipelines())
