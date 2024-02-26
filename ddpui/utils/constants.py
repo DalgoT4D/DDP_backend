@@ -17,6 +17,7 @@ TRANSFORM_TASKS_SEQ = {
     TASK_DBTRUN: 4,
     TASK_DBTTEST: 5,
     TASK_DOCSGENERATE: 6,
+    TASK_SEED: 0,
 }
 
 # airbyte sync timeout in deployment params
