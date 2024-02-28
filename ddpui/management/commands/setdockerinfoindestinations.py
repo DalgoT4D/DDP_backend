@@ -22,10 +22,10 @@ class Command(BaseCommand):
             destination_definition = airbyte_service.get_destination_definition(
                 warehouse.org.airbyte_workspace_id, destination_def_id
             )
-            warehouse.airbyte_docker_repository = (
-                destination_definition["dockerRepository"],
-            )
-            warehouse.airbyte_docker_image_tag = (
-                destination_definition["dockerImageTag"],
-            )
+            warehouse.airbyte_docker_repository = destination_definition[
+                "dockerRepository"
+            ]
+            warehouse.airbyte_docker_image_tag = destination_definition[
+                "dockerImageTag"
+            ]
             warehouse.save()
