@@ -294,7 +294,7 @@ def get_input_sources_and_models(request, schema_name: str = None):
 
 
 @transformapi.get("/dbt_project/graph/", auth=auth.CanManagePipelines())
-def get_dbt_project_DAG(request, schema_name: str = None):
+def get_dbt_project_DAG(request):
     """
     Returns the DAG of the dbt project; including the nodes and edges
     """
@@ -317,12 +317,37 @@ def get_dbt_project_DAG(request, schema_name: str = None):
     res = {"nodes": [], "edges": []}
 
     for edge in edges:
+        # append related nodes
+        res["nodes"].extend(
+            [
+                {
+                    "id": edge.from_node.uuid,
+                    "source_name": edge.from_node.source_name,
+                    "input_name": edge.from_node.name,
+                    "input_type": edge.from_node.type,
+                    "schema": edge.from_node.schema,
+                },
+                {
+                    "id": edge.to_node.uuid,
+                    "source_name": edge.to_node.source_name,
+                    "input_name": edge.to_node.name,
+                    "input_type": edge.to_node.type,
+                    "schema": edge.to_node.schema,
+                },
+            ]
+        )
         res["edges"].append(
             {
-                "source": edge.source.uuid,
-                "target": edge.target.uuid,
-                "config": edge.config,
+                "id": edge.id,
+                "source": edge.from_node.uuid,
+                "target": edge.to_node.uuid,
             }
         )
 
-    return []
+    # set to remove duplicates
+    seen = set()
+    res["nodes"] = [
+        nn for nn in res["nodes"] if not (nn["id"] in seen or seen.add(nn["id"]))
+    ]
+
+    return res
