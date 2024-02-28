@@ -32,26 +32,22 @@ class OrgDbtModel(models.Model):
     type = models.CharField(
         choices=OrgDbtModelType.choices(), max_length=50, default="model"
     )
+    config = models.JSONField(null=True)
+    source_name = models.CharField(max_length=100, null=True)
 
     def __str__(self) -> str:
         return f"DbtModel[{self.type} | {self.schema}.{self.name} | {self.orgdbt.project_dir}]"
-
-    def source_name(self):
-        if self.type == "source":
-            return self.display_name
-        return None
 
 
 class DbtEdge(models.Model):
     """Edge to help generate the DAG of a dbt project. Edge is between two OrgDbtModel(s)"""
 
-    source = models.ForeignKey(
-        OrgDbtModel, on_delete=models.CASCADE, related_name="source"
+    from_node = models.ForeignKey(
+        OrgDbtModel, on_delete=models.CASCADE, related_name="from_node", default=None
     )
-    target = models.ForeignKey(
-        OrgDbtModel, on_delete=models.CASCADE, related_name="target"
+    to_node = models.ForeignKey(
+        OrgDbtModel, on_delete=models.CASCADE, related_name="to_node", default=None
     )
-    config = models.JSONField(null=True)
 
     def __str__(self) -> str:
-        return f"DbtEdge[{self.source.schema}.{self.source.name} -> {self.target.schema}.{self.target.name}]"
+        return f"DbtEdge[{self.from_node.schema}.{self.from_node.name} -> {self.to_node.schema}.{self.to_node.name}]"
