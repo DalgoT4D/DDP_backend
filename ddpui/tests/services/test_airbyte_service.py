@@ -35,6 +35,7 @@ from ddpui.ddpairbyte.airbyte_service import (
     get_destination_definition_specification,
     get_destinations,
     get_destination,
+    get_destination_definition,
     create_destination,
     update_destination,
     AirbyteDestinationCreate,
@@ -826,6 +827,21 @@ def test_get_destination_definitions_failure():
             get_destination_definitions("workspace-id")
 
         assert str(excinfo.value) == "destination definitions not found"
+
+
+def test_get_destination_definition():
+    with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
+        mock_response = Mock(spec=requests.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"Content-Type": "application/json"}
+        mock_response.json.return_value = {
+            "destinationDefinitionId": "theDestinationDefId"
+        }
+        mock_post.return_value = mock_response
+
+        response = get_destination_definition("workspace-id", "destination_def_id")
+
+        assert response["destinationDefinitionId"] == "theDestinationDefId"
 
 
 def test_get_destination_definition_specification_success():

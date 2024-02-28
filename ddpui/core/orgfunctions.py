@@ -55,12 +55,18 @@ def create_warehouse(org: Org, payload: OrgWarehouseSchema):
             "credentials": payload.airbyteConfig["credentials"],
         }
 
+    destination_definition = airbyte_service.get_destination_definition(
+        org.airbyte_workspace_id, payload.destinationDefId
+    )
+
     warehouse = OrgWarehouse(
         org=org,
         name=payload.name,
         wtype=payload.wtype,
         credentials="",
         airbyte_destination_id=destination["destinationId"],
+        docker_repository=destination_definition["dockerRepository"],
+        docker_image_tag=destination_definition["dockerImageTag"],
     )
     credentials_lookupkey = secretsmanager.save_warehouse_credentials(
         warehouse, dbt_credentials
