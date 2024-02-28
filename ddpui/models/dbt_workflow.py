@@ -34,9 +34,10 @@ class OrgDbtModel(models.Model):
     )
     source_name = models.CharField(max_length=100, null=True)
     output_cols = models.JSONField(default=list)
+    under_construction = models.BooleanField(default=False)
 
     def __str__(self) -> str:
-        return f"DbtModel[{self.type} | {self.schema}.{self.name} | {self.orgdbt.project_dir}]"
+        return f"DbtModel[{self.type} | {self.schema}.{self.name} | {self.orgdbt.project_dir} | under_construction: {self.under_construction}]"
 
 
 class OrgDbtOperation(models.Model):
