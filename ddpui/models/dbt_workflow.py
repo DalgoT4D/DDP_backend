@@ -25,8 +25,8 @@ class OrgDbtModel(models.Model):
 
     orgdbt = models.ForeignKey(OrgDbt, on_delete=models.CASCADE)
     uuid = models.UUIDField(editable=False, unique=True, null=True)
-    name = models.CharField(max_length=100)
-    display_name = models.CharField(max_length=100)
+    name = models.CharField(max_length=100, null=True)
+    display_name = models.CharField(max_length=100, null=True)
     schema = models.CharField(max_length=100, null=True)
     sql_path = models.CharField(max_length=200, null=True)
     type = models.CharField(
