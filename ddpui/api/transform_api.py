@@ -4,6 +4,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from django.forms.models import model_to_dict
+from django.db.models import Q
 from django.utils.text import slugify
 from ninja import NinjaAPI
 from ninja.errors import ValidationError, HttpError
@@ -271,3 +272,38 @@ def get_input_sources_and_models(request, schema_name: str = None):
         )
 
     return res
+
+
+@transformapi.get("/dbt_project/graph/", auth=auth.CanManagePipelines())
+def get_dbt_project_DAG(request, schema_name: str = None):
+    """
+    Returns the DAG of the dbt project; including the nodes and edges
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    # make sure the orgdbt here is the one we create locally
+    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    edges = DbtEdge.objects.filter(
+        Q(from_node__orgdbt=orgdbt) | Q(to_node__orgdbt=orgdbt)
+    ).all()
+
+    res = {"nodes": [], "edges": []}
+
+    for edge in edges:
+        res["edges"].append(
+            {
+                "source": edge.source.uuid,
+                "target": edge.target.uuid,
+                "config": edge.config,
+            }
+        )
+
+    return []
