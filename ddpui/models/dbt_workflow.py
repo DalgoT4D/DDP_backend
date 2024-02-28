@@ -32,8 +32,8 @@ class OrgDbtModel(models.Model):
     type = models.CharField(
         choices=OrgDbtModelType.choices(), max_length=50, default="model"
     )
-    config = models.JSONField(null=True)
     source_name = models.CharField(max_length=100, null=True)
+    output_cols = models.JSONField(default=list)
 
     def __str__(self) -> str:
         return f"DbtModel[{self.type} | {self.schema}.{self.name} | {self.orgdbt.project_dir}]"
