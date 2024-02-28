@@ -39,6 +39,21 @@ class OrgDbtModel(models.Model):
         return f"DbtModel[{self.type} | {self.schema}.{self.name} | {self.orgdbt.project_dir}]"
 
 
+class OrgDbtOperation(models.Model):
+    """Model to store dbt operations for a model. Basically steps to create/reach a OrgDbtModel"""
+
+    dbtmodel = models.ForeignKey(OrgDbtModel, on_delete=models.CASCADE)
+    uuid = models.UUIDField(editable=False, unique=True)
+    seq = models.IntegerField(default=0)
+    output_cols = models.JSONField(default=list)
+    config = models.JSONField(null=True)
+
+    def __str__(self) -> str:
+        return (
+            f"DbtOperation[{self.uuid} | {self.dbtmodel.schema}.{self.dbtmodel.name}]"
+        )
+
+
 class DbtEdge(models.Model):
     """Edge to help generate the DAG of a dbt project. Edge is between two OrgDbtModel(s)"""
 
