@@ -7,12 +7,20 @@ class CreateDbtModelPayload(Schema):
     schema to define the payload required to create a custom org task
     """
 
+    model_uuid: str
+    input_uuids: list[str]
+    config: dict
+    op_type: str
+
+
+class CompleteDbtModelPayload(Schema):
+    """
+    schema to define the payload required to create a custom org task
+    """
+
     name: str
     display_name: str
     dest_schema: str
-    input_uuids: list[uuid.UUID]
-    config: dict
-    op_type: str
 
 
 class SyncSourcesSchema(Schema):

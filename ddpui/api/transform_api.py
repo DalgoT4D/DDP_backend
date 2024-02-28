@@ -15,11 +15,15 @@ from ddpui import auth
 from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgDbt, OrgWarehouse
-from ddpui.models.dbt_workflow import OrgDbtModel, DbtEdge
+from ddpui.models.dbt_workflow import OrgDbtModel, DbtEdge, OrgDbtOperation
 from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.schemas.org_task_schema import DbtProjectSchema
-from ddpui.schemas.dbt_workflow_schema import CreateDbtModelPayload, SyncSourcesSchema
+from ddpui.schemas.dbt_workflow_schema import (
+    CreateDbtModelPayload,
+    SyncSourcesSchema,
+    CompleteDbtModelPayload,
+)
 
 from ddpui.core import dbtautomation_service
 
@@ -175,9 +179,9 @@ def sync_sources(request, payload: SyncSourcesSchema):
 
 
 @transformapi.post("/dbt_project/model/", auth=auth.CanManagePipelines())
-def post_dbt_model(request, payload: CreateDbtModelPayload):
+def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     """
-    Create a model on local disk and save configuration to django db
+    Construct a model, operation and the edge in django db
     """
     orguser: OrgUser = request.orguser
     org = orguser.org
@@ -192,7 +196,7 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
         raise HttpError(404, "dbt workspace not setup")
 
     if payload.op_type not in dbtautomation_service.OPERATIONS_DICT.keys():
-        raise HttpError(422, "Operation not found")
+        raise HttpError(422, "Operation not supported")
 
     if len(payload.input_uuids) == 0:
         raise HttpError(422, "no input provided")
@@ -201,13 +205,6 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
     if len(input_models) != len(payload.input_uuids):
         raise HttpError(404, "input not found")
 
-    output_name = slugify(payload.name)
-    # output_name should not be repeated
-    if OrgDbtModel.objects.filter(name=output_name).count() > 0:
-        raise HttpError(422, "model output name must be unique")
-
-    payload.config["output_name"] = output_name
-    payload.config["dest_schema"] = payload.dest_schema
     input_arr = [
         {
             "input_name": input.name,
@@ -217,41 +214,103 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
         for input in input_models
     ]
 
-    # input according to dbt_automation package
+    # input according to dbt_automation packag
     if len(input_arr) == 1:  # single input operation
         payload.config["input"] = input_arr[0]
     else:  # multi inputs operation
         payload.config["input"] = input_arr
 
+    orgdbt_model = None
+    if payload.model_uuid:
+        orgdbt_model = OrgDbtModel.objects.filter(uuid=payload.model_uuid).first()
+
+    if not orgdbt_model:
+        orgdbt_model = OrgDbtModel.objects.create(
+            uuid=uuid.uuid4(),
+            orgdbt=orgdbt,
+        )
+
+    # create operation
+    prev_op = (
+        OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).order_by("-seq").first()
+    )
+    if prev_op:
+        payload.config["source_colums"] = prev_op.output_cols
+    else:
+        payload.config["source_colums"] = dbtautomation_service.get_table_columns(
+            org_warehouse, input_models[0]  # consider single input operations for now
+        )
+
+    input_config = {
+        "config": payload.config,
+        "type": payload.op_type,
+        "input_uuids": [payload.input_uuids],
+    }
+
+    dbt_op = OrgDbtOperation.objects.create(
+        dbtmodel=orgdbt_model,
+        uuid=uuid.uuid4(),
+        seq=OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).count() + 1,
+        config=input_config,
+        output_cols=[],  # TODO: get output cols from dbt_automation
+    )
+
+    # save the output cols of the latest operation to the dbt model
+    orgdbt_model.output_cols = dbt_op.output_cols
+
+    # create edge if it doesn't exist
+    for source in input_models:
+        edge = DbtEdge.objects.filter(from_node=source, to_node=orgdbt_model).first()
+        if not edge:
+            DbtEdge.objects.create(
+                from_node=source,
+                to_node=orgdbt_model,
+            )
+
+    return {
+        "id": orgdbt_model.uuid,
+        "input_type": orgdbt_model.type,
+        "source_name": orgdbt_model.source_name,
+        "input_name": orgdbt_model.name,
+        "schema": orgdbt_model.schema,
+    }
+
+
+@transformapi.post(
+    "/dbt_project/model/{model_uuid}/save", auth=auth.CanManagePipelines()
+)
+def post_save_model(request, model_uuid: str, payload: CompleteDbtModelPayload):
+    """Complete the model; create the dbt model on disk"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    # make sure the orgdbt here is the one we create locally
+    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid).first()
+    if not orgdbt_model:
+        raise HttpError(404, "model not found")
+
     sql_path, error = dbtautomation_service.create_dbt_model_in_project(
-        orgdbt, org_warehouse, payload.op_type, payload.config
+        orgdbt, org_warehouse, payload
     )
     if error:
         raise HttpError(422, error)
 
-    payload.config["op_type"] = payload.op_type  # add op_type to config
-    orgdbt_model = OrgDbtModel.objects.create(
-        orgdbt=orgdbt,
-        name=output_name,
-        display_name=payload.display_name,
-        schema=payload.dest_schema,
-        sql_path=sql_path,
-        config=payload.config,
-        uuid=uuid.uuid4(),
-    )
-
-    # create the dbt edge(s)
-    for source in input_models:
-        DbtEdge.objects.create(
-            from_node=source,
-            to_node=orgdbt_model,
-        )
+    orgdbt_model.sql_path = sql_path
+    orgdbt_model.save()
 
     return {
         "id": orgdbt_model.uuid,
+        "input_type": orgdbt_model.type,
         "source_name": orgdbt_model.source_name,
         "input_name": orgdbt_model.name,
-        "input_type": orgdbt_model.type,
         "schema": orgdbt_model.schema,
     }
 
