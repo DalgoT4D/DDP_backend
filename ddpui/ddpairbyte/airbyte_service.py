@@ -3,6 +3,7 @@ Airbyte service module
 Functions which communicate with Airbyte
 These functions do not access the Dalgo database
 """
+
 import os
 from typing import Dict, List
 import requests
@@ -442,6 +443,23 @@ def get_destination_definitions(workspace_id: str) -> dict:
             "Destination definitions not found for workspace: %s", workspace_id
         )
         raise HttpError(404, "destination definitions not found")
+    return res
+
+
+def get_destination_definition(workspace_id: str, destinationdef_id: str) -> dict:
+    """get the destination definition"""
+    if not isinstance(workspace_id, str):
+        raise HttpError(400, "workspace_id must be a string")
+    if not isinstance(destinationdef_id, str):
+        raise HttpError(400, "destinationdef_id must be a string")
+
+    res = abreq(
+        "destination_definitions/get",
+        {"destinationDefinitionId": destinationdef_id},
+    )
+    if "destinationDefinitionId" not in res:
+        logger.error("Destination definition not found for workspace: %s", workspace_id)
+        raise HttpError(404, "destination definition not found")
     return res
 
 
