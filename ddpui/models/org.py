@@ -28,9 +28,10 @@ class OrgDbt(models.Model):
 
     target_type = models.CharField(max_length=10)
     default_schema = models.CharField(max_length=50)
+    transform_type = models.CharField(max_length=10, null=True)
 
     def __str__(self) -> str:
-        return f"OrgDbt[{self.gitrepo_url}|{self.target_type}|{self.default_schema}]"
+        return f"OrgDbt[{self.gitrepo_url}|{self.target_type}|{self.default_schema}|{self.transform_type}]"
 
 
 class Org(models.Model):
