@@ -410,10 +410,6 @@ def test_post_airbyte_connection_v1_task_not_supported(
     mock_request = Mock()
     mock_request.orguser = mock_orguser
 
-    call_command("loaddata", "seed/tasks.json")
-    for task in Task.objects.all():
-        OrgTask.objects.create(org=org_with_workspace, task=task)
-
     payload = AirbyteConnectionCreate(
         name="conn-name",
         sourceId="source-id",
