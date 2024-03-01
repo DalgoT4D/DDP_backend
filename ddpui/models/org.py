@@ -147,13 +147,17 @@ class OrgWarehouse(models.Model):
     def is_destinations_v2(self):
         """returns True if the warehouse is using destinations v2"""
         if (
-            self.airbyte_docker_repository.find("postgres") > -1
-            and self.airbyte_docker_image_tag > "2"
+            self.airbyte_docker_repository
+            and self.airbyte_docker_repository.find("postgres") > -1
+            and self.airbyte_docker_image_tag
+            and self.airbyte_docker_image_tag >= "0.6.0"
         ):
             return True
         if (
-            self.airbyte_docker_repository.find("bigquery") > -1
-            and self.airbyte_docker_image_tag > "2"
+            self.airbyte_docker_repository
+            and self.airbyte_docker_repository.find("bigquery") > -1
+            and self.airbyte_docker_image_tag
+            and self.airbyte_docker_image_tag >= "1.9.1"
         ):
             return True
         return False
