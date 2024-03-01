@@ -8,10 +8,10 @@ class CreateDbtModelPayload(Schema):
     """
 
     model_uuid: str
-    input_uuids: list[str]
     select_columns: list[str]
     config: dict
     op_type: str
+    input_uuids: list[str] = []
 
 
 class CompleteDbtModelPayload(Schema):

@@ -182,6 +182,8 @@ def sync_sources(request, payload: SyncSourcesSchema):
 def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     """
     Construct a model, operation and the edge in django db
+    same api will be used for creating the under_construction model and chaining operations
+    input_uuid(s) is required for the first model in the chain
     """
     OP_CONFIG = payload.config
 
@@ -200,45 +202,68 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     if payload.op_type not in dbtautomation_service.OPERATIONS_DICT.keys():
         raise HttpError(422, "Operation not supported")
 
-    if len(payload.input_uuids) == 0:
-        raise HttpError(422, "no input provided")
-
-    input_models = OrgDbtModel.objects.filter(uuid__in=payload.input_uuids).all()
-    if len(input_models) != len(payload.input_uuids):
-        raise HttpError(404, "input not found")
-
-    input_arr = [
-        {
-            "input_name": input.name,
-            "input_type": input.type,
-            "source_name": input.source_name,
-        }
-        for input in input_models
-    ]
-
-    # input according to dbt_automation packag
-    if len(input_arr) == 1:  # single input operation
-        payload.config["input"] = input_arr[0]
-    else:  # multi inputs operation
-        payload.config["input"] = input_arr
-
-    logger.info("passed all validation; moving to create operation")
-    logger.info(f"no of inputs for the operation {len(input_arr)}")
-
-    orgdbt_model = None
+    target_model = None
     if payload.model_uuid:
-        orgdbt_model = OrgDbtModel.objects.filter(uuid=payload.model_uuid).first()
+        target_model = OrgDbtModel.objects.filter(uuid=payload.model_uuid).first()
 
     # only under construction models can be modified
-    if orgdbt_model and not orgdbt_model.under_construction:
+    if target_model and not target_model.under_construction:
         raise HttpError(422, "model is locked")
 
-    if not orgdbt_model:
-        orgdbt_model = OrgDbtModel.objects.create(
+    if not target_model:
+        target_model = OrgDbtModel.objects.create(
             uuid=uuid.uuid4(),
             orgdbt=orgdbt,
             under_construction=True,
         )
+
+    current_operations_chained = OrgDbtOperation.objects.filter(
+        dbtmodel=target_model
+    ).count()
+
+    # input things for the first operation to be chained
+    if current_operations_chained == 0:
+        logger.info("Chaining the first operation")
+        logger.info("Making sure atleast one input orgdbtmodel is present")
+
+        if not payload.input_uuids or len(payload.input_uuids) == 0:
+            raise HttpError(
+                422, "input_uuids required for the first model in the chain"
+            )
+
+        input_models = OrgDbtModel.objects.filter(uuid__in=payload.input_uuids).all()
+        if len(input_models) != len(payload.input_uuids):
+            raise HttpError(404, "input not found")
+
+        input_arr = [
+            {
+                "input_name": input.name,
+                "input_type": input.type,
+                "source_name": input.source_name,
+            }
+            for input in input_models
+        ]
+
+        # input according to dbt_automation packag
+        if len(input_arr) == 1:  # single input operation
+            OP_CONFIG["input"] = input_arr[0]
+        else:  # multi inputs operation
+            OP_CONFIG["input"] = input_arr
+
+        logger.info(f"no of inputs for the operation {len(input_arr)}")
+
+        # create edge if it doesn't exist
+        for source in input_models:
+            edge = DbtEdge.objects.filter(
+                from_node=source, to_node=target_model
+            ).first()
+            if not edge:
+                DbtEdge.objects.create(
+                    from_node=source,
+                    to_node=target_model,
+                )
+
+    logger.info("passed all validation; moving to create operation")
 
     # source columns or selected columns
     OP_CONFIG["source_columns"] = payload.select_columns
@@ -254,9 +279,9 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     logger.info("creating operation")
 
     dbt_op = OrgDbtOperation.objects.create(
-        dbtmodel=orgdbt_model,
+        dbtmodel=target_model,
         uuid=uuid.uuid4(),
-        seq=OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).count() + 1,
+        seq=current_operations_chained + 1,
         config=input_config,
         output_cols=output_cols,
     )
@@ -264,26 +289,17 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     logger.info("created operation")
 
     # save the output cols of the latest operation to the dbt model
-    orgdbt_model.output_cols = dbt_op.output_cols
-    orgdbt_model.save()
+    target_model.output_cols = dbt_op.output_cols
+    target_model.save()
 
     logger.info("updated output cols for the model")
 
-    # create edge if it doesn't exist
-    for source in input_models:
-        edge = DbtEdge.objects.filter(from_node=source, to_node=orgdbt_model).first()
-        if not edge:
-            DbtEdge.objects.create(
-                from_node=source,
-                to_node=orgdbt_model,
-            )
-
     return {
-        "id": orgdbt_model.uuid,
-        "input_type": orgdbt_model.type,
-        "source_name": orgdbt_model.source_name,
-        "input_name": orgdbt_model.name,
-        "schema": orgdbt_model.schema,
+        "id": target_model.uuid,
+        "input_type": target_model.type,
+        "source_name": target_model.source_name,
+        "input_name": target_model.name,
+        "schema": target_model.schema,
     }
 
 
