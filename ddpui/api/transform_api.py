@@ -183,6 +183,8 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     """
     Construct a model, operation and the edge in django db
     """
+    OP_CONFIG = payload.config
+
     orguser: OrgUser = request.orguser
     org = orguser.org
 
@@ -220,43 +222,52 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     else:  # multi inputs operation
         payload.config["input"] = input_arr
 
+    logger.info("passed all validation; moving to create operation")
+    logger.info(f"no of inputs for the operation {len(input_arr)}")
+
     orgdbt_model = None
     if payload.model_uuid:
         orgdbt_model = OrgDbtModel.objects.filter(uuid=payload.model_uuid).first()
+
+    # only under construction models can be modified
+    if orgdbt_model and not orgdbt_model.under_construction:
+        raise HttpError(422, "model is locked")
 
     if not orgdbt_model:
         orgdbt_model = OrgDbtModel.objects.create(
             uuid=uuid.uuid4(),
             orgdbt=orgdbt,
+            under_construction=True,
         )
 
-    # create operation
-    prev_op = (
-        OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).order_by("-seq").first()
-    )
-    if prev_op:
-        payload.config["source_colums"] = prev_op.output_cols
-    else:
-        payload.config["source_colums"] = dbtautomation_service.get_table_columns(
-            org_warehouse, input_models[0]  # consider single input operations for now
-        )
-
+    # source columns or selected columns
+    OP_CONFIG["source_columns"] = payload.select_columns
     input_config = {
-        "config": payload.config,
+        "config": OP_CONFIG,
         "type": payload.op_type,
         "input_uuids": [payload.input_uuids],
     }
+    output_cols = dbtautomation_service.get_output_cols_for_operation(
+        org_warehouse, payload.op_type, OP_CONFIG
+    )
+
+    logger.info("creating operation")
 
     dbt_op = OrgDbtOperation.objects.create(
         dbtmodel=orgdbt_model,
         uuid=uuid.uuid4(),
         seq=OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).count() + 1,
         config=input_config,
-        output_cols=[],  # TODO: get output cols from dbt_automation
+        output_cols=output_cols,
     )
+
+    logger.info("created operation")
 
     # save the output cols of the latest operation to the dbt model
     orgdbt_model.output_cols = dbt_op.output_cols
+    orgdbt_model.save()
+
+    logger.info("updated output cols for the model")
 
     # create edge if it doesn't exist
     for source in input_models:
