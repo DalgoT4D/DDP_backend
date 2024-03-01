@@ -380,44 +380,93 @@ def get_dbt_project_DAG(request):
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
-    edges = DbtEdge.objects.filter(
+    model_nodes: list[OrgDbtModel] = []
+    operation_nodes: list[OrgDbtOperation] = []
+    res_edges = []  # will go directly in the res
+
+    for edge in DbtEdge.objects.filter(
         Q(from_node__orgdbt=orgdbt) | Q(to_node__orgdbt=orgdbt)
-    ).all()
+    ).all():
 
-    res = {"nodes": [], "edges": []}
+        model_nodes.append(edge.from_node)
+        model_nodes.append(edge.to_node)
 
-    for edge in edges:
-        # append related nodes
-        res["nodes"].extend(
-            [
+    # push operation nodes and edges if any
+    for target_node in model_nodes:
+        # src_node -> op1 -> op2 -> op3 -> op4
+        # start building edges fromt the source
+        prev_op = None
+        for operation in (
+            OrgDbtOperation.objects.filter(dbtmodel=target_node).order_by("seq").all()
+        ):
+            operation_nodes.append(operation)
+
+            if operation.seq == 1:
+                input_uuids = operation.config["input_uuids"]
+                if input_uuids and len(input_uuids) > 0:
+                    # edge(s) between the node(s) and their first operation
+                    for op_src_node in OrgDbtModel.objects.filter(
+                        uuid__in=input_uuids
+                    ).all():
+                        res_edges.append(
+                            {
+                                "id": str(op_src_node.uuid) + "_" + str(operation.uuid),
+                                "source": op_src_node.uuid,
+                                "target": operation.uuid,
+                            }
+                        )
+            else:
+                # for chained operations for seq >= 2
+                res_edges.append(
+                    {
+                        "id": str(prev_op.uuid) + "_" + str(operation.uuid),
+                        "source": prev_op.uuid,
+                        "target": operation.uuid,
+                    }
+                )
+
+            prev_op = operation
+
+        # -> op4 -> target_model
+        if not target_node.under_construction and prev_op:
+            # edge between the last operation and the target model
+            res_edges.append(
                 {
-                    "id": edge.from_node.uuid,
-                    "source_name": edge.from_node.source_name,
-                    "input_name": edge.from_node.name,
-                    "input_type": edge.from_node.type,
-                    "schema": edge.from_node.schema,
-                },
-                {
-                    "id": edge.to_node.uuid,
-                    "source_name": edge.to_node.source_name,
-                    "input_name": edge.to_node.name,
-                    "input_type": edge.to_node.type,
-                    "schema": edge.to_node.schema,
-                },
-            ]
-        )
-        res["edges"].append(
+                    "id": str(prev_op.uuid) + "_" + str(target_node.uuid),
+                    "source": prev_op.uuid,
+                    "target": target_node.uuid,
+                }
+            )
+
+    res_nodes = []
+    for node in model_nodes:
+        res_nodes.append(
             {
-                "id": edge.id,
-                "source": edge.from_node.uuid,
-                "target": edge.to_node.uuid,
+                "id": node.uuid,
+                "source_name": node.source_name,
+                "input_name": node.name,
+                "input_type": node.type,
+                "schema": node.schema,
+                "type": "src_model_node",
+            }
+        )
+
+    for node in operation_nodes:
+        res_nodes.append(
+            {
+                "id": node.uuid,
+                "output_cols": node.output_cols,
+                "config": node.config,
+                "type": "operation_node",
             }
         )
 
     # set to remove duplicates
     seen = set()
+    res = {}
     res["nodes"] = [
-        nn for nn in res["nodes"] if not (nn["id"] in seen or seen.add(nn["id"]))
+        nn for nn in res_nodes if not (nn["id"] in seen or seen.add(nn["id"]))
     ]
+    res["edges"] = res_edges
 
     return res
