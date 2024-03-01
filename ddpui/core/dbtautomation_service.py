@@ -75,6 +75,11 @@ def _get_wclient(org_warehouse: OrgWarehouse):
 
 def _get_merge_operation_config(
     operations: list[dict],
+    input: dict = {
+        "input_type": "source",
+        "input_name": "dummy",
+        "source_name": "dummy",
+    },
     output_name: str = "",
     dest_schema: str = "",
 ):
@@ -82,11 +87,7 @@ def _get_merge_operation_config(
     return {
         "output_name": output_name,
         "dest_schema": dest_schema,
-        "input": {
-            "input_type": "source",
-            "input_name": "dummy",
-            "source_name": "dummy",
-        },  # TODO: need to update dbt_automation first
+        "input": input,
         "operations": operations,
     }
 
@@ -96,24 +97,50 @@ def create_dbt_model_in_project(
     orgdbt_model: OrgDbtModel,
     payload: CompleteDbtModelPayload,
 ):
-    """Create a dbt model in the project for an operation"""
+    """
+    Create a dbt model in the project for an operation
+    Read through all the operations mapped to the target_model
+    Fetch the source from the first operation
+    Create the merge op config
+    Call the merge operation to create sql model file on disk
+    """
 
     wclient = _get_wclient(org_warehouse)
 
-    merge_config = _get_merge_operation_config(payload.name, payload.dest_schema, [])
-
-    operations = (
+    operations = []
+    input_uuids = []
+    for operation in (
         OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).order_by("seq").all()
+    ):
+        if operation.seq == 1:
+            input_uuids = operation.config["input_uuids"]
+        operations.append(
+            {"type": operation.config["type"], "config": operation.config["config"]}
+        )
+
+    merge_input = []
+    for uuid in input_uuids:
+        source_model = OrgDbtModel.objects.filter(uuid=uuid).first()
+        if source_model:
+            merge_input.append(
+                {
+                    "input_type": source_model.type,
+                    "input_name": source_model.name,
+                    "source_name": source_model.source_name,
+                }
+            )
+
+    merge_config = _get_merge_operation_config(
+        operations,
+        input=merge_input[0] if len(merge_input) == 1 else merge_input,
+        output_name=payload.name,
+        dest_schema=payload.dest_schema,
+    )
+    model_sql_path, output_cols = merge_operations(
+        merge_config, wclient, Path(orgdbt_model.orgdbt.project_dir) / "dbtrepo"
     )
 
-    for operation in operations:
-        merge_config["config"]["operations"].append(operation.config)
-
-    model_sql_path = merge_operations(
-        merge_config, wclient, orgdbt_model.orgdbt.project_dir
-    )
-
-    return str(model_sql_path), None
+    return model_sql_path, output_cols
 
 
 def sync_sources_to_dbt(

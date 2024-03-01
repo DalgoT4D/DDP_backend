@@ -227,30 +227,11 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
         logger.info("Making sure atleast one input orgdbtmodel is present")
 
         if not payload.input_uuids or len(payload.input_uuids) == 0:
-            raise HttpError(
-                422, "input_uuids required for the first model in the chain"
-            )
+            raise HttpError(422, "input is required for the first model in the chain")
 
         input_models = OrgDbtModel.objects.filter(uuid__in=payload.input_uuids).all()
         if len(input_models) != len(payload.input_uuids):
             raise HttpError(404, "input not found")
-
-        input_arr = [
-            {
-                "input_name": input.name,
-                "input_type": input.type,
-                "source_name": input.source_name,
-            }
-            for input in input_models
-        ]
-
-        # input according to dbt_automation packag
-        if len(input_arr) == 1:  # single input operation
-            OP_CONFIG["input"] = input_arr[0]
-        else:  # multi inputs operation
-            OP_CONFIG["input"] = input_arr
-
-        logger.info(f"no of inputs for the operation {len(input_arr)}")
 
         # create edge if it doesn't exist
         for source in input_models:
@@ -270,10 +251,10 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     input_config = {
         "config": OP_CONFIG,
         "type": payload.op_type,
-        "input_uuids": [payload.input_uuids],
+        "input_uuids": payload.input_uuids if current_operations_chained == 0 else [],
     }
     output_cols = dbtautomation_service.get_output_cols_for_operation(
-        org_warehouse, payload.op_type, OP_CONFIG
+        org_warehouse, payload.op_type, OP_CONFIG.copy()
     )
 
     logger.info("creating operation")
@@ -324,13 +305,16 @@ def post_save_model(request, model_uuid: str, payload: CompleteDbtModelPayload):
     if not orgdbt_model:
         raise HttpError(404, "model not found")
 
-    sql_path, error = dbtautomation_service.create_dbt_model_in_project(
-        orgdbt, org_warehouse, payload
+    model_sql_path, output_cols = dbtautomation_service.create_dbt_model_in_project(
+        org_warehouse, orgdbt_model, payload
     )
-    if error:
-        raise HttpError(422, error)
 
-    orgdbt_model.sql_path = sql_path
+    orgdbt_model.output_cols = output_cols
+    orgdbt_model.sql_path = str(model_sql_path)
+    orgdbt_model.under_construction = False
+    orgdbt_model.name = slugify(payload.name)
+    orgdbt_model.display_name = payload.display_name
+    orgdbt_model.schema = payload.dest_schema
     orgdbt_model.save()
 
     return {
