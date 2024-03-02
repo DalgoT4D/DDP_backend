@@ -21,8 +21,6 @@ def checkenv():
     valid = True
     for envvar in [
         "DBHOST",
-        "DBADMINUSER",
-        "DBADMINPASSWORD",
         "DBNAME",
         "DBUSER",
         "DBPASSWORD",
@@ -42,15 +40,11 @@ if not checkenv():
 
 # ================================================================================
 dbhost = os.getenv("DBHOST")
-dbadminuser = os.getenv("DBADMINUSER")
-dbadminpassword = os.getenv("DBADMINPASSWORD")
 dbname = os.getenv("DBNAME")
 dbuser = os.getenv("DBUSER")
 dbpassword = os.getenv("DBPASSWORD")
 
-conn = psycopg2.connect(
-    host=dbhost, user=dbadminuser, password=dbadminpassword, database="postgres"
-)
+conn = psycopg2.connect(host=dbhost, user=dbuser, password=dbpassword, database=dbname)
 conn.autocommit = True
 cursor = conn.cursor()
 
