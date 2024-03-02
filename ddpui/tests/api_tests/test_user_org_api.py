@@ -522,6 +522,7 @@ def test_post_organization_warehouse_unknownwtype(orguser):
     create_destination=Mock(
         return_value={"destinationId": "destination-id", "connectionConfiguration": {}}
     ),
+    get_destination_definition=Mock(return_value={"dockerRepository": "docker-repo", "dockerImageTag": "0.0.0"}),
 )
 @patch.multiple(
     "ddpui.utils.secretsmanager",

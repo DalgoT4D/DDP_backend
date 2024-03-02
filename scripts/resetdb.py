@@ -6,13 +6,12 @@ import psycopg2
 from dotenv import load_dotenv
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--yes-really", action="store_true")
-parser.add_argument("--yes-partially", action="store_true")
+parser.add_argument("--yes", action="store_true")
 args = parser.parse_args()
 
 load_dotenv()
 
-if not args.yes_really and not args.yes_partially:
+if not args.yes:
     parser.print_usage()
     sys.exit(0)
 
@@ -55,30 +54,28 @@ conn = psycopg2.connect(
 conn.autocommit = True
 cursor = conn.cursor()
 
-if args.yes_really:  # Full reset
-    print("Full reset of database")
+if args.yes:  # Partial reset of some tables
+    print("Truncating tables...")
     for cmd in [
-        # f"CREATE USER {dbuser} WITH PASSWORD '{dbpassword}'",
-        # f"ALTER USER {dbuser} CREATEDB",
-        f"DROP DATABASE IF EXISTS {dbname}",
-        f"CREATE DATABASE {dbname}",
-        f"GRANT ALL PRIVILEGES on DATABASE {dbname} TO {dbuser}",
-    ]:
-        print(cmd)
-        cursor.execute(cmd)
-        sleep(1)
-
-if args.yes_partially:  # Partial reset of some tables
-    print("Partial reset of database")
-    for cmd in [
-        "delete from ddpui_orgdataflow",
-        "delete from ddpui_orguser",
-        "delete from ddpui_orgwarehouse",
-        "delete from ddpui_orgprefectblock",
-        "delete from ddpui_org",
-        "delete from ddpui_orgdbt",
-        "delete from authtoken_token",
-        "delete from auth_user",
+        "TRUNCATE TABLE ddpui_blocklock       CASCADE",
+        "TRUNCATE TABLE ddpui_dataflowblock   CASCADE",
+        "TRUNCATE TABLE ddpui_datafloworgtask CASCADE",
+        "TRUNCATE TABLE ddpui_dbtedge         CASCADE",
+        "TRUNCATE TABLE ddpui_invitation      CASCADE",
+        "TRUNCATE TABLE ddpui_org             CASCADE",
+        "TRUNCATE TABLE ddpui_orgdataflow     CASCADE",
+        "TRUNCATE TABLE ddpui_orgdataflowv1   CASCADE",
+        "TRUNCATE TABLE ddpui_orgdbt          CASCADE",
+        "TRUNCATE TABLE ddpui_orgdbtmodel     CASCADE",
+        "TRUNCATE TABLE ddpui_orgprefectblock CASCADE",
+        "TRUNCATE TABLE ddpui_orgtask         CASCADE",
+        "TRUNCATE TABLE ddpui_orgtnc          CASCADE",
+        "TRUNCATE TABLE ddpui_orguser         CASCADE",
+        "TRUNCATE TABLE ddpui_orgwarehouse    CASCADE",
+        "TRUNCATE TABLE ddpui_prefectflowrun  CASCADE",
+        "TRUNCATE TABLE ddpui_task            CASCADE",
+        "TRUNCATE TABLE ddpui_tasklock        CASCADE",
+        "TRUNCATE TABLE ddpui_userattributes  CASCADE",
     ]:
         print(cmd)
         cursor.execute(cmd)
