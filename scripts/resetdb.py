@@ -11,7 +11,7 @@ args = parser.parse_args()
 
 load_dotenv()
 
-if not args.yes_really and not args.yes_partially:
+if not args.yes:
     parser.print_usage()
     sys.exit(0)
 
