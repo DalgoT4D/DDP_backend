@@ -25,18 +25,34 @@ class OrgDbtModel(models.Model):
 
     orgdbt = models.ForeignKey(OrgDbt, on_delete=models.CASCADE)
     uuid = models.UUIDField(editable=False, unique=True, null=True)
-    name = models.CharField(max_length=100)
-    display_name = models.CharField(max_length=100)
+    name = models.CharField(max_length=100, null=True)
+    display_name = models.CharField(max_length=100, null=True)
     schema = models.CharField(max_length=100, null=True)
     sql_path = models.CharField(max_length=200, null=True)
     type = models.CharField(
         choices=OrgDbtModelType.choices(), max_length=50, default="model"
     )
-    config = models.JSONField(null=True)
     source_name = models.CharField(max_length=100, null=True)
+    output_cols = models.JSONField(default=list)
+    under_construction = models.BooleanField(default=False)
 
     def __str__(self) -> str:
-        return f"DbtModel[{self.type} | {self.schema}.{self.name} | {self.orgdbt.project_dir}]"
+        return f"DbtModel[{self.type} | {self.schema}.{self.name} | {self.orgdbt.project_dir} | under_construction: {self.under_construction}]"
+
+
+class OrgDbtOperation(models.Model):
+    """Model to store dbt operations for a model. Basically steps to create/reach a OrgDbtModel"""
+
+    dbtmodel = models.ForeignKey(OrgDbtModel, on_delete=models.CASCADE)
+    uuid = models.UUIDField(editable=False, unique=True)
+    seq = models.IntegerField(default=0)
+    output_cols = models.JSONField(default=list)
+    config = models.JSONField(null=True)
+
+    def __str__(self) -> str:
+        return (
+            f"DbtOperation[{self.uuid} | {self.dbtmodel.schema}.{self.dbtmodel.name}]"
+        )
 
 
 class DbtEdge(models.Model):

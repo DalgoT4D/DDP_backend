@@ -1,23 +1,44 @@
 import os
 from pathlib import Path
 
-from dbt_automation.operations.arithmetic import arithmetic
-from dbt_automation.operations.castdatatypes import cast_datatypes
-from dbt_automation.operations.coalescecolumns import coalesce_columns
-from dbt_automation.operations.concatcolumns import concat_columns
-from dbt_automation.operations.droprenamecolumns import drop_columns, rename_columns
+from dbt_automation.operations.arithmetic import arithmetic, arithmetic_dbt_sql
+from dbt_automation.operations.castdatatypes import cast_datatypes, cast_datatypes_sql
+from dbt_automation.operations.coalescecolumns import (
+    coalesce_columns,
+    coalesce_columns_dbt_sql,
+)
+from dbt_automation.operations.concatcolumns import (
+    concat_columns,
+    concat_columns_dbt_sql,
+)
+from dbt_automation.operations.droprenamecolumns import (
+    drop_columns,
+    rename_columns,
+    rename_columns_dbt_sql,
+    drop_columns_dbt_sql,
+)
 from dbt_automation.operations.flattenairbyte import flatten_operation
 
 # operations
-from dbt_automation.operations.flattenjson import flattenjson
-from dbt_automation.operations.mergetables import union_tables
-from dbt_automation.operations.regexextraction import regex_extraction
+from dbt_automation.operations.flattenjson import flattenjson, flattenjson_dbt_sql
+
+# from dbt_automation.operations.mergetables import union_tables, union_tables_sql
+from dbt_automation.operations.regexextraction import (
+    regex_extraction,
+    regex_extraction_sql,
+)
+from dbt_automation.operations.mergeoperations import (
+    merge_operations,
+    merge_operations_sql,
+)
 from dbt_automation.operations.syncsources import sync_sources
 from dbt_automation.utils.warehouseclient import get_client
 from dbt_automation.utils.dbtproject import dbtProject
 from dbt_automation.utils.dbtsources import read_sources
 
-from ddpui.models.org import OrgDbt, OrgWarehouse
+from ddpui.schemas.dbt_workflow_schema import CompleteDbtModelPayload
+from ddpui.models.org import Org, OrgDbt, OrgWarehouse
+from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation
 from ddpui.utils import secretsmanager
 
 OPERATIONS_DICT = {
@@ -33,6 +54,18 @@ OPERATIONS_DICT = {
     "regexextraction": regex_extraction,
 }
 
+OPERATIONS_DICT_SQL = {
+    "flattenjson": flattenjson_dbt_sql,
+    # "unionall": union_tables_sql,
+    "castdatatypes": cast_datatypes_sql,
+    "coalescecolumns": coalesce_columns_dbt_sql,
+    "arithmetic": arithmetic_dbt_sql,
+    "concat": concat_columns_dbt_sql,
+    "dropcolumns": drop_columns_dbt_sql,
+    "renamecolumns": rename_columns_dbt_sql,
+    "regexextraction": regex_extraction_sql,
+}
+
 
 def _get_wclient(org_warehouse: OrgWarehouse):
     """Connect to a warehouse and return the client"""
@@ -41,31 +74,78 @@ def _get_wclient(org_warehouse: OrgWarehouse):
     return get_client(org_warehouse.wtype, credentials, org_warehouse.bq_location)
 
 
-def create_dbt_model_in_project(
-    orgdbt: OrgDbt, org_warehouse: OrgWarehouse, op_type: str, config: dict
+def _get_merge_operation_config(
+    operations: list[dict],
+    input: dict = {
+        "input_type": "source",
+        "input_name": "dummy",
+        "source_name": "dummy",
+    },
+    output_name: str = "",
+    dest_schema: str = "",
 ):
-    """Create a dbt model in the project for an operation"""
+    """Get the config for a merge operation"""
+    return {
+        "output_name": output_name,
+        "dest_schema": dest_schema,
+        "input": input,
+        "operations": operations,
+    }
+
+
+def create_dbt_model_in_project(
+    org_warehouse: OrgWarehouse,
+    orgdbt_model: OrgDbtModel,
+    payload: CompleteDbtModelPayload,
+):
+    """
+    Create a dbt model in the project for an operation
+    Read through all the operations mapped to the target_model
+    Fetch the source from the first operation
+    Create the merge op config
+    Call the merge operation to create sql model file on disk
+    """
 
     wclient = _get_wclient(org_warehouse)
-    if op_type not in OPERATIONS_DICT:
-        return None, "Operation not found"
 
-    # fetch input columns of the model
-    config["source_columns"] = wclient.get_table_columns(
-        config["dest_schema"], config["input"]["input_name"]
+    operations = []
+    input_uuids = []
+    for operation in (
+        OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).order_by("seq").all()
+    ):
+        if operation.seq == 1:
+            input_uuids = operation.config["input_uuids"]
+        operations.append(
+            {"type": operation.config["type"], "config": operation.config["config"]}
+        )
+
+    merge_input = []
+    for uuid in input_uuids:
+        source_model = OrgDbtModel.objects.filter(uuid=uuid).first()
+        if source_model:
+            merge_input.append(
+                {
+                    "input_type": source_model.type,
+                    "input_name": source_model.name,
+                    "source_name": source_model.source_name,
+                }
+            )
+
+    merge_config = _get_merge_operation_config(
+        operations,
+        input=merge_input[0] if len(merge_input) == 1 else merge_input,
+        output_name=payload.name,
+        dest_schema=payload.dest_schema,
+    )
+    model_sql_path, output_cols = merge_operations(
+        merge_config, wclient, Path(orgdbt_model.orgdbt.project_dir) / "dbtrepo"
     )
 
-    sql_file_path = OPERATIONS_DICT[op_type](
-        config=config,
-        warehouse=wclient,
-        project_dir=Path(orgdbt.project_dir) / "dbtrepo",
-    )
-
-    return str(sql_file_path), None
+    return model_sql_path, output_cols
 
 
 def sync_sources_to_dbt(
-    schema_name: str, source_name: str, org: str, org_warehouse: str
+    schema_name: str, source_name: str, org: Org, org_warehouse: OrgWarehouse
 ):
     """
     Sync sources from a given schema to dbt.
@@ -85,3 +165,25 @@ def read_dbt_sources_in_project(orgdbt: OrgDbt):
     """Read the sources from .yml files in the dbt project"""
 
     return read_sources(Path(orgdbt.project_dir) / "dbtrepo")
+
+
+def get_table_columns(org_warehouse: OrgWarehouse, dbtmodel: OrgDbtModel):
+    """Get the columns of a table in a warehouse"""
+    wclient = _get_wclient(org_warehouse)
+    return wclient.get_table_columns(dbtmodel.schema, dbtmodel.name)
+
+
+def get_output_cols_for_operation(
+    org_warehouse: OrgWarehouse, op_type: str, config: dict
+):
+    """
+    Get the output columns from a merge operation;
+    this only generates the sql and fetches the output col.
+    Model is neither being run nor saved to the disk
+    """
+    wclient = _get_wclient(org_warehouse)
+    operations = [{"type": op_type, "config": config}]
+    _, output_cols = merge_operations_sql(
+        _get_merge_operation_config(operations), wclient
+    )
+    return output_cols
