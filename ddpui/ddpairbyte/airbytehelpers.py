@@ -176,7 +176,7 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
         return None, "warehouse has no airbyte_destination_id"
     payload.destinationId = warehouse.airbyte_destination_id
 
-    if warehouse.airbyte_norm_op_id is None:
+    if warehouse.airbyte_norm_op_id is None and not warehouse.is_destinations_v2():
         warehouse.airbyte_norm_op_id = airbyte_service.create_normalization_operation(
             org.airbyte_workspace_id
         )["operationId"]
@@ -433,7 +433,10 @@ def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUp
     # update normalization of data
     if payload.normalize:
         if "operationIds" not in connection or len(connection["operationIds"]) == 0:
-            if warehouse.airbyte_norm_op_id is None:
+            if (
+                warehouse.airbyte_norm_op_id is None
+                and not warehouse.is_destinations_v2()
+            ):
                 warehouse.airbyte_norm_op_id = (
                     airbyte_service.create_normalization_operation(
                         org.airbyte_workspace_id

@@ -129,6 +129,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
         dbt_venv=os.getenv("DBT_VENV"),
         target_type=warehouse.wtype,
         default_schema=payload["profile"]["target_configs_schema"],
+        transform_type="github"
     )
     dbt.save()
     logger.info("created orgdbt for org %s", org.name)

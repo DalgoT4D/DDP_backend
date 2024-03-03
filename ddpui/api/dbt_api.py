@@ -204,3 +204,17 @@ def put_dbt_schema_v1(request, payload: OrgDbtTarget):
         )
 
     return {"success": 1}
+
+
+@dbtapi.get("/dbt_transform/", auth=auth.CanManagePipelines())
+def get_transform_type(request):
+    """find the transform type"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    if org.dbt is None:
+        transform_type = None
+    else:
+        transform_type = org.dbt.transform_type
+
+    return {'transform_type': transform_type}
