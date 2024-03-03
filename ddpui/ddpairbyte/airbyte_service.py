@@ -711,14 +711,12 @@ def is_operation_normalization(operation_id: str):
 
 def create_connection(
     workspace_id: str,
-    airbyte_norm_op_id: str,
+    airbyte_norm_op_id: str | None,
     connection_info: schema.AirbyteConnectionCreate,
 ) -> dict:
     """Create a connection in an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
-    if not isinstance(airbyte_norm_op_id, str):
-        raise HttpError(400, "airbyte_norm_op_id must be a string")
 
     if len(connection_info.streams) == 0:
         error_message = f"must specify at least one stream workspace_id={workspace_id}"

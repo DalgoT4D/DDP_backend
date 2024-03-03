@@ -1,9 +1,10 @@
-import os, uuid
+import os
+import uuid
 import shutil
 from pathlib import Path
 
 from dotenv import load_dotenv
-from django.forms.models import model_to_dict
+from django.db.models import Q
 from django.utils.text import slugify
 from ninja import NinjaAPI
 from ninja.errors import ValidationError, HttpError
@@ -14,11 +15,15 @@ from ddpui import auth
 from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgDbt, OrgWarehouse
-from ddpui.models.dbt_workflow import OrgDbtModel, DbtEdge
+from ddpui.models.dbt_workflow import OrgDbtModel, DbtEdge, OrgDbtOperation
 from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.schemas.org_task_schema import DbtProjectSchema
-from ddpui.schemas.dbt_workflow_schema import CreateDbtModelPayload, SyncSourcesSchema
+from ddpui.schemas.dbt_workflow_schema import (
+    CreateDbtModelPayload,
+    SyncSourcesSchema,
+    CompleteDbtModelPayload,
+)
 
 from ddpui.core import dbtautomation_service
 
@@ -174,10 +179,14 @@ def sync_sources(request, payload: SyncSourcesSchema):
 
 
 @transformapi.post("/dbt_project/model/", auth=auth.CanManagePipelines())
-def post_dbt_model(request, payload: CreateDbtModelPayload):
+def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     """
-    Create a model on local disk and save configuration to django db
+    Construct a model, operation and the edge in django db
+    same api will be used for creating the under_construction model and chaining operations
+    input_uuid(s) is required for the first model in the chain
     """
+    OP_CONFIG = payload.config
+
     orguser: OrgUser = request.orguser
     org = orguser.org
 
@@ -191,66 +200,128 @@ def post_dbt_model(request, payload: CreateDbtModelPayload):
         raise HttpError(404, "dbt workspace not setup")
 
     if payload.op_type not in dbtautomation_service.OPERATIONS_DICT.keys():
-        raise HttpError(422, "Operation not found")
+        raise HttpError(422, "Operation not supported")
 
-    if len(payload.input_uuids) == 0:
-        raise HttpError(422, "no input provided")
+    target_model = None
+    if payload.model_uuid:
+        target_model = OrgDbtModel.objects.filter(uuid=payload.model_uuid).first()
 
-    input_models = OrgDbtModel.objects.filter(uuid__in=payload.input_uuids).all()
-    if len(input_models) != len(payload.input_uuids):
-        raise HttpError(404, "input not found")
+    # only under construction models can be modified
+    if target_model and not target_model.under_construction:
+        raise HttpError(422, "model is locked")
 
-    output_name = slugify(payload.name)
-    # output_name should not be repeated
-    if OrgDbtModel.objects.filter(name=output_name).count() > 0:
-        raise HttpError(422, "model output name must be unique")
-
-    payload.config["output_name"] = output_name
-    payload.config["dest_schema"] = payload.dest_schema
-    input_arr = [
-        {
-            "input_name": input.name,
-            "input_type": input.type,
-            "source_name": input.source_name,
-        }
-        for input in input_models
-    ]
-
-    # input according to dbt_automation package
-    if len(input_arr) == 1:  # single input operation
-        payload.config["input"] = input_arr[0]
-    else:  # multi inputs operation
-        payload.config["input"] = input_arr
-
-    sql_path, error = dbtautomation_service.create_dbt_model_in_project(
-        orgdbt, org_warehouse, payload.op_type, payload.config
-    )
-    if error:
-        raise HttpError(422, error)
-
-    payload.config["op_type"] = payload.op_type  # add op_type to config
-    orgdbt_model = OrgDbtModel.objects.create(
-        orgdbt=orgdbt,
-        name=output_name,
-        display_name=payload.display_name,
-        schema=payload.dest_schema,
-        sql_path=sql_path,
-        config=payload.config,
-        uuid=uuid.uuid4(),
-    )
-
-    # create the dbt edge(s)
-    for source in input_models:
-        DbtEdge.objects.create(
-            from_node=source,
-            to_node=orgdbt_model,
+    if not target_model:
+        target_model = OrgDbtModel.objects.create(
+            uuid=uuid.uuid4(),
+            orgdbt=orgdbt,
+            under_construction=True,
         )
+
+    current_operations_chained = OrgDbtOperation.objects.filter(
+        dbtmodel=target_model
+    ).count()
+
+    # input things for the first operation to be chained
+    if current_operations_chained == 0:
+        logger.info("Chaining the first operation")
+        logger.info("Making sure atleast one input orgdbtmodel is present")
+
+        if not payload.input_uuids or len(payload.input_uuids) == 0:
+            raise HttpError(422, "input is required for the first model in the chain")
+
+        input_models = OrgDbtModel.objects.filter(uuid__in=payload.input_uuids).all()
+        if len(input_models) != len(payload.input_uuids):
+            raise HttpError(404, "input not found")
+
+        # create edge if it doesn't exist
+        for source in input_models:
+            edge = DbtEdge.objects.filter(
+                from_node=source, to_node=target_model
+            ).first()
+            if not edge:
+                DbtEdge.objects.create(
+                    from_node=source,
+                    to_node=target_model,
+                )
+
+    logger.info("passed all validation; moving to create operation")
+
+    # source columns or selected columns
+    OP_CONFIG["source_columns"] = payload.select_columns
+    input_config = {
+        "config": OP_CONFIG,
+        "type": payload.op_type,
+        "input_uuids": payload.input_uuids if current_operations_chained == 0 else [],
+    }
+    output_cols = dbtautomation_service.get_output_cols_for_operation(
+        org_warehouse, payload.op_type, OP_CONFIG.copy()
+    )
+
+    logger.info("creating operation")
+
+    dbt_op = OrgDbtOperation.objects.create(
+        dbtmodel=target_model,
+        uuid=uuid.uuid4(),
+        seq=current_operations_chained + 1,
+        config=input_config,
+        output_cols=output_cols,
+    )
+
+    logger.info("created operation")
+
+    # save the output cols of the latest operation to the dbt model
+    target_model.output_cols = dbt_op.output_cols
+    target_model.save()
+
+    logger.info("updated output cols for the model")
+
+    return {
+        "id": target_model.uuid,
+        "input_type": target_model.type,
+        "source_name": target_model.source_name,
+        "input_name": target_model.name,
+        "schema": target_model.schema,
+    }
+
+
+@transformapi.post(
+    "/dbt_project/model/{model_uuid}/save/", auth=auth.CanManagePipelines()
+)
+def post_save_model(request, model_uuid: str, payload: CompleteDbtModelPayload):
+    """Complete the model; create the dbt model on disk"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    # make sure the orgdbt here is the one we create locally
+    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid).first()
+    if not orgdbt_model:
+        raise HttpError(404, "model not found")
+
+    model_sql_path, output_cols = dbtautomation_service.create_dbt_model_in_project(
+        org_warehouse, orgdbt_model, payload
+    )
+
+    orgdbt_model.output_cols = output_cols
+    orgdbt_model.sql_path = str(model_sql_path)
+    orgdbt_model.under_construction = False
+    orgdbt_model.name = slugify(payload.name)
+    orgdbt_model.display_name = payload.display_name
+    orgdbt_model.schema = payload.dest_schema
+    orgdbt_model.save()
 
     return {
         "id": orgdbt_model.uuid,
+        "input_type": orgdbt_model.type,
         "source_name": orgdbt_model.source_name,
         "input_name": orgdbt_model.name,
-        "input_type": orgdbt_model.type,
         "schema": orgdbt_model.schema,
     }
 
@@ -288,5 +359,114 @@ def get_input_sources_and_models(request, schema_name: str = None):
                 "schema": orgdbt_model.schema,
             }
         )
+
+    return res
+
+
+@transformapi.get("/dbt_project/graph/", auth=auth.CanManagePipelines())
+def get_dbt_project_DAG(request):
+    """
+    Returns the DAG of the dbt project; including the nodes and edges
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    # make sure the orgdbt here is the one we create locally
+    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    model_nodes: list[OrgDbtModel] = []
+    operation_nodes: list[OrgDbtOperation] = []
+    res_edges = []  # will go directly in the res
+
+    for edge in DbtEdge.objects.filter(
+        Q(from_node__orgdbt=orgdbt) | Q(to_node__orgdbt=orgdbt)
+    ).all():
+
+        model_nodes.append(edge.from_node)
+        model_nodes.append(edge.to_node)
+
+    # push operation nodes and edges if any
+    for target_node in model_nodes:
+        # src_node -> op1 -> op2 -> op3 -> op4
+        # start building edges fromt the source
+        prev_op = None
+        for operation in (
+            OrgDbtOperation.objects.filter(dbtmodel=target_node).order_by("seq").all()
+        ):
+            operation_nodes.append(operation)
+
+            if operation.seq == 1:
+                input_uuids = operation.config["input_uuids"]
+                if input_uuids and len(input_uuids) > 0:
+                    # edge(s) between the node(s) and their first operation
+                    for op_src_node in OrgDbtModel.objects.filter(
+                        uuid__in=input_uuids
+                    ).all():
+                        res_edges.append(
+                            {
+                                "id": str(op_src_node.uuid) + "_" + str(operation.uuid),
+                                "source": op_src_node.uuid,
+                                "target": operation.uuid,
+                            }
+                        )
+            else:
+                # for chained operations for seq >= 2
+                res_edges.append(
+                    {
+                        "id": str(prev_op.uuid) + "_" + str(operation.uuid),
+                        "source": prev_op.uuid,
+                        "target": operation.uuid,
+                    }
+                )
+
+            prev_op = operation
+
+        # -> op4 -> target_model
+        if not target_node.under_construction and prev_op:
+            # edge between the last operation and the target model
+            res_edges.append(
+                {
+                    "id": str(prev_op.uuid) + "_" + str(target_node.uuid),
+                    "source": prev_op.uuid,
+                    "target": target_node.uuid,
+                }
+            )
+
+    res_nodes = []
+    for node in model_nodes:
+        res_nodes.append(
+            {
+                "id": node.uuid,
+                "source_name": node.source_name,
+                "input_name": node.name,
+                "input_type": node.type,
+                "schema": node.schema,
+                "type": "src_model_node",
+            }
+        )
+
+    for node in operation_nodes:
+        res_nodes.append(
+            {
+                "id": node.uuid,
+                "output_cols": node.output_cols,
+                "config": node.config,
+                "type": "operation_node",
+            }
+        )
+
+    # set to remove duplicates
+    seen = set()
+    res = {}
+    res["nodes"] = [
+        nn for nn in res_nodes if not (nn["id"] in seen or seen.add(nn["id"]))
+    ]
+    res["edges"] = res_edges
 
     return res

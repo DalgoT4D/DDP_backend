@@ -182,6 +182,7 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
         dbt_venv=os.getenv("DBT_VENV"),
         target_type=warehouse.wtype,
         default_schema=default_schema,
+        transform_type="ui"
     )
     dbt.save()
     logger.info("created orgdbt for org %s", org.name)
