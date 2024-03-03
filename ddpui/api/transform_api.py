@@ -1,9 +1,9 @@
-import os, uuid
+import os
+import uuid
 import shutil
 from pathlib import Path
 
 from dotenv import load_dotenv
-from django.forms.models import model_to_dict
 from django.db.models import Q
 from django.utils.text import slugify
 from ninja import NinjaAPI
@@ -285,7 +285,7 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
 
 
 @transformapi.post(
-    "/dbt_project/model/{model_uuid}/save", auth=auth.CanManagePipelines()
+    "/dbt_project/model/{model_uuid}/save/", auth=auth.CanManagePipelines()
 )
 def post_save_model(request, model_uuid: str, payload: CompleteDbtModelPayload):
     """Complete the model; create the dbt model on disk"""
