@@ -21,7 +21,8 @@ from dbt_automation.operations.flattenairbyte import flatten_operation
 
 # operations
 from dbt_automation.operations.flattenjson import flattenjson, flattenjson_dbt_sql
-from dbt_automation.operations.mergetables import union_tables, union_tables_sql
+
+# from dbt_automation.operations.mergetables import union_tables, union_tables_sql
 from dbt_automation.operations.regexextraction import (
     regex_extraction,
     regex_extraction_sql,
@@ -36,7 +37,7 @@ from dbt_automation.utils.dbtproject import dbtProject
 from dbt_automation.utils.dbtsources import read_sources
 
 from ddpui.schemas.dbt_workflow_schema import CompleteDbtModelPayload
-from ddpui.models.org import OrgDbt, OrgWarehouse
+from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation
 from ddpui.utils import secretsmanager
 
@@ -144,7 +145,7 @@ def create_dbt_model_in_project(
 
 
 def sync_sources_to_dbt(
-    schema_name: str, source_name: str, org: str, org_warehouse: str
+    schema_name: str, source_name: str, org: Org, org_warehouse: OrgWarehouse
 ):
     """
     Sync sources from a given schema to dbt.
