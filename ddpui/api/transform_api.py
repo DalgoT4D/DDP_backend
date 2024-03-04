@@ -472,3 +472,75 @@ def get_dbt_project_DAG(request):
     res["edges"] = res_edges
 
     return res
+
+
+@transformapi.delete("/dbt_project/model/{model_uuid}/", auth=auth.CanManagePipelines())
+def delete_model(request, model_uuid):
+    """
+    Delete a model if it does not have any operations chained
+    Convert the model to "under_construction if its has atleast 1 operation chained"
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    # make sure the orgdbt here is the one we create locally
+    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid).first()
+    if not orgdbt_model:
+        raise HttpError(404, "model not found")
+
+    operations = OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).count()
+
+    if operations > 0:
+        orgdbt_model.under_construction = True
+        orgdbt_model.save()
+    else:
+        orgdbt_model.delete()
+
+    # delete the model file is present
+    dbtautomation_service.delete_dbt_model_in_project(orgdbt_model)
+
+    return {"success": 1}
+
+
+@transformapi.delete(
+    "/dbt_project/model/operations/{operation_uuid}/", auth=auth.CanManagePipelines()
+)
+def delete_operation(request, operation_uuid):
+    """
+    Delete an operation;
+    Delete the model if its the last operation left in the chain
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    # make sure the orgdbt here is the one we create locally
+    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    dbt_operation = OrgDbtOperation.objects.filter(uuid=operation_uuid).first()
+    if not dbt_operation:
+        raise HttpError(404, "operation not found")
+
+    if OrgDbtOperation.objects.filter(dbtmodel=dbt_operation.dbtmodel).count() == 1:
+        # delete the model file
+        dbt_operation.dbtmodel.delete()
+    else:
+        dbt_operation.delete()
+
+    # delete the model file is present
+    dbtautomation_service.delete_dbt_model_in_project(dbt_operation.dbtmodel)
+
+    return {"success": 1}
