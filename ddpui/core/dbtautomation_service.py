@@ -187,3 +187,10 @@ def get_output_cols_for_operation(
         _get_merge_operation_config(operations), wclient
     )
     return output_cols
+
+
+def delete_dbt_model_in_project(orgdbt_model: OrgDbtModel):
+    """Delete a dbt model in the project"""
+    dbt_project = dbtProject(Path(orgdbt_model.orgdbt.project_dir) / "dbtrepo")
+    dbt_project.delete_model(orgdbt_model.sql_path)
+    return True
