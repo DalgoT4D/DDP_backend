@@ -350,15 +350,16 @@ def get_input_sources_and_models(request, schema_name: str = None):
 
     res = []
     for orgdbt_model in query.all():
-        res.append(
-            {
-                "id": orgdbt_model.uuid,
-                "source_name": orgdbt_model.source_name,
-                "input_name": orgdbt_model.name,
-                "input_type": orgdbt_model.type,
-                "schema": orgdbt_model.schema,
-            }
-        )
+        if not orgdbt_model.under_construction:
+            res.append(
+                {
+                    "id": orgdbt_model.uuid,
+                    "source_name": orgdbt_model.source_name,
+                    "input_name": orgdbt_model.name,
+                    "input_type": orgdbt_model.type,
+                    "schema": orgdbt_model.schema,
+                }
+            )
 
     return res
 
@@ -440,16 +441,17 @@ def get_dbt_project_DAG(request):
 
     res_nodes = []
     for node in model_nodes:
-        res_nodes.append(
-            {
-                "id": node.uuid,
-                "source_name": node.source_name,
-                "input_name": node.name,
-                "input_type": node.type,
-                "schema": node.schema,
-                "type": "src_model_node",
-            }
-        )
+        if not node.under_construction:
+            res_nodes.append(
+                {
+                    "id": node.uuid,
+                    "source_name": node.source_name,
+                    "input_name": node.name,
+                    "input_type": node.type,
+                    "schema": node.schema,
+                    "type": "src_model_node",
+                }
+            )
 
     for node in operation_nodes:
         res_nodes.append(
