@@ -495,17 +495,15 @@ def delete_model(request, model_uuid):
     orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid).first()
     if not orgdbt_model:
         raise HttpError(404, "model not found")
-
+    
     operations = OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).count()
 
     if operations > 0:
         orgdbt_model.under_construction = True
         orgdbt_model.save()
-    else:
-        orgdbt_model.delete()
 
-    # delete the model file is present
-    dbtautomation_service.delete_dbt_model_in_project(orgdbt_model)
+        # delete the model file is present
+        dbtautomation_service.delete_dbt_model_in_project(orgdbt_model)
 
     return {"success": 1}
 
