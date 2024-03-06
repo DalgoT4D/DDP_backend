@@ -142,37 +142,11 @@ def sync_sources(request, payload: SyncSourcesSchema):
     if not orgdbt:
         raise HttpError(404, "DBT workspace not set up")
 
-    sources_file_path, error = dbtautomation_service.sync_sources_to_dbt(
-        payload.schema_name, payload.source_name, org, org_warehouse
-    )
+    dbtautomation_service.sync_sources_for_warehouse(orgdbt, org_warehouse)
 
-    if error:
-        raise HttpError(422, error)
+    logger.info("HEREEEE")
 
-    # sync sources to django db
-    logger.info("synced sources in dbt, saving to db now")
-    sources = dbtautomation_service.read_dbt_sources_in_project(orgdbt)
-    for source in sources:
-        orgdbt_source = OrgDbtModel.objects.filter(
-            source_name=source["source_name"], name=source["input_name"], type="source"
-        ).first()
-
-        if not orgdbt_source:
-            orgdbt_source = OrgDbtModel(
-                uuid=uuid.uuid4(),
-                orgdbt=orgdbt,
-                source_name=source["source_name"],
-                name=source["input_name"],
-                display_name=source["input_name"],
-                type="source",
-            )
-
-        orgdbt_source.schema = source["schema"]
-        orgdbt_source.sql_path = sources_file_path
-
-        orgdbt_source.save()
-
-    return {"sources_file_path": str(sources_file_path)}
+    return {"success": 1}
 
 
 ########################## Models & Sources #############################################
@@ -460,6 +434,7 @@ def get_dbt_project_DAG(request):
                 "output_cols": node.output_cols,
                 "config": node.config,
                 "type": "operation_node",
+                "target_model_id": node.dbtmodel.uuid,
             }
         )
 
@@ -495,7 +470,7 @@ def delete_model(request, model_uuid):
     orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid).first()
     if not orgdbt_model:
         raise HttpError(404, "model not found")
-    
+
     operations = OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).count()
 
     if operations > 0:

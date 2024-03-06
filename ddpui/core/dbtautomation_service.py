@@ -1,4 +1,4 @@
-import os
+import os, uuid
 from pathlib import Path
 
 from dbt_automation.operations.arithmetic import arithmetic, arithmetic_dbt_sql
@@ -31,7 +31,10 @@ from dbt_automation.operations.mergeoperations import (
     merge_operations,
     merge_operations_sql,
 )
-from dbt_automation.operations.syncsources import sync_sources
+from dbt_automation.operations.syncsources import (
+    sync_sources,
+    generate_source_definitions_yaml,
+)
 from dbt_automation.utils.warehouseclient import get_client
 from dbt_automation.utils.dbtproject import dbtProject
 from dbt_automation.utils.dbtsources import read_sources
@@ -39,6 +42,7 @@ from dbt_automation.utils.dbtsources import read_sources
 from ddpui.schemas.dbt_workflow_schema import CompleteDbtModelPayload
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation
+from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 
 OPERATIONS_DICT = {
@@ -65,6 +69,9 @@ OPERATIONS_DICT_SQL = {
     "renamecolumns": rename_columns_dbt_sql,
     "regexextraction": regex_extraction_sql,
 }
+
+
+logger = CustomLogger("ddpui")
 
 
 def _get_wclient(org_warehouse: OrgWarehouse):
@@ -144,7 +151,7 @@ def create_dbt_model_in_project(
     return model_sql_path, output_cols
 
 
-def sync_sources_to_dbt(
+def sync_sources_in_schema(
     schema_name: str, source_name: str, org: Org, org_warehouse: OrgWarehouse
 ):
     """
@@ -193,4 +200,63 @@ def delete_dbt_model_in_project(orgdbt_model: OrgDbtModel):
     """Delete a dbt model in the project"""
     dbt_project = dbtProject(Path(orgdbt_model.orgdbt.project_dir) / "dbtrepo")
     dbt_project.delete_model(orgdbt_model.sql_path)
+    return True
+
+
+def sync_sources_for_warehouse(org_dbt: OrgDbt, org_warehouse: OrgWarehouse):
+    """
+    Sync all tables in all schemas in the warehouse.
+    Dbt source name will be the same as the schema name.
+    """
+    dbt_project = dbtProject(Path(org_dbt.project_dir) / "dbtrepo")
+    wclient = _get_wclient(org_warehouse)
+
+    for schema in wclient.get_schemas():
+        logger.info(f"syncing sources for schema {schema}")
+        sync_tables = []
+        for table in wclient.get_tables(schema):
+            if not OrgDbtModel.objects.filter(
+                orgdbt=org_dbt, schema=schema, name=table, type="model"
+            ).first():
+                sync_tables.append(table)
+
+        if len(sync_tables) == 0:
+            logger.info(f"No new tables in schema '{schema}' to be synced as sources.")
+            continue
+
+        source_yml_path = generate_source_definitions_yaml(
+            schema, schema, sync_tables, dbt_project
+        )
+
+        logger.info(
+            f"Synced {len(sync_tables)} tables for schema '{schema}' as sources; yaml at {source_yml_path}"
+        )
+
+        # sync sources to django db
+        logger.info(f"synced sources in dbt for schema {schema}, saving to db now")
+
+        for table in sync_tables:
+            orgdbt_source = OrgDbtModel.objects.filter(
+                source_name=schema,
+                schema=schema,
+                name=table,
+                type="source",
+            ).first()
+
+            if not orgdbt_source:
+                orgdbt_source = OrgDbtModel(
+                    uuid=uuid.uuid4(),
+                    orgdbt=org_dbt,
+                    source_name=schema,
+                    schema=schema,
+                    name=table,
+                    display_name=table,
+                    type="source",
+                )
+
+            orgdbt_source.schema = schema
+            orgdbt_source.sql_path = source_yml_path
+
+            orgdbt_source.save()
+
     return True
