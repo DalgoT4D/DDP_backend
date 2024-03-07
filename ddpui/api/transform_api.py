@@ -21,7 +21,6 @@ from ddpui.utils.custom_logger import CustomLogger
 from ddpui.schemas.org_task_schema import DbtProjectSchema
 from ddpui.schemas.dbt_workflow_schema import (
     CreateDbtModelPayload,
-    SyncSourcesSchema,
     CompleteDbtModelPayload,
 )
 
@@ -127,7 +126,7 @@ def delete_dbt_project(request, project_name: str):
 
 
 @transformapi.post("/dbt_project/sync_sources/", auth=auth.CanManagePipelines())
-def sync_sources(request, payload: SyncSourcesSchema):
+def sync_sources(request):
     """
     Sync sources from a given schema.
     """
