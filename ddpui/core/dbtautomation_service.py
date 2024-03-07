@@ -44,6 +44,8 @@ from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
+from ddpui.celery import app
+from ddpui.utils.taskprogress import TaskProgress
 
 OPERATIONS_DICT = {
     "flatten": flatten_operation,
@@ -203,22 +205,50 @@ def delete_dbt_model_in_project(orgdbt_model: OrgDbtModel):
     return True
 
 
-def sync_sources_for_warehouse(org_dbt: OrgDbt, org_warehouse: OrgWarehouse):
+@app.task(bind=True)
+def sync_sources_for_warehouse(self, org_dbt_id: str, org_warehouse_id: str):
     """
     Sync all tables in all schemas in the warehouse.
     Dbt source name will be the same as the schema name.
     """
+    org_dbt: OrgDbt = OrgDbt.objects.filter(id=org_dbt_id).first()
+    org_warehouse: OrgWarehouse = OrgWarehouse.objects.filter(
+        id=org_warehouse_id
+    ).first()
+
+    taskprogress = TaskProgress(self.request.id)
+
+    taskprogress.add(
+        {
+            "message": "started syncing sources",
+            "status": "running",
+        }
+    )
+
     dbt_project = dbtProject(Path(org_dbt.project_dir) / "dbtrepo")
     wclient = _get_wclient(org_warehouse)
 
     for schema in wclient.get_schemas():
-        logger.info(f"syncing sources for schema {schema}")
+        taskprogress.add(
+            {
+                "message": f"reading sources for schema {schema} from warehouse",
+                "status": "running",
+            }
+        )
+        logger.info(f"reading sources for schema {schema} for warehouse")
         sync_tables = []
         for table in wclient.get_tables(schema):
             if not OrgDbtModel.objects.filter(
                 orgdbt=org_dbt, schema=schema, name=table, type="model"
             ).first():
                 sync_tables.append(table)
+
+        taskprogress.add(
+            {
+                "message": f"Finished reading sources for schema {schema}",
+                "status": "running",
+            }
+        )
 
         if len(sync_tables) == 0:
             logger.info(f"No new tables in schema '{schema}' to be synced as sources.")
@@ -240,6 +270,12 @@ def sync_sources_for_warehouse(org_dbt: OrgDbt, org_warehouse: OrgWarehouse):
     logger.info("synced sources in dbt, saving to db now")
     sources = read_dbt_sources_in_project(org_dbt)
     logger.info("read fresh source from all yaml files")
+    taskprogress.add(
+        {
+            "message": f"Started syncing sources",
+            "status": "running",
+        }
+    )
     for source in sources:
         orgdbt_source = OrgDbtModel.objects.filter(
             source_name=source["source_name"], name=source["input_name"], type="source"
@@ -258,6 +294,13 @@ def sync_sources_for_warehouse(org_dbt: OrgDbt, org_warehouse: OrgWarehouse):
         orgdbt_source.sql_path = source["sql_path"]
 
         orgdbt_source.save()
+
+    taskprogress.add(
+        {
+            "message": f"Sync finished",
+            "status": "running",
+        }
+    )
 
     logger.info("saved sources to db")
 

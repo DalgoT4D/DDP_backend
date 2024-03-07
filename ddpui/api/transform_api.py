@@ -25,6 +25,7 @@ from ddpui.schemas.dbt_workflow_schema import (
 )
 
 from ddpui.core import dbtautomation_service
+from ddpui.core.dbtautomation_service import sync_sources_for_warehouse
 
 transformapi = NinjaAPI(urls_namespace="transform")
 
@@ -141,9 +142,9 @@ def sync_sources(request):
     if not orgdbt:
         raise HttpError(404, "DBT workspace not set up")
 
-    dbtautomation_service.sync_sources_for_warehouse(orgdbt, org_warehouse)
+    task = sync_sources_for_warehouse.delay(orgdbt.id, org_warehouse.id)
 
-    return {"success": 1}
+    return {"task_id": task.id}
 
 
 ########################## Models & Sources #############################################
