@@ -29,5 +29,5 @@ class SyncSourcesSchema(Schema):
     schema to sync sources from the schema
     """
 
-    schema_name: str
-    source_name: str
+    schema_name: str = None
+    source_name: str = None
