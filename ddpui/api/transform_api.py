@@ -144,8 +144,6 @@ def sync_sources(request, payload: SyncSourcesSchema):
 
     dbtautomation_service.sync_sources_for_warehouse(orgdbt, org_warehouse)
 
-    logger.info("HEREEEE")
-
     return {"success": 1}
 
 

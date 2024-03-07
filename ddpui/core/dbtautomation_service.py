@@ -224,39 +224,41 @@ def sync_sources_for_warehouse(org_dbt: OrgDbt, org_warehouse: OrgWarehouse):
             logger.info(f"No new tables in schema '{schema}' to be synced as sources.")
             continue
 
+        # in dbt automation, it will overwrite the sources (if name is same which it will be = "schema") and the file
         source_yml_path = generate_source_definitions_yaml(
             schema, schema, sync_tables, dbt_project
         )
 
         logger.info(
-            f"Synced {len(sync_tables)} tables for schema '{schema}' as sources; yaml at {source_yml_path}"
+            f"Generated yaml for {len(sync_tables)} tables for schema '{schema}' as sources; yaml at {source_yml_path}"
         )
 
-        # sync sources to django db
-        logger.info(f"synced sources in dbt for schema {schema}, saving to db now")
-
-        for table in sync_tables:
-            orgdbt_source = OrgDbtModel.objects.filter(
-                source_name=schema,
-                schema=schema,
-                name=table,
+    # sync sources to django db; create if not present
+    # its okay if we have dnagling sources that they deleted from their warehouse but are still in our db;
+    # we can clear them up or give them an option to delete
+    # because deleting the dnagling sources might delete their workflow nodes & edges. They should see a warning for this on the UI
+    logger.info("synced sources in dbt, saving to db now")
+    sources = read_dbt_sources_in_project(org_dbt)
+    logger.info("read fresh source from all yaml files")
+    for source in sources:
+        orgdbt_source = OrgDbtModel.objects.filter(
+            source_name=source["source_name"], name=source["input_name"], type="source"
+        ).first()
+        if not orgdbt_source:
+            orgdbt_source = OrgDbtModel.objects.create(
+                uuid=uuid.uuid4(),
+                orgdbt=org_dbt,
+                source_name=source["source_name"],
+                name=source["input_name"],
+                display_name=source["input_name"],
                 type="source",
-            ).first()
+            )
 
-            if not orgdbt_source:
-                orgdbt_source = OrgDbtModel(
-                    uuid=uuid.uuid4(),
-                    orgdbt=org_dbt,
-                    source_name=schema,
-                    schema=schema,
-                    name=table,
-                    display_name=table,
-                    type="source",
-                )
+        orgdbt_source.schema = source["schema"]
+        orgdbt_source.sql_path = source["sql_path"]
 
-            orgdbt_source.schema = schema
-            orgdbt_source.sql_path = source_yml_path
+        orgdbt_source.save()
 
-            orgdbt_source.save()
+    logger.info("saved sources to db")
 
     return True
