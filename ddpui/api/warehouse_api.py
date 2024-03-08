@@ -126,3 +126,23 @@ def get_table_data(
         order_by=order_by,
         order=order,
     )
+
+
+@warehouseapi.get(
+    "/table_count/{schema_name}/{table_name}", auth=auth.CanManagePipelines()
+)
+def get_table_count(request, schema_name: str, table_name: str):
+    """Fetches the total number of rows for a specified table."""
+    try:
+        org_user = request.orguser
+        org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).first()
+        wtype = org_warehouse.wtype
+        credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+
+        data = []
+        client = get_client(wtype, credentials, org_warehouse.bq_location)
+        total_rows = client.get_total_rows(schema_name, table_name)
+        return {"total_rows": total_rows}
+    except Exception as e:
+        logger.error(f"Failed to fetch total rows for {schema_name}.{table_name}: {e}")
+        raise HttpError(500, f"Failed to fetch total rows for {schema_name}.{table_name}")
