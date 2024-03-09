@@ -23,7 +23,12 @@ def create_default_transform_tasks(
     org: Org, cli_profile_block: OrgPrefectBlockv1, dbt_project_params: DbtProjectParams
 ):
     """Create all the transform (git, dbt) tasks"""
-    for task in Task.objects.filter(type__in=["dbt", "git"], is_system=True).all():
+    if org.dbt is None:
+        raise ValueError("dbt is not configured for this org")
+
+    # if transform_type is "ui" then we don't set up git-pull
+    task_types = ["dbt", "git"] if org.dbt.transform_type == "git" else ["dbt"]
+    for task in Task.objects.filter(type__in=task_types, is_system=True).all():
         org_task = OrgTask.objects.create(org=org, task=task, uuid=uuid.uuid4())
 
         if task.slug == TASK_DBTRUN:
