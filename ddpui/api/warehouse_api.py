@@ -127,6 +127,7 @@ def get_table_data(
         order=order,
     )
 
+
 @warehouseapi.get(
     "/table_count/{schema_name}/{table_name}", auth=auth.CanManagePipelines()
 )
@@ -143,4 +144,6 @@ def get_table_count(request, schema_name: str, table_name: str):
         return {"total_rows": total_rows}
     except Exception as e:
         logger.error(f"Failed to fetch total rows for {schema_name}.{table_name}: {e}")
-        raise HttpError(500, f"Failed to fetch total rows for {schema_name}.{table_name}")
+        raise HttpError(
+            500, f"Failed to fetch total rows for {schema_name}.{table_name}"
+        )
