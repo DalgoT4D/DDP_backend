@@ -1,5 +1,4 @@
 from ninja import Field, Schema
-import uuid
 
 
 class InputModelPayload(Schema):
@@ -17,10 +16,12 @@ class CreateDbtModelPayload(Schema):
     schema to define the payload required to create a custom org task
     """
 
-    model_uuid: str
     config: dict
     op_type: str
-    input_models: list[InputModelPayload] = []
+    target_model_uuid: str = ""
+    input_uuid: str = ""
+    source_columns: list[str] = []
+    other_inputs: list[InputModelPayload] = []
 
 
 class CompleteDbtModelPayload(Schema):
