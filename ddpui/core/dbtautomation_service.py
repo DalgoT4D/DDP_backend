@@ -19,7 +19,6 @@ from dbt_automation.operations.droprenamecolumns import (
 )
 from dbt_automation.operations.flattenairbyte import flatten_operation
 
-# operations
 from dbt_automation.operations.flattenjson import flattenjson, flattenjson_dbt_sql
 
 # from dbt_automation.operations.mergetables import union_tables, union_tables_sql
@@ -35,6 +34,10 @@ from dbt_automation.operations.syncsources import (
     sync_sources,
     generate_source_definitions_yaml,
 )
+from dbt_automation.operations.joins import join, joins_sql
+from dbt_automation.operations.groupby import groupby, groupby_dbt_sql
+from dbt_automation.operations.wherefilter import where_filter, where_filter_sql
+from dbt_automation.operations.mergetables import union_tables, union_tables_sql
 from dbt_automation.utils.warehouseclient import get_client
 from dbt_automation.utils.dbtproject import dbtProject
 from dbt_automation.utils.dbtsources import read_sources
@@ -58,18 +61,24 @@ OPERATIONS_DICT = {
     "dropcolumns": drop_columns,
     "renamecolumns": rename_columns,
     "regexextraction": regex_extraction,
+    "join": join,
+    "groupby": groupby,
+    "where": where_filter,
 }
 
 OPERATIONS_DICT_SQL = {
     "flattenjson": flattenjson_dbt_sql,
-    # "unionall": union_tables_sql,
     "castdatatypes": cast_datatypes_sql,
+    # "unionall": union_tables_sql,
     "coalescecolumns": coalesce_columns_dbt_sql,
     "arithmetic": arithmetic_dbt_sql,
     "concat": concat_columns_dbt_sql,
     "dropcolumns": drop_columns_dbt_sql,
     "renamecolumns": rename_columns_dbt_sql,
     "regexextraction": regex_extraction_sql,
+    "join": joins_sql,
+    "groupby": groupby_dbt_sql,
+    "where": where_filter_sql,
 }
 
 

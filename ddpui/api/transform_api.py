@@ -193,16 +193,18 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
         dbtmodel=target_model
     ).count()
 
-    # input things for the first operation to be chained
-    if current_operations_chained == 0:
+    payload.input_models.sort(key=lambda x: x.seq)
+    if current_operations_chained == 0:  # if its the first operation in the chain
         logger.info("Chaining the first operation")
         logger.info("Making sure atleast one input orgdbtmodel is present")
 
-        if not payload.input_uuids or len(payload.input_uuids) == 0:
+        if not payload.input_models or len(payload.input_models) == 0:
             raise HttpError(422, "input is required for the first model in the chain")
 
-        input_models = OrgDbtModel.objects.filter(uuid__in=payload.input_uuids).all()
-        if len(input_models) != len(payload.input_uuids):
+        input_models = OrgDbtModel.objects.filter(
+            uuid__in=[inp.uuid for inp in payload.input_models]
+        ).all()
+        if len(input_models) != len(payload.input_models):
             raise HttpError(404, "input not found")
 
         # create edge if it doesn't exist
@@ -219,15 +221,17 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     logger.info("passed all validation; moving to create operation")
 
     # source columns or selected columns
-    OP_CONFIG["source_columns"] = payload.select_columns
+    # there will be atleast one input
+    OP_CONFIG["source_columns"] = payload.input_models[0].columns
     input_config = {
         "config": OP_CONFIG,
         "type": payload.op_type,
-        "input_uuids": payload.input_uuids if current_operations_chained == 0 else [],
+        "input_models": [dict(model) for model in payload.input_models],
     }
     output_cols = dbtautomation_service.get_output_cols_for_operation(
         org_warehouse, payload.op_type, OP_CONFIG.copy()
     )
+    logger.info(f"output_cols: {output_cols}")
 
     logger.info("creating operation")
 
@@ -374,21 +378,24 @@ def get_dbt_project_DAG(request):
         ):
             operation_nodes.append(operation)
 
-            if operation.seq == 1:
-                input_uuids = operation.config["input_uuids"]
-                if input_uuids and len(input_uuids) > 0:
-                    # edge(s) between the node(s) and their first operation
-                    for op_src_node in OrgDbtModel.objects.filter(
-                        uuid__in=input_uuids
-                    ).all():
-                        res_edges.append(
-                            {
-                                "id": str(op_src_node.uuid) + "_" + str(operation.uuid),
-                                "source": op_src_node.uuid,
-                                "target": operation.uuid,
-                            }
-                        )
-            else:
+            if (
+                "input_models" in operation.config
+                and len(operation.config["input_models"]) > 0
+            ):
+                input_models = operation.config["input_models"]
+                # edge(s) between the node(s) and other sources involved that are tables (OrgDbtModel)
+                for op_src_node in OrgDbtModel.objects.filter(
+                    uuid__in=[model["uuid"] for model in input_models]
+                ).all():
+                    model_nodes.append(op_src_node)
+                    res_edges.append(
+                        {
+                            "id": str(op_src_node.uuid) + "_" + str(operation.uuid),
+                            "source": op_src_node.uuid,
+                            "target": operation.uuid,
+                        }
+                    )
+            if operation.seq >= 2:
                 # for chained operations for seq >= 2
                 res_edges.append(
                     {
