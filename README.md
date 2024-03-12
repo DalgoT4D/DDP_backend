@@ -61,6 +61,8 @@ Django application for the DDP platform's management backend. Exposes API endpoi
 
 ## Setup instructions
 
+### Step 1: Create a Python Virtual Environment
+
 -   `pyenv local 3.10`
 
 -   `pyenv exec python -m venv venv`
@@ -71,25 +73,98 @@ Django application for the DDP platform's management backend. Exposes API endpoi
 
 -   `pip install -r requirements.txt`
 
+### Step 2: Create the .env file
+
 -   create `.env` from `.env.template`
+
+### Step 3: Create SQL Database
 
 -   create a SQL database and populate its credentials into `.env`
 
+-   You can use a postgresql docker image for local development
+
+``` 
+docker run --name postgres-db -e POSTGRES_PASSWORD=<password> -p 5432:5432 -d <db name>
+
+```
+
+- Add the environment variable to .env
+
+```
+DBNAME=<db name>
+DBHOST=localhost
+DBPORT=5432
+DBUSER=postgres
+DBPASSWORD=<password>
+DBADMINUSER=postgres
+DBADMINPASSWORD=<password>
+
+```
+
+### Step 4: Install Airbyte
+-   Open a new terminal
 -   [Start Airbyte](https://docs.airbyte.com/deploying-airbyte/local-deployment) and populate connection info in `.env`
 
--   [Start Prefect](https://docs.prefect.io/latest/getting-started/installation/) and populate connection info in `.env`
+```
+AIRBYTE_SERVER_HOST=
+AIRBYTE_SERVER_PORT=
+AIRBYTE_SERVER_APIVER=
+AIRBYTE_API_TOKEN= <token> # base64 encryption of username:password. Default username and password is airbyte:password and token will be YWlyYnl0ZTpwYXNzd29yZA==
+AIRBYTE_DESTINATION_TYPES=
+```
 
--   Make sure you run a Prefect Server (`prefect server start`) and a Prefect Agent (`prefect agent start -q ddp --pool default-agent-pool`)
+### Step 5: Install Prefect
+-   Open a new terminal. 
 
+-   Clone [Prefect Proxy](https://github.com/DalgoT4D/prefect-proxy)
+
+-   [Start Prefect](https://github.com/DalgoT4D/prefect-proxy) and populate connection info in `.env`
+
+```
+PREFECT_PROXY_API_URL=
+```
+
+### Step 6: Create secrets directory
 -   Set `DEV_SECRETS_DIR` in `.env` unless you want to use Amazon's Secrets Manager
 
--   Run `prefect-proxy` and put its URL into `PREFECT_PROXY_API_URL` in `.env`
+### Step 7: Install DBT
+-   Open a new terminal
 
 -   Create a local `venv`, install `dbt` and put its location into `DBT_VENV` in `.env`
 
+```
+pyenv local 3.10
+
+pyenv exec python -m venv <env-name>
+
+source <env-name>/bin/activate
+
+python -m pip install \
+  dbt-core \
+  dbt-postgres \
+  dbt-bigquery
+
+```
+
 -   Create empty directories for `CLIENTDBT_ROOT`
 
+```
+CLIENTDBT_ROOT=
+DBT_VENV=<env-name>/bin/activate
+```
+
+### Step 8: Add SIGNUPCODE and FRONTEND_URL
+
 -   The `SIGNUPCODE` in `.env` is for signing up using the frontend. If you are running the frontend, set its URL in `FRONTEND_URL`
+
+### Step 9: Start Backend
+
+```
+DJANGOSECRET=
+```
+-   Create logs folder in `ddpui`
+
+-   create `whitelist.py` from `.whitelist.template.py` in ddpui > assets folder
 
 -   Run DB migrations `python manage.py migrate`
 
