@@ -1,5 +1,14 @@
 from ninja import Field, Schema
-import uuid
+
+
+class InputModelPayload(Schema):
+    """
+    Schema to be expected when we are creating models in a chain
+    """
+
+    uuid: str
+    columns: list[str] = []
+    seq: int = 1
 
 
 class CreateDbtModelPayload(Schema):
@@ -7,11 +16,12 @@ class CreateDbtModelPayload(Schema):
     schema to define the payload required to create a custom org task
     """
 
-    model_uuid: str
-    select_columns: list[str]
     config: dict
     op_type: str
-    input_uuids: list[str] = []
+    target_model_uuid: str = ""
+    input_uuid: str = ""
+    source_columns: list[str] = []
+    other_inputs: list[InputModelPayload] = []
 
 
 class CompleteDbtModelPayload(Schema):
