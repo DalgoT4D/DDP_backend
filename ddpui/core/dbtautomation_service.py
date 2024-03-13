@@ -127,19 +127,19 @@ def create_dbt_model_in_project(
     wclient = _get_wclient(org_warehouse)
 
     operations = []
-    input_uuids = []
+    input_models = []
     for operation in (
         OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).order_by("seq").all()
     ):
         if operation.seq == 1:
-            input_uuids = operation.config["input_uuids"]
+            input_models = operation.config["input_models"]
         operations.append(
             {"type": operation.config["type"], "config": operation.config["config"]}
         )
 
     merge_input = []
-    for uuid in input_uuids:
-        source_model = OrgDbtModel.objects.filter(uuid=uuid).first()
+    for model in input_models:
+        source_model = OrgDbtModel.objects.filter(uuid=model["uuid"]).first()
         if source_model:
             merge_input.append(
                 {

@@ -297,11 +297,11 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     logger.info("updated output cols for the model")
 
     return {
-        "id": target_model.uuid,
-        "input_type": target_model.type,
-        "source_name": target_model.source_name,
-        "input_name": target_model.name,
-        "schema": target_model.schema,
+        "id": dbt_op.uuid,
+        "output_cols": dbt_op.output_cols,
+        "config": dbt_op.config,
+        "type": "operation_node",
+        "target_model_id": dbt_op.dbtmodel.uuid,
     }
 
 
