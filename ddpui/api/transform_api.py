@@ -379,6 +379,7 @@ def get_input_sources_and_models(request, schema_name: str = None):
                     "input_name": orgdbt_model.name,
                     "input_type": orgdbt_model.type,
                     "schema": orgdbt_model.schema,
+                    "type": "src_model_node",
                 }
             )
 

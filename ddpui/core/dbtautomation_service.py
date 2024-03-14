@@ -41,6 +41,7 @@ from dbt_automation.operations.mergetables import union_tables, union_tables_sql
 from dbt_automation.utils.warehouseclient import get_client
 from dbt_automation.utils.dbtproject import dbtProject
 from dbt_automation.utils.dbtsources import read_sources
+from dbt_automation.operations.replace import replace, replace_dbt_sql
 
 from ddpui.schemas.dbt_workflow_schema import CompleteDbtModelPayload
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
@@ -64,6 +65,7 @@ OPERATIONS_DICT = {
     "join": join,
     "groupby": groupby,
     "where": where_filter,
+    "replace": replace,
 }
 
 OPERATIONS_DICT_SQL = {
@@ -79,6 +81,7 @@ OPERATIONS_DICT_SQL = {
     "join": joins_sql,
     "groupby": groupby_dbt_sql,
     "where": where_filter_sql,
+    "replace": replace_dbt_sql,
 }
 
 
