@@ -113,7 +113,7 @@ AIRBYTE_API_TOKEN= <token> # base64 encryption of username:password. Default use
 AIRBYTE_DESTINATION_TYPES=
 ```
 
-### Step 5: Install Prefect
+### Step 5: Install Prefect and Start Prefect Proxy
 
 -   [Start Prefect Proxy](https://github.com/DalgoT4D/prefect-proxy) and populate connection info in `.env`
 
