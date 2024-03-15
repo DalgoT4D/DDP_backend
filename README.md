@@ -114,11 +114,8 @@ AIRBYTE_DESTINATION_TYPES=
 ```
 
 ### Step 5: Install Prefect
--   Open a new terminal. 
 
--   Clone [Prefect Proxy](https://github.com/DalgoT4D/prefect-proxy)
-
--   [Start Prefect](https://github.com/DalgoT4D/prefect-proxy) and populate connection info in `.env`
+-   [Start Prefect Proxy](https://github.com/DalgoT4D/prefect-proxy) and populate connection info in `.env`
 
 ```
 PREFECT_PROXY_API_URL=
