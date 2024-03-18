@@ -326,6 +326,8 @@ def post_save_model(request, model_uuid: str, payload: CompleteDbtModelPayload):
     if not orgdbt_model:
         raise HttpError(404, "model not found")
 
+    payload.name = slugify(payload.name)
+
     model_sql_path, output_cols = dbtautomation_service.create_dbt_model_in_project(
         org_warehouse, orgdbt_model, payload
     )
@@ -333,7 +335,7 @@ def post_save_model(request, model_uuid: str, payload: CompleteDbtModelPayload):
     orgdbt_model.output_cols = output_cols
     orgdbt_model.sql_path = str(model_sql_path)
     orgdbt_model.under_construction = False
-    orgdbt_model.name = slugify(payload.name)
+    orgdbt_model.name = payload.name
     orgdbt_model.display_name = payload.display_name
     orgdbt_model.schema = payload.dest_schema
     orgdbt_model.save()
