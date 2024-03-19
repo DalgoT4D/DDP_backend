@@ -317,3 +317,9 @@ def sync_sources_for_warehouse(self, org_dbt_id: str, org_warehouse_id: str):
     logger.info("saved sources to db")
 
     return True
+
+
+def warehouse_datatypes(org_warehouse: OrgWarehouse):
+    """Get the datatypes of a table in a warehouse"""
+    wclient = _get_wclient(org_warehouse)
+    return wclient.get_column_data_types()

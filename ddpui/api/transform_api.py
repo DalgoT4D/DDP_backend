@@ -576,7 +576,8 @@ def delete_operation(request, operation_uuid):
 
 
 @transformapi.get('/dbt_project/data_type/', auth=auth.CanManagePipelines())
-def get_postgres_datatypes(request):
+def get_warehouse_datatypes(request):
+    """Get the datatypes of a table in a warehouse"""
     orguser: OrgUser = request.orguser
     org = orguser.org
 
@@ -584,7 +585,6 @@ def get_postgres_datatypes(request):
     if not org_warehouse:
         raise HttpError(404, "please setup your warehouse first")
     
-    wclient = _get_wclient(org_warehouse)
-    data_types = wclient.get_column_data_types()
+    data_types = dbtautomation_service.warehouse_datatypes(org_warehouse)
     return Response(data_types)
     
