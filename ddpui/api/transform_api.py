@@ -25,7 +25,7 @@ from ddpui.schemas.dbt_workflow_schema import (
 )
 
 from ddpui.core import dbtautomation_service
-from ddpui.core.dbtautomation_service import sync_sources_for_warehouse
+from ddpui.core.dbtautomation_service import _get_wclient, sync_sources_for_warehouse
 
 transformapi = NinjaAPI(urls_namespace="transform")
 
@@ -573,3 +573,18 @@ def delete_operation(request, operation_uuid):
     dbtautomation_service.delete_dbt_model_in_project(dbt_operation.dbtmodel)
 
     return {"success": 1}
+
+
+@transformapi.get('/dbt_project/data_type/', auth=auth.CanManagePipelines())
+def get_postgres_datatypes(request):
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+    
+    wclient = _get_wclient(org_warehouse)
+    data_types = wclient.get_column_data_types()
+    return Response(data_types)
+    
