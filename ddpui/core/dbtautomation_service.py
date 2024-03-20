@@ -157,7 +157,9 @@ def create_dbt_model_in_project(
 
     merge_config = _get_merge_operation_config(
         operations,
-        input=merge_input[0] if len(merge_input) == 1 else merge_input,
+        input=merge_input[
+            0
+        ],  # just send the first input; for multi input operations rest will be inside the operations and their config - under "other_inputs".
         output_name=payload.name,
         dest_schema=payload.dest_schema,
     )
