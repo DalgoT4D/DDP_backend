@@ -573,3 +573,17 @@ def delete_operation(request, operation_uuid):
     dbtautomation_service.delete_dbt_model_in_project(dbt_operation.dbtmodel)
 
     return {"success": 1}
+
+
+@transformapi.get("/dbt_project/data_type/", auth=auth.CanManagePipelines())
+def get_warehouse_datatypes(request):
+    """Get the datatypes of a table in a warehouse"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    data_types = dbtautomation_service.warehouse_datatypes(org_warehouse)
+    return data_types
