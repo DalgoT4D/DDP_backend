@@ -27,12 +27,12 @@ class OrgDbtModel(models.Model):
     uuid = models.UUIDField(editable=False, unique=True, null=True)
     name = models.CharField(max_length=300, null=True)
     display_name = models.CharField(max_length=300, null=True)
-    schema = models.CharField(max_length=100, null=True)
+    schema = models.CharField(max_length=300, null=True)
     sql_path = models.CharField(max_length=300, null=True)
     type = models.CharField(
         choices=OrgDbtModelType.choices(), max_length=50, default="model"
     )
-    source_name = models.CharField(max_length=100, null=True)
+    source_name = models.CharField(max_length=300, null=True)
     output_cols = models.JSONField(default=list)
     under_construction = models.BooleanField(default=False)
 
