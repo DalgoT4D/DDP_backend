@@ -586,5 +586,5 @@ def get_warehouse_datatypes(request):
         raise HttpError(404, "please setup your warehouse first")
     
     data_types = dbtautomation_service.warehouse_datatypes(org_warehouse)
-    return Response(data_types)
+    return data_types
     
