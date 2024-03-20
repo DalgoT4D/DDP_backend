@@ -535,6 +535,16 @@ def delete_model(request, model_uuid):
 
         # delete the model file is present
         dbtautomation_service.delete_dbt_model_in_project(orgdbt_model)
+    else:
+        # make sure this is not linked to any other model
+        # delete if there are no edges coming or going out of this model
+        if (
+            DbtEdge.objects.filter(
+                Q(from_node=orgdbt_model) | Q(to_node=orgdbt_model)
+            ).count()
+            == 0
+        ):
+            orgdbt_model.delete()
 
     return {"success": 1}
 
