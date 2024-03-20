@@ -42,6 +42,7 @@ from dbt_automation.utils.warehouseclient import get_client
 from dbt_automation.utils.dbtproject import dbtProject
 from dbt_automation.utils.dbtsources import read_sources
 from dbt_automation.operations.replace import replace, replace_dbt_sql
+from dbt_automation.operations.casewhen import casewhen, casewhen_dbt_sql
 
 from ddpui.schemas.dbt_workflow_schema import CompleteDbtModelPayload
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
@@ -54,7 +55,7 @@ from ddpui.utils.taskprogress import TaskProgress
 OPERATIONS_DICT = {
     "flatten": flatten_operation,
     "flattenjson": flattenjson,
-    # "unionall": union_tables,
+    "unionall": union_tables,
     "castdatatypes": cast_datatypes,
     "coalescecolumns": coalesce_columns,
     "arithmetic": arithmetic,
@@ -66,12 +67,13 @@ OPERATIONS_DICT = {
     "groupby": groupby,
     "where": where_filter,
     "replace": replace,
+    "casewhen": casewhen,
 }
 
 OPERATIONS_DICT_SQL = {
     "flattenjson": flattenjson_dbt_sql,
     "castdatatypes": cast_datatypes_sql,
-    # "unionall": union_tables_sql,
+    "unionall": union_tables_sql,
     "coalescecolumns": coalesce_columns_dbt_sql,
     "arithmetic": arithmetic_dbt_sql,
     "concat": concat_columns_dbt_sql,
@@ -82,6 +84,7 @@ OPERATIONS_DICT_SQL = {
     "groupby": groupby_dbt_sql,
     "where": where_filter_sql,
     "replace": replace_dbt_sql,
+    "casewhen": casewhen_dbt_sql,
 }
 
 
