@@ -263,6 +263,8 @@ def get_connections(org: Org):
 
     res = []
 
+    warehouse = OrgWarehouse.objects.filter(org=org).first()
+
     for org_task in org_tasks:
         # fetch the connection
         connection = airbyte_service.get_connection(
@@ -294,6 +296,7 @@ def get_connections(org: Org):
         # is the task currently locked?
         lock = TaskLock.objects.filter(orgtask=org_task).first()
 
+        connection["destination"]["name"] = warehouse.name
         res.append(
             {
                 "name": connection["name"],
