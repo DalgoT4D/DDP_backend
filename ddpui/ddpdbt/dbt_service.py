@@ -124,6 +124,9 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
     """sets up an org's dbt workspace, recreating it if it already exists"""
     warehouse = OrgWarehouse.objects.filter(org=org).first()
 
+    if not warehouse:
+        return None, "Please set up your warehouse first"
+
     if org.slug is None:
         org.slug = slugify(org.name)
         org.save()
