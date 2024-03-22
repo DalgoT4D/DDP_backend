@@ -171,7 +171,7 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     if payload.op_type not in dbtautomation_service.OPERATIONS_DICT.keys():
         raise HttpError(422, "Operation not supported")
 
-    is_multi_input_op = payload.op_type == "join"
+    is_multi_input_op = payload.op_type in ["join", "unionall"]
 
     target_model = None
     if payload.target_model_uuid:
@@ -194,7 +194,8 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
         dbtmodel=target_model
     ).count()
 
-    input_models: list[OrgDbtModel] = []
+    primary_input_model: OrgDbtModel = None  # the first input model
+    other_input_models: list[OrgDbtModel] = []
     seq: list[int] = []
     other_input_columns: list[list[str]] = []
 
@@ -210,7 +211,7 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
         if not model:
             raise HttpError(404, "input not found")
 
-        input_models.append(model)
+        primary_input_model = model
 
     if is_multi_input_op:  # multi input operation
         if len(payload.other_inputs) == 0:
@@ -224,11 +225,15 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
                 raise HttpError(404, "input not found")
             seq.append(other_input.seq)
             other_input_columns.append(other_input.columns)
-            input_models.append(model)
+            other_input_models.append(model)
+
+    all_input_models = (
+        [primary_input_model] if primary_input_model else []
+    ) + other_input_models
 
     # we create edges only with tables/models at the start of the chain & not operation nodes
     if current_operations_chained == 0:
-        for source in input_models:
+        for source in all_input_models:
             edge = DbtEdge.objects.filter(
                 from_node=source, to_node=target_model
             ).first()
@@ -247,7 +252,7 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     OP_CONFIG["other_inputs"] = []
 
     # in case of mutli input; send the rest of the inputs in the config; dbt_automation will handle the rest
-    for dbtmodel, seq, columns in zip(input_models, seq, other_input_columns):
+    for dbtmodel, seq, columns in zip(other_input_models, seq, other_input_columns):
         OP_CONFIG["other_inputs"].append(
             {
                 "input": {
@@ -272,7 +277,7 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
                 "schema": model.schema,
                 "type": model.type,
             }
-            for model in input_models
+            for model in all_input_models
         ],
     }
     output_cols = dbtautomation_service.get_output_cols_for_operation(
