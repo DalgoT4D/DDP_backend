@@ -532,6 +532,9 @@ def delete_model(request, model_uuid):
     if not orgdbt_model:
         raise HttpError(404, "model not found")
 
+    if orgdbt_model.type == "source":
+        return {"success": 1}
+
     operations = OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).count()
 
     if operations > 0:
