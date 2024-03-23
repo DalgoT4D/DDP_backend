@@ -213,6 +213,8 @@ def test_get_airbyte_connections_success(org_with_workspace):
 
     DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=org_task)
 
+    OrgWarehouse.objects.create(org=org_with_workspace, name="fake-warehouse-name")
+
     result = get_airbyte_connections_v1(mock_request)
     assert len(result) == 1
 
@@ -220,7 +222,7 @@ def test_get_airbyte_connections_success(org_with_workspace):
     assert result[0]["source"]["id"] == "fake-source-id-1"
     assert result[0]["source"]["name"] == "fake-source-name-1"
     assert result[0]["destination"]["id"] == "fake-destination-id-1"
-    assert result[0]["destination"]["name"] == "fake-destination-name-1"
+    assert result[0]["destination"]["name"] == "fake-warehouse-name"
     assert result[0]["catalogId"] == "fake-source-catalog-id-1"
     assert result[0]["syncCatalog"] == "sync-catalog"
     assert result[0]["status"] == "conn-status"
