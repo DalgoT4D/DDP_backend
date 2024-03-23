@@ -298,7 +298,7 @@ def sync_sources_for_warehouse(self, org_dbt_id: str, org_warehouse_id: str):
     )
     for source in sources:
         orgdbt_source = OrgDbtModel.objects.filter(
-            source_name=source["source_name"], name=source["input_name"], type="source"
+            source_name=source["source_name"], name=source["input_name"], type="source", orgdbt=org_dbt
         ).first()
         if not orgdbt_source:
             orgdbt_source = OrgDbtModel.objects.create(
