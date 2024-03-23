@@ -293,6 +293,7 @@ def get_prefect_transformation_tasks(request):
                     {
                         "lockedBy": lock.locked_by.user.email,
                         "lockedAt": lock.locked_at,
+                        "flowRunId": lock.flow_run_id,
                     }
                     if lock
                     else None
