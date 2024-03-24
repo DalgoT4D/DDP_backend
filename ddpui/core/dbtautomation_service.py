@@ -227,21 +227,23 @@ def delete_dbt_model_in_project(orgdbt_model: OrgDbtModel):
 
 
 @app.task(bind=True)
-def sync_sources_for_warehouse(self, org_dbt_id: str, org_warehouse_id: str):
+def sync_sources_for_warehouse(
+    self, org_dbt_id: str, org_warehouse_id: str, orgslug: str
+):
     """
     Sync all tables in all schemas in the warehouse.
     Dbt source name will be the same as the schema name.
     """
+    taskprogress = TaskProgress(
+        task_id=orgslug,
+        hashkey="syncsources-" + orgslug,
+        expire_in_seconds=timedelta(seconds=10 * 60),  # max 10 minutes
+    )
+
     org_dbt: OrgDbt = OrgDbt.objects.filter(id=org_dbt_id).first()
     org_warehouse: OrgWarehouse = OrgWarehouse.objects.filter(
         id=org_warehouse_id
     ).first()
-
-    taskprogress = TaskProgress(
-        task_id=org_warehouse.org.slug,
-        hashkey="syncsources-" + org_warehouse.org.slug,
-        expire_in_seconds=timedelta(seconds=10 * 60),  # max 10 minutes
-    )
 
     taskprogress.add(
         {
