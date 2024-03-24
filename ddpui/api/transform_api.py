@@ -144,7 +144,7 @@ def sync_sources(request):
 
     sync_sources_for_warehouse.delay(orgdbt.id, org_warehouse.id)
 
-    return {"task_progress_id": org_warehouse.org.slug}
+    return {"task_progress_id": "syncsources-" + org_warehouse.org.slug}
 
 
 ########################## Models & Sources #############################################

@@ -1,5 +1,6 @@
 import os, uuid
 from pathlib import Path
+from datetime import timedelta
 
 from dbt_automation.operations.arithmetic import arithmetic, arithmetic_dbt_sql
 from dbt_automation.operations.castdatatypes import cast_datatypes, cast_datatypes_sql
@@ -236,7 +237,11 @@ def sync_sources_for_warehouse(self, org_dbt_id: str, org_warehouse_id: str):
         id=org_warehouse_id
     ).first()
 
-    taskprogress = TaskProgress(org_warehouse.org.slug)
+    taskprogress = TaskProgress(
+        task_id=org_warehouse.org.slug,
+        hashkey="syncsources-" + org_warehouse.org.slug,
+        expire_in_seconds=timedelta(seconds=10 * 60),  # max 10 minutes
+    )
 
     taskprogress.add(
         {
@@ -326,6 +331,8 @@ def sync_sources_for_warehouse(self, org_dbt_id: str, org_warehouse_id: str):
     )
 
     logger.info("saved sources to db")
+
+    taskprogress.remove()
 
     return True
 
