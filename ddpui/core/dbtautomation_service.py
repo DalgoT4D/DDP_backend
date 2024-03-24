@@ -1,5 +1,6 @@
 import os, uuid
 from pathlib import Path
+from datetime import timedelta
 
 from dbt_automation.operations.arithmetic import arithmetic, arithmetic_dbt_sql
 from dbt_automation.operations.castdatatypes import cast_datatypes, cast_datatypes_sql
@@ -226,22 +227,28 @@ def delete_dbt_model_in_project(orgdbt_model: OrgDbtModel):
 
 
 @app.task(bind=True)
-def sync_sources_for_warehouse(self, org_dbt_id: str, org_warehouse_id: str):
+def sync_sources_for_warehouse(
+    self, org_dbt_id: str, org_warehouse_id: str, orgslug: str
+):
     """
     Sync all tables in all schemas in the warehouse.
     Dbt source name will be the same as the schema name.
     """
+    taskprogress = TaskProgress(
+        task_id=orgslug,
+        hashkey="syncsources-" + orgslug,
+        expire_in_seconds=timedelta(seconds=10 * 60),  # max 10 minutes
+    )
+
     org_dbt: OrgDbt = OrgDbt.objects.filter(id=org_dbt_id).first()
     org_warehouse: OrgWarehouse = OrgWarehouse.objects.filter(
         id=org_warehouse_id
     ).first()
 
-    taskprogress = TaskProgress(self.request.id)
-
     taskprogress.add(
         {
             "message": "started syncing sources",
-            "status": "running",
+            "status": "Syncing sources from your warehouse",
         }
     )
 
@@ -252,7 +259,7 @@ def sync_sources_for_warehouse(self, org_dbt_id: str, org_warehouse_id: str):
         taskprogress.add(
             {
                 "message": f"reading sources for schema {schema} from warehouse",
-                "status": "running",
+                "status": "Syncing sources from your warehouse",
             }
         )
         logger.info(f"reading sources for schema {schema} for warehouse")
@@ -266,7 +273,7 @@ def sync_sources_for_warehouse(self, org_dbt_id: str, org_warehouse_id: str):
         taskprogress.add(
             {
                 "message": f"Finished reading sources for schema {schema}",
-                "status": "running",
+                "status": "Syncing sources from your warehouse",
             }
         )
 
@@ -293,12 +300,15 @@ def sync_sources_for_warehouse(self, org_dbt_id: str, org_warehouse_id: str):
     taskprogress.add(
         {
             "message": f"Started syncing sources",
-            "status": "running",
+            "status": "Syncing sources from your warehouse",
         }
     )
     for source in sources:
         orgdbt_source = OrgDbtModel.objects.filter(
-            source_name=source["source_name"], name=source["input_name"], type="source", orgdbt=org_dbt
+            source_name=source["source_name"],
+            name=source["input_name"],
+            type="source",
+            orgdbt=org_dbt,
         ).first()
         if not orgdbt_source:
             orgdbt_source = OrgDbtModel.objects.create(
@@ -318,11 +328,13 @@ def sync_sources_for_warehouse(self, org_dbt_id: str, org_warehouse_id: str):
     taskprogress.add(
         {
             "message": f"Sync finished",
-            "status": "running",
+            "status": "Synced sources from your warehouse",
         }
     )
 
     logger.info("saved sources to db")
+
+    taskprogress.remove()
 
     return True
 
