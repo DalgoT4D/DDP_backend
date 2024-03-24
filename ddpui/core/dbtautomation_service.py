@@ -236,12 +236,12 @@ def sync_sources_for_warehouse(self, org_dbt_id: str, org_warehouse_id: str):
         id=org_warehouse_id
     ).first()
 
-    taskprogress = TaskProgress(self.request.id)
+    taskprogress = TaskProgress(org_warehouse.org.slug)
 
     taskprogress.add(
         {
             "message": "started syncing sources",
-            "status": "running",
+            "status": "Syncing sources from your warehouse",
         }
     )
 
@@ -252,7 +252,7 @@ def sync_sources_for_warehouse(self, org_dbt_id: str, org_warehouse_id: str):
         taskprogress.add(
             {
                 "message": f"reading sources for schema {schema} from warehouse",
-                "status": "running",
+                "status": "Syncing sources from your warehouse",
             }
         )
         logger.info(f"reading sources for schema {schema} for warehouse")
@@ -266,7 +266,7 @@ def sync_sources_for_warehouse(self, org_dbt_id: str, org_warehouse_id: str):
         taskprogress.add(
             {
                 "message": f"Finished reading sources for schema {schema}",
-                "status": "running",
+                "status": "Syncing sources from your warehouse",
             }
         )
 
@@ -293,12 +293,15 @@ def sync_sources_for_warehouse(self, org_dbt_id: str, org_warehouse_id: str):
     taskprogress.add(
         {
             "message": f"Started syncing sources",
-            "status": "running",
+            "status": "Syncing sources from your warehouse",
         }
     )
     for source in sources:
         orgdbt_source = OrgDbtModel.objects.filter(
-            source_name=source["source_name"], name=source["input_name"], type="source", orgdbt=org_dbt
+            source_name=source["source_name"],
+            name=source["input_name"],
+            type="source",
+            orgdbt=org_dbt,
         ).first()
         if not orgdbt_source:
             orgdbt_source = OrgDbtModel.objects.create(
@@ -318,7 +321,7 @@ def sync_sources_for_warehouse(self, org_dbt_id: str, org_warehouse_id: str):
     taskprogress.add(
         {
             "message": f"Sync finished",
-            "status": "running",
+            "status": "Synced sources from your warehouse",
         }
     )
 

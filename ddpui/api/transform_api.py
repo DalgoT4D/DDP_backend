@@ -142,9 +142,9 @@ def sync_sources(request):
     if not orgdbt:
         raise HttpError(404, "DBT workspace not set up")
 
-    task = sync_sources_for_warehouse.delay(orgdbt.id, org_warehouse.id)
+    sync_sources_for_warehouse.delay(orgdbt.id, org_warehouse.id)
 
-    return {"task_id": task.id}
+    return {"task_progress_id": org_warehouse.org.slug}
 
 
 ########################## Models & Sources #############################################
