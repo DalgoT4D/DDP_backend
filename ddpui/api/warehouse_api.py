@@ -7,6 +7,7 @@ from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from ddpui import auth
+from ddpui.core import dbtautomation_service
 from ddpui.models.org import OrgWarehouse
 from ddpui.utils import secretsmanager
 from ddpui.utils.custom_logger import CustomLogger
@@ -151,3 +152,21 @@ def get_table_count(request, schema_name: str, table_name: str):
         raise HttpError(
             500, f"Failed to fetch total rows for {schema_name}.{table_name}"
         )
+
+
+@warehouseapi.get("/dbt_project/json_columnspec/", auth=auth.CanManagePipelines())
+def get_json_column_spec(request, source_schema: str, input_name: str, json_column: str):
+    """Get the json column spec of a table in a warehouse"""
+    orguser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    if not all([source_schema, input_name, json_column]):
+        raise HttpError(400, "Missing required parameters")
+
+    json_columnspec = dbtautomation_service.json_columnspec(
+        org_warehouse, source_schema, input_name, json_column)
+    return json_columnspec
