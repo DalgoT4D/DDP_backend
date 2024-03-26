@@ -1,15 +1,17 @@
+from typing import Union
 from ninja.errors import HttpError
 from ddpui.models.dbt_workflow import OrgDbtModel, DbtEdge, OrgDbtOperation
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.schemas.dbt_workflow_schema import (
     CreateDbtModelPayload,
+    EditDbtOperationPayload,
 )
 
 logger = CustomLogger("ddpui")
 
 
 def validate_operation_config(
-    payload: CreateDbtModelPayload,
+    payload: Union[CreateDbtModelPayload, EditDbtOperationPayload],
     target_model: OrgDbtModel,
     is_multi_input_op: bool,
     current_operations_chained: int = 0,

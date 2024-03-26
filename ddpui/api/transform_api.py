@@ -290,7 +290,7 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
     ).count()
 
     final_config, all_input_models = validate_operation_config(
-        payload, target_model, is_multi_input_op, current_operations_chained
+        payload, target_model, is_multi_input_op, current_operations_chained, edit=True
     )
 
     # create edges only with tables/models if not present
