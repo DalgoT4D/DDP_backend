@@ -343,3 +343,10 @@ def warehouse_datatypes(org_warehouse: OrgWarehouse):
     """Get the datatypes of a table in a warehouse"""
     wclient = _get_wclient(org_warehouse)
     return wclient.get_column_data_types()
+
+
+def json_columnspec(warehouse: OrgWarehouse, source_schema, input_name, json_column):
+    """Get json keys of a table in warehouse"""
+    wclient = _get_wclient(warehouse)
+    json_columnspec = wclient.get_json_columnspec(source_schema, input_name, json_column)
+    return json_columnspec
