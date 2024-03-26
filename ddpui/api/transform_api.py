@@ -328,6 +328,44 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
     }
 
 
+@transformapi.get(
+    "/dbt_project/model/operations/{operation_uuid}/", auth=auth.CanManagePipelines()
+)
+def get_operation(request, operation_uuid: str):
+    """
+    Fetch config of operation
+    """
+
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    # make sure the orgdbt here is the one we create locally
+    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    try:
+        uuid.UUID(str(operation_uuid))
+    except ValueError:
+        raise HttpError(400, "operation not found")
+
+    dbt_operation = OrgDbtOperation.objects.filter(uuid=operation_uuid).first()
+    if not dbt_operation:
+        raise HttpError(404, "operation not found")
+
+    return {
+        "id": dbt_operation.uuid,
+        "output_cols": dbt_operation.output_cols,
+        "config": dbt_operation.config,
+        "type": "operation_node",
+        "target_model_id": dbt_operation.dbtmodel.uuid,
+    }
+
+
 @transformapi.post(
     "/dbt_project/model/{model_uuid}/save/", auth=auth.CanManagePipelines()
 )
