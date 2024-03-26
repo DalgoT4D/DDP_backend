@@ -202,17 +202,14 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
         payload, target_model, is_multi_input_op, current_operations_chained
     )
 
-    # we create edges only with tables/models at the start of the chain & not operation nodes
-    if current_operations_chained == 0:
-        for source in all_input_models:
-            edge = DbtEdge.objects.filter(
-                from_node=source, to_node=target_model
-            ).first()
-            if not edge:
-                DbtEdge.objects.create(
-                    from_node=source,
-                    to_node=target_model,
-                )
+    # we create edges only with tables/models
+    for source in all_input_models:
+        edge = DbtEdge.objects.filter(from_node=source, to_node=target_model).first()
+        if not edge:
+            DbtEdge.objects.create(
+                from_node=source,
+                to_node=target_model,
+            )
 
     output_cols = dbtautomation_service.get_output_cols_for_operation(
         org_warehouse, payload.op_type, final_config["config"].copy()
@@ -241,6 +238,93 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
         "config": dbt_op.config,
         "type": "operation_node",
         "target_model_id": dbt_op.dbtmodel.uuid,
+    }
+
+
+@transformapi.put(
+    "/dbt_project/model/operations/{operation_uuid}/", auth=auth.CanManagePipelines()
+)
+def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload):
+    """
+    Update operation config
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    is_multi_input_op = payload.op_type in ["join", "unionall"]
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    # make sure the orgdbt here is the one we create locally
+    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    try:
+        uuid.UUID(str(operation_uuid))
+    except ValueError:
+        raise HttpError(400, "operation not found")
+
+    dbt_operation = OrgDbtOperation.objects.filter(uuid=operation_uuid).first()
+    if not dbt_operation:
+        raise HttpError(404, "operation not found")
+
+    if dbt_operation.dbtmodel.under_construction is False:
+        raise HttpError(403, "model is locked")
+
+    # allow edit of only leaf operation nodes
+    if (
+        OrgDbtOperation.objects.filter(
+            dbtmodel=dbt_operation.dbtmodel, seq__gt=dbt_operation.seq
+        ).count()
+        >= 1
+    ):
+        raise HttpError(403, "operation is locked; cannot edit")
+
+    target_model = dbt_operation.dbtmodel
+
+    current_operations_chained = OrgDbtOperation.objects.filter(
+        dbtmodel=target_model
+    ).count()
+
+    final_config, all_input_models = validate_operation_config(
+        payload, target_model, is_multi_input_op, current_operations_chained
+    )
+
+    # create edges only with tables/models if not present
+    for source in all_input_models:
+        edge = DbtEdge.objects.filter(from_node=source, to_node=target_model).first()
+        if not edge:
+            DbtEdge.objects.create(
+                from_node=source,
+                to_node=target_model,
+            )
+
+    output_cols = dbtautomation_service.get_output_cols_for_operation(
+        org_warehouse, payload.op_type, final_config["config"].copy()
+    )
+    logger.info("updating operation")
+
+    dbt_operation.config = final_config
+    dbt_operation.output_cols = output_cols
+    dbt_operation.save()
+
+    logger.info("updated operation")
+
+    # save the output cols of the latest operation to the dbt model
+    target_model.output_cols = dbt_operation.output_cols
+    target_model.save()
+
+    logger.info("updated output cols for the target model")
+
+    return {
+        "id": dbt_operation.uuid,
+        "output_cols": dbt_operation.output_cols,
+        "config": dbt_operation.config,
+        "type": "operation_node",
+        "target_model_id": dbt_operation.dbtmodel.uuid,
     }
 
 
