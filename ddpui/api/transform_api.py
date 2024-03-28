@@ -22,7 +22,9 @@ from ddpui.schemas.org_task_schema import DbtProjectSchema
 from ddpui.schemas.dbt_workflow_schema import (
     CreateDbtModelPayload,
     CompleteDbtModelPayload,
+    EditDbtOperationPayload,
 )
+from ddpui.core.transformfunctions import validate_operation_config
 
 from ddpui.core import dbtautomation_service
 from ddpui.core.dbtautomation_service import sync_sources_for_warehouse
@@ -196,94 +198,21 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
         dbtmodel=target_model
     ).count()
 
-    primary_input_model: OrgDbtModel = None  # the first input model
-    other_input_models: list[OrgDbtModel] = []
-    seq: list[int] = []
-    other_input_columns: list[list[str]] = []
-
-    logger.info(
-        f"Operations chained for the target model {target_model.uuid} : {current_operations_chained}"
+    final_config, all_input_models = validate_operation_config(
+        payload, target_model, is_multi_input_op, current_operations_chained
     )
 
-    if current_operations_chained == 0:
-        if not payload.input_uuid:
-            raise HttpError(422, "input is required")
+    # we create edges only with tables/models
+    for source in all_input_models:
+        edge = DbtEdge.objects.filter(from_node=source, to_node=target_model).first()
+        if not edge:
+            DbtEdge.objects.create(
+                from_node=source,
+                to_node=target_model,
+            )
 
-        model = OrgDbtModel.objects.filter(uuid=payload.input_uuid).first()
-        if not model:
-            raise HttpError(404, "input not found")
-
-        primary_input_model = model
-
-    if is_multi_input_op:  # multi input operation
-        if len(payload.other_inputs) == 0:
-            raise HttpError(422, "atleast 2 inputs are required for this operation")
-
-        payload.other_inputs.sort(key=lambda x: x.seq)
-
-        for other_input in payload.other_inputs:
-            model = OrgDbtModel.objects.filter(uuid=other_input.uuid).first()
-            if not model:
-                raise HttpError(404, "input not found")
-            seq.append(other_input.seq)
-            other_input_columns.append(other_input.columns)
-            other_input_models.append(model)
-
-    all_input_models = (
-        [primary_input_model] if primary_input_model else []
-    ) + other_input_models
-
-    # we create edges only with tables/models at the start of the chain & not operation nodes
-    if current_operations_chained == 0:
-        for source in all_input_models:
-            edge = DbtEdge.objects.filter(
-                from_node=source, to_node=target_model
-            ).first()
-            if not edge:
-                DbtEdge.objects.create(
-                    from_node=source,
-                    to_node=target_model,
-                )
-
-    logger.info("passed all validation; moving to create operation")
-
-    # source columns or selected columns
-    # there will be atleast one input
-    OP_CONFIG = payload.config
-    OP_CONFIG["source_columns"] = payload.source_columns
-    OP_CONFIG["other_inputs"] = []
-
-    # in case of mutli input; send the rest of the inputs in the config; dbt_automation will handle the rest
-    for dbtmodel, seq, columns in zip(other_input_models, seq, other_input_columns):
-        OP_CONFIG["other_inputs"].append(
-            {
-                "input": {
-                    "input_type": dbtmodel.type,
-                    "input_name": dbtmodel.name,
-                    "source_name": dbtmodel.source_name,
-                },
-                "source_columns": columns,
-                "seq": seq,
-            }
-        )
-
-    input_config = {
-        "config": OP_CONFIG,
-        "type": payload.op_type,
-        "input_models": [
-            {
-                "uuid": str(model.uuid),
-                "name": model.name,
-                "display_name": model.display_name,
-                "source_name": model.source_name,
-                "schema": model.schema,
-                "type": model.type,
-            }
-            for model in all_input_models
-        ],
-    }
     output_cols = dbtautomation_service.get_output_cols_for_operation(
-        org_warehouse, payload.op_type, OP_CONFIG.copy()
+        org_warehouse, payload.op_type, final_config["config"].copy()
     )
     logger.info("creating operation")
 
@@ -291,7 +220,7 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
         dbtmodel=target_model,
         uuid=uuid.uuid4(),
         seq=current_operations_chained + 1,
-        config=input_config,
+        config=final_config,
         output_cols=output_cols,
     )
 
@@ -309,6 +238,131 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
         "config": dbt_op.config,
         "type": "operation_node",
         "target_model_id": dbt_op.dbtmodel.uuid,
+    }
+
+
+@transformapi.put(
+    "/dbt_project/model/operations/{operation_uuid}/", auth=auth.CanManagePipelines()
+)
+def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload):
+    """
+    Update operation config
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    is_multi_input_op = payload.op_type in ["join", "unionall"]
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    # make sure the orgdbt here is the one we create locally
+    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    try:
+        uuid.UUID(str(operation_uuid))
+    except ValueError:
+        raise HttpError(400, "operation not found")
+
+    dbt_operation = OrgDbtOperation.objects.filter(uuid=operation_uuid).first()
+    if not dbt_operation:
+        raise HttpError(404, "operation not found")
+
+    if dbt_operation.dbtmodel.under_construction is False:
+        raise HttpError(403, "model is locked")
+
+    # allow edit of only leaf operation nodes
+    if (
+        OrgDbtOperation.objects.filter(
+            dbtmodel=dbt_operation.dbtmodel, seq__gt=dbt_operation.seq
+        ).count()
+        >= 1
+    ):
+        raise HttpError(403, "operation is locked; cannot edit")
+
+    target_model = dbt_operation.dbtmodel
+
+    current_operations_chained = OrgDbtOperation.objects.filter(
+        dbtmodel=target_model
+    ).count()
+
+    final_config, all_input_models = validate_operation_config(
+        payload, target_model, is_multi_input_op, current_operations_chained, edit=True
+    )
+
+    # create edges only with tables/models if not present
+    for source in all_input_models:
+        edge = DbtEdge.objects.filter(from_node=source, to_node=target_model).first()
+        if not edge:
+            DbtEdge.objects.create(
+                from_node=source,
+                to_node=target_model,
+            )
+
+    output_cols = dbtautomation_service.get_output_cols_for_operation(
+        org_warehouse, payload.op_type, final_config["config"].copy()
+    )
+    logger.info("updating operation")
+
+    dbt_operation.config = final_config
+    dbt_operation.output_cols = output_cols
+    dbt_operation.save()
+
+    logger.info("updated operation")
+
+    # save the output cols of the latest operation to the dbt model
+    target_model.output_cols = dbt_operation.output_cols
+    target_model.save()
+
+    logger.info("updated output cols for the target model")
+
+    return {
+        "id": dbt_operation.uuid,
+        "output_cols": dbt_operation.output_cols,
+        "config": dbt_operation.config,
+        "type": "operation_node",
+        "target_model_id": dbt_operation.dbtmodel.uuid,
+    }
+
+
+@transformapi.get(
+    "/dbt_project/model/operations/{operation_uuid}/", auth=auth.CanManagePipelines()
+)
+def get_operation(request, operation_uuid: str):
+    """
+    Fetch config of operation
+    """
+
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    # make sure the orgdbt here is the one we create locally
+    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    try:
+        uuid.UUID(str(operation_uuid))
+    except ValueError:
+        raise HttpError(400, "operation not found")
+
+    dbt_operation = OrgDbtOperation.objects.filter(uuid=operation_uuid).first()
+    if not dbt_operation:
+        raise HttpError(404, "operation not found")
+
+    return {
+        "id": dbt_operation.uuid,
+        "output_cols": dbt_operation.output_cols,
+        "config": dbt_operation.config,
+        "type": "operation_node",
+        "target_model_id": dbt_operation.dbtmodel.uuid,
     }
 
 

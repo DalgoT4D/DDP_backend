@@ -24,6 +24,18 @@ class CreateDbtModelPayload(Schema):
     other_inputs: list[InputModelPayload] = []
 
 
+class EditDbtOperationPayload(Schema):
+    """
+    schema to define the payload required to edit a dbt operation
+    """
+
+    config: dict
+    op_type: str
+    input_uuid: str = ""
+    source_columns: list[str] = []
+    other_inputs: list[InputModelPayload] = []
+
+
 class CompleteDbtModelPayload(Schema):
     """
     schema to define the payload required to create a custom org task
