@@ -25,6 +25,7 @@ from ddpui.schemas.dbt_workflow_schema import (
     EditDbtOperationPayload,
 )
 from ddpui.core.transformfunctions import validate_operation_config
+from ddpui.api.warehouse_api import get_warehouse_data
 
 from ddpui.core import dbtautomation_service
 from ddpui.core.dbtautomation_service import sync_sources_for_warehouse
@@ -357,12 +358,34 @@ def get_operation(request, operation_uuid: str):
     if not dbt_operation:
         raise HttpError(404, "operation not found")
 
+    prev_source_columns = []
+    if dbt_operation.seq > 1:
+        prev_dbt_op = OrgDbtOperation.objects.filter(
+            dbtmodel=dbt_operation.dbtmodel, seq=dbt_operation.seq - 1
+        ).first()
+        prev_source_columns = prev_dbt_op.output_cols
+    else:
+        config = dbt_operation.config
+        if "input_models" in config and len(config["input_models"]) >= 1:
+            model = OrgDbtModel.objects.filter(
+                uuid=config["input_models"][0]["uuid"]
+            ).first()
+            if model:
+                for col_data in get_warehouse_data(
+                    request,
+                    "table_columns",
+                    schema_name=model.schema,
+                    table_name=model.name,
+                ):
+                    prev_source_columns.append(col_data["name"])
+
     return {
         "id": dbt_operation.uuid,
         "output_cols": dbt_operation.output_cols,
         "config": dbt_operation.config,
         "type": "operation_node",
         "target_model_id": dbt_operation.dbtmodel.uuid,
+        "prev_source_columns": prev_source_columns,
     }
 
 
