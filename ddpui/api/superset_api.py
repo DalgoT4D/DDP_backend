@@ -51,7 +51,7 @@ def ninja_default_error_handler(
 
 @supersetapi.post(
     "embed_token/{dashboard_uuid}/",
-    auth=auth.AnyOrgUser(),
+    auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_view_usage_dashboard"])
 def post_fetch_embed_token(request, dashboard_uuid):  # pylint: disable=unused-argument

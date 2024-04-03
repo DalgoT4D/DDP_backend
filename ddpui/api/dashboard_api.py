@@ -48,7 +48,7 @@ def ninja_default_error_handler(
     return Response({"detail": "something went wrong"}, status=500)
 
 
-@dashboardapi.get("/", auth=auth.CanManagePipelines())
+@dashboardapi.get("/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_dashboard"])
 def get_dashboard(request):
     """Fetch all flows/pipelines created in an organization"""
@@ -93,7 +93,7 @@ def get_dashboard(request):
     return res
 
 
-@dashboardapi.get("/v1", auth=auth.CanManagePipelines())
+@dashboardapi.get("/v1", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_dashboard"])
 def get_dashboard_v1(request):
     """Fetch all flows/pipelines created in an organization"""

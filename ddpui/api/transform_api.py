@@ -77,7 +77,7 @@ def handle_value_error(request, exc):
     return Response({"detail": str(exc)}, status=400)
 
 
-@transformapi.post("/dbt_project/", auth=auth.CanManagePipelines())
+@transformapi.post("/dbt_project/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_dbt_workspace"])
 def create_dbt_project(request, payload: DbtProjectSchema):
     """
@@ -99,7 +99,7 @@ def create_dbt_project(request, payload: DbtProjectSchema):
     return {"message": f"Project {org.slug} created successfully"}
 
 
-@transformapi.delete("/dbt_project/{project_name}", auth=auth.CanManagePipelines())
+@transformapi.delete("/dbt_project/{project_name}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_delete_dbt_workspace"])
 def delete_dbt_project(request, project_name: str):
     """
@@ -132,7 +132,7 @@ def delete_dbt_project(request, project_name: str):
     return {"message": f"Project {project_name} deleted successfully"}
 
 
-@transformapi.post("/dbt_project/sync_sources/", auth=auth.CanManagePipelines())
+@transformapi.post("/dbt_project/sync_sources/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_sync_sources"])
 def sync_sources(request):
     """
@@ -159,7 +159,7 @@ def sync_sources(request):
 ########################## Models & Sources #############################################
 
 
-@transformapi.post("/dbt_project/model/", auth=auth.CanManagePipelines())
+@transformapi.post("/dbt_project/model/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_dbt_model"])
 def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     """
@@ -248,7 +248,7 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
 
 
 @transformapi.put(
-    "/dbt_project/model/operations/{operation_uuid}/", auth=auth.CanManagePipelines()
+    "/dbt_project/model/operations/{operation_uuid}/", auth=auth.CustomAuthMiddleware()
 )
 @has_permission(["can_edit_dbt_operation"])
 def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload):
@@ -336,7 +336,7 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
 
 
 @transformapi.get(
-    "/dbt_project/model/operations/{operation_uuid}/", auth=auth.CanManagePipelines()
+    "/dbt_project/model/operations/{operation_uuid}/", auth=auth.CustomAuthMiddleware()
 )
 @has_permission(["can_view_dbt_operation"])
 def get_operation(request, operation_uuid: str):
@@ -397,7 +397,7 @@ def get_operation(request, operation_uuid: str):
 
 
 @transformapi.post(
-    "/dbt_project/model/{model_uuid}/save/", auth=auth.CanManagePipelines()
+    "/dbt_project/model/{model_uuid}/save/", auth=auth.CustomAuthMiddleware()
 )
 @has_permission(["can_edit_dbt_model"])
 def post_save_model(request, model_uuid: str, payload: CompleteDbtModelPayload):
@@ -441,7 +441,7 @@ def post_save_model(request, model_uuid: str, payload: CompleteDbtModelPayload):
     }
 
 
-@transformapi.get("/dbt_project/sources_models/", auth=auth.CanManagePipelines())
+@transformapi.get("/dbt_project/sources_models/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_dbt_models"])
 def get_input_sources_and_models(request, schema_name: str = None):
     """
@@ -481,7 +481,7 @@ def get_input_sources_and_models(request, schema_name: str = None):
     return res
 
 
-@transformapi.get("/dbt_project/graph/", auth=auth.CanManagePipelines())
+@transformapi.get("/dbt_project/graph/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_dbt_workspace"])
 def get_dbt_project_DAG(request):
     """
@@ -599,7 +599,9 @@ def get_dbt_project_DAG(request):
     return res
 
 
-@transformapi.delete("/dbt_project/model/{model_uuid}/", auth=auth.CanManagePipelines())
+@transformapi.delete(
+    "/dbt_project/model/{model_uuid}/", auth=auth.CustomAuthMiddleware()
+)
 @has_permission(["can_delete_dbt_model"])
 def delete_model(request, model_uuid):
     """
@@ -648,7 +650,7 @@ def delete_model(request, model_uuid):
 
 
 @transformapi.delete(
-    "/dbt_project/model/operations/{operation_uuid}/", auth=auth.CanManagePipelines()
+    "/dbt_project/model/operations/{operation_uuid}/", auth=auth.CustomAuthMiddleware()
 )
 @has_permission(["can_delete_dbt_operation"])
 def delete_operation(request, operation_uuid):
@@ -684,8 +686,8 @@ def delete_operation(request, operation_uuid):
     return {"success": 1}
 
 
-@transformapi.get("/dbt_project/data_type/", auth=auth.CanManagePipelines())
-@has_permission(['can_view_warehouse_data'])
+@transformapi.get("/dbt_project/data_type/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse_data"])
 def get_warehouse_datatypes(request):
     """Get the datatypes of a table in a warehouse"""
     orguser: OrgUser = request.orguser

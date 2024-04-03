@@ -81,7 +81,9 @@ def ninja_default_error_handler(
     return Response({"detail": "something went wrong"}, status=500)
 
 
-@user_org_api.get("/currentuser", response=OrgUserResponse, auth=auth.AnyOrgUser())
+@user_org_api.get(
+    "/currentuser", response=OrgUserResponse, auth=auth.CustomAuthMiddleware()
+)
 @has_permission(["can_view_orgusers"])
 def get_current_user(request):
     """return the OrgUser making this request"""
@@ -133,7 +135,9 @@ def post_login(request):
 
 
 @user_org_api.get(
-    "/organizations/users", response=List[OrgUserResponse], auth=auth.CanManageUsers()
+    "/organizations/users",
+    response=List[OrgUserResponse],
+    auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_view_orgusers"])
 def get_organization_users(request):
@@ -150,7 +154,7 @@ def get_organization_users(request):
     return orgusers
 
 
-@user_org_api.post("/organizations/users/delete", auth=auth.CanManageUsers())
+@user_org_api.post("/organizations/users/delete", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_delete_orguser"])
 def delete_organization_users(request, payload: DeleteOrgUserPayload):
     """delete the orguser posted"""
@@ -166,7 +170,9 @@ def delete_organization_users(request, payload: DeleteOrgUserPayload):
 
 
 @user_org_api.put(
-    "/organizations/user_self/", response=OrgUserResponse, auth=auth.AnyOrgUser()
+    "/organizations/user_self/",
+    response=OrgUserResponse,
+    auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_edit_orguser"])
 def put_organization_user_self(request, payload: OrgUserUpdate):
@@ -181,7 +187,7 @@ def put_organization_user_self(request, payload: OrgUserUpdate):
 @user_org_api.put(
     "/organizations/users/",
     response=OrgUserResponse,
-    auth=auth.CanManageUsers(),
+    auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_edit_orguser"])
 def put_organization_user(request, payload: OrgUserUpdate):
@@ -208,7 +214,7 @@ def put_organization_user(request, payload: OrgUserUpdate):
 @user_org_api.post(
     "/organizations/users/makeowner/",
     response=OrgUserResponse,
-    auth=auth.FullAccess(),
+    auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_edit_orguser_role"])
 def post_transfer_ownership(request, payload: OrgUserNewOwner):
@@ -220,7 +226,7 @@ def post_transfer_ownership(request, payload: OrgUserNewOwner):
     return retval
 
 
-@user_org_api.post("/organizations/warehouse/", auth=auth.CanManagePipelines())
+@user_org_api.post("/organizations/warehouse/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_warehouse"])
 def post_organization_warehouse(request, payload: OrgWarehouseSchema):
     """registers a data warehouse for the org"""
@@ -232,7 +238,7 @@ def post_organization_warehouse(request, payload: OrgWarehouseSchema):
     return {"success": 1}
 
 
-@user_org_api.get("/organizations/warehouses", auth=auth.CanManagePipelines())
+@user_org_api.get("/organizations/warehouses", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouses"])
 def get_organizations_warehouses(request):
     """returns all warehouses associated with this org"""
@@ -246,7 +252,7 @@ def get_organizations_warehouses(request):
 @user_org_api.post(
     "/organizations/users/invite/",
     response=InvitationSchema,
-    auth=auth.CanManageUsers(),
+    auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_create_invitation"])
 def post_organization_user_invite(request, payload: InvitationSchema):
@@ -272,7 +278,7 @@ def post_organization_user_accept_invite(
     return retval
 
 
-@user_org_api.get("/users/invitations/", auth=auth.AnyOrgUser())
+@user_org_api.get("/users/invitations/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_invitations"])
 def get_invitations(request):
     """Get all invitations sent by the current user"""
@@ -282,7 +288,9 @@ def get_invitations(request):
     return retval
 
 
-@user_org_api.post("/users/invitations/resend/{invitation_id}", auth=auth.AnyOrgUser())
+@user_org_api.post(
+    "/users/invitations/resend/{invitation_id}", auth=auth.CustomAuthMiddleware()
+)
 @has_permission(["can_edit_invitation"])
 def post_resend_invitation(request, invitation_id):
     """Get all invitations sent by the current user"""
@@ -298,7 +306,7 @@ def post_resend_invitation(request, invitation_id):
 
 
 @user_org_api.delete(
-    "/users/invitations/delete/{invitation_id}", auth=auth.AnyOrgUser()
+    "/users/invitations/delete/{invitation_id}", auth=auth.CustomAuthMiddleware()
 )
 @has_permission(["can_delete_invitation"])
 def delete_invitation(request, invitation_id):
@@ -339,7 +347,7 @@ def post_reset_password(
     return {"success": 1}
 
 
-@user_org_api.get("/users/verify_email/resend", auth=auth.AnyOrgUser())
+@user_org_api.get("/users/verify_email/resend", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_resend_email_verification"])
 def get_verify_email_resend(request):  # pylint: disable=unused-argument
     """this api is hit when the user is logged in but the email is still not verified"""
@@ -366,7 +374,9 @@ def post_verify_email(
 # new apis to go away from the block architecture
 
 
-@user_org_api.post("/v1/organizations/", response=OrgSchema, auth=auth.AnyOrgUser())
+@user_org_api.post(
+    "/v1/organizations/", response=OrgSchema, auth=auth.CustomAuthMiddleware()
+)
 @has_permission(["can_create_org"])
 def post_organization_v1(request, payload: OrgSchema):
     """creates a new org & new orguser (if required) and attaches it to the requestor"""
@@ -389,7 +399,7 @@ def post_organization_v1(request, payload: OrgSchema):
     )
 
 
-@user_org_api.delete("/v1/organizations/warehouses/", auth=auth.CanManagePipelines())
+@user_org_api.delete("/v1/organizations/warehouses/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_delete_warehouses"])
 def delete_organization_warehouses_v1(request):
     """deletes all (references to) data warehouses for the org"""
@@ -405,7 +415,7 @@ def delete_organization_warehouses_v1(request):
     return {"success": 1}
 
 
-@user_org_api.post("/organizations/accept-tnc/", auth=auth.CanManagePipelines())
+@user_org_api.post("/organizations/accept-tnc/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_accept_tnc"])
 def post_organization_accept_tnc(request):
     """accept the terms and conditions"""

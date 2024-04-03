@@ -87,14 +87,14 @@ def get_warehouse_data(request, data_type: str, **kwargs):
     return data
 
 
-@warehouseapi.get("/tables/{schema_name}", auth=auth.CanManagePipelines())
+@warehouseapi.get("/tables/{schema_name}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def get_table(request, schema_name: str):
     """Fetches table names from a warehouse"""
     return get_warehouse_data(request, "tables", schema_name=schema_name)
 
 
-@warehouseapi.get("/schemas", auth=auth.CanManagePipelines())
+@warehouseapi.get("/schemas", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def get_schema(request):
     """Fetches schema names from a warehouse"""
@@ -102,7 +102,7 @@ def get_schema(request):
 
 
 @warehouseapi.get(
-    "/table_columns/{schema_name}/{table_name}", auth=auth.CanManagePipelines()
+    "/table_columns/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware()
 )
 @has_permission(["can_view_warehouse_data"])
 def get_table_columns(request, schema_name: str, table_name: str):
@@ -113,7 +113,7 @@ def get_table_columns(request, schema_name: str, table_name: str):
 
 
 @warehouseapi.get(
-    "/table_data/{schema_name}/{table_name}", auth=auth.CanManagePipelines()
+    "/table_data/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware()
 )
 @has_permission(["can_view_warehouse_data"])
 def get_table_data(
@@ -139,7 +139,7 @@ def get_table_data(
 
 
 @warehouseapi.get(
-    "/table_count/{schema_name}/{table_name}", auth=auth.CanManagePipelines()
+    "/table_count/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware()
 )
 @has_permission(["can_view_warehouse_data"])
 def get_table_count(request, schema_name: str, table_name: str):
@@ -160,7 +160,7 @@ def get_table_count(request, schema_name: str, table_name: str):
         )
 
 
-@warehouseapi.get("/dbt_project/json_columnspec/", auth=auth.CanManagePipelines())
+@warehouseapi.get("/dbt_project/json_columnspec/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def get_json_column_spec(
     request, source_schema: str, input_name: str, json_column: str

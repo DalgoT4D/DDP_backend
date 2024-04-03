@@ -58,7 +58,7 @@ def ninja_default_error_handler(
     return Response({"detail": "something went wrong"}, status=500)
 
 
-@dataapi.get("/tasks/", auth=auth.CanManagePipelines())
+@dataapi.get("/tasks/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_master_tasks"])
 def get_tasks(request):
     """Fetch master list of tasks related to transformation"""
@@ -69,7 +69,7 @@ def get_tasks(request):
     return tasks
 
 
-@dataapi.get("/tasks/{slug}/config/", auth=auth.CanManagePipelines())
+@dataapi.get("/tasks/{slug}/config/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_master_task"])
 def get_task_config(request, slug):
     """Get task config which details about the parameters that can be added/used while running it"""

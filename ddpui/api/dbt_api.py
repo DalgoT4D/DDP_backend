@@ -62,7 +62,7 @@ def ninja_default_error_handler(
     return Response({"detail": "something went wrong"}, status=500)
 
 
-@dbtapi.post("/workspace/", auth=auth.CanManagePipelines())
+@dbtapi.post("/workspace/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_dbt_workspace"])
 def post_dbt_workspace(request, payload: OrgDbtSchema):
     """Setup the client git repo and install a virtual env inside it to run dbt"""
@@ -78,7 +78,7 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
     return {"task_id": task.id}
 
 
-@dbtapi.put("/github/", auth=auth.CanManagePipelines())
+@dbtapi.put("/github/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_dbt_workspace"])
 def put_dbt_github(request, payload: OrgDbtGitHub):
     """Setup the client git repo and install a virtual env inside it to run dbt"""
@@ -100,7 +100,9 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
     return {"task_id": task.id}
 
 
-@dbtapi.delete("/workspace/", response=OrgUserResponse, auth=auth.CanManagePipelines())
+@dbtapi.delete(
+    "/workspace/", response=OrgUserResponse, auth=auth.CustomAuthMiddleware()
+)
 @has_permission(["can_delete_dbt_workspace"])
 def dbt_delete(request):
     """Delete the dbt workspace and project repo created"""
@@ -113,7 +115,7 @@ def dbt_delete(request):
     return from_orguser(orguser)
 
 
-@dbtapi.get("/dbt_workspace", auth=auth.CanManagePipelines())
+@dbtapi.get("/dbt_workspace", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_dbt_workspace"])
 def get_dbt_workspace(request):
     """return details of the dbt workspace for this org"""
@@ -128,7 +130,7 @@ def get_dbt_workspace(request):
     }
 
 
-@dbtapi.post("/git_pull/", auth=auth.CanManagePipelines())
+@dbtapi.post("/git_pull/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_run_orgtask"])
 def post_dbt_git_pull(request):
     """Pull the dbt repo from github for the organization"""
@@ -150,7 +152,7 @@ def post_dbt_git_pull(request):
     return {"success": True}
 
 
-@dbtapi.post("/makedocs/", auth=auth.CanManagePipelines())
+@dbtapi.post("/makedocs/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_dbt_docs"])
 def post_dbt_makedocs(request):
     """prepare the dbt docs single html"""
@@ -183,7 +185,7 @@ def post_dbt_makedocs(request):
     return {"token": token.hex}
 
 
-@dbtapi.put("/v1/schema/", auth=auth.CanManagePipelines())
+@dbtapi.put("/v1/schema/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_dbt_workspace"])
 def put_dbt_schema_v1(request, payload: OrgDbtTarget):
     """Update the target_configs.schema for the dbt cli profile block"""
@@ -215,7 +217,7 @@ def put_dbt_schema_v1(request, payload: OrgDbtTarget):
     return {"success": 1}
 
 
-@dbtapi.get("/dbt_transform/", auth=auth.CanManagePipelines())
+@dbtapi.get("/dbt_transform/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_dbt_workspace"])
 def get_transform_type(request):
     """find the transform type"""
