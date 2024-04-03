@@ -82,6 +82,7 @@ def ninja_default_error_handler(
 
 
 @user_org_api.get("/currentuser", response=OrgUserResponse, auth=auth.AnyOrgUser())
+@has_permission(["can_view_orgusers"])
 def get_current_user(request):
     """return the OrgUser making this request"""
     orguser: OrgUser = request.orguser
@@ -103,6 +104,7 @@ def get_current_user_v2(request):
 
 
 @user_org_api.post("/organizations/users/", response=OrgUserResponse)
+@has_permission(["can_create_orguser"])
 def post_organization_user(
     request, payload: OrgUserCreate
 ):  # pylint: disable=unused-argument
@@ -133,6 +135,7 @@ def post_login(request):
 @user_org_api.get(
     "/organizations/users", response=List[OrgUserResponse], auth=auth.CanManageUsers()
 )
+@has_permission(["can_view_orgusers"])
 def get_organization_users(request):
     """list all OrgUsers in the requestor's org, including inactive"""
     orguser: OrgUser = request.orguser
@@ -148,6 +151,7 @@ def get_organization_users(request):
 
 
 @user_org_api.post("/organizations/users/delete", auth=auth.CanManageUsers())
+@has_permission(["can_delete_orguser"])
 def delete_organization_users(request, payload: DeleteOrgUserPayload):
     """delete the orguser posted"""
     orguser: OrgUser = request.orguser
@@ -164,6 +168,7 @@ def delete_organization_users(request, payload: DeleteOrgUserPayload):
 @user_org_api.put(
     "/organizations/user_self/", response=OrgUserResponse, auth=auth.AnyOrgUser()
 )
+@has_permission(["can_edit_orguser"])
 def put_organization_user_self(request, payload: OrgUserUpdate):
     """update the requestor's OrgUser"""
     orguser: OrgUser = request.orguser
@@ -178,6 +183,7 @@ def put_organization_user_self(request, payload: OrgUserUpdate):
     response=OrgUserResponse,
     auth=auth.CanManageUsers(),
 )
+@has_permission(["can_edit_orguser"])
 def put_organization_user(request, payload: OrgUserUpdate):
     """update another OrgUser"""
     requestor_orguser: OrgUser = request.orguser
@@ -204,6 +210,7 @@ def put_organization_user(request, payload: OrgUserUpdate):
     response=OrgUserResponse,
     auth=auth.FullAccess(),
 )
+@has_permission(["can_edit_orguser_role"])
 def post_transfer_ownership(request, payload: OrgUserNewOwner):
     """update another OrgUser"""
     orguser: OrgUser = request.orguser
@@ -214,6 +221,7 @@ def post_transfer_ownership(request, payload: OrgUserNewOwner):
 
 
 @user_org_api.post("/organizations/warehouse/", auth=auth.CanManagePipelines())
+@has_permission(["can_create_warehouse"])
 def post_organization_warehouse(request, payload: OrgWarehouseSchema):
     """registers a data warehouse for the org"""
     orguser: OrgUser = request.orguser
@@ -225,6 +233,7 @@ def post_organization_warehouse(request, payload: OrgWarehouseSchema):
 
 
 @user_org_api.get("/organizations/warehouses", auth=auth.CanManagePipelines())
+@has_permission(["can_view_warehouses"])
 def get_organizations_warehouses(request):
     """returns all warehouses associated with this org"""
     orguser: OrgUser = request.orguser
@@ -239,6 +248,7 @@ def get_organizations_warehouses(request):
     response=InvitationSchema,
     auth=auth.CanManageUsers(),
 )
+@has_permission(["can_create_invitation"])
 def post_organization_user_invite(request, payload: InvitationSchema):
     """Send an invitation to a user to join platform"""
     orguser: OrgUser = request.orguser
@@ -263,6 +273,7 @@ def post_organization_user_accept_invite(
 
 
 @user_org_api.get("/users/invitations/", auth=auth.AnyOrgUser())
+@has_permission(["can_view_invitations"])
 def get_invitations(request):
     """Get all invitations sent by the current user"""
     retval, error = orguserfunctions.get_invitations_from_orguser(request.orguser)
@@ -272,6 +283,7 @@ def get_invitations(request):
 
 
 @user_org_api.post("/users/invitations/resend/{invitation_id}", auth=auth.AnyOrgUser())
+@has_permission(["can_edit_invitation"])
 def post_resend_invitation(request, invitation_id):
     """Get all invitations sent by the current user"""
     orguser: OrgUser = request.orguser
@@ -288,6 +300,7 @@ def post_resend_invitation(request, invitation_id):
 @user_org_api.delete(
     "/users/invitations/delete/{invitation_id}", auth=auth.AnyOrgUser()
 )
+@has_permission(["can_delete_invitation"])
 def delete_invitation(request, invitation_id):
     """Get all invitations sent by the current user"""
     orguser: OrgUser = request.orguser
@@ -327,6 +340,7 @@ def post_reset_password(
 
 
 @user_org_api.get("/users/verify_email/resend", auth=auth.AnyOrgUser())
+@has_permission(["can_resend_email_verification"])
 def get_verify_email_resend(request):  # pylint: disable=unused-argument
     """this api is hit when the user is logged in but the email is still not verified"""
     _, error = orguserfunctions.resend_verification_email(
@@ -353,6 +367,7 @@ def post_verify_email(
 
 
 @user_org_api.post("/v1/organizations/", response=OrgSchema, auth=auth.AnyOrgUser())
+@has_permission(["can_create_org"])
 def post_organization_v1(request, payload: OrgSchema):
     """creates a new org & new orguser (if required) and attaches it to the requestor"""
     orguser: OrgUser = request.orguser
@@ -375,6 +390,7 @@ def post_organization_v1(request, payload: OrgSchema):
 
 
 @user_org_api.delete("/v1/organizations/warehouses/", auth=auth.CanManagePipelines())
+@has_permission(["can_delete_warehouses"])
 def delete_organization_warehouses_v1(request):
     """deletes all (references to) data warehouses for the org"""
     orguser: OrgUser = request.orguser
@@ -390,6 +406,7 @@ def delete_organization_warehouses_v1(request):
 
 
 @user_org_api.post("/organizations/accept-tnc/", auth=auth.CanManagePipelines())
+@has_permission(["can_accept_tnc"])
 def post_organization_accept_tnc(request):
     """accept the terms and conditions"""
     orguser: OrgUser = request.orguser
