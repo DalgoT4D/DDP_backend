@@ -12,6 +12,7 @@ from ddpui import auth
 from ddpui.models.org import OrgDataFlow, OrgDataFlowv1
 from ddpui.models.orgjobs import BlockLock, DataflowBlock
 from ddpui.models.tasks import DataflowOrgTask, TaskLock
+from ddpui.auth import has_permission
 
 
 dashboardapi = NinjaAPI(urls_namespace="dashboard")
@@ -48,6 +49,7 @@ def ninja_default_error_handler(
 
 
 @dashboardapi.get("/", auth=auth.CanManagePipelines())
+@has_permission(["can_view_dashboard"])
 def get_dashboard(request):
     """Fetch all flows/pipelines created in an organization"""
     orguser = request.orguser
@@ -75,12 +77,14 @@ def get_dashboard(request):
                 "runs": prefect_service.get_flow_runs_by_deployment_id(
                     flow.deployment_id, 50
                 ),
-                "lock": {
-                    "lockedBy": lock.locked_by.user.email,
-                    "lockedAt": lock.locked_at,
-                }
-                if lock
-                else None,
+                "lock": (
+                    {
+                        "lockedBy": lock.locked_by.user.email,
+                        "lockedAt": lock.locked_at,
+                    }
+                    if lock
+                    else None
+                ),
             }
         )
 
@@ -90,6 +94,7 @@ def get_dashboard(request):
 
 
 @dashboardapi.get("/v1", auth=auth.CanManagePipelines())
+@has_permission(["can_view_dashboard"])
 def get_dashboard_v1(request):
     """Fetch all flows/pipelines created in an organization"""
     orguser = request.orguser
@@ -117,12 +122,14 @@ def get_dashboard_v1(request):
                 "runs": prefect_service.get_flow_runs_by_deployment_id(
                     flow.deployment_id, 50
                 ),
-                "lock": {
-                    "lockedBy": lock.locked_by.user.email,
-                    "lockedAt": lock.locked_at,
-                }
-                if lock
-                else None,
+                "lock": (
+                    {
+                        "lockedBy": lock.locked_by.user.email,
+                        "lockedAt": lock.locked_at,
+                    }
+                    if lock
+                    else None
+                ),
             }
         )
 
