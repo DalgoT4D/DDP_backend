@@ -107,6 +107,8 @@ class OrgUserResponse(Schema):
     role_slug: str
     wtype: str | None
     is_demo: bool = False
+    new_role_slug: str
+    permissions: list[dict]
 
 
 class Invitation(models.Model):
