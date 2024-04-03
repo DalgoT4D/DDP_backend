@@ -16,6 +16,7 @@ from ddpui.utils.constants import (
     TASK_DBTRUN,
     TASK_GITPULL,
 )
+from ddpui.auth import has_permission
 from ddpui.ddpdbt import dbt_service
 
 dataapi = NinjaAPI(urls_namespace="master_data")
@@ -58,6 +59,7 @@ def ninja_default_error_handler(
 
 
 @dataapi.get("/tasks/", auth=auth.CanManagePipelines())
+@has_permission(["can_view_master_tasks"])
 def get_tasks(request):
     """Fetch master list of tasks related to transformation"""
     tasks = [
@@ -68,6 +70,7 @@ def get_tasks(request):
 
 
 @dataapi.get("/tasks/{slug}/config/", auth=auth.CanManagePipelines())
+@has_permission(["can_view_master_task"])
 def get_task_config(request, slug):
     """Get task config which details about the parameters that can be added/used while running it"""
     task = Task.objects.filter(slug=slug).first()

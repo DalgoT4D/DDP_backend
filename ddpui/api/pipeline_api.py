@@ -40,6 +40,7 @@ from ddpui.core.pipelinefunctions import (
     pipeline_with_orgtasks,
 )
 from ddpui.core.dbtfunctions import gather_dbt_project_params
+from ddpui.auth import has_permission
 
 pipelineapi = NinjaAPI(urls_namespace="pipeline")
 # http://127.0.0.1:8000/api/docs
@@ -80,6 +81,7 @@ def ninja_default_error_handler(
 
 
 @pipelineapi.post("v1/flows/", auth=auth.CanManagePipelines())
+@has_permission(["can_create_pipeline"])
 def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
     """Create a prefect deployment i.e. a ddp dataflow"""
     orguser: OrgUser = request.orguser
@@ -215,6 +217,7 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
 
 
 @pipelineapi.get("v1/flows/", auth=auth.CanManagePipelines())
+@has_permission(["can_view_pipelines"])
 def get_prefect_dataflows_v1(request):
     """Fetch all flows/pipelines created in an organization"""
     orguser: OrgUser = request.orguser
@@ -280,6 +283,7 @@ def get_prefect_dataflows_v1(request):
 
 
 @pipelineapi.get("v1/flows/{deployment_id}", auth=auth.CanManagePipelines())
+@has_permission(["can_view_pipeline"])
 def get_prefect_dataflow_v1(request, deployment_id):
     """Fetch details of prefect deployment"""
     orguser: OrgUser = request.orguser
@@ -346,6 +350,7 @@ def get_prefect_dataflow_v1(request, deployment_id):
 
 
 @pipelineapi.delete("v1/flows/{deployment_id}", auth=auth.CanManagePipelines())
+@has_permission(["can_delete_pipeline"])
 def delete_prefect_dataflow_v1(request, deployment_id):
     """Delete a prefect deployment along with its org data flow"""
     orguser: OrgUser = request.orguser
@@ -369,6 +374,7 @@ def delete_prefect_dataflow_v1(request, deployment_id):
 
 
 @pipelineapi.put("v1/flows/{deployment_id}", auth=auth.CanManagePipelines())
+@has_permission(["can_edit_pipeline"])
 def put_prefect_dataflow_v1(
     request, deployment_id, payload: PrefectDataFlowUpdateSchema3
 ):
@@ -501,6 +507,7 @@ def put_prefect_dataflow_v1(
 @pipelineapi.post(
     "flows/{deployment_id}/set_schedule/{status}", auth=auth.CanManagePipelines()
 )
+@has_permission(["can_edit_pipeline"])
 def post_deployment_set_schedule(request, deployment_id, status):
     """Set deployment schedule to active / inactive"""
     orguser: OrgUser = request.orguser
@@ -527,6 +534,7 @@ def post_deployment_set_schedule(request, deployment_id, status):
 
 
 @pipelineapi.post("v1/flows/{deployment_id}/flow_run/", auth=auth.CanManagePipelines())
+@has_permission(["can_run_pipeline"])
 def post_run_prefect_org_deployment_task(
     request, deployment_id, payload: TaskParameters = None
 ):
@@ -604,6 +612,7 @@ def post_run_prefect_org_deployment_task(
 
 
 @pipelineapi.get("flow_runs/{flow_run_id}/logs", auth=auth.CanManagePipelines())
+@has_permission(["can_view_pipeline"])
 def get_flow_runs_logs(
     request, flow_run_id, offset: int = 0
 ):  # pylint: disable=unused-argument
@@ -617,6 +626,7 @@ def get_flow_runs_logs(
 
 
 @pipelineapi.get("flow_runs/{flow_run_id}/logsummary", auth=auth.CanManagePipelines())
+@has_permission(["can_view_pipeline"])
 def get_flow_runs_logsummary(request, flow_run_id):  # pylint: disable=unused-argument
     """return the logs from a flow-run"""
     try:
@@ -639,6 +649,7 @@ def get_flow_runs_logsummary(request, flow_run_id):  # pylint: disable=unused-ar
     auth=auth.CanManagePipelines(),
     response=PrefectFlowRunSchema,
 )
+@has_permission(["can_view_pipeline"])
 def get_flow_run_by_id(request, flow_run_id):
     # pylint: disable=unused-argument
     """fetch a flow run from prefect"""
@@ -653,6 +664,7 @@ def get_flow_run_by_id(request, flow_run_id):
 @pipelineapi.get(
     "flows/{deployment_id}/flow_runs/history", auth=auth.CanManagePipelines()
 )
+@has_permission(["can_view_pipeline"])
 def get_prefect_flow_runs_log_history(
     request, deployment_id, limit: int = 0, fetchlogs=True
 ):

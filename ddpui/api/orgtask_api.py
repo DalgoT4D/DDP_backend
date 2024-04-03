@@ -50,6 +50,7 @@ from ddpui.core.pipelinefunctions import (
     setup_dbt_core_task_config,
     setup_git_pull_shell_task_config,
 )
+from ddpui.auth import has_permission
 
 orgtaskapi = NinjaAPI(urls_namespace="orgtask")
 # http://127.0.0.1:8000/api/docs
@@ -91,6 +92,7 @@ def ninja_default_error_handler(
 
 
 @orgtaskapi.post("/", auth=auth.CanManagePipelines())
+@has_permission(["can_create_orgtask"])
 def post_orgtask(request, payload: CreateOrgTaskPayload):
     """Create a custom client org task (dbt or git). If base task is dbt run create a deployment"""
     orguser: OrgUser = request.orguser
@@ -146,6 +148,7 @@ def post_orgtask(request, payload: CreateOrgTaskPayload):
 
 
 @orgtaskapi.post("transform/", auth=auth.CanManagePipelines())
+@has_permission(["can_create_orgtask"])
 def post_system_transformation_tasks(request):
     """
     - Create a git pull url secret block
@@ -261,6 +264,7 @@ def post_system_transformation_tasks(request):
 
 
 @orgtaskapi.get("transform/", auth=auth.CanManagePipelines())
+@has_permission(["can_view_orgtasks"])
 def get_prefect_transformation_tasks(request):
     """Fetch all dbt tasks for an org; client or system"""
     orguser: OrgUser = request.orguser
@@ -315,6 +319,7 @@ def get_prefect_transformation_tasks(request):
 
 
 @orgtaskapi.delete("transform/", auth=auth.CanManagePipelines())
+@has_permission(["can_delete_orgtask"])
 def delete_system_transformation_tasks(request):
     """delete tasks and related objects for an org"""
     orguser: OrgUser = request.orguser
@@ -348,6 +353,7 @@ def delete_system_transformation_tasks(request):
 
 
 @orgtaskapi.post("{orgtask_uuid}/run/", auth=auth.CanManagePipelines())
+@has_permission(["can_run_orgtask"])
 def post_run_prefect_org_task(
     request, orgtask_uuid, payload: TaskParameters = None
 ):  # pylint: disable=unused-argument
@@ -457,6 +463,7 @@ def post_run_prefect_org_task(
 
 
 @orgtaskapi.delete("{orgtask_uuid}/", auth=auth.CanManagePipelines())
+@has_permission(["can_delete_orgtask"])
 def post_delete_orgtask(request, orgtask_uuid):  # pylint: disable=unused-argument
     """Delete client generated orgtask"""
 
