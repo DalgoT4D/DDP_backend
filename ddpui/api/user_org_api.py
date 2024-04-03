@@ -12,6 +12,7 @@ from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from rest_framework.authtoken import views
 
 from ddpui import auth
+from ddpui.auth import has_permission
 from ddpui.models.org import (
     OrgSchema,
     OrgWarehouseSchema,
@@ -90,8 +91,9 @@ def get_current_user(request):
 
 
 @user_org_api.get(
-    "/currentuserv2", response=List[OrgUserResponse], auth=auth.AnyOrgUser()
+    "/currentuserv2", response=List[OrgUserResponse], auth=auth.CustomAuthMiddleware()
 )
+@has_permission(["can_view_orgusers"])
 def get_current_user_v2(request):
     """return all the OrgUsers for the User making this request"""
     if request.orguser is None:

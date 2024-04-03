@@ -6,6 +6,7 @@ from rest_framework.authtoken.models import Token
 
 from ddpui.models.org_user import OrgUser
 from ddpui.models.admin_user import AdminUser
+from ddpui.models.role_based_access import Permission, RolePermission
 
 from ddpui.models.org_user import OrgUserRole
 
@@ -38,6 +39,31 @@ class PlatformAdmin(HttpBearer):
         raise HttpError(400, UNAUTHORIZED)
 
 
+def has_permission(permission_slugs: list):
+    def decorator(api_endpoint):
+        def wrapper(request, **kwargs):
+            # request will have set of permissions that are allowed
+            # check if permission_slug lies in this set
+            # throw error if nots
+            try:
+                if (
+                    request.permissions
+                    and len(
+                        set(permission_slugs).intersection(set(request.permissions))
+                    )
+                    == 0
+                ):
+                    raise HttpError(403, "not allowed")
+            except:
+                raise HttpError(404, UNAUTHORIZED)
+
+            return api_endpoint(request, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
 def authenticate_org_user(request, token, allowed_roles, require_org):
     """docstring"""
     tokenrecord = Token.objects.filter(key=token).first()
@@ -55,6 +81,33 @@ def authenticate_org_user(request, token, allowed_roles, require_org):
                 request.orguser = orguser
                 return request
     raise HttpError(400, UNAUTHORIZED)
+
+
+class CustomAuthMiddleware(HttpBearer):
+    """new middleware that works based on permissions from db"""
+
+    def authenticate(self, request, token):
+        tokenrecord = Token.objects.filter(key=token).first()
+        if tokenrecord and tokenrecord.user:
+            request.user = tokenrecord.user
+            q_orguser = OrgUser.objects.filter(user=request.user)
+            if request.headers.get("x-dalgo-org"):
+                orgslug = request.headers["x-dalgo-org"]
+                q_orguser = q_orguser.filter(org__slug=orgslug)
+            orguser = q_orguser.first()
+            if orguser is not None:
+                if orguser.org is None:
+                    raise HttpError(400, "register an organization first")
+
+                permission_slugs = RolePermission.objects.filter(
+                    role=orguser.role
+                ).values_list("permission__slug", flat=True)
+
+                request.permissions = list(permission_slugs)
+                request.orguser = orguser
+                return request
+
+        raise HttpError(400, UNAUTHORIZED)
 
 
 class AnyOrgUser(HttpBearer):
