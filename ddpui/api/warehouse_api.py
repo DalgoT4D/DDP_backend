@@ -11,6 +11,7 @@ from ddpui.core import dbtautomation_service
 from ddpui.models.org import OrgWarehouse
 from ddpui.utils import secretsmanager
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.auth import has_permission
 
 warehouseapi = NinjaAPI(urls_namespace="warehouse")
 logger = CustomLogger("ddpui")
@@ -87,12 +88,14 @@ def get_warehouse_data(request, data_type: str, **kwargs):
 
 
 @warehouseapi.get("/tables/{schema_name}", auth=auth.CanManagePipelines())
+@has_permission(["can_view_warehouse_data"])
 def get_table(request, schema_name: str):
     """Fetches table names from a warehouse"""
     return get_warehouse_data(request, "tables", schema_name=schema_name)
 
 
 @warehouseapi.get("/schemas", auth=auth.CanManagePipelines())
+@has_permission(["can_view_warehouse_data"])
 def get_schema(request):
     """Fetches schema names from a warehouse"""
     return get_warehouse_data(request, "schemas")
@@ -101,6 +104,7 @@ def get_schema(request):
 @warehouseapi.get(
     "/table_columns/{schema_name}/{table_name}", auth=auth.CanManagePipelines()
 )
+@has_permission(["can_view_warehouse_data"])
 def get_table_columns(request, schema_name: str, table_name: str):
     """Fetches column names for a specific table from a warehouse"""
     return get_warehouse_data(
@@ -111,6 +115,7 @@ def get_table_columns(request, schema_name: str, table_name: str):
 @warehouseapi.get(
     "/table_data/{schema_name}/{table_name}", auth=auth.CanManagePipelines()
 )
+@has_permission(["can_view_warehouse_data"])
 def get_table_data(
     request,
     schema_name: str,
@@ -136,6 +141,7 @@ def get_table_data(
 @warehouseapi.get(
     "/table_count/{schema_name}/{table_name}", auth=auth.CanManagePipelines()
 )
+@has_permission(["can_view_warehouse_data"])
 def get_table_count(request, schema_name: str, table_name: str):
     """Fetches the total number of rows for a specified table."""
     try:
@@ -155,7 +161,10 @@ def get_table_count(request, schema_name: str, table_name: str):
 
 
 @warehouseapi.get("/dbt_project/json_columnspec/", auth=auth.CanManagePipelines())
-def get_json_column_spec(request, source_schema: str, input_name: str, json_column: str):
+@has_permission(["can_view_warehouse_data"])
+def get_json_column_spec(
+    request, source_schema: str, input_name: str, json_column: str
+):
     """Get the json column spec of a table in a warehouse"""
     orguser = request.orguser
     org = orguser.org
@@ -168,5 +177,6 @@ def get_json_column_spec(request, source_schema: str, input_name: str, json_colu
         raise HttpError(400, "Missing required parameters")
 
     json_columnspec = dbtautomation_service.json_columnspec(
-        org_warehouse, source_schema, input_name, json_column)
+        org_warehouse, source_schema, input_name, json_column
+    )
     return json_columnspec
