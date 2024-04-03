@@ -12,6 +12,12 @@ from ddpui.models.org_user import OrgUserRole
 
 UNAUTHORIZED = "unauthorized"
 
+SUPER_ADMIN_ROLE = "super-admin"
+ACCOUNT_MANAGER_ROLE = "account-manager"
+PIPELINE_MANAGER_ROLE = "pipeline-manager"
+ANALYST_ROLE = "analyst"
+GUEST_ROLE = "guest"
+
 
 class BearerAuthentication(TokenAuthentication):
     """
