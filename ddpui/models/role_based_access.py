@@ -1,10 +1,11 @@
 from django.db import models
+import uuid
 
 
 class Role(models.Model):
     """Roles for an orguser"""
 
-    uuid = models.UUIDField(editable=False, unique=True)
+    uuid = models.UUIDField(editable=False, unique=True, default=uuid.uuid4)
     slug = models.CharField(max_length=255, unique=True)
     name = models.CharField(max_length=255)
 
@@ -15,7 +16,7 @@ class Role(models.Model):
 class Permission(models.Model):
     """List of permissions to be assigned to roles"""
 
-    uuid = models.UUIDField(editable=False, unique=True)
+    uuid = models.UUIDField(editable=False, unique=True, default=uuid.uuid4)
     slug = models.CharField(max_length=255, unique=True)
     name = models.CharField(max_length=255)
 
