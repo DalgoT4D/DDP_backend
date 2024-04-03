@@ -10,6 +10,7 @@ from ninja import Schema
 from pydantic import SecretStr
 
 from ddpui.models.org import Org, OrgSchema
+from ddpui.models.role_based_access import Role
 
 
 class UserAttributes(models.Model):
@@ -65,6 +66,7 @@ class OrgUser(models.Model):
     role = models.IntegerField(
         choices=OrgUserRole.choices(), default=OrgUserRole.REPORT_VIEWER
     )
+    new_role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True)
     email_verified = models.BooleanField(default=False)
 
     def __str__(self):
