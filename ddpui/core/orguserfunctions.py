@@ -470,7 +470,10 @@ def get_invitations_from_orguser_v1(orguser: OrgUser):
             {
                 "id": invitation.id,
                 "invited_email": invitation.invited_email,
-                "invited_role_uuid": invitation.invited_new_role.uuid,
+                "invited_role": {
+                    "uuid": invitation.invited_new_role.uuid,
+                    "name": invitation.invited_new_role.name,
+                },
                 "invited_on": invitation.invited_on,
             }
         )

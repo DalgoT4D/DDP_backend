@@ -240,7 +240,7 @@ def post_modify_orguser_role(request, payload: OrgUserUpdateNewRole):
     if not orguser.new_role:
         raise HttpError(403, "Insufficient permissions")
 
-    role_to_be_assgined = Role.objects.filter(slug=payload.new_role_slug).first()
+    role_to_be_assgined = Role.objects.filter(uuid=payload.role_uuid).first()
 
     if not role_to_be_assgined:
         raise HttpError(400, "Invalid role")

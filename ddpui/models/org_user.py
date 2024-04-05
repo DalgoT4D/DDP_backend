@@ -1,4 +1,5 @@
 from datetime import datetime
+import uuid
 from enum import IntEnum
 from django.utils.text import slugify
 
@@ -95,7 +96,7 @@ class OrgUserUpdateNewRole(Schema):
     """Payload to change the role of an orguser"""
 
     toupdate_email: str
-    new_role_slug: str | None
+    role_uuid: uuid.UUID
 
 
 class OrgUserNewOwner(Schema):
@@ -135,7 +136,7 @@ class NewInvitationSchema(Schema):
     """Invitation schema based on the new_role field added to invitations"""
 
     invited_email: str
-    invited_role_uuid: str
+    invited_role_uuid: uuid.UUID
 
 
 class InvitationSchema(Schema):
