@@ -6,7 +6,9 @@ roles = pd.read_excel("scripts/RBAC.xlsx", sheet_name="role")
 
 permissions = pd.read_excel("scripts/RBAC.xlsx", sheet_name="permissions")
 
-roles.rename(columns={"Name": "name", "Slug": "slug", "ID": "id"}, inplace=True)
+roles.rename(
+    columns={"Name": "name", "Slug": "slug", "ID": "id", "Level": "level"}, inplace=True
+)
 roles_dict = []
 for role in roles.to_dict(orient="records"):
     id = role["id"]
@@ -14,7 +16,7 @@ for role in roles.to_dict(orient="records"):
     temp = {
         "model": "ddpui.Role",
         "pk": id,
-        "fields": {"name": role["name"], "slug": role["slug"]},
+        "fields": {"name": role["name"], "slug": role["slug"], "level": role["level"]},
     }
     roles_dict.append(temp)
 

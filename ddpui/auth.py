@@ -1,5 +1,6 @@
 from ninja.security import HttpBearer
 from ninja.errors import HttpError
+from functools import wraps
 
 from rest_framework.authentication import TokenAuthentication
 from rest_framework.authtoken.models import Token
@@ -47,6 +48,7 @@ class PlatformAdmin(HttpBearer):
 
 def has_permission(permission_slugs: list):
     def decorator(api_endpoint):
+        @wraps(api_endpoint)
         def wrapper(request, **kwargs):
             # request will have set of permissions that are allowed
             # check if permission_slug lies in this set
@@ -106,10 +108,10 @@ class CustomAuthMiddleware(HttpBearer):
                     raise HttpError(400, "register an organization first")
 
                 permission_slugs = RolePermission.objects.filter(
-                    role=orguser.role
+                    role=orguser.new_role
                 ).values_list("permission__slug", flat=True)
 
-                request.permissions = list(permission_slugs)
+                request.permissions = list(permission_slugs) or []
                 request.orguser = orguser
                 return request
 

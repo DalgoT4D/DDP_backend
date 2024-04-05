@@ -91,6 +91,13 @@ class OrgUserUpdate(Schema):
     role: str = None
 
 
+class OrgUserUpdateNewRole(Schema):
+    """Payload to change the role of an orguser"""
+
+    toupdate_email: str
+    new_role_slug: str | None
+
+
 class OrgUserNewOwner(Schema):
     """payload to transfer account ownership"""
 
@@ -107,7 +114,7 @@ class OrgUserResponse(Schema):
     role_slug: str
     wtype: str | None
     is_demo: bool = False
-    new_role_slug: str
+    new_role_slug: str | None
     permissions: list[dict]
 
 

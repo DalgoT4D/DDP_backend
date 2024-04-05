@@ -32,9 +32,10 @@ from ddpui.models.org_user import (
     ResetPasswordSchema,
     VerifyEmailSchema,
     DeleteOrgUserPayload,
+    OrgUserUpdateNewRole,
 )
 
-
+from ddpui.models.role_based_access import Role
 from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.utils.deleteorg import delete_warehouse_v1
@@ -224,6 +225,41 @@ def post_transfer_ownership(request, payload: OrgUserNewOwner):
     if error:
         raise HttpError(400, error)
     return retval
+
+
+@user_org_api.post(
+    "/organizations/user_role/modify/",
+    auth=auth.CustomAuthMiddleware(),
+)
+@has_permission(["can_edit_orguser_role"])
+def post_modify_orguser_role(request, payload: OrgUserUpdateNewRole):
+    """update another OrgUser's role"""
+    orguser: OrgUser = request.orguser
+
+    if not orguser.new_role:
+        raise HttpError(403, "not allowed")
+
+    role_to_be_assgined = Role.objects.filter(slug=payload.new_role_slug).first()
+
+    if not role_to_be_assgined:
+        raise HttpError(400, "invalid role")
+
+    # you cannot assign a role that is higher than yours
+    if role_to_be_assgined.level > orguser.new_role.level:
+        raise HttpError(403, "not allowed")
+
+    orguser_to_be_assigned = (
+        OrgUser.objects.filter(user__email=payload.toupdate_email)
+        .exclude(user__email=orguser.user.email)
+        .first()
+    )
+    if not orguser_to_be_assigned:
+        raise HttpError(400, "user does not exist")
+
+    orguser_to_be_assigned.new_role = role_to_be_assgined
+    orguser_to_be_assigned.save()
+
+    return {"success": 1}
 
 
 @user_org_api.post("/organizations/warehouse/", auth=auth.CustomAuthMiddleware())

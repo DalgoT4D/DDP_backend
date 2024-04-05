@@ -13,6 +13,7 @@ def from_orguser(orguser: OrgUser):
     """helper to turn an OrgUser into an OrgUserResponse"""
     warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
     orguser_new_role = orguser.new_role.slug if orguser.new_role else None
+    permissions = []
     if orguser_new_role:
         role_permissions = list(
             RolePermission.objects.filter(role=orguser.new_role).all()
