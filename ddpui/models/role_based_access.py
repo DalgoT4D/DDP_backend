@@ -8,9 +8,10 @@ class Role(models.Model):
     uuid = models.UUIDField(editable=False, unique=True, default=uuid.uuid4)
     slug = models.CharField(max_length=255, unique=True)
     name = models.CharField(max_length=255)
+    level = models.SmallIntegerField(default=1)  # keep the lowest role as default
 
     def __str__(self):
-        return f"{self.name} | {self.slug}"
+        return f"{self.name} | {self.slug} | {self.level}"
 
 
 class Permission(models.Model):
