@@ -17,6 +17,7 @@ from ddpui.models.org_user import (
     AcceptInvitationSchema,
     Invitation,
     InvitationSchema,
+    NewInvitationSchema,
     UserAttributes,
     OrgUser,
     OrgUserCreate,
@@ -276,11 +277,9 @@ def invite_user(orguser: OrgUser, payload: InvitationSchema):
     return payload, None
 
 
-def invite_user_v1(orguser: OrgUser, payload: InvitationSchema):
+def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema):
     """invite a user to an org"""
     frontend_url = os.getenv("FRONTEND_URL")
-
-    logger.info(payload)
 
     if orguser.org is None:
         return None, "create an organization first"
@@ -291,7 +290,7 @@ def invite_user_v1(orguser: OrgUser, payload: InvitationSchema):
     ).exists():
         return None, "user already has an account"
 
-    invited_role = Role.objects.filter(slug=payload.invited_role_slug).first()
+    invited_role = Role.objects.filter(uuid=payload.invited_role_uuid).first()
     if not invited_role:
         return None, "Invalid role"
 
@@ -310,9 +309,9 @@ def invite_user_v1(orguser: OrgUser, payload: InvitationSchema):
             invited_email, orguser.user.email, orguser.org.name
         )
         return (
-            InvitationSchema(
+            NewInvitationSchema(
                 invited_email=invited_email,
-                invited_role_slug=payload.invited_role_slug,
+                invited_role_slug=payload.invited_role_uuid,
             ),
             None,
         )
@@ -333,27 +332,27 @@ def invite_user_v1(orguser: OrgUser, payload: InvitationSchema):
         )
         return from_invitation(invitation), None
 
-    payload.invited_by = from_orguser(orguser)
-    payload.invited_on = timezone.as_utc(datetime.utcnow())
-    payload.invite_code = str(uuid4())
+    # payload.invited_by = from_orguser(orguser)
+    # payload.invited_on = timezone.as_utc(datetime.utcnow())
+    # payload.invite_code = str(uuid4())
 
     invitation = Invitation.objects.create(
         invited_email=invited_email,
         invited_by=orguser,
-        invited_on=payload.invited_on,
-        invite_code=payload.invite_code,
+        invited_on=datetime.now(timezone.UTC),
+        invite_code=str(uuid4()),
         invited_new_role=invited_role,
     )
 
     # trigger an email to the user
-    invite_url = f"{frontend_url}/invitations/?invite_code={payload.invite_code}"
+    invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
     sendgrid.send_invite_user_email(
         invitation.invited_email, invitation.invited_by.user.email, invite_url
     )
 
     logger.info(
         f"Invited {invited_email} to join {orguser.org.name} "
-        f"with invite code {payload.invite_code}",
+        f"with invite code {invitation.invite_code}",
     )
     return payload, None
 

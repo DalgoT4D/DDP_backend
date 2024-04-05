@@ -131,6 +131,13 @@ class Invitation(models.Model):
     invited_new_role = models.ForeignKey(Role, on_delete=models.CASCADE, null=True)
 
 
+class NewInvitationSchema(Schema):
+    """Invitation schema based on the new_role field added to invitations"""
+
+    invited_email: str
+    invited_role_uuid: str
+
+
 class InvitationSchema(Schema):
     """Docstring"""
 

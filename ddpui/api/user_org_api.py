@@ -21,6 +21,7 @@ from ddpui.models.org_user import (
     AcceptInvitationSchema,
     Invitation,
     InvitationSchema,
+    NewInvitationSchema,
     UserAttributes,
     OrgUser,
     OrgUserCreate,
@@ -353,11 +354,11 @@ def post_organization_user_invite(request, payload: InvitationSchema):
 
 @user_org_api.post(
     "/v1/organizations/users/invite/",
-    response=InvitationSchema,
+    response=NewInvitationSchema,
     auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_create_invitation"])
-def post_organization_user_invite_v1(request, payload: InvitationSchema):
+def post_organization_user_invite_v1(request, payload: NewInvitationSchema):
     """Send an invitation to a user to join platform"""
     orguser: OrgUser = request.orguser
     retval, error = orguserfunctions.invite_user_v1(orguser, payload)
