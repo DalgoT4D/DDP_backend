@@ -27,6 +27,7 @@ from ddpui.models.org_user import (
     VerifyEmailSchema,
     DeleteOrgUserPayload,
 )
+from ddpui.models.role_based_access import Role
 from ddpui.models.org import Org
 from ddpui.models.orgtnc import OrgTnC
 from ddpui.utils import sendgrid
@@ -275,6 +276,88 @@ def invite_user(orguser: OrgUser, payload: InvitationSchema):
     return payload, None
 
 
+def invite_user_v1(orguser: OrgUser, payload: InvitationSchema):
+    """invite a user to an org"""
+    frontend_url = os.getenv("FRONTEND_URL")
+
+    logger.info(payload)
+
+    if orguser.org is None:
+        return None, "create an organization first"
+
+    invited_email = payload.invited_email.lower().strip()
+    if OrgUser.objects.filter(
+        org=orguser.org, user__email__iexact=invited_email
+    ).exists():
+        return None, "user already has an account"
+
+    invited_role = Role.objects.filter(slug=payload.invited_role_slug).first()
+    if not invited_role:
+        return None, "Invalid role"
+
+    # user can only invite a role equal or lower to their role
+    if invited_role.level > orguser.new_role.level:
+        return None, "Insufficient permissions for this operation"
+
+    existing_user = User.objects.filter(email__iexact=invited_email).first()
+
+    if existing_user:
+        logger.info("user exists, creating new OrgUser")
+        OrgUser.objects.create(
+            user=existing_user, org=orguser.org, new_role=invited_role
+        )
+        sendgrid.send_youve_been_added_email(
+            invited_email, orguser.user.email, orguser.org.name
+        )
+        return (
+            InvitationSchema(
+                invited_email=invited_email,
+                invited_role_slug=payload.invited_role_slug,
+            ),
+            None,
+        )
+
+    invitation = Invitation.objects.filter(
+        invited_email__iexact=invited_email, invited_by__org=orguser.org
+    ).first()
+    if invitation:
+        invitation.invited_on = timezone.as_utc(datetime.utcnow())
+        # if the invitation is already present - trigger the email again
+        invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
+        sendgrid.send_invite_user_email(
+            invitation.invited_email, invitation.invited_by.user.email, invite_url
+        )
+        logger.info(
+            f"Resent invitation to {invited_email} to join {orguser.org.name} "
+            f"with invite code {invitation.invite_code}",
+        )
+        return from_invitation(invitation), None
+
+    payload.invited_by = from_orguser(orguser)
+    payload.invited_on = timezone.as_utc(datetime.utcnow())
+    payload.invite_code = str(uuid4())
+
+    invitation = Invitation.objects.create(
+        invited_email=invited_email,
+        invited_by=orguser,
+        invited_on=payload.invited_on,
+        invite_code=payload.invite_code,
+        invited_new_role=invited_role,
+    )
+
+    # trigger an email to the user
+    invite_url = f"{frontend_url}/invitations/?invite_code={payload.invite_code}"
+    sendgrid.send_invite_user_email(
+        invitation.invited_email, invitation.invited_by.user.email, invite_url
+    )
+
+    logger.info(
+        f"Invited {invited_email} to join {orguser.org.name} "
+        f"with invite code {payload.invite_code}",
+    )
+    return payload, None
+
+
 def accept_invitation(payload: AcceptInvitationSchema):
     """accept an invitation"""
     invitation = Invitation.objects.filter(invite_code=payload.invite_code).first()
@@ -307,6 +390,45 @@ def accept_invitation(payload: AcceptInvitationSchema):
             UserAttributes.objects.create(user=user, email_verified=True)
         orguser = OrgUser.objects.create(
             user=user, org=invitation.invited_by.org, role=invitation.invited_role
+        )
+    invitation.delete()
+    return from_orguser(orguser), None
+
+
+def accept_invitation_v1(payload: AcceptInvitationSchema):
+    """accept an invitation"""
+    invitation = Invitation.objects.filter(invite_code=payload.invite_code).first()
+    if invitation is None:
+        return None, "invalid invite code"
+
+    # we can have one auth user mapped to multiple orguser and hence multiple orgs
+    # but there can only be one orguser per one org
+    orguser = OrgUser.objects.filter(
+        user__email__iexact=invitation.invited_email, org=invitation.invited_by.org
+    ).first()
+
+    if not orguser:
+        user = User.objects.filter(
+            username=invitation.invited_email,
+            email=invitation.invited_email,
+        ).first()
+        if user is None:
+            if payload.password is None:
+                return None, "password is required"
+            logger.info(
+                f"creating invited user {invitation.invited_email} "
+                f"for {invitation.invited_by.org.name}"
+            )
+            user = User.objects.create_user(
+                username=invitation.invited_email.lower().strip(),
+                email=invitation.invited_email.lower().strip(),
+                password=payload.password,
+            )
+            UserAttributes.objects.create(user=user, email_verified=True)
+        orguser = OrgUser.objects.create(
+            user=user,
+            org=invitation.invited_by.org,
+            new_role=invitation.invited_new_role,
         )
     invitation.delete()
     return from_orguser(orguser), None

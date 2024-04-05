@@ -48,4 +48,5 @@ def from_invitation(invitation: Invitation):
         invited_by=from_orguser(invitation.invited_by),
         invited_on=invitation.invited_on,
         invite_code=invitation.invite_code,
+        invited_new_role_slug=invitation.invited_new_role.slug,
     )

@@ -128,6 +128,7 @@ class Invitation(models.Model):
     invited_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE)
     invited_on = models.DateTimeField()
     invite_code = models.CharField(max_length=36)
+    invited_new_role = models.ForeignKey(Role, on_delete=models.CASCADE, null=True)
 
 
 class InvitationSchema(Schema):
@@ -139,6 +140,7 @@ class InvitationSchema(Schema):
     invited_by: OrgUserResponse = None
     invited_on: datetime = None
     invite_code: str = None
+    invited_new_role_slug: str | None
 
 
 class AcceptInvitationSchema(Schema):

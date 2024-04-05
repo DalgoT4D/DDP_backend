@@ -237,24 +237,25 @@ def post_modify_orguser_role(request, payload: OrgUserUpdateNewRole):
     orguser: OrgUser = request.orguser
 
     if not orguser.new_role:
-        raise HttpError(403, "not allowed")
+        raise HttpError(403, "Insufficient permissions")
 
     role_to_be_assgined = Role.objects.filter(slug=payload.new_role_slug).first()
 
     if not role_to_be_assgined:
-        raise HttpError(400, "invalid role")
+        raise HttpError(400, "Invalid role")
 
     # you cannot assign a role that is higher than yours
     if role_to_be_assgined.level > orguser.new_role.level:
-        raise HttpError(403, "not allowed")
+        raise HttpError(403, "Insufficient permissions")
 
+    request_email = payload.toupdate_email.lower().strip()
     orguser_to_be_assigned = (
-        OrgUser.objects.filter(user__email=payload.toupdate_email)
-        .exclude(user__email=orguser.user.email)
+        OrgUser.objects.filter(user__email__iexact=request_email)
+        .exclude(user__email__iexact=orguser.user.email)
         .first()
     )
     if not orguser_to_be_assigned:
-        raise HttpError(400, "user does not exist")
+        raise HttpError(400, "User does not exist")
 
     orguser_to_be_assigned.new_role = role_to_be_assgined
     orguser_to_be_assigned.save()
@@ -286,6 +287,56 @@ def get_organizations_warehouses(request):
 
 
 @user_org_api.post(
+    "/users/forgot_password/",
+)
+def post_forgot_password(
+    request, payload: ForgotPasswordSchema
+):  # pylint: disable=unused-argument
+    """step 1 of the forgot-password flow"""
+    _, error = orguserfunctions.request_reset_password(payload.email)
+    if error:
+        raise HttpError(400, error)
+    return {"success": 1}
+
+
+@user_org_api.post("/users/reset_password/")
+def post_reset_password(
+    request, payload: ResetPasswordSchema
+):  # pylint: disable=unused-argument
+    """step 2 of the forgot-password flow"""
+    _, error = orguserfunctions.confirm_reset_password(payload)
+    if error:
+        raise HttpError(400, error)
+    return {"success": 1}
+
+
+@user_org_api.get("/users/verify_email/resend", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_resend_email_verification"])
+def get_verify_email_resend(request):  # pylint: disable=unused-argument
+    """this api is hit when the user is logged in but the email is still not verified"""
+    _, error = orguserfunctions.resend_verification_email(
+        request.orguser, request.user.email
+    )
+    if error:
+        raise HttpError(400, error)
+    return {"success": 1}
+
+
+@user_org_api.post("/users/verify_email/")
+def post_verify_email(
+    request, payload: VerifyEmailSchema
+):  # pylint: disable=unused-argument
+    """step 2 of the verify-email flow"""
+    _, error = orguserfunctions.verify_email(payload)
+    if error:
+        raise HttpError(400, error)
+    return {"success": 1}
+
+
+# ====================== Invite users =========================================
+
+
+@user_org_api.post(
     "/organizations/users/invite/",
     response=InvitationSchema,
     auth=auth.CustomAuthMiddleware(),
@@ -301,6 +352,21 @@ def post_organization_user_invite(request, payload: InvitationSchema):
 
 
 @user_org_api.post(
+    "/v1/organizations/users/invite/",
+    response=InvitationSchema,
+    auth=auth.CustomAuthMiddleware(),
+)
+@has_permission(["can_create_invitation"])
+def post_organization_user_invite_v1(request, payload: InvitationSchema):
+    """Send an invitation to a user to join platform"""
+    orguser: OrgUser = request.orguser
+    retval, error = orguserfunctions.invite_user_v1(orguser, payload)
+    if error:
+        raise HttpError(400, error)
+    return retval
+
+
+@user_org_api.post(
     "/organizations/users/invite/accept/",
     response=OrgUserResponse,
 )
@@ -309,6 +375,20 @@ def post_organization_user_accept_invite(
 ):  # pylint: disable=unused-argument
     """User accepting the invite sent with a valid invite code"""
     retval, error = orguserfunctions.accept_invitation(payload)
+    if error:
+        raise HttpError(400, error)
+    return retval
+
+
+@user_org_api.post(
+    "/v1/organizations/users/invite/accept/",
+    response=OrgUserResponse,
+)
+def post_organization_user_accept_invite_v1(
+    request, payload: AcceptInvitationSchema
+):  # pylint: disable=unused-argument
+    """User accepting the invite sent with a valid invite code"""
+    retval, error = orguserfunctions.accept_invitation_v1(payload)
     if error:
         raise HttpError(400, error)
     return retval
@@ -356,53 +436,6 @@ def delete_invitation(request, invitation_id):
     if invitation:
         invitation.delete()
 
-    return {"success": 1}
-
-
-@user_org_api.post(
-    "/users/forgot_password/",
-)
-def post_forgot_password(
-    request, payload: ForgotPasswordSchema
-):  # pylint: disable=unused-argument
-    """step 1 of the forgot-password flow"""
-    _, error = orguserfunctions.request_reset_password(payload.email)
-    if error:
-        raise HttpError(400, error)
-    return {"success": 1}
-
-
-@user_org_api.post("/users/reset_password/")
-def post_reset_password(
-    request, payload: ResetPasswordSchema
-):  # pylint: disable=unused-argument
-    """step 2 of the forgot-password flow"""
-    _, error = orguserfunctions.confirm_reset_password(payload)
-    if error:
-        raise HttpError(400, error)
-    return {"success": 1}
-
-
-@user_org_api.get("/users/verify_email/resend", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_resend_email_verification"])
-def get_verify_email_resend(request):  # pylint: disable=unused-argument
-    """this api is hit when the user is logged in but the email is still not verified"""
-    _, error = orguserfunctions.resend_verification_email(
-        request.orguser, request.user.email
-    )
-    if error:
-        raise HttpError(400, error)
-    return {"success": 1}
-
-
-@user_org_api.post("/users/verify_email/")
-def post_verify_email(
-    request, payload: VerifyEmailSchema
-):  # pylint: disable=unused-argument
-    """step 2 of the verify-email flow"""
-    _, error = orguserfunctions.verify_email(payload)
-    if error:
-        raise HttpError(400, error)
     return {"success": 1}
 
 

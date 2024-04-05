@@ -1,4 +1,4 @@
-"""All the master data api cane found here"""
+"""All the master data api can be found here"""
 
 from ninja import NinjaAPI
 from ninja.errors import HttpError
@@ -11,6 +11,8 @@ from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from ddpui import auth
 from ddpui.models.tasks import Task
+from ddpui.models.org_user import OrgUser
+from ddpui.models.role_based_access import Role
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.constants import (
     TASK_DBTRUN,
@@ -79,3 +81,13 @@ def get_task_config(request, slug):
         raise HttpError(404, "Task not found")
 
     return dbt_service.task_config_params(task)
+
+
+@dataapi.get("/roles/", auth=auth.CustomAuthMiddleware())
+def get_roles(request):
+    """Fetch master list of roles"""
+    orguser: OrgUser = request.orguser
+
+    roles = Role.objects.filter(level__lte=orguser.new_role.level).all()
+
+    return [{"uuid": role.uuid, "slug": role.slug, "name": role.name} for role in roles]
