@@ -456,6 +456,28 @@ def get_invitations_from_orguser(orguser: OrgUser):
     return res, None
 
 
+def get_invitations_from_orguser_v1(orguser: OrgUser):
+    """get all invitations sent by an orguser"""
+    if orguser.org is None:
+        return None, "create an organization first"
+
+    invitations = (
+        Invitation.objects.filter(invited_by=orguser).order_by("-invited_on").all()
+    )
+    res = []
+    for invitation in invitations:
+        res.append(
+            {
+                "id": invitation.id,
+                "invited_email": invitation.invited_email,
+                "invited_role_uuid": invitation.invited_new_role.uuid,
+                "invited_on": invitation.invited_on,
+            }
+        )
+
+    return res, None
+
+
 def resend_invitation(invitation_id: str):
     """resend email invitation to user"""
     invitation = Invitation.objects.filter(id=invitation_id).first()

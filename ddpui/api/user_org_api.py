@@ -405,6 +405,16 @@ def get_invitations(request):
     return retval
 
 
+@user_org_api.get("/v1/users/invitations/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_invitations"])
+def get_invitations_v1(request):
+    """Get all invitations sent by the current user"""
+    retval, error = orguserfunctions.get_invitations_from_orguser_v1(request.orguser)
+    if error:
+        raise HttpError(400, error)
+    return retval
+
+
 @user_org_api.post(
     "/users/invitations/resend/{invitation_id}", auth=auth.CustomAuthMiddleware()
 )
