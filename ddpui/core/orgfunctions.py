@@ -91,6 +91,8 @@ def get_warehouses(org: Org):
             "airbyte_destination": airbyte_service.get_destination(
                 org.airbyte_workspace_id, warehouse.airbyte_destination_id
             ),
+            "airbyte_docker_repository": warehouse.airbyte_docker_repository,
+            "airbyte_docker_image_tag": warehouse.airbyte_docker_image_tag,
         }
         for warehouse in OrgWarehouse.objects.filter(org=org)
     ]
