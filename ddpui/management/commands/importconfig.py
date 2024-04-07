@@ -59,7 +59,7 @@ class Command(BaseCommand):
             self.import_sources(org, source_config)
         for connection_config in input_config["connections"]:
             self.import_connections(org, connection_config)
-        self.import_dataflow(org, input_config["flows"])
+        # self.import_dataflow(org, input_config["flows"])
 
     def create_warehouse(self, org: Org, config: dict):
         """creates a warehouse for an org from the json"""
