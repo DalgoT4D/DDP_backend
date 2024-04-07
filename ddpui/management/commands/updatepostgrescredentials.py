@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
-from django.contrib.auth.models import User
 
-from ddpui.models.org import Org
+from ddpui.models.org import Org, OrgWarehouse
+from ddpui.utils.secretsmanager import retrieve_warehouse_credentials
 
 
 class Command(BaseCommand):
@@ -18,4 +18,14 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         """For every org"""
-        pass
+        for org in Org.objects.all():
+            warehouse = OrgWarehouse.objects.filter(org=org).first()
+            credentials = retrieve_warehouse_credentials(warehouse)
+            if "tunnel_method" not in credentials:
+                credentials["tunnel_method"] = {"tunnel_method": "NO_TUNNEL"}
+                warehouse.credentials = credentials
+                warehouse.save()
+                print(f"Updated {org.name}")
+            else:
+                print(f"Skipping {org.name}")
+        print("Done.")
