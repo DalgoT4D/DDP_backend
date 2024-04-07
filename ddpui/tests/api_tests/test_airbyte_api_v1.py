@@ -86,10 +86,10 @@ def test_get_airbyte_connection_v1_without_workspace(org_without_workspace):
             "syncCatalog": "sync-catalog",
             "namespaceDefinition": "namespace-definition",
             "status": "conn-status",
-            "source": {"id": "fake-source-id-1", "sourceName": "fake-source-name-1"},
+            "source": {"id": "fake-source-id-1", "name": "fake-source-name-1"},
             "destination": {
                 "id": "fake-destination-id-1",
-                "destinationName": "fake-destination-name-1",
+                "name": "fake-destination-name-1",
             },
         }
     ),
