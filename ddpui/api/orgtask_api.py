@@ -12,6 +12,8 @@ from ninja.errors import ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
+from dbt_automation.utils.warehouseclient import map_airbyte_keys_to_postgres_keys
+
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service
@@ -226,9 +228,14 @@ def post_system_transformation_tasks(request):
         if destination.get("connectionConfiguration"):
             bqlocation = destination["connectionConfiguration"]["dataset_location"]
 
+    # map airbyte keys to postgres keys
+    if warehouse.wtype == "postgres":
+        credentials = map_airbyte_keys_to_postgres_keys(credentials)
+
     # create a dbt cli profile block
     try:
         cli_block_name = f"{orguser.org.slug}-{profile_name}"
+
         cli_block_response = prefect_service.create_dbt_cli_profile_block(
             cli_block_name,
             profile_name,

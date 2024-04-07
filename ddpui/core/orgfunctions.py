@@ -34,26 +34,26 @@ def create_warehouse(org: Org, payload: OrgWarehouseSchema):
     # prepare the dbt credentials from airbyteConfig
     dbt_credentials = None
     if payload.wtype == "postgres":
-        dbt_credentials = {
-            "host": payload.airbyteConfig["host"],
-            "port": payload.airbyteConfig["port"],
-            "username": payload.airbyteConfig["username"],
-            "password": payload.airbyteConfig["password"],
-            "database": payload.airbyteConfig["database"],
-        }
-
+        # host, database, port, username, password
+        # jdbc_url_params
+        # ssl: true | false
+        # ssl_mode:
+        #   mode: disable | allow | prefer | require | verify-ca | verify-full
+        #   ca_certificate: string if mode is require, verify-ca, or verify-full
+        #   client_key_password: string if mode is verify-full
+        # tunnel_method:
+        #   tunnel_method = NO_TUNNEL | SSH_KEY_AUTH | SSH_PASSWORD_AUTH
+        #   tunnel_host: string if SSH_KEY_AUTH | SSH_PASSWORD_AUTH
+        #   tunnel_port: int if SSH_KEY_AUTH | SSH_PASSWORD_AUTH
+        #   tunnel_user: string if SSH_KEY_AUTH | SSH_PASSWORD_AUTH
+        #   ssh_key: string if SSH_KEY_AUTH
+        #   tunnel_user_password: string if SSH_PASSWORD_AUTH
+        dbt_credentials = payload.airbyteConfig
     elif payload.wtype == "bigquery":
-        dbt_credentials = json.loads(payload.airbyteConfig["credentials_json"])
+        credentials_json = json.loads(payload.airbyteConfig["credentials_json"])
+        dbt_credentials = credentials_json
     elif payload.wtype == "snowflake":
-        dbt_credentials = {
-            "host": payload.airbyteConfig["host"],
-            "role": payload.airbyteConfig["role"],
-            "warehouse": payload.airbyteConfig["warehouse"],
-            "database": payload.airbyteConfig["database"],
-            "schema": payload.airbyteConfig["schema"],
-            "username": payload.airbyteConfig["username"],
-            "credentials": payload.airbyteConfig["credentials"],
-        }
+        dbt_credentials = payload.airbyteConfig
 
     destination_definition = airbyte_service.get_destination_definition(
         org.airbyte_workspace_id, payload.destinationDefId
