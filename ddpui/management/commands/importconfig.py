@@ -1,29 +1,16 @@
 import json
-from typing import List
 from dotenv import load_dotenv
 from django.core.management.base import BaseCommand
-import requests
-from ninja.errors import HttpError
-
-from ddpui.api import pipeline_api, transform_api
-from ddpui.api.airbyte_api import post_airbyte_source
 from ddpui.core import orgfunctions
 from ddpui.ddpairbyte.schema import AirbyteConnectionCreate, AirbyteSourceCreate
-from ddpui.ddpprefect.schema import PrefectDataFlowCreateSchema, PrefectDataFlowCreateSchema4
-from ddpui.models.org import Org, OrgWarehouse, OrgDataFlowv1, OrgWarehouseSchema
-from ddpui.models.org_user import OrgUser
-from ddpui.utils import secretsmanager
-from ddpui.utils.secretsmanager import retrieve_warehouse_credentials
+from ddpui.models.org import Org, OrgWarehouse, OrgWarehouseSchema
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers
-from testclient.testclient import TestClient
 import logging
 
 load_dotenv()
 
 logger = logging.getLogger("dumpconfig")
 
-import json
-from django.core.management.base import BaseCommand
 
 class Command(BaseCommand):
     """
@@ -148,7 +135,7 @@ class Command(BaseCommand):
         result = airbytehelpers.create_connection(org, payload)
 
         if 'connectionId' in result[0]:
-            print(f"Connection with id {result['connectionId']} created successfully.")
+            print(f"Connection with id {result[0]['connectionId']} created successfully.")
         else:
             print(f"Error creating connection: {result}")
 
