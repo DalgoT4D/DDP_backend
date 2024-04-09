@@ -86,12 +86,19 @@ class Command(BaseCommand):
                     "cursorField": stream["config"]["cursorField"]
                 }
                 formatted_streams.append(formatted_stream)
+
+            schema = None
+            if connection["destination"]["destinationName"] == "BigQuery":
+                schema = connection["destination"]["connectionConfiguration"]["dataset_id"]
+            elif connection["destination"]["destinationName"] == "Postgres":
+                schema = connection["destination"]["connectionConfiguration"]["schema"]
+
             formatted_connection = {
                 "name": connection["name"],
                 "source_name": connection["source"]["name"],
                 "streams": formatted_streams,
                 "normalize": False,
-                "destinationSchema": connection["destination"]["connectionConfiguration"].get("schema", None)
+                "destinationSchema": schema,
             }
             formatted_connections.append(formatted_connection)
         return formatted_connections
