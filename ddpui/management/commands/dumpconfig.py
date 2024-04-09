@@ -91,7 +91,7 @@ class Command(BaseCommand):
                 "source_name": connection["source"]["name"],
                 "streams": formatted_streams,
                 "normalize": False,
-                "destinationSchema": connection["destination"]["connectionConfiguration"]["schema"]
+                "destinationSchema": connection["destination"]["connectionConfiguration"].get("schema", None)
             }
             formatted_connections.append(formatted_connection)
         return formatted_connections
