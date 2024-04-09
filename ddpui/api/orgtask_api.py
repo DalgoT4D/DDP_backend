@@ -12,8 +12,6 @@ from ninja.errors import ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
-from dbt_automation.utils.warehouseclient import map_airbyte_keys_to_postgres_keys
-
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service
@@ -47,6 +45,7 @@ from ddpui.core.orgtaskfunctions import (
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
+from ddpui.utils.helpers import map_airbyte_keys_to_postgres_keys
 from ddpui.utils.constants import TASK_DBTRUN, TASK_GITPULL, TRANSFORM_TASKS_SEQ
 from ddpui.core.pipelinefunctions import (
     setup_dbt_core_task_config,
