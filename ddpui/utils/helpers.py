@@ -76,7 +76,7 @@ def map_airbyte_keys_to_postgres_keys(conn_info: dict):
             )
 
         elif method["tunnel_method"] == "SSH_PASSWORD_AUTH":
-            conn_info["ssh_password"] = method["tunnel_user_password"]
+            conn_info["ssh_password"] = method.get("tunnel_user_password")
 
     conn_info["user"] = conn_info["username"]
 
