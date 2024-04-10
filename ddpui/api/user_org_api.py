@@ -84,18 +84,6 @@ def ninja_default_error_handler(
 
 
 @user_org_api.get(
-    "/currentuser", response=OrgUserResponse, auth=auth.CustomAuthMiddleware()
-)
-@has_permission(["can_view_orgusers"])
-def get_current_user(request):
-    """return the OrgUser making this request"""
-    orguser: OrgUser = request.orguser
-    if orguser is not None:
-        return from_orguser(orguser)
-    raise HttpError(400, "requestor is not an OrgUser")
-
-
-@user_org_api.get(
     "/currentuserv2", response=List[OrgUserResponse], auth=auth.CustomAuthMiddleware()
 )
 @has_permission(["can_view_orgusers"])
@@ -165,6 +153,21 @@ def delete_organization_users(request, payload: DeleteOrgUserPayload):
         raise HttpError(400, "no associated org")
 
     _, error = orguserfunctions.delete_orguser(orguser, payload)
+    if error:
+        raise HttpError(400, error)
+
+    return {"success": 1}
+
+
+@user_org_api.post("/v1/organizations/users/delete", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_delete_orguser"])
+def delete_organization_users_v1(request, payload: DeleteOrgUserPayload):
+    """delete the orguser posted"""
+    orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "no associated org")
+
+    _, error = orguserfunctions.delete_orguser_v1(orguser, payload)
     if error:
         raise HttpError(400, error)
 

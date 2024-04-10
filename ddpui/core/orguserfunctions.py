@@ -195,6 +195,32 @@ def delete_orguser(requestor_orguser: OrgUser, payload: DeleteOrgUserPayload):
     return None, None
 
 
+def delete_orguser_v1(requestor_orguser: OrgUser, payload: DeleteOrgUserPayload):
+    """delete another orguser"""
+    orguser_to_delete = OrgUser.objects.filter(
+        org=requestor_orguser.org, user__email=payload.email
+    ).first()
+
+    if requestor_orguser == orguser_to_delete:
+        return None, "user cannot delete themselves"
+
+    if orguser_to_delete is None:
+        return None, "user does not belong to the org"
+
+    if orguser_to_delete.new_role.level > requestor_orguser.new_role.level:
+        return None, "cannot delete user having higher role"
+
+    # remove the invitations associated with the org user
+    Invitation.objects.filter(
+        invited_by__org=requestor_orguser.org, invited_email=payload.email
+    ).delete()
+
+    # delete the org user
+    orguser_to_delete.delete()
+
+    return None, None
+
+
 def invite_user(orguser: OrgUser, payload: InvitationSchema):
     """invite a user to an org"""
     frontend_url = os.getenv("FRONTEND_URL")
