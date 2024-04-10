@@ -20,9 +20,12 @@ from ddpui.api.orgtask_api import (
 )
 from ddpui.ddpprefect import DBTCLIPROFILE, SECRET
 from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1, OrgWarehouse
-from ddpui.models.org_user import OrgUser
+from ddpui.models.role_based_access import Role, RolePermission, Permission
+from ddpui.models.org_user import OrgUser, OrgUserRole
 from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask, Task
 from ddpui.utils.constants import TASK_DBTDEPS, TASK_GITPULL
+from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
 pytestmark = pytest.mark.django_db
 
@@ -46,10 +49,11 @@ def seed_tasks():
 
 
 # ================================================================================
+
+
 @pytest.fixture()
 def org_without_dbt_workspace():
     """org without dbt workspace"""
-    print("creating org")
     org_slug = "test-org-slug"
 
     org = Org.objects.create(
@@ -58,8 +62,22 @@ def org_without_dbt_workspace():
         name=org_slug,
     )
     yield org
-    print("deleting org")
     org.delete()
+
+
+@pytest.fixture
+def orguser(org_without_dbt_workspace):
+    """a pytest fixture representing an OrgUser having the account-manager role"""
+    orguser = OrgUser.objects.create(
+        user=User.objects.create(
+            username="tempusername", email="tempuseremail", password="tempuserpassword"
+        ),
+        org=org_without_dbt_workspace,
+        role=OrgUserRole.ACCOUNT_MANAGER,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+    )
+    yield orguser
+    orguser.delete()
 
 
 @pytest.fixture()
@@ -98,11 +116,24 @@ def org_with_dbt_workspace(tmpdir_factory):
     org.delete()
 
 
+@pytest.fixture
+def orguser_dbt_workspace(org_with_dbt_workspace):
+    """a pytest fixture representing an OrgUser having the account-manager role"""
+    orguser = OrgUser.objects.create(
+        user=User.objects.create(
+            username="tempusername", email="tempuseremail", password="tempuserpassword"
+        ),
+        org=org_with_dbt_workspace,
+        role=OrgUserRole.ACCOUNT_MANAGER,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+    )
+    yield orguser
+    orguser.delete()
+
+
 @pytest.fixture()
 def org_with_transformation_tasks(tmpdir_factory):
     """org having the transformation tasks and dbt workspace"""
-    print("creating org with tasks")
-
     org_slug = "test-org-slug"
     client_dir = tmpdir_factory.mktemp("clients")
     org_dir = client_dir.mkdir(org_slug)
@@ -130,14 +161,6 @@ def org_with_transformation_tasks(tmpdir_factory):
         dbt=dbt,
         name=org_slug,
     )
-    user = User.objects.create(
-        is_superuser=True,
-        username="test@gmail.com",
-        password="password",
-        is_active=True,
-        is_staff=False,
-    )
-    OrgUser.objects.create(org=org, user=user, role=3, email_verified=True)
 
     # create secret block
     OrgPrefectBlockv1.objects.create(
@@ -180,30 +203,48 @@ def org_with_transformation_tasks(tmpdir_factory):
     org.delete()
 
 
-# ================================================================================
-def test_post_system_transformation_tasks_dbt_not_setup():
-    """tests POST /tasks/transform/ without setting up dbt workspace"""
-    mock_orguser = Mock()
-    mock_orguser.org.dbt = None
+@pytest.fixture
+def orguser_transform_tasks(org_with_transformation_tasks):
+    """a pytest fixture representing an OrgUser having the account-manager role"""
+    orguser = OrgUser.objects.create(
+        user=User.objects.create(
+            username="tempusername", email="tempuseremail", password="tempuserpassword"
+        ),
+        org=org_with_transformation_tasks,
+        role=OrgUserRole.ACCOUNT_MANAGER,
+        email_verified=True,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+    )
+    yield orguser
+    orguser.delete()
 
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
+
+# ================================================================================
+
+
+def test_seed_data(seed_db):
+    """a test to seed the database"""
+    assert Role.objects.count() == 5
+    assert RolePermission.objects.count() > 5
+    assert Permission.objects.count() > 5
+
+
+# ================================================================================
+def test_post_system_transformation_tasks_dbt_not_setup(orguser):
+    """tests POST /tasks/transform/ without setting up dbt workspace"""
+    request = mock_request(orguser)
 
     with pytest.raises(HttpError) as excinfo:
-        post_system_transformation_tasks(mock_request)
+        post_system_transformation_tasks(request)
     assert str(excinfo.value) == "create a dbt workspace first"
 
 
-def test_post_system_transformation_tasks_warehouse_not_setup(org_with_dbt_workspace):
+def test_post_system_transformation_tasks_warehouse_not_setup(orguser_dbt_workspace):
     """tests POST /tasks/transform/ with no warehouse"""
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_dbt_workspace
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
+    request = mock_request(orguser_dbt_workspace)
 
     with pytest.raises(HttpError) as excinfo:
-        post_system_transformation_tasks(mock_request)
+        post_system_transformation_tasks(request)
     assert str(excinfo.value) == "need to set up a warehouse first"
 
 
@@ -235,20 +276,16 @@ def test_post_system_transformation_tasks_warehouse_not_setup(org_with_dbt_works
     ),
 )
 def test_post_system_transformation_tasks_success_postgres_warehouse(
-    org_with_dbt_workspace,
+    orguser_dbt_workspace,
 ):
     """tests POST /tasks/transform/ success with postgres warehouse"""
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_dbt_workspace
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
+    request = mock_request(orguser_dbt_workspace)
 
     seed_tasks()
 
-    OrgWarehouse.objects.create(org=org_with_dbt_workspace, wtype="postgres")
+    OrgWarehouse.objects.create(org=request.orguser.org, wtype="postgres")
 
-    post_system_transformation_tasks(mock_request)
+    post_system_transformation_tasks(request)
 
 
 @patch.multiple(
@@ -285,33 +322,25 @@ def test_post_system_transformation_tasks_success_postgres_warehouse(
     ),
 )
 def test_post_system_transformation_tasks_success_bigquery_warehouse(
-    org_with_dbt_workspace,
+    orguser_dbt_workspace,
 ):
     """tests POST /tasks/transform/ success with bigquery warehouse"""
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_dbt_workspace
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
+    request = mock_request(orguser_dbt_workspace)
 
     seed_tasks()
 
-    OrgWarehouse.objects.create(org=org_with_dbt_workspace, wtype="bigquery")
+    OrgWarehouse.objects.create(org=request.orguser.org, wtype="bigquery")
 
-    post_system_transformation_tasks(mock_request)
+    post_system_transformation_tasks(request)
 
 
-def test_get_prefect_transformation_tasks_success(org_with_transformation_tasks):
+def test_get_prefect_transformation_tasks_success(orguser_transform_tasks):
     """tests GET /tasks/transform/ success"""
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
+    request = mock_request(orguser_transform_tasks)
 
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
+    get_prefect_transformation_tasks(request)
 
-    get_prefect_transformation_tasks(mock_request)
-
-    assert OrgTask.objects.filter(org=mock_orguser.org).count() == 5
+    assert OrgTask.objects.filter(org=request.orguser.org).count() == 5
 
 
 @patch.multiple(
@@ -320,61 +349,43 @@ def test_get_prefect_transformation_tasks_success(org_with_transformation_tasks)
     delete_dbt_cli_profile_block=Mock(return_value=True),
     delete_deployment_by_id=Mock(return_value=True),
 )
-def test_delete_system_transformation_tasks_success(org_with_transformation_tasks):
+def test_delete_system_transformation_tasks_success(orguser_transform_tasks):
     """tests DELETE /tasks/transform/ success"""
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
+    request = mock_request(orguser_transform_tasks)
 
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
+    delete_system_transformation_tasks(request)
 
-    delete_system_transformation_tasks(mock_request)
-
-    assert OrgTask.objects.filter(org=mock_orguser.org).count() == 0
+    assert OrgTask.objects.filter(org=request.orguser.org).count() == 0
     assert (
         OrgPrefectBlockv1.objects.filter(
-            org=mock_orguser.org, block_type=SECRET
+            org=request.orguser.org, block_type=SECRET
         ).count()
         == 0
     )
     assert (
         OrgPrefectBlockv1.objects.filter(
-            org=mock_orguser.org, block_type=DBTCLIPROFILE
+            org=request.orguser.org, block_type=DBTCLIPROFILE
         ).count()
         == 0
     )
 
 
-def test_post_run_prefect_org_task_invalid_task_id(org_with_transformation_tasks):
+def test_post_run_prefect_org_task_invalid_task_id(orguser_transform_tasks):
     """tests POST /tasks/{orgtask_uuid}/run/ failure by invalid task id"""
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
+    request = mock_request(orguser_transform_tasks)
 
     with pytest.raises(HttpError) as excinfo:
-        post_run_prefect_org_task(mock_request, 0)
+        post_run_prefect_org_task(request, 0)
     assert str(excinfo.value) == "invalid input type"
 
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
-
     with pytest.raises(HttpError) as excinfo:
-        post_run_prefect_org_task(mock_request, uuid.uuid4())
+        post_run_prefect_org_task(request, uuid.uuid4())
     assert str(excinfo.value) == "task not found"
 
 
-def test_post_run_prefect_org_task_invalid_task_type(org_with_transformation_tasks):
+def test_post_run_prefect_org_task_invalid_task_type(orguser_transform_tasks):
     """tests POST /tasks/{orgtask_uuid}/run/ failure by invalid task type"""
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
+    request = mock_request(orguser_transform_tasks)
 
     airbyte_task_config = {
         "type": "airbyte",
@@ -385,35 +396,31 @@ def test_post_run_prefect_org_task_invalid_task_type(org_with_transformation_tas
     task = Task.objects.create(**airbyte_task_config)
 
     org_task = OrgTask.objects.create(
-        task=task, org=mock_orguser.org, uuid=uuid.uuid4()
+        task=task, org=request.orguser.org, uuid=uuid.uuid4()
     )
 
     if org_task is None:
         raise Exception("Task not found")
 
     with pytest.raises(HttpError) as excinfo:
-        post_run_prefect_org_task(mock_request, org_task.uuid)
+        post_run_prefect_org_task(request, org_task.uuid)
     assert str(excinfo.value) == "task not supported"
 
 
-def test_post_run_prefect_org_task_no_dbt_workspace(org_with_transformation_tasks):
+def test_post_run_prefect_org_task_no_dbt_workspace(orguser_transform_tasks):
     """tests POST /tasks/{orgtask_uuid}/run/ failure by not setting up dbt workspace"""
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
-    mock_orguser.org.dbt = None
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
+    orguser_transform_tasks.org.dbt = None
+    request = mock_request(orguser_transform_tasks)
 
     org_task = OrgTask.objects.filter(
-        org=mock_orguser.org, task__slug=TASK_DBTDEPS
+        org=request.orguser.org, task__slug=TASK_DBTDEPS
     ).first()
 
     if org_task is None:
         raise Exception("Task not found")
 
     with pytest.raises(HttpError) as excinfo:
-        post_run_prefect_org_task(mock_request, org_task.uuid)
+        post_run_prefect_org_task(request, org_task.uuid)
     assert str(excinfo.value) == "dbt is not configured for this client"
 
 
@@ -421,43 +428,35 @@ def test_post_run_prefect_org_task_no_dbt_workspace(org_with_transformation_task
     "ddpui.ddpprefect.prefect_service",
     run_shell_task_sync=Mock(return_value=True),
 )
-def test_post_run_prefect_org_task_git_pull_success(org_with_transformation_tasks):
+def test_post_run_prefect_org_task_git_pull_success(orguser_transform_tasks):
     """tests POST /tasks/{orgtask_id}/run/ success"""
 
-    mock_request = Mock()
-    mock_request.org = org_with_transformation_tasks
-    mock_request.orguser = OrgUser.objects.filter(
-        org=org_with_transformation_tasks
-    ).first()
+    request = mock_request(orguser_transform_tasks)
 
     org_task = OrgTask.objects.filter(
-        org=mock_request.org, task__slug=TASK_GITPULL
+        org=request.orguser.org, task__slug=TASK_GITPULL
     ).first()
 
     if org_task is None:
         raise Exception("Task not found")
 
-    post_run_prefect_org_task(mock_request, org_task.uuid)
+    post_run_prefect_org_task(request, org_task.uuid)
 
 
 @patch.multiple(
     "ddpui.ddpprefect.prefect_service",
     run_dbt_task_sync=Mock(return_value=True),
 )
-def test_post_run_prefect_org_task_dbt_deps_success(org_with_transformation_tasks):
+def test_post_run_prefect_org_task_dbt_deps_success(orguser_transform_tasks):
     """tests POST /tasks/{orgtask_uuid}/run/ success"""
 
-    mock_request = Mock()
-    mock_request.org = org_with_transformation_tasks
-    mock_request.orguser = OrgUser.objects.filter(
-        org=org_with_transformation_tasks
-    ).first()
+    request = mock_request(orguser_transform_tasks)
 
     org_task = OrgTask.objects.filter(
-        org=org_with_transformation_tasks, task__slug=TASK_DBTDEPS
+        org=request.orguser.org, task__slug=TASK_DBTDEPS
     ).first()
 
     if org_task is None:
         raise Exception("Task not found")
 
-    post_run_prefect_org_task(mock_request, org_task.uuid)
+    post_run_prefect_org_task(request, org_task.uuid)
