@@ -58,8 +58,6 @@ from ddpui.models.org_user import (
     DeleteOrgUserPayload,
 )
 from ddpui.auth import (
-    has_permission,
-    ANALYST_ROLE,
     ACCOUNT_MANAGER_ROLE,
     PIPELINE_MANAGER_ROLE,
     GUEST_ROLE,
