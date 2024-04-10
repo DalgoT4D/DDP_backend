@@ -92,6 +92,15 @@ class OrgUserUpdate(Schema):
     role: str = None
 
 
+class OrgUserUpdatev1(Schema):
+    """payload to update an existing OrgUser"""
+
+    toupdate_email: str
+    role_uuid: uuid.UUID = None
+    email: str = None
+    active: bool = None
+
+
 class OrgUserUpdateNewRole(Schema):
     """Payload to change the role of an orguser"""
 

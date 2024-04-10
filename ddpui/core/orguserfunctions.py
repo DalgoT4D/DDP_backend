@@ -24,6 +24,7 @@ from ddpui.models.org_user import (
     OrgUserNewOwner,
     OrgUserRole,
     OrgUserUpdate,
+    OrgUserUpdatev1,
     ResetPasswordSchema,
     VerifyEmailSchema,
     DeleteOrgUserPayload,
@@ -131,6 +132,20 @@ def update_orguser(orguser: OrgUser, payload: OrgUserUpdate):
         orguser.user.is_active = payload.active
     if payload.role:
         orguser.role = payload.role
+    orguser.user.save()
+
+    logger.info(f"updated orguser {orguser.user.email}")
+    return from_orguser(orguser)
+
+
+def update_orguser_v1(orguser: OrgUser, payload: OrgUserUpdatev1):
+    """updates attributes of an OrgUser"""
+    if payload.email:
+        orguser.user.email = payload.email.lower().strip()
+    if payload.active is not None:
+        orguser.user.is_active = payload.active
+    if payload.role_uuid:
+        orguser.new_role = Role.objects.filter(uuid=payload.role_uuid).first()
     orguser.user.save()
 
     logger.info(f"updated orguser {orguser.user.email}")

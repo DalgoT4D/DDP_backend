@@ -29,6 +29,7 @@ from ddpui.models.org_user import (
     OrgUserResponse,
     OrgUserRole,
     OrgUserUpdate,
+    OrgUserUpdatev1,
     ForgotPasswordSchema,
     ResetPasswordSchema,
     VerifyEmailSchema,
@@ -178,6 +179,7 @@ def delete_organization_users_v1(request, payload: DeleteOrgUserPayload):
     "/organizations/user_self/",
     response=OrgUserResponse,
     auth=auth.CustomAuthMiddleware(),
+    deprecated=True,
 )
 @has_permission(["can_edit_orguser"])
 def put_organization_user_self(request, payload: OrgUserUpdate):
@@ -190,9 +192,25 @@ def put_organization_user_self(request, payload: OrgUserUpdate):
 
 
 @user_org_api.put(
+    "/v1/organizations/user_self/",
+    response=OrgUserResponse,
+    auth=auth.CustomAuthMiddleware(),
+)
+@has_permission(["can_edit_orguser"])
+def put_organization_user_self_v1(request, payload: OrgUserUpdatev1):
+    """update the requestor's OrgUser"""
+    orguser: OrgUser = request.orguser
+
+    # not allowed to update own role
+    payload.role_uuid = None
+    return orguserfunctions.update_orguser_v1(orguser, payload)
+
+
+@user_org_api.put(
     "/organizations/users/",
     response=OrgUserResponse,
     auth=auth.CustomAuthMiddleware(),
+    deprecated=True,
 )
 @has_permission(["can_edit_orguser"])
 def put_organization_user(request, payload: OrgUserUpdate):
@@ -214,6 +232,35 @@ def put_organization_user(request, payload: OrgUserUpdate):
         )
 
     return orguserfunctions.update_orguser(orguser, payload)
+
+
+@user_org_api.put(
+    "/v1/organizations/users/",
+    response=OrgUserResponse,
+    auth=auth.CustomAuthMiddleware(),
+)
+@has_permission(["can_edit_orguser"])
+def put_organization_user_v1(request, payload: OrgUserUpdatev1):
+    """update another OrgUser or themselves"""
+    requestor_orguser: OrgUser = request.orguser
+
+    orguser = OrgUser.objects.filter(
+        user__email=payload.toupdate_email, org=request.orguser.org
+    ).first()
+    if orguser is None:
+        raise HttpError(
+            400, "could not find user having this email address in this org"
+        )
+
+    # one can only update the role of user less than or equal to their role
+    if payload.role_uuid and orguser.new_role.level > requestor_orguser.new_role.level:
+        raise HttpError(403, "Insufficient permissions")
+
+    # not allowed to update own role
+    if requestor_orguser.user.email == orguser.user.email:
+        payload.role_uuid = None
+
+    return orguserfunctions.update_orguser_v1(orguser, payload)
 
 
 @user_org_api.post(
