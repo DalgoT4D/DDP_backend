@@ -1,19 +1,21 @@
-"""dump s full configuration of an organization"""
+"""dumps full configuration of an organization
+
+run the script:
+    python manage.py dumpconfig --org NGO
+                                --output ngo
+"""
 
 import json
 from dotenv import load_dotenv
 from django.core.management.base import BaseCommand
 
 from ddpui.models.org import Org, OrgWarehouse, OrgDataFlowv1
+from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.secretsmanager import retrieve_warehouse_credentials
 from ddpui.ddpairbyte import airbyte_service
 
-import logging
-
+logger = CustomLogger("ddpui")
 load_dotenv()
-
-logger = logging.getLogger("dumpconfig")
-
 
 class Command(BaseCommand):
     """
