@@ -352,7 +352,7 @@ def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema):
         return (
             NewInvitationSchema(
                 invited_email=invited_email,
-                invited_role_slug=payload.invited_role_uuid,
+                invited_role_uuid=payload.invited_role_uuid,
             ),
             None,
         )
