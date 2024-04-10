@@ -106,21 +106,20 @@ class Command(BaseCommand):
     
     def dump_dataflow(self, org: Org):
         """dumps dataflow info"""
-        dataflows = OrgDataFlowv1.objects.filter(org=org)
+        dataflows = OrgDataFlowv1.objects.filter(org=org).exclude(dataflow_type='manual')
         if dataflows is None:
             logger.error(f"No dataflow found for {org.slug}")
             return None
         retval = []
         for dataflow in dataflows:
-            if dataflow.dataflow_type != "manual":
-                retval.append({
-                    'org': dataflow.org.id,
-                    'name': dataflow.name,
-                    'deployment_name': dataflow.deployment_name,
-                    'deployment_id': dataflow.deployment_id,
-                    'cron': dataflow.cron,
-                    'dataflow_type': dataflow.dataflow_type,
-                })
+            retval.append({
+                'org': dataflow.org.id,
+                'name': dataflow.name,
+                'deployment_name': dataflow.deployment_name,
+                'deployment_id': dataflow.deployment_id,
+                'cron': dataflow.cron,
+                'dataflow_type': dataflow.dataflow_type,
+            })
         return retval
 
     def handle(self, *args, **options):
