@@ -2,6 +2,7 @@ import os, uuid
 from unittest.mock import Mock, patch
 
 import django
+from django.core.management import call_command
 import pytest
 import yaml
 from ninja.errors import HttpError
@@ -30,22 +31,11 @@ from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 pytestmark = pytest.mark.django_db
 
 
-def seed_tasks():
-    # seed data
-    for task in [
-        {"type": "git", "slug": "git-pull", "label": "GIT pull", "command": "git pull"},
-        {"type": "dbt", "slug": "dbt-clean", "label": "DBT clean", "command": "clean"},
-        {"type": "dbt", "slug": "dbt-deps", "label": "DBT deps", "command": "deps"},
-        {"type": "dbt", "slug": "dbt-run", "label": "DBT run", "command": "run"},
-        {"type": "dbt", "slug": "dbt-test", "label": "DBT test", "command": "test"},
-        {
-            "type": "airbyte",
-            "slug": "airbyte-sync",
-            "label": "AIRBYTE sync",
-            "command": None,
-        },
-    ]:
-        Task.objects.create(**task)
+@pytest.fixture(scope="session")
+def seed_master_tasks_db(django_db_setup, django_db_blocker):
+    with django_db_blocker.unblock():
+        # Run the loaddata command to load the fixture
+        call_command("loaddata", "tasks.json")
 
 
 # ================================================================================
@@ -132,7 +122,7 @@ def orguser_dbt_workspace(org_with_dbt_workspace):
 
 
 @pytest.fixture()
-def org_with_transformation_tasks(tmpdir_factory):
+def org_with_transformation_tasks(tmpdir_factory, seed_master_tasks_db):
     """org having the transformation tasks and dbt workspace"""
     org_slug = "test-org-slug"
     client_dir = tmpdir_factory.mktemp("clients")
@@ -177,9 +167,6 @@ def org_with_transformation_tasks(tmpdir_factory):
         block_id="cliprofile-blk-id",
         block_name="cliprofile-blk-name",
     )
-
-    # seed data
-    seed_tasks()
 
     for task in Task.objects.filter(type__in=["dbt", "git"]).all():
         org_task = OrgTask.objects.create(org=org, task=task, uuid=uuid.uuid4())
@@ -227,6 +214,11 @@ def test_seed_data(seed_db):
     assert Role.objects.count() == 5
     assert RolePermission.objects.count() > 5
     assert Permission.objects.count() > 5
+
+
+def test_seed_master_tasks(seed_master_tasks_db):
+    """a test to seed the database"""
+    assert Task.objects.count() == 8
 
 
 # ================================================================================
@@ -281,8 +273,6 @@ def test_post_system_transformation_tasks_success_postgres_warehouse(
     """tests POST /tasks/transform/ success with postgres warehouse"""
     request = mock_request(orguser_dbt_workspace)
 
-    seed_tasks()
-
     OrgWarehouse.objects.create(org=request.orguser.org, wtype="postgres")
 
     post_system_transformation_tasks(request)
@@ -327,8 +317,6 @@ def test_post_system_transformation_tasks_success_bigquery_warehouse(
     """tests POST /tasks/transform/ success with bigquery warehouse"""
     request = mock_request(orguser_dbt_workspace)
 
-    seed_tasks()
-
     OrgWarehouse.objects.create(org=request.orguser.org, wtype="bigquery")
 
     post_system_transformation_tasks(request)
@@ -340,7 +328,9 @@ def test_get_prefect_transformation_tasks_success(orguser_transform_tasks):
 
     get_prefect_transformation_tasks(request)
 
-    assert OrgTask.objects.filter(org=request.orguser.org).count() == 5
+    assert (
+        OrgTask.objects.filter(org=request.orguser.org).count() == 7
+    )  # including git, dbt
 
 
 @patch.multiple(
@@ -355,7 +345,10 @@ def test_delete_system_transformation_tasks_success(orguser_transform_tasks):
 
     delete_system_transformation_tasks(request)
 
-    assert OrgTask.objects.filter(org=request.orguser.org).count() == 0
+    assert (
+        OrgTask.objects.filter(org=request.orguser.org, task__is_system=True).count()
+        == 0
+    )
     assert (
         OrgPrefectBlockv1.objects.filter(
             org=request.orguser.org, block_type=SECRET
