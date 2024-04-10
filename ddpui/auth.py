@@ -54,9 +54,10 @@ def has_permission(permission_slugs: list):
             # check if permission_slug lies in this set
             # throw error if nots
             try:
-                if request.permissions and not set(request.permissions).issuperset(
-                    set(permission_slugs)
-                ):
+                if not request.permissions or len(request.permissions) == 0:
+                    raise HttpError(403, "not allowed")
+
+                if not set(request.permissions).issuperset(set(permission_slugs)):
                     raise HttpError(403, "not allowed")
             except:
                 raise HttpError(404, UNAUTHORIZED)
