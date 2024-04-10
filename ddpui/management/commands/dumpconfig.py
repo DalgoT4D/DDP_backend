@@ -81,7 +81,6 @@ class Command(BaseCommand):
             for stream in streams:
                 formatted_stream = {
                     "name": stream["stream"]["name"],
-                    "supportsIncremental": True,
                     "selected": stream["config"]["selected"],
                     "syncMode": stream["config"]["syncMode"],
                     "destinationSyncMode": stream["config"]["destinationSyncMode"],
@@ -113,16 +112,17 @@ class Command(BaseCommand):
             return None
         retval = []
         for dataflow in dataflows:
-            retval.append({
-                'org': dataflow.org.id,
-                'name': dataflow.name,
-                'deployment_name': dataflow.deployment_name,
-                'deployment_id': dataflow.deployment_id,
-                'cron': dataflow.cron,
-                'dataflow_type': dataflow.dataflow_type,
-            })
+            if dataflow.dataflow_type != "manual":
+                retval.append({
+                    'org': dataflow.org.id,
+                    'name': dataflow.name,
+                    'deployment_name': dataflow.deployment_name,
+                    'deployment_id': dataflow.deployment_id,
+                    'cron': dataflow.cron,
+                    'dataflow_type': dataflow.dataflow_type,
+                })
         return retval
-    
+
     def handle(self, *args, **options):
         org = Org.objects.filter(slug=options["org"]).first()
         if org is None:
