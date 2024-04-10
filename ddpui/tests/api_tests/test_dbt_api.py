@@ -22,12 +22,7 @@ from ddpui.api.dbt_api import (
     post_dbt_git_pull,
     post_dbt_makedocs,
 )
-from ddpui.auth import (
-    ACCOUNT_MANAGER_ROLE,
-    PIPELINE_MANAGER_ROLE,
-    GUEST_ROLE,
-    SUPER_ADMIN_ROLE,
-)
+from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.ddpprefect.schema import DbtProfile, OrgDbtSchema, OrgDbtGitHub
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 from ddpui.utils.custom_logger import CustomLogger
