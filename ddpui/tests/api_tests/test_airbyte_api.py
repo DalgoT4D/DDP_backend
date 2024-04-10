@@ -39,7 +39,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteDestinationCreate,
     AirbyteDestinationUpdateCheckConnection,
 )
-from ddpui.auth import ACCOUNT_MANAGER_ROLE, SUPER_ADMIN_ROLE
+from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui import ddpprefect
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 from ddpui.utils.custom_logger import CustomLogger
