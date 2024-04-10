@@ -49,10 +49,11 @@ class PlatformAdmin(HttpBearer):
 def has_permission(permission_slugs: list):
     def decorator(api_endpoint):
         @wraps(api_endpoint)
-        def wrapper(request, **kwargs):
+        def wrapper(*args, **kwargs):
             # request will have set of permissions that are allowed
             # check if permission_slug lies in this set
             # throw error if nots
+            request = args[0]
             try:
                 if not request.permissions or len(request.permissions) == 0:
                     raise HttpError(403, "not allowed")
@@ -62,7 +63,7 @@ def has_permission(permission_slugs: list):
             except:
                 raise HttpError(404, UNAUTHORIZED)
 
-            return api_endpoint(request, **kwargs)
+            return api_endpoint(*args, **kwargs)
 
         return wrapper
 
