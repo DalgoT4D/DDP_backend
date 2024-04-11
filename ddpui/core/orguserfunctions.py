@@ -147,6 +147,7 @@ def update_orguser_v1(orguser: OrgUser, payload: OrgUserUpdatev1):
     if payload.role_uuid:
         orguser.new_role = Role.objects.filter(uuid=payload.role_uuid).first()
     orguser.user.save()
+    orguser.save()
 
     logger.info(f"updated orguser {orguser.user.email}")
     return from_orguser(orguser)
