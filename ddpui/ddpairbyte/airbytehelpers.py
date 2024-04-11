@@ -355,9 +355,9 @@ def get_one_connection(org: Org, connection_id: str):
 
     # fetch the source and destination names
     # the web_backend/connections/get fetches the source & destination objects also so we dont need to query again
-    source_name = airbyte_conn["source"]["sourceName"]
+    source_name = airbyte_conn["source"]["name"]
 
-    destination_name = airbyte_conn["destination"]["destinationName"]
+    destination_name = airbyte_conn["destination"]["name"]
 
     res = {
         "name": airbyte_conn["name"],

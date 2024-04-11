@@ -6,17 +6,31 @@ from ddpui.models.org_user import Invitation, InvitationSchema
 from ddpui.models.org_user import OrgUser, OrgUserResponse, OrgUserRole
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.orgtnc import OrgTnC
+from ddpui.models.role_based_access import RolePermission
 
 
 def from_orguser(orguser: OrgUser):
     """helper to turn an OrgUser into an OrgUserResponse"""
     warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    orguser_new_role = orguser.new_role.slug if orguser.new_role else None
+    permissions = []
+    if orguser_new_role:
+        role_permissions = list(
+            RolePermission.objects.filter(role=orguser.new_role).all()
+        )
+        permissions = [
+            {"slug": item.permission.slug, "name": item.permission.name}
+            for item in role_permissions
+        ]
+
     response = OrgUserResponse(
         email=orguser.user.email,
         org=orguser.org,
         active=orguser.user.is_active,
         role=orguser.role,
         role_slug=slugify(OrgUserRole(orguser.role).name),
+        new_role_slug=orguser_new_role,
+        permissions=permissions,
         wtype=warehouse.wtype if warehouse else None,
         is_demo=orguser.org.is_demo if orguser.org else False,
     )
@@ -34,4 +48,5 @@ def from_invitation(invitation: Invitation):
         invited_by=from_orguser(invitation.invited_by),
         invited_on=invitation.invited_on,
         invite_code=invitation.invite_code,
+        invited_new_role_slug=invitation.invited_new_role.slug,
     )

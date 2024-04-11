@@ -12,6 +12,7 @@ from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from rest_framework.authtoken import views
 
 from ddpui import auth
+from ddpui.auth import has_permission
 from ddpui.models.org import (
     OrgSchema,
     OrgWarehouseSchema,
@@ -20,6 +21,7 @@ from ddpui.models.org_user import (
     AcceptInvitationSchema,
     Invitation,
     InvitationSchema,
+    NewInvitationSchema,
     UserAttributes,
     OrgUser,
     OrgUserCreate,
@@ -27,13 +29,15 @@ from ddpui.models.org_user import (
     OrgUserResponse,
     OrgUserRole,
     OrgUserUpdate,
+    OrgUserUpdatev1,
     ForgotPasswordSchema,
     ResetPasswordSchema,
     VerifyEmailSchema,
     DeleteOrgUserPayload,
+    OrgUserUpdateNewRole,
 )
 
-
+from ddpui.models.role_based_access import Role
 from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.utils.deleteorg import delete_warehouse_v1
@@ -80,18 +84,10 @@ def ninja_default_error_handler(
     return Response({"detail": "something went wrong"}, status=500)
 
 
-@user_org_api.get("/currentuser", response=OrgUserResponse, auth=auth.AnyOrgUser())
-def get_current_user(request):
-    """return the OrgUser making this request"""
-    orguser: OrgUser = request.orguser
-    if orguser is not None:
-        return from_orguser(orguser)
-    raise HttpError(400, "requestor is not an OrgUser")
-
-
 @user_org_api.get(
-    "/currentuserv2", response=List[OrgUserResponse], auth=auth.AnyOrgUser()
+    "/currentuserv2", response=List[OrgUserResponse], auth=auth.CustomAuthMiddleware()
 )
+@has_permission(["can_view_orgusers"])
 def get_current_user_v2(request):
     """return all the OrgUsers for the User making this request"""
     if request.orguser is None:
@@ -101,6 +97,7 @@ def get_current_user_v2(request):
 
 
 @user_org_api.post("/organizations/users/", response=OrgUserResponse)
+@has_permission(["can_create_orguser"])
 def post_organization_user(
     request, payload: OrgUserCreate
 ):  # pylint: disable=unused-argument
@@ -129,8 +126,11 @@ def post_login(request):
 
 
 @user_org_api.get(
-    "/organizations/users", response=List[OrgUserResponse], auth=auth.CanManageUsers()
+    "/organizations/users",
+    response=List[OrgUserResponse],
+    auth=auth.CustomAuthMiddleware(),
 )
+@has_permission(["can_view_orgusers"])
 def get_organization_users(request):
     """list all OrgUsers in the requestor's org, including inactive"""
     orguser: OrgUser = request.orguser
@@ -145,7 +145,8 @@ def get_organization_users(request):
     return orgusers
 
 
-@user_org_api.post("/organizations/users/delete", auth=auth.CanManageUsers())
+@user_org_api.post("/organizations/users/delete", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_delete_orguser"])
 def delete_organization_users(request, payload: DeleteOrgUserPayload):
     """delete the orguser posted"""
     orguser: OrgUser = request.orguser
@@ -159,9 +160,28 @@ def delete_organization_users(request, payload: DeleteOrgUserPayload):
     return {"success": 1}
 
 
+@user_org_api.post("/v1/organizations/users/delete", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_delete_orguser"])
+def delete_organization_users_v1(request, payload: DeleteOrgUserPayload):
+    """delete the orguser posted"""
+    orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "no associated org")
+
+    _, error = orguserfunctions.delete_orguser_v1(orguser, payload)
+    if error:
+        raise HttpError(400, error)
+
+    return {"success": 1}
+
+
 @user_org_api.put(
-    "/organizations/user_self/", response=OrgUserResponse, auth=auth.AnyOrgUser()
+    "/organizations/user_self/",
+    response=OrgUserResponse,
+    auth=auth.CustomAuthMiddleware(),
+    deprecated=True,
 )
+@has_permission(["can_edit_orguser"])
 def put_organization_user_self(request, payload: OrgUserUpdate):
     """update the requestor's OrgUser"""
     orguser: OrgUser = request.orguser
@@ -172,10 +192,27 @@ def put_organization_user_self(request, payload: OrgUserUpdate):
 
 
 @user_org_api.put(
+    "/v1/organizations/user_self/",
+    response=OrgUserResponse,
+    auth=auth.CustomAuthMiddleware(),
+)
+@has_permission(["can_edit_orguser"])
+def put_organization_user_self_v1(request, payload: OrgUserUpdatev1):
+    """update the requestor's OrgUser"""
+    orguser: OrgUser = request.orguser
+
+    # not allowed to update own role
+    payload.role_uuid = None
+    return orguserfunctions.update_orguser_v1(orguser, payload)
+
+
+@user_org_api.put(
     "/organizations/users/",
     response=OrgUserResponse,
-    auth=auth.CanManageUsers(),
+    auth=auth.CustomAuthMiddleware(),
+    deprecated=True,
 )
+@has_permission(["can_edit_orguser"])
 def put_organization_user(request, payload: OrgUserUpdate):
     """update another OrgUser"""
     requestor_orguser: OrgUser = request.orguser
@@ -197,11 +234,41 @@ def put_organization_user(request, payload: OrgUserUpdate):
     return orguserfunctions.update_orguser(orguser, payload)
 
 
+@user_org_api.put(
+    "/v1/organizations/users/",
+    response=OrgUserResponse,
+    auth=auth.CustomAuthMiddleware(),
+)
+@has_permission(["can_edit_orguser"])
+def put_organization_user_v1(request, payload: OrgUserUpdatev1):
+    """update another OrgUser or themselves"""
+    requestor_orguser: OrgUser = request.orguser
+
+    orguser = OrgUser.objects.filter(
+        user__email=payload.toupdate_email, org=request.orguser.org
+    ).first()
+    if orguser is None:
+        raise HttpError(
+            400, "could not find user having this email address in this org"
+        )
+
+    # one can only update the role of user less than or equal to their role
+    if payload.role_uuid and orguser.new_role.level > requestor_orguser.new_role.level:
+        raise HttpError(403, "Insufficient permissions")
+
+    # not allowed to update own role
+    if requestor_orguser.user.email == orguser.user.email:
+        payload.role_uuid = None
+
+    return orguserfunctions.update_orguser_v1(orguser, payload)
+
+
 @user_org_api.post(
     "/organizations/users/makeowner/",
     response=OrgUserResponse,
-    auth=auth.FullAccess(),
+    auth=auth.CustomAuthMiddleware(),
 )
+@has_permission(["can_edit_orguser_role"])
 def post_transfer_ownership(request, payload: OrgUserNewOwner):
     """update another OrgUser"""
     orguser: OrgUser = request.orguser
@@ -211,7 +278,44 @@ def post_transfer_ownership(request, payload: OrgUserNewOwner):
     return retval
 
 
-@user_org_api.post("/organizations/warehouse/", auth=auth.CanManagePipelines())
+@user_org_api.post(
+    "/organizations/user_role/modify/",
+    auth=auth.CustomAuthMiddleware(),
+)
+@has_permission(["can_edit_orguser_role"])
+def post_modify_orguser_role(request, payload: OrgUserUpdateNewRole):
+    """update another OrgUser's role"""
+    orguser: OrgUser = request.orguser
+
+    if not orguser.new_role:
+        raise HttpError(403, "Insufficient permissions")
+
+    role_to_be_assgined = Role.objects.filter(uuid=payload.role_uuid).first()
+
+    if not role_to_be_assgined:
+        raise HttpError(400, "Invalid role")
+
+    # you cannot assign a role that is higher than yours
+    if role_to_be_assgined.level > orguser.new_role.level:
+        raise HttpError(403, "Insufficient permissions")
+
+    request_email = payload.toupdate_email.lower().strip()
+    orguser_to_be_assigned = (
+        OrgUser.objects.filter(user__email__iexact=request_email)
+        .exclude(user__email__iexact=orguser.user.email)
+        .first()
+    )
+    if not orguser_to_be_assigned:
+        raise HttpError(400, "User does not exist")
+
+    orguser_to_be_assigned.new_role = role_to_be_assgined
+    orguser_to_be_assigned.save()
+
+    return {"success": 1}
+
+
+@user_org_api.post("/organizations/warehouse/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_create_warehouse"])
 def post_organization_warehouse(request, payload: OrgWarehouseSchema):
     """registers a data warehouse for the org"""
     orguser: OrgUser = request.orguser
@@ -222,7 +326,8 @@ def post_organization_warehouse(request, payload: OrgWarehouseSchema):
     return {"success": 1}
 
 
-@user_org_api.get("/organizations/warehouses", auth=auth.CanManagePipelines())
+@user_org_api.get("/organizations/warehouses", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouses"])
 def get_organizations_warehouses(request):
     """returns all warehouses associated with this org"""
     orguser: OrgUser = request.orguser
@@ -230,74 +335,6 @@ def get_organizations_warehouses(request):
     if error:
         raise HttpError(400, error)
     return {"warehouses": result}
-
-
-@user_org_api.post(
-    "/organizations/users/invite/",
-    response=InvitationSchema,
-    auth=auth.CanManageUsers(),
-)
-def post_organization_user_invite(request, payload: InvitationSchema):
-    """Send an invitation to a user to join platform"""
-    orguser: OrgUser = request.orguser
-    retval, error = orguserfunctions.invite_user(orguser, payload)
-    if error:
-        raise HttpError(400, error)
-    return retval
-
-
-@user_org_api.post(
-    "/organizations/users/invite/accept/",
-    response=OrgUserResponse,
-)
-def post_organization_user_accept_invite(
-    request, payload: AcceptInvitationSchema
-):  # pylint: disable=unused-argument
-    """User accepting the invite sent with a valid invite code"""
-    retval, error = orguserfunctions.accept_invitation(payload)
-    if error:
-        raise HttpError(400, error)
-    return retval
-
-
-@user_org_api.get("/users/invitations/", auth=auth.AnyOrgUser())
-def get_invitations(request):
-    """Get all invitations sent by the current user"""
-    retval, error = orguserfunctions.get_invitations_from_orguser(request.orguser)
-    if error:
-        raise HttpError(400, error)
-    return retval
-
-
-@user_org_api.post("/users/invitations/resend/{invitation_id}", auth=auth.AnyOrgUser())
-def post_resend_invitation(request, invitation_id):
-    """Get all invitations sent by the current user"""
-    orguser: OrgUser = request.orguser
-    if orguser.org is None:
-        raise HttpError(400, "create an organization first")
-
-    _, error = orguserfunctions.resend_invitation(invitation_id)
-    if error:
-        raise HttpError(400, error)
-
-    return {"success": 1}
-
-
-@user_org_api.delete(
-    "/users/invitations/delete/{invitation_id}", auth=auth.AnyOrgUser()
-)
-def delete_invitation(request, invitation_id):
-    """Get all invitations sent by the current user"""
-    orguser: OrgUser = request.orguser
-    if orguser.org is None:
-        raise HttpError(400, "create an organization first")
-
-    invitation = Invitation.objects.filter(id=invitation_id).first()
-
-    if invitation:
-        invitation.delete()
-
-    return {"success": 1}
 
 
 @user_org_api.post(
@@ -324,7 +361,8 @@ def post_reset_password(
     return {"success": 1}
 
 
-@user_org_api.get("/users/verify_email/resend", auth=auth.AnyOrgUser())
+@user_org_api.get("/users/verify_email/resend", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_resend_email_verification"])
 def get_verify_email_resend(request):  # pylint: disable=unused-argument
     """this api is hit when the user is logged in but the email is still not verified"""
     _, error = orguserfunctions.resend_verification_email(
@@ -346,11 +384,130 @@ def post_verify_email(
     return {"success": 1}
 
 
+# ====================== Invite users =========================================
+
+
+@user_org_api.post(
+    "/organizations/users/invite/",
+    response=InvitationSchema,
+    auth=auth.CustomAuthMiddleware(),
+)
+@has_permission(["can_create_invitation"])
+def post_organization_user_invite(request, payload: InvitationSchema):
+    """Send an invitation to a user to join platform"""
+    orguser: OrgUser = request.orguser
+    retval, error = orguserfunctions.invite_user(orguser, payload)
+    if error:
+        raise HttpError(400, error)
+    return retval
+
+
+@user_org_api.post(
+    "/v1/organizations/users/invite/",
+    response=NewInvitationSchema,
+    auth=auth.CustomAuthMiddleware(),
+)
+@has_permission(["can_create_invitation"])
+def post_organization_user_invite_v1(request, payload: NewInvitationSchema):
+    """Send an invitation to a user to join platform"""
+    orguser: OrgUser = request.orguser
+    retval, error = orguserfunctions.invite_user_v1(orguser, payload)
+    if error:
+        raise HttpError(400, error)
+    return retval
+
+
+@user_org_api.post(
+    "/organizations/users/invite/accept/",
+    response=OrgUserResponse,
+)
+def post_organization_user_accept_invite(
+    request, payload: AcceptInvitationSchema
+):  # pylint: disable=unused-argument
+    """User accepting the invite sent with a valid invite code"""
+    retval, error = orguserfunctions.accept_invitation(payload)
+    if error:
+        raise HttpError(400, error)
+    return retval
+
+
+@user_org_api.post(
+    "/v1/organizations/users/invite/accept/",
+    response=OrgUserResponse,
+)
+def post_organization_user_accept_invite_v1(
+    request, payload: AcceptInvitationSchema
+):  # pylint: disable=unused-argument
+    """User accepting the invite sent with a valid invite code"""
+    retval, error = orguserfunctions.accept_invitation_v1(payload)
+    if error:
+        raise HttpError(400, error)
+    return retval
+
+
+@user_org_api.get("/users/invitations/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_invitations"])
+def get_invitations(request):
+    """Get all invitations sent by the current user"""
+    retval, error = orguserfunctions.get_invitations_from_orguser(request.orguser)
+    if error:
+        raise HttpError(400, error)
+    return retval
+
+
+@user_org_api.get("/v1/users/invitations/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_invitations"])
+def get_invitations_v1(request):
+    """Get all invitations sent by the current user"""
+    retval, error = orguserfunctions.get_invitations_from_orguser_v1(request.orguser)
+    if error:
+        raise HttpError(400, error)
+    return retval
+
+
+@user_org_api.post(
+    "/users/invitations/resend/{invitation_id}", auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_edit_invitation"])
+def post_resend_invitation(request, invitation_id):
+    """Get all invitations sent by the current user"""
+    orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
+
+    _, error = orguserfunctions.resend_invitation(invitation_id)
+    if error:
+        raise HttpError(400, error)
+
+    return {"success": 1}
+
+
+@user_org_api.delete(
+    "/users/invitations/delete/{invitation_id}", auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_delete_invitation"])
+def delete_invitation(request, invitation_id):
+    """Get all invitations sent by the current user"""
+    orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
+
+    invitation = Invitation.objects.filter(id=invitation_id).first()
+
+    if invitation:
+        invitation.delete()
+
+    return {"success": 1}
+
+
 # ==============================================================================
 # new apis to go away from the block architecture
 
 
-@user_org_api.post("/v1/organizations/", response=OrgSchema, auth=auth.AnyOrgUser())
+@user_org_api.post(
+    "/v1/organizations/", response=OrgSchema, auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_create_org"])
 def post_organization_v1(request, payload: OrgSchema):
     """creates a new org & new orguser (if required) and attaches it to the requestor"""
     orguser: OrgUser = request.orguser
@@ -372,7 +529,8 @@ def post_organization_v1(request, payload: OrgSchema):
     )
 
 
-@user_org_api.delete("/v1/organizations/warehouses/", auth=auth.CanManagePipelines())
+@user_org_api.delete("/v1/organizations/warehouses/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_delete_warehouses"])
 def delete_organization_warehouses_v1(request):
     """deletes all (references to) data warehouses for the org"""
     orguser: OrgUser = request.orguser
@@ -387,7 +545,8 @@ def delete_organization_warehouses_v1(request):
     return {"success": 1}
 
 
-@user_org_api.post("/organizations/accept-tnc/", auth=auth.CanManagePipelines())
+@user_org_api.post("/organizations/accept-tnc/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_accept_tnc"])
 def post_organization_accept_tnc(request):
     """accept the terms and conditions"""
     orguser: OrgUser = request.orguser

@@ -1,4 +1,4 @@
-"""All the master data api cane found here"""
+"""All the master data api can be found here"""
 
 from ninja import NinjaAPI
 from ninja.errors import HttpError
@@ -11,11 +11,14 @@ from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from ddpui import auth
 from ddpui.models.tasks import Task
+from ddpui.models.org_user import OrgUser
+from ddpui.models.role_based_access import Role
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.constants import (
     TASK_DBTRUN,
     TASK_GITPULL,
 )
+from ddpui.auth import has_permission
 from ddpui.ddpdbt import dbt_service
 
 dataapi = NinjaAPI(urls_namespace="master_data")
@@ -57,7 +60,8 @@ def ninja_default_error_handler(
     return Response({"detail": "something went wrong"}, status=500)
 
 
-@dataapi.get("/tasks/", auth=auth.CanManagePipelines())
+@dataapi.get("/tasks/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_master_tasks"])
 def get_tasks(request):
     """Fetch master list of tasks related to transformation"""
     tasks = [
@@ -67,7 +71,8 @@ def get_tasks(request):
     return tasks
 
 
-@dataapi.get("/tasks/{slug}/config/", auth=auth.CanManagePipelines())
+@dataapi.get("/tasks/{slug}/config/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_master_task"])
 def get_task_config(request, slug):
     """Get task config which details about the parameters that can be added/used while running it"""
     task = Task.objects.filter(slug=slug).first()
@@ -76,3 +81,13 @@ def get_task_config(request, slug):
         raise HttpError(404, "Task not found")
 
     return dbt_service.task_config_params(task)
+
+
+@dataapi.get("/roles/", auth=auth.CustomAuthMiddleware())
+def get_roles(request):
+    """Fetch master list of roles"""
+    orguser: OrgUser = request.orguser
+
+    roles = Role.objects.filter(level__lte=orguser.new_role.level).all()
+
+    return [{"uuid": role.uuid, "slug": role.slug, "name": role.name} for role in roles]

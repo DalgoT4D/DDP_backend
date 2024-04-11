@@ -12,17 +12,33 @@ from ddpui.models.org import Org, OrgPrefectBlock
 from ddpui.models.org_user import User, OrgUser
 from ddpui.models.orgjobs import OrgDataFlow, DataflowBlock, BlockLock
 from ddpui.models.tasks import Task, DataflowOrgTask, TaskLock, OrgTask, OrgDataFlowv1
+from ddpui.models.role_based_access import Role, RolePermission, Permission
+from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.api.dashboard_api import get_dashboard, get_dashboard_v1
+from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
 pytestmark = pytest.mark.django_db
 
+# ================================================================================
 
+
+def test_seed_data(seed_db):
+    """a test to seed the database"""
+    assert Role.objects.count() == 5
+    assert RolePermission.objects.count() > 5
+    assert Permission.objects.count() > 5
+
+
+# ================================================================================
 def test_get_dashboard():
     user = User.objects.create(email="email", username="username")
     org = Org.objects.create(name="org", slug="org")
-    orguser = OrgUser.objects.create(user=user, org=org)
-    request = Mock()
-    request.orguser = orguser
+    orguser = OrgUser.objects.create(
+        user=user,
+        org=org,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+    )
+    request = mock_request(orguser)
 
     opb = OrgPrefectBlock.objects.create(
         org=org, block_type="block-type", block_id="block-id", block_name="block-name"
@@ -54,9 +70,12 @@ def test_get_dashboard():
 def test_get_dashboard_v1():
     user = User.objects.create(email="email", username="username")
     org = Org.objects.create(name="org", slug="org")
-    orguser = OrgUser.objects.create(user=user, org=org)
-    request = Mock()
-    request.orguser = orguser
+    orguser = OrgUser.objects.create(
+        user=user,
+        org=org,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+    )
+    request = mock_request(orguser)
 
     task = Task.objects.create(
         type="dbt", slug="dbt-clean", label="DBT clean", command="clean"
