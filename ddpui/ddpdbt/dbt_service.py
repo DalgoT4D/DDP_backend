@@ -1,3 +1,4 @@
+import glob
 import os
 import shutil
 import subprocess
@@ -172,20 +173,25 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
     )
     shutil.copy(source_packages_yml, target_packages_yml)
 
-    # copy generate schema macro file
-    logger.info("copying generate schema macro from assets")
-    custom_schema_target = Path(dbtrepo_dir) / "macros" / "generate_schema_name.sql"
-    source_schema_name_macro_path = os.path.abspath(
-        os.path.join(os.path.abspath(assets.__file__), "..", "generate_schema_name.sql")
-    )
-    shutil.copy(source_schema_name_macro_path, custom_schema_target)
+    # copy all macros with .sql extension from assets
+    assets_dir = assets.__path__[0]
+
+    for sql_file_path in glob.glob(os.path.join(assets_dir, "*.sql")):
+        # Get the target path in the project_dir/macros directory
+        target_path = Path(dbtrepo_dir) / "macros" / Path(sql_file_path).name
+
+        # Copy the .sql file to the target path
+        shutil.copy(sql_file_path, target_path)
+
+        # Log the creation of the file
+        logger.info("created %s", target_path)
 
     dbt = OrgDbt(
         project_dir=str(project_dir),
         dbt_venv=os.getenv("DBT_VENV"),
         target_type=warehouse.wtype,
         default_schema=default_schema,
-        transform_type="ui"
+        transform_type="ui",
     )
     dbt.save()
     logger.info("created orgdbt for org %s", org.name)
