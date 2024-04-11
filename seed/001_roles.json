@@ -1,0 +1,47 @@
+[
+    {
+        "model": "ddpui.Role",
+        "pk": 1,
+        "fields": {
+            "name": "Super User",
+            "slug": "super-admin",
+            "level": 5
+        }
+    },
+    {
+        "model": "ddpui.Role",
+        "pk": 2,
+        "fields": {
+            "name": "Account Manager",
+            "slug": "account-manager",
+            "level": 4
+        }
+    },
+    {
+        "model": "ddpui.Role",
+        "pk": 3,
+        "fields": {
+            "name": "Pipeline Manager",
+            "slug": "pipeline-manager",
+            "level": 3
+        }
+    },
+    {
+        "model": "ddpui.Role",
+        "pk": 4,
+        "fields": {
+            "name": "Analyst",
+            "slug": "analyst",
+            "level": 2
+        }
+    },
+    {
+        "model": "ddpui.Role",
+        "pk": 5,
+        "fields": {
+            "name": "Guest",
+            "slug": "guest",
+            "level": 1
+        }
+    }
+]

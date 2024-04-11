@@ -17,16 +17,19 @@ from ddpui.models.org_user import (
     AcceptInvitationSchema,
     Invitation,
     InvitationSchema,
+    NewInvitationSchema,
     UserAttributes,
     OrgUser,
     OrgUserCreate,
     OrgUserNewOwner,
     OrgUserRole,
     OrgUserUpdate,
+    OrgUserUpdatev1,
     ResetPasswordSchema,
     VerifyEmailSchema,
     DeleteOrgUserPayload,
 )
+from ddpui.models.role_based_access import Role
 from ddpui.models.org import Org
 from ddpui.models.orgtnc import OrgTnC
 from ddpui.utils import sendgrid
@@ -135,6 +138,21 @@ def update_orguser(orguser: OrgUser, payload: OrgUserUpdate):
     return from_orguser(orguser)
 
 
+def update_orguser_v1(orguser: OrgUser, payload: OrgUserUpdatev1):
+    """updates attributes of an OrgUser"""
+    if payload.email:
+        orguser.user.email = payload.email.lower().strip()
+    if payload.active is not None:
+        orguser.user.is_active = payload.active
+    if payload.role_uuid:
+        orguser.new_role = Role.objects.filter(uuid=payload.role_uuid).first()
+    orguser.user.save()
+    orguser.save()
+
+    logger.info(f"updated orguser {orguser.user.email}")
+    return from_orguser(orguser)
+
+
 def transfer_ownership(requestor_orguser: OrgUser, payload: OrgUserNewOwner):
     """transfer ownership of an orguser"""
     if requestor_orguser.role not in [
@@ -180,6 +198,32 @@ def delete_orguser(requestor_orguser: OrgUser, payload: DeleteOrgUserPayload):
         return None, "user does not belong to the org"
 
     if orguser_to_delete.role > requestor_orguser.role:
+        return None, "cannot delete user having higher role"
+
+    # remove the invitations associated with the org user
+    Invitation.objects.filter(
+        invited_by__org=requestor_orguser.org, invited_email=payload.email
+    ).delete()
+
+    # delete the org user
+    orguser_to_delete.delete()
+
+    return None, None
+
+
+def delete_orguser_v1(requestor_orguser: OrgUser, payload: DeleteOrgUserPayload):
+    """delete another orguser"""
+    orguser_to_delete = OrgUser.objects.filter(
+        org=requestor_orguser.org, user__email=payload.email
+    ).first()
+
+    if requestor_orguser == orguser_to_delete:
+        return None, "user cannot delete themselves"
+
+    if orguser_to_delete is None:
+        return None, "user does not belong to the org"
+
+    if orguser_to_delete.new_role.level > requestor_orguser.new_role.level:
         return None, "cannot delete user having higher role"
 
     # remove the invitations associated with the org user
@@ -275,6 +319,86 @@ def invite_user(orguser: OrgUser, payload: InvitationSchema):
     return payload, None
 
 
+def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema):
+    """invite a user to an org"""
+    frontend_url = os.getenv("FRONTEND_URL")
+
+    if orguser.org is None:
+        return None, "create an organization first"
+
+    invited_email = payload.invited_email.lower().strip()
+    if OrgUser.objects.filter(
+        org=orguser.org, user__email__iexact=invited_email
+    ).exists():
+        return None, "user already has an account"
+
+    invited_role = Role.objects.filter(uuid=payload.invited_role_uuid).first()
+    if not invited_role:
+        return None, "Invalid role"
+
+    # user can only invite a role equal or lower to their role
+    if invited_role.level > orguser.new_role.level:
+        return None, "Insufficient permissions for this operation"
+
+    existing_user = User.objects.filter(email__iexact=invited_email).first()
+
+    if existing_user:
+        logger.info("user exists, creating new OrgUser")
+        OrgUser.objects.create(
+            user=existing_user, org=orguser.org, new_role=invited_role
+        )
+        sendgrid.send_youve_been_added_email(
+            invited_email, orguser.user.email, orguser.org.name
+        )
+        return (
+            NewInvitationSchema(
+                invited_email=invited_email,
+                invited_role_uuid=payload.invited_role_uuid,
+            ),
+            None,
+        )
+
+    invitation = Invitation.objects.filter(
+        invited_email__iexact=invited_email, invited_by__org=orguser.org
+    ).first()
+    if invitation:
+        invitation.invited_on = timezone.as_utc(datetime.utcnow())
+        # if the invitation is already present - trigger the email again
+        invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
+        sendgrid.send_invite_user_email(
+            invitation.invited_email, invitation.invited_by.user.email, invite_url
+        )
+        logger.info(
+            f"Resent invitation to {invited_email} to join {orguser.org.name} "
+            f"with invite code {invitation.invite_code}",
+        )
+        return from_invitation(invitation), None
+
+    # payload.invited_by = from_orguser(orguser)
+    # payload.invited_on = timezone.as_utc(datetime.utcnow())
+    # payload.invite_code = str(uuid4())
+
+    invitation = Invitation.objects.create(
+        invited_email=invited_email,
+        invited_by=orguser,
+        invited_on=datetime.now(timezone.UTC),
+        invite_code=str(uuid4()),
+        invited_new_role=invited_role,
+    )
+
+    # trigger an email to the user
+    invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
+    sendgrid.send_invite_user_email(
+        invitation.invited_email, invitation.invited_by.user.email, invite_url
+    )
+
+    logger.info(
+        f"Invited {invited_email} to join {orguser.org.name} "
+        f"with invite code {invitation.invite_code}",
+    )
+    return payload, None
+
+
 def accept_invitation(payload: AcceptInvitationSchema):
     """accept an invitation"""
     invitation = Invitation.objects.filter(invite_code=payload.invite_code).first()
@@ -312,6 +436,45 @@ def accept_invitation(payload: AcceptInvitationSchema):
     return from_orguser(orguser), None
 
 
+def accept_invitation_v1(payload: AcceptInvitationSchema):
+    """accept an invitation"""
+    invitation = Invitation.objects.filter(invite_code=payload.invite_code).first()
+    if invitation is None:
+        return None, "invalid invite code"
+
+    # we can have one auth user mapped to multiple orguser and hence multiple orgs
+    # but there can only be one orguser per one org
+    orguser = OrgUser.objects.filter(
+        user__email__iexact=invitation.invited_email, org=invitation.invited_by.org
+    ).first()
+
+    if not orguser:
+        user = User.objects.filter(
+            username=invitation.invited_email,
+            email=invitation.invited_email,
+        ).first()
+        if user is None:
+            if payload.password is None:
+                return None, "password is required"
+            logger.info(
+                f"creating invited user {invitation.invited_email} "
+                f"for {invitation.invited_by.org.name}"
+            )
+            user = User.objects.create_user(
+                username=invitation.invited_email.lower().strip(),
+                email=invitation.invited_email.lower().strip(),
+                password=payload.password,
+            )
+            UserAttributes.objects.create(user=user, email_verified=True)
+        orguser = OrgUser.objects.create(
+            user=user,
+            org=invitation.invited_by.org,
+            new_role=invitation.invited_new_role,
+        )
+    invitation.delete()
+    return from_orguser(orguser), None
+
+
 def get_invitations_from_orguser(orguser: OrgUser):
     """get all invitations sent by an orguser"""
     if orguser.org is None:
@@ -328,6 +491,31 @@ def get_invitations_from_orguser(orguser: OrgUser):
                 "invited_email": invitation.invited_email,
                 "invited_role_slug": slugify(OrgUserRole(invitation.invited_role).name),
                 "invited_role": invitation.invited_role,
+                "invited_on": invitation.invited_on,
+            }
+        )
+
+    return res, None
+
+
+def get_invitations_from_orguser_v1(orguser: OrgUser):
+    """get all invitations sent by an orguser"""
+    if orguser.org is None:
+        return None, "create an organization first"
+
+    invitations = (
+        Invitation.objects.filter(invited_by=orguser).order_by("-invited_on").all()
+    )
+    res = []
+    for invitation in invitations:
+        res.append(
+            {
+                "id": invitation.id,
+                "invited_email": invitation.invited_email,
+                "invited_role": {
+                    "uuid": invitation.invited_new_role.uuid,
+                    "name": invitation.invited_new_role.name,
+                },
                 "invited_on": invitation.invited_on,
             }
         )

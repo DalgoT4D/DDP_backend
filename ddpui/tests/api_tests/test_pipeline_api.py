@@ -7,6 +7,7 @@ import yaml
 import json
 from pathlib import Path
 from django.apps import apps
+from django.core.management import call_command
 from ninja.errors import HttpError
 
 
@@ -41,27 +42,29 @@ from ddpui.ddpprefect.schema import (
 )
 from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
+from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask, Task, TaskLock
-from ddpui.utils.constants import TASK_DBTRUN, TRANSFORM_TASKS_SEQ
+from ddpui.models.org_user import OrgUser, OrgUserRole
+from ddpui.utils.constants import TASK_DBTRUN
+from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
 pytestmark = pytest.mark.django_db
 
 
+@pytest.fixture(scope="session")
+def seed_master_tasks_db(django_db_setup, django_db_blocker):
+    with django_db_blocker.unblock():
+        # Run the loaddata command to load the fixture
+        call_command("loaddata", "tasks.json")
+
+
 # ================================================================================
-@pytest.fixture
-def seed_master_tasks():
-    app_dir = os.path.join(Path(apps.get_app_config("ddpui").path), "..")
-    seed_dir = os.path.abspath(os.path.join(app_dir, "seed"))
-    f = open(os.path.join(seed_dir, "tasks.json"))
-    tasks = json.load(f)
-    for task in tasks:
-        Task.objects.create(**task["fields"])
 
 
 @pytest.fixture()
-def org_without_dbt_workspace(seed_master_tasks):
+def org_without_dbt_workspace():
     """org without dbt workspace"""
-    print("creating org")
     org_slug = "test-org-slug"
 
     org = Org.objects.create(
@@ -70,12 +73,26 @@ def org_without_dbt_workspace(seed_master_tasks):
         name=org_slug,
     )
     yield org
-    print("deleting org")
     org.delete()
 
 
+@pytest.fixture
+def orguser(org_without_dbt_workspace):
+    """a pytest fixture representing an OrgUser having the account-manager role"""
+    orguser = OrgUser.objects.create(
+        user=User.objects.create(
+            username="tempusername", email="tempuseremail", password="tempuserpassword"
+        ),
+        org=org_without_dbt_workspace,
+        role=OrgUserRole.ACCOUNT_MANAGER,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+    )
+    yield orguser
+    orguser.delete()
+
+
 @pytest.fixture()
-def org_with_dbt_workspace(tmpdir_factory, seed_master_tasks):
+def org_with_dbt_workspace(tmpdir_factory):
     """a pytest fixture which creates an Org having an dbt workspace"""
     print("creating org_with_dbt_workspace")
     org_slug = "test-org-slug"
@@ -110,11 +127,24 @@ def org_with_dbt_workspace(tmpdir_factory, seed_master_tasks):
     org.delete()
 
 
-@pytest.fixture()
-def org_with_transformation_tasks(tmpdir_factory, seed_master_tasks):
-    """org having the default system transformation tasks and dbt workspace"""
-    print("creating org with tasks")
+@pytest.fixture
+def orguser_dbt_workspace(org_with_dbt_workspace):
+    """a pytest fixture representing an OrgUser having the account-manager role"""
+    orguser = OrgUser.objects.create(
+        user=User.objects.create(
+            username="tempusername", email="tempuseremail", password="tempuserpassword"
+        ),
+        org=org_with_dbt_workspace,
+        role=OrgUserRole.ACCOUNT_MANAGER,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+    )
+    yield orguser
+    orguser.delete()
 
+
+@pytest.fixture()
+def org_with_transformation_tasks(tmpdir_factory, seed_master_tasks_db):
+    """org having the transformation tasks and dbt workspace"""
     org_slug = "test-org-slug"
     client_dir = tmpdir_factory.mktemp("clients")
     org_dir = client_dir.mkdir(org_slug)
@@ -142,14 +172,6 @@ def org_with_transformation_tasks(tmpdir_factory, seed_master_tasks):
         dbt=dbt,
         name=org_slug,
     )
-    user = User.objects.create(
-        is_superuser=True,
-        username="test@gmail.com",
-        password="password",
-        is_active=True,
-        is_staff=False,
-    )
-    OrgUser.objects.create(org=org, user=user, role=3, email_verified=True)
 
     # server block
     OrgPrefectBlockv1.objects.create(
@@ -175,8 +197,8 @@ def org_with_transformation_tasks(tmpdir_factory, seed_master_tasks):
         block_name="cliprofile-blk-name",
     )
 
-    for task in Task.objects.filter(type__in=["dbt", "git"], is_system=True).all():
-        org_task = OrgTask.objects.create(uuid=uuid.uuid4(), org=org, task=task)
+    for task in Task.objects.filter(type__in=["dbt", "git"]).all():
+        org_task = OrgTask.objects.create(org=org, task=task, uuid=uuid.uuid4())
 
         if task.slug == "dbt-run":
             new_dataflow = OrgDataFlowv1.objects.create(
@@ -197,10 +219,41 @@ def org_with_transformation_tasks(tmpdir_factory, seed_master_tasks):
     org.delete()
 
 
+@pytest.fixture
+def orguser_transform_tasks(org_with_transformation_tasks):
+    """a pytest fixture representing an OrgUser having the account-manager role"""
+    orguser = OrgUser.objects.create(
+        user=User.objects.create(
+            username="tempusername", email="tempuseremail", password="tempuserpassword"
+        ),
+        org=org_with_transformation_tasks,
+        role=OrgUserRole.ACCOUNT_MANAGER,
+        email_verified=True,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+    )
+    yield orguser
+    orguser.delete()
+
+
 # ================================================================================
 
 
-def test_post_prefect_dataflow_v1_failure1():
+def test_seed_data(seed_db):
+    """a test to seed the database"""
+    assert Role.objects.count() == 5
+    assert RolePermission.objects.count() > 5
+    assert Permission.objects.count() > 5
+
+
+def test_seed_master_tasks(seed_master_tasks_db):
+    """a test to seed the database"""
+    assert Task.objects.count() == 8
+
+
+# ================================================================================
+
+
+def test_post_prefect_dataflow_v1_failure1(orguser):
     """tests the failure due to missing organization"""
     connections = [PrefectFlowAirbyteConnection2(id="test-conn-id", seq=1)]
     payload = PrefectDataFlowCreateSchema4(
@@ -209,32 +262,25 @@ def test_post_prefect_dataflow_v1_failure1():
         cron="",
         transformTasks=[],
     )
-    mock_orguser = Mock()
-    mock_orguser.org = None
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
+    orguser.org = None
+    request = mock_request(orguser)
 
     with pytest.raises(HttpError) as excinfo:
-        post_prefect_dataflow_v1(mock_request, payload)
+        post_prefect_dataflow_v1(request, payload)
 
     assert str(excinfo.value) == "register an organization first"
 
 
-def test_post_prefect_dataflow_v1_failure2(org_with_transformation_tasks):
+def test_post_prefect_dataflow_v1_failure2(orguser_transform_tasks):
     """tests the failure due to missing name of the dataflow in the payload"""
     connections = [PrefectFlowAirbyteConnection2(id="test-conn-id", seq=1)]
     payload = PrefectDataFlowCreateSchema4(
         name="", connections=connections, cron="", transformTasks=[]
     )
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
+    request = mock_request(orguser_transform_tasks)
 
     with pytest.raises(HttpError) as excinfo:
-        post_prefect_dataflow_v1(mock_request, payload)
+        post_prefect_dataflow_v1(request, payload)
 
     assert str(excinfo.value) == "must provide a name for the flow"
 
@@ -245,8 +291,10 @@ def test_post_prefect_dataflow_v1_failure2(org_with_transformation_tasks):
         return_value={"deployment": {"name": "test-deploy", "id": "test-deploy-id"}}
     ),
 )
-def test_post_prefect_dataflow_v1_success(org_with_transformation_tasks):
+def test_post_prefect_dataflow_v1_success(orguser_transform_tasks):
     """tests the success of creating dataflow with only connections and no transform"""
+    request = mock_request(orguser_transform_tasks)
+
     connections = [
         PrefectFlowAirbyteConnection2(id="test-conn-id-1", seq=1),
         PrefectFlowAirbyteConnection2(id="test-conn-id-2", seq=1),
@@ -254,7 +302,7 @@ def test_post_prefect_dataflow_v1_success(org_with_transformation_tasks):
     # create org tasks for these connections
     for conn in connections:
         OrgTask.objects.create(
-            org=org_with_transformation_tasks,
+            org=request.orguser.org,
             task=Task.objects.filter(type__in=["airbyte"]).first(),
             connection_id=conn.id,
         )
@@ -264,13 +312,8 @@ def test_post_prefect_dataflow_v1_success(org_with_transformation_tasks):
         cron="test-cron",
         transformTasks=[],
     )
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
 
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
-
-    deployment = post_prefect_dataflow_v1(mock_request, payload)
+    deployment = post_prefect_dataflow_v1(request, payload)
 
     assert deployment["deploymentId"] == "test-deploy-id"
     assert deployment["name"] == payload.name
@@ -278,7 +321,7 @@ def test_post_prefect_dataflow_v1_success(org_with_transformation_tasks):
 
     # cleanup
     OrgTask.objects.filter(
-        org=org_with_transformation_tasks,
+        org=request.orguser.org,
         connection_id__in=["test-conn-id-1", "test-conn-id-1"],
     ).delete()
 
@@ -289,8 +332,10 @@ def test_post_prefect_dataflow_v1_success(org_with_transformation_tasks):
         return_value={"deployment": {"name": "test-deploy", "id": "test-deploy-id"}}
     ),
 )
-def test_post_prefect_dataflow_v1_success2(org_with_transformation_tasks):
+def test_post_prefect_dataflow_v1_success2(orguser_transform_tasks):
     """tests the success of creating dataflow/pipelin with connections and with system default tasks"""
+    request = mock_request(orguser_transform_tasks)
+
     connections = [
         PrefectFlowAirbyteConnection2(id="test-conn-id-1", seq=1),
         PrefectFlowAirbyteConnection2(id="test-conn-id-2", seq=2),
@@ -299,13 +344,13 @@ def test_post_prefect_dataflow_v1_success2(org_with_transformation_tasks):
     for conn in connections:
         OrgTask.objects.create(
             uuid=uuid.uuid4(),
-            org=org_with_transformation_tasks,
+            org=request.orguser.org,
             task=Task.objects.filter(type__in=["airbyte"]).first(),
             connection_id=conn.id,
         )
 
     transform_tasks = OrgTask.objects.filter(
-        org=org_with_transformation_tasks,
+        org=request.orguser.org,
         generated_by="system",
         task__type__in=["dbt", "git"],
     ).all()
@@ -319,13 +364,8 @@ def test_post_prefect_dataflow_v1_success2(org_with_transformation_tasks):
             for idx, org_task in enumerate(transform_tasks)
         ],
     )
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
 
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
-
-    deployment = post_prefect_dataflow_v1(mock_request, payload)
+    deployment = post_prefect_dataflow_v1(request, payload)
 
     assert deployment["deploymentId"] == "test-deploy-id"
     assert deployment["name"] == payload.name
@@ -333,7 +373,7 @@ def test_post_prefect_dataflow_v1_success2(org_with_transformation_tasks):
 
     # check sequence of tasks
     dataflow = OrgDataFlowv1.objects.filter(
-        org=org_with_transformation_tasks, deployment_id="test-deploy-id"
+        org=request.orguser.org, deployment_id="test-deploy-id"
     ).first()
 
     assert dataflow is not None
@@ -356,21 +396,19 @@ def test_post_prefect_dataflow_v1_success2(org_with_transformation_tasks):
 
     # cleanup
     OrgTask.objects.filter(
-        org=org_with_transformation_tasks,
+        org=request.orguser.org,
         connection_id__in=["test-conn-id-1", "test-conn-id-1"],
     ).delete()
 
 
-def test_get_prefect_dataflows_v1_failure():
+def test_get_prefect_dataflows_v1_failure(orguser):
     """tests failure in get dataflows due to missing org"""
-    mock_orguser = Mock()
-    mock_orguser.org = None
+    orguser.org = None
 
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
+    request = mock_request(orguser)
 
     with pytest.raises(HttpError) as excinfo:
-        get_prefect_dataflows_v1(mock_request)
+        get_prefect_dataflows_v1(request)
 
     assert str(excinfo.value) == "register an organization first"
 
@@ -379,15 +417,11 @@ def test_get_prefect_dataflows_v1_failure():
     "ddpui.ddpprefect.prefect_service",
     get_filtered_deployments=Mock(return_value=[]),
 )
-def test_get_prefect_dataflows_v1_success(org_with_transformation_tasks):
+def test_get_prefect_dataflows_v1_success(orguser_transform_tasks):
     """tests success with 0 dataflows for the org"""
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
+    request = mock_request(orguser_transform_tasks)
 
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
-
-    dataflows = get_prefect_dataflows_v1(mock_request)
+    dataflows = get_prefect_dataflows_v1(request)
 
     assert len(dataflows) == 0
 
@@ -407,31 +441,27 @@ def test_get_prefect_dataflows_v1_success(org_with_transformation_tasks):
         return_value={"deployment": {"name": "test-deploy", "id": "test-deploy-id"}}
     ),
 )
-def test_get_prefect_dataflows_v1_success2(org_with_transformation_tasks):
+def test_get_prefect_dataflows_v1_success2(orguser_transform_tasks):
     """tests success with atleast 1 dataflow/pipeline for the org"""
     # setup two pipelines to fetch for the org
+    request = mock_request(orguser_transform_tasks)
+
     flow0 = OrgDataFlowv1.objects.create(
-        org=org_with_transformation_tasks,
+        org=request.orguser.org,
         name="flow-1",
         deployment_name="prefect-flow-1",
         deployment_id="test-dep-id-1",
         dataflow_type="orchestrate",
     )
     flow1 = OrgDataFlowv1.objects.create(
-        org=org_with_transformation_tasks,
+        org=request.orguser.org,
         name="flow-2",
         deployment_name="prefect-flow-2",
         deployment_id="test-dep-id-2",
         dataflow_type="orchestrate",
     )
 
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
-
-    dataflows = get_prefect_dataflows_v1(mock_request)
+    dataflows = get_prefect_dataflows_v1(request)
 
     assert len(dataflows) == 2
     assert dataflows[0]["deploymentId"] == flow0.deployment_id
@@ -447,35 +477,29 @@ def test_get_prefect_dataflows_v1_success2(org_with_transformation_tasks):
 
     # cleanup
     OrgDataFlowv1.objects.filter(
-        org=org_with_transformation_tasks,
+        org=request.orguser.org,
         deployment_id__in=["test-dep-id-1", "test-dep-id-2"],
     ).delete()
 
 
-def test_get_prefect_dataflow_v1_failure():
+def test_get_prefect_dataflow_v1_failure(orguser):
     """tests failure in fetching a dataflow due to missing org"""
-    mock_orguser = Mock()
-    mock_orguser.org = None
+    orguser.org = None
 
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
+    request = mock_request(orguser)
 
     with pytest.raises(HttpError) as excinfo:
-        get_prefect_dataflow_v1(mock_request, "deployment-id")
+        get_prefect_dataflow_v1(request, "deployment-id")
 
     assert str(excinfo.value) == "register an organization first"
 
 
-def test_get_prefect_dataflow_v1_failure2(org_with_transformation_tasks):
+def test_get_prefect_dataflow_v1_failure2(orguser_transform_tasks):
     """tests failure in fetching a dataflow that does not exist"""
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
+    request = mock_request(orguser_transform_tasks)
 
     with pytest.raises(HttpError) as excinfo:
-        get_prefect_dataflow_v1(mock_request, "deployment-id")
+        get_prefect_dataflow_v1(request, "deployment-id")
 
     assert str(excinfo.value) == "pipeline does not exist"
 
@@ -484,31 +508,27 @@ def test_get_prefect_dataflow_v1_failure2(org_with_transformation_tasks):
     "ddpui.ddpprefect.prefect_service",
     get_deployment=Mock(side_effect=Exception("not found")),
 )
-def test_get_prefect_dataflow_v1_failure3(org_with_transformation_tasks):
+def test_get_prefect_dataflow_v1_failure3(orguser_transform_tasks):
     """tests failure in fetching a dataflow which prefect failed to fetch"""
     # create the dataflow to be fetched
+    request = mock_request(orguser_transform_tasks)
+
     OrgDataFlowv1.objects.create(
-        org=org_with_transformation_tasks,
+        org=request.orguser.org,
         name="flow-1",
         deployment_name="prefect-flow-1",
         deployment_id="test-dep-id-1",
         dataflow_type="orchestrate",
     )
 
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
-
     with pytest.raises(HttpError) as excinfo:
-        get_prefect_dataflow_v1(mock_request, "test-dep-id-1")
+        get_prefect_dataflow_v1(request, "test-dep-id-1")
 
     assert str(excinfo.value) == "failed to get deploymenet from prefect-proxy"
 
     # cleanup
     OrgDataFlowv1.objects.filter(
-        org=org_with_transformation_tasks, deployment_id="test-dep-id-1"
+        org=request.orguser.org, deployment_id="test-dep-id-1"
     ).delete()
 
 
@@ -562,8 +582,10 @@ def test_get_prefect_dataflow_v1_failure3(org_with_transformation_tasks):
         }
     ),
 )
-def test_get_prefect_dataflow_v1_success(org_with_transformation_tasks):
+def test_get_prefect_dataflow_v1_success(orguser_transform_tasks):
     """tests success in fetching a dataflow with both default system transformation tasks and airbyte syncs"""
+    request = mock_request(orguser_transform_tasks)
+
     connections = [
         PrefectFlowAirbyteConnection2(id="test-conn-id-1", seq=1),
         PrefectFlowAirbyteConnection2(id="test-conn-id-2", seq=2),
@@ -572,13 +594,13 @@ def test_get_prefect_dataflow_v1_success(org_with_transformation_tasks):
     for conn in connections:
         OrgTask.objects.create(
             uuid=uuid.uuid4(),
-            org=org_with_transformation_tasks,
+            org=request.orguser.org,
             task=Task.objects.filter(type__in=["airbyte"]).first(),
             connection_id=conn.id,
         )
 
     transform_tasks = OrgTask.objects.filter(
-        org=org_with_transformation_tasks,
+        org=request.orguser.org,
         generated_by="system",
         task__type__in=["dbt", "git"],
     ).all()
@@ -592,31 +614,20 @@ def test_get_prefect_dataflow_v1_success(org_with_transformation_tasks):
             for idx, org_task in enumerate(transform_tasks)
         ],
     )
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
 
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
-
-    deployment = post_prefect_dataflow_v1(mock_request, payload)
+    deployment = post_prefect_dataflow_v1(request, payload)
 
     assert deployment["deploymentId"] == "test-deploy-id"
     assert deployment["name"] == payload.name
     assert deployment["cron"] == payload.cron
 
     created_dataflow = OrgDataFlowv1.objects.filter(
-        org=org_with_transformation_tasks, deployment_id="test-deploy-id"
+        org=request.orguser.org, deployment_id="test-deploy-id"
     ).first()
 
     assert created_dataflow is not None
 
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
-
-    dataflow = get_prefect_dataflow_v1(mock_request, "test-deploy-id")
+    dataflow = get_prefect_dataflow_v1(request, "test-deploy-id")
 
     assert dataflow["name"] == created_dataflow.name
     assert dataflow["deploymentName"] == created_dataflow.deployment_name
@@ -630,34 +641,28 @@ def test_get_prefect_dataflow_v1_success(org_with_transformation_tasks):
 
     # cleanup
     OrgDataFlowv1.objects.filter(
-        org=org_with_transformation_tasks, deployment_id="test-dep-id-1"
+        org=request.orguser.org, deployment_id="test-dep-id-1"
     ).delete()
 
 
-def test_delete_prefect_dataflow_v1_failure():
+def test_delete_prefect_dataflow_v1_failure(orguser):
     """tests failure in deleting a dataflow due to missing org"""
-    mock_orguser = Mock()
-    mock_orguser.org = None
+    orguser.org = None
 
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
+    request = mock_request(orguser)
 
     with pytest.raises(HttpError) as excinfo:
-        delete_prefect_dataflow_v1(mock_request, "deployment-id")
+        delete_prefect_dataflow_v1(request, "deployment-id")
 
     assert str(excinfo.value) == "register an organization first"
 
 
-def test_delete_prefect_dataflow_v1_failure2(org_with_transformation_tasks):
+def test_delete_prefect_dataflow_v1_failure2(orguser_transform_tasks):
     """tests failure in deleting a dataflow due to not found error"""
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
+    request = mock_request(orguser_transform_tasks)
 
     with pytest.raises(HttpError) as excinfo:
-        delete_prefect_dataflow_v1(mock_request, "deployment-id")
+        delete_prefect_dataflow_v1(request, "deployment-id")
 
     assert str(excinfo.value) == "pipeline not found"
 
@@ -666,49 +671,44 @@ def test_delete_prefect_dataflow_v1_failure2(org_with_transformation_tasks):
     "ddpui.ddpprefect.prefect_service",
     delete_deployment_by_id=Mock(return_value=True),
 )
-def test_delete_prefect_dataflow_v1_success(org_with_transformation_tasks):
+def test_delete_prefect_dataflow_v1_success(orguser_transform_tasks):
     """tests success in deleting a dataflow"""
     # create dataflow to delete
-    dataflow = OrgDataFlowv1.objects.create(
-        org=org_with_transformation_tasks,
+    request = mock_request(orguser_transform_tasks)
+
+    OrgDataFlowv1.objects.create(
+        org=request.orguser.org,
         name="flow-1",
         deployment_name="prefect-flow-1",
         deployment_id="test-dep-id-1",
         dataflow_type="orchestrate",
     )
 
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
-
-    delete_prefect_dataflow_v1(mock_request, "test-dep-id-1")
+    delete_prefect_dataflow_v1(request, "test-dep-id-1")
 
     assert (
         OrgDataFlowv1.objects.filter(
-            org=org_with_transformation_tasks, deployment_id="test-dep-id-1"
+            org=request.orguser.org, deployment_id="test-dep-id-1"
         ).count()
         == 0
     )
 
 
-def test_put_prefect_dataflow_v1_failure():
+def test_put_prefect_dataflow_v1_failure(orguser):
     """tests failure in update dataflow due to missing org"""
+    orguser.org = None
+
+    request = mock_request(orguser)
+
     payload = PrefectDataFlowUpdateSchema3(
         name="put-dataflow",
         connections=[],
         transformTasks=[],
         cron="",
     )
-    mock_orguser = Mock()
-    mock_orguser.org = None
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
 
     with pytest.raises(HttpError) as excinfo:
-        put_prefect_dataflow_v1(mock_request, "deployment-id", payload)
+        put_prefect_dataflow_v1(request, "deployment-id", payload)
 
     assert str(excinfo.value) == "register an organization first"
 
@@ -717,11 +717,13 @@ def test_put_prefect_dataflow_v1_failure():
     "ddpui.ddpprefect.prefect_service",
     update_dataflow_v1=Mock(return_value=[]),
 )
-def test_put_prefect_dataflow_v1_success(org_with_transformation_tasks):
+def test_put_prefect_dataflow_v1_success(orguser_transform_tasks):
     """tests success in update dataflow; remove all connection syncs & keep the transform on"""
     # create pipeline with airbyte syncs + dbt transform
+    request = mock_request(orguser_transform_tasks)
+
     dataflow = OrgDataFlowv1.objects.create(
-        org=org_with_transformation_tasks,
+        org=request.orguser.org,
         name="flow-1",
         deployment_name="prefect-flow-1",
         deployment_id="test-dep-id-1",
@@ -737,7 +739,7 @@ def test_put_prefect_dataflow_v1_success(org_with_transformation_tasks):
     for i, conn in enumerate(connections):
         org_task = OrgTask.objects.create(
             uuid=uuid.uuid4(),
-            org=org_with_transformation_tasks,
+            org=request.orguser.org,
             task=Task.objects.filter(type__in=["airbyte"]).first(),
             connection_id=conn.id,
         )
@@ -746,7 +748,7 @@ def test_put_prefect_dataflow_v1_success(org_with_transformation_tasks):
     seq = len(connections)
 
     transform_tasks = OrgTask.objects.filter(
-        org=org_with_transformation_tasks,
+        org=request.orguser.org,
         generated_by="system",
         task__type__in=["dbt", "git"],
     ).all()
@@ -764,13 +766,8 @@ def test_put_prefect_dataflow_v1_success(org_with_transformation_tasks):
         ],
         cron="",
     )
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
 
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
-
-    put_prefect_dataflow_v1(mock_request, "test-dep-id-1", payload)
+    put_prefect_dataflow_v1(request, "test-dep-id-1", payload)
 
     assert (
         DataflowOrgTask.objects.filter(
@@ -796,11 +793,13 @@ def test_put_prefect_dataflow_v1_success(org_with_transformation_tasks):
     "ddpui.ddpprefect.prefect_service",
     update_dataflow_v1=Mock(return_value=[]),
 )
-def test_put_prefect_dataflow_v1_success2(org_with_transformation_tasks):
+def test_put_prefect_dataflow_v1_success2(orguser_transform_tasks):
     """tests success in update dataflow; add connection syncs & keep the transform on"""
     # create pipeline with dbt transform default system tasks
+    request = mock_request(orguser_transform_tasks)
+
     dataflow = OrgDataFlowv1.objects.create(
-        org=org_with_transformation_tasks,
+        org=request.orguser.org,
         name="flow-1",
         deployment_name="prefect-flow-1",
         deployment_id="test-dep-id-1",
@@ -816,13 +815,13 @@ def test_put_prefect_dataflow_v1_success2(org_with_transformation_tasks):
     for i, conn in enumerate(connections):
         OrgTask.objects.create(
             uuid=uuid.uuid4(),
-            org=org_with_transformation_tasks,
+            org=request.orguser.org,
             task=Task.objects.filter(type__in=["airbyte"]).first(),
             connection_id=conn.id,
         )
 
     transform_tasks = OrgTask.objects.filter(
-        org=org_with_transformation_tasks,
+        org=request.orguser.org,
         generated_by="system",
         task__type__in=["dbt", "git"],
     ).all()
@@ -841,13 +840,8 @@ def test_put_prefect_dataflow_v1_success2(org_with_transformation_tasks):
         ],
         cron="",
     )
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
 
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
-
-    put_prefect_dataflow_v1(mock_request, "test-dep-id-1", payload)
+    put_prefect_dataflow_v1(request, "test-dep-id-1", payload)
 
     assert (
         DataflowOrgTask.objects.filter(
@@ -870,37 +864,29 @@ def test_put_prefect_dataflow_v1_success2(org_with_transformation_tasks):
     )
 
 
-def test_post_deployment_set_schedule_failure():
+def test_post_deployment_set_schedule_failure(orguser):
     """tests failure in setting schedule for dataflow due to missing org"""
-    mock_orguser = Mock()
-    mock_orguser.org = None
+    orguser.org = None
 
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
+    request = mock_request(orguser)
 
     with pytest.raises(HttpError) as excinfo:
-        post_deployment_set_schedule(mock_request, "deployment-id", "active")
+        post_deployment_set_schedule(request, "deployment-id", "active")
 
     assert str(excinfo.value) == "register an organization first"
 
 
-def test_post_deployment_set_schedule_failure2(org_with_transformation_tasks):
+def test_post_deployment_set_schedule_failure2(orguser_transform_tasks):
     """tests failure in setting schedule for dataflow due to incorrect status value"""
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
+    request = mock_request(orguser_transform_tasks)
 
     with pytest.raises(HttpError) as excinfo:
-        post_deployment_set_schedule(
-            mock_request, "deployment-id", "some-fake-status-value"
-        )
+        post_deployment_set_schedule(request, "deployment-id", "some-fake-status-value")
 
     assert str(excinfo.value) == "incorrect status value"
 
     with pytest.raises(HttpError) as excinfo:
-        post_deployment_set_schedule(mock_request, "deployment-id", None)
+        post_deployment_set_schedule(request, "deployment-id", None)
 
     assert str(excinfo.value) == "incorrect status value"
 
@@ -909,16 +895,12 @@ def test_post_deployment_set_schedule_failure2(org_with_transformation_tasks):
     "ddpui.ddpprefect.prefect_service",
     set_deployment_schedule=Mock(side_effect=Exception("error")),
 )
-def test_post_deployment_set_schedule_failure3(org_with_transformation_tasks):
+def test_post_deployment_set_schedule_failure3(orguser_transform_tasks):
     """tests failure in setting schedule for dataflow due to error from prefect"""
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
+    request = mock_request(orguser_transform_tasks)
 
     with pytest.raises(HttpError) as excinfo:
-        post_deployment_set_schedule(mock_request, "deployment-id", "active")
+        post_deployment_set_schedule(request, "deployment-id", "active")
 
     assert str(excinfo.value) == "failed to change flow state"
 
@@ -927,15 +909,11 @@ def test_post_deployment_set_schedule_failure3(org_with_transformation_tasks):
     "ddpui.ddpprefect.prefect_service",
     set_deployment_schedule=Mock(return_value=True),
 )
-def test_post_deployment_set_schedule_success(org_with_transformation_tasks):
+def test_post_deployment_set_schedule_success(orguser_transform_tasks):
     """tests success in setting schedule for dataflow"""
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
+    request = mock_request(orguser_transform_tasks)
 
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
-
-    res = post_deployment_set_schedule(mock_request, "deployment-id", "active")
+    res = post_deployment_set_schedule(request, "deployment-id", "active")
 
     assert res["success"] == 1
 
@@ -945,17 +923,13 @@ def test_post_deployment_set_schedule_success(org_with_transformation_tasks):
     create_deployment_flow_run=Mock(return_value=True),
     lock_tasks_for_deployment=Mock(return_value=[]),
 )
-def test_post_run_prefect_org_deployment_task_success(org_with_transformation_tasks):
+def test_post_run_prefect_org_deployment_task_success(orguser_transform_tasks):
     """tests POST /v1/flows/{deployment_id}/flow_run/ success"""
-    mock_orguser = Mock()
-    mock_orguser.org = org_with_transformation_tasks
-
-    mock_request = Mock()
-    mock_request.orguser = mock_orguser
+    request = mock_request(orguser_transform_tasks)
 
     dataflow_orgtask = None
     org_task = OrgTask.objects.filter(
-        org=mock_orguser.org, task__slug=TASK_DBTRUN
+        org=request.orguser.org, task__slug=TASK_DBTRUN
     ).first()
     if org_task:
         dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
@@ -964,7 +938,7 @@ def test_post_run_prefect_org_deployment_task_success(org_with_transformation_ta
         raise Exception("Deployment not found")
 
     post_run_prefect_org_deployment_task(
-        mock_orguser, dataflow_orgtask.dataflow.deployment_id
+        request, dataflow_orgtask.dataflow.deployment_id
     )
 
     assert TaskLock.objects.filter(orgtask=org_task).count() == 0
