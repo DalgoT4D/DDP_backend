@@ -16,7 +16,6 @@ from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgDbt, OrgWarehouse
 from ddpui.models.dbt_workflow import OrgDbtModel, DbtEdge, OrgDbtOperation
-from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.schemas.org_task_schema import DbtProjectSchema
 from ddpui.schemas.dbt_workflow_schema import (
@@ -30,6 +29,12 @@ from ddpui.api.warehouse_api import get_warehouse_data
 from ddpui.core import dbtautomation_service
 from ddpui.core.dbtautomation_service import sync_sources_for_warehouse
 from ddpui.auth import has_permission
+
+from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.transform_workflow_helpers import (
+    from_orgdbtoperation,
+    from_orgdbtmodel,
+)
 
 transformapi = NinjaAPI(urls_namespace="transform")
 
@@ -238,13 +243,7 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
 
     logger.info("updated output cols for the model")
 
-    return {
-        "id": dbt_op.uuid,
-        "output_cols": dbt_op.output_cols,
-        "config": dbt_op.config,
-        "type": "operation_node",
-        "target_model_id": dbt_op.dbtmodel.uuid,
-    }
+    return from_orgdbtoperation(dbt_op, chain_length=dbt_op.seq)
 
 
 @transformapi.put(
@@ -281,14 +280,14 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
     if dbt_operation.dbtmodel.under_construction is False:
         raise HttpError(403, "model is locked")
 
-    # allow edit of only leaf operation nodes
-    if (
-        OrgDbtOperation.objects.filter(
-            dbtmodel=dbt_operation.dbtmodel, seq__gt=dbt_operation.seq
-        ).count()
-        >= 1
-    ):
-        raise HttpError(403, "operation is locked; cannot edit")
+    # allow edit of only leaf operation nodes - disabled for now
+    # if (
+    #     OrgDbtOperation.objects.filter(
+    #         dbtmodel=dbt_operation.dbtmodel, seq__gt=dbt_operation.seq
+    #     ).count()
+    #     >= 1
+    # ):
+    #     raise HttpError(403, "operation is locked; cannot edit")
 
     target_model = dbt_operation.dbtmodel
 
@@ -326,13 +325,7 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
 
     logger.info("updated output cols for the target model")
 
-    return {
-        "id": dbt_operation.uuid,
-        "output_cols": dbt_operation.output_cols,
-        "config": dbt_operation.config,
-        "type": "operation_node",
-        "target_model_id": dbt_operation.dbtmodel.uuid,
-    }
+    return from_orgdbtoperation(dbt_operation, chain_length=current_operations_chained)
 
 
 @transformapi.get(
@@ -386,14 +379,7 @@ def get_operation(request, operation_uuid: str):
                 ):
                     prev_source_columns.append(col_data["name"])
 
-    return {
-        "id": dbt_operation.uuid,
-        "output_cols": dbt_operation.output_cols,
-        "config": dbt_operation.config,
-        "type": "operation_node",
-        "target_model_id": dbt_operation.dbtmodel.uuid,
-        "prev_source_columns": prev_source_columns,
-    }
+    return from_orgdbtoperation(dbt_operation, prev_source_columns=prev_source_columns)
 
 
 @transformapi.post(
@@ -432,13 +418,7 @@ def post_save_model(request, model_uuid: str, payload: CompleteDbtModelPayload):
     orgdbt_model.schema = payload.dest_schema
     orgdbt_model.save()
 
-    return {
-        "id": orgdbt_model.uuid,
-        "input_type": orgdbt_model.type,
-        "source_name": orgdbt_model.source_name,
-        "input_name": orgdbt_model.name,
-        "schema": orgdbt_model.schema,
-    }
+    return from_orgdbtmodel(orgdbt_model)
 
 
 @transformapi.get("/dbt_project/sources_models/", auth=auth.CustomAuthMiddleware())
@@ -467,16 +447,7 @@ def get_input_sources_and_models(request, schema_name: str = None):
     res = []
     for orgdbt_model in query.all():
         if not orgdbt_model.under_construction:
-            res.append(
-                {
-                    "id": orgdbt_model.uuid,
-                    "source_name": orgdbt_model.source_name,
-                    "input_name": orgdbt_model.name,
-                    "input_type": orgdbt_model.type,
-                    "schema": orgdbt_model.schema,
-                    "type": "src_model_node",
-                }
-            )
+            res.append(from_orgdbtmodel(orgdbt_model))
 
     return res
 
@@ -563,27 +534,10 @@ def get_dbt_project_DAG(request):
     res_nodes = []
     for node in model_nodes:
         if not node.under_construction:
-            res_nodes.append(
-                {
-                    "id": node.uuid,
-                    "source_name": node.source_name,
-                    "input_name": node.name,
-                    "input_type": node.type,
-                    "schema": node.schema,
-                    "type": "src_model_node",
-                }
-            )
+            res_nodes.append(from_orgdbtmodel(node))
 
     for node in operation_nodes:
-        res_nodes.append(
-            {
-                "id": node.uuid,
-                "output_cols": node.output_cols,
-                "config": node.config,
-                "type": "operation_node",
-                "target_model_id": node.dbtmodel.uuid,
-            }
-        )
+        res_nodes.append(from_orgdbtoperation(node))
 
     # set to remove duplicates
     seen = set()
