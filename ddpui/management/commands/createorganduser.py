@@ -1,0 +1,67 @@
+""" Creates and Org and an OrgUser """
+
+from django.core.management.base import BaseCommand
+
+from django.contrib.auth.models import User
+from django.utils.text import slugify
+from ddpui.models.org import Org
+from ddpui.models.org_user import OrgUser, UserAttributes
+from ddpui.models.role_based_access import Role
+
+
+class Command(BaseCommand):
+    """Creates an Org and an admin OrgUser"""
+
+    help = "Creates an Org and an OrgUser"
+
+    def add_arguments(self, parser):
+        """adds command line arguments"""
+        parser.add_argument("orgname", type=str, help="Name of the Org")
+        parser.add_argument("email", type=str, help="Email address of the OrgUser")
+
+    def handle(self, *args, **options):
+
+        # ensure the Role exists
+        role = Role.objects.filter(slug="account-manager").first()
+        if not role:
+            raise ValueError(
+                "Role with slug 'account-manager' does not exist, please run 'python manage.py loaddata seed/*.json'"
+            )
+
+        # fetch / create the Org
+        if not Org.objects.filter(name=options["orgname"]).exists():
+            Org.objects.create(
+                name=options["orgname"], slug=slugify(options["orgname"])
+            )
+            print(f"Org {options['orgname']} created")
+        else:
+            print(f"Org {options['orgname']} already exists")
+        org = Org.objects.filter(name=options["orgname"]).first()
+
+        # fetch / create the User
+        if not User.objects.filter(email=options["email"]).exists():
+            User.objects.create_user(email=options["email"], username=options["email"])
+            print(f"User {options['email']} created")
+        else:
+            print(f"User {options['email']} already exists")
+        user = User.objects.filter(email=options["email"]).first()
+
+        if not OrgUser.objects.filter(org=org, user=user).exists():
+            OrgUser.objects.create(
+                org=org, user=user, role=3, new_role=role, email_verified=True
+            )
+            print(
+                f"OrgUser {user.email} created for Org {org.name} with role {role.name}"
+            )
+        else:
+            print(f"OrgUser {user.email} already exists for Org {org.name}")
+        orguser = OrgUser.objects.filter(org=org, user=user).first()
+
+        # ensure the UserAttributes exists with email_verified=True
+        if not UserAttributes.objects.filter(user=user).exists():
+            UserAttributes.objects.create(user=user)
+            print("UserAttributes created for User")
+        ua = UserAttributes.objects.filter(user=user).first()
+        ua.email_verified = True
+        ua.save()
+        print(f"UserAttributes updated for User {user.email} with email_verified=True")
