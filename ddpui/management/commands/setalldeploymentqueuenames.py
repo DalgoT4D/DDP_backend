@@ -24,7 +24,7 @@ class Command(BaseCommand):
             work_queue_name = None
 
             if dataflow.name.find("airbyte-sync") != -1:
-                work_queue_name = "manual-sync"
+                work_queue_name = "ddp"
             elif dataflow.name.find("dbt-run") != -1:
                 work_queue_name = "manual-dbt"
 
