@@ -165,4 +165,10 @@ DJANGOSECRET=
 
 -   Run DB migrations `python manage.py migrate`
 
+-   Seed the DB `python manage.py loaddata seed/*.json`
+
 -   Start the server `python manage.py runserver`
+
+### Step 10: Create first org and user
+
+-   Run `python manage.py createorganduser <Org Name> <Email address>`
