@@ -45,6 +45,9 @@ from dbt_automation.utils.dbtsources import read_sources
 from dbt_automation.operations.replace import replace, replace_dbt_sql
 from dbt_automation.operations.casewhen import casewhen, casewhen_dbt_sql
 from dbt_automation.operations.aggregate import aggregate, aggregate_dbt_sql
+from dbt_automation.operations.pivot import pivot, pivot_dbt_sql
+from dbt_automation.operations.unpivot import unpivot, unpivot_dbt_sql
+from dbt_automation.operations.generic import generic_function, generic_function_dbt_sql
 
 from ddpui.schemas.dbt_workflow_schema import CompleteDbtModelPayload
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
@@ -71,6 +74,9 @@ OPERATIONS_DICT = {
     "replace": replace,
     "casewhen": casewhen,
     "aggregate": aggregate,
+    "pivot": pivot,
+    "unpivot": unpivot,
+    "generic": generic_function,
 }
 
 OPERATIONS_DICT_SQL = {
@@ -89,6 +95,9 @@ OPERATIONS_DICT_SQL = {
     "replace": replace_dbt_sql,
     "casewhen": casewhen_dbt_sql,
     "aggregate": aggregate_dbt_sql,
+    "pivot": pivot_dbt_sql,
+    "unpivot": unpivot_dbt_sql,
+    "generic": generic_function_dbt_sql,
 }
 
 
@@ -348,5 +357,7 @@ def warehouse_datatypes(org_warehouse: OrgWarehouse):
 def json_columnspec(warehouse: OrgWarehouse, source_schema, input_name, json_column):
     """Get json keys of a table in warehouse"""
     wclient = _get_wclient(warehouse)
-    json_columnspec = wclient.get_json_columnspec(source_schema, input_name, json_column)
+    json_columnspec = wclient.get_json_columnspec(
+        source_schema, input_name, json_column
+    )
     return json_columnspec
