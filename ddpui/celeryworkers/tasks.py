@@ -129,7 +129,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
         dbt_venv=os.getenv("DBT_VENV"),
         target_type=warehouse.wtype,
         default_schema=payload["profile"]["target_configs_schema"],
-        transform_type="github"
+        transform_type="github",
     )
     dbt.save()
     logger.info("created orgdbt for org %s", org.name)
@@ -160,24 +160,14 @@ def update_dbt_core_block_schema_task(block_name, default_schema):
 @app.task()
 def delete_old_blocklocks():
     """delete blocklocks which were created over an hour ago"""
-    logger.info("deleting old blocklocks")
     onehourago = UTC.localize(datetime.utcnow() - timedelta(seconds=3600))
-    logger.info(
-        BlockLock.objects.filter(locked_at__lt=onehourago).values("opb__block_name")
-    )
     BlockLock.objects.filter(locked_at__lt=onehourago).delete()
 
 
 @app.task()
 def delete_old_tasklocks():
     """delete task locks which were created over an hour ago"""
-    logger.info("deleting old task locks")
     onehourago = UTC.localize(datetime.utcnow() - timedelta(seconds=3600))
-    logger.info(
-        TaskLock.objects.filter(locked_at__lt=onehourago).values(
-            "orgtask__org__slug", "orgtask__task__slug"
-        )
-    )
     TaskLock.objects.filter(locked_at__lt=onehourago).delete()
 
 
