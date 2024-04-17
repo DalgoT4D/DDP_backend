@@ -2,6 +2,7 @@ import os
 import uuid
 import shutil
 from pathlib import Path
+from datetime import datetime
 
 from dotenv import load_dotenv
 from django.db.models import Q
@@ -16,12 +17,15 @@ from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgDbt, OrgWarehouse
 from ddpui.models.dbt_workflow import OrgDbtModel, DbtEdge, OrgDbtOperation
+from ddpui.models.canvaslock import CanvasLock
 
 from ddpui.schemas.org_task_schema import DbtProjectSchema
 from ddpui.schemas.dbt_workflow_schema import (
     CreateDbtModelPayload,
     CompleteDbtModelPayload,
     EditDbtOperationPayload,
+    LockCanvasRequestSchema,
+    LockCanvasResponseSchema,
 )
 from ddpui.core.transformfunctions import validate_operation_config
 from ddpui.api.warehouse_api import get_warehouse_data
@@ -183,6 +187,15 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
+    canvas_lock = CanvasLock.objects.filter(locked_by__org=org).first()
+    if canvas_lock:
+        if canvas_lock.locked_by != orguser:
+            raise HttpError(403, "canvas is locked")
+        elif canvas_lock.lock_id != payload.canvas_lock_id:
+            raise HttpError(403, "canvas is locked")
+    else:
+        raise HttpError(403, "acquire a canvas lock first")
+
     if payload.op_type not in dbtautomation_service.OPERATIONS_DICT.keys():
         raise HttpError(422, "Operation not supported")
 
@@ -267,6 +280,15 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
     orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
+
+    canvas_lock = CanvasLock.objects.filter(locked_by__org=org).first()
+    if canvas_lock:
+        if canvas_lock.locked_by != orguser:
+            raise HttpError(403, "canvas is locked")
+        elif canvas_lock.lock_id != payload.canvas_lock_id:
+            raise HttpError(403, "canvas is locked")
+    else:
+        raise HttpError(403, "acquire a canvas lock first")
 
     try:
         uuid.UUID(str(operation_uuid))
@@ -403,6 +425,15 @@ def post_save_model(request, model_uuid: str, payload: CompleteDbtModelPayload):
     orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid).first()
     if not orgdbt_model:
         raise HttpError(404, "model not found")
+
+    canvas_lock = CanvasLock.objects.filter(locked_by__org=org).first()
+    if canvas_lock:
+        if canvas_lock.locked_by != orguser:
+            raise HttpError(403, "canvas is locked")
+        elif canvas_lock.lock_id != payload.canvas_lock_id:
+            raise HttpError(403, "canvas is locked")
+    else:
+        raise HttpError(403, "acquire a canvas lock first")
 
     payload.name = slugify(payload.name)
 
@@ -653,3 +684,81 @@ def get_warehouse_datatypes(request):
 
     data_types = dbtautomation_service.warehouse_datatypes(org_warehouse)
     return data_types
+
+
+@transformapi.post(
+    "/dbt_project/canvas/lock/",
+    auth=auth.CustomAuthMiddleware(),
+    response=LockCanvasResponseSchema,
+)
+@has_permission(["can_edit_dbt_model"])
+def post_lock_canvas(request, payload: LockCanvasRequestSchema):
+    """
+    Lock the canvas for the org
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    canvas_lock = CanvasLock.objects.filter(locked_by__org=org).first()
+
+    if canvas_lock:
+        # locked, but not by the requestor
+        if canvas_lock.locked_by != orguser:
+            # no lock_id => didn't acquire the lock
+            return LockCanvasResponseSchema(
+                locked_by=canvas_lock.locked_by.user.email,
+                locked_at=canvas_lock.locked_at.isoformat(),
+            )
+
+        # locked by the requestor
+        else:
+            # only if this is the right session do we refresh the lock
+            if payload.lock_id == canvas_lock.lock_id:
+                canvas_lock.locked_at = datetime.now()
+                canvas_lock.save()
+            else:
+                # no lock_id => didn't acquire the lock
+                return LockCanvasResponseSchema(
+                    locked_by=canvas_lock.locked_by.user.email,
+                    locked_at=canvas_lock.locked_at.isoformat(),
+                )
+
+    # no lock, acquire
+    else:
+        canvas_lock = CanvasLock.objects.create(
+            locked_by=orguser, locked_at=datetime.now(), lock_id=uuid.uuid4()
+        )
+
+    return LockCanvasResponseSchema(
+        locked_by=canvas_lock.locked_by.user.email,
+        locked_at=canvas_lock.locked_at.isoformat(),
+        lock_id=str(canvas_lock.lock_id),
+    )
+
+
+@transformapi.post(
+    "/dbt_project/canvas/unlock/",
+    auth=auth.CustomAuthMiddleware(),
+)
+@has_permission(["can_edit_dbt_model"])
+def post_unlock_canvas(request, payload: LockCanvasRequestSchema):
+    """
+    Lock the canvas for the org
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    canvas_lock = CanvasLock.objects.filter(locked_by__org=org).first()
+
+    if canvas_lock is None:
+        return {"status": "unlocked"}
+
+    if canvas_lock.locked_by != orguser:
+        return {"error": "not-allowed"}
+
+    if str(canvas_lock.lock_id) != payload.lock_id:
+        return {"error": "wrong-lock-id"}
+
+    canvas_lock.delete()
+
+    return {"status": "unlocked"}
