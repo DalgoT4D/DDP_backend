@@ -165,6 +165,8 @@ DJANGOSECRET=
 
 -   Run DB migrations `python manage.py migrate`
 
+-   Seed the DB python manage.py loaddata seed/*.json
+
 -   Start the server `python manage.py runserver`
 
 ### Step 10: Create first org and user
@@ -176,25 +178,25 @@ Follow the steps below:
 
 ### Step 1: Install Docker and Docker Compose
 
- - Install [docker](https://docs.docker.com/engine/install/)
- - Install [docker-compose](https://docs.docker.com/compose/install/)
+-  Install [docker](https://docs.docker.com/engine/install/)
+-  Install [docker-compose](https://docs.docker.com/compose/install/)
 
 ### Step 2: Create .env file
 
-- create `.env` from `.env.template` inside the Docker folcer
+-  create `.env` from `.env.template` inside the Docker folcer
 
 ### Step 3: Create `whitelist.py` file
 
-- Copy the file in ddpui/assets/ to Docker/mount
+-  Copy the file in ddpui/assets/ to Docker/mount
 
 ### Step 4: Build the image
 
- - `docker build -f Docker/Dockerfile --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') -t dalgo_backend:0.1 .`
+-  `docker build -f Docker/Dockerfile --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') -t dalgo_backend:0.1 .`
 
 ### Step 5: Start the other applications
 
-- Follow [Step 4](#step-4-install-airbyte) and [Step 5](#step-5-install-prefect-and-start-prefect-proxy) in the Setup Instructions
+-  Follow [Step 4](#step-4-install-airbyte) and [Step 5](#step-5-install-prefect-and-start-prefect-proxy) in the Setup Instructions
 
 ### Step 5: Start Backend
 
-- `docker-compose -f Docker/docker-compose.dev.yml up`
+-  `docker-compose -f Docker/docker-compose.dev.yml up`
