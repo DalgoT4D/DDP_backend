@@ -99,7 +99,8 @@ logger = CustomLogger("ddpui")
 def _get_wclient(org_warehouse: OrgWarehouse):
     """Connect to a warehouse and return the client"""
     credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
-    credentials = map_airbyte_keys_to_postgres_keys(credentials)
+    if org_warehouse.wtype == "postgres":
+        credentials = map_airbyte_keys_to_postgres_keys(credentials)
     return get_client(org_warehouse.wtype, credentials, org_warehouse.bq_location)
 
 
