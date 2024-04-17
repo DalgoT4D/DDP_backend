@@ -4,6 +4,12 @@
 echo "Apply database migrations"
 python manage.py migrate
 
+echo "Seed database"
+python manage.py loaddata seed/*.json
+
+echo "Create first user"
+python manage.py createorganduser ${FIRST_ORG_NAME} ${FIRST_USER_EMAIL}
+
 # Start server
 echo "Starting server"
 

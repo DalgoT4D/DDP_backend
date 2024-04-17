@@ -1,4 +1,5 @@
 from datetime import datetime
+import uuid
 from enum import IntEnum
 from django.utils.text import slugify
 
@@ -10,6 +11,7 @@ from ninja import Schema
 from pydantic import SecretStr
 
 from ddpui.models.org import Org, OrgSchema
+from ddpui.models.role_based_access import Role
 
 
 class UserAttributes(models.Model):
@@ -65,6 +67,7 @@ class OrgUser(models.Model):
     role = models.IntegerField(
         choices=OrgUserRole.choices(), default=OrgUserRole.REPORT_VIEWER
     )
+    new_role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True)
     email_verified = models.BooleanField(default=False)
 
     def __str__(self):
@@ -89,6 +92,22 @@ class OrgUserUpdate(Schema):
     role: str = None
 
 
+class OrgUserUpdatev1(Schema):
+    """payload to update an existing OrgUser"""
+
+    toupdate_email: str
+    role_uuid: uuid.UUID = None
+    email: str = None
+    active: bool = None
+
+
+class OrgUserUpdateNewRole(Schema):
+    """Payload to change the role of an orguser"""
+
+    toupdate_email: str
+    role_uuid: uuid.UUID
+
+
 class OrgUserNewOwner(Schema):
     """payload to transfer account ownership"""
 
@@ -105,6 +124,8 @@ class OrgUserResponse(Schema):
     role_slug: str
     wtype: str | None
     is_demo: bool = False
+    new_role_slug: str | None
+    permissions: list[dict]
 
 
 class Invitation(models.Model):
@@ -117,6 +138,14 @@ class Invitation(models.Model):
     invited_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE)
     invited_on = models.DateTimeField()
     invite_code = models.CharField(max_length=36)
+    invited_new_role = models.ForeignKey(Role, on_delete=models.CASCADE, null=True)
+
+
+class NewInvitationSchema(Schema):
+    """Invitation schema based on the new_role field added to invitations"""
+
+    invited_email: str
+    invited_role_uuid: uuid.UUID
 
 
 class InvitationSchema(Schema):
@@ -128,6 +157,7 @@ class InvitationSchema(Schema):
     invited_by: OrgUserResponse = None
     invited_on: datetime = None
     invite_code: str = None
+    invited_new_role_slug: str | None
 
 
 class AcceptInvitationSchema(Schema):

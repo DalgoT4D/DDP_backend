@@ -45,12 +45,16 @@ from dbt_automation.utils.dbtsources import read_sources
 from dbt_automation.operations.replace import replace, replace_dbt_sql
 from dbt_automation.operations.casewhen import casewhen, casewhen_dbt_sql
 from dbt_automation.operations.aggregate import aggregate, aggregate_dbt_sql
+from dbt_automation.operations.pivot import pivot, pivot_dbt_sql
+from dbt_automation.operations.unpivot import unpivot, unpivot_dbt_sql
+from dbt_automation.operations.generic import generic_function, generic_function_dbt_sql
 
 from ddpui.schemas.dbt_workflow_schema import CompleteDbtModelPayload
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
+from ddpui.utils.helpers import map_airbyte_keys_to_postgres_keys
 from ddpui.celery import app
 from ddpui.utils.taskprogress import TaskProgress
 
@@ -71,6 +75,9 @@ OPERATIONS_DICT = {
     "replace": replace,
     "casewhen": casewhen,
     "aggregate": aggregate,
+    "pivot": pivot,
+    "unpivot": unpivot,
+    "generic": generic_function,
 }
 
 OPERATIONS_DICT_SQL = {
@@ -89,6 +96,9 @@ OPERATIONS_DICT_SQL = {
     "replace": replace_dbt_sql,
     "casewhen": casewhen_dbt_sql,
     "aggregate": aggregate_dbt_sql,
+    "pivot": pivot_dbt_sql,
+    "unpivot": unpivot_dbt_sql,
+    "generic": generic_function_dbt_sql,
 }
 
 
@@ -98,7 +108,8 @@ logger = CustomLogger("ddpui")
 def _get_wclient(org_warehouse: OrgWarehouse):
     """Connect to a warehouse and return the client"""
     credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
-
+    if org_warehouse.wtype == "postgres":
+        credentials = map_airbyte_keys_to_postgres_keys(credentials)
     return get_client(org_warehouse.wtype, credentials, org_warehouse.bq_location)
 
 
@@ -343,3 +354,12 @@ def warehouse_datatypes(org_warehouse: OrgWarehouse):
     """Get the datatypes of a table in a warehouse"""
     wclient = _get_wclient(org_warehouse)
     return wclient.get_column_data_types()
+
+
+def json_columnspec(warehouse: OrgWarehouse, source_schema, input_name, json_column):
+    """Get json keys of a table in warehouse"""
+    wclient = _get_wclient(warehouse)
+    json_columnspec = wclient.get_json_columnspec(
+        source_schema, input_name, json_column
+    )
+    return json_columnspec

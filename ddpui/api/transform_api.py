@@ -16,16 +16,25 @@ from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgDbt, OrgWarehouse
 from ddpui.models.dbt_workflow import OrgDbtModel, DbtEdge, OrgDbtOperation
-from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.schemas.org_task_schema import DbtProjectSchema
 from ddpui.schemas.dbt_workflow_schema import (
     CreateDbtModelPayload,
     CompleteDbtModelPayload,
+    EditDbtOperationPayload,
 )
+from ddpui.core.transformfunctions import validate_operation_config
+from ddpui.api.warehouse_api import get_warehouse_data
 
 from ddpui.core import dbtautomation_service
 from ddpui.core.dbtautomation_service import sync_sources_for_warehouse
+from ddpui.auth import has_permission
+
+from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.transform_workflow_helpers import (
+    from_orgdbtoperation,
+    from_orgdbtmodel,
+)
 
 transformapi = NinjaAPI(urls_namespace="transform")
 
@@ -73,7 +82,8 @@ def handle_value_error(request, exc):
     return Response({"detail": str(exc)}, status=400)
 
 
-@transformapi.post("/dbt_project/", auth=auth.CanManagePipelines())
+@transformapi.post("/dbt_project/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_create_dbt_workspace"])
 def create_dbt_project(request, payload: DbtProjectSchema):
     """
     Create a new dbt project.
@@ -94,7 +104,8 @@ def create_dbt_project(request, payload: DbtProjectSchema):
     return {"message": f"Project {org.slug} created successfully"}
 
 
-@transformapi.delete("/dbt_project/{project_name}", auth=auth.CanManagePipelines())
+@transformapi.delete("/dbt_project/{project_name}", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_delete_dbt_workspace"])
 def delete_dbt_project(request, project_name: str):
     """
     Delete a dbt project in this org
@@ -126,7 +137,8 @@ def delete_dbt_project(request, project_name: str):
     return {"message": f"Project {project_name} deleted successfully"}
 
 
-@transformapi.post("/dbt_project/sync_sources/", auth=auth.CanManagePipelines())
+@transformapi.post("/dbt_project/sync_sources/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_sync_sources"])
 def sync_sources(request):
     """
     Sync sources from a given schema.
@@ -152,7 +164,8 @@ def sync_sources(request):
 ########################## Models & Sources #############################################
 
 
-@transformapi.post("/dbt_project/model/", auth=auth.CanManagePipelines())
+@transformapi.post("/dbt_project/model/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_create_dbt_model"])
 def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     """
     Construct a model or chain operations on a under construction target model
@@ -196,94 +209,21 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
         dbtmodel=target_model
     ).count()
 
-    primary_input_model: OrgDbtModel = None  # the first input model
-    other_input_models: list[OrgDbtModel] = []
-    seq: list[int] = []
-    other_input_columns: list[list[str]] = []
-
-    logger.info(
-        f"Operations chained for the target model {target_model.uuid} : {current_operations_chained}"
+    final_config, all_input_models = validate_operation_config(
+        payload, target_model, is_multi_input_op, current_operations_chained
     )
 
-    if current_operations_chained == 0:
-        if not payload.input_uuid:
-            raise HttpError(422, "input is required")
+    # we create edges only with tables/models
+    for source in all_input_models:
+        edge = DbtEdge.objects.filter(from_node=source, to_node=target_model).first()
+        if not edge:
+            DbtEdge.objects.create(
+                from_node=source,
+                to_node=target_model,
+            )
 
-        model = OrgDbtModel.objects.filter(uuid=payload.input_uuid).first()
-        if not model:
-            raise HttpError(404, "input not found")
-
-        primary_input_model = model
-
-    if is_multi_input_op:  # multi input operation
-        if len(payload.other_inputs) == 0:
-            raise HttpError(422, "atleast 2 inputs are required for this operation")
-
-        payload.other_inputs.sort(key=lambda x: x.seq)
-
-        for other_input in payload.other_inputs:
-            model = OrgDbtModel.objects.filter(uuid=other_input.uuid).first()
-            if not model:
-                raise HttpError(404, "input not found")
-            seq.append(other_input.seq)
-            other_input_columns.append(other_input.columns)
-            other_input_models.append(model)
-
-    all_input_models = (
-        [primary_input_model] if primary_input_model else []
-    ) + other_input_models
-
-    # we create edges only with tables/models at the start of the chain & not operation nodes
-    if current_operations_chained == 0:
-        for source in all_input_models:
-            edge = DbtEdge.objects.filter(
-                from_node=source, to_node=target_model
-            ).first()
-            if not edge:
-                DbtEdge.objects.create(
-                    from_node=source,
-                    to_node=target_model,
-                )
-
-    logger.info("passed all validation; moving to create operation")
-
-    # source columns or selected columns
-    # there will be atleast one input
-    OP_CONFIG = payload.config
-    OP_CONFIG["source_columns"] = payload.source_columns
-    OP_CONFIG["other_inputs"] = []
-
-    # in case of mutli input; send the rest of the inputs in the config; dbt_automation will handle the rest
-    for dbtmodel, seq, columns in zip(other_input_models, seq, other_input_columns):
-        OP_CONFIG["other_inputs"].append(
-            {
-                "input": {
-                    "input_type": dbtmodel.type,
-                    "input_name": dbtmodel.name,
-                    "source_name": dbtmodel.source_name,
-                },
-                "source_columns": columns,
-                "seq": seq,
-            }
-        )
-
-    input_config = {
-        "config": OP_CONFIG,
-        "type": payload.op_type,
-        "input_models": [
-            {
-                "uuid": str(model.uuid),
-                "name": model.name,
-                "display_name": model.display_name,
-                "source_name": model.source_name,
-                "schema": model.schema,
-                "type": model.type,
-            }
-            for model in all_input_models
-        ],
-    }
     output_cols = dbtautomation_service.get_output_cols_for_operation(
-        org_warehouse, payload.op_type, OP_CONFIG.copy()
+        org_warehouse, payload.op_type, final_config["config"].copy()
     )
     logger.info("creating operation")
 
@@ -291,7 +231,7 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
         dbtmodel=target_model,
         uuid=uuid.uuid4(),
         seq=current_operations_chained + 1,
-        config=input_config,
+        config=final_config,
         output_cols=output_cols,
     )
 
@@ -303,18 +243,149 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
 
     logger.info("updated output cols for the model")
 
-    return {
-        "id": dbt_op.uuid,
-        "output_cols": dbt_op.output_cols,
-        "config": dbt_op.config,
-        "type": "operation_node",
-        "target_model_id": dbt_op.dbtmodel.uuid,
-    }
+    return from_orgdbtoperation(dbt_op, chain_length=dbt_op.seq)
+
+
+@transformapi.put(
+    "/dbt_project/model/operations/{operation_uuid}/", auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_edit_dbt_operation"])
+def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload):
+    """
+    Update operation config
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    is_multi_input_op = payload.op_type in ["join", "unionall"]
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    # make sure the orgdbt here is the one we create locally
+    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    try:
+        uuid.UUID(str(operation_uuid))
+    except ValueError:
+        raise HttpError(400, "operation not found")
+
+    dbt_operation = OrgDbtOperation.objects.filter(uuid=operation_uuid).first()
+    if not dbt_operation:
+        raise HttpError(404, "operation not found")
+
+    if dbt_operation.dbtmodel.under_construction is False:
+        raise HttpError(403, "model is locked")
+
+    # allow edit of only leaf operation nodes - disabled for now
+    # if (
+    #     OrgDbtOperation.objects.filter(
+    #         dbtmodel=dbt_operation.dbtmodel, seq__gt=dbt_operation.seq
+    #     ).count()
+    #     >= 1
+    # ):
+    #     raise HttpError(403, "operation is locked; cannot edit")
+
+    target_model = dbt_operation.dbtmodel
+
+    current_operations_chained = OrgDbtOperation.objects.filter(
+        dbtmodel=target_model
+    ).count()
+
+    final_config, all_input_models = validate_operation_config(
+        payload, target_model, is_multi_input_op, current_operations_chained, edit=True
+    )
+
+    # create edges only with tables/models if not present
+    for source in all_input_models:
+        edge = DbtEdge.objects.filter(from_node=source, to_node=target_model).first()
+        if not edge:
+            DbtEdge.objects.create(
+                from_node=source,
+                to_node=target_model,
+            )
+
+    output_cols = dbtautomation_service.get_output_cols_for_operation(
+        org_warehouse, payload.op_type, final_config["config"].copy()
+    )
+    logger.info("updating operation")
+
+    dbt_operation.config = final_config
+    dbt_operation.output_cols = output_cols
+    dbt_operation.save()
+
+    logger.info("updated operation")
+
+    # save the output cols of the latest operation to the dbt model
+    target_model.output_cols = dbt_operation.output_cols
+    target_model.save()
+
+    logger.info("updated output cols for the target model")
+
+    return from_orgdbtoperation(dbt_operation, chain_length=current_operations_chained)
+
+
+@transformapi.get(
+    "/dbt_project/model/operations/{operation_uuid}/", auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_view_dbt_operation"])
+def get_operation(request, operation_uuid: str):
+    """
+    Fetch config of operation
+    """
+
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    # make sure the orgdbt here is the one we create locally
+    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    try:
+        uuid.UUID(str(operation_uuid))
+    except ValueError:
+        raise HttpError(400, "operation not found")
+
+    dbt_operation = OrgDbtOperation.objects.filter(uuid=operation_uuid).first()
+    if not dbt_operation:
+        raise HttpError(404, "operation not found")
+
+    prev_source_columns = []
+    if dbt_operation.seq > 1:
+        prev_dbt_op = OrgDbtOperation.objects.filter(
+            dbtmodel=dbt_operation.dbtmodel, seq=dbt_operation.seq - 1
+        ).first()
+        prev_source_columns = prev_dbt_op.output_cols
+    else:
+        config = dbt_operation.config
+        if "input_models" in config and len(config["input_models"]) >= 1:
+            model = OrgDbtModel.objects.filter(
+                uuid=config["input_models"][0]["uuid"]
+            ).first()
+            if model:
+                for col_data in get_warehouse_data(
+                    request,
+                    "table_columns",
+                    schema_name=model.schema,
+                    table_name=model.name,
+                ):
+                    prev_source_columns.append(col_data["name"])
+
+    return from_orgdbtoperation(dbt_operation, prev_source_columns=prev_source_columns)
 
 
 @transformapi.post(
-    "/dbt_project/model/{model_uuid}/save/", auth=auth.CanManagePipelines()
+    "/dbt_project/model/{model_uuid}/save/", auth=auth.CustomAuthMiddleware()
 )
+@has_permission(["can_edit_dbt_model"])
 def post_save_model(request, model_uuid: str, payload: CompleteDbtModelPayload):
     """Complete the model; create the dbt model on disk"""
     orguser: OrgUser = request.orguser
@@ -347,16 +418,11 @@ def post_save_model(request, model_uuid: str, payload: CompleteDbtModelPayload):
     orgdbt_model.schema = payload.dest_schema
     orgdbt_model.save()
 
-    return {
-        "id": orgdbt_model.uuid,
-        "input_type": orgdbt_model.type,
-        "source_name": orgdbt_model.source_name,
-        "input_name": orgdbt_model.name,
-        "schema": orgdbt_model.schema,
-    }
+    return from_orgdbtmodel(orgdbt_model)
 
 
-@transformapi.get("/dbt_project/sources_models/", auth=auth.CanManagePipelines())
+@transformapi.get("/dbt_project/sources_models/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_dbt_models"])
 def get_input_sources_and_models(request, schema_name: str = None):
     """
     Fetches all sources and models in a dbt project
@@ -381,21 +447,13 @@ def get_input_sources_and_models(request, schema_name: str = None):
     res = []
     for orgdbt_model in query.all():
         if not orgdbt_model.under_construction:
-            res.append(
-                {
-                    "id": orgdbt_model.uuid,
-                    "source_name": orgdbt_model.source_name,
-                    "input_name": orgdbt_model.name,
-                    "input_type": orgdbt_model.type,
-                    "schema": orgdbt_model.schema,
-                    "type": "src_model_node",
-                }
-            )
+            res.append(from_orgdbtmodel(orgdbt_model))
 
     return res
 
 
-@transformapi.get("/dbt_project/graph/", auth=auth.CanManagePipelines())
+@transformapi.get("/dbt_project/graph/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_dbt_workspace"])
 def get_dbt_project_DAG(request):
     """
     Returns the DAG of the dbt project; including the nodes and edges
@@ -476,27 +534,10 @@ def get_dbt_project_DAG(request):
     res_nodes = []
     for node in model_nodes:
         if not node.under_construction:
-            res_nodes.append(
-                {
-                    "id": node.uuid,
-                    "source_name": node.source_name,
-                    "input_name": node.name,
-                    "input_type": node.type,
-                    "schema": node.schema,
-                    "type": "src_model_node",
-                }
-            )
+            res_nodes.append(from_orgdbtmodel(node))
 
     for node in operation_nodes:
-        res_nodes.append(
-            {
-                "id": node.uuid,
-                "output_cols": node.output_cols,
-                "config": node.config,
-                "type": "operation_node",
-                "target_model_id": node.dbtmodel.uuid,
-            }
-        )
+        res_nodes.append(from_orgdbtoperation(node))
 
     # set to remove duplicates
     seen = set()
@@ -512,7 +553,10 @@ def get_dbt_project_DAG(request):
     return res
 
 
-@transformapi.delete("/dbt_project/model/{model_uuid}/", auth=auth.CanManagePipelines())
+@transformapi.delete(
+    "/dbt_project/model/{model_uuid}/", auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_delete_dbt_model"])
 def delete_model(request, model_uuid):
     """
     Delete a model if it does not have any operations chained
@@ -560,8 +604,9 @@ def delete_model(request, model_uuid):
 
 
 @transformapi.delete(
-    "/dbt_project/model/operations/{operation_uuid}/", auth=auth.CanManagePipelines()
+    "/dbt_project/model/operations/{operation_uuid}/", auth=auth.CustomAuthMiddleware()
 )
+@has_permission(["can_delete_dbt_operation"])
 def delete_operation(request, operation_uuid):
     """
     Delete an operation;
@@ -595,7 +640,8 @@ def delete_operation(request, operation_uuid):
     return {"success": 1}
 
 
-@transformapi.get("/dbt_project/data_type/", auth=auth.CanManagePipelines())
+@transformapi.get("/dbt_project/data_type/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse_data"])
 def get_warehouse_datatypes(request):
     """Get the datatypes of a table in a warehouse"""
     orguser: OrgUser = request.orguser

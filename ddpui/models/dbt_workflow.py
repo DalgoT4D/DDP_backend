@@ -8,6 +8,15 @@ from django.db import models
 from ddpui.models.org import OrgDbt
 
 
+class OrgDbtNodeType(str, Enum):
+    """
+    enum for type of node in dbt workflow
+    """
+
+    SRC_MODEL_NODE = "src_model_node"
+    OPERATION_NODE = "operation_node"
+
+
 class OrgDbtModelType(str, Enum):
     """an enum for roles assignable to org-users"""
 

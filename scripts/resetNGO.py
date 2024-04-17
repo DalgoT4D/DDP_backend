@@ -21,7 +21,7 @@ sample spec.json
         },
         "sources": [
             {
-                "stype": "SurveyCTO", # from airbyte source definition
+                "sourceDefinitionName": "SurveyCTO", # from airbyte source definition
                 "name": "testing-surveyCto-source",
                 "config": {
                     "form_id" : [""],
@@ -35,16 +35,16 @@ sample spec.json
     }
 """
 
-import sys
-from testclient import TestClient
-import argparse
-from uuid import uuid4
 import os
-from dotenv import load_dotenv
+import sys
+import argparse
 import json
+from uuid import uuid4
 from time import sleep
-from ddpui.utils.helpers import remove_nested_attribute
+from dotenv import load_dotenv
 from django.utils.text import slugify
+from ddpui.utils.helpers import remove_nested_attribute
+from testclient.testclient import TestClient
 
 load_dotenv(".env")
 
@@ -81,15 +81,27 @@ except Exception:
     )
     ngoClient.login(args.email, args.password)
 
-currentuser = ngoClient.clientget("currentuserv2")
-if currentuser.get("org") is None:
+ngoClient.clientheaders["x-dalgo-org"] = args.org_name
+
+
+def get_currentuser_for_org(ngoClient, slug: str):
+    """iterates through the orgusers for this login and returns the currentuser for the org"""
+    orgusers = ngoClient.clientget("currentuserv2")
+    for orguser in orgusers:
+        if orguser["org"]["slug"] == args.org_name:
+            return orguser
+
+
+currentuser = get_currentuser_for_org(ngoClient, args.org_name)
+if currentuser is None:
     # create org
     try:
         createorg_response = ngoClient.clientpost(
-            "organizations/",
+            "v1/organizations/",
             json={
                 "name": args.org_name,
             },
+            timeout=60,
         )
         if (
             createorg_response.get("detail")
@@ -101,10 +113,10 @@ if currentuser.get("org") is None:
             print(createorg_response)
             sys.exit(1)
         print(createorg_response)
-        currentuser = ngoClient.clientget("currentuser")
+        currentuser = get_currentuser_for_org(ngoClient, args.org_name)
 
     except Exception as error:
-        sys.exit(1)
+        raise error
 
 print(currentuser)
 
@@ -115,19 +127,31 @@ if len(warehouse_response["warehouses"]) == 0:
     if args.verbose:
         print(destination_definitions)
 
-    create_warehouse_payload = spec["warehouse"]
+    create_warehouse_payload = {}
+    # wtype: str
+    # name: str
+    # destinationDefId: str
+    # airbyteConfig: dict
+    create_warehouse_payload["name"] = spec["warehouse"]["destination"]["name"]
     for destdef in destination_definitions:
         if destdef["name"].lower() == spec["warehouse"]["wtype"].lower():
-            destinationDefinitionId = destdef["destinationDefinitionId"]
-            create_warehouse_payload["destinationDefId"] = destinationDefinitionId
-            create_warehouse_payload["wtype"] = create_warehouse_payload[
-                "wtype"
-            ].lower()
+            create_warehouse_payload["destinationDefId"] = destdef[
+                "destinationDefinitionId"
+            ]
+            create_warehouse_payload["wtype"] = spec["warehouse"]["wtype"].lower()
             break
 
+    create_warehouse_payload["airbyteConfig"] = spec["warehouse"]["destination"][
+        "connectionConfiguration"
+    ]
     if create_warehouse_payload["wtype"] == "postgres":
         create_warehouse_payload["airbyteConfig"]["schema"] += "-" + args.org_name
-    print(create_warehouse_payload)
+    elif create_warehouse_payload["wtype"] == "bigquery":
+        create_warehouse_payload["airbyteConfig"]["credentials_json"] = json.dumps(
+            spec["warehouse"]["credentials"]
+        )
+
+    print(json.dumps(create_warehouse_payload, indent=2))
     destination = ngoClient.clientpost(
         "organizations/warehouse/", json=create_warehouse_payload
     )
@@ -146,7 +170,7 @@ if "sources" in spec:
         for src in spec["sources"]:
             for sourceDef in source_definitions:
                 sourceDefId = sourceDef["sourceDefinitionId"]
-                if sourceDef["name"] == src["stype"]:
+                if sourceDef["name"] == src["sourceDefinitionName"]:
                     # add source
                     try:
                         source_creation_response = ngoClient.clientpost(
@@ -154,7 +178,7 @@ if "sources" in spec:
                             json={
                                 "name": src["name"],
                                 "sourceDefId": sourceDefId,
-                                "config": src["config"],
+                                "config": src["connectionConfiguration"],
                             },
                         )
                         print(source_creation_response)

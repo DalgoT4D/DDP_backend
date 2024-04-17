@@ -11,7 +11,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgWarehouse
 from ddpui import auth
 from ddpui.utils import secretsmanager
-
+from ddpui.auth import has_permission
 
 supersetapi = NinjaAPI(urls_namespace="superset")
 
@@ -51,8 +51,9 @@ def ninja_default_error_handler(
 
 @supersetapi.post(
     "embed_token/{dashboard_uuid}/",
-    auth=auth.AnyOrgUser(),
+    auth=auth.CustomAuthMiddleware(),
 )
+@has_permission(["can_view_usage_dashboard"])
 def post_fetch_embed_token(request, dashboard_uuid):  # pylint: disable=unused-argument
     """endpoint to fetch the embed token of a dashboard from superset"""
     orguser: OrgUser = request.orguser
@@ -141,7 +142,7 @@ def post_fetch_embed_token(request, dashboard_uuid):  # pylint: disable=unused-a
                     "last_name": credentials["last_name"],
                 },
                 "resources": [{"type": "dashboard", "id": dashboard_uuid}],
-                "rls": [{"clause": f"org='{orguser.org.slug}'"}],
+                "rls": [{"clause": f"org='{orguser.org.slug.replace('-', '_')}'"}],
             },
             headers={
                 "Authorization": f"Bearer {access_token}",

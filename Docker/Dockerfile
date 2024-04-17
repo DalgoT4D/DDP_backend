@@ -39,6 +39,7 @@ RUN python -m venv {HOME_DIR}/dbt_venv && {HOME_DIR}/dbt_venv/bin/python -m pip 
 # Copy the current directory contents into the container at /app
 COPY ddpui ${HOME_DIR}/ddpui
 COPY manage.py ${HOME_DIR}/manage.py
+COPY seed ${HOME_DIR}/seed
 COPY Docker/entrypoint.sh /entrypoint.sh
 COPY gunicorn-log.conf ${HOME_DIR}/gunicorn-log.conf
 

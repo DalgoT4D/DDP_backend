@@ -1,4 +1,5 @@
 """Dalgo API for Airbyte"""
+
 import os
 from typing import List
 from ninja import NinjaAPI
@@ -23,7 +24,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteDestinationUpdateCheckConnection,
     AirbyteConnectionUpdate,
 )
-
+from ddpui.auth import has_permission
 
 from ddpui.models.org_user import OrgUser
 from ddpui.ddpairbyte import airbytehelpers
@@ -65,7 +66,8 @@ def ninja_default_error_handler(
     return Response({"detail": "something went wrong"}, status=500)
 
 
-@airbyteapi.get("/source_definitions", auth=auth.CanManagePipelines())
+@airbyteapi.get("/source_definitions", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_sources"])
 def get_airbyte_source_definitions(request):
     """Fetch airbyte source definitions in the user organization workspace"""
     orguser: OrgUser = request.orguser
@@ -88,8 +90,9 @@ def get_airbyte_source_definitions(request):
 
 @airbyteapi.get(
     "/source_definitions/{sourcedef_id}/specifications",
-    auth=auth.CanManagePipelines(),
+    auth=auth.CustomAuthMiddleware(),
 )
+@has_permission(["can_view_sources"])
 def get_airbyte_source_definition_specifications(request, sourcedef_id):
     """
     Fetch definition specifications for a particular
@@ -106,7 +109,8 @@ def get_airbyte_source_definition_specifications(request, sourcedef_id):
     return res["connectionSpecification"]
 
 
-@airbyteapi.post("/sources/", auth=auth.CanManagePipelines())
+@airbyteapi.post("/sources/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_create_source"])
 def post_airbyte_source(request, payload: AirbyteSourceCreate):
     """Create airbyte source in the user organization workspace"""
     orguser: OrgUser = request.orguser
@@ -138,7 +142,8 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
     return {"sourceId": source["sourceId"]}
 
 
-@airbyteapi.put("/sources/{source_id}", auth=auth.CanManagePipelines())
+@airbyteapi.put("/sources/{source_id}", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_edit_source"])
 def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
     """Update airbyte source in the user organization workspace"""
     orguser: OrgUser = request.orguser
@@ -168,7 +173,8 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
     return {"sourceId": source["sourceId"]}
 
 
-@airbyteapi.post("/sources/check_connection/", auth=auth.CanManagePipelines())
+@airbyteapi.post("/sources/check_connection/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_create_source"])
 def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
     """Test the source connection in the user organization workspace"""
     orguser: OrgUser = request.orguser
@@ -200,8 +206,10 @@ def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
 
 
 @airbyteapi.post(
-    "/sources/{source_id}/check_connection_for_update/", auth=auth.CanManagePipelines()
+    "/sources/{source_id}/check_connection_for_update/",
+    auth=auth.CustomAuthMiddleware(),
 )
+@has_permission(["can_edit_source"])
 def post_airbyte_check_source_for_update(
     request, source_id: str, payload: AirbyteSourceUpdateCheckConnection
 ):
@@ -231,7 +239,8 @@ def post_airbyte_check_source_for_update(
     }
 
 
-@airbyteapi.get("/sources", auth=auth.CanManagePipelines())
+@airbyteapi.get("/sources", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_sources"])
 def get_airbyte_sources(request):
     """Fetch all airbyte sources in the user organization workspace"""
     orguser: OrgUser = request.orguser
@@ -243,7 +252,8 @@ def get_airbyte_sources(request):
     return res
 
 
-@airbyteapi.get("/sources/{source_id}", auth=auth.CanManagePipelines())
+@airbyteapi.get("/sources/{source_id}", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_source"])
 def get_airbyte_source(request, source_id):
     """Fetch a single airbyte source in the user organization workspace"""
     orguser: OrgUser = request.orguser
@@ -255,7 +265,8 @@ def get_airbyte_source(request, source_id):
     return res
 
 
-@airbyteapi.get("/sources/{source_id}/schema_catalog", auth=auth.CanManagePipelines())
+@airbyteapi.get("/sources/{source_id}/schema_catalog", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_source"])
 def get_airbyte_source_schema_catalog(request, source_id):
     """Fetch schema catalog for a source in the user organization workspace"""
     orguser: OrgUser = request.orguser
@@ -269,7 +280,8 @@ def get_airbyte_source_schema_catalog(request, source_id):
     return res
 
 
-@airbyteapi.get("/destination_definitions", auth=auth.CanManagePipelines())
+@airbyteapi.get("/destination_definitions", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouses"])
 def get_airbyte_destination_definitions(request):
     """Fetch destination definitions in the user organization workspace"""
     orguser: OrgUser = request.orguser
@@ -292,8 +304,9 @@ def get_airbyte_destination_definitions(request):
 
 @airbyteapi.get(
     "/destination_definitions/{destinationdef_id}/specifications",
-    auth=auth.CanManagePipelines(),
+    auth=auth.CustomAuthMiddleware(),
 )
+@has_permission(["can_view_warehouse"])
 def get_airbyte_destination_definition_specifications(request, destinationdef_id):
     """
     Fetch specifications for a destination
@@ -310,7 +323,8 @@ def get_airbyte_destination_definition_specifications(request, destinationdef_id
     return res
 
 
-@airbyteapi.post("/destinations/", auth=auth.CanManagePipelines())
+@airbyteapi.post("/destinations/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_create_warehouse"])
 def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
     """Create an airbyte destination in the user organization workspace"""
     orguser: OrgUser = request.orguser
@@ -327,7 +341,8 @@ def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
     return {"destinationId": destination["destinationId"]}
 
 
-@airbyteapi.post("/destinations/check_connection/", auth=auth.CanManagePipelines())
+@airbyteapi.post("/destinations/check_connection/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_create_warehouse"])
 def post_airbyte_check_destination(request, payload: AirbyteDestinationCreate):
     """Test connection to destination in the user organization workspace"""
     orguser: OrgUser = request.orguser
@@ -345,8 +360,9 @@ def post_airbyte_check_destination(request, payload: AirbyteDestinationCreate):
 
 @airbyteapi.post(
     "/destinations/{destination_id}/check_connection_for_update/",
-    auth=auth.CanManagePipelines(),
+    auth=auth.CustomAuthMiddleware(),
 )
+@has_permission(["can_edit_warehouse"])
 def post_airbyte_check_destination_for_update(
     request, destination_id: str, payload: AirbyteDestinationUpdateCheckConnection
 ):
@@ -364,7 +380,8 @@ def post_airbyte_check_destination_for_update(
     }
 
 
-@airbyteapi.get("/destinations", auth=auth.CanManagePipelines())
+@airbyteapi.get("/destinations", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouses"])
 def get_airbyte_destinations(request):
     """Fetch all airbyte destinations in the user organization workspace"""
     orguser: OrgUser = request.orguser
@@ -378,7 +395,8 @@ def get_airbyte_destinations(request):
     return res
 
 
-@airbyteapi.get("/destinations/{destination_id}", auth=auth.CanManagePipelines())
+@airbyteapi.get("/destinations/{destination_id}", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse"])
 def get_airbyte_destination(request, destination_id):
     """Fetch an airbyte destination in the user organization workspace"""
     orguser: OrgUser = request.orguser
@@ -392,7 +410,8 @@ def get_airbyte_destination(request, destination_id):
     return res
 
 
-@airbyteapi.get("/jobs/{job_id}", auth=auth.CanManagePipelines())
+@airbyteapi.get("/jobs/{job_id}", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_connection"])
 def get_job_status(request, job_id):
     """get the job info from airbyte"""
     result = airbyte_service.get_job_info(job_id)
@@ -408,8 +427,9 @@ def get_job_status(request, job_id):
 
 
 @airbyteapi.post(
-    "/v1/workspace/", response=AirbyteWorkspace, auth=auth.CanManagePipelines()
+    "/v1/workspace/", response=AirbyteWorkspace, auth=auth.CustomAuthMiddleware()
 )
+@has_permission(["can_create_org"])
 def post_airbyte_workspace_v1(request, payload: AirbyteWorkspaceCreate):
     """Create an airbyte workspace"""
     orguser: OrgUser = request.orguser
@@ -423,9 +443,10 @@ def post_airbyte_workspace_v1(request, payload: AirbyteWorkspaceCreate):
 
 @airbyteapi.post(
     "/v1/connections/",
-    auth=auth.CanManagePipelines(),
+    auth=auth.CustomAuthMiddleware(),
     response=AirbyteConnectionCreateResponse,
 )
+@has_permission(["can_create_connection"])
 def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
     """Create an airbyte connection in the user organization workspace"""
     orguser: OrgUser = request.orguser
@@ -446,9 +467,10 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
 
 @airbyteapi.get(
     "/v1/connections",
-    auth=auth.CanManagePipelines(),
+    auth=auth.CustomAuthMiddleware(),
     response=List[AirbyteConnectionCreateResponse],
 )
+@has_permission(["can_view_connections"])
 def get_airbyte_connections_v1(request):
     """Fetch all airbyte connections in the user organization workspace"""
     orguser: OrgUser = request.orguser
@@ -466,9 +488,10 @@ def get_airbyte_connections_v1(request):
 
 @airbyteapi.get(
     "/v1/connections/{connection_id}",
-    auth=auth.CanManagePipelines(),
+    auth=auth.CustomAuthMiddleware(),
     response=AirbyteConnectionCreateResponse,
 )
+@has_permission(["can_view_connection"])
 def get_airbyte_connection_v1(request, connection_id):
     """Fetch a connection in the user organization workspace"""
     orguser: OrgUser = request.orguser
@@ -483,8 +506,9 @@ def get_airbyte_connection_v1(request, connection_id):
 
 
 @airbyteapi.post(
-    "/v1/connections/{connection_id}/reset", auth=auth.CanManagePipelines()
+    "/v1/connections/{connection_id}/reset", auth=auth.CustomAuthMiddleware()
 )
+@has_permission(["can_reset_connection"])
 def post_airbyte_connection_reset_v1(request, connection_id):
     """Reset the data for connection at destination"""
     orguser: OrgUser = request.orguser
@@ -499,8 +523,9 @@ def post_airbyte_connection_reset_v1(request, connection_id):
 
 
 @airbyteapi.put(
-    "/v1/connections/{connection_id}/update", auth=auth.CanManagePipelines()
+    "/v1/connections/{connection_id}/update", auth=auth.CustomAuthMiddleware()
 )
+@has_permission(["can_edit_connection"])
 def put_airbyte_connection_v1(
     request, connection_id, payload: AirbyteConnectionUpdate
 ):  # pylint: disable=unused-argument
@@ -517,7 +542,8 @@ def put_airbyte_connection_v1(
     return res
 
 
-@airbyteapi.delete("/v1/connections/{connection_id}", auth=auth.CanManagePipelines())
+@airbyteapi.delete("/v1/connections/{connection_id}", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_delete_connection"])
 def delete_airbyte_connection_v1(request, connection_id):
     """Update an airbyte connection in the user organization workspace"""
     orguser: OrgUser = request.orguser
@@ -534,7 +560,10 @@ def delete_airbyte_connection_v1(request, connection_id):
     return {"success": 1}
 
 
-@airbyteapi.get("/v1/connections/{connection_id}/jobs", auth=auth.CanManagePipelines())
+@airbyteapi.get(
+    "/v1/connections/{connection_id}/jobs", auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_view_connection"])
 def get_latest_job_for_connection(request, connection_id):
     """get the job info from airbyte for a connection"""
     orguser: OrgUser = request.orguser
@@ -548,7 +577,8 @@ def get_latest_job_for_connection(request, connection_id):
     return job_info
 
 
-@airbyteapi.put("/v1/destinations/{destination_id}/", auth=auth.CanManagePipelines())
+@airbyteapi.put("/v1/destinations/{destination_id}/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_edit_warehouse"])
 def put_airbyte_destination_v1(
     request, destination_id: str, payload: AirbyteDestinationUpdate
 ):
@@ -568,7 +598,8 @@ def put_airbyte_destination_v1(
     return {"destinationId": destination["destinationId"]}
 
 
-@airbyteapi.delete("/sources/{source_id}", auth=auth.CanManagePipelines())
+@airbyteapi.delete("/sources/{source_id}", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_delete_source"])
 def delete_airbyte_source_v1(request, source_id):
     """Delete a single airbyte source in the user organization workspace"""
     logger.info("deleting source started")
