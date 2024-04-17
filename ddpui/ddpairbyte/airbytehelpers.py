@@ -24,7 +24,7 @@ from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.models.org import OrgDataFlowv1, OrgWarehouse
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskLock
 from ddpui.utils.constants import TASK_AIRBYTESYNC
-from ddpui.utils.helpers import generate_hash_id
+from ddpui.utils.helpers import generate_hash_id, update_dict_but_not_stars
 from ddpui.utils import secretsmanager
 from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
 from ddpui.core.pipelinefunctions import setup_airbyte_sync_task_config
@@ -543,13 +543,7 @@ def update_destination(
     dbt_credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
 
     if warehouse.wtype == "postgres":
-        for config_key, config_value in payload.config.items():
-            if config_value and isinstance(config_value, str):
-                config_value = config_value.trim()
-                # don't overwrite parameters which are "********"
-                if not re.match(r"^\*+$", config_value):
-                    dbt_credentials[config_key] = config_value
-
+        dbt_credentials = update_dict_but_not_stars(payload.config)
         # i've forgotten why we have this here, airbyte sends "database" - RC
         if "dbname" in dbt_credentials:
             dbt_credentials["database"] = dbt_credentials["dbname"]

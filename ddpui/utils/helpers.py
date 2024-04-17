@@ -81,3 +81,27 @@ def map_airbyte_keys_to_postgres_keys(conn_info: dict):
     conn_info["user"] = conn_info["username"]
 
     return conn_info
+
+
+def update_dict_but_not_stars(input_config: dict):
+    """
+    copies all the key-value pairs from `input_config` to `output_config`
+    except for the ones where the value is "*****"
+    """
+    output_config: dict = {}
+    for key, val in input_config.items():
+        if val and isinstance(val, str):
+            val = val.strip()
+            if not re.match(r"^\*+$", val):
+                output_config[key] = val
+        elif val and isinstance(val, dict):
+            output_config[key] = update_dict_but_not_stars(val)
+        elif val and isinstance(val, list):
+            output_config[key] = [
+                update_dict_but_not_stars(item) if isinstance(item, dict) else item
+                for item in val
+            ]
+        else:
+            output_config[key] = val
+
+    return output_config
