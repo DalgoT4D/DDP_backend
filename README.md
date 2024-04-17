@@ -167,6 +167,10 @@ DJANGOSECRET=
 
 -   Start the server `python manage.py runserver`
 
+### Step 10: Create first org and user
+
+-   Run `python manage.py createorganduser <Org Name> <Email address>`
+
 ## Using Docker
 Follow the steps below:
 
