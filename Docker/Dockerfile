@@ -1,39 +1,77 @@
-# The first instruction is what image we want to base our container on
-# We Use an official Python runtime as a parent image
-FROM python:3.10-slim-bullseye
+
+# Stage 1: Build the application
+FROM python:3.10 as build
+LABEL Stage="Build"
+
+ENV HOME_DIR=/usr/src/backend
+ENV PYTHONUNBUFFERED 1
+
+# Set the working directory to /usr/src/backend
+WORKDIR ${HOME_DIR}
+
+COPY requirements.txt /requirements.txt
+
+# install uv. This makes installation of packages faster compared to pip
+ADD https://astral.sh/uv/install.sh /install.sh
+
+#Install system dependencies. git is needed because there are some packages that are not available in PyPI
+RUN apt-get update && apt-get -y install libpq-dev gcc wget curl git \
+    && chmod -R 755 /install.sh && /install.sh && rm /install.sh \
+    && set -ex apt-get autoremove -y --purge wget && rm -rf /var/lib/apt/lists/* \
+    && /root/.cargo/bin/uv pip install --system --upgrade pip \
+    && /root/.cargo/bin/uv pip install --system --no-cache-dir -r /requirements.txt \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean 
+
+
+
+RUN useradd -ms /bin/bash -d ${HOME_DIR} container_user \
+    && chown -R container_user: ${HOME_DIR} \
+    && mkdir -p ${HOME_DIR}/secrets && chown -R container_user: ${HOME_DIR}/secrets \
+    && mkdir -p ${HOME_DIR}/dbt/dbt && chown -R container_user: ${HOME_DIR}/dbt/dbt \
+    && mkdir -p ${HOME_DIR}/ddpui/logs && chown -R container_user: ${HOME_DIR}/ddpui/logs
+
+USER container_user
+
+RUN python -m venv {HOME_DIR}/dbt_venv && {HOME_DIR}/dbt_venv/bin/python -m pip install dbt-core
+
+
+# Copy the current directory contents into the container at /app
+COPY ddpui ${HOME_DIR}/ddpui
+COPY manage.py ${HOME_DIR}/manage.py
+COPY Docker/entrypoint.sh /entrypoint.sh
+COPY gunicorn-log.conf ${HOME_DIR}/gunicorn-log.conf
+
+
+# Stage 2 - Runtime
+from python:3.10-slim-bookworm as runtime
+
+ARG BUILD_DATE
+
+LABEL maintainer="DalgoT4D"
+LABEL org.opencontainers.image.source="https://github.com/DalgoT4D/DDP_backend"
+LABEL org.opencontainers.image.licenses="https://github.com/DalgoT4D/DDP_backend?tab=AGPL-3.0-1-ov-file#readme"
+LABEL org.opencontainers.image.version="1.0"
+LABEL org.opencontainers.image.created=${BUILD_DATE}
 
 ENV HOME_DIR=/usr/src/backend
 
-# The enviroment variable ensures that the python output is set straight
-# to the terminal with out buffering it first
-ENV PYTHONUNBUFFERED 1
-
-# Install system dependencies. git is needed because there are some packages that are not available in PyPI
-RUN apt-get update && apt-get -y install libpq-dev gcc jq wget curl git
-
-# install uv
-ADD https://astral.sh/uv/install.sh /install.sh
-RUN chmod -R 755 /install.sh && /install.sh && rm /install.sh
-
-RUN set -ex apt-get autoremove -y --purge wget && rm -rf /var/lib/apt/lists/*
-
-RUN /root/.cargo/bin/uv pip install --system --upgrade pip
-
-COPY requirements.txt /requirements.txt
-RUN /root/.cargo/bin/uv pip install --system --no-cache -r /requirements.txt
-
-RUN useradd -ms /bin/bash -d ${HOME_DIR} container_user
-RUN chown -R container_user: ${HOME_DIR}
-
-# Set the working directory to /app
+# Set the working directory to /usr/src/backend
 WORKDIR ${HOME_DIR}
 
-# Copy the current directory contents into the container at /app
-COPY ddpui ${HOME_DIR}/app
-COPY manage.py ${HOME_DIR}/
-COPY .env ${HOME_DIR}/
+# Create user to run the application
+RUN useradd -ms /bin/bash -d ${HOME_DIR} container_user \
+    && chown -R container_user: ${HOME_DIR}
 
-VOLUME ${HOME_DIR}/app
+USER container_user
 
-# Make port 8000 available to the world outside this container
-EXPOSE 8000
+COPY --from=build ${HOME_DIR} ${HOME_DIR}
+COPY --from=build /entrypoint.sh /entrypoint.sh
+# This is added to get packages installed in the build stage
+COPY --from=build /usr/local/ /usr/local/
+
+
+# Make port 8002 available to the world outside this container
+EXPOSE 8002
+
+ENTRYPOINT ["bash", "/entrypoint.sh" ]
