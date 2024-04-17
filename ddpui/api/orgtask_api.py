@@ -45,6 +45,7 @@ from ddpui.core.orgtaskfunctions import (
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
+from ddpui.utils.helpers import map_airbyte_keys_to_postgres_keys
 from ddpui.utils.constants import TASK_DBTRUN, TASK_GITPULL, TRANSFORM_TASKS_SEQ
 from ddpui.core.pipelinefunctions import (
     setup_dbt_core_task_config,
@@ -229,9 +230,14 @@ def post_system_transformation_tasks(request):
         if destination.get("connectionConfiguration"):
             bqlocation = destination["connectionConfiguration"]["dataset_location"]
 
+    # map airbyte keys to postgres keys
+    if warehouse.wtype == "postgres":
+        credentials = map_airbyte_keys_to_postgres_keys(credentials)
+
     # create a dbt cli profile block
     try:
         cli_block_name = f"{orguser.org.slug}-{profile_name}"
+
         cli_block_response = prefect_service.create_dbt_cli_profile_block(
             cli_block_name,
             profile_name,

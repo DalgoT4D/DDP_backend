@@ -54,6 +54,7 @@ from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
+from ddpui.utils.helpers import map_airbyte_keys_to_postgres_keys
 from ddpui.celery import app
 from ddpui.utils.taskprogress import TaskProgress
 
@@ -107,7 +108,8 @@ logger = CustomLogger("ddpui")
 def _get_wclient(org_warehouse: OrgWarehouse):
     """Connect to a warehouse and return the client"""
     credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
-
+    if org_warehouse.wtype == "postgres":
+        credentials = map_airbyte_keys_to_postgres_keys(credentials)
     return get_client(org_warehouse.wtype, credentials, org_warehouse.bq_location)
 
 

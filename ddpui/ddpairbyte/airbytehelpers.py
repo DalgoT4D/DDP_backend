@@ -3,6 +3,7 @@ functions which work with airbyte and with the dalgo database
 """
 
 import json
+import re
 from django.utils.text import slugify
 from django.conf import settings
 from ddpui.ddpairbyte import airbyte_service
@@ -23,7 +24,7 @@ from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.models.org import OrgDataFlowv1, OrgWarehouse
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskLock
 from ddpui.utils.constants import TASK_AIRBYTESYNC
-from ddpui.utils.helpers import generate_hash_id
+from ddpui.utils.helpers import generate_hash_id, update_dict_but_not_stars
 from ddpui.utils import secretsmanager
 from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
 from ddpui.core.pipelinefunctions import setup_airbyte_sync_task_config
@@ -542,19 +543,10 @@ def update_destination(
     dbt_credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
 
     if warehouse.wtype == "postgres":
-        aliases = {
-            "dbname": "database",
-        }
-        for config_key in ["host", "port", "username", "password", "database"]:
-            if (
-                config_key in payload.config
-                and isinstance(payload.config[config_key], str)
-                and len(payload.config[config_key]) > 0
-                and list(set(payload.config[config_key]))[0] != "*"
-            ):
-                dbt_credentials[aliases.get(config_key, config_key)] = payload.config[
-                    config_key
-                ]
+        dbt_credentials = update_dict_but_not_stars(payload.config)
+        # i've forgotten why we have this here, airbyte sends "database" - RC
+        if "dbname" in dbt_credentials:
+            dbt_credentials["database"] = dbt_credentials["dbname"]
 
     elif warehouse.wtype == "bigquery":
         dbt_credentials = json.loads(payload.config["credentials_json"])
