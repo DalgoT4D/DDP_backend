@@ -1,4 +1,7 @@
-from ddpui.utils.helpers import map_airbyte_keys_to_postgres_keys
+from ddpui.utils.helpers import (
+    map_airbyte_keys_to_postgres_keys,
+    update_dict_but_not_stars,
+)
 
 
 def test_map_airbyte_keys_to_postgres_keys_oldconfig():
@@ -81,3 +84,33 @@ def test_map_airbyte_keys_to_postgres_keys_notunnel():
     assert conn_info["port"] == 100
     assert conn_info["user"] == "user"
     assert conn_info["password"] == "password"
+
+
+def test_update_dict_but_not_stars():
+    """tests update_dict_but_not_stars"""
+    payload = {
+        "k1": "v1",
+        "k2": 100,
+        "k3": "*******",
+        "k4": {
+            "k5": "v5",
+            "k6": 101,
+            "k7": "*****",
+            "k8": [
+                {"k9": "*****", "k10": "v10", "k11": 11},
+                {"k12": "*****", "k13": "v13", "k14": 14, "k15": "*****"},
+                200,
+                "v8",
+            ],
+        },
+    }
+    result = update_dict_but_not_stars(payload)
+    assert result == {
+        "k1": "v1",
+        "k2": 100,
+        "k4": {
+            "k5": "v5",
+            "k6": 101,
+            "k8": [{"k10": "v10", "k11": 11}, {"k13": "v13", "k14": 14}, 200, "v8"],
+        },
+    }
