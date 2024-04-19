@@ -152,6 +152,7 @@ six==1.16.0
 sniffio==1.3.0
 SQLAlchemy==1.4.47
 sqlparse==0.4.3
+sshtunnel==0.4.0
 stack-data==0.6.2
 starkbank-ecdsa==2.2.0
 stringcase==1.2.0
