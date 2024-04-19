@@ -252,6 +252,11 @@ def get_prefect_dataflows_v1(request):
         )
 
         lock = TaskLock.objects.filter(orgtask_id__in=org_task_ids).first()
+        if lock and lock.flow_run_id:
+            current_job_is_queued = False
+            flow_run = prefect_service.get_flow_run(lock.flow_run_id)
+            if flow_run and flow_run["state_type"] in ["SCHEDULED", "PENDING"]:
+                current_job_is_queued = True
 
         res.append(
             {
@@ -276,6 +281,7 @@ def get_prefect_dataflows_v1(request):
                     else None
                 ),
                 "isRunning": lock and lock.locking_dataflow == flow,
+                "currentJobIsQueued": current_job_is_queued,
             }
         )
 

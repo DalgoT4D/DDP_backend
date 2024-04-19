@@ -287,6 +287,11 @@ def get_prefect_transformation_tasks(request):
     ):
         # check if task is locked
         lock = TaskLock.objects.filter(orgtask=org_task).first()
+        if lock and lock.flow_run_id:
+            current_job_is_queued = False
+            flow_run = prefect_service.get_flow_run(lock.flow_run_id)
+            if flow_run and flow_run["state_type"] in ["SCHEDULED", "PENDING"]:
+                current_job_is_queued = True
 
         # git pull               : "git" + " " + "pull"
         # dbt run --full-refresh : "dbt" + " " + "run --full-refresh"
@@ -308,6 +313,7 @@ def get_prefect_transformation_tasks(request):
                     if lock
                     else None
                 ),
+                "currentJobIsQueued": current_job_is_queued,
                 "command": command,
                 "generated_by": org_task.generated_by,
                 "seq": TRANSFORM_TASKS_SEQ[org_task.task.slug],

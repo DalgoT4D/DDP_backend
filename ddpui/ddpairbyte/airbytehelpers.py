@@ -296,6 +296,11 @@ def get_connections(org: Org):
 
         # is the task currently locked?
         lock = TaskLock.objects.filter(orgtask=org_task).first()
+        if lock and lock.flow_run_id:
+            current_job_is_queued = False
+            flow_run = prefect_service.get_flow_run(lock.flow_run_id)
+            if flow_run and flow_run["state_type"] in ["SCHEDULED", "PENDING"]:
+                current_job_is_queued = True
 
         connection["destination"]["name"] = warehouse.name
         res.append(
@@ -322,6 +327,7 @@ def get_connections(org: Org):
                 "isRunning": (
                     lock.locking_dataflow == sync_dataflow.dataflow if lock else False
                 ),
+                "currentJobIsQueued": current_job_is_queued,
             }
         )
 
@@ -352,6 +358,11 @@ def get_one_connection(org: Org, connection_id: str):
 
     # check if the task is locked or not
     lock = TaskLock.objects.filter(orgtask=org_task).first()
+    if lock and lock.flow_run_id:
+        current_job_is_queued = False
+        flow_run = prefect_service.get_flow_run(lock.flow_run_id)
+        if flow_run and flow_run["state_type"] in ["SCHEDULED", "PENDING"]:
+            current_job_is_queued = True
 
     # fetch the source and destination names
     # the web_backend/connections/get fetches the source & destination objects also so we dont need to query again
@@ -390,6 +401,7 @@ def get_one_connection(org: Org, connection_id: str):
             if lock
             else None
         ),
+        "currentJobIsQueued": current_job_is_queued,
     }
 
     return res, None
