@@ -379,6 +379,12 @@ def delete_dbt_cli_profile_block(block_id) -> None:
     prefect_delete_a_block(block_id)
 
 
+def get_dbt_cli_profile_block(block_name: str) -> dict:
+    """fetches the dbt cli profile block from prefect"""
+    response = prefect_get(f"blocks/dbtcli/profile/{block_name}")
+    return response
+
+
 # ================================================================================================
 
 
