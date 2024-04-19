@@ -743,7 +743,7 @@ def post_lock_canvas(request, payload: LockCanvasRequestSchema):
 @has_permission(["can_edit_dbt_model"])
 def post_unlock_canvas(request, payload: LockCanvasRequestSchema):
     """
-    Lock the canvas for the org
+    Unlock the canvas for the org
     """
     orguser: OrgUser = request.orguser
     org = orguser.org
@@ -751,14 +751,14 @@ def post_unlock_canvas(request, payload: LockCanvasRequestSchema):
     canvas_lock = CanvasLock.objects.filter(locked_by__org=org).first()
 
     if canvas_lock is None:
-        return {"status": "unlocked"}
+        raise HttpError(404, "no lock found")
 
     if canvas_lock.locked_by != orguser:
-        return {"error": "not-allowed"}
+        raise HttpError(403, "not allowed")
 
     if str(canvas_lock.lock_id) != payload.lock_id:
-        return {"error": "wrong-lock-id"}
+        raise HttpError(422, "wrong lock id")
 
     canvas_lock.delete()
 
-    return {"status": "unlocked"}
+    return {"success": 1}
