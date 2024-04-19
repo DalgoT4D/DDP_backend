@@ -1,6 +1,7 @@
 import os
 import shutil
 from pathlib import Path
+from subprocess import CompletedProcess
 
 from datetime import datetime, timedelta
 import yaml
@@ -198,17 +199,20 @@ def run_dbt_commands(self, org_id: int):
         Path(os.getenv("CLIENTDBT_ROOT"))
         / org.slug
         / "dbtrepo"
-        / "profiles/profile.yml"
+        / "profiles/profiles.yml"
     )
     logger.info("writing dbt profile to " + str(profile_filename))
     with open(profile_filename, "w", encoding="utf-8") as f:
         yaml.safe_dump(profile, f)
 
+    dbt_binary = Path(os.getenv("DBT_VENV")) / "venv/bin/dbt"
+    project_dir = Path(orgdbt.project_dir) / "dbtrepo"
+
     # dbt clean
     taskprogress.add({"message": "starting dbt clean", "status": "running"})
     try:
-        process = runcmd_with_output(
-            "dbt clean --profiles-dir=profiles", orgdbt.project_dir
+        process: CompletedProcess = runcmd_with_output(
+            f"{dbt_binary} clean --profiles-dir=profiles", project_dir
         )
         command_output = process.stdout.decode("utf-8").split("\n")
         taskprogress.add(
@@ -232,8 +236,8 @@ def run_dbt_commands(self, org_id: int):
     # dbt deps
     try:
         taskprogress.add({"message": "starting dbt deps", "status": "running"})
-        process = runcmd_with_output(
-            "dbt deps --profiles-dir=profiles", orgdbt.project_dir
+        process: CompletedProcess = runcmd_with_output(
+            f"{dbt_binary} deps --profiles-dir=profiles", project_dir
         )
         command_output = process.stdout.decode("utf-8").split("\n")
         taskprogress.add(
@@ -257,8 +261,8 @@ def run_dbt_commands(self, org_id: int):
     # dbt run
     try:
         taskprogress.add({"message": "starting dbt run", "status": "running"})
-        process = runcmd_with_output(
-            "dbt run --profiles-dir=profiles", orgdbt.project_dir
+        process: CompletedProcess = runcmd_with_output(
+            f"{dbt_binary} run --profiles-dir=profiles", project_dir
         )
         command_output = process.stdout.decode("utf-8").split("\n")
         taskprogress.add(
