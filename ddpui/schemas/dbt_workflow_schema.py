@@ -46,6 +46,7 @@ class CompleteDbtModelPayload(Schema):
     name: str
     display_name: str
     dest_schema: str
+    canvas_lock_id: str = None
 
 
 class SyncSourcesSchema(Schema):
