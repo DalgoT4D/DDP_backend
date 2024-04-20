@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import Mock, patch
 from datetime import datetime
-
+from ninja.errors import HttpError
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.tests.api_tests.test_user_org_api import (
     seed_db,
@@ -77,8 +77,9 @@ def test_post_unlock_canvas_unlocked(orguser):
     """a test to unlock the canvas"""
     request = mock_request(orguser)
     payload = LockCanvasRequestSchema()
-    response = post_unlock_canvas(request, payload)
-    assert response == {"status": "unlocked"}
+    with pytest.raises(HttpError) as excinfo:
+        post_unlock_canvas(request, payload)
+    assert str(excinfo.value) == "no lock found"
 
 
 def test_post_unlock_canvas_locked(orguser):
@@ -87,8 +88,9 @@ def test_post_unlock_canvas_locked(orguser):
     payload = LockCanvasRequestSchema()
     post_lock_canvas(request, payload)
 
-    response = post_unlock_canvas(request, payload)
-    assert response == {"error": "wrong-lock-id"}
+    with pytest.raises(HttpError) as excinfo:
+        post_unlock_canvas(request, payload)
+    assert str(excinfo.value) == "wrong lock id"
 
 
 def test_post_unlock_canvas_locked_unlocked(orguser):
@@ -99,7 +101,7 @@ def test_post_unlock_canvas_locked_unlocked(orguser):
 
     payload.lock_id = lock.lock_id
     response = post_unlock_canvas(request, payload)
-    assert response == {"status": "unlocked"}
+    assert response == {"success": 1}
 
 
 def test_post_unlock_canvas_locked_wrong_lock_id(orguser):
@@ -109,5 +111,6 @@ def test_post_unlock_canvas_locked_wrong_lock_id(orguser):
     post_lock_canvas(request, payload)
 
     payload.lock_id = "wrong-lock-id"
-    response = post_unlock_canvas(request, payload)
-    assert response == {"error": "wrong-lock-id"}
+    with pytest.raises(HttpError) as excinfo:
+        post_unlock_canvas(request, payload)
+    assert str(excinfo.value) == "wrong lock id"
