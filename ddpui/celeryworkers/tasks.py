@@ -12,6 +12,7 @@ from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse, OrgPrefectBlockv1
 from ddpui.models.orgjobs import BlockLock
 from ddpui.models.tasks import TaskLock
+from ddpui.models.canvaslock import CanvasLock
 from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
@@ -293,23 +294,33 @@ def update_dbt_core_block_schema_task(block_name, default_schema):
 @app.task()
 def delete_old_blocklocks():
     """delete blocklocks which were created over an hour ago"""
-    onehourago = UTC.localize(datetime.utcnow() - timedelta(seconds=3600))
+    onehourago = UTC.localize(datetime.now(datetime.UTC) - timedelta(seconds=3600))
     BlockLock.objects.filter(locked_at__lt=onehourago).delete()
 
 
 @app.task()
 def delete_old_tasklocks():
     """delete task locks which were created over an hour ago"""
-    onehourago = UTC.localize(datetime.utcnow() - timedelta(seconds=3600))
+    onehourago = UTC.localize(datetime.now(datetime.UTC) - timedelta(seconds=3600))
     TaskLock.objects.filter(locked_at__lt=onehourago).delete()
+
+
+@app.task()
+def delete_old_canvaslocks():
+    """delete canvas locks which were created over 10 minutes ago"""
+    tenminutesago = UTC.localize(datetime.now(datetime.UTC) - timedelta(seconds=600))
+    CanvasLock.objects.filter(locked_at__lt=tenminutesago).delete()
 
 
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender, **kwargs):
-    """check for old blocks every minute"""
+    """check for old locks every minute"""
     sender.add_periodic_task(
         60 * 1.0, delete_old_blocklocks.s(), name="remove old blocklocks"
     )
     sender.add_periodic_task(
         60 * 1.0, delete_old_tasklocks.s(), name="remove old tasklocks"
+    )
+    sender.add_periodic_task(
+        60 * 1.0, delete_old_canvaslocks.s(), name="remove old canvaslocks"
     )
