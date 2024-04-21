@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 
-from ddpui.models.org import Org, OrgWarehouse
+from ddpui.models.org import OrgWarehouse
 from ddpui.utils.secretsmanager import retrieve_warehouse_credentials
 
 
@@ -18,14 +18,20 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         """For every org"""
-        for org in Org.objects.all():
-            warehouse = OrgWarehouse.objects.filter(org=org).first()
+        for warehouse in OrgWarehouse.objects.filter(wtype="postgres"):
             credentials = retrieve_warehouse_credentials(warehouse)
             if "tunnel_method" not in credentials:
                 credentials["tunnel_method"] = {"tunnel_method": "NO_TUNNEL"}
                 warehouse.credentials = credentials
                 warehouse.save()
-                print(f"Updated {org.name}")
+                print(f"Added tunnel_method for postgres {warehouse.org.name}")
             else:
-                print(f"Skipping {org.name}")
+                print(f"Skipping {warehouse.org.name}")
+        for warehouse in OrgWarehouse.objects.filter(wtype="bigquery"):
+            credentials = retrieve_warehouse_credentials(warehouse)
+            if "tunnel_method" in credentials:
+                del credentials["tunnel_method"]
+                warehouse.credentials = credentials
+                warehouse.save()
+                print(f"Remove tunnel_method from bigquery {warehouse.org.name}")
         print("Done.")
