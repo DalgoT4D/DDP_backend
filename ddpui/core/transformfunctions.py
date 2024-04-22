@@ -1,3 +1,5 @@
+import os
+
 from typing import Union
 from ninja.errors import HttpError
 from ddpui.models.dbt_workflow import OrgDbtModel, DbtEdge, OrgDbtOperation
@@ -115,6 +117,9 @@ def check_canvas_locked(requestor_orguser: OrgUser, lock_id: str):
     Checks if the requestor user of an org can access the canvas or not
     Raises error if the canvas is not accessible
     """
+    if os.getenv("CANVAS_LOCK") in [False, "False", "false"]:
+        return True
+
     canvas_lock = CanvasLock.objects.filter(
         locked_by__org=requestor_orguser.org
     ).first()
