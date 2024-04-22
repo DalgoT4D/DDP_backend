@@ -10,13 +10,15 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.1/ref/settings/
 """
 
-from pathlib import Path
 import os
-from dotenv import load_dotenv
-from ddpui.utils.django_logger import setup_logger as setup_django_logger
-from ddpui.utils.ddp_logger import setup_logger as setup_ddp_logger
-from ddpui.utils.ab_logger import setup_logger as setup_ab_logger
+from pathlib import Path
+
 from corsheaders.defaults import default_headers
+from dotenv import load_dotenv
+
+from ddpui.utils.ab_logger import setup_logger as setup_ab_logger
+from ddpui.utils.ddp_logger import setup_logger as setup_ddp_logger
+from ddpui.utils.django_logger import setup_logger as setup_django_logger
 
 load_dotenv()
 
@@ -43,6 +45,7 @@ ALLOWED_HOSTS = [
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ORIGIN_WHITELIST = (
     "http://localhost:3000",
+    "http://frontend:3000",
     "http://127.0.0.1:3000",
     "https://staging.dalgo.in",
     "https://dashboard.dalgo.in",

@@ -10,8 +10,8 @@ services:
       - "5432:5432"
     volumes:
       - ./data:/var/lib/postgresql/data
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    networks:
+      - dalgo-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -p 5432"]
       interval: 5s
@@ -74,3 +74,10 @@ services:
       - DEMO_SUPERSET_PASSWORD=${DEMO_SUPERSET_PASSWORD}
     volumes:
       - ./mount/whitelist.py:/usr/src/backend/ddpui/assets/whitelist.py
+    networks:
+      - dalgo-network
+
+
+networks:
+  dalgo-network:
+    driver: bridge
