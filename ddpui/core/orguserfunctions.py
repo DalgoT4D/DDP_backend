@@ -651,6 +651,7 @@ def ensure_orguser_for_org(orguser: OrgUser, org):
             role=OrgUserRole.ACCOUNT_MANAGER,
             email_verified=True,
             org=org,
+            new_role=orguser.new_role,
         )
     return None, None
 
