@@ -13,6 +13,7 @@ from django.contrib.auth.models import User
 from django.db import transaction
 from django.utils.text import slugify
 
+from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
     Invitation,
@@ -264,9 +265,14 @@ def invite_user(orguser: OrgUser, payload: InvitationSchema):
 
     existing_user = User.objects.filter(email__iexact=invited_email).first()
 
+    # new role for the invited user; so that he doesnt' get stuck due new RBAC changes released
+    new_role = Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first()
+
     if existing_user:
         logger.info("user exists, creating new OrgUser")
-        OrgUser.objects.create(user=existing_user, org=orguser.org, role=invited_role)
+        OrgUser.objects.create(
+            user=existing_user, org=orguser.org, role=invited_role, new_role=new_role
+        )
         sendgrid.send_youve_been_added_email(
             invited_email, orguser.user.email, orguser.org.name
         )
@@ -304,6 +310,7 @@ def invite_user(orguser: OrgUser, payload: InvitationSchema):
         invited_by=orguser,
         invited_on=payload.invited_on,
         invite_code=payload.invite_code,
+        invited_new_role=new_role,
     )
 
     # trigger an email to the user
@@ -430,7 +437,10 @@ def accept_invitation(payload: AcceptInvitationSchema):
             )
             UserAttributes.objects.create(user=user, email_verified=True)
         orguser = OrgUser.objects.create(
-            user=user, org=invitation.invited_by.org, role=invitation.invited_role
+            user=user,
+            org=invitation.invited_by.org,
+            role=invitation.invited_role,
+            new_role=invitation.invited_new_role,
         )
     invitation.delete()
     return from_orguser(orguser), None
@@ -651,6 +661,7 @@ def ensure_orguser_for_org(orguser: OrgUser, org):
             role=OrgUserRole.ACCOUNT_MANAGER,
             email_verified=True,
             org=org,
+            new_role=orguser.new_role,
         )
     return None, None
 
