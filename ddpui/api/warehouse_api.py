@@ -56,11 +56,9 @@ def get_warehouse_data(request, data_type: str, **kwargs):
     try:
         org_user = request.orguser
         org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).first()
-        wtype = org_warehouse.wtype
-        credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
 
         data = []
-        client = get_client(wtype, credentials, org_warehouse.bq_location)
+        client = dbtautomation_service._get_wclient(org_warehouse)
         if data_type == "tables":
             data = client.get_tables(kwargs["schema_name"])
         elif data_type == "schemas":
@@ -147,10 +145,8 @@ def get_table_count(request, schema_name: str, table_name: str):
     try:
         org_user = request.orguser
         org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).first()
-        wtype = org_warehouse.wtype
-        credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
 
-        client = get_client(wtype, credentials, org_warehouse.bq_location)
+        client = dbtautomation_service._get_wclient(org_warehouse)
         total_rows = client.get_total_rows(schema_name, table_name)
         return {"total_rows": total_rows}
     except Exception as e:
