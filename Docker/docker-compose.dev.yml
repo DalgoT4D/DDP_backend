@@ -10,6 +10,8 @@ services:
       - "5432:5432"
     volumes:
       - ./data:/var/lib/postgresql/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - dalgo-network
     healthcheck:
@@ -76,6 +78,8 @@ services:
       - ./mount/whitelist.py:/usr/src/backend/ddpui/assets/whitelist.py
     networks:
       - dalgo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 
 networks:

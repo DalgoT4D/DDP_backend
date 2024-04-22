@@ -25,15 +25,11 @@ RUN apt-get update && apt-get -y install libpq-dev gcc wget curl git \
 
 
 
-RUN useradd -ms /bin/bash -d ${HOME_DIR} container_user \
-    && chown -R container_user: ${HOME_DIR} \
-    && mkdir -p ${HOME_DIR}/secrets && chown -R container_user: ${HOME_DIR}/secrets \
-    && mkdir -p ${HOME_DIR}/dbt/dbt && chown -R container_user: ${HOME_DIR}/dbt/dbt \
-    && mkdir -p ${HOME_DIR}/ddpui/logs && chown -R container_user: ${HOME_DIR}/ddpui/logs
+RUN mkdir -p ${HOME_DIR}/secrets \
+    && mkdir -p ${HOME_DIR}/dbt/dbt \
+    && mkdir -p ${HOME_DIR}/ddpui/logs 
 
-USER container_user
-
-RUN python -m venv {HOME_DIR}/dbt_venv && {HOME_DIR}/dbt_venv/bin/python -m pip install dbt-core
+RUN python -m venv ${HOME_DIR}/dbt_venv && ${HOME_DIR}/dbt_venv/bin/python -m pip install dbt-core
 
 
 # Copy the current directory contents into the container at /app
@@ -60,17 +56,17 @@ ENV HOME_DIR=/usr/src/backend
 # Set the working directory to /usr/src/backend
 WORKDIR ${HOME_DIR}
 
-# Create user to run the application
-RUN useradd -ms /bin/bash -d ${HOME_DIR} container_user \
-    && chown -R container_user: ${HOME_DIR}
+# Create user to run the application -m flag creates the home directory -s flag sets the shell -d flag sets the home directory
+RUN useradd -ms /bin/bash -d ${HOME_DIR} container_user
+
+COPY --from=build --chown=container_user ${HOME_DIR} ${HOME_DIR}
+COPY --from=build --chown=container_user /entrypoint.sh /entrypoint.sh
+# This is added to get packages installed in the build stage
+COPY --from=build --chown=container_user /usr/local/ /usr/local/
+
+
 
 USER container_user
-
-COPY --from=build ${HOME_DIR} ${HOME_DIR}
-COPY --from=build /entrypoint.sh /entrypoint.sh
-# This is added to get packages installed in the build stage
-COPY --from=build /usr/local/ /usr/local/
-
 
 # Make port 8002 available to the world outside this container
 EXPOSE 8002

@@ -41,11 +41,12 @@ ALLOWED_HOSTS = [
     "127.0.0.1",
     "staging-api.dalgo.in",
     "api.dalgo.in",
+    "host.docker.internal",
 ]
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ORIGIN_WHITELIST = (
     "http://localhost:3000",
-    "http://frontend:3000",
+    "http://host.docker.internal:3000",
     "http://127.0.0.1:3000",
     "https://staging.dalgo.in",
     "https://dashboard.dalgo.in",
