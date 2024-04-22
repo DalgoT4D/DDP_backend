@@ -1,7 +1,10 @@
 from django.core.management.base import BaseCommand
 
 from ddpui.models.org import OrgWarehouse
-from ddpui.utils.secretsmanager import retrieve_warehouse_credentials
+from ddpui.utils.secretsmanager import (
+    retrieve_warehouse_credentials,
+    update_warehouse_credentials,
+)
 
 
 class Command(BaseCommand):
@@ -22,8 +25,7 @@ class Command(BaseCommand):
             credentials = retrieve_warehouse_credentials(warehouse)
             if "tunnel_method" not in credentials:
                 credentials["tunnel_method"] = {"tunnel_method": "NO_TUNNEL"}
-                warehouse.credentials = credentials
-                warehouse.save()
+                update_warehouse_credentials(warehouse, credentials)
                 print(f"Added tunnel_method for postgres {warehouse.org.name}")
             else:
                 print(f"Skipping {warehouse.org.name}")
@@ -31,7 +33,6 @@ class Command(BaseCommand):
             credentials = retrieve_warehouse_credentials(warehouse)
             if "tunnel_method" in credentials:
                 del credentials["tunnel_method"]
-                warehouse.credentials = credentials
-                warehouse.save()
+                update_warehouse_credentials(warehouse, credentials)
                 print(f"Remove tunnel_method from bigquery {warehouse.org.name}")
         print("Done.")
