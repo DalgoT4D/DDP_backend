@@ -285,8 +285,8 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
     if not dbt_operation:
         raise HttpError(404, "operation not found")
 
-    if dbt_operation.dbtmodel.under_construction is False:
-        raise HttpError(403, "model is locked")
+    # if dbt_operation.dbtmodel.under_construction is False:
+    #     raise HttpError(403, "model is locked")
 
     # allow edit of only leaf operation nodes - disabled for now
     # if (
