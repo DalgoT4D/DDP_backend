@@ -28,6 +28,7 @@ from ddpui.utils.helpers import generate_hash_id, update_dict_but_not_stars
 from ddpui.utils import secretsmanager
 from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
 from ddpui.core.pipelinefunctions import setup_airbyte_sync_task_config
+from ddpui.core.orgtaskfunctions import fetch_orgtask_lock
 
 logger = CustomLogger("airbyte")
 
@@ -294,14 +295,6 @@ def get_connections(org: Org):
             orgtask=org_task, dataflow__dataflow_type="manual"
         ).first()
 
-        # is the task currently locked?
-        lock = TaskLock.objects.filter(orgtask=org_task).first()
-        if lock and lock.flow_run_id:
-            current_job_is_queued = False
-            flow_run = prefect_service.get_flow_run(lock.flow_run_id)
-            if flow_run and flow_run["state_type"] in ["SCHEDULED", "PENDING"]:
-                current_job_is_queued = True
-
         connection["destination"]["name"] = warehouse.name
         res.append(
             {
@@ -316,18 +309,9 @@ def get_connections(org: Org):
                     sync_dataflow.dataflow.deployment_id if sync_dataflow else None
                 ),
                 "lastRun": last_runs[-1] if len(last_runs) > 0 else None,
-                "lock": (
-                    {
-                        "lockedBy": lock.locked_by.user.email,
-                        "lockedAt": lock.locked_at,
-                    }
-                    if lock
-                    else None
-                ),
-                "isRunning": (
-                    lock.locking_dataflow == sync_dataflow.dataflow if lock else False
-                ),
-                "currentJobIsQueued": current_job_is_queued,
+                "lock": fetch_orgtask_lock(
+                    org_task
+                ),  # this will have the status of the flow run
             }
         )
 
@@ -355,14 +339,6 @@ def get_one_connection(org: Org, connection_id: str):
 
     if dataflow_orgtask is None:
         return None, "deployment not found"
-
-    # check if the task is locked or not
-    lock = TaskLock.objects.filter(orgtask=org_task).first()
-    if lock and lock.flow_run_id:
-        current_job_is_queued = False
-        flow_run = prefect_service.get_flow_run(lock.flow_run_id)
-        if flow_run and flow_run["state_type"] in ["SCHEDULED", "PENDING"]:
-            current_job_is_queued = True
 
     # fetch the source and destination names
     # the web_backend/connections/get fetches the source & destination objects also so we dont need to query again
@@ -393,15 +369,7 @@ def get_one_connection(org: Org, connection_id: str):
             if "operationIds" in airbyte_conn and len(airbyte_conn["operationIds"]) == 1
             else False
         ),
-        "lock": (
-            {
-                "lockedBy": lock.locked_by.user.email,
-                "lockedAt": lock.locked_at,
-            }
-            if lock
-            else None
-        ),
-        "currentJobIsQueued": current_job_is_queued,
+        "lock": fetch_orgtask_lock(org_task),
     }
 
     return res, None

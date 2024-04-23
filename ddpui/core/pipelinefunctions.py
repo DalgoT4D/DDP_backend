@@ -3,15 +3,21 @@ functions to work with pipelies/dataflows
 do not raise http errors here
 """
 
-from ddpui.models.tasks import OrgTask
-from ddpui.models.org import Org, OrgPrefectBlockv1
+from ddpui.models.tasks import OrgTask, DataflowOrgTask, TaskLock, TaskLockStatus
+from ddpui.models.org import Org, OrgPrefectBlockv1, OrgDataFlowv1
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpprefect.schema import (
     PrefectDbtTaskSetup,
     PrefectShellTaskSetup,
     PrefectAirbyteSyncTaskSetup,
 )
-from ddpui.ddpprefect import AIRBYTECONNECTION, DBTCORE, SECRET, SHELLOPERATION
+from ddpui.ddpprefect import (
+    AIRBYTECONNECTION,
+    DBTCORE,
+    SECRET,
+    SHELLOPERATION,
+    prefect_service,
+)
 from ddpui.utils.constants import (
     AIRBYTE_SYNC_TIMEOUT,
     TASK_GITPULL,
@@ -205,3 +211,32 @@ def pipeline_with_orgtasks(
             start_seq += 1
 
     return task_configs, None
+
+
+def fetch_pipeline_lock(dataflow: OrgDataFlowv1):
+    """
+    fetch the lock status of an dataflow/deployment
+    """
+    org_task_ids = DataflowOrgTask.objects.filter(dataflow=dataflow).values_list(
+        "orgtask_id", flat=True
+    )
+    lock = TaskLock.objects.filter(orgtask_id__in=org_task_ids).first()
+    if lock:
+        lock_status = TaskLockStatus.QUEUED
+        if lock.flow_run_id:
+            flow_run = prefect_service.get_flow_run(lock.flow_run_id)
+            if flow_run and flow_run["state_type"] in ["SCHEDULED", "PENDING"]:
+                lock_status = TaskLockStatus.QUEUED
+            elif flow_run and flow_run["state_type"] == "RUNNING":
+                lock_status = TaskLockStatus.RUNNING
+            else:
+                lock_status = TaskLockStatus.COMPLETED
+
+        return {
+            "lockedBy": lock.locked_by.user.email,
+            "lockedAt": lock.locked_at,
+            "flowRunId": lock.flow_run_id,
+            "status": lock_status,
+        }
+
+    return None

@@ -23,7 +23,7 @@ from ddpui.models.org import (
     OrgPrefectBlockv1,
 )
 from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import DataflowOrgTask, TaskLock, OrgTask
+from ddpui.models.tasks import DataflowOrgTask, OrgTask
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
     PrefectFlowRunSchema,
@@ -38,6 +38,7 @@ from ddpui.utils.helpers import generate_hash_id
 from ddpui.core.pipelinefunctions import (
     setup_dbt_core_task_config,
     pipeline_with_orgtasks,
+    fetch_pipeline_lock,
 )
 from ddpui.core.dbtfunctions import gather_dbt_project_params
 from ddpui.auth import has_permission
@@ -247,16 +248,6 @@ def get_prefect_dataflows_v1(request):
     res = []
 
     for flow in org_data_flows:
-        org_task_ids = DataflowOrgTask.objects.filter(dataflow=flow).values_list(
-            "orgtask_id", flat=True
-        )
-
-        lock = TaskLock.objects.filter(orgtask_id__in=org_task_ids).first()
-        if lock and lock.flow_run_id:
-            current_job_is_queued = False
-            flow_run = prefect_service.get_flow_run(lock.flow_run_id)
-            if flow_run and flow_run["state_type"] in ["SCHEDULED", "PENDING"]:
-                current_job_is_queued = True
 
         res.append(
             {
@@ -272,16 +263,7 @@ def get_prefect_dataflows_v1(request):
                     if flow.deployment_id in is_deployment_active
                     else False
                 ),
-                "lock": (
-                    {
-                        "lockedBy": lock.locked_by.user.email,
-                        "lockedAt": lock.locked_at,
-                    }
-                    if lock
-                    else None
-                ),
-                "isRunning": lock and lock.locking_dataflow == flow,
-                "currentJobIsQueued": current_job_is_queued,
+                "lock": fetch_pipeline_lock(flow),
             }
         )
 
