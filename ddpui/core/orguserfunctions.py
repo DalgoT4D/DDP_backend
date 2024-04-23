@@ -100,7 +100,10 @@ def signup_orguser(payload: OrgUserCreate):
     )
     UserAttributes.objects.create(user=user)
     orguser = OrgUser.objects.create(
-        user=user, role=OrgUserRole.ACCOUNT_MANAGER, org=demo_org
+        user=user,
+        role=OrgUserRole.ACCOUNT_MANAGER,
+        org=demo_org,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
     )
     orguser.save()
     logger.info(
