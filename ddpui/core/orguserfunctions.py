@@ -13,7 +13,7 @@ from django.contrib.auth.models import User
 from django.db import transaction
 from django.utils.text import slugify
 
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, GUEST_ROLE
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
     Invitation,
@@ -100,7 +100,14 @@ def signup_orguser(payload: OrgUserCreate):
     )
     UserAttributes.objects.create(user=user)
     orguser = OrgUser.objects.create(
-        user=user, role=OrgUserRole.ACCOUNT_MANAGER, org=demo_org
+        user=user,
+        role=OrgUserRole.ACCOUNT_MANAGER,
+        org=demo_org,
+        new_role=(
+            Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first()
+            if is_demo
+            else Role.objects.filter(slug=GUEST_ROLE).first()
+        ),
     )
     orguser.save()
     logger.info(
