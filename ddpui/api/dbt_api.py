@@ -20,6 +20,7 @@ from ddpui.utils.dbtdocs import create_single_html
 from ddpui.celeryworkers.tasks import (
     setup_dbtworkspace,
     clone_github_repo,
+    run_dbt_commands,
 )
 from ddpui.ddpdbt import dbt_service
 from ddpui.ddpprefect import prefect_service
@@ -230,3 +231,15 @@ def get_transform_type(request):
         transform_type = org.dbt.transform_type
 
     return {"transform_type": transform_type}
+
+
+@dbtapi.post("/run_dbt_via_celery/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_edit_dbt_workspace"])
+def post_run_dbt_commands(request):
+    """Run dbt commands via celery"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    task = run_dbt_commands.delay(org.id)
+
+    return {"task_id": task.id}

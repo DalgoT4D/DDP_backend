@@ -1,11 +1,17 @@
+import os
+
 from typing import Union
 from ninja.errors import HttpError
 from ddpui.models.dbt_workflow import OrgDbtModel, DbtEdge, OrgDbtOperation
-from ddpui.utils.custom_logger import CustomLogger
+from ddpui.models.org_user import OrgUser
+from ddpui.models.org import Org
+from ddpui.models.canvaslock import CanvasLock
 from ddpui.schemas.dbt_workflow_schema import (
     CreateDbtModelPayload,
     EditDbtOperationPayload,
 )
+
+from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
 
@@ -104,3 +110,28 @@ def validate_operation_config(
     }
 
     return (input_config, all_input_models)
+
+
+def check_canvas_locked(requestor_orguser: OrgUser, lock_id: str):
+    """
+    Checks if the requestor user of an org can access the canvas or not
+    Raises error if the canvas is not accessible
+    """
+    if os.getenv("CANVAS_LOCK") in [False, "False", "false"]:
+        return True
+
+    canvas_lock = CanvasLock.objects.filter(
+        locked_by__org=requestor_orguser.org
+    ).first()
+    if canvas_lock:
+        if canvas_lock.locked_by != requestor_orguser:
+            raise HttpError(
+                403, f"canvas is locked by {canvas_lock.locked_by.user.email}"
+            )
+        elif canvas_lock.lock_id != lock_id:
+            raise HttpError(
+                403,
+                "canvas is locked, looks like you are using another device to access the canvas",
+            )
+    else:
+        raise HttpError(403, "acquire a canvas lock first")

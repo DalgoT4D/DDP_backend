@@ -3,13 +3,10 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-import yaml
 
-import slugify
-
+from django.utils.text import slugify
+from dbt_automation import assets
 from ddpui.ddpprefect import (
-    DBTCORE,
-    SHELLOPERATION,
     prefect_service,
     DBTCLIPROFILE,
     SECRET,
@@ -20,32 +17,12 @@ from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask
 from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.utils import secretsmanager
 from ddpui.utils.custom_logger import CustomLogger
-from dbt_automation import assets
 
 logger = CustomLogger("ddpui")
 
 
 def delete_dbt_workspace(org: Org):
     """deletes the dbt workspace on disk as well as in prefect"""
-
-    # we no longer have dbt core operation blocks
-    # for dbtblock in OrgPrefectBlock.objects.filter(org=org, block_type=DBTCORE):
-    #     try:
-    #         prefect_service.delete_dbt_core_block(dbtblock.block_id)
-    #     except Exception:  # pylint:disable=broad-exception-caught
-    #         pass
-    #     dbtblock.delete()
-
-    # we no longer have shell operation blocks
-    # for shellblock in OrgPrefectBlock.objects.filter(
-    #     org=org, block_type=SHELLOPERATION
-    # ):
-    #     if shellblock.block_name.find("-git-pull") > -1:
-    #         try:
-    #             prefect_service.delete_shell_block(shellblock.block_id)
-    #         except Exception:  # pylint:disable=broad-exception-caught
-    #             pass
-    #         shellblock.delete()
 
     # remove transform tasks
     org_tasks_delete = []
