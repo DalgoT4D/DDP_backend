@@ -97,7 +97,6 @@ def get_current_user_v2(request):
 
 
 @user_org_api.post("/organizations/users/", response=OrgUserResponse)
-@has_permission(["can_create_orguser"])
 def post_organization_user(
     request, payload: OrgUserCreate
 ):  # pylint: disable=unused-argument
