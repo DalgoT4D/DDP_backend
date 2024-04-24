@@ -236,7 +236,11 @@ def fetch_pipeline_lock(dataflow: OrgDataFlowv1):
             "lockedBy": lock.locked_by.user.email,
             "lockedAt": lock.locked_at,
             "flowRunId": lock.flow_run_id,
-            "status": lock_status,
+            "status": (
+                lock_status
+                if lock.locking_dataflow == dataflow
+                else TaskLockStatus.LOCKED
+            ),
         }
 
     return None
