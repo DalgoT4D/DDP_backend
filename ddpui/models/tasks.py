@@ -95,7 +95,7 @@ class DataflowOrgTask(models.Model):
 
 
 class TaskLockStatus(str, Enum):
-    """an enum for roles assignable to org-users"""
+    """all possible statuses of a task lock"""
 
     QUEUED = "queued"
     RUNNING = "running"
