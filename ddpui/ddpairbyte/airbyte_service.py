@@ -658,7 +658,7 @@ def create_normalization_operation(workspace_id: str) -> str:
 
     # create normalization operation
     res = abreq(
-        "/operations/create",
+        "operations/create",
         {
             "workspaceId": workspace_id,
             "name": "op-normalize",
@@ -682,7 +682,7 @@ def get_airbyte_operation(operation_id: str):
         raise HttpError(400, "operation_id must be a string")
 
     res = abreq(
-        "/operations/get",
+        "operations/get",
         {"operationId": operation_id},
     )
 
