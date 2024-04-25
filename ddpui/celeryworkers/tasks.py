@@ -363,21 +363,21 @@ def update_dbt_core_block_schema_task(block_name, default_schema):
 @app.task()
 def delete_old_blocklocks():
     """delete blocklocks which were created over an hour ago"""
-    onehourago = UTC.localize(datetime.now(datetime.UTC) - timedelta(seconds=3600))
+    onehourago = UTC.localize(datetime.now() - timedelta(seconds=3600))
     BlockLock.objects.filter(locked_at__lt=onehourago).delete()
 
 
 @app.task()
 def delete_old_tasklocks():
     """delete task locks which were created over an hour ago"""
-    onehourago = UTC.localize(datetime.now(datetime.UTC) - timedelta(seconds=3600))
+    onehourago = UTC.localize(datetime.now() - timedelta(seconds=3600))
     TaskLock.objects.filter(locked_at__lt=onehourago).delete()
 
 
 @app.task()
 def delete_old_canvaslocks():
     """delete canvas locks which were created over 10 minutes ago"""
-    tenminutesago = UTC.localize(datetime.now(datetime.UTC) - timedelta(seconds=600))
+    tenminutesago = UTC.localize(datetime.now() - timedelta(seconds=600))
     CanvasLock.objects.filter(locked_at__lt=tenminutesago).delete()
 
 
