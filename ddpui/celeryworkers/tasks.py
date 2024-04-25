@@ -10,8 +10,9 @@ from ddpui.celery import app
 from ddpui.utils.timezone import UTC
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse, OrgPrefectBlockv1
+from ddpui.models.org_user import OrgUser
 from ddpui.models.orgjobs import BlockLock
-from ddpui.models.tasks import TaskLock
+from ddpui.models.tasks import TaskLock, OrgTask
 from ddpui.models.canvaslock import CanvasLock
 from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
@@ -19,6 +20,11 @@ from ddpui.utils.taskprogress import TaskProgress
 from ddpui.ddpprefect.prefect_service import (
     update_dbt_core_block_schema,
     get_dbt_cli_profile_block,
+)
+from ddpui.utils.constants import (
+    TASK_DBTRUN,
+    TASK_DBTCLEAN,
+    TASK_DBTDEPS,
 )
 from ddpui.ddpprefect import DBTCLIPROFILE
 
@@ -158,8 +164,9 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
 
 
 @app.task(bind=True)
-def run_dbt_commands(self, org_id: int):
+def run_dbt_commands(self, orguser_id: int):
     """run a dbt command via celery instead of via prefect"""
+    # acquire locks
     taskprogress = TaskProgress(self.request.id)
 
     taskprogress.add(
@@ -168,120 +175,182 @@ def run_dbt_commands(self, org_id: int):
             "status": "running",
         }
     )
-    org = Org.objects.filter(id=org_id).first()
-    logger.info("found org %s", org.name)
 
-    orgdbt = OrgDbt.objects.filter(org=org).first()
-    if orgdbt is None:
-        taskprogress.add(
-            {
-                "message": "need to set up a dbt workspace first",
-                "status": "failed",
-            }
-        )
-        logger.error("need to set up a dbt workspace first for org %s", org.name)
-        return
+    task_locks: list[TaskLock] = []
 
-    dbt_cli_profile = OrgPrefectBlockv1.objects.filter(
-        org=org, block_type=DBTCLIPROFILE
-    ).first()
-    if dbt_cli_profile is None:
-        taskprogress.add(
-            {
-                "message": "need to set up a dbt cli profile first",
-                "status": "failed",
-            }
-        )
-        logger.error("need to set up a dbt cli profile first for org %s", org.name)
-        return
-
-    profile = get_dbt_cli_profile_block(dbt_cli_profile.block_name)["profile"]
-    profile_filename = (
-        Path(os.getenv("CLIENTDBT_ROOT"))
-        / org.slug
-        / "dbtrepo"
-        / "profiles/profiles.yml"
-    )
-    logger.info("writing dbt profile to " + str(profile_filename))
-    with open(profile_filename, "w", encoding="utf-8") as f:
-        yaml.safe_dump(profile, f)
-
-    dbt_binary = Path(os.getenv("DBT_VENV")) / "venv/bin/dbt"
-    project_dir = Path(orgdbt.project_dir) / "dbtrepo"
-
-    # dbt clean
-    taskprogress.add({"message": "starting dbt clean", "status": "running"})
     try:
-        process: CompletedProcess = runcmd_with_output(
-            f"{dbt_binary} clean --profiles-dir=profiles", project_dir
-        )
-        command_output = process.stdout.decode("utf-8").split("\n")
-        taskprogress.add(
-            {
-                "message": "dbt clean output",
-                "status": "running",
-                "output": command_output,
-            }
-        )
-    except subprocess.CalledProcessError as error:
-        taskprogress.add(
-            {
-                "message": "dbt clean failed",
-                "error": str(error),
-                "status": "failed",
-            }
-        )
-        logger.exception(error)
-        return
 
-    # dbt deps
-    try:
-        taskprogress.add({"message": "starting dbt deps", "status": "running"})
-        process: CompletedProcess = runcmd_with_output(
-            f"{dbt_binary} deps --profiles-dir=profiles", project_dir
-        )
-        command_output = process.stdout.decode("utf-8").split("\n")
-        taskprogress.add(
-            {
-                "message": "dbt deps output",
-                "status": "running",
-                "output": command_output,
-            }
-        )
-    except subprocess.CalledProcessError as error:
-        taskprogress.add(
-            {
-                "message": "dbt deps failed",
-                "error": str(error),
-                "status": "failed",
-            }
-        )
-        logger.exception(error)
-        return
+        orguser: OrgUser = OrgUser.objects.filter(id=orguser_id).first()
 
-    # dbt run
-    try:
-        taskprogress.add({"message": "starting dbt run", "status": "running"})
-        process: CompletedProcess = runcmd_with_output(
-            f"{dbt_binary} run --profiles-dir=profiles", project_dir
-        )
-        command_output = process.stdout.decode("utf-8").split("\n")
-        taskprogress.add(
-            {"message": "dbt run output", "status": "running", "output": command_output}
-        )
-    except subprocess.CalledProcessError as error:
-        taskprogress.add(
-            {
-                "message": "dbt run failed",
-                "error": str(error),
-                "status": "failed",
-            }
-        )
-        logger.exception(error)
-        return
+        org: Org = orguser.org
+        logger.info("found org %s", org.name)
 
-    # done
-    taskprogress.add({"message": "dbt run completed", "status": "completed"})
+        # acquire locks for clean, deps and run
+        org_tasks = OrgTask.objects.filter(
+            org=org,
+            task__slug__in=[TASK_DBTCLEAN, TASK_DBTDEPS, TASK_DBTRUN],
+            generated_by="system",
+        ).all()
+        for org_task in org_tasks:
+            task_lock = TaskLock.objects.create(
+                orgtask=org_task, locked_by=orguser, celery_task_id=self.request.id
+            )
+            task_locks.append(task_lock)
+
+        orgdbt = OrgDbt.objects.filter(org=org).first()
+        if orgdbt is None:
+            taskprogress.add(
+                {
+                    "message": "need to set up a dbt workspace first",
+                    "status": "failed",
+                }
+            )
+            logger.error("need to set up a dbt workspace first for org %s", org.name)
+            return
+
+        dbt_cli_profile = OrgPrefectBlockv1.objects.filter(
+            org=org, block_type=DBTCLIPROFILE
+        ).first()
+        if dbt_cli_profile is None:
+            taskprogress.add(
+                {
+                    "message": "need to set up a dbt cli profile first",
+                    "status": "failed",
+                }
+            )
+            logger.error("need to set up a dbt cli profile first for org %s", org.name)
+            return
+
+        profile = get_dbt_cli_profile_block(dbt_cli_profile.block_name)["profile"]
+        profile_filename = (
+            Path(os.getenv("CLIENTDBT_ROOT"))
+            / org.slug
+            / "dbtrepo"
+            / "profiles/profiles.yml"
+        )
+        logger.info("writing dbt profile to " + str(profile_filename))
+        with open(profile_filename, "w", encoding="utf-8") as f:
+            yaml.safe_dump(profile, f)
+
+        dbt_binary = Path(os.getenv("DBT_VENV")) / "venv/bin/dbt"
+        project_dir = Path(orgdbt.project_dir) / "dbtrepo"
+
+        # dbt clean
+        taskprogress.add({"message": "starting dbt clean", "status": "running"})
+        try:
+            process: CompletedProcess = runcmd_with_output(
+                f"{dbt_binary} clean --profiles-dir=profiles", project_dir
+            )
+            command_output = process.stdout.decode("utf-8").split("\n")
+            taskprogress.add(
+                {
+                    "message": "dbt clean output",
+                    "status": "running",
+                }
+            )
+            for cmd_out in command_output:
+                taskprogress.add(
+                    {
+                        "message": cmd_out,
+                        "status": "running",
+                    }
+                )
+        except subprocess.CalledProcessError as error:
+            taskprogress.add(
+                {
+                    "message": "dbt clean failed",
+                    "status": "failed",
+                }
+            )
+            taskprogress.add(
+                {
+                    "message": str(error),
+                    "status": "failed",
+                }
+            )
+            logger.exception(error)
+            raise Exception("Dbt clean failed")
+
+        # dbt deps
+        try:
+            taskprogress.add({"message": "starting dbt deps", "status": "running"})
+            process: CompletedProcess = runcmd_with_output(
+                f"{dbt_binary} deps --profiles-dir=profiles", project_dir
+            )
+            command_output = process.stdout.decode("utf-8").split("\n")
+            taskprogress.add(
+                {
+                    "message": "dbt deps output",
+                    "status": "running",
+                }
+            )
+            for cmd_out in command_output:
+                taskprogress.add(
+                    {
+                        "message": cmd_out,
+                        "status": "running",
+                    }
+                )
+        except subprocess.CalledProcessError as error:
+            taskprogress.add(
+                {
+                    "message": "dbt deps failed",
+                    "status": "failed",
+                }
+            )
+            taskprogress.add(
+                {
+                    "message": str(error),
+                    "status": "failed",
+                }
+            )
+            logger.exception(error)
+            raise Exception("Dbt deps failed")
+
+        # dbt run
+        try:
+            taskprogress.add({"message": "starting dbt run", "status": "running"})
+            process: CompletedProcess = runcmd_with_output(
+                f"{dbt_binary} run --profiles-dir=profiles", project_dir
+            )
+            command_output = process.stdout.decode("utf-8").split("\n")
+            taskprogress.add(
+                {
+                    "message": "dbt run output",
+                    "status": "running",
+                }
+            )
+            for cmd_out in command_output:
+                taskprogress.add(
+                    {
+                        "message": cmd_out,
+                        "status": "running",
+                    }
+                )
+        except subprocess.CalledProcessError as error:
+            taskprogress.add(
+                {
+                    "message": "dbt run failed",
+                    "status": "failed",
+                }
+            )
+            taskprogress.add(
+                {
+                    "message": str(error),
+                    "status": "failed",
+                }
+            )
+            logger.exception(error)
+            raise Exception("Dbt run failed")
+
+        # done
+        taskprogress.add({"message": "dbt run completed", "status": "completed"})
+    except Exception as e:
+        logger.error(e)
+    finally:
+        # clear all locks
+        for lock in task_locks:
+            lock.delete()
 
 
 @app.task(bind=False)
