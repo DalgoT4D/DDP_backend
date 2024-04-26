@@ -4,7 +4,7 @@ do not raise http errors here
 """
 
 import uuid
-from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask
+from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask, TaskLock, TaskLockStatus
 from ddpui.models.org import Org, OrgPrefectBlockv1, OrgDataFlowv1
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpprefect.schema import (
@@ -119,3 +119,27 @@ def delete_orgtask(org_task: OrgTask):
     org_task.delete()
 
     return None, None
+
+
+def fetch_orgtask_lock(org_task: OrgTask):
+    """fetch the lock status of an orgtask"""
+    lock = TaskLock.objects.filter(orgtask=org_task).first()
+    if lock:
+        lock_status = TaskLockStatus.QUEUED
+        if lock.flow_run_id:
+            flow_run = prefect_service.get_flow_run(lock.flow_run_id)
+            if flow_run and flow_run["state_type"] in ["SCHEDULED", "PENDING"]:
+                lock_status = TaskLockStatus.QUEUED
+            elif flow_run and flow_run["state_type"] == "RUNNING":
+                lock_status = TaskLockStatus.RUNNING
+            else:
+                lock_status = TaskLockStatus.COMPLETED
+
+        return {
+            "lockedBy": lock.locked_by.user.email,
+            "lockedAt": lock.locked_at,
+            "flowRunId": lock.flow_run_id,
+            "status": lock_status,
+        }
+
+    return None

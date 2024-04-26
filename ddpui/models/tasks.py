@@ -94,6 +94,15 @@ class DataflowOrgTask(models.Model):
     seq = models.IntegerField(default=1)
 
 
+class TaskLockStatus(str, Enum):
+    """all possible statuses of a task lock"""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    LOCKED = "locked"
+    COMPLETED = "complete"
+
+
 class TaskLock(models.Model):
     """A locking implementation for OrgTask"""
 

@@ -41,6 +41,7 @@ from ddpui.core.orgtaskfunctions import (
     create_default_transform_tasks,
     create_prefect_deployment_for_dbtcore_task,
     delete_orgtask,
+    fetch_orgtask_lock,
 )
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
@@ -285,9 +286,6 @@ def get_prefect_transformation_tasks(request):
         .order_by("-generated_by")
         .all()
     ):
-        # check if task is locked
-        lock = TaskLock.objects.filter(orgtask=org_task).first()
-
         # git pull               : "git" + " " + "pull"
         # dbt run --full-refresh : "dbt" + " " + "run --full-refresh"
         command = org_task.task.type + " " + org_task.get_task_parameters()
@@ -299,16 +297,7 @@ def get_prefect_transformation_tasks(request):
                 "id": org_task.id,
                 "uuid": org_task.uuid,
                 "deploymentId": None,
-                "lock": (
-                    {
-                        "lockedBy": lock.locked_by.user.email,
-                        "lockedAt": lock.locked_at,
-                        "flowRunId": lock.flow_run_id,
-                        "celeryTaskId": lock.celery_task_id,
-                    }
-                    if lock
-                    else None
-                ),
+                "lock": fetch_orgtask_lock(org_task),
                 "command": command,
                 "generated_by": org_task.generated_by,
                 "seq": TRANSFORM_TASKS_SEQ[org_task.task.slug],
