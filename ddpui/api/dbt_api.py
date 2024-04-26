@@ -238,8 +238,8 @@ def get_transform_type(request):
 def post_run_dbt_commands(request):
     """Run dbt commands via celery"""
     orguser: OrgUser = request.orguser
-    org = orguser.org
 
-    task = run_dbt_commands.delay(org.id)
+    # executes clean, deps, run
+    task = run_dbt_commands.delay(orguser.id)
 
     return {"task_id": task.id}

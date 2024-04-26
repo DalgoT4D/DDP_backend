@@ -113,3 +113,4 @@ class TaskLock(models.Model):
     locking_dataflow = models.ForeignKey(
         OrgDataFlowv1, on_delete=models.CASCADE, null=True
     )
+    celery_task_id = models.TextField(max_length=36, null=True)
