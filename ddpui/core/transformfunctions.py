@@ -128,7 +128,7 @@ def check_canvas_locked(requestor_orguser: OrgUser, lock_id: str):
             raise HttpError(
                 403, f"canvas is locked by {canvas_lock.locked_by.user.email}"
             )
-        elif canvas_lock.lock_id != lock_id:
+        elif str(canvas_lock.lock_id) != lock_id:
             raise HttpError(
                 403,
                 "canvas is locked, looks like you are using another device to access the canvas",
