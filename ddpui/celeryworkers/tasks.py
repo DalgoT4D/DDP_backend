@@ -222,12 +222,11 @@ def run_dbt_commands(self, orguser_id: int):
             return
 
         profile = get_dbt_cli_profile_block(dbt_cli_profile.block_name)["profile"]
-        profile_filename = (
-            Path(os.getenv("CLIENTDBT_ROOT"))
-            / org.slug
-            / "dbtrepo"
-            / "profiles/profiles.yml"
+        profile_dirname = (
+            Path(os.getenv("CLIENTDBT_ROOT")) / org.slug / "dbtrepo" / "profiles"
         )
+        os.makedirs(profile_dirname, exist_ok=True)
+        profile_filename = profile_dirname / "profiles.yml"
         logger.info("writing dbt profile to " + str(profile_filename))
         with open(profile_filename, "w", encoding="utf-8") as f:
             yaml.safe_dump(profile, f)
