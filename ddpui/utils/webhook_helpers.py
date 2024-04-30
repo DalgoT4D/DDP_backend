@@ -94,7 +94,7 @@ def email_orgusers(org: Org, email_body: str):
     if org.ses_whitelisted_email:
         logger.info(f"sending email to {org.ses_whitelisted_email}")
         send_text_message(org.ses_whitelisted_email, subject, email_body)
-        return
+
     for orguser in OrgUser.objects.filter(
         org=org,
         role__in=[
