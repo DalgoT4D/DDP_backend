@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 import pytest
 from ninja.errors import HttpError
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
+os.environ.setdefault(" ", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
