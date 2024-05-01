@@ -50,6 +50,7 @@ class Org(models.Model):
         choices=OrgVizLoginType.choices(), max_length=50, null=True
     )
     is_demo = models.BooleanField(default=False)
+    ses_whitelisted_email = models.TextField(max_length=100, null=True)
 
     def __str__(self) -> str:
         demostr = "demo=" + ("yes" if self.is_demo else "no")
