@@ -248,7 +248,7 @@ def sync_sources_for_warehouse(
     taskprogress = TaskProgress(
         task_id=orgslug,
         hashkey="syncsources-" + orgslug,
-        expire_in_seconds=timedelta(seconds=10 * 60),  # max 10 minutes
+        expire_in_seconds=10 * 60,  # max 10 minutes
     )
 
     org_dbt: OrgDbt = OrgDbt.objects.filter(id=org_dbt_id).first()
