@@ -33,7 +33,7 @@ class TaskProgress:
         self.redis.delete(self.hashkey)
 
     @staticmethod
-    def fetch(task_id, hashkey="taskprogress"):
+    def fetch(task_id, hashkey):
         """look up progress by task_id"""
         redis = Redis()
         result = redis.hget(hashkey, task_id)
