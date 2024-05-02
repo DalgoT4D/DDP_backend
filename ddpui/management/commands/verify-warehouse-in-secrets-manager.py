@@ -30,9 +30,19 @@ class Command(BaseCommand):
                 "destinations/get", {"destinationId": warehouse.airbyte_destination_id}
             )
             print(org.slug)
-            for key in ["host", "database", "port", "username"]:
-                if warehouse_secret[key] != res["connectionConfiguration"][key]:
+            if warehouse.wtype == "postgres":
+                for key in ["host", "database", "port", "username"]:
+                    if warehouse_secret[key] != res["connectionConfiguration"][key]:
+                        print(
+                            f'{key} mismatch: {warehouse_secret[key]} vs {res["connectionConfiguration"][key]}'
+                        )
+            elif warehouse.wtype == "bigquery":
+                # the credentials_json is not available, and the dataset_id is not available
+                if (
+                    warehouse_secret["project_id"]
+                    != res["connectionConfiguration"]["project_id"]
+                ):
                     print(
-                        f'{key} mismatch: {warehouse_secret[key]} vs {res["connectionConfiguration"][key]}'
+                        f'project_id mismatch: {warehouse_secret["project_id"]} vs {res["connectionConfiguration"]["project_id"]}'
                     )
             print("=" * 80)
