@@ -10,9 +10,7 @@ class TaskProgress:
     with the task_id as the key
     """
 
-    def __init__(
-        self, task_id, hashkey="taskprogress", expire_in_seconds: int | None = None
-    ) -> None:
+    def __init__(self, task_id, hashkey, expire_in_seconds: int | None = None) -> None:
         self.hashkey = hashkey
         self.task_id = task_id
         self.taskprogress = []

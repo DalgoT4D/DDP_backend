@@ -34,6 +34,7 @@ logger = CustomLogger("ddpui")
 @app.task(bind=True)
 def clone_github_repo(
     self,
+    org_slug: str,
     gitrepo_url: str,
     gitrepo_access_token: str | None,
     project_dir: str,
@@ -42,7 +43,7 @@ def clone_github_repo(
     """clones an org's github repo"""
     if taskprogress is None:
         child = False
-        taskprogress = TaskProgress(self.request.id)
+        taskprogress = TaskProgress(self.request.id, "clone-github-repo-" + org_slug)
     else:
         child = True
 
@@ -96,7 +97,10 @@ def clone_github_repo(
 @app.task(bind=True)
 def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     """sets up an org's dbt workspace, recreating it if it already exists"""
-    taskprogress = TaskProgress(self.request.id)
+    org = Org.objects.filter(id=org_id).first()
+    logger.info("found org %s", org.name)
+
+    taskprogress = TaskProgress(self.request.id, "setup-dbt-workspace-" + org.slug)
 
     taskprogress.add(
         {
@@ -104,9 +108,6 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
             "status": "running",
         }
     )
-    org = Org.objects.filter(id=org_id).first()
-    logger.info("found org %s", org.name)
-
     warehouse = OrgWarehouse.objects.filter(org=org).first()
     if warehouse is None:
         taskprogress.add(
@@ -127,6 +128,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
 
     # four parameters here is correct despite vscode thinking otherwise
     if not clone_github_repo(
+        org.slug,
         payload["gitrepoUrl"],
         payload["gitrepoAccessToken"],
         str(project_dir),
@@ -166,24 +168,23 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
 @app.task(bind=True)
 def run_dbt_commands(self, orguser_id: int):
     """run a dbt command via celery instead of via prefect"""
-    # acquire locks
-    taskprogress = TaskProgress(self.request.id)
-
-    taskprogress.add(
-        {
-            "message": "started",
-            "status": "running",
-        }
-    )
-
-    task_locks: list[TaskLock] = []
-
     try:
 
         orguser: OrgUser = OrgUser.objects.filter(id=orguser_id).first()
 
         org: Org = orguser.org
         logger.info("found org %s", org.name)
+
+        taskprogress = TaskProgress(self.request.id, "run-dbt-commands-" + org.slug)
+
+        taskprogress.add(
+            {
+                "message": "started",
+                "status": "running",
+            }
+        )
+
+        task_locks: list[TaskLock] = []
 
         # acquire locks for clean, deps and run
         org_tasks = OrgTask.objects.filter(
