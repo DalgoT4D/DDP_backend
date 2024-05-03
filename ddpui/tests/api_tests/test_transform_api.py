@@ -3,6 +3,10 @@ from unittest.mock import Mock, patch
 from datetime import datetime
 from ninja.errors import HttpError
 from ddpui.models.role_based_access import Role, RolePermission, Permission
+from ddpui.models.org_user import OrgUser
+from ddpui.models.org import OrgWarehouse
+from ddpui.auth import GUEST_ROLE
+from ddpui.schemas.org_task_schema import DbtProjectSchema
 from ddpui.tests.api_tests.test_user_org_api import (
     seed_db,
     orguser,
@@ -114,3 +118,33 @@ def test_post_unlock_canvas_locked_wrong_lock_id(orguser):
     with pytest.raises(HttpError) as excinfo:
         post_unlock_canvas(request, payload)
     assert str(excinfo.value) == "wrong lock id"
+
+
+# =================================== ui4t =======================================
+
+
+def test_create_dbt_project_check_permission(orguser: OrgUser):
+    """a failure test to check if the orguser has the correct permission"""
+    orguser.new_role = Role.objects.filter(slug=GUEST_ROLE).first()
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as excinfo:
+        create_dbt_project(request)
+    assert str(excinfo.value) == "unauthorized"
+
+
+def test_create_dbt_project_mocked_helper(orguser: OrgUser):
+    """a success test to create a dbt project"""
+    request = mock_request(orguser)
+    payload = DbtProjectSchema(default_schema="default")
+
+    with patch(
+        "ddpui.api.transform_api.setup_local_dbt_workspace",
+        return_value=(None, None),
+    ) as setup_local_dbt_workspace_mock:
+        result = create_dbt_project(request, payload)
+        assert isinstance(result, dict)
+        assert "message" in result
+        assert result["message"] == f"Project {orguser.org.slug} created successfully"
+        setup_local_dbt_workspace_mock.assert_called_once_with(
+            orguser.org, project_name="dbtrepo", default_schema=payload.default_schema
+        )
