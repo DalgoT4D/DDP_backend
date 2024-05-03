@@ -1,6 +1,5 @@
 import os, uuid
 from pathlib import Path
-from datetime import timedelta
 
 from dbt_automation.operations.arithmetic import arithmetic, arithmetic_dbt_sql
 from dbt_automation.operations.castdatatypes import cast_datatypes, cast_datatypes_sql
@@ -52,6 +51,7 @@ from dbt_automation.operations.generic import generic_function, generic_function
 from ddpui.schemas.dbt_workflow_schema import CompleteDbtModelPayload
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation
+from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils.helpers import map_airbyte_keys_to_postgres_keys
@@ -246,8 +246,8 @@ def sync_sources_for_warehouse(
     Dbt source name will be the same as the schema name.
     """
     taskprogress = TaskProgress(
-        task_id=orgslug,
-        hashkey="syncsources-" + orgslug,
+        task_id=self.request.id,
+        hashkey=f"{TaskProgressHashPrefix.SYNCSOURCES}-{orgslug}",
         expire_in_seconds=10 * 60,  # max 10 minutes
     )
 

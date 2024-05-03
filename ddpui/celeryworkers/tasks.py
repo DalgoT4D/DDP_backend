@@ -12,7 +12,7 @@ from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.orgjobs import BlockLock
-from ddpui.models.tasks import TaskLock, OrgTask
+from ddpui.models.tasks import TaskLock, OrgTask, TaskProgressHashPrefix
 from ddpui.models.canvaslock import CanvasLock
 from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
@@ -43,7 +43,9 @@ def clone_github_repo(
     """clones an org's github repo"""
     if taskprogress is None:
         child = False
-        taskprogress = TaskProgress(self.request.id, "clone-github-repo-" + org_slug)
+        taskprogress = TaskProgress(
+            self.request.id, f"{TaskProgressHashPrefix.CLONEGITREPO}-{org_slug}"
+        )
     else:
         child = True
 
@@ -100,7 +102,9 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     org = Org.objects.filter(id=org_id).first()
     logger.info("found org %s", org.name)
 
-    taskprogress = TaskProgress(self.request.id, "setup-dbt-workspace-" + org.slug)
+    taskprogress = TaskProgress(
+        self.request.id, f"{TaskProgressHashPrefix.DBTWORKSPACE}-{org.slug}"
+    )
 
     taskprogress.add(
         {
@@ -175,7 +179,9 @@ def run_dbt_commands(self, orguser_id: int):
         org: Org = orguser.org
         logger.info("found org %s", org.name)
 
-        taskprogress = TaskProgress(self.request.id, "run-dbt-commands-" + org.slug)
+        taskprogress = TaskProgress(
+            self.request.id, f"{TaskProgressHashPrefix.RUNDBTCMDS}-{org.slug}"
+        )
 
         taskprogress.add(
             {

@@ -10,6 +10,19 @@ from ddpui.models.org import OrgDataFlowv1
 from ddpui.models.org_user import OrgUser
 
 
+class TaskProgressHashPrefix(str, Enum):
+    """
+    all possible hash prefixes used to run long running process via celery/redis
+    the prefix is most cases will be suffixed with orgslug to generate the final hash in redis
+    hash: "prefix-orgslug"
+    """
+
+    SYNCSOURCES = "syncsources"
+    CLONEGITREPO = "clone-github-repo"
+    DBTWORKSPACE = "setup-dbt-workspace"
+    RUNDBTCMDS = "run-dbt-commands"
+
+
 class OrgTaskGeneratedBy(str, Enum):
     """an enum for roles assignable to org-users"""
 
