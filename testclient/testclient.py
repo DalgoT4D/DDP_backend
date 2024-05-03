@@ -1,4 +1,5 @@
 """a client for testing dalgo services"""
+
 import os
 import json
 import requests
@@ -23,9 +24,11 @@ class TestClient:
 
     def clientget(self, endpoint, **kwargs):
         """GET"""
-        print(f"GET /api/{endpoint}")
+        url = f"{self.httpschema}://{self.host}:{self.port}/api/{endpoint}"
+        if self.verbose:
+            print(f"GET {url}")
         req = requests.get(
-            f"{self.httpschema}://{self.host}:{self.port}/api/{endpoint}",
+            url,
             headers=self.clientheaders,
             timeout=kwargs.get("timeout", 10),
         )
@@ -43,9 +46,11 @@ class TestClient:
 
     def clientpost(self, endpoint, **kwargs):
         """POST"""
-        print(f"POST /api/{endpoint}")
+        url = f"{self.httpschema}://{self.host}:{self.port}/api/{endpoint}"
+        if self.verbose:
+            print(f"POST {url}")
         req = requests.post(
-            f"{self.httpschema}://{self.host}:{self.port}/api/{endpoint}",
+            url,
             headers=self.clientheaders,
             timeout=kwargs.get("timeout", 10),
             json=kwargs.get("json"),
@@ -64,9 +69,11 @@ class TestClient:
 
     def clientput(self, endpoint, **kwargs):
         """PUT"""
-        print(f"PUT /api/{endpoint}")
+        url = f"{self.httpschema}://{self.host}:{self.port}/api/{endpoint}"
+        if self.verbose:
+            print(f"PUT {url}")
         req = requests.put(
-            f"{self.httpschema}://{self.host}:{self.port}/api/{endpoint}",
+            url,
             headers=self.clientheaders,
             timeout=kwargs.get("timeout", 10),
             json=kwargs.get("json"),
@@ -85,9 +92,11 @@ class TestClient:
 
     def clientdelete(self, endpoint, **kwargs):
         """DELETE"""
-        print(f"DELETE /api/{endpoint}")
+        url = f"{self.httpschema}://{self.host}:{self.port}/api/{endpoint}"
+        if self.verbose:
+            print(f"DELETE {url}")
         req = requests.delete(
-            f"{self.httpschema}://{self.host}:{self.port}/api/{endpoint}",
+            url,
             headers=self.clientheaders,
             timeout=10,
         )
