@@ -124,6 +124,7 @@ def test_put_dbt_github(orguser):
     ) as delay:
         put_dbt_github(request, payload)
         delay.assert_called_once_with(
+            "org-slug",
             "new-url",
             "new-access-token",
             os.getenv("CLIENTDBT_ROOT") + "/org-slug",

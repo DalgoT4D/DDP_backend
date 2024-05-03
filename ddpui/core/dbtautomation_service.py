@@ -1,6 +1,5 @@
 import os, uuid
 from pathlib import Path
-from datetime import timedelta
 
 from dbt_automation.operations.arithmetic import arithmetic, arithmetic_dbt_sql
 from dbt_automation.operations.castdatatypes import cast_datatypes, cast_datatypes_sql
@@ -52,6 +51,7 @@ from dbt_automation.operations.generic import generic_function, generic_function
 from ddpui.schemas.dbt_workflow_schema import CompleteDbtModelPayload
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation
+from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils.helpers import map_airbyte_keys_to_postgres_keys
@@ -246,9 +246,9 @@ def sync_sources_for_warehouse(
     Dbt source name will be the same as the schema name.
     """
     taskprogress = TaskProgress(
-        task_id=orgslug,
-        hashkey="syncsources-" + orgslug,
-        expire_in_seconds=timedelta(seconds=10 * 60),  # max 10 minutes
+        task_id=self.request.id,
+        hashkey=f"{TaskProgressHashPrefix.SYNCSOURCES}-{orgslug}",
+        expire_in_seconds=10 * 60,  # max 10 minutes
     )
 
     org_dbt: OrgDbt = OrgDbt.objects.filter(id=org_dbt_id).first()
@@ -258,49 +258,62 @@ def sync_sources_for_warehouse(
 
     taskprogress.add(
         {
-            "message": "started syncing sources",
-            "status": "Syncing sources from your warehouse",
+            "message": "Started syncing sources",
+            "status": "runnning",
         }
     )
 
     dbt_project = dbtProject(Path(org_dbt.project_dir) / "dbtrepo")
-    wclient = _get_wclient(org_warehouse)
 
-    for schema in wclient.get_schemas():
+    try:
+        wclient = _get_wclient(org_warehouse)
+
+        for schema in wclient.get_schemas():
+            taskprogress.add(
+                {
+                    "message": f"Reading sources for schema {schema} from warehouse",
+                    "status": "running",
+                }
+            )
+            logger.info(f"reading sources for schema {schema} for warehouse")
+            sync_tables = []
+            for table in wclient.get_tables(schema):
+                if not OrgDbtModel.objects.filter(
+                    orgdbt=org_dbt, schema=schema, name=table, type="model"
+                ).first():
+                    sync_tables.append(table)
+
+            taskprogress.add(
+                {
+                    "message": f"Finished reading sources for schema {schema}",
+                    "status": "running",
+                }
+            )
+
+            if len(sync_tables) == 0:
+                logger.info(
+                    f"No new tables in schema '{schema}' to be synced as sources."
+                )
+                continue
+
+            # in dbt automation, it will overwrite the sources (if name is same which it will be = "schema") and the file
+            source_yml_path = generate_source_definitions_yaml(
+                schema, schema, sync_tables, dbt_project
+            )
+
+            logger.info(
+                f"Generated yaml for {len(sync_tables)} tables for schema '{schema}' as sources; yaml at {source_yml_path}"
+            )
+
+    except Exception as e:
+        logger.error(f"Error syncing sources: {e}")
         taskprogress.add(
             {
-                "message": f"reading sources for schema {schema} from warehouse",
-                "status": "Syncing sources from your warehouse",
+                "message": f"Error syncing sources: {e}",
+                "status": "failed",
             }
         )
-        logger.info(f"reading sources for schema {schema} for warehouse")
-        sync_tables = []
-        for table in wclient.get_tables(schema):
-            if not OrgDbtModel.objects.filter(
-                orgdbt=org_dbt, schema=schema, name=table, type="model"
-            ).first():
-                sync_tables.append(table)
-
-        taskprogress.add(
-            {
-                "message": f"Finished reading sources for schema {schema}",
-                "status": "Syncing sources from your warehouse",
-            }
-        )
-
-        if len(sync_tables) == 0:
-            logger.info(f"No new tables in schema '{schema}' to be synced as sources.")
-            continue
-
-        # in dbt automation, it will overwrite the sources (if name is same which it will be = "schema") and the file
-        source_yml_path = generate_source_definitions_yaml(
-            schema, schema, sync_tables, dbt_project
-        )
-
-        logger.info(
-            f"Generated yaml for {len(sync_tables)} tables for schema '{schema}' as sources; yaml at {source_yml_path}"
-        )
-
+        return False
     # sync sources to django db; create if not present
     # its okay if we have dnagling sources that they deleted from their warehouse but are still in our db;
     # we can clear them up or give them an option to delete
@@ -310,8 +323,8 @@ def sync_sources_for_warehouse(
     logger.info("read fresh source from all yaml files")
     taskprogress.add(
         {
-            "message": f"Started syncing sources",
-            "status": "Syncing sources from your warehouse",
+            "message": "Creating sources in dbt",
+            "status": "running",
         }
     )
     for source in sources:
@@ -330,6 +343,15 @@ def sync_sources_for_warehouse(
                 display_name=source["input_name"],
                 type="source",
             )
+            taskprogress.add(
+                {
+                    "message": "Added "
+                    + source["source_name"]
+                    + "."
+                    + source["input_name"],
+                    "status": "running",
+                }
+            )
 
         orgdbt_source.schema = source["schema"]
         orgdbt_source.sql_path = source["sql_path"]
@@ -338,14 +360,12 @@ def sync_sources_for_warehouse(
 
     taskprogress.add(
         {
-            "message": f"Sync finished",
-            "status": "Synced sources from your warehouse",
+            "message": "Sync finished",
+            "status": "completed",
         }
     )
 
     logger.info("saved sources to db")
-
-    taskprogress.remove()
 
     return True
 

@@ -95,7 +95,11 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
     project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
 
     task = clone_github_repo.delay(
-        org.dbt.gitrepo_url, org.dbt.gitrepo_access_token_secret, str(project_dir), None
+        org.slug,
+        org.dbt.gitrepo_url,
+        org.dbt.gitrepo_access_token_secret,
+        str(project_dir),
+        None,
     )
 
     return {"task_id": task.id}

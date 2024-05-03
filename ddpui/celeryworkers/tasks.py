@@ -12,7 +12,7 @@ from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.orgjobs import BlockLock
-from ddpui.models.tasks import TaskLock, OrgTask
+from ddpui.models.tasks import TaskLock, OrgTask, TaskProgressHashPrefix
 from ddpui.models.canvaslock import CanvasLock
 from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
@@ -34,6 +34,7 @@ logger = CustomLogger("ddpui")
 @app.task(bind=True)
 def clone_github_repo(
     self,
+    org_slug: str,
     gitrepo_url: str,
     gitrepo_access_token: str | None,
     project_dir: str,
@@ -42,7 +43,9 @@ def clone_github_repo(
     """clones an org's github repo"""
     if taskprogress is None:
         child = False
-        taskprogress = TaskProgress(self.request.id)
+        taskprogress = TaskProgress(
+            self.request.id, f"{TaskProgressHashPrefix.CLONEGITREPO}-{org_slug}"
+        )
     else:
         child = True
 
@@ -96,7 +99,12 @@ def clone_github_repo(
 @app.task(bind=True)
 def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     """sets up an org's dbt workspace, recreating it if it already exists"""
-    taskprogress = TaskProgress(self.request.id)
+    org = Org.objects.filter(id=org_id).first()
+    logger.info("found org %s", org.name)
+
+    taskprogress = TaskProgress(
+        self.request.id, f"{TaskProgressHashPrefix.DBTWORKSPACE}-{org.slug}"
+    )
 
     taskprogress.add(
         {
@@ -104,9 +112,6 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
             "status": "running",
         }
     )
-    org = Org.objects.filter(id=org_id).first()
-    logger.info("found org %s", org.name)
-
     warehouse = OrgWarehouse.objects.filter(org=org).first()
     if warehouse is None:
         taskprogress.add(
@@ -127,6 +132,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
 
     # four parameters here is correct despite vscode thinking otherwise
     if not clone_github_repo(
+        org.slug,
         payload["gitrepoUrl"],
         payload["gitrepoAccessToken"],
         str(project_dir),
@@ -166,24 +172,25 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
 @app.task(bind=True)
 def run_dbt_commands(self, orguser_id: int):
     """run a dbt command via celery instead of via prefect"""
-    # acquire locks
-    taskprogress = TaskProgress(self.request.id)
-
-    taskprogress.add(
-        {
-            "message": "started",
-            "status": "running",
-        }
-    )
-
-    task_locks: list[TaskLock] = []
-
     try:
 
         orguser: OrgUser = OrgUser.objects.filter(id=orguser_id).first()
 
         org: Org = orguser.org
         logger.info("found org %s", org.name)
+
+        taskprogress = TaskProgress(
+            self.request.id, f"{TaskProgressHashPrefix.RUNDBTCMDS}-{org.slug}"
+        )
+
+        taskprogress.add(
+            {
+                "message": "started",
+                "status": "running",
+            }
+        )
+
+        task_locks: list[TaskLock] = []
 
         # acquire locks for clean, deps and run
         org_tasks = OrgTask.objects.filter(
