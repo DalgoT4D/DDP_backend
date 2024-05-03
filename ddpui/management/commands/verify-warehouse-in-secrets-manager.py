@@ -16,7 +16,6 @@ class Command(BaseCommand):
     """
 
     def handle(self, *args, **options):
-        # Update all orgusers to have role of Super admin
 
         airbyte_service.logger.logger.setLevel(ERROR)
         secretsmanager.logger.logger.setLevel(ERROR)
