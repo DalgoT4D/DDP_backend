@@ -345,7 +345,10 @@ def sync_sources_for_warehouse(
             )
             taskprogress.add(
                 {
-                    "message": "Added " + source["source_name"],
+                    "message": "Added "
+                    + source["source_name"]
+                    + "."
+                    + source["input_name"],
                     "status": "running",
                 }
             )
