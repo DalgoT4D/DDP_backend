@@ -1,6 +1,6 @@
 from enum import Enum
 from django.db import models
-from ninja.schema import Schema
+from ninja import Schema
 
 
 class OrgVizLoginType(str, Enum):

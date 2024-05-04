@@ -7,7 +7,7 @@ from django.utils.text import slugify
 from django.db import models
 from django.contrib.auth.models import User
 
-from ninja.schema import Schema
+from ninja import Schema
 from pydantic import SecretStr
 
 from ddpui.models.org import Org, OrgSchema
