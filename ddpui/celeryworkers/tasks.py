@@ -121,7 +121,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
             }
         )
         logger.error("need to set up a warehouse first for org %s", org.name)
-        return
+        raise Exception("need to set up a warehouse first for org %s" % org.name)
 
     if org.slug is None:
         org.slug = slugify(org.name)
@@ -138,7 +138,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
         str(project_dir),
         taskprogress,
     ):
-        return
+        raise Exception("Failed to clone git repo")
 
     logger.info("git clone succeeded for org %s", org.name)
 
