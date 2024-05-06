@@ -11,6 +11,7 @@ django.setup()
 
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.models.org_user import OrgUser
+from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.tests.api_tests.test_user_org_api import (
     seed_db,
     orguser,
@@ -226,3 +227,125 @@ def test_sync_sources_failed_to_fetch_schemas(orguser: OrgUser, tmp_path):
             ]
         )
         get_wclient_mock.assert_called_once_with(warehouse)
+
+
+def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
+    """
+    a success test that syncs all sources of warehouse
+    1. On first sync new models will be created
+    2. On second sync; no new models should be created
+    3. If a new table is added to warehouse; this should be synced
+    """
+    project_dir: Path = Path(tmp_path) / orguser.org.slug
+    warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir=project_dir,
+        dbt_venv=tmp_path,
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type="ui",
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    project_dir.mkdir(exist_ok=True, parents=True)
+    dbtrepo_dir = project_dir / "dbtrepo"
+    dbtrepo_dir.mkdir(exist_ok=True, parents=True)
+    models_dir = dbtrepo_dir / "models"
+    models_dir.mkdir(exist_ok=True, parents=True)
+
+    # warehouse schemas and tables
+    SCHEMAS_TABLES = {
+        "schema1": ["table1", "table2"],
+        "schema2": ["table3", "table4"],
+    }
+
+    with patch.object(TaskProgress, "__init__", return_value=None), patch.object(
+        TaskProgress, "add", return_value=Mock()
+    ) as add_progress_mock, patch("os.getenv", return_value=tmp_path), patch(
+        "ddpui.core.dbtautomation_service._get_wclient",
+    ) as get_wclient_mock:
+        mock_instance = Mock()
+        mock_instance.get_schemas.return_value = SCHEMAS_TABLES.keys()
+        mock_instance.get_tables.side_effect = lambda schema: SCHEMAS_TABLES[schema]
+
+        # Make _get_wclient return the mock instance
+        get_wclient_mock.return_value = mock_instance
+
+        assert OrgDbtModel.objects.filter(type="source", orgdbt=orgdbt).count() == 0
+        sync_sources_for_warehouse(orgdbt.id, warehouse.id, orguser.org.slug)
+        for schema in SCHEMAS_TABLES:
+            assert (
+                list(
+                    OrgDbtModel.objects.filter(
+                        type="source", orgdbt=orgdbt, schema=schema
+                    ).values_list("name", flat=True)
+                )
+                == SCHEMAS_TABLES[schema]
+            )
+
+        add_progress_mock.assert_has_calls(
+            [
+                call({"message": "Started syncing sources", "status": "runnning"}),
+                call(
+                    {
+                        "message": "Reading sources for schema schema1 from warehouse",
+                        "status": "running",
+                    }
+                ),
+                call(
+                    {
+                        "message": "Finished reading sources for schema schema1",
+                        "status": "running",
+                    }
+                ),
+                call(
+                    {
+                        "message": "Reading sources for schema schema2 from warehouse",
+                        "status": "running",
+                    }
+                ),
+                call(
+                    {
+                        "message": "Finished reading sources for schema schema2",
+                        "status": "running",
+                    }
+                ),
+                call({"message": "Creating sources in dbt", "status": "running"}),
+                call({"message": "Added schema1.table1", "status": "running"}),
+                call({"message": "Added schema1.table2", "status": "running"}),
+                call({"message": "Added schema2.table3", "status": "running"}),
+                call({"message": "Added schema2.table4", "status": "running"}),
+                call({"message": "Sync finished", "status": "completed"}),
+            ]
+        )
+
+        # syncing sources again should not create any new entries
+        sync_sources_for_warehouse(orgdbt.id, warehouse.id, orguser.org.slug)
+        for schema in SCHEMAS_TABLES:
+            assert (
+                list(
+                    OrgDbtModel.objects.filter(
+                        type="source", orgdbt=orgdbt, schema=schema
+                    ).values_list("name", flat=True)
+                )
+                == SCHEMAS_TABLES[schema]
+            )
+
+        # add a new table in the warehouse
+        SCHEMAS_TABLES["schema1"].append("table5")
+        sync_sources_for_warehouse(orgdbt.id, warehouse.id, orguser.org.slug)
+        for schema in SCHEMAS_TABLES:
+            assert (
+                list(
+                    OrgDbtModel.objects.filter(
+                        type="source", orgdbt=orgdbt, schema=schema
+                    ).values_list("name", flat=True)
+                )
+                == SCHEMAS_TABLES[schema]
+            )
