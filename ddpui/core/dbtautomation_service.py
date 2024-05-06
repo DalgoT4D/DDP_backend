@@ -313,7 +313,7 @@ def sync_sources_for_warehouse(
                 "status": "failed",
             }
         )
-        return False
+        raise Exception(f"Error syncing sources: {e}")
     # sync sources to django db; create if not present
     # its okay if we have dnagling sources that they deleted from their warehouse but are still in our db;
     # we can clear them up or give them an option to delete
