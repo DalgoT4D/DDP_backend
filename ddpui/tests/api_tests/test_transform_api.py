@@ -210,3 +210,55 @@ def test_delete_dbt_project_success(orguser: OrgUser, tmp_path):
     assert not dbtrepo_dir.exists()
     assert project_dir.exists()
     assert OrgDbt.objects.filter(org=orguser.org).count() == 0
+
+
+def test_sync_sources_failed_warehouse_not_present(orguser: OrgUser):
+    """a failure test for sync sources when warehouse is not present"""
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as excinfo:
+        sync_sources(request)
+    assert str(excinfo.value) == "Please set up your warehouse first"
+
+
+def test_sync_sources_failed_dbt_workspace_not_setup(orguser: OrgUser):
+    """a failure test for sync sources when dbt workspace is not setup"""
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as excinfo:
+        sync_sources(request)
+    assert str(excinfo.value) == "DBT workspace not set up"
+
+
+def test_sync_sources_success(orguser: OrgUser, tmp_path):
+    """a success test for sync sources"""
+    org_warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir=str(Path(tmp_path) / orguser.org.slug),
+        dbt_venv=tmp_path,
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type="ui",
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    request = mock_request(orguser)
+    mocked_task = Mock()
+    mocked_task.id = "task-id"
+    with patch(
+        "ddpui.core.dbtautomation_service.sync_sources_for_warehouse.delay",
+        return_value=mocked_task,
+    ) as delay:
+        result = sync_sources(request)
+
+        delay.assert_called_once_with(orgdbt.id, org_warehouse.id, orguser.org.slug)
+        assert result["task_id"] == "task-id"
