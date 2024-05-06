@@ -120,14 +120,14 @@ def delete_dbt_project(request, project_name: str):
     project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
 
     if not project_dir.exists():
-        return {"error": f"Organization {org.slug} does not have any projects"}
+        raise HttpError(404, f"Organization {org.slug} does not have any projects")
 
     dbtrepo_dir: Path = project_dir / project_name
 
     if not dbtrepo_dir.exists():
-        return {
-            "error": f"Project {project_name} does not exist in organization {org.slug}"
-        }
+        raise HttpError(
+            422, f"Project {project_name} does not exist in organization {org.slug}"
+        )
 
     if org.dbt:
         dbt = org.dbt
