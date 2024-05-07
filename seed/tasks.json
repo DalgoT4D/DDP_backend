@@ -86,5 +86,16 @@
             "command": "seed",
             "is_system": false
         }
+    },
+    {
+        "model": "ddpui.Task",
+        "pk": 9,
+        "fields": {
+            "type": "airbyte",
+            "slug": "airbyte-reset",
+            "label": "AIRBYTE reset",
+            "command": null,
+            "is_system": false
+        }
     }
 ]
