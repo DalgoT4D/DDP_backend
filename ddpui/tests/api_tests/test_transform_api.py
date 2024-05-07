@@ -1,12 +1,20 @@
 from pathlib import Path
+from pydantic.error_wrappers import ValidationError as PydanticValidationError
+import pydantic
 import pytest
 from unittest.mock import Mock, patch
 from datetime import datetime
-from ninja.errors import HttpError
+from ninja.errors import HttpError, ValidationError
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgWarehouse, OrgDbt
-from ddpui.auth import GUEST_ROLE
+from ddpui.auth import (
+    GUEST_ROLE,
+    SUPER_ADMIN_ROLE,
+    ACCOUNT_MANAGER_ROLE,
+    PIPELINE_MANAGER_ROLE,
+    ANALYST_ROLE,
+)
 from ddpui.schemas.org_task_schema import DbtProjectSchema
 from ddpui.tests.api_tests.test_user_org_api import (
     seed_db,
@@ -125,12 +133,31 @@ def test_post_unlock_canvas_locked_wrong_lock_id(orguser):
 
 
 def test_create_dbt_project_check_permission(orguser: OrgUser):
-    """a failure test to check if the orguser has the correct permission"""
-    orguser.new_role = Role.objects.filter(slug=GUEST_ROLE).first()
-    request = mock_request(orguser)
-    with pytest.raises(HttpError) as excinfo:
-        create_dbt_project(request)
-    assert str(excinfo.value) == "unauthorized"
+    """
+    a failure test to check if the orguser has the correct permission
+    """
+    slugs_have_permission = [
+        SUPER_ADMIN_ROLE,
+        ACCOUNT_MANAGER_ROLE,
+        ANALYST_ROLE,
+        PIPELINE_MANAGER_ROLE,
+    ]
+    slugs_dont_have_permission = [GUEST_ROLE]
+
+    payload = DbtProjectSchema(default_schema="default")
+    for slug in slugs_dont_have_permission:
+        orguser.new_role = Role.objects.filter(slug=slug).first()
+        request = mock_request(orguser)
+        with pytest.raises(HttpError) as exc:
+            create_dbt_project(request, payload)
+        assert str(exc.value) == "unauthorized"
+
+    for slug in slugs_have_permission:
+        orguser.new_role = Role.objects.filter(slug=slug).first()
+        request = mock_request(orguser)
+        with pytest.raises(HttpError) as exc:
+            create_dbt_project(request, payload)
+        assert str(exc.value) == "Please set up your warehouse first"
 
 
 def test_create_dbt_project_mocked_helper(orguser: OrgUser):
