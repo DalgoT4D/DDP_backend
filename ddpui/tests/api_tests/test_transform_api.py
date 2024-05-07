@@ -10,7 +10,7 @@ from dbt_automation import assets
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgWarehouse, OrgDbt
-from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation
+from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation, DbtEdge
 from ddpui.auth import (
     GUEST_ROLE,
     SUPER_ADMIN_ROLE,
@@ -518,6 +518,10 @@ def test_post_construct_dbt_model_operation_success_chain1(orguser: OrgUser, tmp
         assert cast_op.output_cols == payload.source_columns
         assert cast_op.seq == 1
         assert cast_op.config["config"] == payload.config
+
+        assert (
+            DbtEdge.objects.filter(from_node=source, to_node=target_model).count() == 1
+        )
 
         # push arithmetic operation
         payload.target_model_uuid = target_model.uuid
