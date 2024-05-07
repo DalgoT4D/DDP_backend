@@ -1,4 +1,4 @@
-import os, glob
+import os, glob, uuid
 from pathlib import Path
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 import pydantic
@@ -445,6 +445,95 @@ def test_post_construct_dbt_model_operation_failure_invalid_op_type(
     with pytest.raises(HttpError) as excinfo:
         post_construct_dbt_model_operation(request, payload)
     assert str(excinfo.value) == "Operation not supported"
+
+
+def test_post_construct_dbt_model_operation_failure_validate_input(
+    orguser: OrgUser, tmp_path
+):
+    """
+    a failure test: that validates input
+    - validate input for single input operations
+    - validate input for multi input operations
+    """
+    os.environ["CANVAS_LOCK"] = "False"
+    warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir=str(Path(tmp_path) / orguser.org.slug),
+        dbt_venv=tmp_path,
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type="ui",
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    mock_setup_dbt_workspace_ui_transform(orguser, tmp_path)
+    mock_setup_sync_sources(orgdbt, warehouse)
+
+    payload = CreateDbtModelPayload(
+        target_model_uuid="",
+        source_columns=["State", "District_Name", "Iron", "Arsenic"],
+        op_type="castdatatypes",
+        config={
+            "columns": [
+                {"columnname": "Iron", "columntype": "INT"},
+                {"columnname": "Arsenic", "columntype": "INT"},
+            ]
+        },
+        input_uuid="",  # input not present
+    )
+
+    # single input op
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.core.dbtautomation_service._get_wclient",
+    ) as get_wclient_mock:
+        mock_instance = Mock()
+        mock_instance.name = "postgres"
+        get_wclient_mock.return_value = mock_instance
+
+        with pytest.raises(HttpError) as excinfo:
+            post_construct_dbt_model_operation(request, payload)
+        assert str(excinfo.value) == "input is required"
+
+        payload.input_uuid = str(uuid.uuid4())  # some random uuid
+        with pytest.raises(HttpError) as excinfo:
+            post_construct_dbt_model_operation(request, payload)
+        assert str(excinfo.value) == "input not found"
+
+    # multi input op
+    source = OrgDbtModel.objects.filter(orgdbt=orgdbt, type="source").first()
+    payload.op_type = "join"
+    payload.other_inputs = []
+    payload.input_uuid = str(source.uuid)
+
+    with patch(
+        "ddpui.core.dbtautomation_service._get_wclient",
+    ) as get_wclient_mock:
+        mock_instance = Mock()
+        mock_instance.name = "postgres"
+        get_wclient_mock.return_value = mock_instance
+
+        with pytest.raises(HttpError) as excinfo:
+            post_construct_dbt_model_operation(request, payload)
+        assert str(excinfo.value) == "atleast 2 inputs are required for this operation"
+
+        payload.other_inputs = [
+            {
+                "uuid": str(uuid.uuid4()),  # some random uuid which is not a source
+                "seq": 2,
+                "columns": ["Indicator", "measure1", "Month1", "ngo1", "spoc"],
+            }
+        ]
+        payload = CreateDbtModelPayload(**payload.dict())
+        with pytest.raises(HttpError) as excinfo:
+            post_construct_dbt_model_operation(request, payload)
+        assert str(excinfo.value) == "input not found"
 
 
 def test_post_construct_dbt_model_operation_success_chain1(orguser: OrgUser, tmp_path):
