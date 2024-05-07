@@ -522,6 +522,7 @@ def test_post_construct_dbt_model_operation_success_chain1(orguser: OrgUser, tmp
         assert (
             DbtEdge.objects.filter(from_node=source, to_node=target_model).count() == 1
         )
+        assert DbtEdge.objects.count() == 1
 
         # push arithmetic operation
         payload.target_model_uuid = target_model.uuid
@@ -549,3 +550,4 @@ def test_post_construct_dbt_model_operation_success_chain1(orguser: OrgUser, tmp
         assert cast_op.config["type"] == "arithmetic"
         assert cast_op.output_cols == payload.source_columns + ["IronPlusArsenic"]
         assert cast_op.config["config"] == payload.config
+        assert DbtEdge.objects.count() == 1
