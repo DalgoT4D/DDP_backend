@@ -4,6 +4,7 @@ functions which work with airbyte and with the dalgo database
 
 import json
 import re
+from typing import Union
 from django.utils.text import slugify
 from django.conf import settings
 from ddpui.ddpairbyte import airbyte_service
@@ -326,6 +327,16 @@ def get_connections(org: Org):
             sync_dataflow_orgtask.dataflow.reset_conn_dataflow
         )
 
+        lock = fetch_orgtask_lock(org_task)
+
+        if not lock and reset_dataflow:
+            reset_dataflow_orgtask = DataflowOrgTask.objects.filter(
+                dataflow=reset_dataflow
+            ).first()
+
+            if reset_dataflow_orgtask.orgtask:
+                lock = fetch_orgtask_lock(reset_dataflow_orgtask.orgtask)
+
         connection["destination"]["name"] = warehouse.name
         res.append(
             {
@@ -342,9 +353,7 @@ def get_connections(org: Org):
                     else None
                 ),
                 "lastRun": last_runs[-1] if len(last_runs) > 0 else None,
-                "lock": fetch_orgtask_lock(
-                    org_task
-                ),  # this will have the status of the flow run
+                "lock": lock,  # this will have the status of the flow run
                 "resetConnDeploymentId": (
                     reset_dataflow.deployment_id if reset_dataflow else None
                 ),
@@ -384,6 +393,16 @@ def get_one_connection(org: Org, connection_id: str):
 
     destination_name = airbyte_conn["destination"]["name"]
 
+    lock = fetch_orgtask_lock(org_task)
+
+    if not lock and reset_dataflow:
+        reset_dataflow_orgtask = DataflowOrgTask.objects.filter(
+            dataflow=reset_dataflow
+        ).first()
+
+        if reset_dataflow_orgtask.orgtask:
+            lock = fetch_orgtask_lock(reset_dataflow_orgtask.orgtask)
+
     res = {
         "name": airbyte_conn["name"],
         "connectionId": airbyte_conn["connectionId"],
@@ -407,7 +426,7 @@ def get_one_connection(org: Org, connection_id: str):
             if "operationIds" in airbyte_conn and len(airbyte_conn["operationIds"]) == 1
             else False
         ),
-        "lock": fetch_orgtask_lock(org_task),
+        "lock": lock,
         "resetConnDeploymentId": (
             reset_dataflow.deployment_id if reset_dataflow else None
         ),
