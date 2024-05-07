@@ -376,6 +376,8 @@ def get_one_connection(org: Org, connection_id: str):
     if dataflow_orgtask is None:
         return None, "deployment not found"
 
+    reset_dataflow: OrgDataFlowv1 = dataflow_orgtask.dataflow.reset_conn_dataflow
+
     # fetch the source and destination names
     # the web_backend/connections/get fetches the source & destination objects also so we dont need to query again
     source_name = airbyte_conn["source"]["name"]
@@ -406,6 +408,9 @@ def get_one_connection(org: Org, connection_id: str):
             else False
         ),
         "lock": fetch_orgtask_lock(org_task),
+        "resetConnDeploymentId": (
+            reset_dataflow.deployment_id if reset_dataflow else None
+        ),
     }
 
     return res, None
