@@ -20,7 +20,7 @@ from ddpui.tests.api_tests.test_user_org_api import (
     authuser,
     org_without_workspace,
 )
-from ddpui.ddpprefect.schema import DbtProfile, OrgDbtSchema, OrgDbtGitHub
+from ddpui.ddpprefect.schema import DbtProfile, OrgDbtSchema
 from ddpui.celeryworkers.tasks import setup_dbtworkspace
 from ddpui.core.dbtautomation_service import sync_sources_for_warehouse
 from ddpui.utils.taskprogress import TaskProgress
