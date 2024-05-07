@@ -449,7 +449,7 @@ def test_post_construct_dbt_model_operation_failure_invalid_op_type(
 
 def test_post_construct_dbt_model_operation_success_chain1(orguser: OrgUser, tmp_path):
     """
-    a success test: | model | -> | op (cast) | -> | op (arithmetic) | -> | target_model |
+    a success test: | source | -> | op (cast) | -> | op (arithmetic) | -> | target_model |
     Single input operation
     Chain 2 operations
     """
@@ -551,3 +551,89 @@ def test_post_construct_dbt_model_operation_success_chain1(orguser: OrgUser, tmp
         assert cast_op.output_cols == payload.source_columns + ["IronPlusArsenic"]
         assert cast_op.config["config"] == payload.config
         assert DbtEdge.objects.count() == 1
+
+
+def test_post_construct_dbt_model_operation_success_chain2(orguser: OrgUser, tmp_path):
+    """
+    a success test: | source1, source2 | -> | op (join) | -> | target_model |
+    Multi input operation
+    Chain
+    """
+    os.environ["CANVAS_LOCK"] = "False"
+    warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir=str(Path(tmp_path) / orguser.org.slug),
+        dbt_venv=tmp_path,
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type="ui",
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    mock_setup_dbt_workspace_ui_transform(orguser, tmp_path)
+    mock_setup_sync_sources(orgdbt, warehouse)
+
+    source1 = OrgDbtModel.objects.filter(orgdbt=orgdbt, type="source").first()
+    source2 = (
+        OrgDbtModel.objects.filter(orgdbt=orgdbt, type="source")
+        .exclude(id=source1.id)
+        .first()
+    )
+    # Create a model
+    payload = CreateDbtModelPayload(
+        target_model_uuid="",
+        source_columns=["Indicator", "measure", "Month", "ngo", "spoc"],
+        op_type="join",
+        config={
+            "join_type": "inner",
+            "join_on": {"key1": "spoc", "key2": "spoc", "compare_with": "="},
+        },
+        input_uuid=str(source1.uuid),
+        other_inputs=[
+            {
+                "uuid": str(source2.uuid),
+                "seq": 2,
+                "columns": ["Indicator", "measure1", "Month1", "ngo1", "spoc"],
+            }
+        ],
+    )
+
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.core.dbtautomation_service._get_wclient",
+    ) as get_wclient_mock:
+        mock_instance = Mock()
+        mock_instance.name = "postgres"
+        get_wclient_mock.return_value = mock_instance
+
+        # push join operation
+        response1 = post_construct_dbt_model_operation(request, payload)
+
+        assert response1 is not None
+        assert "target_model_id" in response1
+
+        target_model = OrgDbtModel.objects.filter(
+            uuid=response1["target_model_id"]
+        ).first()
+        assert target_model is not None
+        assert target_model.under_construction is True
+        assert (
+            DbtEdge.objects.filter(from_node=source1, to_node=target_model).count() == 1
+        )
+        assert (
+            DbtEdge.objects.filter(from_node=source2, to_node=target_model).count() == 1
+        )
+        assert DbtEdge.objects.count() == 2
+
+        assert "output_cols" in response1
+        assert len(response1["output_cols"]) == len(
+            payload.source_columns + payload.other_inputs[0].columns
+        )
+
+        assert OrgDbtOperation.objects.filter(dbtmodel=target_model).count() == 1
