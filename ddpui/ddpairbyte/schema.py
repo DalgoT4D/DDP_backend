@@ -82,6 +82,7 @@ class AirbyteConnectionCreateResponse(Schema):
     normalize: bool = False
     lock: Optional[dict | None]
     isRunning: bool = False
+    resetConnDeploymentId: str = None
 
 
 class AirbyteConnectionUpdate(Schema):
