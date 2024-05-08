@@ -1,9 +1,11 @@
 import os
+from time import sleep
 import requests
 
 from ninja.errors import HttpError
 from dotenv import load_dotenv
 from django.db import transaction
+from ddpui import settings
 from ddpui.ddpprefect.schema import (
     PrefectDbtCoreSetup,
     PrefectShellSetup,
@@ -381,8 +383,17 @@ def delete_dbt_cli_profile_block(block_id) -> None:
 
 def get_dbt_cli_profile_block(block_name: str) -> dict:
     """fetches the dbt cli profile block from prefect"""
-    response = prefect_get(f"blocks/dbtcli/profile/{block_name}")
-    return response
+    ntries = 0
+    while ntries < settings.MAX_PREFECT_RETRIES:
+        try:
+            response = prefect_get(f"blocks/dbtcli/profile/{block_name}")
+            return response
+        except HttpError as error:
+            logger.warning(f"Error fetching dbt cli profile block: {error}, retrying")
+            ntries += 1
+            sleep(1)
+            continue
+    raise Exception("Failed to fetch dbt cli profile block")
 
 
 # ================================================================================================

@@ -207,3 +207,5 @@ FIXTURE_DIRS = [
 ]
 
 PRODUCTION = os.getenv("PRODUCTION", "") == "True"
+
+MAX_PREFECT_RETRIES = int(os.getenv("MAX_PREFECT_RETRIES", "3"))

@@ -228,7 +228,18 @@ def run_dbt_commands(self, orguser_id: int):
             logger.error("need to set up a dbt cli profile first for org %s", org.name)
             return
 
-        profile = get_dbt_cli_profile_block(dbt_cli_profile.block_name)["profile"]
+        try:
+            profile = get_dbt_cli_profile_block(dbt_cli_profile.block_name)["profile"]
+        except Exception as error:
+            taskprogress.add(
+                {
+                    "message": "failed to get dbt cli profile",
+                    "status": "failed",
+                }
+            )
+            logger.exception(error)
+            return
+
         profile_dirname = (
             Path(os.getenv("CLIENTDBT_ROOT")) / org.slug / "dbtrepo" / "profiles"
         )
