@@ -521,33 +521,36 @@ def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUp
 
 def delete_connection(org: Org, connection_id: str):
     """deletes an airbyte connection"""
-    # delete airbyte connection
-    logger.info("deleting airbyte connection")
-    airbyte_service.delete_connection(org.airbyte_workspace_id, connection_id)
 
+    dataflows_to_delete: list[OrgDataFlowv1] = []
+    orgtask_to_delete: list[OrgTask] = []
     for org_task in OrgTask.objects.filter(
         org=org,
         connection_id=connection_id,
     ).all():
-        logger.info(f"Deleting orgtask of type {org_task.task.slug}")
         for dataflow_orgtask in DataflowOrgTask.objects.filter(orgtask=org_task).all():
-            # delete prefect deployment
-            logger.info("deleteing prefect deployment")
-            prefect_service.delete_deployment_by_id(
-                dataflow_orgtask.dataflow.deployment_id
-            )
+            dataflows_to_delete.append(dataflow_orgtask.dataflow)
 
-            # delete the org dataflow for manual deployment
-            logger.info("deleting org dataflow from db")
-            dataflow_orgtask.dataflow.delete()
+        orgtask_to_delete.append(org_task)
 
-            # delete orgtask <-> dataflow mapping
-            logger.info("deleteing datafloworgtask mapping")
-            dataflow_orgtask.delete()
+    # delete all deployments
+    logger.info("deleting prefect deployment")
+    for dataflow in dataflows_to_delete:
+        prefect_service.delete_deployment_by_id(dataflow.deployment_id)
 
-        # delete orgtask
-        logger.info("deleteing orgtask")
+    # delete all dataflows
+    logger.info("deleting org dataflow from db")
+    for dataflow in dataflows_to_delete:
+        dataflow.delete()
+
+    # delete all orgtasks
+    logger.info("deleting orgtask")
+    for org_task in orgtask_to_delete:
         org_task.delete()
+
+    # delete airbyte connection
+    logger.info("deleting airbyte connection")
+    airbyte_service.delete_connection(org.airbyte_workspace_id, connection_id)
 
     return None, None
 
