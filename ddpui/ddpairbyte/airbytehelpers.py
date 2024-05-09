@@ -7,6 +7,7 @@ import re
 from typing import Union
 from django.utils.text import slugify
 from django.conf import settings
+from django.db import transaction
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import AirbyteWorkspace
 from ddpui.ddpprefect import prefect_service
@@ -249,26 +250,38 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
         org.airbyte_workspace_id, warehouse.airbyte_norm_op_id, payload
     )
 
-    # create a sync deployment & dataflow
-    org_task = OrgTask.objects.create(
-        org=org, task=sync_task, connection_id=airbyte_conn["connectionId"]
-    )
+    try:
+        with transaction.atomic():
 
-    sync_dataflow: OrgDataFlowv1 = create_airbyte_deployment(
-        org, org_task, org_airbyte_server_block
-    )
+            # create a sync deployment & dataflow
+            org_task = OrgTask.objects.create(
+                org=org, task=sync_task, connection_id=airbyte_conn["connectionId"]
+            )
 
-    # create reset connection deplpyment & dataflow
-    org_task = OrgTask.objects.create(
-        org=org, task=reset_task, connection_id=airbyte_conn["connectionId"]
-    )
+            sync_dataflow: OrgDataFlowv1 = create_airbyte_deployment(
+                org, org_task, org_airbyte_server_block
+            )
 
-    reset_dataflow: OrgDataFlowv1 = create_airbyte_deployment(
-        org, org_task, org_airbyte_server_block
-    )
+            # create reset connection deplpyment & dataflow
+            org_task = OrgTask.objects.create(
+                org=org, task=reset_task, connection_id=airbyte_conn["connectionId"]
+            )
 
-    sync_dataflow.reset_conn_dataflow = reset_dataflow
-    sync_dataflow.save()
+            reset_dataflow: OrgDataFlowv1 = create_airbyte_deployment(
+                org, org_task, org_airbyte_server_block
+            )
+
+            sync_dataflow.reset_conn_dataflow = reset_dataflow
+            sync_dataflow.save()
+
+    except Exception as err:
+        # delete the airbyte connection; since the deployment didn't get created
+        logger.info("deleting airbyte connection")
+        airbyte_service.delete_connection(
+            org.airbyte_workspace_id, airbyte_conn["connectionId"]
+        )
+        logger.error(err)
+        return None, "Couldn't create the connection, please try again"
 
     res = {
         "name": payload.name,
