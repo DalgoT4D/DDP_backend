@@ -433,7 +433,7 @@ def test_post_airbyte_connection_v1_task_not_supported(
     )
     with pytest.raises(Exception) as excinfo:
         post_airbyte_connection_v1(request, payload)
-    assert str(excinfo.value) == "task not supported"
+    assert str(excinfo.value) == "sync task not supported"
 
 
 @patch.multiple(
@@ -451,6 +451,7 @@ def test_post_airbyte_connection_v1_task_not_supported(
             "status": "running",
         }
     ),
+    delete_connection=Mock(),
 )
 @patch.multiple(
     "ddpui.ddpprefect.prefect_service",
