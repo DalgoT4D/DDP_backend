@@ -1,6 +1,9 @@
 import os, glob, uuid
 from pathlib import Path
+import django.core
+import django.core.exceptions
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
+import django
 import pydantic
 import pytest
 from unittest.mock import Mock, patch, call
@@ -47,7 +50,10 @@ from ddpui.api.transform_api import (
     CanvasLock,
     post_unlock_canvas,
 )
-from ddpui.schemas.dbt_workflow_schema import CreateDbtModelPayload
+from ddpui.schemas.dbt_workflow_schema import (
+    CreateDbtModelPayload,
+    CompleteDbtModelPayload,
+)
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
 from ddpui.core.dbtautomation_service import sync_sources_for_warehouse
@@ -128,6 +134,30 @@ def mock_setup_sync_sources(orgdbt: OrgDbt, warehouse: OrgWarehouse):
                 )
                 == SCHEMAS_TABLES[schema]
             )
+
+
+def mock_create_dbt_model_operation(orguser: OrgUser, payload: CreateDbtModelPayload):
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.core.dbtautomation_service._get_wclient",
+    ) as get_wclient_mock:
+        mock_instance = Mock()
+        mock_instance.name = "postgres"
+        get_wclient_mock.return_value = mock_instance
+
+        # push join operation
+        response1 = post_construct_dbt_model_operation(request, payload)
+
+        assert response1 is not None
+        assert "target_model_id" in response1
+
+        target_model = OrgDbtModel.objects.filter(
+            uuid=response1["target_model_id"]
+        ).first()
+        assert target_model is not None
+        assert target_model.under_construction is True
+
+        return response1
 
 
 # ================================================================================
@@ -726,3 +756,162 @@ def test_post_construct_dbt_model_operation_success_chain2(orguser: OrgUser, tmp
         )
 
         assert OrgDbtOperation.objects.filter(dbtmodel=target_model).count() == 1
+
+
+def test_post_save_model_failure_warehouse_not_setup(orguser: OrgUser):
+    """a failure test for saving model to file due to warehouse not setup"""
+    os.environ["CANVAS_LOCK"] = "False"
+    request = mock_request(orguser)
+    model_uuid: str = "some-random-uuuid"
+    payload = CompleteDbtModelPayload(
+        name="output_model", display_name="Output", dest_schema="intermediate"
+    )
+    with pytest.raises(HttpError) as excinfo:
+        post_save_model(request, model_uuid, payload)
+    assert str(excinfo.value) == "please setup your warehouse first"
+
+
+def test_post_save_model_failure_dbt_workspace_not_setup(orguser: OrgUser):
+    """a failure test for saving model due to dbt workspace not setup"""
+    os.environ["CANVAS_LOCK"] = "False"
+
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+
+    request = mock_request(orguser)
+    model_uuid: str = "some-random-uuuid"
+    payload = CompleteDbtModelPayload(
+        name="output_model", display_name="Output", dest_schema="intermediate"
+    )
+    with pytest.raises(HttpError) as excinfo:
+        post_save_model(request, model_uuid, payload)
+    assert str(excinfo.value) == "dbt workspace not setup"
+
+
+def test_post_save_model_failure_invalid_target_model(orguser: OrgUser, tmp_path):
+    """a failure test for saving model due to invalid target model uuid"""
+    os.environ["CANVAS_LOCK"] = "False"
+
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir=str(Path(tmp_path) / orguser.org.slug),
+        dbt_venv=tmp_path,
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type="ui",
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    request = mock_request(orguser)
+    model_uuid: str = "some-random-uuuid"
+    payload = CompleteDbtModelPayload(
+        name="output_model", display_name="Output", dest_schema="intermediate"
+    )
+    with pytest.raises(django.core.exceptions.ValidationError) as excinfo:
+        post_save_model(request, model_uuid, payload)
+    assert (
+        str(excinfo.value) == "[" + "'“some-random-uuuid” is not a valid UUID.'" + "]"
+    )
+
+    model_uuid = str(uuid.uuid4())  # some random valid uuid
+    with pytest.raises(HttpError) as excinfo:
+        post_save_model(request, model_uuid, payload)
+    assert str(excinfo.value) == "model not found"
+
+
+def test_post_save_model_success_save_chained_model(orguser: OrgUser, tmp_path):
+    """
+    Successfully saved the chained model: | source | -> | op (cast) | -> | op (arithmetic) | -> | target_model |
+    Single input operations
+    """
+    os.environ["CANVAS_LOCK"] = "False"
+
+    warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir=str(Path(tmp_path) / orguser.org.slug),
+        dbt_venv=tmp_path,
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type="ui",
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    mock_setup_dbt_workspace_ui_transform(orguser, tmp_path)
+    mock_setup_sync_sources(orgdbt, warehouse)
+
+    source = OrgDbtModel.objects.filter(orgdbt=orgdbt, type="source").first()
+    # push cast operation
+    payload = CreateDbtModelPayload(
+        target_model_uuid="",
+        source_columns=["State", "District_Name", "Iron", "Arsenic"],
+        op_type="castdatatypes",
+        config={
+            "columns": [
+                {"columnname": "Iron", "columntype": "INT"},
+                {"columnname": "Arsenic", "columntype": "INT"},
+            ]
+        },
+        input_uuid=str(source.uuid),
+    )
+    response1 = mock_create_dbt_model_operation(orguser, payload)
+    target_model = OrgDbtModel.objects.filter(uuid=response1["target_model_id"]).first()
+
+    # push arithmetic operation
+    payload.target_model_uuid = target_model.uuid
+    payload.op_type = "arithmetic"
+    payload.config = {
+        "operator": "add",
+        "operands": [
+            {"is_col": True, "value": "Iron"},
+            {"is_col": True, "value": "Arsenic"},
+        ],
+        "output_column_name": "IronPlusArsenic",
+    }
+    response2 = mock_create_dbt_model_operation(orguser, payload)
+
+    request = mock_request(orguser)
+    payload = CompleteDbtModelPayload(
+        name="output_model", display_name="Output", dest_schema="intermediate"
+    )
+    with patch(
+        "ddpui.core.dbtautomation_service._get_wclient",
+    ) as get_wclient_mock:
+        mock_instance = Mock()
+        mock_instance.name = "postgres"
+        get_wclient_mock.return_value = mock_instance
+        post_save_model(request, target_model.uuid, payload)
+
+        target_model_after_save = OrgDbtModel.objects.filter(
+            uuid=target_model.uuid
+        ).first()
+
+        assert target_model_after_save is not None
+        assert target_model_after_save.under_construction is False
+
+        assert (Path(orgdbt.project_dir) / "dbtrepo").exists()
+        assert (Path(orgdbt.project_dir) / "dbtrepo" / "models").exists()
+        assert (
+            Path(orgdbt.project_dir) / "dbtrepo" / "models" / "intermediate"
+        ).exists()
+        assert (
+            Path(orgdbt.project_dir)
+            / "dbtrepo"
+            / "models"
+            / "intermediate"
+            / "output_model.sql"
+        ).exists()
