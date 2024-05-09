@@ -456,9 +456,20 @@ def test_post_airbyte_connection_v1_task_not_supported(
 @patch.multiple(
     "ddpui.ddpprefect.prefect_service",
     create_dataflow_v1=Mock(
-        return_value={
-            "deployment": {"id": "fake-deployment-id", "name": "fake-deployment-name"}
-        }
+        side_effect=[
+            {
+                "deployment": {
+                    "id": "fake-deployment-id",
+                    "name": "fake-deployment-name",
+                },
+            },
+            {
+                "deployment": {
+                    "id": "fake-reset-conn-deployment-id",
+                    "name": "fake-deployment-name",
+                },
+            },
+        ]
     ),
 )
 def test_post_airbyte_connection_v1_success(
@@ -488,6 +499,13 @@ def test_post_airbyte_connection_v1_success(
         "command": None,
     }
     Task.objects.create(**airbyte_task_config)
+    airbyte_reset_task_config = {
+        "type": "airbyte",
+        "slug": "airbyte-reset",
+        "label": "AIRBYTE reset",
+        "command": None,
+    }
+    Task.objects.create(**airbyte_reset_task_config)
 
     response = post_airbyte_connection_v1(request, payload)
 
