@@ -300,7 +300,7 @@ def post_modify_orguser_role(request, payload: OrgUserUpdateNewRole):
 
     request_email = payload.toupdate_email.lower().strip()
     orguser_to_be_assigned = (
-        OrgUser.objects.filter(user__email__iexact=request_email)
+        OrgUser.objects.filter(user__email__iexact=request_email, org=orguser.org)
         .exclude(user__email__iexact=orguser.user.email)
         .first()
     )
