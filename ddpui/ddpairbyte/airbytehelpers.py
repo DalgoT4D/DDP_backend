@@ -379,8 +379,7 @@ def get_connections(org: Org):
 def get_one_connection(org: Org, connection_id: str):
     """retrieve details of a single connection"""
     org_task = OrgTask.objects.filter(
-        org=org,
-        connection_id=connection_id,
+        org=org, connection_id=connection_id, task__slug=TASK_AIRBYTESYNC
     ).first()
 
     if org_task is None or org_task.connection_id is None:
