@@ -140,6 +140,7 @@ def fetch_orgtask_lock(org_task: OrgTask):
             "lockedAt": lock.locked_at,
             "flowRunId": lock.flow_run_id,
             "status": lock_status,
+            "task_slug": org_task.task.slug,
         }
 
     return None
