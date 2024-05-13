@@ -16,7 +16,7 @@ class Command(BaseCommand):
     help = "Setups the existing org to run reset connection via deployments"
 
     def add_arguments(self, parser):
-        parser.add_argument("--orgslug", type=str, help="Org slug")
+        parser.add_argument("--orgslug", type=str, help="Org slug", required=True)
 
     def handle(self, *args, **options):
         """Setups the existing org to run reset connection via deployments"""
