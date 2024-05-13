@@ -6,6 +6,7 @@ TASK_DBTDEPS = "dbt-deps"
 TASK_GITPULL = "git-pull"
 TASK_DOCSGENERATE = "dbt-docs-generate"
 TASK_AIRBYTESYNC = "airbyte-sync"
+TASK_AIRBYTERESET = "airbyte-reset"
 TASK_SEED = "dbt-seed"
 
 

@@ -47,6 +47,7 @@ from dbt_automation.operations.aggregate import aggregate, aggregate_dbt_sql
 from dbt_automation.operations.pivot import pivot, pivot_dbt_sql
 from dbt_automation.operations.unpivot import unpivot, unpivot_dbt_sql
 from dbt_automation.operations.generic import generic_function, generic_function_dbt_sql
+from dbt_automation.operations.rawsql import generic_sql_function, raw_generic_dbt_sql
 
 from ddpui.schemas.dbt_workflow_schema import CompleteDbtModelPayload
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
@@ -78,6 +79,7 @@ OPERATIONS_DICT = {
     "pivot": pivot,
     "unpivot": unpivot,
     "generic": generic_function,
+    "rawsql": generic_sql_function
 }
 
 OPERATIONS_DICT_SQL = {
@@ -99,6 +101,7 @@ OPERATIONS_DICT_SQL = {
     "pivot": pivot_dbt_sql,
     "unpivot": unpivot_dbt_sql,
     "generic": generic_function_dbt_sql,
+    "rawsql": raw_generic_dbt_sql
 }
 
 

@@ -66,7 +66,7 @@ class OrgTask(models.Model):
     uuid = models.UUIDField(editable=False, unique=True, null=True)
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     task = models.ForeignKey(Task, on_delete=models.CASCADE)
-    connection_id = models.CharField(max_length=36, unique=True, null=True)
+    connection_id = models.CharField(max_length=36, null=True)
     parameters = models.JSONField(default=dict, blank=True)
     generated_by = models.CharField(
         choices=OrgTaskGeneratedBy.choices(), max_length=50, default="system"
