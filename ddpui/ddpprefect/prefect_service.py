@@ -162,14 +162,6 @@ def delete_airbyte_server_block(block_id):
 
 
 # ================================================================================================
-def get_airbyte_connection_block_id(blockname) -> str | None:
-    """get the block_id for the connection block having this name"""
-    response = prefect_get(
-        f"blocks/airbyte/connection/byblockname/{blockname}",
-    )
-    return response["block_id"]
-
-
 def get_airbye_connection_blocks(block_names) -> dict:
     """Filter out blocks by query params"""
     response = prefect_post(
@@ -177,29 +169,6 @@ def get_airbye_connection_blocks(block_names) -> dict:
         {"block_names": block_names},
     )
     return response
-
-
-def get_airbyte_connection_block_by_id(block_id: str) -> dict:
-    """look up a prefect airbyte-connection block by id"""
-    response = prefect_get(
-        f"blocks/airbyte/connection/byblockid/{block_id}",
-    )
-    return response
-
-
-def create_airbyte_connection_block(
-    conninfo: PrefectAirbyteConnectionSetup,
-) -> str:
-    """Create airbyte connection block"""
-    response = prefect_post(
-        "blocks/airbyte/connection/",
-        {
-            "serverBlockName": conninfo.serverBlockName,
-            "connectionId": conninfo.connectionId,
-            "connectionBlockName": conninfo.connectionBlockName,
-        },
-    )
-    return response["block_id"]
 
 
 def update_airbyte_connection_block(blockname):

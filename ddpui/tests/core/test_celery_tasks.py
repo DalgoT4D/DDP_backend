@@ -281,10 +281,12 @@ def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
         sync_sources_for_warehouse(orgdbt.id, warehouse.id, orguser.org.slug)
         for schema in SCHEMAS_TABLES:
             assert (
-                list(
-                    OrgDbtModel.objects.filter(
-                        type="source", orgdbt=orgdbt, schema=schema
-                    ).values_list("name", flat=True)
+                sorted(
+                    list(
+                        OrgDbtModel.objects.filter(
+                            type="source", orgdbt=orgdbt, schema=schema
+                        ).values_list("name", flat=True)
+                    )
                 )
                 == SCHEMAS_TABLES[schema]
             )
