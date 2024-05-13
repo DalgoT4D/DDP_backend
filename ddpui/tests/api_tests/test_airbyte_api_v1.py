@@ -543,12 +543,6 @@ def test_post_airbyte_connection_reset_v1_no_connection_task(orguser_workspace):
     assert str(excinfo.value) == "connection not found"
 
 
-@patch.multiple(
-    "ddpui.ddpprefect.prefect_service",
-    get_airbyte_connection_block_by_id=Mock(
-        return_value={"data": {"connection_id": "the-connection-id"}}
-    ),
-)
 def test_post_airbyte_connection_reset_v1_success(orguser_workspace):
     """tests POST /v1/connections/{connection_id}/reset success"""
     request = mock_request(orguser_workspace)
@@ -664,12 +658,6 @@ def test_put_airbyte_connection_v1_no_streams(
 
 
 @patch.multiple(
-    "ddpui.ddpprefect.prefect_service",
-    get_airbyte_connection_block_by_id=Mock(
-        return_value={"data": {"connection_id": "connection-id"}}
-    ),
-)
-@patch.multiple(
     "ddpui.ddpairbyte.airbyte_service",
     get_connection=Mock(return_value={"conn-key": "conn-val"}),
 )
@@ -713,12 +701,6 @@ def test_put_airbyte_connection_v1_without_normalization(orguser_workspace):
     )
 
 
-@patch.multiple(
-    "ddpui.ddpprefect.prefect_service",
-    get_airbyte_connection_block_by_id=Mock(
-        return_value={"data": {"connection_id": "connection-id"}}
-    ),
-)
 @patch.multiple(
     "ddpui.ddpairbyte.airbyte_service",
     get_connection=Mock(return_value={"operationIds": [1]}),
@@ -764,12 +746,6 @@ def test_put_airbyte_connection_v1_with_normalization_with_opids(orguser_workspa
     )
 
 
-@patch.multiple(
-    "ddpui.ddpprefect.prefect_service",
-    get_airbyte_connection_block_by_id=Mock(
-        return_value={"data": {"connection_id": "connection-id"}}
-    ),
-)
 @patch.multiple(
     "ddpui.ddpairbyte.airbyte_service",
     get_connection=Mock(return_value={"operationIds": []}),

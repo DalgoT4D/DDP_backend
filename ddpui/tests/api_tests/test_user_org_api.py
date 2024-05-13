@@ -87,7 +87,7 @@ def seed_db(django_db_setup, django_db_blocker):
 @pytest.fixture
 def org_without_workspace():
     """a pytest fixture which creates an Org without an airbyte workspace"""
-    org = Org.objects.create(airbyte_workspace_id=None, slug="test-org-WO-slug")
+    org = Org.objects.create(airbyte_workspace_id=None, slug="test-org-WO-slug", name="test-org-WO-name")
     yield org
     org.delete()
 
