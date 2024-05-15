@@ -365,7 +365,7 @@ def run_dbt_commands(self, orguser_id: int):
 @app.task()
 def schema_change_detection():
     """detects schema changes for all the orgs and sends an email to admins if there is a change"""
-    orgs = Org.objects.filter(name="testorg1")
+    orgs = Org.objects.all()
     schema_changes = {}
 
     for org in orgs:
