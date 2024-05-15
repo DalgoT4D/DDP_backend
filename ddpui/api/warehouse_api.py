@@ -176,3 +176,39 @@ def get_json_column_spec(
         org_warehouse, source_schema, input_name, json_column
     )
     return json_columnspec
+
+
+@warehouseapi.get("/insights/generate/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse_data"])
+def get_data_insights(request, db_schema: str, db_table: str):
+    """Get the json column spec of a table in a warehouse"""
+    orguser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    return {"success": 1}
+
+
+@warehouseapi.get("/insights/metrics/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse_data"])
+def get_data_insights(request, column_name: str):
+    """Get the json column spec of a table in a warehouse"""
+    orguser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    import sqlalchemy
+    from sqlalchemy.engine.reflection import Inspector
+    from sqlalchemy import create_engine, func, MetaData, inspect
+
+    conn = dbtautomation_service._get_wclient(org_warehouse).connection
+    engine = sqlalchemy.create_engine("postgresql://", creator=lambda: conn)
+    inspect_obj: Inspector = inspect(engine)
+
+    return inspect_obj.get_schema_names()
