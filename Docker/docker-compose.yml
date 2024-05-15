@@ -1,5 +1,13 @@
 version: '3.8'
 services:
+  redis_server:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - dalgo-network 
   backend:
     image: dalgo_backend:0.1
     restart: always
@@ -54,3 +62,12 @@ services:
       - DEMO_SUPERSET_PASSWORD=${DEMO_SUPERSET_PASSWORD}
     volumes:
       - ./mount/whitelist.py:/usr/src/backend/ddpui/assets/whitelist.py
+    networks:
+      - dalgo-network
+
+volumes:
+  redis_data:
+
+networks:
+  dalgo-network:
+    driver: bridge
