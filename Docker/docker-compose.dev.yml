@@ -19,8 +19,18 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+  
+  redis_server:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - dalgo-network
+
   backend:
-    image: dalgo_backend:0.1
+    image: dalgo_backend:0.2
     restart: always
     depends_on:
       database:
@@ -40,6 +50,9 @@ services:
       - DBPASSWORD=${DBPASSWORD}
       - DBADMINUSER=${DBADMINUSER}
       - DBADMINPASSWORD=${DBADMINPASSWORD}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_DB=${REDIS_DB}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
@@ -81,6 +94,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+volumes:
+  redis_data:
 
 networks:
   dalgo-network:

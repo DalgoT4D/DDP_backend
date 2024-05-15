@@ -1,7 +1,7 @@
 import os
 from uuid import uuid4
 from pathlib import Path
-from redis import Redis
+from ddpui.utils.redis_client import  RedisClient
 
 from ninja import NinjaAPI
 from ninja.errors import HttpError
@@ -177,7 +177,7 @@ def post_dbt_makedocs(request):
         indexfile.write(html)
         indexfile.close()
 
-    redis = Redis()
+    redis = RedisClient.get_instance()
     token = uuid4()
     redis_key = f"dbtdocs-{token.hex}"
     redis.set(redis_key, htmlfilename.encode("utf-8"))

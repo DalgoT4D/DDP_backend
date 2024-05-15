@@ -1,11 +1,11 @@
 import os
-from redis import Redis
+from ddpui.utils.redis_client import  RedisClient
 from django.http import HttpResponse, Http404
 
 
 def get_dbt_docs(request, tokenhex: str):
     """serve the generated docs"""
-    redis = Redis()
+    redis = RedisClient.get_instance()
     redis_key = f"dbtdocs-{tokenhex}"
     htmlfilename = redis.get(redis_key)
     if htmlfilename is None:
