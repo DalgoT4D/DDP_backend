@@ -14,6 +14,7 @@ from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import (
     AirbyteConnectionCreate,
     AirbyteConnectionCreateResponse,
+    AirbyteGetConnectionsResponse,
     AirbyteDestinationCreate,
     AirbyteDestinationUpdate,
     AirbyteSourceCreate,
@@ -468,7 +469,7 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
 @airbyteapi.get(
     "/v1/connections",
     auth=auth.CustomAuthMiddleware(),
-    response=List[AirbyteConnectionCreateResponse],
+    response=List[AirbyteGetConnectionsResponse],
 )
 @has_permission(["can_view_connections"])
 def get_airbyte_connections_v1(request):
