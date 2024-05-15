@@ -350,7 +350,9 @@ def get_connections(org: Org):
             )
         )
 
-        sync_dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
+        sync_dataflow_orgtask = DataflowOrgTask.objects.filter(
+            orgtask=org_task, dataflow__dataflow_type="manual"
+        ).first()
 
         reset_dataflow: OrgDataFlowv1 = (
             sync_dataflow_orgtask.dataflow.reset_conn_dataflow
