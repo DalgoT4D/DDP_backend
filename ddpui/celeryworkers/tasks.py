@@ -6,7 +6,11 @@ from subprocess import CompletedProcess
 from datetime import datetime, timedelta
 import yaml
 from django.utils.text import slugify
+from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.celery import app
+from celery.schedules import crontab
+from ddpui.ddpairbyte.airbyte_service import abreq
+from ddpui.utils.awsses import send_text_message
 from ddpui.utils.timezone import UTC
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse, OrgPrefectBlockv1
@@ -358,6 +362,42 @@ def run_dbt_commands(self, orguser_id: int):
         for lock in task_locks:
             lock.delete()
 
+@app.task()
+def schema_change_detection():
+    """detects schema changes for all the orgs and sends an email to admins if there is a change"""
+    orgs = Org.objects.filter(name="testorg1")
+    schema_changes = {}
+
+    for org in orgs:
+        org_conn = OrgTask.objects.filter(org=org, task__slug='airbyte-sync')
+        for org_task in org_conn:
+            try:
+                response = abreq("web_backend/connections/get", {
+                    "withRefreshedCatalog": True,
+                    "connectionId": org_task.connection_id
+                }, timeout=60)
+                
+                change_type = response.get('schemaChange')
+                logger.info(f"Schema change detected for org {org.name}: {change_type}")
+                
+                if change_type in ['breaking', 'non_breaking']:
+                    if org not in schema_changes:
+                        schema_changes[org] = {'breaking': 0, 'non_breaking': 0}
+                    schema_changes[org][change_type] += 1
+            except Exception as e:
+                logger.error(f"Error checking connection for org {org.name}: {e}")
+                continue
+            
+
+    for org, changes in schema_changes.items():
+        email_subject = f"Schema Change Summary for {org.name}"
+        email_body = f"Breaking changes: {changes['breaking']}, Non-breaking changes: {changes['non_breaking']}. Please review the changes."
+        for orguser in OrgUser.objects.filter(
+            org=org,
+            new_role__slug=ACCOUNT_MANAGER_ROLE,
+        ):
+            logger.info(f"sending notification email to {orguser.user.email}")
+        send_text_message(orguser.user.email, email_subject, email_body)
 
 @app.task(bind=False)
 def update_dbt_core_block_schema_task(block_name, default_schema):
@@ -390,6 +430,10 @@ def delete_old_canvaslocks():
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender, **kwargs):
     """check for old locks every minute"""
+    sender.add_periodic_task(
+        crontab(hour=00, minute=49), schema_change_detection.s(), 
+        name="schema change detection"
+    )
     sender.add_periodic_task(
         60 * 1.0, delete_old_blocklocks.s(), name="remove old blocklocks"
     )
