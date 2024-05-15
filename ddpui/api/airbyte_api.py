@@ -31,6 +31,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
 
+from ddpui.celeryworkers.tasks import sync_flow_runs_of_deployments
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
 logger = CustomLogger("airbyte")
@@ -482,6 +483,10 @@ def get_airbyte_connections_v1(request):
     if error:
         raise HttpError(400, error)
     logger.debug(res)
+
+    # sync the deployment flow runs into our db; a bit heavy task
+    deployment_ids = [body["deploymentId"] for body in res]
+    sync_flow_runs_of_deployments.delay(deployment_ids)
 
     # by default normalization is going as False here because we dont do anything with it
     return res

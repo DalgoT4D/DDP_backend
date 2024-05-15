@@ -12,6 +12,7 @@ from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import AirbyteWorkspace
 from ddpui.ddpprefect import prefect_service
 from ddpui.models.org import Org, OrgPrefectBlockv1
+from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpairbyte.schema import (
     AirbyteConnectionCreate,
@@ -332,11 +333,16 @@ def get_connections(org: Org):
         for df_orgtask in DataflowOrgTask.objects.filter(
             orgtask=org_task,
         ):
-            run = prefect_service.get_last_flow_run_by_deployment_id(
-                df_orgtask.dataflow.deployment_id
+            # if dataflow_last_run is not preset; fetch from prefect
+            run = (
+                PrefectFlowRun.objects.filter(
+                    deployment_id=df_orgtask.dataflow.deployment_id
+                )
+                .order_by("-start_time")
+                .first()
             )
             if run:
-                last_runs.append(run)
+                last_runs.append(run.to_json())
 
         last_runs.sort(
             key=lambda run: (
@@ -344,9 +350,7 @@ def get_connections(org: Org):
             )
         )
 
-        sync_dataflow_orgtask = DataflowOrgTask.objects.filter(
-            orgtask=org_task, dataflow__dataflow_type="manual"
-        ).first()
+        sync_dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
 
         reset_dataflow: OrgDataFlowv1 = (
             sync_dataflow_orgtask.dataflow.reset_conn_dataflow
