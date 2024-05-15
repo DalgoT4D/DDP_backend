@@ -30,7 +30,7 @@ services:
       - dalgo-network
 
   backend:
-    image: dalgo_backend:0.2
+    image: dalgo_backend:0.1
     restart: always
     depends_on:
       database:
