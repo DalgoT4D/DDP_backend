@@ -431,7 +431,7 @@ def delete_old_canvaslocks():
 def setup_periodic_tasks(sender, **kwargs):
     """check for old locks every minute"""
     sender.add_periodic_task(
-        crontab(hour=00, minute=49), schema_change_detection.s(), 
+        crontab(hour=18, minute=30), schema_change_detection.s(), 
         name="schema change detection"
     )
     sender.add_periodic_task(
