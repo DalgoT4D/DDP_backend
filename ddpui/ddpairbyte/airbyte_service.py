@@ -932,3 +932,41 @@ def get_logs_for_job(job_id: int, attempt_number: int = 0) -> list:
         "attempt/get_for_job", {"jobId": job_id, "attemptNumber": attempt_number}
     )
     return res
+
+
+def get_connection_catalog(connection_id: str) -> dict:
+    """get the catalog for a connection"""
+    if not isinstance(connection_id, str):
+        raise HttpError(400, "connection_id must be a string")
+
+    res = abreq("web_backend/connections/get", {"connectionId": connection_id, "withRefreshedCatalog": True})
+    return res
+
+def update_schema_change(workspace_id: str, 
+                         connection_info: schema.AirbyteConnectionSchemaUpdate, 
+                         current_connection: dict) -> dict:
+    """update the schema change for a connection"""
+    # Input validation
+    if not isinstance(workspace_id, str):
+        raise HttpError(400, "workspace_id must be a string")
+    if not isinstance(connection_info, schema.AirbyteConnectionSchemaUpdate):
+        raise HttpError(400, "connection_info must be an instance of AirbyteConnectionSchemaUpdate")
+    if not isinstance(current_connection, dict):
+        raise HttpError(400, "current_connection must be a dictionary")
+
+    current_connection["syncCatalog"]["streams"] = []
+
+    if "syncCatalog" in connection_info:
+        current_connection["syncCatalog"]["streams"].append(connection_info.syncCatalog["streams"])
+        logger.info("Updated syncCatalog")
+
+    # Make a request to update the connection
+    res = abreq("web_backend/connections/update", current_connection)
+
+    # Check if the update was successful
+    if "connectionId" not in res:
+        logger.error("Failed to update schema in connection: %s", res)
+        raise HttpError(500, "failed to update schema in connection")
+
+    logger.info("Successfully updated schema in connection")
+    return res

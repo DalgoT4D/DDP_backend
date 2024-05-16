@@ -76,6 +76,7 @@ class AirbyteConnectionCreateResponse(Schema):
     catalogId: str
     syncCatalog: dict
     status: str
+    schemaChange: str
     deploymentId: str = None
     lastRun: Optional[dict | None]
     destinationSchema: str = ""
@@ -102,3 +103,12 @@ class AirbyteWorkspace(Schema):
     name: str
     workspaceId: str
     initialSetupComplete: bool
+
+
+class AirbyteConnectionSchemaUpdate(Schema):
+    """Docstring"""
+
+    name: str
+    syncCatalog: dict
+    connectionId: str
+    

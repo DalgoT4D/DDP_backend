@@ -9,7 +9,7 @@ from django.utils.text import slugify
 from django.conf import settings
 from django.db import transaction
 from ddpui.ddpairbyte import airbyte_service
-from ddpui.ddpairbyte.schema import AirbyteWorkspace
+from ddpui.ddpairbyte.schema import AirbyteConnectionSchemaUpdate, AirbyteWorkspace
 from ddpui.ddpprefect import prefect_service
 from ddpui.models.org import Org, OrgPrefectBlockv1
 from ddpui.utils.custom_logger import CustomLogger
@@ -359,6 +359,7 @@ def get_connections(org: Org):
                 "destination": connection["destination"],
                 "catalogId": connection["catalogId"],
                 "syncCatalog": connection["syncCatalog"],
+                "schemaChange": connection["schemaChange"],
                 "status": connection["status"],
                 "deploymentId": (
                     sync_dataflow_orgtask.dataflow.deployment_id
@@ -701,3 +702,55 @@ def delete_source(org: Org, source_id: str):
     logger.info(f"deleted airbyte source {source_id}")
 
     return None, None
+
+def get_connection_catalog(org: Org, connection_id: str):
+    """
+    Get the catalog diff of a connection.
+    """
+    res = []
+    try:
+        connection = airbyte_service.get_connection_catalog(connection_id)
+        res.append(
+            {
+                "name": connection["name"],
+                "connectionId": connection["connectionId"],
+                "catalogId": connection["catalogId"],
+                "syncCatalog": connection["syncCatalog"],
+                "schemaChange": connection["schemaChange"],
+                "catalogDiff": connection["catalogDiff"],
+            }
+        )
+        return res, None
+    except Exception as e:
+        logger.error(f"Error getting catalog for connection {connection_id}: {e}")
+        return None, f"Error getting catalog for connection {connection_id}: {e}"
+
+def update_schema_changes_connection(org: Org, connection_id: str, payload: AirbyteConnectionSchemaUpdate):
+    """
+    Update the schema changes of a connection.
+    """
+    org_task = OrgTask.objects.filter(
+        org=org,
+        connection_id=connection_id,
+    ).first()
+
+    if org_task is None:
+        return None, "connection not found"
+    
+    warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if warehouse is None:
+        return None, "need to set up a warehouse first"
+    if warehouse.airbyte_destination_id is None:
+        return None, "warehouse has no airbyte_destination_id"
+
+    connection = airbyte_service.get_connection(org.airbyte_workspace_id, connection_id)
+    if payload.name:
+        connection["name"] = payload.name
+
+    connection["skipReset"] = False
+
+    res = airbyte_service.update_schema_change(
+        org.airbyte_workspace_id, payload, connection
+    )
+
+    return res, None
