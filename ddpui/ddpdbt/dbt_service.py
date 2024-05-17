@@ -2,8 +2,8 @@ import glob
 import os
 import shutil
 import subprocess
-import requests
 from pathlib import Path
+import requests
 
 from django.utils.text import slugify
 from dbt_automation import assets
