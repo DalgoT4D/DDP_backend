@@ -3,8 +3,6 @@ functions which work with airbyte and with the dalgo database
 """
 
 import json
-import re
-from typing import Union
 from django.utils.text import slugify
 from django.conf import settings
 from django.db import transaction
@@ -747,10 +745,99 @@ def update_schema_changes_connection(org: Org, connection_id: str, payload: Airb
     if payload.name:
         connection["name"] = payload.name
 
-    connection["skipReset"] = False
+    connection["skipReset"] = True
 
     res = airbyte_service.update_schema_change(
-        org.airbyte_workspace_id, payload, connection
+        org, payload, connection
     )
-
     return res, None
+
+def trigger_prefect_flow_run(org: Org, connection_id: str):
+    """
+    Trigger a prefect flow run for a connection, first for reset and then for sync.
+    """
+    sync_org_task = OrgTask.objects.filter(
+        org=org,
+        connection_id=connection_id,
+        task__slug=TASK_AIRBYTESYNC
+    ).first()
+
+    if sync_org_task is None:
+        logger.error("Sync OrgTask not found")
+        return None, "sync OrgTask not found"
+
+    # Find the relevant DataflowOrgTask for sync
+    sync_dataflow_orgtask = DataflowOrgTask.objects.filter(
+        orgtask=sync_org_task, dataflow__dataflow_type="manual"
+    ).first()
+
+    if sync_dataflow_orgtask is None:
+        logger.error("Sync dataflow not found")
+        return None, "sync dataflow not found"
+
+    # Find the relevant OrgTask for reset
+    reset_org_task = OrgTask.objects.filter(
+        org=org,
+        connection_id=connection_id,
+        task__slug=TASK_AIRBYTERESET
+    ).first()
+
+    if reset_org_task is None:
+        logger.error("Reset OrgTask not found")
+        return None, "reset OrgTask not found"
+
+    reset_dataflow = sync_dataflow_orgtask.dataflow.reset_conn_dataflow
+    reset_deployment_id = reset_dataflow.deployment_id
+    sync_deployment_id = sync_dataflow_orgtask.dataflow.deployment_id
+
+    if not reset_deployment_id or not sync_deployment_id:
+        logger.error("Deployment ID not found")
+        return None, "deployment ID not found"
+
+    org_server_block = OrgPrefectBlockv1.objects.filter(
+        org=org, block_type=AIRBYTESERVER
+    ).first()
+
+    if not org_server_block:
+        logger.error("Airbyte server block not found")
+        return None, "airbyte server block not found"
+
+    reset_params = {
+        "config": {
+            "tasks": [
+                setup_airbyte_sync_task_config(
+                    reset_org_task,
+                    org_server_block,
+                ).to_json()
+            ],
+            "org_slug": org.slug,
+        }
+    }
+
+    try:
+        prefect_service.create_deployment_flow_run(reset_deployment_id, reset_params)
+        logger.info("Successfully triggered Prefect flow run for reset")
+    except Exception as error:
+        logger.error("Failed to trigger Prefect flow run for reset: %s", error)
+        return None, "failed to trigger Prefect flow run for reset"
+
+    sync_params = {
+        "config": {
+            "tasks": [
+                setup_airbyte_sync_task_config(
+                    sync_org_task,
+                    org_server_block,
+                ).to_json()
+            ],
+            "org_slug": org.slug,
+        }
+    }
+
+    try:
+        prefect_service.create_deployment_flow_run(sync_deployment_id, sync_params)
+        logger.info("Successfully triggered Prefect flow run for sync")
+    except Exception as error:
+        logger.error("Failed to trigger Prefect flow run for sync: %s", error)
+        return None, "failed to trigger Prefect flow run for sync"
+
+    return None, None

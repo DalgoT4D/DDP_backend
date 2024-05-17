@@ -6,7 +6,7 @@ from subprocess import CompletedProcess
 from datetime import datetime, timedelta
 import yaml
 from django.utils.text import slugify
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, PIPELINE_MANAGER_ROLE
 from ddpui.celery import app
 from celery.schedules import crontab
 from ddpui.ddpairbyte.airbyte_service import abreq
@@ -394,7 +394,7 @@ def schema_change_detection():
         email_body = f"Breaking changes: {changes['breaking']}, Non-breaking changes: {changes['non_breaking']}. Please review the changes."
         for orguser in OrgUser.objects.filter(
             org=org,
-            new_role__slug=ACCOUNT_MANAGER_ROLE,
+            new_role__slug__in=[ACCOUNT_MANAGER_ROLE, PIPELINE_MANAGER_ROLE],
         ):
             logger.info(f"sending notification email to {orguser.user.email}")
         send_text_message(orguser.user.email, email_subject, email_body)

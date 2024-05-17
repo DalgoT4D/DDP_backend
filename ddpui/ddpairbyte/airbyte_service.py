@@ -10,6 +10,8 @@ import requests
 from dotenv import load_dotenv
 from ninja.errors import HttpError
 from ddpui.ddpairbyte import schema
+from ddpui.ddpairbyte.airbytehelpers import trigger_prefect_flow_run
+from ddpui.models.org import Org
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.helpers import remove_nested_attribute
 from ddpui.ddpairbyte.schema import (
@@ -942,13 +944,11 @@ def get_connection_catalog(connection_id: str) -> dict:
     res = abreq("web_backend/connections/get", {"connectionId": connection_id, "withRefreshedCatalog": True})
     return res
 
-def update_schema_change(workspace_id: str, 
+def update_schema_change(org: Org, 
                          connection_info: schema.AirbyteConnectionSchemaUpdate, 
                          current_connection: dict) -> dict:
     """update the schema change for a connection"""
     # Input validation
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "workspace_id must be a string")
     if not isinstance(connection_info, schema.AirbyteConnectionSchemaUpdate):
         raise HttpError(400, "connection_info must be an instance of AirbyteConnectionSchemaUpdate")
     if not isinstance(current_connection, dict):
@@ -956,6 +956,7 @@ def update_schema_change(workspace_id: str,
 
     current_connection["syncCatalog"]["streams"] = []
 
+    # Update the syncCatalog
     if "syncCatalog" in connection_info:
         current_connection["syncCatalog"]["streams"].append(connection_info.syncCatalog["streams"])
         logger.info("Updated syncCatalog")
@@ -969,4 +970,12 @@ def update_schema_change(workspace_id: str,
         raise HttpError(500, "failed to update schema in connection")
 
     logger.info("Successfully updated schema in connection")
+
+    # Call helper function to trigger Prefect flow run
+    try:
+        trigger_prefect_flow_run(org, res["connectionId"])
+    except Exception as error:
+        logger.error("Failed to trigger Prefect flow run: %s", error)
+        raise HttpError(500, "failed to trigger Prefect flow run") from error
+
     return res
