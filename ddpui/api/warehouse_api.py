@@ -13,9 +13,11 @@ from ddpui.utils import secretsmanager
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.auth import has_permission
 
-from ddpui.datainsights.insights.insight_factory import ColInsightFactory
+from ddpui.datainsights.insights.insight_factory import InsightsFactory
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.datainsights.generate_result import GenerateResult
+
+from ddpui.schemas.warehouse_api_schemas import ColumnMetrics
 
 warehouseapi = NinjaAPI(urls_namespace="warehouse")
 logger = CustomLogger("ddpui")
@@ -196,9 +198,9 @@ def get_data_insights(request, db_schema: str, db_table: str):
     return {"success": 1}
 
 
-@warehouseapi.get("/insights/metrics/", auth=auth.CustomAuthMiddleware())
+@warehouseapi.post("/insights/col_metrics/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
-def get_data_insights(request, db_schema: str, db_table: str, column_name: str):
+def get_data_insights(request, payload: ColumnMetrics):
     """Get the json column spec of a table in a warehouse"""
     orguser = request.orguser
     org = orguser.org
@@ -211,11 +213,20 @@ def get_data_insights(request, db_schema: str, db_table: str, column_name: str):
 
     wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
 
-    insight_obj = ColInsightFactory.initiate_insight(
-        column_name,
-        db_table,
-        db_schema,
-        wclient.get_col_python_type(db_schema, db_table, column_name),
+    print(
+        wclient.get_col_python_type(
+            payload.db_schema, payload.db_table, payload.column_name
+        )
+    )
+
+    insight_obj = InsightsFactory.initiate_insight(
+        payload.column_name,
+        payload.db_table,
+        payload.db_schema,
+        wclient.get_col_python_type(
+            payload.db_schema, payload.db_table, payload.column_name
+        ),
+        payload.filter,
     )
 
     return GenerateResult.generate_insight(insight_obj, wclient)

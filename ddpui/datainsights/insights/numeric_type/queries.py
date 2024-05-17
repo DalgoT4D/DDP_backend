@@ -15,11 +15,12 @@ from sqlalchemy import Float
 from ddpui.datainsights.insights.insight_interface import ColInsight
 
 
-class NumericColInsight(ColInsight):
+class DataStats(ColInsight):
 
     def generate_sql(self):
         """
-        Returns a sql alchemy sql expression string
+        Returns a sqlalchemy query ready to be executed by an engine
+        Computes basic stats
         """
         column_name = self.column_name
         numeric_col: ColumnClause = column(column_name)
@@ -99,17 +100,15 @@ class NumericColInsight(ColInsight):
                 "countNull": 0,
                 "countDistinct": 1,
                 "maxVal": 100,
-                "minVal": 100
+                "minVal": 100,
+                "mean": 12.00,
+                "mode": 100,
+                "media": 50
             }
         ]
         """
-        response = {
-            "name": self.column_name,
-            "type": self.get_col_type(),
-            "insights": {},
-        }
         if len(result) > 0:
-            response["insights"] = {
+            return {
                 "count": result[0]["count"],
                 "countNull": result[0]["countNull"],
                 "countDistinct": result[0]["countDistinct"],
@@ -120,7 +119,13 @@ class NumericColInsight(ColInsight):
                 "mode": result[0]["mode"],
             }
 
-        return response
-
-    def get_col_type(self):
-        return "Numeric"
+        return {
+            "count": 0,
+            "countNull": 0,
+            "countDistinct": 0,
+            "maxVal": 0,
+            "minVal": 0,
+            "mean": 0,
+            "median": 0,
+            "mode": 0,
+        }

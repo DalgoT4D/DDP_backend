@@ -1,5 +1,13 @@
 from sqlalchemy.sql.functions import func, Function
-from sqlalchemy.sql.expression import table, TableClause, select, Select
+from sqlalchemy.sql.expression import (
+    table,
+    TableClause,
+    select,
+    Select,
+    ColumnClause,
+    column,
+    text,
+)
 
 
 class AggQueryBuilder:
@@ -11,6 +19,10 @@ class AggQueryBuilder:
     def __init__(self):
         self.column_clauses: list[Function] = []
         self.select_from: TableClause = None
+        self.group_by_clauses: list[ColumnClause] = []
+        self.order_by_clauses: list[ColumnClause] = []
+        self.limit_records: int = None
+        self.offset_records: int = 0
 
     def add_column(self, agg_col: Function):
         """Push a column to select"""
@@ -23,7 +35,24 @@ class AggQueryBuilder:
 
     def group_cols_by(self, *cols):
         """Group by the columns"""
-        self.column_clauses.append(func.group_by(*cols))
+        for col in cols:
+            self.group_by_clauses.append(column(col))
+        return self
+
+    def order_cols_by(self, *cols):
+        """Group by the columns"""
+        for col in cols:
+            self.order_by_clauses.append(column(col))
+        return self
+
+    def limit_rows(self, limit: int):
+        """Limit the number of rows"""
+        self.limit_records = limit
+        return self
+
+    def offset_rows(self, offset: int):
+        """Offset the number of rows"""
+        self.offset_records = offset
         return self
 
     def build(self):
@@ -32,7 +61,15 @@ class AggQueryBuilder:
             raise ValueError("Table to select from is not provided")
 
         stmt: Select = select(self.column_clauses)
-        stmt = stmt.select_from(self.select_from).compile(
-            compile_kwargs={"literal_binds": True}
-        )
-        return stmt
+        stmt = stmt.select_from(self.select_from)
+
+        if len(self.group_by_clauses) > 0:
+            stmt = stmt.group_by(*self.group_by_clauses)
+
+        if len(self.order_by_clauses) > 0:
+            stmt = stmt.order_by(*self.order_by_clauses)
+
+        if self.limit_records:
+            stmt = stmt.slice(self.offset_records, self.limit_records)
+
+        return stmt.compile(compile_kwargs={"literal_binds": True})

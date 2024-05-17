@@ -27,8 +27,6 @@ class PostgresClient(Warehouse):
         """
         result = self.connection.execute(sql)
         rows = result.fetchall()
-        print("herereeeee")
-        print(rows)
         return [dict(row) for row in rows]
 
     def get_table_columns(self, db_schema: str, db_table: str) -> dict:

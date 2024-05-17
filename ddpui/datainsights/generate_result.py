@@ -1,5 +1,6 @@
 from ddpui.datainsights.insights.insight_interface import ColInsight
 from ddpui.datainsights.warehouse.warehouse_interface import Warehouse
+from ddpui.datainsights.insights.insight_interface import DataTypeColInsights
 
 
 class GenerateResult:
@@ -8,11 +9,14 @@ class GenerateResult:
     """
 
     @classmethod
-    def generate_insight(cls, insight: ColInsight, wclient: Warehouse) -> dict:
+    def generate_insight(cls, insight: DataTypeColInsights, wclient: Warehouse) -> dict:
         """
         Generates insights for the given list of insights
         """
-        sql = insight.generate_sql()
-        results = wclient.execute(sql)
-        parsed_results = insight.parse_results(results)
-        return parsed_results
+        sql_queries: list = insight.generate_sqls()
+        output = []
+        for query in sql_queries:
+            results = wclient.execute(query)
+            output.append(results)
+
+        return insight.merge_output(output)
