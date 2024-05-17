@@ -190,8 +190,8 @@ def check_repo_exists(gitrepo_url: str, gitrepo_access_token: str | None) -> boo
     if gitrepo_access_token:
         headers["Authorization"] = f"token {gitrepo_access_token}"
 
-    url = gitrepo_url.replace("github.com", "api.github.com/repos")
-
+    url = gitrepo_url.replace("github.com", "api.github.com/repos").replace(".git", "")
+    
     try:
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
