@@ -2,6 +2,7 @@ import glob
 import os
 import shutil
 import subprocess
+import requests
 from pathlib import Path
 
 from django.utils.text import slugify
@@ -179,3 +180,23 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
     logger.info("set dbt workspace completed for org %s", org.name)
 
     return None, None
+
+
+def check_repo_exists(gitrepo_url: str, gitrepo_access_token: str | None) -> bool:
+    """Check if a GitHub repo exists."""
+    headers = {
+        "Accept": "application/vnd.github.v3+json",
+    }
+    if gitrepo_access_token:
+        headers["Authorization"] = f"token {gitrepo_access_token}"
+
+    url = gitrepo_url.replace("github.com", "api.github.com/repos")
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        logger.info(f"Error checking repo existence: {e}")
+        return False
+
+    return response.status_code == 200

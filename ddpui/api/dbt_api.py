@@ -2,7 +2,6 @@ import os
 from uuid import uuid4
 from pathlib import Path
 from redis import Redis
-import requests
 from ninja import NinjaAPI
 from ninja.errors import HttpError
 
@@ -79,25 +78,6 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
     return {"task_id": task.id}
 
 
-def check_repo_exists(gitrepo_url: str, gitrepo_access_token: str | None) -> bool:
-    """check if a github repo exists"""
-    headers = {
-        "Accept": "application/vnd.github.v3+json",
-    }
-    if gitrepo_access_token != "":
-        headers["Authorization"] = f"token {gitrepo_access_token}"
-
-    print(headers)
-    url = gitrepo_url.replace("github.com", "api.github.com/repos")
-
-    response = requests.get(url, headers=headers, timeout=10)
-
-    if response.status_code == 200:
-        return True
-    else:
-        return False
-
-
 @dbtapi.put("/github/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_dbt_workspace"])
 def put_dbt_github(request, payload: OrgDbtGitHub):
@@ -105,12 +85,14 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
     orguser: OrgUser = request.orguser
     org = orguser.org
     if org.dbt is None:
-        raise HttpError(400, "create a dbt workspace first")
+        raise HttpError(400, "Create a dbt workspace first")
 
-    repo_exists = check_repo_exists(payload.gitrepoUrl, payload.gitrepoAccessToken)
+    repo_exists = dbt_service.check_repo_exists(
+        payload.gitrepoUrl, payload.gitrepoAccessToken
+    )
 
-    if repo_exists is False:
-        raise HttpError(400, "Repo does not exist")
+    if not repo_exists:
+        raise HttpError(400, "Github repository does not exist")
 
     org.dbt.gitrepo_url = payload.gitrepoUrl
     org.dbt.gitrepo_access_token_secret = payload.gitrepoAccessToken
