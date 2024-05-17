@@ -14,7 +14,5 @@ class GenerateResult:
         """
         sql = insight.generate_sql()
         results = wclient.execute(sql)
-        print("here")
-        print(results)
         parsed_results = insight.parse_results(results)
         return parsed_results
