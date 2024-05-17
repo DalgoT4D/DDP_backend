@@ -30,8 +30,6 @@ class NumericColInsights(DataTypeColInsights):
             "columnType": self.get_col_type(),
             "insights": {},
         }
-        print("here")
-        print(output)
 
         if len(output) > 0:
             resp["insights"] = output[0]
