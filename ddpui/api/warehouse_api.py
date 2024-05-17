@@ -13,6 +13,10 @@ from ddpui.utils import secretsmanager
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.auth import has_permission
 
+from ddpui.datainsights.insights.insight_factory import ColInsightFactory
+from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
+from ddpui.datainsights.generate_result import GenerateResult
+
 warehouseapi = NinjaAPI(urls_namespace="warehouse")
 logger = CustomLogger("ddpui")
 
@@ -194,7 +198,7 @@ def get_data_insights(request, db_schema: str, db_table: str):
 
 @warehouseapi.get("/insights/metrics/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
-def get_data_insights(request, column_name: str):
+def get_data_insights(request, db_schema: str, db_table: str, column_name: str):
     """Get the json column spec of a table in a warehouse"""
     orguser = request.orguser
     org = orguser.org
@@ -203,12 +207,15 @@ def get_data_insights(request, column_name: str):
     if not org_warehouse:
         raise HttpError(404, "Please set up your warehouse first")
 
-    import sqlalchemy
-    from sqlalchemy.engine.reflection import Inspector
-    from sqlalchemy import create_engine, func, MetaData, inspect
+    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
 
-    conn = dbtautomation_service._get_wclient(org_warehouse).connection
-    engine = sqlalchemy.create_engine("postgresql://", creator=lambda: conn)
-    inspect_obj: Inspector = inspect(engine)
+    wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
 
-    return inspect_obj.get_schema_names()
+    insight_obj = ColInsightFactory.initiate_insight(
+        column_name,
+        db_table,
+        db_schema,
+        wclient.get_col_python_type(db_schema, db_table, column_name),
+    )
+
+    return GenerateResult.generate_insight(insight_obj, wclient)
