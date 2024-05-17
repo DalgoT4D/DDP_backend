@@ -4,6 +4,7 @@ from ddpui.datainsights.insights.numeric_type.numeric_insight import NumericColI
 from ddpui.datainsights.insights.datetime_type.datetime_insight import (
     DatetimeColInsights,
 )
+from ddpui.datainsights.insights.boolean_type.boolean_insights import BooleanColInsights
 from ddpui.datainsights.insights.insight_interface import (
     DataTypeColInsights,
 )
@@ -25,5 +26,7 @@ class InsightsFactory:
                 db_schema,
                 filter if "chart_type" in filter else None,
             )
+        elif col_type == bool:
+            return BooleanColInsights(column_name, db_table, db_schema, filter)
         else:
             raise ValueError("Column type not supported for insights generation")
