@@ -21,6 +21,7 @@ class TaskProgressHashPrefix(str, Enum):
     CLONEGITREPO = "clone-github-repo"
     DBTWORKSPACE = "setup-dbt-workspace"
     RUNDBTCMDS = "run-dbt-commands"
+    RUNELEMENTARY = "run-elementary"
 
 
 class OrgTaskGeneratedBy(str, Enum):
