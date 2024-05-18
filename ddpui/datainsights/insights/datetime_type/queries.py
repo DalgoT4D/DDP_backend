@@ -45,7 +45,10 @@ class DataStats(ColInsight):
                 func.min(datetime_col).label("minVal"),
             )
             .add_column(
-                (func.max(datetime_col) - func.min(datetime_col)).label("range"),
+                (
+                    func.date(func.max(datetime_col))
+                    - func.date(func.min(datetime_col))
+                ).label("rangeInDays"),
             )
         )
 
@@ -73,7 +76,7 @@ class DataStats(ColInsight):
                 "countDistinct": result[0]["countDistinct"],
                 "maxVal": result[0]["maxVal"],
                 "minVal": result[0]["minVal"],
-                "rangeInDays": result[0]["range"],
+                "rangeInDays": result[0]["rangeInDays"],
             }
 
         return {
@@ -116,16 +119,19 @@ class DistributionChart(ColInsight):
 
         query = self.builder
         groupby_cols = []
+        orderby_cols = []
 
         if self.filter.range == "year":
             query = query.add_column(extract("year", datetime_col).label("year"))
             groupby_cols = ["year"]
+            orderby_cols = [("year", "desc")]
 
         if self.filter.range == "month":
             query = query.add_column(
                 extract("year", datetime_col).label("year")
             ).add_column(extract("month", datetime_col).label("month"))
             groupby_cols = ["year", "month"]
+            orderby_cols = [("year", "desc"), ("month", "desc")]
 
         if self.filter.range == "day":
             query = (
@@ -134,12 +140,13 @@ class DistributionChart(ColInsight):
                 .add_column(extract("day", datetime_col).label("day"))
             )
             groupby_cols = ["year", "month", "day"]
+            orderby_cols = [("year", "desc"), ("month", "desc"), ("day", "desc")]
 
         query = (
             query.add_column(func.count().label("frequency"))
             .fetch_from(self.db_table, self.db_schema)
             .group_cols_by(*groupby_cols)
-            .order_cols_by(*groupby_cols)
+            .order_cols_by(orderby_cols)
             .limit_rows(self.filter.limit)
             .offset_rows(self.filter.offset)
         )

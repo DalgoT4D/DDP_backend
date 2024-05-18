@@ -5,6 +5,7 @@ from ddpui.datainsights.insights.datetime_type.datetime_insight import (
     DatetimeColInsights,
 )
 from ddpui.datainsights.insights.boolean_type.boolean_insights import BooleanColInsights
+from ddpui.datainsights.insights.string_type.string_insights import StringColInsights
 from ddpui.datainsights.insights.insight_interface import (
     DataTypeColInsights,
 )
@@ -28,5 +29,7 @@ class InsightsFactory:
             )
         elif col_type == bool:
             return BooleanColInsights(column_name, db_table, db_schema, filter)
+        elif col_type == str:
+            return StringColInsights(column_name, db_table, db_schema, filter)
         else:
             raise ValueError("Column type not supported for insights generation")
