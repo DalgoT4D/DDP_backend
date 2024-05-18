@@ -26,19 +26,18 @@ class DataStats(ColInsight):
         numeric_col: ColumnClause = column(column_name)
 
         median_subquery = (
-            select(
-                [
-                    numeric_col,
-                    func.count().over().label("total_rows"),
-                    func.row_number().over(order_by=numeric_col).label("row_number"),
-                ]
+            self.builder.add_column(numeric_col)
+            .add_column(func.count().over().label("total_rows"))
+            .add_column(
+                func.row_number().over(order_by=numeric_col).label("row_number")
             )
-            .select_from(table(self.db_table, schema=self.db_schema))
-            .alias("subquery")
+            .fetch_from(self.db_table, self.db_schema)
+            .subquery(alias="subquery")
         )
 
         query = (
-            self.builder.add_column(func.count().label("count"))
+            self.builder.reset()
+            .add_column(func.count().label("count"))
             .add_column(
                 func.sum(
                     case(
