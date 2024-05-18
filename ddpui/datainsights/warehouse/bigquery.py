@@ -1,22 +1,22 @@
+from sqlalchemy.sql.compiler import IdentifierPreparer
 from sqlalchemy.engine import create_engine
 from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy import inspect
+from sqlalchemy_bigquery import BigQueryDialect
 
 from ddpui.datainsights.warehouse.warehouse_interface import Warehouse
 
 
-class PostgresClient(Warehouse):
+class BigqueryClient(Warehouse):
 
     def __init__(self, creds: dict):
         """
         Establish connection to the postgres database using sqlalchemy engine
         Creds come from the secrets manager
         """
-        connection_string = (
-            "postgresql://{username}:{password}@{host}/{database}".format(**creds)
-        )
+        connection_string = "bigquery://{project_id}".format(**creds)
 
-        self.engine = create_engine(connection_string)
+        self.engine = create_engine(connection_string, credentials_info=creds)
         self.connection = self.engine.connect()
         self.inspect_obj: Inspector = inspect(
             self.engine

@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from sqlalchemy.sql.selectable import Select
 
 from ddpui.datainsights.query_builder import AggQueryBuilder
 
@@ -24,7 +25,7 @@ class ColInsight(ABC):
         self.filter = filter
 
     @abstractmethod
-    def generate_sql(self):
+    def generate_sql(self) -> Select:
         pass
 
     @abstractmethod
@@ -54,7 +55,7 @@ class DataTypeColInsights(ABC):
         self.filter = filter
 
     @abstractmethod
-    def generate_sqls(self) -> list:
+    def generate_sqls(self) -> list[Select]:
         pass
 
     @abstractmethod

@@ -1,3 +1,4 @@
+from sqlalchemy.sql.selectable import Select
 from ddpui.datainsights.insights.insight_interface import ColInsight
 from ddpui.datainsights.warehouse.warehouse_interface import Warehouse
 from ddpui.datainsights.insights.insight_interface import DataTypeColInsights
@@ -13,9 +14,10 @@ class GenerateResult:
         """
         Generates insights for the given list of insights
         """
-        sql_queries: list = insight.generate_sqls()
+        sql_queries: list[Select] = insight.generate_sqls()
         output = []
         for query in sql_queries:
+            query = query.compile(bind=wclient.engine)
             results = wclient.execute(query)
             output.append(results)
 

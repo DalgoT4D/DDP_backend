@@ -92,7 +92,7 @@ class AggQueryBuilder:
     def build(self):
         """return the sql statement to be excuted"""
 
-        return self.subquery().compile(compile_kwargs={"literal_binds": True})
+        return self.subquery()
 
     def reset(self):
         self.column_clauses: list[Function] = []
