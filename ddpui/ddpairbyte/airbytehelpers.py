@@ -802,12 +802,18 @@ def trigger_prefect_flow_run(org: Org, connection_id: str):
         logger.error("Airbyte server block not found")
         return None, "airbyte server block not found"
 
-    reset_params = {
+    reset_sync_params = {
         "config": {
             "tasks": [
                 setup_airbyte_sync_task_config(
                     reset_org_task,
                     org_server_block,
+                    seq=1
+                ).to_json(),
+                setup_airbyte_sync_task_config(
+                    sync_org_task,
+                    org_server_block,
+                    seq=2
                 ).to_json()
             ],
             "org_slug": org.slug,
@@ -815,29 +821,10 @@ def trigger_prefect_flow_run(org: Org, connection_id: str):
     }
 
     try:
-        prefect_service.create_deployment_flow_run(reset_deployment_id, reset_params)
+        prefect_service.create_deployment_flow_run(reset_deployment_id, reset_sync_params)
         logger.info("Successfully triggered Prefect flow run for reset")
     except Exception as error:
         logger.error("Failed to trigger Prefect flow run for reset: %s", error)
         return None, "failed to trigger Prefect flow run for reset"
-
-    sync_params = {
-        "config": {
-            "tasks": [
-                setup_airbyte_sync_task_config(
-                    sync_org_task,
-                    org_server_block,
-                ).to_json()
-            ],
-            "org_slug": org.slug,
-        }
-    }
-
-    try:
-        prefect_service.create_deployment_flow_run(sync_deployment_id, sync_params)
-        logger.info("Successfully triggered Prefect flow run for sync")
-    except Exception as error:
-        logger.error("Failed to trigger Prefect flow run for sync: %s", error)
-        return None, "failed to trigger Prefect flow run for sync"
 
     return None, None

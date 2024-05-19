@@ -947,24 +947,23 @@ def get_connection_catalog(connection_id: str) -> dict:
 def update_schema_change(org: Org, 
                          connection_info: schema.AirbyteConnectionSchemaUpdate, 
                          current_connection: dict) -> dict:
-    """update the schema change for a connection"""
-    # Input validation
+    """Update the schema change for a connection."""
     if not isinstance(connection_info, schema.AirbyteConnectionSchemaUpdate):
         raise HttpError(400, "connection_info must be an instance of AirbyteConnectionSchemaUpdate")
     if not isinstance(current_connection, dict):
         raise HttpError(400, "current_connection must be a dictionary")
+    
+    # check syncCatalog is present in current_connection
+    if "syncCatalog" not in current_connection:
+        current_connection["syncCatalog"] = {}
 
-    current_connection["syncCatalog"]["streams"] = []
-
-    # Update the syncCatalog
-    if "syncCatalog" in connection_info:
-        current_connection["syncCatalog"]["streams"].append(connection_info.syncCatalog["streams"])
+    # replace the syncCatalog with the new one from connection_info
+    if hasattr(connection_info, "syncCatalog") and connection_info.syncCatalog:
+        current_connection["syncCatalog"] = connection_info.syncCatalog
         logger.info("Updated syncCatalog")
 
-    # Make a request to update the connection
     res = abreq("web_backend/connections/update", current_connection)
 
-    # Check if the update was successful
     if "connectionId" not in res:
         logger.error("Failed to update schema in connection: %s", res)
         raise HttpError(500, "failed to update schema in connection")
