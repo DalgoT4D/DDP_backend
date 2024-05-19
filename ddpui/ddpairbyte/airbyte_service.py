@@ -957,6 +957,7 @@ def update_schema_change(org: Org,
     if "syncCatalog" not in current_connection:
         current_connection["syncCatalog"] = {}
 
+    current_connection["sourceCatalogId"] = connection_info.sourceCatalogId
     # replace the syncCatalog with the new one from connection_info
     if hasattr(connection_info, "syncCatalog") and connection_info.syncCatalog:
         current_connection["syncCatalog"] = connection_info.syncCatalog
