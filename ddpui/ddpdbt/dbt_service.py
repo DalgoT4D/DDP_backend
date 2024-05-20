@@ -4,6 +4,7 @@ import shutil
 import subprocess
 from pathlib import Path
 import requests
+import re
 
 from django.utils.text import slugify
 from dbt_automation import assets
@@ -182,6 +183,14 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
     return None, None
 
 
+def convert_github_url(url: str) -> str:
+    """convert Github repo url to api url"""
+    pattern = r"https://github.com/([^/]+)/([^/]+)\.git"
+    replacement = r"https://api.github.com/repos/\1/\2"
+    new_url = re.sub(pattern, replacement, url)
+    return new_url
+
+
 def check_repo_exists(gitrepo_url: str, gitrepo_access_token: str | None) -> bool:
     """Check if a GitHub repo exists."""
     headers = {
@@ -190,8 +199,8 @@ def check_repo_exists(gitrepo_url: str, gitrepo_access_token: str | None) -> boo
     if gitrepo_access_token:
         headers["Authorization"] = f"token {gitrepo_access_token}"
 
-    url = gitrepo_url.replace("github.com", "api.github.com/repos").replace(".git", "")
-    
+    url = convert_github_url(gitrepo_url)
+
     try:
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
