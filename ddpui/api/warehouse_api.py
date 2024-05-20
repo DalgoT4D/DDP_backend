@@ -212,7 +212,7 @@ def get_table_data_v1(request, schema_name: str, table_name: str):
         raise HttpError(404, "Table not found")
     except Exception as err:
         logger.error(err)
-        raise HttpError(500, err)
+        raise HttpError(500, str(err))
 
 
 @warehouseapi.post("/insights/metrics/", auth=auth.CustomAuthMiddleware())
@@ -254,4 +254,5 @@ def post_data_insights(request, payload: ColumnMetrics):
 
         return GenerateResult.generate_col_insights(org, insight_obj, wclient)
     except Exception as err:
+        logger.error(err)
         raise HttpError(500, str(err))
