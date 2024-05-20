@@ -64,8 +64,6 @@ services:
       - DEMO_SENDGRID_SIGNUP_TEMPLATE=${DEMO_SENDGRID_SIGNUP_TEMPLATE}
       - DEMO_SUPERSET_USERNAME=${DEMO_SUPERSET_USERNAME}
       - DEMO_SUPERSET_PASSWORD=${DEMO_SUPERSET_PASSWORD}
-    volumes:
-      - ./mount/whitelist.py:/usr/src/backend/ddpui/assets/whitelist.py
     networks:
       - dalgo-network
 
