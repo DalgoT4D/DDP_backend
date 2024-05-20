@@ -378,6 +378,7 @@ def create_elementary_report(
         self.request.id, f"{TaskProgressHashPrefix.RUNELEMENTARY}-{org.slug}", 60
     )
 
+    os.environ["PATH"] += ":" + str(Path(os.getenv("DBT_VENV")) / "venv/bin")
     cmd = [
         str(edr_binary),
         "send-report",
