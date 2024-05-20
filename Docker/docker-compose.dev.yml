@@ -1,7 +1,15 @@
 version: '3.8'
 services:
+  redis:
+    image: 'redis'
+    extra_hosts:
+        - "host.docker.internal:host-gateway"
+    networks:
+      - dalgo-network
+    ports:
+      - "6379:6379"
   database:
-    image: postgres:11
+    image: postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: docker
@@ -15,7 +23,7 @@ services:
     networks:
       - dalgo-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -p 5432"]
+      test: ["CMD-SHELL", "pg_isready -p 5432 -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -30,7 +38,7 @@ services:
       - dalgo-network
 
   backend:
-    image: dalgo_backend:0.1
+    image: dalgo_backend_deploy:0.1
     restart: always
     depends_on:
       database:
@@ -81,13 +89,14 @@ services:
       - SUPERSET_USAGE_CREDS_SECRET_ID=${SUPERSET_USAGE_CREDS_SECRET_ID}
       - FIRST_ORG_NAME=${FIRST_ORG_NAME}
       - FIRST_USER_EMAIL=${FIRST_USER_EMAIL}
+      - ADMIN_USER_EMAIL=${ADMIN_USER_EMAIL}
+      - ADMIN_USER_PASSWORD=${ADMIN_USER_PASSWORD}
       - DEMO_SIGNUPCODE=${DEMO_SIGNUPCODE}
       - DEMO_AIRBYTE_SOURCE_TYPES=${DEMO_AIRBYTE_SOURCE_TYPES}
       - DEMO_SENDGRID_SIGNUP_TEMPLATE=${DEMO_SENDGRID_SIGNUP_TEMPLATE}
       - DEMO_SUPERSET_USERNAME=${DEMO_SUPERSET_USERNAME}
       - DEMO_SUPERSET_PASSWORD=${DEMO_SUPERSET_PASSWORD}
-    volumes:
-      - ./mount/whitelist.py:/usr/src/backend/ddpui/assets/whitelist.py
+
     networks:
       - dalgo-network
     extra_hosts:

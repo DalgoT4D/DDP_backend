@@ -183,13 +183,15 @@ Follow the steps below:
 
 ### Step 2: Create .env file
 
--  create `.env` from `.env.template` inside the Docker folcer
+-  create `.env` from `.env.template` inside the Docker folder
 
 ### Step 3: Create `whitelist.py` file
 
 -  Copy the file in ddpui/assets/ to Docker/mount
 
 ### Step 4: Build the image
+If using M1-based MacBook  run this before building image 
+  `export DOCKER_DEFAULT_PLATFORM=linux/amd64`
 
 -  `docker build -f Docker/Dockerfile --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') -t dalgo_backend:0.1 .`
 

@@ -35,26 +35,41 @@ SECRET_KEY = os.getenv("DJANGOSECRET")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "") == "True"
 
+
 # CORS
+
+MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
+    "django.middleware.common.CommonMiddleware",
+]
+
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
     "staging-api.dalgo.in",
     "api.dalgo.in",
     "host.docker.internal",
+    "backend-image-fosambcxuq-uc.a.run.app",
+    "frontend-image-fosambcxuq-uc.a.run.app",
 ]
-CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_METHODS = [
+    "GET",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "OPTIONS",
+]
 CORS_ORIGIN_WHITELIST = (
     "http://localhost:3000",
     "http://host.docker.internal:3000",
     "http://127.0.0.1:3000",
     "https://staging.dalgo.in",
     "https://dashboard.dalgo.in",
+    "https://frontend-image-fosambcxuq-uc.a.run.app",
 )
-CORS_ALLOW_HEADERS = (
-    *default_headers,
-    "x-dalgo-org",
-)
+CORS_ALLOW_HEADERS = (*default_headers, "x-dalgo-org", "Content-Type", "Authorization")
 
 # Application definition
 

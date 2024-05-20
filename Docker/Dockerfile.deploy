@@ -1,0 +1,30 @@
+FROM us-central1-docker.pkg.dev/dalgo-serverless/backend-repo/backend-main-image:0.1 as build
+
+USER root
+# Install gloud sdk
+RUN apt-get update && apt-get install -y curl gnupg jq && \
+    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add - && \
+    echo "deb https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && \
+    apt-get update && apt-get install -y google-cloud-sdk && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*  && \
+    mkdir -p /usr/src/backend/.config/gcloud && \
+    chown -R container_user:container_user /usr/src/backend/.config
+
+
+
+
+
+COPY Docker/bootstrap.sh /bootstrap.sh
+
+# Copy whitelist file
+COPY Docker/mount/whitelist_deploy.py /usr/src/backend/ddpui/assets/whitelist.py
+
+RUN chmod +x /entrypoint.sh && chmod +x /bootstrap.sh
+
+
+USER container_user
+
+# Make port 8002 available to the world outside this container
+EXPOSE 8002
+
+ENTRYPOINT ["/bootstrap.sh", "/entrypoint.sh" ]
