@@ -4,22 +4,22 @@ do not raise http errors here
 """
 
 import os
-from uuid import uuid4
 from datetime import datetime
-
-from redis import Redis
+from uuid import uuid4
 
 from django.contrib.auth.models import User
 from django.db import transaction
 from django.utils.text import slugify
+from redis import Redis
 
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, GUEST_ROLE
+from ddpui.models.org import Org
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
+    DeleteOrgUserPayload,
     Invitation,
     InvitationSchema,
     NewInvitationSchema,
-    UserAttributes,
     OrgUser,
     OrgUserCreate,
     OrgUserNewOwner,
@@ -27,17 +27,14 @@ from ddpui.models.org_user import (
     OrgUserUpdate,
     OrgUserUpdatev1,
     ResetPasswordSchema,
+    UserAttributes,
     VerifyEmailSchema,
-    DeleteOrgUserPayload,
 )
-from ddpui.models.role_based_access import Role
-from ddpui.models.org import Org
 from ddpui.models.orgtnc import OrgTnC
-from ddpui.utils import sendgrid
-from ddpui.utils import helpers
-from ddpui.utils import timezone
-from ddpui.utils.orguserhelpers import from_orguser, from_invitation
+from ddpui.models.role_based_access import Role
+from ddpui.utils import helpers, sendgrid, timezone
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.orguserhelpers import from_invitation, from_orguser
 
 logger = CustomLogger("ddpui")
 
