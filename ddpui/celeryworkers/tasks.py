@@ -49,6 +49,13 @@ def clone_github_repo(
     else:
         child = True
 
+    taskprogress.add(
+        {
+            "message": "started cloning github repository",
+            "status": "running",
+        }
+    )
+
     # clone the client's dbt repo into "dbtrepo/" under the project_dir
     # if we have an access token with the "contents" and "metadata" permissions then
     #   git clone https://oauth2:[TOKEN]@github.com/[REPO-OWNER]/[REPO-NAME]
