@@ -20,7 +20,6 @@ class GenerateResult:
             query = query.compile(
                 bind=wclient.engine, compile_kwargs={"literal_binds": True}
             )
-            print(query)
             results = wclient.execute(query)
             output.append(results)
 
