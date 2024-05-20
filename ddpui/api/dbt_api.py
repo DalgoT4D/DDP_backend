@@ -71,7 +71,7 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
         org.dbt.delete()
         org.dbt = None
         org.save()
-        
+
     repo_exists = dbt_service.check_repo_exists(
         payload.gitrepoUrl, payload.gitrepoAccessToken
     )
