@@ -1,6 +1,7 @@
 from ddpui.datainsights.insights.insight_interface import (
     DataTypeColInsights,
     ColInsight,
+    TranslateColDataType,
 )
 from ddpui.datainsights.insights.boolean_type.queries import (
     DataStats,
@@ -49,4 +50,4 @@ class BooleanColInsights(DataTypeColInsights):
         return resp
 
     def get_col_type(self) -> str:
-        return "Boolean"
+        return TranslateColDataType.BOOL

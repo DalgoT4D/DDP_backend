@@ -12,7 +12,10 @@ from sqlalchemy.sql.expression import (
 from sqlalchemy.sql.functions import func, Function
 from sqlalchemy import Float
 
-from ddpui.datainsights.insights.insight_interface import ColInsight
+from ddpui.datainsights.insights.insight_interface import (
+    ColInsight,
+    TranslateColDataType,
+)
 
 
 class DataStats(ColInsight):

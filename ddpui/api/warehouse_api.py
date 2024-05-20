@@ -1,10 +1,11 @@
 import json
-
+import sqlalchemy
 from dbt_automation.utils.warehouseclient import get_client
 from ninja import NinjaAPI
 from ninja.errors import HttpError, ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
+import sqlalchemy.exc
 
 from ddpui import auth
 from ddpui.core import dbtautomation_service
@@ -184,10 +185,15 @@ def get_json_column_spec(
     return json_columnspec
 
 
-@warehouseapi.get("/insights/generate/", auth=auth.CustomAuthMiddleware())
+@warehouseapi.get(
+    "/v1/table_data/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware()
+)
 @has_permission(["can_view_warehouse_data"])
-def get_data_insights(request, db_schema: str, db_table: str):
-    """Get the json column spec of a table in a warehouse"""
+def get_table_data_v1(request, schema_name: str, table_name: str):
+    """
+    Get the json column spec of a table in a warehouse
+    This fetches table data using the sqlalchemy engine
+    """
     orguser = request.orguser
     org = orguser.org
 
@@ -195,13 +201,27 @@ def get_data_insights(request, db_schema: str, db_table: str):
     if not org_warehouse:
         raise HttpError(404, "Please set up your warehouse first")
 
-    return {"success": 1}
+    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+
+    wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
+
+    try:
+        cols = wclient.get_table_columns(schema_name, table_name)
+        return cols
+    except sqlalchemy.exc.NoSuchTableError:
+        raise HttpError(404, "Table not found")
+    except Exception as err:
+        logger.error(err)
+        raise HttpError(500, err)
 
 
 @warehouseapi.post("/insights/metrics/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
-def get_data_insights(request, payload: ColumnMetrics):
-    """Get the json column spec of a table in a warehouse"""
+def post_data_insights(request, payload: ColumnMetrics):
+    """
+    Run all the require queries to fetch insights for a column
+    Will also save to redis results as queries are processed
+    """
     orguser = request.orguser
     org = orguser.org
 
@@ -232,6 +252,6 @@ def get_data_insights(request, payload: ColumnMetrics):
             wclient.get_wtype(),
         )
 
-        return GenerateResult.generate_col_insights(insight_obj, wclient)
+        return GenerateResult.generate_col_insights(org, insight_obj, wclient)
     except Exception as err:
         raise HttpError(500, str(err))

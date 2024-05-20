@@ -1,6 +1,7 @@
 from ddpui.datainsights.insights.insight_interface import (
     DataTypeColInsights,
     ColInsight,
+    TranslateColDataType,
 )
 from ddpui.datainsights.insights.numeric_type.queries import DataStats
 
@@ -44,4 +45,4 @@ class NumericColInsights(DataTypeColInsights):
         return resp
 
     def get_col_type(self) -> str:
-        return "Numeric"
+        return TranslateColDataType.NUMERIC

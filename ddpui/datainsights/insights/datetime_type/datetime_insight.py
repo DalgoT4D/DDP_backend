@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from ddpui.datainsights.insights.insight_interface import (
     DataTypeColInsights,
     ColInsight,
+    TranslateColDataType,
 )
 from ddpui.datainsights.insights.datetime_type.queries import (
     DataStats,
@@ -53,4 +54,4 @@ class DatetimeColInsights(DataTypeColInsights):
         return resp
 
     def get_col_type(self) -> str:
-        return "Datetime"
+        return TranslateColDataType.DATETIME

@@ -1,6 +1,7 @@
 from ddpui.datainsights.insights.insight_interface import (
     DataTypeColInsights,
     ColInsight,
+    TranslateColDataType,
 )
 from ddpui.datainsights.insights.string_type.queries import DataStats, DistributionChart
 
@@ -48,4 +49,4 @@ class StringColInsights(DataTypeColInsights):
         return resp
 
     def get_col_type(self) -> str:
-        return "String"
+        return TranslateColDataType.STRING

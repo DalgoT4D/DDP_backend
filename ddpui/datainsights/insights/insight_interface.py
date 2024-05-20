@@ -1,8 +1,27 @@
 from abc import ABC, abstractmethod
+import datetime
+from enum import Enum
 from sqlalchemy.sql.selectable import Select
 
 from ddpui.datainsights.query_builder import AggQueryBuilder
 from ddpui.datainsights.warehouse.warehouse_interface import WarehouseType
+
+
+class TranslateColDataType(str, Enum):
+    STRING = "String"
+    BOOL = "Boolean"
+    DATETIME = "Datetime"
+    NUMERIC = "Numeric"
+
+
+MAP_TRANSLATE_TYPES = {
+    int: TranslateColDataType.NUMERIC,
+    float: TranslateColDataType.NUMERIC,
+    datetime.datetime: TranslateColDataType.DATETIME,
+    datetime.date: TranslateColDataType.DATETIME,
+    bool: TranslateColDataType.BOOL,
+    str: TranslateColDataType.STRING,
+}
 
 
 class ColInsight(ABC):

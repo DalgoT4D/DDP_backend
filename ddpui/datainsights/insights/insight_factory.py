@@ -7,6 +7,7 @@ from ddpui.datainsights.insights.boolean_type.boolean_insights import BooleanCol
 from ddpui.datainsights.insights.string_type.string_insights import StringColInsights
 from ddpui.datainsights.insights.insight_interface import (
     DataTypeColInsights,
+    TranslateColDataType,
 )
 
 

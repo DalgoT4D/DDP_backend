@@ -2,6 +2,7 @@ from sqlalchemy.engine import create_engine
 from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy import inspect
 
+from ddpui.datainsights.insights.insight_interface import MAP_TRANSLATE_TYPES
 from ddpui.datainsights.warehouse.warehouse_interface import Warehouse
 from ddpui.datainsights.warehouse.warehouse_interface import WarehouseType
 
@@ -32,8 +33,20 @@ class PostgresClient(Warehouse):
         return [dict(row) for row in rows]
 
     def get_table_columns(self, db_schema: str, db_table: str) -> dict:
-        """Fetch columns of a table"""
-        return self.inspect_obj.get_columns(table_name=db_table, schema=db_schema)
+        """Fetch columns of a table; also send the translated col data type"""
+        res = []
+        for column in self.inspect_obj.get_columns(
+            table_name=db_table, schema=db_schema
+        ):
+            res.append(
+                {
+                    "name": column["name"],
+                    "data_type": str(column["type"]),
+                    "translated_type": MAP_TRANSLATE_TYPES[column["type"].python_type],
+                    "nullable": column["nullable"],
+                }
+            )
+        return res
 
     def get_col_python_type(self, db_schema: str, db_table: str, column_name: str):
         """Fetch python type of a column"""
