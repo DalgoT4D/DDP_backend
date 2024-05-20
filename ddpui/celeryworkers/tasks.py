@@ -359,6 +359,67 @@ def run_dbt_commands(self, orguser_id: int):
             lock.delete()
 
 
+@app.task(bind=True)
+def create_elementary_report(
+    self,
+    org_id: int,
+):
+    """run edr report to create the elementary report and write to s3"""
+    edr_binary = Path(os.getenv("DBT_VENV")) / "venv/bin/edr"
+    org = Org.objects.filter(id=org_id).first()
+    orgdbt = OrgDbt.objects.filter(org=org).first()
+    project_dir = Path(orgdbt.project_dir) / "dbtrepo"
+    profiles_dir = project_dir / "elementary_profiles"
+    aws_access_key_id = os.getenv("ELEMENTARY_AWS_ACCESS_KEY_ID")
+    aws_secret_access_key = os.getenv("ELEMENTARY_AWS_SECRET_ACCESS_KEY")
+    s3_bucket_name = os.getenv("ELEMENTARY_S3_BUCKET")
+
+    taskprogress = TaskProgress(
+        self.request.id, f"{TaskProgressHashPrefix.RUNELEMENTARY}-{org.slug}", 60
+    )
+
+    os.environ["PATH"] += ":" + str(Path(os.getenv("DBT_VENV")) / "venv/bin")
+    cmd = [
+        str(edr_binary),
+        "send-report",
+        "--aws-access-key-id",
+        aws_access_key_id,
+        "--aws-secret-access-key",
+        aws_secret_access_key,
+        "--s3-bucket-name",
+        s3_bucket_name,
+        "--bucket-file-path",
+        f"reports/{org.slug}.html",
+        "--profiles-dir",
+        str(profiles_dir),
+    ]
+    taskprogress.add(
+        {
+            "message": "started",
+            "status": "running",
+        }
+    )
+    try:
+        logger.info(" ".join(cmd))
+        runcmd(" ".join(cmd), project_dir)
+    except subprocess.CalledProcessError:
+        taskprogress.add(
+            {
+                "message": "edr failed",
+                # "error": str(error), # error contains the aws secrets
+                "status": "failed",
+            }
+        )
+        # logger.exception(error)  # error contains the aws secrets
+        return
+    taskprogress.add(
+        {
+            "message": "generated edr report",
+            "status": "completed",
+        }
+    )
+
+
 @app.task(bind=False)
 def update_dbt_core_block_schema_task(block_name, default_schema):
     """single http PUT request to the prefect-proxy"""

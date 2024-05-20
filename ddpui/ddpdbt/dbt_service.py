@@ -5,6 +5,10 @@ import subprocess
 from pathlib import Path
 import requests
 import re
+from uuid import uuid4
+from redis import Redis
+import boto3
+import boto3.exceptions
 
 from django.utils.text import slugify
 from dbt_automation import assets
@@ -19,6 +23,9 @@ from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask
 from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.utils import secretsmanager
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.taskprogress import TaskProgress
+from ddpui.models.tasks import TaskProgressHashPrefix
+from ddpui.celeryworkers.tasks import create_elementary_report
 
 logger = CustomLogger("ddpui")
 
@@ -209,3 +216,64 @@ def check_repo_exists(gitrepo_url: str, gitrepo_access_token: str | None) -> boo
         return False
 
     return response.status_code == 200
+
+
+def make_elementary_report(org: Org):
+    """generate elementary report"""
+    if org.dbt is None:
+        return "dbt is not configured for this client", None
+
+    project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
+    if not os.path.exists(project_dir):
+        return "create the dbt env first", None
+
+    repo_dir = project_dir / "dbtrepo"
+    if not os.path.exists(repo_dir / "elementary_profiles"):
+        return "set up elementary profile first", None
+
+    s3 = boto3.client(
+        "s3",
+        "ap-south-1",
+        aws_access_key_id=os.getenv("ELEMENTARY_AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.getenv("ELEMENTARY_AWS_SECRET_ACCESS_KEY"),
+    )
+    try:
+        s3response = s3.get_object(
+            Bucket=os.getenv("ELEMENTARY_S3_BUCKET"),
+            Key=f"reports/{org.slug}.html",
+        )
+        logger.info("fetched s3response")
+    except boto3.exceptions.botocore.exceptions.ClientError:
+        # the report doesn't exist, trigger a celery task to generate it
+        # see if there is an existing TaskProgress for this org
+        running_task = TaskProgress.get_running_tasks(
+            f"{TaskProgressHashPrefix.RUNELEMENTARY}-{org.slug}"
+        )
+        logger.info("running_task %s", str(running_task))
+        if running_task and len(running_task) > 0:
+            logger.info("edr already running for org %s", org.slug)
+            task_id = running_task[0].decode("utf8")
+            return None, {"task_id": task_id}
+
+        logger.info("creating new elementary report")
+        task = create_elementary_report.delay(org.id)
+        logger.info(task.id)
+        return None, {"task_id": task.id}
+    except Exception:
+        return "error fetching elementary report", None
+
+    report_html = s3response["Body"].read().decode("utf-8")
+    htmlfilename = str(repo_dir / "elementary-report.html")
+    with open(htmlfilename, "w", encoding="utf-8") as indexfile:
+        indexfile.write(report_html)
+        indexfile.close()
+    logger.info("wrote elementary report to %s", htmlfilename)
+
+    redis = Redis()
+    token = uuid4()
+    redis_key = f"elementary-report-{token.hex}"
+    redis.set(redis_key, htmlfilename.encode("utf-8"))
+    redis.expire(redis_key, 3600 * 24)
+    logger.info("created redis key %s", redis_key)
+
+    return None, {"token": token.hex}
