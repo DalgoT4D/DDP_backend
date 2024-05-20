@@ -374,16 +374,6 @@ def create_elementary_report(
     aws_secret_access_key = os.getenv("ELEMENTARY_AWS_SECRET_ACCESS_KEY")
     s3_bucket_name = os.getenv("ELEMENTARY_S3_BUCKET")
 
-    logger.info(
-        "org slug = %s project_dir = %s profiles_dir = %s aws_access_key_id = %s aws_secret_access_key = %s s3_bucket_name = %s",
-        org.slug,
-        project_dir,
-        profiles_dir,
-        aws_access_key_id,
-        aws_secret_access_key,
-        s3_bucket_name,
-    )
-
     taskprogress = TaskProgress(
         self.request.id, f"{TaskProgressHashPrefix.RUNELEMENTARY}-{org.slug}", 60
     )
