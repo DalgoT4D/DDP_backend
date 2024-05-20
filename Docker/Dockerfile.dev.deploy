@@ -1,0 +1,17 @@
+FROM dalgo_main_image:0.1 as build
+
+USER root
+
+
+# Copy whitelist file
+COPY Docker/mount/whitelist_deploy.py /usr/src/backend/ddpui/assets/whitelist.py
+
+RUN chmod +x /entrypoint.sh
+
+
+USER container_user
+
+# Make port 8002 available to the world outside this container
+EXPOSE 8002
+
+ENTRYPOINT [ "/entrypoint.sh" ]

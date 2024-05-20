@@ -1,13 +1,5 @@
 version: '3.8'
 services:
-  redis:
-    image: 'redis'
-    extra_hosts:
-        - "host.docker.internal:host-gateway"
-    networks:
-      - dalgo-network
-    ports:
-      - "6379:6379"
   database:
     image: postgres
     environment:
