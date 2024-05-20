@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from sqlalchemy.sql.selectable import Select
 
 from ddpui.datainsights.query_builder import AggQueryBuilder
+from ddpui.datainsights.warehouse.warehouse_interface import WarehouseType
 
 
 class ColInsight(ABC):
@@ -17,12 +18,14 @@ class ColInsight(ABC):
         db_table: str,
         db_schema: str,
         filter: dict = None,
+        wtype: str = None,
     ):
         self.column_name: str = column_name
         self.builder: AggQueryBuilder = AggQueryBuilder()
         self.db_table: str = db_table
         self.db_schema: str = db_schema
         self.filter = filter
+        self.wtype = wtype
 
     @abstractmethod
     def generate_sql(self) -> Select:
@@ -47,12 +50,14 @@ class DataTypeColInsights(ABC):
         db_table: str,
         db_schema: str,
         filter: dict = None,
+        wtype: str = None,
     ):
         self.column_name: str = column_name
         self.db_table: str = db_table
         self.db_schema: str = db_schema
         self.insights: list[ColInsight] = []
         self.filter = filter
+        self.wtype = WarehouseType.POSTGRES  # default
 
     @abstractmethod
     def generate_sqls(self) -> list[Select]:

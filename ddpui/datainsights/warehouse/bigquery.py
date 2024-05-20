@@ -5,6 +5,7 @@ from sqlalchemy import inspect
 from sqlalchemy_bigquery import BigQueryDialect
 
 from ddpui.datainsights.warehouse.warehouse_interface import Warehouse
+from ddpui.datainsights.warehouse.warehouse_interface import WarehouseType
 
 
 class BigqueryClient(Warehouse):
@@ -41,3 +42,6 @@ class BigqueryClient(Warehouse):
             if column["name"] == column_name:
                 return column["type"].python_type
         return None
+
+    def get_wtype(self):
+        return WarehouseType.BIGQUERY

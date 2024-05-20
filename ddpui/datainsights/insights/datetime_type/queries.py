@@ -10,11 +10,13 @@ from sqlalchemy.sql.expression import (
     cast,
     select,
     desc,
+    text,
 )
-from sqlalchemy.sql.functions import func, Function
-from sqlalchemy import Float, extract
+from sqlalchemy.sql.functions import func, Function, register_function, GenericFunction
+from sqlalchemy import Float, extract, literal
 
 from ddpui.datainsights.insights.insight_interface import ColInsight
+from ddpui.datainsights.warehouse.warehouse_interface import WarehouseType
 
 
 class DataStats(ColInsight):
@@ -44,13 +46,21 @@ class DataStats(ColInsight):
             .add_column(
                 func.min(datetime_col).label("minVal"),
             )
-            .add_column(
+        )
+
+        if self.wtype == WarehouseType.POSTGRES:
+            query = query.add_column(
                 (
                     func.date(func.max(datetime_col))
                     - func.date(func.min(datetime_col))
                 ).label("rangeInDays"),
             )
-        )
+        elif self.wtype == WarehouseType.BIGQUERY:
+            query = query.add_column(
+                func.TIMESTAMP_DIFF(
+                    func.max(datetime_col), func.min(datetime_col), text("DAY")
+                ).label("rangeInDays")
+            )
 
         return query.fetch_from(self.db_table, self.db_schema).build()
 
@@ -102,8 +112,10 @@ class DistributionChart(ColInsight):
     Computes the frequency chart
     """
 
-    def __init__(self, column_name: str, db_table: str, db_schema: str, filter: dict):
-        super().__init__(column_name, db_table, db_schema)
+    def __init__(
+        self, column_name: str, db_table: str, db_schema: str, filter: dict, wtype: str
+    ):
+        super().__init__(column_name, db_table, db_schema, filter, wtype)
         if filter:
             self.filter: BarChartFilter = BarChartFilter(**filter)
         else:

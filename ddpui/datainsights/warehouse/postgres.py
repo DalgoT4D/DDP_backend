@@ -3,6 +3,7 @@ from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy import inspect
 
 from ddpui.datainsights.warehouse.warehouse_interface import Warehouse
+from ddpui.datainsights.warehouse.warehouse_interface import WarehouseType
 
 
 class PostgresClient(Warehouse):
@@ -41,3 +42,6 @@ class PostgresClient(Warehouse):
             if column["name"] == column_name:
                 return column["type"].python_type
         return None
+
+    def get_wtype(self):
+        return WarehouseType.POSTGRES

@@ -11,10 +11,17 @@ class NumericColInsights(DataTypeColInsights):
     """
 
     def __init__(
-        self, column_name: str, db_table: str, db_schema: str, filter: dict = None
+        self,
+        column_name: str,
+        db_table: str,
+        db_schema: str,
+        filter: dict = None,
+        wtype: str = None,
     ):
-        super().__init__(column_name, db_table, db_schema, filter)
-        self.insights: list[ColInsight] = [DataStats(column_name, db_table, db_schema)]
+        super().__init__(column_name, db_table, db_schema, filter, wtype)
+        self.insights: list[ColInsight] = [
+            DataStats(column_name, db_table, db_schema, filter, wtype)
+        ]
 
     def generate_sqls(self) -> list:
         """Returns list of sql queries to be executed"""

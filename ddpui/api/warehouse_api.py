@@ -227,6 +227,7 @@ def get_data_insights(request, payload: ColumnMetrics):
             payload.db_schema, payload.db_table, payload.column_name
         ),
         payload.filter,
+        wclient.get_wtype(),
     )
 
     return GenerateResult.generate_insight(insight_obj, wclient)
