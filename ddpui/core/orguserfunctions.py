@@ -5,8 +5,7 @@ do not raise http errors here
 
 import os
 from datetime import datetime
-
-from ddpui.utils.redis_client import  RedisClient
+from uuid import uuid4
 
 from django.contrib.auth.models import User
 from django.db import transaction
@@ -36,6 +35,7 @@ from ddpui.models.role_based_access import Role
 from ddpui.utils import helpers, sendgrid, timezone
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.orguserhelpers import from_invitation, from_orguser
+from ddpui.utils.redis_client import RedisClient
 
 logger = CustomLogger("ddpui")
 
