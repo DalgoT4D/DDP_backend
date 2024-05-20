@@ -79,7 +79,8 @@ export SUPERSET_USAGE_CREDS_SECRET_ID=$(get_secret_value "SUPERSET_USAGE_CRED_SE
 
 # First Org and User
 export FIRST_ORG_NAME=$(get_secret_value "FIRST_ORG_NAME" "payload" "" "us-central1")
-export FIRST_USER_EMAIL=$(get_secret_value "FIRST_USER_EMAIL" "payload" "" "us-central1")
+export ADMIN_USER_EMAIL=$(get_secret_value "ADMIN_USER_EMAIL" "payload" "" "us-central1")
+export ADMIN_PASSWORD=$(get_secret_value "ADMIN_PASSWORD" "payload" "" "us-central1")
 
 
 
