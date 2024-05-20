@@ -198,7 +198,7 @@ def get_data_insights(request, db_schema: str, db_table: str):
     return {"success": 1}
 
 
-@warehouseapi.post("/insights/col_metrics/", auth=auth.CustomAuthMiddleware())
+@warehouseapi.post("/insights/metrics/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def get_data_insights(request, payload: ColumnMetrics):
     """Get the json column spec of a table in a warehouse"""
@@ -213,21 +213,25 @@ def get_data_insights(request, payload: ColumnMetrics):
 
     wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
 
-    print(
-        wclient.get_col_python_type(
+    try:
+        col_type = wclient.get_col_python_type(
             payload.db_schema, payload.db_table, payload.column_name
         )
-    )
 
-    insight_obj = InsightsFactory.initiate_insight(
-        payload.column_name,
-        payload.db_table,
-        payload.db_schema,
-        wclient.get_col_python_type(
-            payload.db_schema, payload.db_table, payload.column_name
-        ),
-        payload.filter,
-        wclient.get_wtype(),
-    )
+        if not col_type:
+            raise ValueError(
+                f"Column '{payload.column_name}' not found in '{payload.db_schema}.{payload.db_table}'"
+            )
 
-    return GenerateResult.generate_insight(insight_obj, wclient)
+        insight_obj = InsightsFactory.initiate_insight(
+            payload.column_name,
+            payload.db_table,
+            payload.db_schema,
+            col_type,
+            payload.filter,
+            wclient.get_wtype(),
+        )
+
+        return GenerateResult.generate_col_insights(insight_obj, wclient)
+    except Exception as err:
+        raise HttpError(500, str(err))

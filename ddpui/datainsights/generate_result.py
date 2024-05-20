@@ -10,7 +10,9 @@ class GenerateResult:
     """
 
     @classmethod
-    def generate_insight(cls, insight: DataTypeColInsights, wclient: Warehouse) -> dict:
+    def generate_col_insights(
+        cls, insight: DataTypeColInsights, wclient: Warehouse
+    ) -> dict:
         """
         Generates insights for the given list of insights
         """
