@@ -111,4 +111,4 @@ class AirbyteConnectionSchemaUpdate(Schema):
     name: str
     syncCatalog: dict
     connectionId: str
-    
+    sourceCatalogId: str

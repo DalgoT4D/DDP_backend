@@ -2,6 +2,8 @@ from unittest.mock import patch, Mock
 import pytest
 from ddpui.ddpairbyte.airbytehelpers import (
     add_custom_airbyte_connector,
+    get_connection_catalog,
+    update_schema_changes_connection,
     upgrade_custom_sources,
     setup_airbyte_workspace_v1,
     AIRBYTESERVER,
@@ -9,7 +11,7 @@ from ddpui.ddpairbyte.airbytehelpers import (
     update_destination,
     delete_source,
 )
-from ddpui.ddpairbyte.schema import AirbyteDestinationUpdate
+from ddpui.ddpairbyte.schema import AirbyteConnectionSchemaUpdate, AirbyteDestinationUpdate
 from ddpui.models.org import Org, OrgPrefectBlockv1, OrgWarehouse
 from ddpui.models.tasks import Task, OrgTask, OrgDataFlowv1, DataflowOrgTask
 from ddpui.ddpprefect import DBTCLIPROFILE
@@ -623,3 +625,111 @@ def test_delete_source(
     ).exists()
 
     mock_delete_source.assert_called_once()
+
+
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection_catalog",
+    mock_get_connection_catalog=Mock(),
+)
+def test_get_connection_catalog(
+    mock_get_connection_catalog: Mock,
+):
+    """test get_connection_catalog"""
+    org = Org.objects.create(name="org", slug="org")
+
+    mock_get_connection_catalog.return_value = {
+        "name": "Test Connection",
+        "connectionId": "connection_id",
+        "catalogId": "catalog_id",
+        "syncCatalog": True,
+        "schemaChange": False,
+        "catalogDiff": [],
+    }
+
+    result, error = get_connection_catalog("connection_id")
+
+    assert error is None
+    assert result == [
+        {
+            "name": "Test Connection",
+            "connectionId": "connection_id",
+            "catalogId": "catalog_id",
+            "syncCatalog": True,
+            "schemaChange": False,
+            "catalogDiff": [],
+        }
+    ]
+
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection_catalog",
+    mock_get_connection_catalog=Mock(),
+)
+def test_get_connection_catalog_fail(
+    mock_get_connection_catalog: Mock,
+):
+    """Test for failing get_connection_catalog"""
+    org_save = Mock()
+    org = Mock(save=org_save)
+    mock_get_connection_catalog.side_effect = Exception("error")
+    
+    res, error = get_connection_catalog("connection_name")
+    
+    assert res is None
+    assert error == "Error getting catalog for connection connection_name: error"
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.update_schema_change")
+def test_update_schema_changes_connection(
+    mock_update_schema_change, mock_get_connection, db
+):
+    """
+    Test the update_schema_changes_connection function.
+    """
+    # Create a test org
+    org = Org.objects.create(name="Test Org", slug="test-org")
+
+    # Create a test task
+    task = Task.objects.create(type="test-type", slug="test-slug", label="test-task", command="test-command", is_system=True)
+
+    # Create a test OrgTask
+    org_task = OrgTask.objects.create(
+        org=org,
+        task=task,
+        connection_id="test-connection-id",
+        parameters={},
+        generated_by="system"
+    )
+
+    # Create a test OrgWarehouse
+    org_warehouse = OrgWarehouse.objects.create(
+        wtype="bigquery",
+        name="Test Warehouse",
+        credentials='{"key": "value"}',
+        org=org,
+        airbyte_destination_id="test-airbyte-destination-id",
+        bq_location="us-central1"
+    )
+
+    # Set up mock responses
+    mock_get_connection.return_value = {"name": "Test Connection"}
+    mock_update_schema_change.return_value = {"updated": True}, None
+
+    # Call the function
+    payload = AirbyteConnectionSchemaUpdate(
+        name="Updated Connection",
+        syncCatalog={},
+        connectionId="test-connection-id",
+        sourceCatalogId="test-source-catalog-id"
+    )
+    response, error = update_schema_changes_connection(org, "test-connection-id", payload)
+
+    # Assert the response
+    assert response == ({"updated": True}, None)
+    assert error is None
+
+    # Assert the mock functions were called with the expected arguments
+    mock_get_connection.assert_called_once_with(org.airbyte_workspace_id, "test-connection-id")
+    mock_update_schema_change.assert_called_once_with(
+        org, payload, {"name": "Updated Connection", "skipReset": True}
+    )
