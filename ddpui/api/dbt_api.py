@@ -2,7 +2,6 @@ import os
 from uuid import uuid4
 from pathlib import Path
 from redis import Redis
-
 from ninja import NinjaAPI
 from ninja.errors import HttpError
 
@@ -73,6 +72,13 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
         org.dbt = None
         org.save()
 
+    repo_exists = dbt_service.check_repo_exists(
+        payload.gitrepoUrl, payload.gitrepoAccessToken
+    )
+
+    if not repo_exists:
+        raise HttpError(400, "Github repository does not exist")
+
     task = setup_dbtworkspace.delay(org.id, payload.dict())
 
     return {"task_id": task.id}
@@ -85,7 +91,14 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
     orguser: OrgUser = request.orguser
     org = orguser.org
     if org.dbt is None:
-        raise HttpError(400, "create a dbt workspace first")
+        raise HttpError(400, "Create a dbt workspace first")
+
+    repo_exists = dbt_service.check_repo_exists(
+        payload.gitrepoUrl, payload.gitrepoAccessToken
+    )
+
+    if not repo_exists:
+        raise HttpError(400, "Github repository does not exist")
 
     org.dbt.gitrepo_url = payload.gitrepoUrl
     org.dbt.gitrepo_access_token_secret = payload.gitrepoAccessToken
