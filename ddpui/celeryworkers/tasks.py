@@ -9,17 +9,19 @@ from django.utils.text import slugify
 from ddpui.celery import app
 from ddpui.utils.timezone import UTC
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.models.org import Org, OrgDbt, OrgWarehouse, OrgPrefectBlockv1
+from ddpui.models.org import Org, OrgDbt, OrgWarehouse, OrgPrefectBlockv1, OrgDataFlowv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.orgjobs import BlockLock
 from ddpui.models.tasks import TaskLock, OrgTask, TaskProgressHashPrefix
 from ddpui.models.canvaslock import CanvasLock
+from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.ddpprefect.prefect_service import (
     update_dbt_core_block_schema,
     get_dbt_cli_profile_block,
+    prefect_get,
 )
 from ddpui.utils.constants import (
     TASK_DBTRUN,
@@ -445,6 +447,54 @@ def delete_old_canvaslocks():
     """delete canvas locks which were created over 10 minutes ago"""
     tenminutesago = UTC.localize(datetime.now() - timedelta(seconds=600))
     CanvasLock.objects.filter(locked_at__lt=tenminutesago).delete()
+
+
+@app.task(bind=True)
+def sync_flow_runs_of_deployments(self, deployment_ids: list[str] = None):
+    """
+    This function will sync (create) latest flow runs of deployment(s) if missing from our db
+    """
+
+    query = OrgDataFlowv1.objects
+    if deployment_ids:
+        query = query.filter(deployment_id__in=deployment_ids)
+
+    # sync recent 50 flow runs of each deployment
+    start_time_gt = UTC.localize(datetime.now() - timedelta(hours=24))
+    for dataflow in query.all():
+        try:
+            deployment_id = dataflow.deployment_id
+            params = {
+                "deployment_id": deployment_id,
+                "limit": 50,
+                "start_time_gt": start_time_gt.isoformat(),
+            }
+            res = prefect_get("flow_runs", params=params, timeout=60)
+
+            # iterate so that start-time is ASC
+            for flow_run in res["flow_runs"][::-1]:
+                if not PrefectFlowRun.objects.filter(
+                    flow_run_id=flow_run["id"]
+                ).exists():
+                    if flow_run["startTime"] in ["", None]:
+                        flow_run["startTime"] = flow_run["expectedStartTime"]
+                    PrefectFlowRun.objects.create(
+                        deployment_id=deployment_id,
+                        flow_run_id=flow_run["id"],
+                        name=flow_run["name"],
+                        start_time=flow_run["startTime"],
+                        expected_start_time=flow_run["expectedStartTime"],
+                        total_run_time=flow_run["totalRunTime"],
+                        status=flow_run["status"],
+                        state_name=flow_run["state_name"],
+                    )
+        except Exception as e:
+            logger.error(
+                "failed to sync flow runs for deployment %s ; moving to next one",
+                deployment_id,
+            )
+            logger.exception(e)
+            continue
 
 
 @app.on_after_finalize.connect
