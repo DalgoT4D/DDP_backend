@@ -400,7 +400,6 @@ def create_elementary_report(
         }
     )
     try:
-        logger.info(" ".join(cmd))
         runcmd(" ".join(cmd), project_dir)
     except subprocess.CalledProcessError:
         taskprogress.add(
