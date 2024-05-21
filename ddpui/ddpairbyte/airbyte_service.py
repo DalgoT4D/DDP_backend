@@ -10,9 +10,9 @@ import requests
 from dotenv import load_dotenv
 from ninja.errors import HttpError
 from ddpui.ddpairbyte import schema
-from ddpui.ddpairbyte.airbytehelpers import trigger_prefect_flow_run
 from ddpui.models.org import Org
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.deploymentblocks import trigger_prefect_flow_run
 from ddpui.utils.helpers import remove_nested_attribute
 from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
@@ -940,7 +940,6 @@ def get_connection_catalog(connection_id: str) -> dict:
     """get the catalog for a connection"""
     if not isinstance(connection_id, str):
         raise HttpError(400, "connection_id must be a string")
-
     res = abreq("web_backend/connections/get", {"connectionId": connection_id, "withRefreshedCatalog": True})
     return res
 

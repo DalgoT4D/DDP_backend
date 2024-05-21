@@ -357,7 +357,6 @@ def get_connections(org: Org):
                 "destination": connection["destination"],
                 "catalogId": connection["catalogId"],
                 "syncCatalog": connection["syncCatalog"],
-                "schemaChange": connection["schemaChange"],
                 "status": connection["status"],
                 "deploymentId": (
                     sync_dataflow_orgtask.dataflow.deployment_id

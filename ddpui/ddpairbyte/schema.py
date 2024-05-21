@@ -76,7 +76,6 @@ class AirbyteConnectionCreateResponse(Schema):
     catalogId: str
     syncCatalog: dict
     status: str
-    schemaChange: str
     deploymentId: str = None
     lastRun: Optional[dict | None]
     destinationSchema: str = ""

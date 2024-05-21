@@ -17,16 +17,19 @@ from ddpui.api.airbyte_api import (
     delete_airbyte_source_v1,
     get_airbyte_connection_v1,
     get_airbyte_connections_v1,
+    get_connection_catalog_v1,
     get_latest_job_for_connection,
     post_airbyte_connection_reset_v1,
     post_airbyte_connection_v1,
     post_airbyte_workspace_v1,
     put_airbyte_connection_v1,
     put_airbyte_destination_v1,
+    update_schema_changes_connection,
 )
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.ddpairbyte.schema import (
     AirbyteConnectionCreate,
+    AirbyteConnectionSchemaUpdate,
     AirbyteConnectionUpdate,
     AirbyteDestinationUpdate,
     AirbyteWorkspace,
@@ -1050,3 +1053,65 @@ def test_delete_airbyte_source_success(orguser_workspace):
     delete_source_mock.assert_called_once_with(request.orguser.org, source_id)
 
     assert response == {"success": 1}
+
+
+def test_get_connection_catalog_v1_no_workspace(orguser):
+    """Tests get_connection_catalog_v1 when organization has no workspace"""
+    request = mock_request(orguser)
+
+    connection_id = "connection_123"
+
+    with pytest.raises(HttpError) as excinfo:
+        get_connection_catalog_v1(request, connection_id)
+
+    assert excinfo.value.status_code == 400
+    assert str(excinfo.value) == "create an airbyte workspace first"
+
+
+def test_update_schema_changes_connection_with_no_workspace(orguser):
+    """Tests update_schema_changes_connection_v1 when organization has no workspace"""
+    request = mock_request(orguser)
+
+    connection_id = "connection_123"
+    payload = {"schemaChange": "true"}
+
+    with pytest.raises(HttpError) as excinfo:
+        update_schema_changes_connection(request, connection_id, payload)
+
+    assert excinfo.value.status_code == 400
+    assert str(excinfo.value) == "create an airbyte workspace first"
+
+
+# write success test case for update_schema_changes_connection
+
+def test_update_schema_changes_connection_success(orguser_workspace):
+    """Tests update_schema_changes_connection when updating schema changes is successful"""
+    request = mock_request(orguser_workspace)
+
+    connection_id = "connection_123"
+    payload = AirbyteConnectionSchemaUpdate(
+        name="Updated Connection", connectionId="connection_123", syncCatalog={}, sourceCatalogId="source_catalog_id"
+    )
+
+    with patch(
+        "ddpui.ddpairbyte.airbytehelpers.update_schema_changes_connection"
+    ) as update_schema_changes_connection_mock:
+        updated_connection = {
+            "connectionId": connection_id,
+            "name": "Updated Connection",
+            "syncCatalog": {},
+            "catalogId": "source_catalog_id",
+            "schemaChange": "no_change"
+        }
+        update_schema_changes_connection_mock.return_value = (updated_connection, None)
+
+        response = update_schema_changes_connection(request, connection_id, payload)
+
+    update_schema_changes_connection_mock.assert_called_once_with(
+        request.orguser.org, connection_id, payload
+    )
+
+    assert "connectionId" in response
+    assert "syncCatalog" in response
+    assert "catalogId" in response
+    assert "schemaChange" in response

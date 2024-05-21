@@ -627,10 +627,9 @@ def get_connection_catalog_v1(request, connection_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    res, error = airbytehelpers.get_connection_catalog(orguser.org, connection_id)
-    if error:
-        raise HttpError(400, error)
-    logger.debug(res)
+    res = airbytehelpers.get_connection_catalog(connection_id)
+    if res is None:
+        raise HttpError(400, "connection not found")
     return res
 
 
