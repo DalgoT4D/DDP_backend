@@ -99,9 +99,12 @@ def test_post_dbt_workspace(orguser):
     with patch(
         "ddpui.celeryworkers.tasks.setup_dbtworkspace.delay", return_value=mocked_task
     ) as delay:
-        post_dbt_workspace(request, payload)
-        delay.assert_called_once_with(orguser.org.id, payload.dict())
-        assert orguser.org.dbt is None
+        with patch(
+            "ddpui.api.dbt_api.dbt_service.check_repo_exists", return_value=True
+        ):
+            post_dbt_workspace(request, payload)
+            delay.assert_called_once_with(orguser.org.id, payload.dict())
+            assert orguser.org.dbt is None
 
 
 def test_put_dbt_github(orguser):
