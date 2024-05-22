@@ -16,6 +16,7 @@ from ddpui.api.warehouse_api import warehouseapi
 from ddpui.api.webhook_api import webhookapi
 from ddpui.healthcheck import healthcheck
 from ddpui.html.docs import get_dbt_docs
+from ddpui.html.elementary import get_elementary_report
 
 urlpatterns = [
     # path("admin/", admin.site.urls), # Uncomment if you want to use django-admin app
@@ -32,6 +33,7 @@ urlpatterns = [
     path("healthcheck", healthcheck),
     path("api/", user_org_api.urls),
     path("docs/<tokenhex>/", get_dbt_docs),
+    path("elementary/<tokenhex>/", get_elementary_report),
     path("prometheus/", include("django_prometheus.urls")),
     path("webhooks/", webhookapi.urls),
 ]

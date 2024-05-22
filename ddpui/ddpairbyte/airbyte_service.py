@@ -640,6 +640,19 @@ def get_connections(workspace_id: str) -> dict:
     return res
 
 
+def get_webbackend_connections(workspace_id: str) -> dict:
+    """Fetch all connections of an airbyte workspace"""
+    if not isinstance(workspace_id, str):
+        raise HttpError(400, "workspace_id must be a string")
+
+    res = abreq("web_backend/connections/list", {"workspaceId": workspace_id})
+    if "connections" not in res:
+        error_message = f"connections not found for workspace: {workspace_id}"
+        logger.error(error_message)
+        raise HttpError(404, error_message)
+    return res["connections"]
+
+
 def get_connection(workspace_id: str, connection_id: str) -> dict:
     """Fetch a connection of an airbyte workspace"""
     if not isinstance(workspace_id, str):

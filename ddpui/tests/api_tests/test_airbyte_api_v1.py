@@ -39,6 +39,7 @@ from ddpui.auth import ACCOUNT_MANAGER_ROLE, SUPER_ADMIN_ROLE
 from ddpui.models.org_user import OrgUser, OrgUserRole
 from ddpui.models.org import Org, OrgPrefectBlockv1, OrgWarehouse
 from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask, Task
+from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
 pytestmark = pytest.mark.django_db
@@ -197,31 +198,21 @@ def test_get_airbyte_connections_v1_without_workspace(orguser):
 
 @patch.multiple(
     "ddpui.ddpairbyte.airbyte_service",
-    get_connection=Mock(
-        return_value={
-            "name": "fake-conn",
-            "sourceId": "fake-source-id-1",
-            "connectionId": "fake-connection-id-1",
-            "destinationId": "fake-destination-id-1",
-            "catalogId": "fake-source-catalog-id-1",
-            "syncCatalog": "sync-catalog",
-            "status": "conn-status",
-            "source": {"id": "fake-source-id-1", "name": "fake-source-name-1"},
-            "destination": {
-                "id": "fake-destination-id-1",
-                "name": "fake-destination-name-1",
-            },
-        }
-    ),
-)
-@patch.multiple(
-    "ddpui.ddpprefect.prefect_service",
-    get_last_flow_run_by_deployment_id=Mock(
-        return_value={
-            "flow-run-id": "00000",
-            "startTime": 0,
-            "expectedStartTime": 0,
-        }
+    get_webbackend_connections=Mock(
+        return_value=[
+            {
+                "name": "fake-conn",
+                "sourceId": "fake-source-id-1",
+                "connectionId": "fake-connection-id-1",
+                "destinationId": "fake-destination-id-1",
+                "status": "conn-status",
+                "source": {"id": "fake-source-id-1", "name": "fake-source-name-1"},
+                "destination": {
+                    "id": "fake-destination-id-1",
+                    "name": "fake-destination-name-1",
+                },
+            }
+        ]
     ),
 )
 def test_get_airbyte_connections_success(orguser_workspace):
@@ -237,7 +228,7 @@ def test_get_airbyte_connections_success(orguser_workspace):
     task = Task.objects.create(**airbyte_task_config)
 
     org_task = OrgTask.objects.create(
-        task=task, org=request.orguser.org, connection_id="fake-conn-id"
+        task=task, org=request.orguser.org, connection_id="fake-connection-id-1"
     )
 
     dataflow = OrgDataFlowv1.objects.create(
@@ -247,6 +238,18 @@ def test_get_airbyte_connections_success(orguser_workspace):
         deployment_name="test-deployment",
         cron=None,
         dataflow_type="manual",
+    )
+
+    # last run of this sync deployment/dataflow
+    PrefectFlowRun.objects.create(
+        deployment_id="fake-deployment-id",
+        flow_run_id="some-fake-run-id",
+        name="airbyte-sync-run",
+        start_time="2022-01-01",
+        expected_start_time="2022-01-01",
+        total_run_time=12,
+        status="COMPLETED",
+        state_name="Completed",
     )
 
     DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=org_task)
@@ -261,15 +264,13 @@ def test_get_airbyte_connections_success(orguser_workspace):
     assert result[0]["source"]["name"] == "fake-source-name-1"
     assert result[0]["destination"]["id"] == "fake-destination-id-1"
     assert result[0]["destination"]["name"] == "fake-warehouse-name"
-    assert result[0]["catalogId"] == "fake-source-catalog-id-1"
-    assert result[0]["syncCatalog"] == "sync-catalog"
     assert result[0]["status"] == "conn-status"
     assert result[0]["deploymentId"] == "fake-deployment-id"
-    assert result[0]["lastRun"] == {
-        "flow-run-id": "00000",
-        "startTime": 0,
-        "expectedStartTime": 0,
-    }
+    assert result[0]["lastRun"]["id"] == "some-fake-run-id"
+    assert result[0]["lastRun"]["deployment_id"] == "fake-deployment-id"
+    assert result[0]["lastRun"]["name"] == "airbyte-sync-run"
+    assert result[0]["lastRun"]["state_name"] == "Completed"
+    assert result[0]["lastRun"]["status"] == "COMPLETED"
     assert result[0]["lock"] is None
 
 

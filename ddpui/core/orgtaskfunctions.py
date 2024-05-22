@@ -10,6 +10,7 @@ from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
 )
+from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpprefect import prefect_service
 from ddpui.core.pipelinefunctions import setup_dbt_core_task_config
@@ -65,7 +66,8 @@ def create_prefect_deployment_for_dbtcore_task(
                     "org_slug": org_task.org.slug,
                 }
             },
-        )
+        ),
+        MANUL_DBT_WORK_QUEUE,
     )
 
     # store deployment record in django db

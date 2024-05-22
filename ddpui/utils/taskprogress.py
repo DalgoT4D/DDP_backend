@@ -40,3 +40,9 @@ class TaskProgress:
         if result:
             return json.loads(result)
         return None
+
+    @staticmethod
+    def get_running_tasks(hashkey):
+        """look up any running tasks for this hashkey"""
+        redis = Redis()
+        return redis.hkeys(hashkey)

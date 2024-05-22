@@ -5,7 +5,7 @@ import string
 import secrets
 
 
-def runcmd(cmd, cwd):
+def runcmd(cmd: str, cwd: str):
     """runs a shell command in a specified working directory"""
     return subprocess.run(shlex.split(cmd), cwd=str(cwd), check=True)
 
