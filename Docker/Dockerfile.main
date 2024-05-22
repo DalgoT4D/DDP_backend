@@ -1,4 +1,4 @@
-# This is a multistage Dockerfile to build the docker image for the Dalgo backend 
+# This is the main multistage Dockerfile to build the docker image for the Dalgo backend 
 # application based on the official python image and the application code
 
 # Stage 1: Build the application
