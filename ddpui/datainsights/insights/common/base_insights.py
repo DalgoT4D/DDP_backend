@@ -26,19 +26,3 @@ class BaseInsights(DataTypeColInsights):
                 self.columns, self.db_table, self.db_schema, self.filter, self.wtype
             ),
         ]
-
-    def generate_sqls(self) -> list:
-        """Returns list of sql queries to be executed"""
-        return [query.generate_sql() for query in self.insights]
-
-    def merge_output(self, results: list[dict]):
-        output = [
-            insight.parse_results(result)
-            for insight, result in zip(self.insights, results)
-        ]
-        resp = {}
-
-        if len(output) > 0:
-            resp = output[0]
-
-        return resp

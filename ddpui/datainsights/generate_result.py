@@ -94,16 +94,27 @@ def poll_for_column_insights(
 
     GenerateResult.poll_for_all_queries(org_warehouse.org, insight_objs, column_name)
 
-    # return the saved results
-    taskprogress.add(
-        {
-            "message": "Fetched results",
-            "status": GenerateResult.RESULT_STATUS_COMPLETED,
-            "results": GenerateResult.fetch_results(
-                org_warehouse.org, db_schema, db_table, column_name
-            ),
-        }
+    final_result = GenerateResult.fetch_results(
+        org_warehouse.org, db_schema, db_table, column_name
     )
+
+    if not GenerateResult.validate_results(insight_objs, final_result):
+        taskprogress.add(
+            {
+                "message": "Partial data fetched",
+                "status": GenerateResult.RESULT_STATUS_ERROR,
+                "results": [],
+            }
+        )
+    else:
+        # return the saved results
+        taskprogress.add(
+            {
+                "message": "Fetched results",
+                "status": GenerateResult.RESULT_STATUS_COMPLETED,
+                "results": final_result,
+            }
+        )
 
 
 class GenerateResult:
@@ -141,9 +152,6 @@ class GenerateResult:
             if cls.acquire_query_lock(org, query):
                 to_execute_queries.append(query)
 
-        logger.info(f"ENGINE: ")
-        logger.info(wclient.engine)
-
         # run the queries and save results
         for query in to_execute_queries:
             try:
@@ -155,9 +163,6 @@ class GenerateResult:
 
                 # parse result of this query
                 results = query.parse_results(results)
-
-                logger.info("RESULT: ")
-                logger.info(results)
 
                 # save result to redis
                 cls.save_results(org, query, results)
@@ -234,8 +239,6 @@ class GenerateResult:
         current_results = GenerateResult.ensure_insights_setup_for_results(
             org, query.db_schema, query.db_table
         )
-        logger.info("CURRENT RESULTS")
-        logger.info(current_results)
 
         merged_results = {
             key: {**current_results.get(key, {}), **parsed_results.get(key, {})}
@@ -328,3 +331,17 @@ class GenerateResult:
         results = json.loads(results) if results else None
 
         return results[f"{column_name}"] if column_name in results else None
+
+    @classmethod
+    def validate_results(
+        cls, insights: list[DataTypeColInsights], parsed_result: dict
+    ) -> bool:
+        """
+        Validate the results
+        """
+        for insight in insights:
+            for query in insight.insights:
+                if not query.validate_query_results(parsed_result):
+                    return False
+
+        return True

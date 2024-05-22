@@ -73,6 +73,10 @@ class ColInsight(ABC):
     def chart_type(self) -> str:
         return None
 
+    @abstractmethod
+    def validate_query_results(self, parsed_results):
+        pass
+
 
 class DataTypeColInsights(ABC):
     """
@@ -100,11 +104,3 @@ class DataTypeColInsights(ABC):
         self.filter = filter
         self.wtype = wtype if wtype else WarehouseType.POSTGRES  # default postgres
         self.insights: list[ColInsight] = []
-
-    @abstractmethod
-    def generate_sqls(self) -> list[Select]:
-        pass
-
-    @abstractmethod
-    def merge_output(self, results: list[dict]):
-        pass

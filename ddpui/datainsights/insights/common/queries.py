@@ -111,3 +111,21 @@ class BaseDataStats(ColInsight):
                 }
 
         return res
+
+    def validate_query_results(self, parsed_results):
+        """
+        Validate the parsed results of the query
+        This function assumes the parsed_results sent is for a single column
+        """
+        validate = False
+        if (
+            parsed_results
+            and isinstance(parsed_results, dict)
+            and all(
+                key in parsed_results
+                for key in ["count", "countNull", "countDistinct", "maxVal", "minVal"]
+            )
+        ):
+            validate = True
+
+        return validate

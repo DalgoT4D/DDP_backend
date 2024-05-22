@@ -24,24 +24,3 @@ class NumericColInsights(DataTypeColInsights):
                 self.columns, self.db_table, self.db_schema, self.filter, self.wtype
             ),
         ]
-
-    def generate_sqls(self) -> list:
-        """Returns list of sql queries to be executed"""
-        return [query.generate_sql() for query in self.insights]
-
-    def merge_output(self, results: list[dict]):
-        output = [
-            insight.parse_results(result)
-            for insight, result in zip(self.insights, results)
-        ]
-        # resp = {
-        #     "columnName": self.column_name,
-        #     "columnType": self.get_col_type(),
-        #     "insights": {},
-        # }
-        # resp = {}
-
-        # if len(output) > 0:
-        #     resp["insights"] = output[0]
-
-        return output
