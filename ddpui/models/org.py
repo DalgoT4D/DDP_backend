@@ -211,7 +211,7 @@ class OrgDataFlowv1(models.Model):
     )  # skipcq: PTC-W0901, PTC-W0906
 
     reset_conn_dataflow = models.ForeignKey(
-        'self', on_delete=models.SET_NULL, null=True
+        "self", on_delete=models.SET_NULL, null=True
     )
 
     def __str__(self) -> str:

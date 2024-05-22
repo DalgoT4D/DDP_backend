@@ -12,6 +12,7 @@ from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import AirbyteWorkspace
 from ddpui.ddpprefect import prefect_service
 from ddpui.models.org import Org, OrgPrefectBlockv1
+from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpairbyte.schema import (
     AirbyteConnectionCreate,
@@ -308,11 +309,23 @@ def get_connections(org: Org):
 
     warehouse = OrgWarehouse.objects.filter(org=org).first()
 
+    airbyte_connections = airbyte_service.get_webbackend_connections(
+        org.airbyte_workspace_id
+    )
+
     for org_task in org_tasks:
         # fetch the connection
-        connection = airbyte_service.get_connection(
-            org.airbyte_workspace_id, org_task.connection_id
-        )
+        connection = [
+            conn
+            for conn in airbyte_connections
+            if conn["connectionId"] == org_task.connection_id
+        ]
+        if len(connection) == 0:
+            logger.error(
+                f"could not find connection {org_task.connection_id} in airbyte"
+            )
+            continue
+        connection = connection[0]
 
         # a single connection will have a manual deployment and (usually) a pipeline
         # we want to show the last sync, from whichever
@@ -320,11 +333,16 @@ def get_connections(org: Org):
         for df_orgtask in DataflowOrgTask.objects.filter(
             orgtask=org_task,
         ):
-            run = prefect_service.get_last_flow_run_by_deployment_id(
-                df_orgtask.dataflow.deployment_id
+            # if dataflow_last_run is not preset; fetch from prefect
+            run = (
+                PrefectFlowRun.objects.filter(
+                    deployment_id=df_orgtask.dataflow.deployment_id
+                )
+                .order_by("-start_time")
+                .first()
             )
             if run:
-                last_runs.append(run)
+                last_runs.append(run.to_json())
 
         last_runs.sort(
             key=lambda run: (
@@ -357,8 +375,6 @@ def get_connections(org: Org):
                 "connectionId": connection["connectionId"],
                 "source": connection["source"],
                 "destination": connection["destination"],
-                "catalogId": connection["catalogId"],
-                "syncCatalog": connection["syncCatalog"],
                 "status": connection["status"],
                 "deploymentId": (
                     sync_dataflow_orgtask.dataflow.deployment_id

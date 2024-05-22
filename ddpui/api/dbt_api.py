@@ -2,7 +2,6 @@ import os
 from uuid import uuid4
 from pathlib import Path
 from redis import Redis
-
 from ninja import NinjaAPI
 from ninja.errors import HttpError
 
@@ -27,7 +26,6 @@ from ddpui.ddpprefect import prefect_service
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.orguserhelpers import from_orguser
 from ddpui.auth import has_permission
-
 
 dbtapi = NinjaAPI(urls_namespace="dbt")
 logger = CustomLogger("ddpui")
@@ -74,6 +72,13 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
         org.dbt = None
         org.save()
 
+    repo_exists = dbt_service.check_repo_exists(
+        payload.gitrepoUrl, payload.gitrepoAccessToken
+    )
+
+    if not repo_exists:
+        raise HttpError(400, "Github repository does not exist")
+
     task = setup_dbtworkspace.delay(org.id, payload.dict())
 
     return {"task_id": task.id}
@@ -86,7 +91,14 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
     orguser: OrgUser = request.orguser
     org = orguser.org
     if org.dbt is None:
-        raise HttpError(400, "create a dbt workspace first")
+        raise HttpError(400, "Create a dbt workspace first")
+
+    repo_exists = dbt_service.check_repo_exists(
+        payload.gitrepoUrl, payload.gitrepoAccessToken
+    )
+
+    if not repo_exists:
+        raise HttpError(400, "Github repository does not exist")
 
     org.dbt.gitrepo_url = payload.gitrepoUrl
     org.dbt.gitrepo_access_token_secret = payload.gitrepoAccessToken
@@ -247,3 +259,15 @@ def post_run_dbt_commands(request):
     task = run_dbt_commands.delay(orguser.id)
 
     return {"task_id": task.id}
+
+
+@dbtapi.post("/make-elementary-report/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_dbt_workspace"])
+def post_make_elementary_report(request):
+    """prepare the dbt docs single html"""
+    orguser: OrgUser = request.orguser
+    error, result = dbt_service.make_elementary_report(orguser.org)
+    if error:
+        raise HttpError(400, error)
+
+    return result

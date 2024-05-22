@@ -9,17 +9,19 @@ from django.utils.text import slugify
 from ddpui.celery import app
 from ddpui.utils.timezone import UTC
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.models.org import Org, OrgDbt, OrgWarehouse, OrgPrefectBlockv1
+from ddpui.models.org import Org, OrgDbt, OrgWarehouse, OrgPrefectBlockv1, OrgDataFlowv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.orgjobs import BlockLock
 from ddpui.models.tasks import TaskLock, OrgTask, TaskProgressHashPrefix
 from ddpui.models.canvaslock import CanvasLock
+from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.ddpprefect.prefect_service import (
     update_dbt_core_block_schema,
     get_dbt_cli_profile_block,
+    prefect_get,
 )
 from ddpui.utils.constants import (
     TASK_DBTRUN,
@@ -48,6 +50,13 @@ def clone_github_repo(
         )
     else:
         child = True
+
+    taskprogress.add(
+        {
+            "message": "started cloning github repository",
+            "status": "running",
+        }
+    )
 
     # clone the client's dbt repo into "dbtrepo/" under the project_dir
     # if we have an access token with the "contents" and "metadata" permissions then
@@ -359,6 +368,66 @@ def run_dbt_commands(self, orguser_id: int):
             lock.delete()
 
 
+@app.task(bind=True)
+def create_elementary_report(
+    self,
+    org_id: int,
+):
+    """run edr report to create the elementary report and write to s3"""
+    edr_binary = Path(os.getenv("DBT_VENV")) / "venv/bin/edr"
+    org = Org.objects.filter(id=org_id).first()
+    orgdbt = OrgDbt.objects.filter(org=org).first()
+    project_dir = Path(orgdbt.project_dir) / "dbtrepo"
+    profiles_dir = project_dir / "elementary_profiles"
+    aws_access_key_id = os.getenv("ELEMENTARY_AWS_ACCESS_KEY_ID")
+    aws_secret_access_key = os.getenv("ELEMENTARY_AWS_SECRET_ACCESS_KEY")
+    s3_bucket_name = os.getenv("ELEMENTARY_S3_BUCKET")
+
+    taskprogress = TaskProgress(
+        self.request.id, f"{TaskProgressHashPrefix.RUNELEMENTARY}-{org.slug}", 60
+    )
+
+    os.environ["PATH"] += ":" + str(Path(os.getenv("DBT_VENV")) / "venv/bin")
+    cmd = [
+        str(edr_binary),
+        "send-report",
+        "--aws-access-key-id",
+        aws_access_key_id,
+        "--aws-secret-access-key",
+        aws_secret_access_key,
+        "--s3-bucket-name",
+        s3_bucket_name,
+        "--bucket-file-path",
+        f"reports/{org.slug}.html",
+        "--profiles-dir",
+        str(profiles_dir),
+    ]
+    taskprogress.add(
+        {
+            "message": "started",
+            "status": "running",
+        }
+    )
+    try:
+        runcmd(" ".join(cmd), project_dir)
+    except subprocess.CalledProcessError:
+        taskprogress.add(
+            {
+                "message": "edr failed",
+                # "error": str(error), # error contains the aws secrets
+                "status": "failed",
+            }
+        )
+        # logger.exception(error)  # error contains the aws secrets
+        return
+    taskprogress.add(
+        {
+            "message": "generated edr report",
+            "status": "completed",
+        }
+    )
+
+
 @app.task(bind=False)
 def update_dbt_core_block_schema_task(block_name, default_schema):
     """single http PUT request to the prefect-proxy"""
@@ -385,6 +454,54 @@ def delete_old_canvaslocks():
     """delete canvas locks which were created over 10 minutes ago"""
     tenminutesago = UTC.localize(datetime.now() - timedelta(seconds=600))
     CanvasLock.objects.filter(locked_at__lt=tenminutesago).delete()
+
+
+@app.task(bind=True)
+def sync_flow_runs_of_deployments(self, deployment_ids: list[str] = None):
+    """
+    This function will sync (create) latest flow runs of deployment(s) if missing from our db
+    """
+
+    query = OrgDataFlowv1.objects
+    if deployment_ids:
+        query = query.filter(deployment_id__in=deployment_ids)
+
+    # sync recent 50 flow runs of each deployment
+    start_time_gt = UTC.localize(datetime.now() - timedelta(hours=24))
+    for dataflow in query.all():
+        try:
+            deployment_id = dataflow.deployment_id
+            params = {
+                "deployment_id": deployment_id,
+                "limit": 50,
+                "start_time_gt": start_time_gt.isoformat(),
+            }
+            res = prefect_get("flow_runs", params=params, timeout=60)
+
+            # iterate so that start-time is ASC
+            for flow_run in res["flow_runs"][::-1]:
+                if not PrefectFlowRun.objects.filter(
+                    flow_run_id=flow_run["id"]
+                ).exists():
+                    if flow_run["startTime"] in ["", None]:
+                        flow_run["startTime"] = flow_run["expectedStartTime"]
+                    PrefectFlowRun.objects.create(
+                        deployment_id=deployment_id,
+                        flow_run_id=flow_run["id"],
+                        name=flow_run["name"],
+                        start_time=flow_run["startTime"],
+                        expected_start_time=flow_run["expectedStartTime"],
+                        total_run_time=flow_run["totalRunTime"],
+                        status=flow_run["status"],
+                        state_name=flow_run["state_name"],
+                    )
+        except Exception as e:
+            logger.error(
+                "failed to sync flow runs for deployment %s ; moving to next one",
+                deployment_id,
+            )
+            logger.exception(e)
+            continue
 
 
 @app.on_after_finalize.connect

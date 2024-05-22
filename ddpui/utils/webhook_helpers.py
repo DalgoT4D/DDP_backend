@@ -2,11 +2,10 @@ import re
 from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.models.org import Org
-from ddpui.models.org_user import OrgUserRole, OrgUser
+from ddpui.models.org_user import OrgUser
 from ddpui.utils.awsses import send_text_message
 from ddpui.ddpprefect import prefect_service
 from ddpui.settings import PRODUCTION
-from ddpui.models.org_user import UserAttributes
 from ddpui.auth import SUPER_ADMIN_ROLE
 
 logger = CustomLogger("ddpui")
