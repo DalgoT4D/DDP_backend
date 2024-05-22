@@ -16,66 +16,21 @@ from sqlalchemy import Float
 from ddpui.datainsights.insights.insight_interface import ColInsight
 
 
-class DataStats(ColInsight):
-
-    def generate_sql(self):
-        """
-        Returns a sqlalchemy query ready to be executed by an engine
-        Computes basic stats
-        """
-        column_name = self.column_name
-        string_col: ColumnClause = column(column_name)
-
-        query = (
-            self.builder.add_column(func.count().label("count"))
-            .add_column(
-                func.sum(
-                    case(
-                        [(string_col.is_(None), 1)],
-                        else_=0,
-                    )
-                ).label("countNull"),
-            )
-            .add_column(func.count(distinct(string_col)).label("countDistinct"))
-        )
-
-        return query.fetch_from(self.db_table, self.db_schema).build()
-
-    def parse_results(self, result: list[dict]):
-        """
-        Parses the result from the above executed sql query
-        Result:
-        [
-            {
-                "count": 399,
-                "countNull": 0,
-                "countDistinct": 1,
-            }
-        ]
-        """
-        if len(result) > 0:
-            return {
-                "count": result[0]["count"],
-                "countNull": result[0]["countNull"],
-                "countDistinct": result[0]["countDistinct"],
-            }
-
-        return {
-            "count": 0,
-            "countNull": 0,
-            "countDistinct": 0,
-        }
-
-
 class DistributionChart(ColInsight):
 
+    def query_id(self) -> str:
+        return "string-query-id"
+
     def generate_sql(self):
         """
         Returns a sqlalchemy query ready to be executed by an engine
         Computes basic stats
         """
-        column_name = self.column_name
-        string_col: ColumnClause = column(column_name)
+        if len(self.columns) < 1:
+            raise ValueError("No column specified")
+
+        col = self.columns[0]
+        string_col: ColumnClause = column(col.name)
 
         subquery = (
             self.builder.add_column(string_col.label("category"))
@@ -110,16 +65,44 @@ class DistributionChart(ColInsight):
         Result:
         [
             {
-                "count": 399,
-                "countNull": 0,
-                "countDistinct": 1,
+                "chartType": "bar",
+                "data": []
             }
         ]
         """
         return {
-            "chartType": self.chart_type(),
-            "data": result,
+            self.columns[0].name: {
+                "charts": [
+                    {
+                        "chartType": self.chart_type(),
+                        "data": result,
+                    }
+                ]
+            }
         }
 
     def chart_type(self) -> str:
         return "bar"
+
+    def validate_query_results(self, parsed_results) -> bool:
+        """
+        Validate the parsed results of the query
+        This function assumes the parsed_results sent is for a single column
+        """
+        validate = False
+        if (
+            parsed_results
+            and isinstance(parsed_results, dict)
+            and "charts" in parsed_results
+            and len(parsed_results["charts"]) > 0
+        ):
+            if all(
+                key in parsed_results["charts"][0]
+                for key in [
+                    "chartType",
+                    "data",
+                ]
+            ):
+                validate = True
+
+        return validate

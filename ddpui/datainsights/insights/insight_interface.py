@@ -74,7 +74,7 @@ class ColInsight(ABC):
         return None
 
     @abstractmethod
-    def validate_query_results(self, parsed_results):
+    def validate_query_results(self, parsed_results) -> bool:
         pass
 
 
