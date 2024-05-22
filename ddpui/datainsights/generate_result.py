@@ -92,7 +92,7 @@ def poll_for_column_insights(
 
     GenerateResult.execute_insight_queries(org_warehouse.org, wclient, insight_objs)
 
-    GenerateResult.poll_for_all_queries(org_warehouse.org, wclient, insight_objs)
+    GenerateResult.poll_for_all_queries(org_warehouse.org, insight_objs, column_name)
 
     # return the saved results
     taskprogress.add(
@@ -280,8 +280,8 @@ class GenerateResult:
     def poll_for_all_queries(
         cls,
         org: Org,
-        wclient: Warehouse,
         insights: list[DataTypeColInsights],
+        requestor_column: str,
     ) -> dict:
         insight_queries: list[ColInsight] = []
         for insight in insights:
@@ -301,8 +301,14 @@ class GenerateResult:
 
                 # TODO: could be thread unsafe; can have race conditions?
                 is_locked = False
-                if redis.hget(hash, key) is not None:
-                    is_locked = True
+                lock_state = redis.hget(hash, key)
+                if lock_state is not None:
+                    lock_state = json.loads(lock_state)
+                    if (
+                        "columns" in lock_state
+                        and requestor_column in lock_state["columns"]
+                    ):
+                        is_locked = True
 
                 locks[i] = is_locked
 
