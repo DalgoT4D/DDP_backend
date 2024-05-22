@@ -17,26 +17,26 @@ class InsightsFactory:
     @classmethod
     def initiate_insight(
         cls,
-        column_name: str,
+        columns: list[str],
         db_table: str,
         db_schema: str,
-        col_type,
+        col_type: TranslateColDataType,
         filter: dict,
         wtype: str,
     ) -> DataTypeColInsights:
-        if col_type == int or col_type == float:
-            return NumericColInsights(column_name, db_table, db_schema, filter, wtype)
-        elif col_type == datetime.datetime or col_type == datetime.date:
+        if col_type == TranslateColDataType.NUMERIC:
+            return NumericColInsights(columns, db_table, db_schema, filter, wtype)
+        elif col_type == TranslateColDataType.DATETIME:
             return DatetimeColInsights(
-                column_name,
+                columns,
                 db_table,
                 db_schema,
                 filter if "chart_type" in filter else None,
                 wtype,
             )
-        elif col_type == bool:
-            return BooleanColInsights(column_name, db_table, db_schema, filter, wtype)
-        elif col_type == str:
-            return StringColInsights(column_name, db_table, db_schema, filter, wtype)
+        elif col_type == TranslateColDataType.BOOL:
+            return BooleanColInsights(columns, db_table, db_schema, filter, wtype)
+        elif col_type == TranslateColDataType.STRING:
+            return StringColInsights(columns, db_table, db_schema, filter, wtype)
         else:
             raise ValueError("Column type not supported for insights generation")

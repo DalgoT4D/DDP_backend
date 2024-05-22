@@ -1,13 +1,15 @@
 from ddpui.datainsights.insights.insight_interface import (
     DataTypeColInsights,
     ColInsight,
+    ColumnConfig,
+    TranslateColDataType,
 )
-from ddpui.datainsights.insights.numeric_type.queries import DataStats
+from ddpui.datainsights.insights.common.queries import BaseDataStats
 
 
-class NumericColInsights(DataTypeColInsights):
+class BaseInsights(DataTypeColInsights):
     """
-    Class that maintains a list of ColInsight queries for a numeric type col
+    Class that maintains a list of shared queries across all datatypes
     """
 
     def __init__(
@@ -20,7 +22,7 @@ class NumericColInsights(DataTypeColInsights):
     ):
         super().__init__(columns, db_table, db_schema, filter, wtype)
         self.insights: list[ColInsight] = [
-            DataStats(
+            BaseDataStats(
                 self.columns, self.db_table, self.db_schema, self.filter, self.wtype
             ),
         ]
@@ -34,14 +36,9 @@ class NumericColInsights(DataTypeColInsights):
             insight.parse_results(result)
             for insight, result in zip(self.insights, results)
         ]
-        # resp = {
-        #     "columnName": self.column_name,
-        #     "columnType": self.get_col_type(),
-        #     "insights": {},
-        # }
-        # resp = {}
+        resp = {}
 
-        # if len(output) > 0:
-        #     resp["insights"] = output[0]
+        if len(output) > 0:
+            resp = output[0]
 
-        return output
+        return resp

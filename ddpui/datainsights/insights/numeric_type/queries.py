@@ -8,6 +8,8 @@ from sqlalchemy.sql.expression import (
     cast,
     select,
     desc,
+    literal,
+    union_all,
 )
 from sqlalchemy.sql.functions import func, Function
 from sqlalchemy import Float
@@ -20,13 +22,19 @@ from ddpui.datainsights.insights.insight_interface import (
 
 class DataStats(ColInsight):
 
+    def query_id(self) -> str:
+        return "numeric-query-id"
+
     def generate_sql(self):
         """
         Returns a sqlalchemy query ready to be executed by an engine
         Computes basic stats
         """
-        column_name = self.column_name
-        numeric_col: ColumnClause = column(column_name)
+        if len(self.columns) < 1:
+            raise ValueError("No column specified")
+
+        col = self.columns[0]
+        numeric_col: ColumnClause = column(col.name)
 
         median_subquery = (
             self.builder.add_column(numeric_col)
@@ -40,22 +48,6 @@ class DataStats(ColInsight):
 
         query = (
             self.builder.reset()
-            .add_column(func.count().label("count"))
-            .add_column(
-                func.sum(
-                    case(
-                        [(numeric_col.is_(None), 1)],
-                        else_=0,
-                    )
-                ).label("countNull"),
-            )
-            .add_column(func.count(distinct(numeric_col)).label("countDistinct"))
-            .add_column(
-                func.max(numeric_col).label("maxVal"),
-            )
-            .add_column(
-                func.min(numeric_col).label("minVal"),
-            )
             .add_column(
                 cast(func.round(func.avg(numeric_col), 2), Float).label("mean"),
             )
@@ -63,9 +55,7 @@ class DataStats(ColInsight):
                 select(
                     [
                         cast(
-                            func.round(
-                                func.avg(median_subquery.c[f"{column_name}"]), 2
-                            ),
+                            func.round(func.avg(median_subquery.c[f"{col.name}"]), 2),
                             Float,
                         )
                     ]
@@ -98,11 +88,6 @@ class DataStats(ColInsight):
         Result:
         [
             {
-                "count": 399,
-                "countNull": 0,
-                "countDistinct": 1,
-                "maxVal": 100,
-                "minVal": 100,
                 "mean": 12.00,
                 "mode": 100,
                 "media": 50
@@ -111,23 +96,17 @@ class DataStats(ColInsight):
         """
         if len(result) > 0:
             return {
-                "count": result[0]["count"],
-                "countNull": result[0]["countNull"],
-                "countDistinct": result[0]["countDistinct"],
-                "maxVal": result[0]["maxVal"],
-                "minVal": result[0]["minVal"],
-                "mean": result[0]["mean"],
-                "median": result[0]["median"],
-                "mode": result[0]["mode"],
+                self.columns[0].name: {
+                    "mean": result[0]["mean"],
+                    "median": result[0]["median"],
+                    "mode": result[0]["mode"],
+                }
             }
 
         return {
-            "count": 0,
-            "countNull": 0,
-            "countDistinct": 0,
-            "maxVal": 0,
-            "minVal": 0,
-            "mean": 0,
-            "median": 0,
-            "mode": 0,
+            self.columns[0].name: {
+                "mean": 0,
+                "median": 0,
+                "mode": 0,
+            }
         }

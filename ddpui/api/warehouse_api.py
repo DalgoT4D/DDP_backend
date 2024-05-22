@@ -16,7 +16,7 @@ from ddpui.auth import has_permission
 
 from ddpui.datainsights.insights.insight_factory import InsightsFactory
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
-from ddpui.datainsights.generate_result import GenerateResult
+from ddpui.datainsights.generate_result import GenerateResult, poll_for_column_insights
 
 from ddpui.schemas.warehouse_api_schemas import ColumnMetrics
 
@@ -229,30 +229,13 @@ def post_data_insights(request, payload: ColumnMetrics):
     if not org_warehouse:
         raise HttpError(404, "Please set up your warehouse first")
 
-    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
-
-    wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
-
     try:
-        col_type = wclient.get_col_python_type(
-            payload.db_schema, payload.db_table, payload.column_name
+
+        task = poll_for_column_insights.delay(
+            payload.db_schema, payload.db_table, payload.column_name, org_warehouse.id
         )
 
-        if not col_type:
-            raise ValueError(
-                f"Column '{payload.column_name}' not found in '{payload.db_schema}.{payload.db_table}'"
-            )
-
-        insight_obj = InsightsFactory.initiate_insight(
-            payload.column_name,
-            payload.db_table,
-            payload.db_schema,
-            col_type,
-            payload.filter,
-            wclient.get_wtype(),
-        )
-
-        return GenerateResult.generate_col_insights(org, insight_obj, wclient)
+        return {"task_id": task.id}
     except Exception as err:
         logger.error(err)
         raise HttpError(500, str(err))
