@@ -82,6 +82,10 @@ export FIRST_ORG_NAME=$(get_secret_value "FIRST_ORG_NAME" "payload" "" "us-centr
 export ADMIN_USER_EMAIL=$(get_secret_value "ADMIN_USER_EMAIL" "payload" "" "us-central1")
 export ADMIN_USER_PASSWORD=$(get_secret_value "ADMIN_USER_PASSWORD" "payload" "" "us-central1")
 
+# Admin User
+export ADMIN_USER_EMAIL=$(get_secret_value "ADMIN_USER_EMAIL" "payload" "" "us-central1")
+export ADMIN_USER_PASSWORD=$(get_secret_value "ADMIN_USER_PASSWORD" "payload" "" "us-central1")
+
 
 
 # DEMO ACCOUNTS

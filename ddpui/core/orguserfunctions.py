@@ -35,6 +35,7 @@ from ddpui.models.role_based_access import Role
 from ddpui.utils import helpers, sendgrid, timezone
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.orguserhelpers import from_invitation, from_orguser
+from ddpui.utils.redis_client import RedisClient
 
 logger = CustomLogger("ddpui")
 
@@ -111,7 +112,7 @@ def signup_orguser(payload: OrgUserCreate):
         f"created user [account-manager] "
         f"{orguser.user.email} having userid {orguser.user.id}"
     )
-    redis = Redis()
+    redis = RedisClient.get_instance()
     token = uuid4()
 
     redis_key = f"email-verification:{token.hex}"
@@ -563,7 +564,7 @@ def request_reset_password(email: str):
         # addresses exist in our database
         return None, None
 
-    redis = Redis()
+    redis = RedisClient.get_instance()
     token = uuid4()
 
     redis_key = f"password-reset:{token.hex}"
@@ -584,7 +585,7 @@ def request_reset_password(email: str):
 
 def confirm_reset_password(payload: ResetPasswordSchema):
     """verify the reset password token and reset the password"""
-    redis = Redis()
+    redis = RedisClient.get_instance()
     redis_key = f"password-reset:{payload.token}"
     password_reset = redis.get(redis_key)
     if password_reset is None:
@@ -605,7 +606,7 @@ def confirm_reset_password(payload: ResetPasswordSchema):
 
 def resend_verification_email(orguser: OrgUser, email: str):
     """send a verification email to the user"""
-    redis = Redis()
+    redis = RedisClient.get_instance()
     token = uuid4()
 
     redis_key = f"email-verification:{token.hex}"
@@ -625,7 +626,7 @@ def resend_verification_email(orguser: OrgUser, email: str):
 
 def verify_email(payload: VerifyEmailSchema):
     """verify the email verification token"""
-    redis = Redis()
+    redis = RedisClient.get_instance()
     redis_key = f"email-verification:{payload.token}"
     verify_email_token = redis.get(redis_key)
     if verify_email_token is None:
