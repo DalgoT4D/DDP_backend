@@ -13,7 +13,7 @@ from ddpui.ddpairbyte.airbyte_service import abreq
 from ddpui.utils.awsses import send_text_message
 from ddpui.utils.timezone import UTC
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.models.org import Org, OrgDbt, OrgWarehouse, OrgPrefectBlockv1, OrgDataFlowv1
+from ddpui.models.org import Org, OrgDbt, OrgSchemaChange, OrgWarehouse, OrgPrefectBlockv1, OrgDataFlowv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.orgjobs import BlockLock
 from ddpui.models.tasks import TaskLock, OrgTask, TaskProgressHashPrefix
@@ -390,6 +390,14 @@ def schema_change_detection():
                 logger.info(f"Schema change detected for org {org.name}: {change_type}")
                 
                 if change_type in ['breaking', 'non_breaking']:
+                    schema_change, created = OrgSchemaChange.objects.get_or_create(
+                        connection_id=org_task.connection_id,
+                        defaults={'change_type': change_type, 'org': org}
+                    )
+                    if not created:
+                        # If the record already exists, update the change_type
+                        schema_change.change_type = change_type
+                        schema_change.save()
                     if org not in schema_changes:
                         schema_changes[org] = {'breaking': 0, 'non_breaking': 0}
                     schema_changes[org][change_type] += 1

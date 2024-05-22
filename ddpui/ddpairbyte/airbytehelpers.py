@@ -9,7 +9,7 @@ from django.db import transaction
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import AirbyteConnectionSchemaUpdate, AirbyteWorkspace
 from ddpui.ddpprefect import prefect_service
-from ddpui.models.org import Org, OrgPrefectBlockv1
+from ddpui.models.org import Org, OrgPrefectBlockv1, OrgSchemaChange
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpairbyte.schema import (
@@ -764,3 +764,16 @@ def update_schema_changes_connection(org: Org, connection_id: str, payload: Airb
         org, payload, connection
     )
     return res, None
+
+
+def get_schema_changes(org: Org):
+    """
+    Get the schema changes of a connection in an org.
+    """
+    org_schema_change = OrgSchemaChange.objects.filter(org=org)
+
+    if org_schema_change is None:
+        return None, "No schema change found"
+
+    schema_changes = list(org_schema_change.values())
+    return schema_changes, None

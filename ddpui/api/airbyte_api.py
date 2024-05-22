@@ -633,7 +633,7 @@ def get_connection_catalog_v1(request, connection_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    res = airbytehelpers.get_connection_catalog(connection_id)
+    res, error = airbytehelpers.get_connection_catalog(connection_id)
     if res is None:
         raise HttpError(400, "connection not found")
     return res
@@ -651,6 +651,24 @@ def update_schema_changes_connection(request, connection_id, payload: AirbyteCon
         raise HttpError(400, "create an airbyte workspace first")
     
     res, error = airbytehelpers.update_schema_changes_connection(org, connection_id, payload)
+    if error:
+        raise HttpError(400, error)
+    return res
+
+
+@airbyteapi.get(
+    "/v1/connection/schema_change",
+    auth=auth.CustomAuthMiddleware(), 
+)
+@has_permission(["can_view_connection"])
+def get_schema_changes_for_connection(request):
+    """Get schema changes for an org"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    if org.airbyte_workspace_id is None:
+        raise HttpError(400, "Create an Airbyte workspace first")
+
+    res, error = airbytehelpers.get_schema_changes(org)
     if error:
         raise HttpError(400, error)
     return res
