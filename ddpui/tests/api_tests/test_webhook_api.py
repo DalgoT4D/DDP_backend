@@ -22,6 +22,8 @@ from ddpui.utils.webhook_helpers import (
     email_orgusers,
     email_flowrun_logs_to_orgusers,
 )
+from ddpui.auth import SUPER_ADMIN_ROLE, GUEST_ROLE, ACCOUNT_MANAGER_ROLE
+from ddpui.models.role_based_access import Role
 from ddpui.models.org import Org, OrgPrefectBlock
 from ddpui.models.org_user import OrgUser, User, OrgUserRole, UserAttributes
 from ddpui.settings import PRODUCTION
@@ -125,7 +127,8 @@ def test_email_orgusers():
     """tests the email_orgusers function"""
     org = Org.objects.create(name="temp", slug="temp")
     user = User.objects.create(username="username", email="useremail")
-    OrgUser.objects.create(org=org, role=OrgUserRole.ACCOUNT_MANAGER, user=user)
+    new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
+    OrgUser.objects.create(org=org, new_role=new_role, user=user)
     UserAttributes.objects.create(user=user, is_platform_admin=True)
     with patch(
         "ddpui.utils.webhook_helpers.send_text_message"
@@ -140,7 +143,8 @@ def test_email_orgusers_not_non_admins():
     """tests the email_orgusers function"""
     org = Org.objects.create(name="temp", slug="temp")
     user = User.objects.create(username="username", email="useremail")
-    OrgUser.objects.create(org=org, role=OrgUserRole.ACCOUNT_MANAGER, user=user)
+    new_role = Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first()
+    OrgUser.objects.create(org=org, new_role=new_role, user=user)
     with patch(
         "ddpui.utils.webhook_helpers.send_text_message"
     ) as mock_send_text_message:
@@ -152,7 +156,8 @@ def test_email_orgusers_not_to_report_viewers():
     """tests the email_orgusers function"""
     org = Org.objects.create(name="temp", slug="temp")
     user = User.objects.create(username="username", email="useremail")
-    OrgUser.objects.create(org=org, role=OrgUserRole.REPORT_VIEWER, user=user)
+    new_role = Role.objects.filter(slug=GUEST_ROLE).first()
+    OrgUser.objects.create(org=org, new_role=new_role, user=user)
     with patch(
         "ddpui.utils.webhook_helpers.send_text_message"
     ) as mock_send_text_message:

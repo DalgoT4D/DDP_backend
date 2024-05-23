@@ -82,6 +82,24 @@ class AirbyteConnectionCreateResponse(Schema):
     normalize: bool = False
     lock: Optional[dict | None]
     isRunning: bool = False
+    resetConnDeploymentId: str = None
+
+
+class AirbyteGetConnectionsResponse(Schema):
+    """Docstring"""
+
+    name: str
+    connectionId: str
+    source: dict
+    destination: dict
+    status: str
+    deploymentId: str = None
+    lastRun: Optional[dict | None]
+    destinationSchema: str = ""
+    normalize: bool = False
+    lock: Optional[dict | None]
+    isRunning: bool = False
+    resetConnDeploymentId: str = None
 
 
 class AirbyteConnectionUpdate(Schema):

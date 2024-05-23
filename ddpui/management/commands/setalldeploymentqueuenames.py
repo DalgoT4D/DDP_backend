@@ -2,6 +2,7 @@ from django.core.management.base import BaseCommand
 from ninja.errors import HttpError
 from ddpui.ddpprefect.prefect_service import prefect_put
 from ddpui.models.org import OrgDataFlowv1
+from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE, DDP_WORK_QUEUE
 
 
 class Command(BaseCommand):
@@ -23,10 +24,13 @@ class Command(BaseCommand):
 
             work_queue_name = None
 
-            if dataflow.name.find("airbyte-sync") != -1:
-                work_queue_name = "ddp"
+            if (
+                dataflow.name.find("airbyte-sync") != -1
+                or dataflow.name.find("airbyte-reset") != -1
+            ):
+                work_queue_name = DDP_WORK_QUEUE
             elif dataflow.name.find("dbt-run") != -1:
-                work_queue_name = "manual-dbt"
+                work_queue_name = MANUL_DBT_WORK_QUEUE
 
             if work_queue_name:
                 print(f"{dataflow.name:50} {work_queue_name}")

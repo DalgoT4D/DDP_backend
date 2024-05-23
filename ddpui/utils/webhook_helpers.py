@@ -2,11 +2,11 @@ import re
 from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.models.org import Org
-from ddpui.models.org_user import OrgUserRole, OrgUser
+from ddpui.models.org_user import OrgUser
 from ddpui.utils.awsses import send_text_message
 from ddpui.ddpprefect import prefect_service
 from ddpui.settings import PRODUCTION
-from ddpui.models.org_user import UserAttributes
+from ddpui.auth import SUPER_ADMIN_ROLE
 
 logger = CustomLogger("ddpui")
 
@@ -91,18 +91,16 @@ def email_orgusers(org: Org, email_body: str):
     """sends a notificationemail to all OrgUsers"""
     tag = " [STAGING]" if not PRODUCTION else ""
     subject = f"Prefect notification{tag}"
+    if org.ses_whitelisted_email:
+        logger.info(f"sending email to {org.ses_whitelisted_email}")
+        send_text_message(org.ses_whitelisted_email, subject, email_body)
+
     for orguser in OrgUser.objects.filter(
         org=org,
-        role__in=[
-            OrgUserRole.ACCOUNT_MANAGER,
-            OrgUserRole.PIPELINE_MANAGER,
-        ],
+        new_role__slug=SUPER_ADMIN_ROLE,
     ):
-        if UserAttributes.objects.filter(
-            user=orguser.user, is_platform_admin=True
-        ).exists():
-            logger.info(f"sending prefect-notification email to {orguser.user.email}")
-            send_text_message(orguser.user.email, subject, email_body)
+        logger.info(f"sending prefect-notification email to {orguser.user.email}")
+        send_text_message(orguser.user.email, subject, email_body)
 
 
 def email_flowrun_logs_to_orgusers(org: Org, flow_run_id: str):

@@ -99,9 +99,12 @@ def test_post_dbt_workspace(orguser):
     with patch(
         "ddpui.celeryworkers.tasks.setup_dbtworkspace.delay", return_value=mocked_task
     ) as delay:
-        post_dbt_workspace(request, payload)
-        delay.assert_called_once_with(orguser.org.id, payload.dict())
-        assert orguser.org.dbt is None
+        with patch(
+            "ddpui.api.dbt_api.dbt_service.check_repo_exists", return_value=True
+        ):
+            post_dbt_workspace(request, payload)
+            delay.assert_called_once_with(orguser.org.id, payload.dict())
+            assert orguser.org.dbt is None
 
 
 def test_put_dbt_github(orguser):
@@ -122,15 +125,22 @@ def test_put_dbt_github(orguser):
     with patch(
         "ddpui.celeryworkers.tasks.clone_github_repo.delay", return_value=mocked_task
     ) as delay:
-        put_dbt_github(request, payload)
-        delay.assert_called_once_with(
-            "new-url",
-            "new-access-token",
-            os.getenv("CLIENTDBT_ROOT") + "/org-slug",
-            None,
-        )
-        assert request.orguser.org.dbt.gitrepo_url == "new-url"
-        assert request.orguser.org.dbt.gitrepo_access_token_secret == "new-access-token"
+        with patch(
+            "ddpui.api.dbt_api.dbt_service.check_repo_exists", return_value=True
+        ):
+            put_dbt_github(request, payload)
+            delay.assert_called_once_with(
+                "org-slug",
+                "new-url",
+                "new-access-token",
+                os.getenv("CLIENTDBT_ROOT") + "/org-slug",
+                None,
+            )
+            assert request.orguser.org.dbt.gitrepo_url == "new-url"
+            assert (
+                request.orguser.org.dbt.gitrepo_access_token_secret
+                == "new-access-token"
+            )
 
 
 def test_dbt_delete_no_org(orguser):

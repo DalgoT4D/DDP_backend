@@ -14,10 +14,6 @@ from ddpui.models.tasks import Task
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.constants import (
-    TASK_DBTRUN,
-    TASK_GITPULL,
-)
 from ddpui.auth import has_permission
 from ddpui.ddpdbt import dbt_service
 

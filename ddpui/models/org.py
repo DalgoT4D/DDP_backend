@@ -50,6 +50,7 @@ class Org(models.Model):
         choices=OrgVizLoginType.choices(), max_length=50, null=True
     )
     is_demo = models.BooleanField(default=False)
+    ses_whitelisted_email = models.TextField(max_length=100, null=True)
 
     def __str__(self) -> str:
         demostr = "demo=" + ("yes" if self.is_demo else "no")
@@ -208,6 +209,10 @@ class OrgDataFlowv1(models.Model):
         choices=(("orchestrate", "orchestrate"), ("manual", "manual")),
         default="orchestrate",
     )  # skipcq: PTC-W0901, PTC-W0906
+
+    reset_conn_dataflow = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True
+    )
 
     def __str__(self) -> str:
         return f"OrgDataFlow[{self.name}|{self.deployment_name}|{self.deployment_id}|{self.cron}]"

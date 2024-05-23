@@ -20,11 +20,8 @@ from ddpui.ddpprefect.prefect_service import (
     get_airbye_connection_blocks,
     update_airbyte_server_block,
     update_airbyte_connection_block,
-    get_airbyte_connection_block_by_id,
-    get_airbyte_connection_block_id,
     get_dbtcore_block_id,
     create_airbyte_server_block,
-    create_airbyte_connection_block,
     PrefectAirbyteConnectionSetup,
     delete_airbyte_server_block,
     delete_airbyte_connection_block,
@@ -284,14 +281,6 @@ def test_delete_airbyte_server_block(mock_delete: Mock):
 
 
 # =============================================================================
-@patch("ddpui.ddpprefect.prefect_service.prefect_get")
-def test_get_airbyte_connection_block_id(mock_get: Mock):
-    mock_get.return_value = {"block_id": "theblockid"}
-    response = get_airbyte_connection_block_id("blockname")
-    assert response == "theblockid"
-    mock_get.assert_called_once_with("blocks/airbyte/connection/byblockname/blockname")
-
-
 @patch("ddpui.ddpprefect.prefect_service.prefect_post")
 def test_get_airbye_connection_blocks(mock_post: Mock):
     mock_post.return_value = "blocks-blocks-blocks"
@@ -300,34 +289,6 @@ def test_get_airbye_connection_blocks(mock_post: Mock):
     mock_post.assert_called_once_with(
         "blocks/airbyte/connection/filter",
         {"block_names": ["blockname1", "blockname2"]},
-    )
-
-
-@patch("ddpui.ddpprefect.prefect_service.prefect_get")
-def test_get_airbyte_connection_block_by_id(mock_get: Mock):
-    mock_get.return_value = {"block_id": "theblockid", "blockname": "theblockname"}
-    response = get_airbyte_connection_block_by_id("blockid")
-    assert response == {"block_id": "theblockid", "blockname": "theblockname"}
-    mock_get.assert_called_once_with("blocks/airbyte/connection/byblockid/blockid")
-
-
-@patch("ddpui.ddpprefect.prefect_service.prefect_post")
-def test_create_airbyte_connection_block(mock_post: Mock):
-    mock_post.return_value = {"block_id": "block-id"}
-    conninfo = PrefectAirbyteConnectionSetup(
-        serverBlockName="srvr-block-name",
-        connectionId="conn-id",
-        connectionBlockName="conn-block-name",
-    )
-    response = create_airbyte_connection_block(conninfo)
-    assert response == "block-id"
-    mock_post.assert_called_once_with(
-        "blocks/airbyte/connection/",
-        {
-            "serverBlockName": conninfo.serverBlockName,
-            "connectionId": conninfo.connectionId,
-            "connectionBlockName": conninfo.connectionBlockName,
-        },
     )
 
 
@@ -358,34 +319,6 @@ def test_get_shell_block_id(mock_get: Mock):
     response = get_shell_block_id("blockname")
     assert response == "theblockid"
     mock_get.assert_called_once_with("blocks/shell/blockname")
-
-
-@patch("ddpui.ddpprefect.prefect_service.prefect_post")
-def test_create_shell_block(mock_post: Mock):
-    mock_post.return_value = {"block_id": "block-id"}
-    shellinfo = PrefectShellSetup(
-        blockname="theblockname",
-        commands=["c1", "c2"],
-        env={"ekey": "eval"},
-        workingDir="/working/dir",
-    )
-    response = create_shell_block(shellinfo)
-    assert response == {"block_id": "block-id"}
-    mock_post.assert_called_once_with(
-        "blocks/shell/",
-        {
-            "blockName": "theblockname",
-            "commands": ["c1", "c2"],
-            "env": {"ekey": "eval"},
-            "workingDir": "/working/dir",
-        },
-    )
-
-
-@patch("ddpui.ddpprefect.prefect_service.prefect_delete_a_block")
-def test_delete_shell_block(mock_delete: Mock):
-    delete_shell_block("blockid")
-    mock_delete.assert_called_once_with("blockid")
 
 
 # =============================================================================

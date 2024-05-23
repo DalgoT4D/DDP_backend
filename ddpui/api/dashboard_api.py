@@ -12,7 +12,11 @@ from ddpui import auth
 from ddpui.models.org import OrgDataFlow, OrgDataFlowv1
 from ddpui.models.orgjobs import BlockLock, DataflowBlock
 from ddpui.models.tasks import DataflowOrgTask, TaskLock
+from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.auth import has_permission
+
+# celery task
+from ddpui.celeryworkers.tasks import sync_flow_runs_of_deployments
 
 
 dashboardapi = NinjaAPI(urls_namespace="dashboard")
@@ -106,6 +110,7 @@ def get_dashboard_v1(request):
     res = []
 
     # fetch 50 (default limit) flow runs for each flow
+    sync_flowruns_for_deployment_ids = []
     for flow in org_data_flows:
         orgtask_ids = DataflowOrgTask.objects.filter(dataflow=flow).values_list(
             "orgtask__id", flat=True
@@ -119,9 +124,12 @@ def get_dashboard_v1(request):
                 "deploymentId": flow.deployment_id,
                 "cron": flow.cron,
                 "deploymentName": flow.deployment_name,
-                "runs": prefect_service.get_flow_runs_by_deployment_id(
-                    flow.deployment_id, 50
-                ),
+                "runs": [
+                    flow_run.to_json()
+                    for flow_run in PrefectFlowRun.objects.filter(
+                        deployment_id=flow.deployment_id
+                    ).order_by("-start_time")[:50]
+                ],
                 "lock": (
                     {
                         "lockedBy": lock.locked_by.user.email,
@@ -132,7 +140,10 @@ def get_dashboard_v1(request):
                 ),
             }
         )
+        sync_flowruns_for_deployment_ids.append(flow.deployment_id)
+
+    # sync the deployment flow runs into our db; a bit heavy task
+    sync_flow_runs_of_deployments.delay(sync_flowruns_for_deployment_ids)
 
     # we might add more stuff here , system logs etc.
-
     return res

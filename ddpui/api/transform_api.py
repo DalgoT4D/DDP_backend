@@ -120,14 +120,14 @@ def delete_dbt_project(request, project_name: str):
     project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
 
     if not project_dir.exists():
-        return {"error": f"Organization {org.slug} does not have any projects"}
+        raise HttpError(404, f"Organization {org.slug} does not have any projects")
 
     dbtrepo_dir: Path = project_dir / project_name
 
     if not dbtrepo_dir.exists():
-        return {
-            "error": f"Project {project_name} does not exist in organization {org.slug}"
-        }
+        raise HttpError(
+            422, f"Project {project_name} does not exist in organization {org.slug}"
+        )
 
     if org.dbt:
         dbt = org.dbt
@@ -158,11 +158,11 @@ def sync_sources(request):
     if not orgdbt:
         raise HttpError(404, "DBT workspace not set up")
 
-    sync_sources_for_warehouse.delay(
+    task = sync_sources_for_warehouse.delay(
         orgdbt.id, org_warehouse.id, org_warehouse.org.slug
     )
 
-    return {"task_progress_id": "syncsources-" + org_warehouse.org.slug}
+    return {"task_id": task.id}
 
 
 ########################## Models & Sources #############################################

@@ -10,6 +10,20 @@ from ddpui.models.org import OrgDataFlowv1
 from ddpui.models.org_user import OrgUser
 
 
+class TaskProgressHashPrefix(str, Enum):
+    """
+    all possible hash prefixes used to run long running process via celery/redis
+    the prefix is most cases will be suffixed with orgslug to generate the final hash in redis
+    hash: "prefix-orgslug"
+    """
+
+    SYNCSOURCES = "syncsources"
+    CLONEGITREPO = "clone-github-repo"
+    DBTWORKSPACE = "setup-dbt-workspace"
+    RUNDBTCMDS = "run-dbt-commands"
+    RUNELEMENTARY = "run-elementary"
+
+
 class OrgTaskGeneratedBy(str, Enum):
     """an enum for roles assignable to org-users"""
 
@@ -53,7 +67,7 @@ class OrgTask(models.Model):
     uuid = models.UUIDField(editable=False, unique=True, null=True)
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     task = models.ForeignKey(Task, on_delete=models.CASCADE)
-    connection_id = models.CharField(max_length=36, unique=True, null=True)
+    connection_id = models.CharField(max_length=36, null=True)
     parameters = models.JSONField(default=dict, blank=True)
     generated_by = models.CharField(
         choices=OrgTaskGeneratedBy.choices(), max_length=50, default="system"
@@ -94,6 +108,15 @@ class DataflowOrgTask(models.Model):
     seq = models.IntegerField(default=1)
 
 
+class TaskLockStatus(str, Enum):
+    """all possible statuses of a task lock"""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    LOCKED = "locked"
+    COMPLETED = "complete"
+
+
 class TaskLock(models.Model):
     """A locking implementation for OrgTask"""
 
@@ -104,3 +127,4 @@ class TaskLock(models.Model):
     locking_dataflow = models.ForeignKey(
         OrgDataFlowv1, on_delete=models.CASCADE, null=True
     )
+    celery_task_id = models.TextField(max_length=36, null=True)
