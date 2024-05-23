@@ -19,104 +19,6 @@ from ddpui.datainsights.insights.insight_interface import ColInsight
 from ddpui.datainsights.warehouse.warehouse_interface import WarehouseType
 
 
-class DataStats(ColInsight):
-
-    def generate_sql(self):
-        """
-        Returns a sqlalchemy query ready to be executed by an engine
-        Computes basic stats
-        """
-        column_name = self.column_name
-        datetime_col: ColumnClause = column(column_name)
-
-        query = (
-            self.builder.add_column(func.count().label("count"))
-            .add_column(
-                func.sum(
-                    case(
-                        [(datetime_col.is_(None), 1)],
-                        else_=0,
-                    )
-                ).label("countNull"),
-            )
-            .add_column(func.count(distinct(datetime_col)).label("countDistinct"))
-            .add_column(
-                func.max(datetime_col).label("maxVal"),
-            )
-            .add_column(
-                func.min(datetime_col).label("minVal"),
-            )
-        )
-
-        if self.wtype == WarehouseType.POSTGRES:
-            query = query.add_column(
-                (
-                    func.date(func.max(datetime_col))
-                    - func.date(func.min(datetime_col))
-                ).label("rangeInDays"),
-            )
-        elif self.wtype == WarehouseType.BIGQUERY:
-            query = query.add_column(
-                func.TIMESTAMP_DIFF(
-                    func.max(datetime_col), func.min(datetime_col), text("DAY")
-                ).label("rangeInDays")
-            )
-
-        return query.fetch_from(self.db_table, self.db_schema).build()
-
-    def parse_results(self, result: list[dict]):
-        """
-        Parses the result from the above executed sql query
-        Result:
-        [
-            {
-                "count": 399,
-                "countNull": 0,
-                "countDistinct": 1,
-                "maxVal": 100,
-                "minVal": 100,
-                "rangeInDays": ""
-            }
-        ]
-        """
-        if len(result) > 0:
-            return {
-                "count": result[0]["count"],
-                "countNull": result[0]["countNull"],
-                "countDistinct": result[0]["countDistinct"],
-                "maxVal": result[0]["maxVal"],
-                "minVal": result[0]["minVal"],
-                "rangeInDays": result[0]["rangeInDays"],
-            }
-
-        return {
-            "count": 0,
-            "countNull": 0,
-            "countDistinct": 0,
-            "maxVal": None,
-            "minVal": None,
-            "rangeInDays": 0,
-        }
-
-    def validate_query_results(self, parsed_results):
-        """
-        Validate the parsed results of the query
-        This function assumes the parsed_results sent is for a single column
-        """
-        validate = False
-        if (
-            parsed_results
-            and isinstance(parsed_results, dict)
-            and all(
-                key in parsed_results
-                for key in ["count", "countNull", "countDistinct", "maxVal", "minVal"]
-            )
-        ):
-            validate = True
-
-        return validate
-
-
 @dataclass
 class BarChartFilter:
     range: str
@@ -139,13 +41,19 @@ class DistributionChart(ColInsight):
         else:
             self.filter: BarChartFilter = BarChartFilter("year", 10, 0)  # default
 
+    def query_id(self) -> str:
+        return "chart-query-id"
+
     def generate_sql(self):
         """
         Returns a sqlalchemy query ready to be executed by an engine
         Computes basic stats
         """
-        column_name = self.column_name
-        datetime_col: ColumnClause = column(column_name)
+        if len(self.columns) < 1:
+            raise ValueError("No column specified")
+
+        col = self.columns[0]
+        datetime_col: ColumnClause = column(col.name)
 
         query = self.builder
         groupby_cols = []
@@ -197,9 +105,41 @@ class DistributionChart(ColInsight):
         ]
         """
         return {
-            "chartType": self.chart_type(),
-            "data": result,
+            self.columns[0].name: {
+                "charts": [
+                    {
+                        "chartType": self.chart_type(),
+                        "data": [
+                            {key: int(value) for key, value in record.items()}
+                            for record in result
+                        ],
+                    }
+                ]
+            }
         }
 
     def chart_type(self) -> str:
         return "bar"
+
+    def validate_query_results(self, parsed_results) -> bool:
+        """
+        Validate the parsed results of the query
+        This function assumes the parsed_results sent is for a single column
+        """
+        validate = False
+        if (
+            parsed_results
+            and isinstance(parsed_results, dict)
+            and "charts" in parsed_results
+            and len(parsed_results["charts"]) > 0
+        ):
+            if all(
+                key in parsed_results["charts"][0]
+                for key in [
+                    "chartType",
+                    "data",
+                ]
+            ):
+                validate = True
+
+        return validate
