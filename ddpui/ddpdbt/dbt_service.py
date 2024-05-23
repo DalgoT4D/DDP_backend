@@ -1,11 +1,12 @@
 import glob
 import os
 import shutil
+import re
+from uuid import uuid4
+from datetime import datetime
 import subprocess
 from pathlib import Path
 import requests
-import re
-from uuid import uuid4
 from redis import Redis
 import boto3
 import boto3.exceptions
@@ -237,10 +238,12 @@ def make_elementary_report(org: Org):
         aws_access_key_id=os.getenv("ELEMENTARY_AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=os.getenv("ELEMENTARY_AWS_SECRET_ACCESS_KEY"),
     )
+    todays_date = datetime.today().strftime("%Y-%m-%d")
+    bucket_file_path = f"reports/{org.slug}.{todays_date}.html"
     try:
         s3response = s3.get_object(
             Bucket=os.getenv("ELEMENTARY_S3_BUCKET"),
-            Key=f"reports/{org.slug}.html",
+            Key=bucket_file_path,
         )
         logger.info("fetched s3response")
     except boto3.exceptions.botocore.exceptions.ClientError:
@@ -256,7 +259,7 @@ def make_elementary_report(org: Org):
             return None, {"task_id": task_id}
 
         logger.info("creating new elementary report")
-        task = create_elementary_report.delay(org.id)
+        task = create_elementary_report.delay(org.id, bucket_file_path)
         logger.info(task.id)
         return None, {"task_id": task.id}
     except Exception:

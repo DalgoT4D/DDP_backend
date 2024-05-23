@@ -369,10 +369,7 @@ def run_dbt_commands(self, orguser_id: int):
 
 
 @app.task(bind=True)
-def create_elementary_report(
-    self,
-    org_id: int,
-):
+def create_elementary_report(self, org_id: int, bucket_file_path: str):
     """run edr report to create the elementary report and write to s3"""
     edr_binary = Path(os.getenv("DBT_VENV")) / "venv/bin/edr"
     org = Org.objects.filter(id=org_id).first()
@@ -398,7 +395,7 @@ def create_elementary_report(
         "--s3-bucket-name",
         s3_bucket_name,
         "--bucket-file-path",
-        f"reports/{org.slug}.html",
+        bucket_file_path,
         "--profiles-dir",
         str(profiles_dir),
     ]
