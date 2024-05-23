@@ -23,7 +23,7 @@ from ddpui.datainsights.insights.insight_interface import (
 class DataStats(ColInsight):
 
     def query_id(self) -> str:
-        return "numeric-query-id"
+        return f"numeric-queryid-{self.columns[0].name}"
 
     def generate_sql(self):
         """

@@ -165,7 +165,6 @@ class GenerateResult:
                 stmt = stmt.compile(
                     bind=wclient.engine, compile_kwargs={"literal_binds": True}
                 )
-                print(stmt)
                 results = wclient.execute(stmt)
 
                 # parse result of this query
@@ -194,9 +193,6 @@ class GenerateResult:
 
         payload = {
             "status": GenerateResult.RESULT_STATUS_FETCHING,
-            "columns": [
-                c.name for c in query.columns
-            ],  # columns for which query is being runned
             "created_on": str(
                 datetime.now().isoformat()
             ),  # will help the scheduler release locks
@@ -206,7 +202,8 @@ class GenerateResult:
 
         # TODO: could be thread unsafe; can have race conditions?
         is_locked = False
-        if redis.hget(hash, key) is not None:
+        current_lock = redis.hget(hash, key)
+        if current_lock is not None:
             is_locked = True
 
         if is_locked is False:

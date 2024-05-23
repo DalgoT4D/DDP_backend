@@ -18,7 +18,7 @@ from ddpui.datainsights.insights.insight_interface import ColInsight
 class DataStats(ColInsight):
 
     def query_id(self) -> str:
-        return "bool-query-id"
+        return f"bool-queryid-{self.columns[0].name}"
 
     def generate_sql(self):
         """

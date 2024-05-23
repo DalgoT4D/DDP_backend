@@ -19,7 +19,7 @@ from ddpui.datainsights.insights.insight_interface import ColInsight
 class DistributionChart(ColInsight):
 
     def query_id(self) -> str:
-        return "string-query-id"
+        return f"string-queryid-{self.columns[0].name}"
 
     def generate_sql(self):
         """

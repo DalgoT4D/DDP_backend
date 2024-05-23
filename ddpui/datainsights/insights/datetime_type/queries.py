@@ -42,7 +42,7 @@ class DistributionChart(ColInsight):
             self.filter: BarChartFilter = BarChartFilter("year", 10, 0)  # default
 
     def query_id(self) -> str:
-        return "chart-query-id"
+        return f"chart-queryid-{self.columns[0].name}"
 
     def generate_sql(self):
         """
