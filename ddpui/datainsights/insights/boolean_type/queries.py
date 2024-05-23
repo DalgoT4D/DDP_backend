@@ -17,41 +17,34 @@ from ddpui.datainsights.insights.insight_interface import ColInsight
 
 class DataStats(ColInsight):
 
+    def query_id(self) -> str:
+        return "bool-query-id"
+
     def generate_sql(self):
         """
         Returns a sqlalchemy query ready to be executed by an engine
         Computes basic stats
         """
-        column_name = self.column_name
-        bool_col: ColumnClause = column(column_name)
+        if len(self.columns) < 1:
+            raise ValueError("No column specified")
 
-        query = (
-            self.builder.add_column(func.count().label("count"))
-            .add_column(
-                func.sum(
-                    case(
-                        [(bool_col.is_(None), 1)],
-                        else_=0,
-                    )
-                ).label("countNull"),
-            )
-            .add_column(func.count(distinct(bool_col)).label("countDistinct"))
-            .add_column(
-                func.sum(
-                    case(
-                        [(bool_col == True, 1)],
-                        else_=0,
-                    )
-                ).label("countTrue"),
-            )
-            .add_column(
-                func.sum(
-                    case(
-                        [(bool_col == False, 1)],
-                        else_=0,
-                    )
-                ).label("countFalse"),
-            )
+        col = self.columns[0]
+        bool_col: ColumnClause = column(col.name)
+
+        query = self.builder.add_column(
+            func.sum(
+                case(
+                    [(bool_col == True, 1)],
+                    else_=0,
+                )
+            ).label("countTrue"),
+        ).add_column(
+            func.sum(
+                case(
+                    [(bool_col == False, 1)],
+                    else_=0,
+                )
+            ).label("countFalse"),
         )
 
         return query.fetch_from(self.db_table, self.db_schema).build()
@@ -62,9 +55,6 @@ class DataStats(ColInsight):
         Result:
         [
             {
-                "count": 399,
-                "countNull": 0,
-                "countDistinct": 1,
                 "countTrue": 50,
                 "countFalse": 40
             }
@@ -72,17 +62,30 @@ class DataStats(ColInsight):
         """
         if len(result) > 0:
             return {
-                "count": result[0]["count"],
-                "countNull": result[0]["countNull"],
-                "countDistinct": result[0]["countDistinct"],
-                "countTrue": result[0]["countTrue"],
-                "countFalse": result[0]["countFalse"],
+                self.columns[0].name: {
+                    "countTrue": result[0]["countTrue"],
+                    "countFalse": result[0]["countFalse"],
+                }
             }
 
         return {
-            "count": 0,
-            "countNull": 0,
-            "countDistinct": 0,
-            "countTrue": 0,
-            "countFalse": 0,
+            self.columns[0].name: {
+                "countTrue": 0,
+                "countFalse": 0,
+            }
         }
+
+    def validate_query_results(self, parsed_results):
+        """
+        Validate the parsed results of the query
+        This function assumes the parsed_results sent is for a single column
+        """
+        validate = False
+        if (
+            parsed_results
+            and isinstance(parsed_results, dict)
+            and all(key in parsed_results for key in ["countTrue", "countFalse"])
+        ):
+            validate = True
+
+        return validate

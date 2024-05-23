@@ -159,6 +159,7 @@ class GenerateResult:
                 stmt = stmt.compile(
                     bind=wclient.engine, compile_kwargs={"literal_binds": True}
                 )
+                print(stmt)
                 results = wclient.execute(stmt)
 
                 # parse result of this query
@@ -250,8 +251,6 @@ class GenerateResult:
         key = f"{query.db_schema}-{query.db_table}"
 
         redis = RedisClient.get_instance()
-        logger.info("saving the results to redis")
-        logger.info(merged_results)
         redis.hset(hash, key, json.dumps(merged_results))
 
     @classmethod

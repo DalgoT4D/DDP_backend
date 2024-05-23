@@ -12,9 +12,12 @@ from sqlalchemy.sql.expression import (
     literal_column,
 )
 from sqlalchemy.sql.functions import func, Function
-from sqlalchemy import Float
+from sqlalchemy import Integer
 
-from ddpui.datainsights.insights.insight_interface import ColInsight
+from ddpui.datainsights.insights.insight_interface import (
+    ColInsight,
+    TranslateColDataType,
+)
 
 
 class BaseDataStats(ColInsight):
@@ -44,13 +47,20 @@ class BaseDataStats(ColInsight):
                 .add_column(
                     func.count(distinct(col_clause)).label(f"countDistinct__{col.name}")
                 )
-                .add_column(
+            )
+
+            if col.translated_type != TranslateColDataType.BOOL:
+                query = query.add_column(
                     func.max(col_clause).label(f"maxVal_{col.name}"),
-                )
-                .add_column(
+                ).add_column(
                     func.min(col_clause).label(f"minVal_{col.name}"),
                 )
-            )
+            else:
+                query = query.add_column(
+                    func.max(cast(col_clause, Integer)).label(f"maxVal_{col.name}"),
+                ).add_column(
+                    func.min(cast(col_clause, Integer)).label(f"minVal_{col.name}"),
+                )
 
         return query.fetch_from(self.db_table, self.db_schema).build()
 
