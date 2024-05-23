@@ -1,6 +1,8 @@
+import time
 import json
 from datetime import datetime
 from sqlalchemy.sql.selectable import Select
+from channels.generic.websocket import WebsocketConsumer
 
 from ddpui.celery import app
 from ddpui.datainsights.insights.insight_interface import ColInsight
@@ -18,6 +20,73 @@ from ddpui.utils import secretsmanager
 
 
 logger = CustomLogger("ddpui")
+
+
+class DataInsightsConsumer(WebsocketConsumer):
+
+    def connect(self):
+        logger.info("Trying to establish connection")
+        self.accept()
+
+    def websocket_receive(self, message):
+        logger.info("Recieved the message from client")
+        payload = json.loads(message["text"])
+        task_id = payload.get("task_id")
+
+        if task_id:
+            logger.info("Starting to poll for the celery task")
+            result = TaskProgress.fetch(
+                task_id=task_id, hashkey=TaskProgressHashPrefix.DATAINSIGHTS
+            )
+            if result:
+                result = result[-1]
+                while (
+                    result
+                    and "status" in result
+                    and result["status"]
+                    not in [
+                        GenerateResult.RESULT_STATUS_COMPLETED,
+                        GenerateResult.RESULT_STATUS_ERROR,
+                    ]
+                ):
+                    time.sleep(5)
+                    result = TaskProgress.fetch(
+                        task_id=task_id, hashkey=TaskProgressHashPrefix.DATAINSIGHTS
+                    )[-1]
+                self.send(
+                    json.dumps(
+                        {
+                            "status": "success",
+                            "message": "success",
+                            "body": {"task_id": task_id, "data": result["results"]},
+                        }
+                    )
+                )
+            else:
+                self.send(
+                    json.dumps(
+                        {
+                            "status": "failed",
+                            "message": "task id not found",
+                            "body": {},
+                        }
+                    )
+                )
+
+        else:
+            self.send(
+                json.dumps(
+                    {"status": "failed", "message": "task id not provided", "body": {}}
+                )
+            )
+
+    def websocket_send(self, event):
+        print("triggering send")
+        # Extract the message from the event
+        message = event["text"]
+
+        # Send the message to the WebSocket
+        self.send(message)
 
 
 @app.task(bind=True)

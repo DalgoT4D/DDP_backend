@@ -67,6 +67,7 @@ INSTALLED_APPS = [
     "ddpui",
     "django_prometheus",
     "django_extensions",
+    "channels",
 ]
 
 REST_FRAMEWORK = {
@@ -109,6 +110,15 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "ddpui.wsgi.application"
 
+ASGI_APPLICATION = "ddpui.asgi.application"  # for websockets
+
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {"hosts": [("127.0.0.1", "6379")]},
+    }
+}
 
 # Database
 # https://docs.djangoproject.com/en/4.1/ref/settings/#databases
