@@ -22,7 +22,12 @@ logger = CustomLogger("ddpui")
 
 @app.task(bind=True)
 def poll_for_column_insights(
-    self, db_schema: str, db_table: str, column_name: str, org_warehouse_id: str
+    self,
+    db_schema: str,
+    db_table: str,
+    column_name: str,
+    org_warehouse_id: str,
+    refresh: bool,
 ):
     """
     This will help frontend fetch insights for the column provided
@@ -90,7 +95,8 @@ def poll_for_column_insights(
         )
     )
 
-    GenerateResult.execute_insight_queries(org_warehouse.org, wclient, insight_objs)
+    if refresh:
+        GenerateResult.execute_insight_queries(org_warehouse.org, wclient, insight_objs)
 
     GenerateResult.poll_for_all_queries(org_warehouse.org, insight_objs, column_name)
 

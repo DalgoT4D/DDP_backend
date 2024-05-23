@@ -232,7 +232,11 @@ def post_data_insights(request, payload: ColumnMetrics):
     try:
 
         task = poll_for_column_insights.delay(
-            payload.db_schema, payload.db_table, payload.column_name, org_warehouse.id
+            payload.db_schema,
+            payload.db_table,
+            payload.column_name,
+            org_warehouse.id,
+            payload.refresh,
         )
 
         return {"task_id": task.id}
