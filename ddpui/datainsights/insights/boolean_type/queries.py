@@ -12,19 +12,34 @@ from sqlalchemy.sql.expression import (
 from sqlalchemy.sql.functions import func, Function
 from sqlalchemy import Float
 
-from ddpui.datainsights.insights.insight_interface import ColInsight
+from ddpui.datainsights.insights.insight_interface import (
+    ColInsight,
+    TranslateColDataType,
+)
+from ddpui.utils.helpers import hash_dict
 
 
 class DataStats(ColInsight):
+    """
+    Computes basic stats
+    """
 
     def query_id(self) -> str:
-        return f"bool-queryid-{self.columns[0].name}"
+        """
+        This will be dictate whether a query is unique or not
+        Returns a hash string
+        """
+        return hash_dict(
+            {
+                "columns": [col.name for col in self.columns],
+                "type": TranslateColDataType.BOOL,
+                "filter": self.filter,
+                "chart_type": self.chart_type(),
+            }
+        )
 
     def generate_sql(self):
-        """
-        Returns a sqlalchemy query ready to be executed by an engine
-        Computes basic stats
-        """
+
         if len(self.columns) < 1:
             raise ValueError("No column specified")
 
@@ -51,7 +66,6 @@ class DataStats(ColInsight):
 
     def parse_results(self, result: list[dict]):
         """
-        Parses the result from the above executed sql query
         Result:
         [
             {
@@ -76,10 +90,6 @@ class DataStats(ColInsight):
         }
 
     def validate_query_results(self, parsed_results):
-        """
-        Validate the parsed results of the query
-        This function assumes the parsed_results sent is for a single column
-        """
         validate = False
         if (
             parsed_results

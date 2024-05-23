@@ -18,18 +18,29 @@ from ddpui.datainsights.insights.insight_interface import (
     ColInsight,
     TranslateColDataType,
 )
+from ddpui.utils.helpers import hash_dict
 
 
 class BaseDataStats(ColInsight):
+    """
+    Computes basic stats
+    """
 
     def query_id(self) -> str:
-        return "base-query-id"
+        """
+        This will be dictate whether a query is unique or not
+        Returns a hash string
+        """
+        return hash_dict(
+            {
+                "type": TranslateColDataType.BASE,
+                "filter": self.filter,
+                "chart_type": self.chart_type(),
+            }
+        )
 
     def generate_sql(self):
-        """
-        Returns a sqlalchemy query ready to be executed by an engine
-        Computes basic stats
-        """
+
         query = self.builder
 
         for col in self.columns:
@@ -66,7 +77,6 @@ class BaseDataStats(ColInsight):
 
     def parse_results(self, result: list[dict]):
         """
-        Parses the result from the above executed sql query
         Serialize datetime/date objects
         Result:
         [

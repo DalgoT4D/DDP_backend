@@ -17,7 +17,7 @@ class InsightsFactory:
     @classmethod
     def initiate_insight(
         cls,
-        columns: list[str],
+        columns: list[dict],
         db_table: str,
         db_schema: str,
         col_type: TranslateColDataType,

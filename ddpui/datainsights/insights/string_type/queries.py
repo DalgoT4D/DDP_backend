@@ -2,24 +2,33 @@ from sqlalchemy.sql.expression import (
     column,
     ColumnClause,
     case,
-    distinct,
-    table,
-    TableClause,
-    cast,
     select,
-    desc,
     literal_column,
 )
-from sqlalchemy.sql.functions import func, Function
-from sqlalchemy import Float
+from sqlalchemy.sql.functions import func
 
-from ddpui.datainsights.insights.insight_interface import ColInsight
+from ddpui.datainsights.insights.insight_interface import (
+    ColInsight,
+    TranslateColDataType,
+)
+from ddpui.utils.helpers import hash_dict
 
 
 class DistributionChart(ColInsight):
 
     def query_id(self) -> str:
-        return f"string-queryid-{self.columns[0].name}"
+        """
+        This will be dictate whether a query is unique or not
+        Returns a hash string
+        """
+        return hash_dict(
+            {
+                "columns": [col.name for col in self.columns],
+                "type": TranslateColDataType.NUMERIC,
+                "filter": self.filter,
+                "chart_type": self.chart_type(),
+            }
+        )
 
     def generate_sql(self):
         """

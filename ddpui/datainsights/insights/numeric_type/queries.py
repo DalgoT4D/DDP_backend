@@ -1,29 +1,37 @@
 from sqlalchemy.sql.expression import (
     column,
     ColumnClause,
-    case,
-    distinct,
     table,
-    TableClause,
     cast,
     select,
     desc,
-    literal,
-    union_all,
 )
-from sqlalchemy.sql.functions import func, Function
-from sqlalchemy import Float
+from sqlalchemy.sql.functions import func
+from sqlalchemy import Float, NUMERIC
 
 from ddpui.datainsights.insights.insight_interface import (
     ColInsight,
     TranslateColDataType,
 )
+from ddpui.utils.helpers import hash_dict
 
 
 class DataStats(ColInsight):
 
     def query_id(self) -> str:
-        return f"numeric-queryid-{self.columns[0].name}"
+        """
+        This will be dictate whether a query is unique or not
+        Returns a hash string
+        """
+        hash = hash_dict(
+            {
+                "columns": ",".join([col.name for col in self.columns]),
+                "type": TranslateColDataType.NUMERIC,
+                "filter": self.filter,
+                "chart_type": self.chart_type(),
+            }
+        )
+        return hash
 
     def generate_sql(self):
         """
@@ -49,15 +57,15 @@ class DataStats(ColInsight):
         query = (
             self.builder.reset()
             .add_column(
-                cast(func.round(func.avg(numeric_col), 2), Float).label("mean"),
+                func.round(cast(func.avg(numeric_col), NUMERIC), 2).label("mean"),
             )
             .add_column(
                 select(
                     [
-                        cast(
-                            func.round(func.avg(median_subquery.c[f"{col.name}"]), 2),
-                            Float,
-                        )
+                        func.round(
+                            cast(func.avg(median_subquery.c[f"{col.name}"]), NUMERIC),
+                            2,
+                        ),
                     ]
                 )
                 .where(
@@ -97,9 +105,9 @@ class DataStats(ColInsight):
         if len(result) > 0:
             return {
                 self.columns[0].name: {
-                    "mean": result[0]["mean"],
-                    "median": result[0]["median"],
-                    "mode": result[0]["mode"],
+                    "mean": float(result[0]["mean"]),
+                    "median": float(result[0]["median"]),
+                    "mode": float(result[0]["mode"]),
                 }
             }
 

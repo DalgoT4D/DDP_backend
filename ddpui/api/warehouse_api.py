@@ -239,6 +239,8 @@ def post_data_insights(request, payload: ColumnMetrics):
             payload.refresh,
         )
 
+        # send a message to tbe websocket to start tracking progress task_id
+
         return {"task_id": task.id}
     except Exception as err:
         logger.error(err)

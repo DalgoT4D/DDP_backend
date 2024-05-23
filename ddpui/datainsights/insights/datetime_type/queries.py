@@ -1,22 +1,17 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 
 from sqlalchemy.sql.expression import (
     column,
     ColumnClause,
-    case,
-    distinct,
-    table,
-    TableClause,
-    cast,
-    select,
-    desc,
-    text,
 )
-from sqlalchemy.sql.functions import func, Function, register_function, GenericFunction
-from sqlalchemy import Float, extract, literal
+from sqlalchemy.sql.functions import func
+from sqlalchemy import extract
 
-from ddpui.datainsights.insights.insight_interface import ColInsight
-from ddpui.datainsights.warehouse.warehouse_interface import WarehouseType
+from ddpui.datainsights.insights.insight_interface import (
+    ColInsight,
+    TranslateColDataType,
+)
+from ddpui.utils.helpers import hash_dict
 
 
 @dataclass
@@ -42,7 +37,18 @@ class DistributionChart(ColInsight):
             self.filter: BarChartFilter = BarChartFilter("year", 10, 0)  # default
 
     def query_id(self) -> str:
-        return f"chart-queryid-{self.columns[0].name}"
+        """
+        This will be dictate whether a query is unique or not
+        Returns a hash string
+        """
+        return hash_dict(
+            {
+                "columns": [col.name for col in self.columns],
+                "type": TranslateColDataType.DATETIME,
+                "filter": asdict(self.filter) if self.filter else self.filter,
+                "chart_type": self.chart_type(),
+            }
+        )
 
     def generate_sql(self):
         """

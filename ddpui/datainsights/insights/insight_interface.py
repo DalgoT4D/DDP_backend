@@ -60,21 +60,38 @@ class ColInsight(ABC):
 
     @abstractmethod
     def query_id(self) -> str:
+        """
+        This will be dictate whether a query is unique or not
+        Returns a hash string
+        """
         pass
 
     @abstractmethod
     def generate_sql(self) -> Select:
+        """
+        Returns a sqlalchemy query statement ready to be executed by an engine
+        """
         pass
 
     @abstractmethod
     def parse_results(self, result: list[dict]):
+        """
+        Parses the result from the above executed sql query
+        """
         pass
 
     def chart_type(self) -> str:
+        """
+        This will return a Non null value if the insight is a used for a chart
+        """
         return None
 
     @abstractmethod
     def validate_query_results(self, parsed_results) -> bool:
+        """
+        Validate the parsed results of the query
+        This function assumes the parsed_results sent is for a single column
+        """
         pass
 
 

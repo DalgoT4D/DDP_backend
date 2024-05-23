@@ -58,7 +58,7 @@ class DataInsightsConsumer(WebsocketConsumer):
                         {
                             "status": "success",
                             "message": "success",
-                            "body": {"task_id": task_id, "data": result["results"]},
+                            "body": result["results"],
                         }
                     )
                 )
@@ -79,14 +79,6 @@ class DataInsightsConsumer(WebsocketConsumer):
                     {"status": "failed", "message": "task id not provided", "body": {}}
                 )
             )
-
-    def websocket_send(self, event):
-        print("triggering send")
-        # Extract the message from the event
-        message = event["text"]
-
-        # Send the message to the WebSocket
-        self.send(message)
 
 
 @app.task(bind=True)
@@ -164,10 +156,9 @@ def poll_for_column_insights(
         )
     )
 
-    if refresh:
-        GenerateResult.execute_insight_queries(org_warehouse.org, wclient, insight_objs)
-
-    GenerateResult.poll_for_all_queries(org_warehouse.org, insight_objs, column_name)
+    GenerateResult.execute_insight_queries(
+        org_warehouse.org, wclient, insight_objs, refresh
+    )
 
     final_result = GenerateResult.fetch_results(
         org_warehouse.org, db_schema, db_table, column_name
@@ -211,6 +202,7 @@ class GenerateResult:
         org: Org,
         wclient: Warehouse,
         insights: list[DataTypeColInsights],
+        refresh: bool = False,
     ) -> dict:
         """
         1. Collates all queries to run
@@ -221,44 +213,44 @@ class GenerateResult:
         for insight in insights:
             insight_queries += insight.insights
 
-        # acquire lock for all queries
-        to_execute_queries: list[ColInsight] = []
+        logger.info(f"Total number of queries to executed {len(insight_queries)}")
+
+        # acquire & run the queries lock for all queries
         for query in insight_queries:
             if cls.acquire_query_lock(org, query):
-                to_execute_queries.append(query)
+                # run the queries and save results
+                try:
+                    stmt = query.generate_sql()
+                    stmt = stmt.compile(
+                        bind=wclient.engine, compile_kwargs={"literal_binds": True}
+                    )
+                    results = wclient.execute(stmt)
 
-        # run the queries and save results
-        for query in to_execute_queries:
-            try:
-                stmt = query.generate_sql()
-                stmt = stmt.compile(
-                    bind=wclient.engine, compile_kwargs={"literal_binds": True}
-                )
-                results = wclient.execute(stmt)
+                    # parse result of this query
+                    results = query.parse_results(results)
 
-                # parse result of this query
-                results = query.parse_results(results)
+                    # save result to redis
+                    cls.save_results(org, query, results, refresh)
 
-                # save result to redis
-                cls.save_results(org, query, results)
-
-                # release the lock for this query
-                cls.release_query_lock(org, query)
-            except Exception as err:
-                logger.error(
-                    "Something went wrong while executing the query or saving the results; clearing the lock"
-                )
-                logger.error(err)
-                cls.release_query_lock(org, query)
+                    # release the lock for this query
+                    cls.release_query_lock(org, query)
+                except Exception as err:
+                    logger.error(
+                        "Something went wrong while executing the query or saving the results; clearing the lock"
+                    )
+                    logger.error(err)
+                    cls.release_query_lock(org, query)
 
     @classmethod
     def acquire_query_lock(cls, org: Org, query: ColInsight) -> bool:
         """
         Acquire lock to run the query: return True
-        If its already locked, it means someone already triggered the query so just retun False
+        Poll till you get the lock
         """
         hash = GenerateResult.build_queries_locking_hash(org, query)
         key = query.query_id()
+
+        logger.info(f"Acquiring lock for query hash: {key}")
 
         payload = {
             "status": GenerateResult.RESULT_STATUS_FETCHING,
@@ -269,23 +261,29 @@ class GenerateResult:
 
         redis = RedisClient.get_instance()
 
-        # TODO: could be thread unsafe; can have race conditions?
         is_locked = False
         current_lock = redis.hget(hash, key)
         if current_lock is not None:
             is_locked = True
 
         if is_locked is False:
-
             logger.info("creating the hash for queries")
-            if redis.hget(hash, key) is None:
-                redis.hset(hash, key, json.dumps(payload))
+            # set if key does not exist
+            if redis.hsetnx(hash, key, json.dumps(payload)):
+                pass
             else:
                 is_locked = True
 
-        new_lock_acquired = not is_locked
+        if is_locked:
+            # poll for the lock till it releases basically till the query finishes running
+            current_lock = redis.hget(hash, key)
+            while current_lock is not None:
+                time.sleep(5)
+                current_lock = redis.hget(hash, key)
 
-        return new_lock_acquired
+        run_query = not is_locked
+
+        return run_query
 
     @classmethod
     def release_query_lock(cls, org: Org, query: ColInsight) -> None:
@@ -297,20 +295,20 @@ class GenerateResult:
 
         redis = RedisClient.get_instance()
 
-        # TODO: could be thread unsafe; can have race conditions?
         logger.info("clearing the query lock")
-        if redis.hget(hash, key) is not None:
-            redis.hdel(hash, key)
+        redis.hdel(hash, key)
 
         return None
 
     @classmethod
-    def save_results(cls, org: Org, query: ColInsight, parsed_results: dict) -> None:
+    def save_results(
+        cls, org: Org, query: ColInsight, parsed_results: dict, refresh: bool = False
+    ) -> None:
         """Save results to redis"""
         # place to the save the results in redis should be created
 
         current_results = GenerateResult.ensure_insights_setup_for_results(
-            org, query.db_schema, query.db_table
+            org, query.db_schema, query.db_table, refresh
         )
 
         merged_results = {
@@ -339,52 +337,26 @@ class GenerateResult:
 
         redis = RedisClient.get_instance()
 
-        # TODO: could be thread unsafe; can have race conditions?
-        logger.info("creating the hash for to store results for insights")
-        payload = redis.hget(hash, key)
-        payload = json.loads(payload) if payload else None
-
-        if payload is None or refresh is True:
+        # force refresh
+        if refresh is True:
             payload = {}
+            logger.info(
+                f"clearing (force refresh) the hash for schema: {db_schema} & table: {db_table} to store results for insights"
+            )
             redis.hset(hash, key, json.dumps(payload))
+        else:
+            logger.info(
+                f"creating the hash for schema: {db_schema} & table: {db_table}  to store results for insights"
+            )
+            payload = redis.hget(hash, key)
+            payload = json.loads(payload) if payload else None
+            if payload is None:
+                if redis.hsetnx(hash, key, json.dumps({})):
+                    payload = {}
+                else:
+                    payload = redis.hget(hash, key)
 
         return payload
-
-    @classmethod
-    def poll_for_all_queries(
-        cls,
-        org: Org,
-        insights: list[DataTypeColInsights],
-        requestor_column: str,
-    ) -> dict:
-        insight_queries: list[ColInsight] = []
-        for insight in insights:
-            insight_queries += insight.insights
-
-        redis = RedisClient.get_instance()
-
-        locks = [
-            True for _ in range(len(insight_queries))
-        ]  # assume all queries are locked
-
-        while not all(locks):
-            # if any query has a lock keep polling
-            for i, query in enumerate(insight_queries):
-                hash = GenerateResult.build_queries_locking_hash(org, query)
-                key = query.query_id()
-
-                # TODO: could be thread unsafe; can have race conditions?
-                is_locked = False
-                lock_state = redis.hget(hash, key)
-                if lock_state is not None:
-                    lock_state = json.loads(lock_state)
-                    if (
-                        "columns" in lock_state
-                        and requestor_column in lock_state["columns"]
-                    ):
-                        is_locked = True
-
-                locks[i] = is_locked
 
     @classmethod
     def fetch_results(
