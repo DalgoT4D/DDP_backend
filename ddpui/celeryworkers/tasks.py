@@ -11,7 +11,6 @@ from ddpui.utils.timezone import UTC
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse, OrgPrefectBlockv1, OrgDataFlowv1
 from ddpui.models.org_user import OrgUser
-from ddpui.models.orgjobs import BlockLock
 from ddpui.models.tasks import TaskLock, OrgTask, TaskProgressHashPrefix
 from ddpui.models.canvaslock import CanvasLock
 from ddpui.models.flow_runs import PrefectFlowRun
@@ -436,13 +435,6 @@ def update_dbt_core_block_schema_task(block_name, default_schema):
 
 
 @app.task()
-def delete_old_blocklocks():
-    """delete blocklocks which were created over an hour ago"""
-    onehourago = UTC.localize(datetime.now() - timedelta(seconds=3600))
-    BlockLock.objects.filter(locked_at__lt=onehourago).delete()
-
-
-@app.task()
 def delete_old_tasklocks():
     """delete task locks which were created over an hour ago"""
     onehourago = UTC.localize(datetime.now() - timedelta(seconds=3600))
@@ -507,9 +499,6 @@ def sync_flow_runs_of_deployments(self, deployment_ids: list[str] = None):
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender, **kwargs):
     """check for old locks every minute"""
-    sender.add_periodic_task(
-        60 * 1.0, delete_old_blocklocks.s(), name="remove old blocklocks"
-    )
     sender.add_periodic_task(
         60 * 1.0, delete_old_tasklocks.s(), name="remove old tasklocks"
     )

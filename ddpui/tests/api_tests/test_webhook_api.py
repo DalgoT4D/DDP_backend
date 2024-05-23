@@ -14,7 +14,7 @@ from ddpui.api.webhook_api import (
     FLOW_RUN,
     get_message_type,
     get_flowrun_id_and_state,
-    post_notification,
+    post_notification_v1,
 )
 from ddpui.utils.webhook_helpers import (
     get_org_from_flow_run,
@@ -192,17 +192,17 @@ def test_email_flowrun_logs_to_orgusers():
             )
 
 
-def test_post_notification_unauthorized():
+def test_post_notification_v1_unauthorized():
     """tests the api endpoint /notifications/"""
     request = Mock()
     request.headers = {}
     os.environ["X-Notification-Key"] = ""
     with pytest.raises(HttpError) as excinfo:
-        post_notification(request)
+        post_notification_v1(request)
     assert str(excinfo.value) == "unauthorized"
 
 
-def test_post_notification():
+def test_post_notification_v1():
     """tests the api endpoint /notifications/"""
     request = Mock()
     body = """this is a message
@@ -228,5 +228,5 @@ def test_post_notification():
             mock_get_flow_run_logs.return_value = {"logs": []}
             user = User.objects.create(email="email", username="username")
             OrgUser.objects.create(org=org, user=user, role=OrgUserRole.ACCOUNT_MANAGER)
-            response = post_notification(request)
+            response = post_notification_v1(request)
             assert response["status"] == "ok"

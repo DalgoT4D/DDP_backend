@@ -7,11 +7,10 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from ddpui.models.org import Org, OrgDataFlow, OrgPrefectBlock, OrgWarehouse
+from ddpui.models.org import Org, OrgPrefectBlock, OrgWarehouse
 from ddpui.models.org_user import OrgUser, User
 
 from ddpui.utils.deleteorg import (
-    delete_prefect_deployments,
     delete_prefect_shell_blocks,
     delete_dbt_workspace,
     delete_orgusers,
@@ -32,22 +31,6 @@ def org_with_workspace():
     yield org
     print("deleting org_with_workspace")
     org.delete()
-
-
-@patch.multiple(
-    "ddpui.ddpprefect.prefect_service",
-    delete_deployment_by_id=Mock(),
-)
-def test_delete_prefect_deployments(org_with_workspace):
-    """
-    deleting a prefect deployment should
-    - invoke delete_deployment_by_id
-    - delete the org-dataflow
-    """
-    OrgDataFlow.objects.create(org=org_with_workspace, name="org-dataflow-name")
-    assert OrgDataFlow.objects.filter(org=org_with_workspace).count() == 1
-    delete_prefect_deployments(org_with_workspace)
-    assert OrgDataFlow.objects.filter(org=org_with_workspace).count() == 0
 
 
 @patch.multiple(

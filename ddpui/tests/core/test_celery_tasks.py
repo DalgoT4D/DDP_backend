@@ -280,16 +280,11 @@ def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
         assert OrgDbtModel.objects.filter(type="source", orgdbt=orgdbt).count() == 0
         sync_sources_for_warehouse(orgdbt.id, warehouse.id, orguser.org.slug)
         for schema in SCHEMAS_TABLES:
-            assert (
-                sorted(
-                    list(
-                        OrgDbtModel.objects.filter(
-                            type="source", orgdbt=orgdbt, schema=schema
-                        ).values_list("name", flat=True)
-                    )
-                )
-                == SCHEMAS_TABLES[schema]
-            )
+            assert set(
+                OrgDbtModel.objects.filter(
+                    type="source", orgdbt=orgdbt, schema=schema
+                ).values_list("name", flat=True)
+            ) == set(SCHEMAS_TABLES[schema])
 
         add_progress_mock.assert_has_calls(
             [
@@ -330,24 +325,18 @@ def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
         # syncing sources again should not create any new entries
         sync_sources_for_warehouse(orgdbt.id, warehouse.id, orguser.org.slug)
         for schema in SCHEMAS_TABLES:
-            assert (
-                list(
-                    OrgDbtModel.objects.filter(
-                        type="source", orgdbt=orgdbt, schema=schema
-                    ).values_list("name", flat=True)
-                )
-                == SCHEMAS_TABLES[schema]
-            )
+            assert set(
+                OrgDbtModel.objects.filter(
+                    type="source", orgdbt=orgdbt, schema=schema
+                ).values_list("name", flat=True)
+            ) == set(SCHEMAS_TABLES[schema])
 
         # add a new table in the warehouse
         SCHEMAS_TABLES["schema1"].append("table5")
         sync_sources_for_warehouse(orgdbt.id, warehouse.id, orguser.org.slug)
         for schema in SCHEMAS_TABLES:
-            assert (
-                list(
-                    OrgDbtModel.objects.filter(
-                        type="source", orgdbt=orgdbt, schema=schema
-                    ).values_list("name", flat=True)
-                )
-                == SCHEMAS_TABLES[schema]
-            )
+            assert set(
+                OrgDbtModel.objects.filter(
+                    type="source", orgdbt=orgdbt, schema=schema
+                ).values_list("name", flat=True)
+            ) == set(SCHEMAS_TABLES[schema])

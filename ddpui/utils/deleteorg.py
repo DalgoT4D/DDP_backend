@@ -1,7 +1,7 @@
-from ninja.errors import HttpError
 import uuid
+from ninja.errors import HttpError
 from ddpui.models.org_user import Org, OrgUser, OrgUserRole
-from ddpui.models.org import OrgDataFlow, OrgPrefectBlock, OrgWarehouse
+from ddpui.models.org import OrgPrefectBlock, OrgWarehouse
 from ddpui.models.org import OrgDataFlowv1, OrgPrefectBlockv1
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect import prefect_service
@@ -21,18 +21,6 @@ def is_valid_uuid(s):
         return True
     except ValueError:
         return False
-
-
-def delete_prefect_deployments(org: Org):  # skipcq: PYL-R0201
-    """fetches and deletes every prefect deployment for this org"""
-    logger.info("=========== OrgDataFlow ===========")
-    for dataflow in OrgDataFlow.objects.filter(org=org):
-        logger.info("%s %s", dataflow.deployment_id, dataflow.connection_id)
-        try:
-            prefect_service.delete_deployment_by_id(dataflow.deployment_id)
-        except HttpError:
-            pass
-        dataflow.delete()
 
 
 def delete_prefect_shell_blocks(org: Org):  # skipcq: PYL-R0201

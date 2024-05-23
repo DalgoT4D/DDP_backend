@@ -81,32 +81,6 @@ class OrgPrefectBlock(models.Model):
         return f"OrgPrefectBlock[{self.org.name}|{self.block_type}|{self.block_name}]"
 
 
-class OrgDataFlow(models.Model):
-    """This contains the deployment id of an organization to schedule flows/pipelines"""
-
-    org = models.ForeignKey(Org, on_delete=models.CASCADE)
-    name = models.CharField(max_length=100)
-    deployment_name = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
-        max_length=100, null=True
-    )
-    deployment_id = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
-        max_length=36, unique=True, null=True
-    )
-    cron = models.CharField(max_length=36, null=True)  # skipcq: PTC-W0901, PTC-W0906
-    # and if deployment is manual airbyte-connection-sync,then we store the conn_id
-    connection_id = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
-        max_length=36, unique=True, null=True
-    )
-    dataflow_type = models.CharField(
-        max_length=25,
-        choices=(("orchestrate", "orchestrate"), ("manual", "manual")),
-        default="orchestrate",
-    )  # skipcq: PTC-W0901, PTC-W0906
-
-    def __str__(self) -> str:
-        return f"OrgDataFlow[{self.name}|{self.deployment_name}|{self.deployment_id}|{self.cron}|{self.connection_id}]"
-
-
 class OrgSchema(Schema):
     """Docstring"""
 
@@ -215,4 +189,4 @@ class OrgDataFlowv1(models.Model):
     )
 
     def __str__(self) -> str:
-        return f"OrgDataFlow[{self.name}|{self.deployment_name}|{self.deployment_id}|{self.cron}]"
+        return f"OrgDataFlowv1[{self.name}|{self.deployment_name}|{self.deployment_id}|{self.cron}]"
