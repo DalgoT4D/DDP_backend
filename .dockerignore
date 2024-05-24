@@ -20,7 +20,6 @@ parts/
 sdist/
 var/
 wheels/
-pip-wheel-metadata/
 share/python-wheels/
 *.egg-info/
 .installed.cfg
@@ -50,39 +49,23 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+cover/
 
 # Translations
 *.mo
 *.pot
 
 # Django stuff:
-ddpui/logs/*.log*
+*.log
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
-
-# Flask stuff:
-instance/
-.webassets-cache
-
-# Scrapy stuff:
-.scrapy
-
-# Sphinx documentation
-docs/_build/
-
-# PyBuilder
-target/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
+static
 
 # pyenv
-.python-version
+#   For a library or package, you might want to ignore these files since the code is
+#   intended to run in multiple environments; otherwise, check them in:
+# .python-version
 
 # pipenv
 #   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
@@ -98,27 +81,14 @@ __pypackages__/
 celerybeat-schedule
 celerybeat.pid
 
-# SageMath parsed files
-*.sage.py
-
 # Environments
 .env
-.env.test
-.env.gcp
 .venv
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
-.env.gcp
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
 
 # mkdocs documentation
 /site
@@ -131,22 +101,14 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# Vscode
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# Dependency directories
+node_modules/
+
+# VS Code
 .vscode
-
-# mac stuff
-.DS_Store
-
-celeryworker.pid
-celerybeat.pid
-
-secrets/
-data/
-
-celerybeat-schedule.db
-
-createsources.env
-parseprefectlogs.env
-
-# yml configs
-whitelist.py
