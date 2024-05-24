@@ -10,7 +10,6 @@ from uuid import uuid4
 from django.contrib.auth.models import User
 from django.db import transaction
 from django.utils.text import slugify
-from redis import Redis
 
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, GUEST_ROLE
 from ddpui.models.org import Org
