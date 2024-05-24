@@ -10,7 +10,7 @@ from ddpui.auth import ACCOUNT_MANAGER_ROLE, PIPELINE_MANAGER_ROLE
 from ddpui.celery import app
 from celery.schedules import crontab
 from ddpui.ddpairbyte.airbyte_service import abreq
-from ddpui.utils.awsses import send_text_message
+from ddpui.utils.sendgrid import send_schema_changes_email
 from ddpui.utils.timezone import UTC
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.org import Org, OrgDbt, OrgSchemaChange, OrgWarehouse, OrgPrefectBlockv1, OrgDataFlowv1
@@ -405,16 +405,17 @@ def schema_change_detection():
                 logger.error(f"Error checking connection for org {org.name}: {e}")
                 continue
             
-
     for org, changes in schema_changes.items():
-        email_subject = f"Schema Change Summary for {org.name}"
-        email_body = f"Breaking changes: {changes['breaking']}, Non-breaking changes: {changes['non_breaking']}. Please review the changes."
-        for orguser in OrgUser.objects.filter(
+        breaking_changes = changes['breaking']
+        non_breaking_changes = changes['non_breaking']
+        
+        org_users = OrgUser.objects.filter(
             org=org,
-            new_role__slug__in=[ACCOUNT_MANAGER_ROLE, PIPELINE_MANAGER_ROLE],
-        ):
+            new_role__slug__in=[ACCOUNT_MANAGER_ROLE, PIPELINE_MANAGER_ROLE]
+        )
+        for orguser in org_users:
             logger.info(f"sending notification email to {orguser.user.email}")
-        send_text_message(orguser.user.email, email_subject, email_body)
+            send_schema_changes_email(org.name, orguser.user.email, breaking_changes, non_breaking_changes)
 
 @app.task(bind=True)
 def create_elementary_report(
