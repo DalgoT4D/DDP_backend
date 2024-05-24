@@ -649,7 +649,6 @@ def test_get_connection_catalog(
     result, error = get_connection_catalog(org, "connection_id")
 
     assert error is None
-    breakpoint()
     assert result == {'name': 'Test Connection', 'connectionId': 'connection_id', 'catalogId': 'catalog_id', 'syncCatalog': True, 'schemaChange': False, 'catalogDiff': []}
 
 @patch(
