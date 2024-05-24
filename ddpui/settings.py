@@ -64,7 +64,7 @@ CORS_ORIGIN_WHITELIST = (
     "https://dashboard.dalgo.in",
     "https://frontend-image-fosambcxuq-uc.a.run.app",
 )
-CORS_ALLOW_HEADERS = (*default_headers, "x-dalgo-org", "Content-Type", "Authorization")
+CORS_ALLOW_HEADERS = (*default_headers, "x-dalgo-org")
 
 # Application definition
 
