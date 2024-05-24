@@ -194,8 +194,8 @@ If using M1-based MacBook  run this before building image
   `export DOCKER_DEFAULT_PLATFORM=linux/amd64`
 
 
--  `docker build -f Docker/Dockerfile.main --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') -t dalgo_main_image:0.1 .` This will create the main image
-- `docker build -f Docker/Dockerfile.dev.deploy --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') -t dalgo_backend:0.1 .`
+-  `docker build -f Docker/Dockerfile.main --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') -t dalgo_backend_main_image:0.1 .` This will create the main image
+- `docker build -f Docker/Dockerfile.dev.deploy --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') -t dalgo_backend:0.1 .` 
 
 ### Step 5: Start the other applications
 

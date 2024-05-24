@@ -2,7 +2,7 @@
 # application based on the image built using Dockerfile.main. 
 # This is mainly for development purposes 
 
-FROM dalgo_main_image:0.1 as build
+FROM dalgo_backend_main_image:0.1 as build
 
 USER root
 

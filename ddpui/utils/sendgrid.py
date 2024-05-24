@@ -21,7 +21,6 @@ def send_template_message(template_id: str, to_email: str, template_vars: dict) 
     message = Mail(from_email=SENDGRID_SENDER, to_emails=[to_email])
     message.template_id = template_id
     message.dynamic_template_data = template_vars
-    print(message)
 
     try:
         sendgrid_client.send(message)
