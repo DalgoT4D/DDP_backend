@@ -38,11 +38,6 @@ DEBUG = os.getenv("DEBUG", "") == "True"
 
 # CORS
 
-MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",
-    "django.middleware.common.CommonMiddleware",
-]
-
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
