@@ -124,7 +124,6 @@ class AirbyteWorkspace(Schema):
 class AirbyteConnectionSchemaUpdate(Schema):
     """Docstring"""
 
-    name: str
     syncCatalog: dict
     connectionId: str
     sourceCatalogId: str

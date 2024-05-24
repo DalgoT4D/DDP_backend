@@ -40,7 +40,7 @@ def write_dataflowblocks(dataflow: OrgDataFlow) -> None:
             logger.info("wrote DataflowBlock for %s", block["blockName"])
 
 
-def trigger_prefect_flow_run(org: Org, connection_id: str):
+def trigger_reset_and_sync_workflow(org: Org, connection_id: str):
     """
     Trigger a prefect flow run for a connection, first for reset and then for sync.
     """

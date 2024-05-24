@@ -1544,6 +1544,7 @@ def test_get_logs_for_job_raise():
 
 
 def test_get_connection_catalog_success():
+    org = Mock()
     with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
         mock_abreq.return_value = {
             "connectionId": "test-connection-id",
@@ -1564,7 +1565,7 @@ def test_get_connection_catalog_success():
                 ]
             }
         }
-        catalog = get_connection_catalog("test-connection-id")
+        catalog = get_connection_catalog(org, "test-connection-id")
         assert catalog == {
             "connectionId": "test-connection-id",
             "catalog": {
@@ -1590,8 +1591,9 @@ def test_get_connection_catalog_success():
         )
 
 def test_get_connection_catalog_invalid_connection_id():
+    org = Mock()
     with pytest.raises(HttpError) as excinfo:
-        get_connection_catalog(123)
+        get_connection_catalog(org, 123)
     assert str(excinfo.value) == "connection_id must be a string"
 
 
@@ -1600,8 +1602,8 @@ def test_update_schema_change_valid_input():
     connection_info = AirbyteConnectionSchemaUpdate(name="test-connection", connectionId="connection_id", sourceCatalogId="source_id", syncCatalog={"streams": []})
     current_connection = {"connectionId": "test-connection-id", "syncCatalog": {}}
 
-    with patch("ddpui.ddpairbyte.airbyte_service.trigger_prefect_flow_run") as mock_trigger_prefect_flow_run:
-        mock_trigger_prefect_flow_run.side_effect = lambda org, connection_id: None  # Mock the function to do nothing
+    with patch("ddpui.ddpairbyte.airbyte_service.trigger_reset_and_sync_workflow") as mock_trigger_reset_and_sync_workflow:
+        mock_trigger_reset_and_sync_workflow.side_effect = lambda org, connection_id: None  # Mock the function to do nothing
 
         with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
             mock_abreq.return_value = {"connectionId": "test-connection-id"}
@@ -1629,7 +1631,7 @@ def test_update_schema_change_invalid_current_connection():
         update_schema_change(org, connection_info, current_connection)
     assert str(excinfo.value) == "current_connection must be a dictionary"
 
-from ddpui.ddpairbyte.airbyte_service import trigger_prefect_flow_run
+from ddpui.ddpairbyte.airbyte_service import trigger_reset_and_sync_workflow
 
 def test_update_schema_change_missing_syncCatalog():
     org = Mock()
@@ -1637,7 +1639,7 @@ def test_update_schema_change_missing_syncCatalog():
     current_connection = {"connectionId": "test-connection-id"}
 
     with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq, \
-         patch("ddpui.ddpairbyte.airbyte_service.trigger_prefect_flow_run") as mock_trigger_prefect_flow_run:
+         patch("ddpui.ddpairbyte.airbyte_service.trigger_reset_and_sync_workflow") as mock_trigger_reset_and_sync_workflow:
         mock_abreq.return_value = {"connectionId": "test-connection-id"}
 
         result = update_schema_change(org, connection_info, current_connection)
@@ -1645,4 +1647,4 @@ def test_update_schema_change_missing_syncCatalog():
         assert result["connectionId"] == "test-connection-id"
         assert "syncCatalog" not in result
         mock_abreq.assert_called_once_with("web_backend/connections/update", current_connection)
-        mock_trigger_prefect_flow_run.assert_called_once_with(org, "test-connection-id")
+        mock_trigger_reset_and_sync_workflow.assert_called_once_with(org, "test-connection-id")

@@ -24,7 +24,7 @@ from ddpui.api.airbyte_api import (
     post_airbyte_workspace_v1,
     put_airbyte_connection_v1,
     put_airbyte_destination_v1,
-    update_schema_changes_connection,
+    update_connection_schema,
 )
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.ddpairbyte.schema import (
@@ -1077,16 +1077,16 @@ def test_update_schema_changes_connection_with_no_workspace(orguser):
     payload = {"schemaChange": "true"}
 
     with pytest.raises(HttpError) as excinfo:
-        update_schema_changes_connection(request, connection_id, payload)
+        update_connection_schema(request, connection_id, payload)
 
     assert excinfo.value.status_code == 400
     assert str(excinfo.value) == "create an airbyte workspace first"
 
 
-# write success test case for update_schema_changes_connection
+# write success test case for update_connection_schema
 
 def test_update_schema_changes_connection_success(orguser_workspace):
-    """Tests update_schema_changes_connection when updating schema changes is successful"""
+    """Tests update_connection_schema when updating schema changes is successful"""
     request = mock_request(orguser_workspace)
 
     connection_id = "connection_123"
@@ -1095,7 +1095,7 @@ def test_update_schema_changes_connection_success(orguser_workspace):
     )
 
     with patch(
-        "ddpui.ddpairbyte.airbytehelpers.update_schema_changes_connection"
+        "ddpui.ddpairbyte.airbytehelpers.update_connection_schema"
     ) as update_schema_changes_connection_mock:
         updated_connection = {
             "connectionId": connection_id,
@@ -1106,7 +1106,7 @@ def test_update_schema_changes_connection_success(orguser_workspace):
         }
         update_schema_changes_connection_mock.return_value = (updated_connection, None)
 
-        response = update_schema_changes_connection(request, connection_id, payload)
+        response = update_connection_schema(request, connection_id, payload)
 
     update_schema_changes_connection_mock.assert_called_once_with(
         request.orguser.org, connection_id, payload

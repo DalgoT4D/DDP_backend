@@ -716,29 +716,36 @@ def delete_source(org: Org, source_id: str):
 
     return None, None
 
-def get_connection_catalog(connection_id: str):
+def get_connection_catalog(org: Org, connection_id: str):
     """
     Get the catalog diff of a connection.
     """
-    res = []
     try:
         connection = airbyte_service.get_connection_catalog(connection_id)
-        res.append(
-            {
+        schema_change = connection.get("schemaChange")
+
+        if not schema_change or schema_change not in ["breaking", "non_breaking"]:
+            OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+        else:
+            OrgSchemaChange.objects.update_or_create(
+                connection_id=connection_id,
+                defaults={'change_type': schema_change, 'org': org}
+            )
+        
+        res = {
                 "name": connection["name"],
                 "connectionId": connection["connectionId"],
                 "catalogId": connection["catalogId"],
                 "syncCatalog": connection["syncCatalog"],
-                "schemaChange": connection["schemaChange"],
+                "schemaChange": schema_change,
                 "catalogDiff": connection["catalogDiff"],
-            }
-        )
+        }
         return res, None
     except Exception as e:
         logger.error(f"Error getting catalog for connection {connection_id}: {e}")
         return None, f"Error getting catalog for connection {connection_id}: {e}"
 
-def update_schema_changes_connection(org: Org, connection_id: str, payload: AirbyteConnectionSchemaUpdate):
+def update_connection_schema(org: Org, connection_id: str, payload: AirbyteConnectionSchemaUpdate):
     """
     Update the schema changes of a connection.
     """
@@ -755,8 +762,6 @@ def update_schema_changes_connection(org: Org, connection_id: str, payload: Airb
         return None, "need to set up a warehouse first"
 
     connection = airbyte_service.get_connection(org.airbyte_workspace_id, connection_id)
-    if payload.name:
-        connection["name"] = payload.name
 
     connection["skipReset"] = True
 

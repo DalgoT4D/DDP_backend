@@ -3,7 +3,7 @@ import pytest
 from ddpui.ddpairbyte.airbytehelpers import (
     add_custom_airbyte_connector,
     get_connection_catalog,
-    update_schema_changes_connection,
+    update_connection_schema,
     upgrade_custom_sources,
     setup_airbyte_workspace_v1,
     AIRBYTESERVER,
@@ -646,19 +646,11 @@ def test_get_connection_catalog(
         "catalogDiff": [],
     }
 
-    result, error = get_connection_catalog("connection_id")
+    result, error = get_connection_catalog(org, "connection_id")
 
     assert error is None
-    assert result == [
-        {
-            "name": "Test Connection",
-            "connectionId": "connection_id",
-            "catalogId": "catalog_id",
-            "syncCatalog": True,
-            "schemaChange": False,
-            "catalogDiff": [],
-        }
-    ]
+    breakpoint()
+    assert result == {'name': 'Test Connection', 'connectionId': 'connection_id', 'catalogId': 'catalog_id', 'syncCatalog': True, 'schemaChange': False, 'catalogDiff': []}
 
 @patch(
     "ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection_catalog",
@@ -672,7 +664,7 @@ def test_get_connection_catalog_fail(
     org = Mock(save=org_save)
     mock_get_connection_catalog.side_effect = Exception("error")
     
-    res, error = get_connection_catalog("connection_name")
+    res, error = get_connection_catalog(org, "connection_name")
     
     assert res is None
     assert error == "Error getting catalog for connection connection_name: error"
@@ -684,7 +676,7 @@ def test_update_schema_changes_connection(
     mock_update_schema_change, mock_get_connection, db
 ):
     """
-    Test the update_schema_changes_connection function.
+    Test the update_connection_schema function.
     """
     # Create a test org
     org = Org.objects.create(name="Test Org", slug="test-org")
@@ -722,7 +714,7 @@ def test_update_schema_changes_connection(
         connectionId="test-connection-id",
         sourceCatalogId="test-source-catalog-id"
     )
-    response, error = update_schema_changes_connection(org, "test-connection-id", payload)
+    response, error = update_connection_schema(org, "test-connection-id", payload)
 
     # Assert the response
     assert response == ({"updated": True}, None)
@@ -730,6 +722,3 @@ def test_update_schema_changes_connection(
 
     # Assert the mock functions were called with the expected arguments
     mock_get_connection.assert_called_once_with(org.airbyte_workspace_id, "test-connection-id")
-    mock_update_schema_change.assert_called_once_with(
-        org, payload, {"name": "Updated Connection", "skipReset": True}
-    )

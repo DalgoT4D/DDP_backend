@@ -12,7 +12,7 @@ from ninja.errors import HttpError
 from ddpui.ddpairbyte import schema
 from ddpui.models.org import Org
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.deploymentblocks import trigger_prefect_flow_run
+from ddpui.utils.deploymentblocks import trigger_reset_and_sync_workflow
 from ddpui.utils.helpers import remove_nested_attribute
 from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
@@ -985,7 +985,7 @@ def update_schema_change(org: Org,
 
     # Call helper function to trigger Prefect flow run
     try:
-        trigger_prefect_flow_run(org, res["connectionId"])
+        trigger_reset_and_sync_workflow(org, res["connectionId"])
     except Exception as error:
         logger.error("Failed to trigger Prefect flow run: %s", error)
         raise HttpError(500, "failed to trigger Prefect flow run") from error
