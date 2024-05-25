@@ -506,7 +506,7 @@ def sync_flow_runs_of_deployments(self, deployment_ids: list[str] = None):
 
 
 @app.task(bind=True)
-def add_custom_sources_to_workspace(self, workspace_id, custom_sources: list[dict]):
+def add_custom_connectors_to_workspace(self, workspace_id, custom_sources: list[dict]):
     """
     This function will add custom sources to a workspace
     """

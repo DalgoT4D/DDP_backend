@@ -32,7 +32,7 @@ from ddpui.utils import secretsmanager
 from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
 from ddpui.core.pipelinefunctions import setup_airbyte_sync_task_config
 from ddpui.core.orgtaskfunctions import fetch_orgtask_lock
-from ddpui.celeryworkers.tasks import add_custom_sources_to_workspace
+from ddpui.celeryworkers.tasks import add_custom_connectors_to_workspace
 
 logger = CustomLogger("airbyte")
 
@@ -154,7 +154,7 @@ def setup_airbyte_workspace_v1(wsname: str, org: Org) -> AirbyteWorkspace:
             ) from error
 
     # add custom sources to this workspace
-    add_custom_sources_to_workspace.delay(
+    add_custom_connectors_to_workspace.delay(
         workspace["workspaceId"], list(settings.AIRBYTE_CUSTOM_SOURCES.values())
     )
 
