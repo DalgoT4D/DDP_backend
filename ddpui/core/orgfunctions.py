@@ -111,7 +111,8 @@ def create_organization(payload: OrgSchema):
 
     try:
         airbytehelpers.setup_airbyte_workspace_v1(org.slug, org)
-    except Exception:
+    except Exception as err:
+        logger.error("could not create airbyte workspace: " + str(err))
         # delete the org or we won't be able to create it once airbyte comes back up
         org.delete()
         return None, "could not create airbyte workspace"
