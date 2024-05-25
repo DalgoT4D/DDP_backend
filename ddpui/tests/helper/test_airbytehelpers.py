@@ -110,25 +110,34 @@ def test_upgrade_custom_sources_add(
     mock_create_workspace=Mock(),
 )
 @patch(
-    "ddpui.ddpairbyte.airbytehelpers.add_custom_airbyte_connector",
-    mock_add_custom_airbyte_connector=Mock(),
+    "ddpui.ddpairbyte.airbytehelpers.prefect_service.get_airbyte_server_block_id",
+    mock_get_airbyte_server_block_id=Mock(),
+)
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.prefect_service.delete_airbyte_server_block",
+    mock_delete_airbyte_server=Mock(),
 )
 def test_setup_airbyte_workspace_v1_fail(
-    mock_add_custom_airbyte_connector: Mock, create_workspace: Mock
+    mock_delete_airbyte_server: Mock,
+    mock_get_airbyte_server_block_id: Mock,
+    create_workspace: Mock,
 ):
     """failing test"""
-    org_save = Mock()
-    org = Mock(save=org_save)
+    org = Org.objects.create(name="org", slug="org")
     create_workspace.return_value = {
         "workspaceId": "wsid",
         "initialSetupComplete": False,
+        "name": "sda",
     }
-    mock_add_custom_airbyte_connector.side_effect = Exception("error")
-    with pytest.raises(Exception):
-        setup_airbyte_workspace_v1("workspace_name", org)
-    org_save.assert_called_once()
+    mock_get_airbyte_server_block_id.return_value = "blockid"
+    with patch(
+        "ddpui.celeryworkers.tasks.add_custom_connectors_to_workspace.delay",
+        side_effect=Exception("error"),
+    ) as delay:
+        with pytest.raises(Exception):
+            setup_airbyte_workspace_v1("workspace_name", org)
+        delay.assert_called_once()
     assert org.airbyte_workspace_id == "wsid"
-    mock_add_custom_airbyte_connector.assert_called_once()
 
 
 @patch(

@@ -18,6 +18,7 @@ from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
+from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect.prefect_service import (
     update_dbt_core_block_schema,
     get_dbt_cli_profile_block,
@@ -502,6 +503,24 @@ def sync_flow_runs_of_deployments(self, deployment_ids: list[str] = None):
             )
             logger.exception(e)
             continue
+
+
+@app.task(bind=True)
+def add_custom_connectors_to_workspace(self, workspace_id, custom_sources: list[dict]):
+    """
+    This function will add custom sources to a workspace
+    """
+    for source in custom_sources:
+        airbyte_service.create_custom_source_definition(
+            workspace_id=workspace_id,
+            name=source["name"],
+            docker_repository=source["docker_repository"],
+            docker_image_tag=source["docker_image_tag"],
+            documentation_url=source["documentation_url"],
+        )
+        logger.info(
+            f"added custom source {source['name']} [{source['docker_repository']}:{source['docker_image_tag']}]"
+        )
 
 
 @app.on_after_finalize.connect
