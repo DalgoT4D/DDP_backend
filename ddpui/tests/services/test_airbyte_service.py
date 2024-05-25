@@ -1565,7 +1565,7 @@ def test_get_connection_catalog_success():
                 ]
             }
         }
-        catalog = get_connection_catalog(org, "test-connection-id")
+        catalog = get_connection_catalog("test-connection-id")
         assert catalog == {
             "connectionId": "test-connection-id",
             "catalog": {
@@ -1593,7 +1593,7 @@ def test_get_connection_catalog_success():
 def test_get_connection_catalog_invalid_connection_id():
     org = Mock()
     with pytest.raises(HttpError) as excinfo:
-        get_connection_catalog(org, 123)
+        get_connection_catalog(123)
     assert str(excinfo.value) == "connection_id must be a string"
 
 
