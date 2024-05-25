@@ -27,9 +27,12 @@ class DataInsightsConsumer(WebsocketConsumer):
     def connect(self):
         logger.info("Trying to establish connection")
         self.accept()
+        self.scope["user"] = "ishan"
 
     def websocket_receive(self, message):
         logger.info("Recieved the message from client")
+        # payload = message["text"]
+        # self.send(payload)
         payload = json.loads(message["text"])
         task_id = payload.get("task_id")
 
