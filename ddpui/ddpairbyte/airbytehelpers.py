@@ -32,6 +32,7 @@ from ddpui.utils import secretsmanager
 from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
 from ddpui.core.pipelinefunctions import setup_airbyte_sync_task_config
 from ddpui.core.orgtaskfunctions import fetch_orgtask_lock
+from ddpui.celeryworkers.tasks import add_custom_sources_to_workspace
 
 logger = CustomLogger("airbyte")
 
@@ -119,19 +120,6 @@ def setup_airbyte_workspace_v1(wsname: str, org: Org) -> AirbyteWorkspace:
     org.airbyte_workspace_id = workspace["workspaceId"]
     org.save()
 
-    try:
-        for custom_source_info in settings.AIRBYTE_CUSTOM_SOURCES.values():
-            add_custom_airbyte_connector(
-                workspace["workspaceId"],
-                custom_source_info["name"],
-                custom_source_info["docker_repository"],
-                custom_source_info["docker_image_tag"],
-                custom_source_info["documentation_url"],
-            )
-    except Exception as error:
-        logger.error("Error creating custom source definitions: %s", str(error))
-        raise error
-
     # Airbyte server block details. prefect doesn't know the workspace id
     block_name = f"{org.slug}-{slugify(AIRBYTESERVER)}"
 
@@ -164,6 +152,11 @@ def setup_airbyte_workspace_v1(wsname: str, org: Org) -> AirbyteWorkspace:
             raise Exception(
                 "could not create orgprefectblock for airbyte-server"
             ) from error
+
+    # add custom sources to this workspace
+    add_custom_sources_to_workspace.delay(
+        workspace["workspaceId"], list(settings.AIRBYTE_CUSTOM_SOURCES.values())
+    )
 
     return AirbyteWorkspace(
         name=workspace["name"],
