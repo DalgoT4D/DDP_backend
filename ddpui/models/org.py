@@ -190,3 +190,11 @@ class OrgDataFlowv1(models.Model):
 
     def __str__(self) -> str:
         return f"OrgDataFlowv1[{self.name}|{self.deployment_name}|{self.deployment_id}|{self.cron}]"
+
+
+class OrgSchemaChange(models.Model):
+    """This contains the deployment id of an organization to schedule flows/pipelines"""
+
+    org = models.ForeignKey(Org, on_delete=models.CASCADE)
+    connection_id = models.CharField(max_length=36, unique=True, null=True)
+    change_type = models.CharField(max_length=36, null=True)

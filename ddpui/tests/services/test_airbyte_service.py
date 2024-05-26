@@ -1,8 +1,10 @@
 import os
-from unittest.mock import patch, Mock
+from unittest.mock import MagicMock, patch, Mock
 import requests
 import django
 import pytest
+
+from ddpui.ddpairbyte.schema import AirbyteConnectionSchemaUpdate
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
@@ -14,6 +16,7 @@ from ddpui.tests.helper.test_airbyte_unit_schemas import *
 from ddpui.ddpairbyte.airbyte_service import (
     abreq,
     create_workspace,
+    get_connection_catalog,
     get_source_definitions,
     get_workspaces,
     get_workspace,
@@ -24,6 +27,7 @@ from ddpui.ddpairbyte.airbyte_service import (
     get_source,
     delete_source,
     create_source,
+    update_schema_change,
     update_source,
     AirbyteSourceCreate,
     check_source_connection,
@@ -1537,3 +1541,110 @@ def test_get_logs_for_job_raise():
     with pytest.raises(HttpError) as excinfo:
         get_logs_for_job("str")
     assert str(excinfo.value) == "job_id must be an integer"
+
+
+def test_get_connection_catalog_success():
+    org = Mock()
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
+        mock_abreq.return_value = {
+            "connectionId": "test-connection-id",
+            "catalog": {
+                "streams": [
+                    {
+                        "stream": {
+                            "name": "test-stream-1"
+                        },
+                        "config": {}
+                    },
+                    {
+                        "stream": {
+                            "name": "test-stream-2"
+                        },
+                        "config": {}
+                    }
+                ]
+            }
+        }
+        catalog = get_connection_catalog("test-connection-id")
+        assert catalog == {
+            "connectionId": "test-connection-id",
+            "catalog": {
+                "streams": [
+                    {
+                        "stream": {
+                            "name": "test-stream-1"
+                        },
+                        "config": {}
+                    },
+                    {
+                        "stream": {
+                            "name": "test-stream-2"
+                        },
+                        "config": {}
+                    }
+                ]
+            }
+        }
+        mock_abreq.assert_called_once_with(
+            "web_backend/connections/get",
+            {"connectionId": "test-connection-id", "withRefreshedCatalog": True}
+        )
+
+def test_get_connection_catalog_invalid_connection_id():
+    org = Mock()
+    with pytest.raises(HttpError) as excinfo:
+        get_connection_catalog(123)
+    assert str(excinfo.value) == "connection_id must be a string"
+
+
+def test_update_schema_change_valid_input():
+    org = Mock()
+    connection_info = AirbyteConnectionSchemaUpdate(name="test-connection", connectionId="connection_id", sourceCatalogId="source_id", syncCatalog={"streams": []})
+    current_connection = {"connectionId": "test-connection-id", "syncCatalog": {}}
+
+    with patch("ddpui.ddpairbyte.airbyte_service.trigger_reset_and_sync_workflow") as mock_trigger_reset_and_sync_workflow:
+        mock_trigger_reset_and_sync_workflow.side_effect = lambda org, connection_id: None  # Mock the function to do nothing
+
+        with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
+            mock_abreq.return_value = {"connectionId": "test-connection-id"}
+
+            result = update_schema_change(org, connection_info, current_connection)
+
+            assert result["connectionId"] == "test-connection-id"
+            mock_abreq.assert_called_once_with("web_backend/connections/update", current_connection)
+
+def test_update_schema_change_invalid_connection_info():
+    org = Mock()
+    connection_info = {}
+    current_connection = {"connectionId": "test-connection-id", "syncCatalog": {}}
+
+    with pytest.raises(HttpError) as excinfo:
+        update_schema_change(org, connection_info, current_connection)
+    assert str(excinfo.value) == "connection_info must be an instance of AirbyteConnectionSchemaUpdate"
+
+def test_update_schema_change_invalid_current_connection():
+    org = Mock()
+    connection_info = AirbyteConnectionSchemaUpdate(name="test-connection", connectionId="connection_id", sourceCatalogId="source_id", syncCatalog={"streams": []})
+    current_connection = "invalid"
+
+    with pytest.raises(HttpError) as excinfo:
+        update_schema_change(org, connection_info, current_connection)
+    assert str(excinfo.value) == "current_connection must be a dictionary"
+
+from ddpui.ddpairbyte.airbyte_service import trigger_reset_and_sync_workflow
+
+def test_update_schema_change_missing_syncCatalog():
+    org = Mock()
+    connection_info = AirbyteConnectionSchemaUpdate(name="test-connection", connectionId="connection_id", sourceCatalogId="source_id", syncCatalog={"streams": []})
+    current_connection = {"connectionId": "test-connection-id"}
+
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq, \
+         patch("ddpui.ddpairbyte.airbyte_service.trigger_reset_and_sync_workflow") as mock_trigger_reset_and_sync_workflow:
+        mock_abreq.return_value = {"connectionId": "test-connection-id"}
+
+        result = update_schema_change(org, connection_info, current_connection)
+
+        assert result["connectionId"] == "test-connection-id"
+        assert "syncCatalog" not in result
+        mock_abreq.assert_called_once_with("web_backend/connections/update", current_connection)
+        mock_trigger_reset_and_sync_workflow.assert_called_once_with(org, "test-connection-id")
