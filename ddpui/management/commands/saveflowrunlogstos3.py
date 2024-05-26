@@ -11,7 +11,7 @@ class Command(BaseCommand):
     help = "fetches prefect and airbyte logs for an org"
 
     def add_arguments(self, parser):
-        parser.add_argument("org", type=str, required=True)
+        parser.add_argument("org", type=str)
         parser.add_argument("--aws-access-key-id", required=True)
         parser.add_argument("--aws-secret", required=True)
 
