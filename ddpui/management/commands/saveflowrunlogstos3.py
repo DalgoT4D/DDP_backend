@@ -41,7 +41,6 @@ class Command(BaseCommand):
         for dataflow in OrgTask.objects.filter(
             org__slug=org,
             task__slug="airbyte-sync",
-            generated_by="system",
         ):
             connection_id = dataflow.connection_id
             result = airbyte_service.get_jobs_for_connection(connection_id)
