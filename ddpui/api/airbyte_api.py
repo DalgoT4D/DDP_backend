@@ -15,6 +15,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteConnectionCreate,
     AirbyteConnectionCreateResponse,
     AirbyteGetConnectionsResponse,
+    AirbyteConnectionSchemaUpdate,
     AirbyteDestinationCreate,
     AirbyteDestinationUpdate,
     AirbyteSourceCreate,
@@ -619,3 +620,55 @@ def delete_airbyte_source_v1(request, source_id):
         raise HttpError(400, error)
 
     return {"success": 1}
+
+
+@airbyteapi.get(
+    "/v1/connections/{connection_id}/catalog", 
+    auth=auth.CustomAuthMiddleware(), 
+)
+@has_permission(["can_view_connection"])
+def get_connection_catalog_v1(request, connection_id):
+    """Fetch a connection in the user organization workspace"""
+    orguser: OrgUser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    res, error = airbytehelpers.get_connection_catalog(orguser.org, connection_id)
+    if error:
+        raise HttpError(400, error)
+    return res
+
+
+@airbyteapi.put(
+    "/v1/connections/{connection_id}/schema_update", auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_edit_connection"])
+def update_connection_schema(request, connection_id, payload: AirbyteConnectionSchemaUpdate):
+    """update schema change in a connection"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    if org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+    
+    res, error = airbytehelpers.update_connection_schema(org, connection_id, payload)
+    if error:
+        raise HttpError(400, error)
+    return res
+
+
+@airbyteapi.get(
+    "/v1/connection/schema_change",
+    auth=auth.CustomAuthMiddleware(), 
+)
+@has_permission(["can_view_connection"])
+def get_schema_changes_for_connection(request):
+    """Get schema changes for an org"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    if org.airbyte_workspace_id is None:
+        raise HttpError(400, "Create an Airbyte workspace first")
+
+    res, error = airbytehelpers.get_schema_changes(org)
+    if error:
+        raise HttpError(400, error)
+    return res

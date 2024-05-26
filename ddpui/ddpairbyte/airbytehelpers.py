@@ -3,15 +3,13 @@ functions which work with airbyte and with the dalgo database
 """
 
 import json
-import re
-from typing import Union
 from django.utils.text import slugify
 from django.conf import settings
 from django.db import transaction
 from ddpui.ddpairbyte import airbyte_service
-from ddpui.ddpairbyte.schema import AirbyteWorkspace
+from ddpui.ddpairbyte.schema import AirbyteConnectionSchemaUpdate, AirbyteWorkspace
 from ddpui.ddpprefect import prefect_service
-from ddpui.models.org import Org, OrgPrefectBlockv1
+from ddpui.models.org import Org, OrgPrefectBlockv1, OrgSchemaChange
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpairbyte.schema import (
@@ -710,3 +708,70 @@ def delete_source(org: Org, source_id: str):
     logger.info(f"deleted airbyte source {source_id}")
 
     return None, None
+
+def get_connection_catalog(org: Org, connection_id: str):
+    """
+    Get the catalog diff of a connection.
+    """
+    try:
+        connection = airbyte_service.get_connection_catalog(connection_id)
+        schema_change = connection.get("schemaChange")
+
+        if not schema_change or schema_change not in ["breaking", "non_breaking"]:
+            OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+        else:
+            OrgSchemaChange.objects.update_or_create(
+                connection_id=connection_id,
+                defaults={'change_type': schema_change, 'org': org}
+            )
+        
+        res = {
+                "name": connection["name"],
+                "connectionId": connection["connectionId"],
+                "catalogId": connection["catalogId"],
+                "syncCatalog": connection["syncCatalog"],
+                "schemaChange": schema_change,
+                "catalogDiff": connection["catalogDiff"],
+        }
+        return res, None
+    except Exception as e:
+        logger.error(f"Error getting catalog for connection {connection_id}: {e}")
+        return None, f"Error getting catalog for connection {connection_id}: {e}"
+
+def update_connection_schema(org: Org, connection_id: str, payload: AirbyteConnectionSchemaUpdate):
+    """
+    Update the schema changes of a connection.
+    """
+    org_task = OrgTask.objects.filter(
+        org=org,
+        connection_id=connection_id,
+    ).first()
+
+    if org_task is None:
+        return None, "connection not found"
+    
+    warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if warehouse is None:
+        return None, "need to set up a warehouse first"
+
+    connection = airbyte_service.get_connection(org.airbyte_workspace_id, connection_id)
+
+    connection["skipReset"] = True
+
+    res = airbyte_service.update_schema_change(
+        org, payload, connection
+    )
+    return res, None
+
+
+def get_schema_changes(org: Org):
+    """
+    Get the schema changes of a connection in an org.
+    """
+    org_schema_change = OrgSchemaChange.objects.filter(org=org)
+
+    if org_schema_change is None:
+        return None, "No schema change found"
+
+    schema_changes = list(org_schema_change.values())
+    return schema_changes, None

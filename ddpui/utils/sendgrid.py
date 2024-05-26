@@ -52,6 +52,20 @@ def send_invite_user_email(
         {"url": invite_url, "invited_by_email": invited_by_email},
     )
 
+def send_schema_changes_email(org: str, to_email: str, breaking_changes:str, non_breaking_changes: str) -> None:
+    """sends an email notification informing platform admins 
+        and account managers that there is a schema change detected
+    """
+    send_template_message(
+        os.getenv("SENDGRID_SCHEMA_CHANGES_TEMPLATE"),
+        to_email,
+        {
+            "org": org,
+            "breaking_changes": breaking_changes,
+            "non_breaking_changes": non_breaking_changes
+        },
+    )
+
 
 def send_youve_been_added_email(to_email: str, added_by: str, org_name: str) -> None:
     """sends an email notification informing an existing dalgo user that they have
