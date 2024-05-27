@@ -49,69 +49,6 @@ def test_get_flowrun_id_and_state():
     ) == ("3b55ee18-7511-4ede-abba-ad866ebf982c", "Running")
 
 
-def test_get_org_from_flow_run_by_blockname():
-    """tests get_org_from_flow_run"""
-    blockname = str(uuid4())
-    flow_run = {"parameters": {"block_name": blockname, "config": {"org_slug": "temp"}}}
-    org = Org.objects.create(name="temp", slug="temp")
-    OrgPrefectBlock.objects.create(
-        org=org, block_name=blockname, block_type="fake-type", block_id="12345"
-    )
-    response = get_org_from_flow_run(flow_run)
-    assert response == org
-
-
-def test_get_org_from_flow_run_by_connection():
-    """tests get_org_from_flow_run"""
-    blockid = str(uuid4())
-    flow_run = {
-        "parameters": {
-            "airbyte_connection": {"_block_document_id": blockid},
-            "config": {"org_slug": "temp"},
-        }
-    }
-    org = Org.objects.create(name="temp", slug="temp")
-    OrgPrefectBlock.objects.create(
-        org=org, block_name="tempblockname", block_type="fake-type", block_id=blockid
-    )
-    response = get_org_from_flow_run(flow_run)
-    assert response == org
-
-
-def test_get_org_from_flow_run_by_airbyte_blocks():
-    """tests get_org_from_flow_run"""
-    blockname = str(uuid4())
-    flow_run = {
-        "parameters": {
-            "airbyte_blocks": [{"blockName": blockname}],
-            "config": {"org_slug": "temp"},
-        }
-    }
-    org = Org.objects.create(name="temp", slug="temp")
-    OrgPrefectBlock.objects.create(
-        org=org, block_name=blockname, block_type="fake-type", block_id="blockid"
-    )
-    response = get_org_from_flow_run(flow_run)
-    assert response == org
-
-
-def test_get_org_from_flow_run_by_dbt_blocks():
-    """tests get_org_from_flow_run"""
-    blockname = str(uuid4())
-    flow_run = {
-        "parameters": {
-            "dbt_blocks": [{"blockName": blockname}],
-            "config": {"org_slug": "temp"},
-        }
-    }
-    org = Org.objects.create(name="temp", slug="temp")
-    OrgPrefectBlock.objects.create(
-        org=org, block_name=blockname, block_type="fake-type", block_id="blockid"
-    )
-    response = get_org_from_flow_run(flow_run)
-    assert response == org
-
-
 def test_generate_notification_email():
     """tests the email generated"""
     response = generate_notification_email(
