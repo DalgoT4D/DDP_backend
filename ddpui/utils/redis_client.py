@@ -21,7 +21,7 @@ class RedisClient:
         host and port specified in the environment variables REDIS_HOST and REDIS_PORT.
         If the environment variables are not set, it defaults to using "localhost" as the host
         and "6379" as the port.
-        To prevent multiple Redis object being created we make use of locks
+        To prevent multiple Redis objects being created we make use of locks
         Returns:
             Redis: The Redis instance.
         """
@@ -31,7 +31,7 @@ class RedisClient:
                     host = os.getenv("REDIS_HOST", "localhost")
                     port = int(os.getenv("REDIS_PORT", "6379"))
                     cls._redis_instance = Redis(host=host, port=port)
-            cls.lock.release()
+                cls.lock.release()
         return cls._redis_instance
 
     @classmethod
