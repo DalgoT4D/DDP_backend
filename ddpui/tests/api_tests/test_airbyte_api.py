@@ -699,31 +699,6 @@ def warehouse_with_destination(org_with_workspace):
     warehouse.delete()
 
 
-@pytest.fixture
-def airbyte_server_block(org_with_workspace):
-    block = OrgPrefectBlock.objects.create(
-        org=org_with_workspace,
-        block_type=ddpprefect.AIRBYTESERVER,
-        block_id="fake-serverblock-id",
-        block_name="fake ab server block",
-    )
-    yield block
-    block.delete()
-
-
-# ================================================================================
-@pytest.fixture
-def org_prefect_connection_block(org_with_workspace):
-    block = OrgPrefectBlock.objects.create(
-        org=org_with_workspace,
-        block_id="connection_block_id",
-        block_name="temp-conn-block-name",
-        block_type=ddpprefect.AIRBYTECONNECTION,
-    )
-    yield block
-    block.delete()
-
-
 # ================================================================================
 @patch.multiple(
     "ddpui.ddpairbyte.airbyte_service",

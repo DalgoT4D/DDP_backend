@@ -85,7 +85,6 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
                     "failed to lock blocks for deployment %s, ignoring", deployment_id
                 )
 
-        # logger.info(flow_run)
         if state in ["Failed", "Crashed"]:
             org = get_org_from_flow_run(flow_run)
             if org:

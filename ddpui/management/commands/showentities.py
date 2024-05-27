@@ -3,7 +3,7 @@
 from django.core.management.base import BaseCommand
 from django.utils.text import slugify
 
-from ddpui.models.org import Org, OrgPrefectBlock
+from ddpui.models.org import Org, OrgPrefectBlockv1
 from ddpui.models.tasks import OrgTask, OrgDataFlowv1
 
 
@@ -20,7 +20,7 @@ class Command(BaseCommand):
     def show_orgprefectblocks(self, org: Org):
         """shows all OrgPrefectBlocks for an org"""
         print("Blocks for " + org.slug + ":")
-        for opb in OrgPrefectBlock.objects.filter(org=org).order_by("block_type"):
+        for opb in OrgPrefectBlockv1.objects.filter(org=org).order_by("block_type"):
             if opb.block_type == "Airbyte Server":
                 print(f"  {opb.block_type}")
             elif opb.block_type == "Airbyte Connection":
