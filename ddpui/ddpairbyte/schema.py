@@ -119,3 +119,11 @@ class AirbyteWorkspace(Schema):
     name: str
     workspaceId: str
     initialSetupComplete: bool
+
+
+class AirbyteConnectionSchemaUpdate(Schema):
+    """Docstring"""
+
+    syncCatalog: dict
+    connectionId: str
+    sourceCatalogId: str

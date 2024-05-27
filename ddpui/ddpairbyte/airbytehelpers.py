@@ -3,15 +3,13 @@ functions which work with airbyte and with the dalgo database
 """
 
 import json
-import re
-from typing import Union
 from django.utils.text import slugify
 from django.conf import settings
 from django.db import transaction
 from ddpui.ddpairbyte import airbyte_service
-from ddpui.ddpairbyte.schema import AirbyteWorkspace
+from ddpui.ddpairbyte.schema import AirbyteConnectionSchemaUpdate, AirbyteWorkspace
 from ddpui.ddpprefect import prefect_service
-from ddpui.models.org import Org, OrgPrefectBlockv1
+from ddpui.models.org import Org, OrgPrefectBlockv1, OrgSchemaChange
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpairbyte.schema import (
@@ -32,6 +30,7 @@ from ddpui.utils import secretsmanager
 from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
 from ddpui.core.pipelinefunctions import setup_airbyte_sync_task_config
 from ddpui.core.orgtaskfunctions import fetch_orgtask_lock
+from ddpui.celeryworkers.tasks import add_custom_connectors_to_workspace
 
 logger = CustomLogger("airbyte")
 
@@ -119,19 +118,6 @@ def setup_airbyte_workspace_v1(wsname: str, org: Org) -> AirbyteWorkspace:
     org.airbyte_workspace_id = workspace["workspaceId"]
     org.save()
 
-    try:
-        for custom_source_info in settings.AIRBYTE_CUSTOM_SOURCES.values():
-            add_custom_airbyte_connector(
-                workspace["workspaceId"],
-                custom_source_info["name"],
-                custom_source_info["docker_repository"],
-                custom_source_info["docker_image_tag"],
-                custom_source_info["documentation_url"],
-            )
-    except Exception as error:
-        logger.error("Error creating custom source definitions: %s", str(error))
-        raise error
-
     # Airbyte server block details. prefect doesn't know the workspace id
     block_name = f"{org.slug}-{slugify(AIRBYTESERVER)}"
 
@@ -164,6 +150,11 @@ def setup_airbyte_workspace_v1(wsname: str, org: Org) -> AirbyteWorkspace:
             raise Exception(
                 "could not create orgprefectblock for airbyte-server"
             ) from error
+
+    # add custom sources to this workspace
+    add_custom_connectors_to_workspace.delay(
+        workspace["workspaceId"], list(settings.AIRBYTE_CUSTOM_SOURCES.values())
+    )
 
     return AirbyteWorkspace(
         name=workspace["name"],
@@ -717,3 +708,70 @@ def delete_source(org: Org, source_id: str):
     logger.info(f"deleted airbyte source {source_id}")
 
     return None, None
+
+def get_connection_catalog(org: Org, connection_id: str):
+    """
+    Get the catalog diff of a connection.
+    """
+    try:
+        connection = airbyte_service.get_connection_catalog(connection_id)
+        schema_change = connection.get("schemaChange")
+
+        if not schema_change or schema_change not in ["breaking", "non_breaking"]:
+            OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+        else:
+            OrgSchemaChange.objects.update_or_create(
+                connection_id=connection_id,
+                defaults={'change_type': schema_change, 'org': org}
+            )
+        
+        res = {
+                "name": connection["name"],
+                "connectionId": connection["connectionId"],
+                "catalogId": connection["catalogId"],
+                "syncCatalog": connection["syncCatalog"],
+                "schemaChange": schema_change,
+                "catalogDiff": connection["catalogDiff"],
+        }
+        return res, None
+    except Exception as e:
+        logger.error(f"Error getting catalog for connection {connection_id}: {e}")
+        return None, f"Error getting catalog for connection {connection_id}: {e}"
+
+def update_connection_schema(org: Org, connection_id: str, payload: AirbyteConnectionSchemaUpdate):
+    """
+    Update the schema changes of a connection.
+    """
+    org_task = OrgTask.objects.filter(
+        org=org,
+        connection_id=connection_id,
+    ).first()
+
+    if org_task is None:
+        return None, "connection not found"
+    
+    warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if warehouse is None:
+        return None, "need to set up a warehouse first"
+
+    connection = airbyte_service.get_connection(org.airbyte_workspace_id, connection_id)
+
+    connection["skipReset"] = True
+
+    res = airbyte_service.update_schema_change(
+        org, payload, connection
+    )
+    return res, None
+
+
+def get_schema_changes(org: Org):
+    """
+    Get the schema changes of a connection in an org.
+    """
+    org_schema_change = OrgSchemaChange.objects.filter(org=org)
+
+    if org_schema_change is None:
+        return None, "No schema change found"
+
+    schema_changes = list(org_schema_change.values())
+    return schema_changes, None

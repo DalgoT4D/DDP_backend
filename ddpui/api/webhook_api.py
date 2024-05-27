@@ -120,7 +120,7 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
         flow_run = prefect_service.get_flow_run(flow_run_id)
         deployment_id = flow_run["deployment_id"]
 
-        if state in ["Cancelled", "Completed", "Failed", "Crashed"]:
+        if deployment_id and state in ["Cancelled", "Completed", "Failed", "Crashed"]:
             logger.info("deleting the task locks")
             TaskLock.objects.filter(flow_run_id=flow_run_id).delete()
             if state in ["Completed", "Failed"]:
