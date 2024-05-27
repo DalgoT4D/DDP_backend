@@ -280,8 +280,8 @@ def test_post_dbt_makedocs_no_target(orguser: OrgUser):
 )
 @patch("builtins.open", mock_open=Mock(write=Mock(), close=Mock()))
 @patch(
-    "ddpui.api.dbt_api.Redis",
-    mock_Redis=Mock(return_value=Mock(set=Mock(), expire=Mock())),
+    "ddpui.api.dbt_api.RedisClient",
+    mock_Redis=Mock(return_value=Mock(get_instance=Mock(set=Mock(), expire=Mock()))),
 )
 def test_post_dbt_makedocs(
     mock_Redis: Mock,
