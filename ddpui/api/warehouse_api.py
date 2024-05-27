@@ -232,9 +232,6 @@ def post_data_insights(request, payload: RequestorColumnSchema):
     try:
 
         task = poll_for_column_insights.delay(
-            payload.db_schema,
-            payload.db_table,
-            payload.column_name,
             org_warehouse.id,
             payload.dict(),
         )
@@ -272,6 +269,9 @@ def get_data_insights(request, payload: RequestorColumnSchema):
         final_result = GenerateResult.fetch_results(
             org_warehouse.org, payload.db_schema, payload.db_table, payload.column_name
         )
+
+        if not final_result:
+            raise HttpError(500, "Insights not found")
 
         if not GenerateResult.validate_results(insight_objs, final_result):
             raise HttpError(500, "Failed to fetch all insights")

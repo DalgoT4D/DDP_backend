@@ -31,7 +31,7 @@ class InsightsFactory:
                 columns,
                 db_table,
                 db_schema,
-                filter if "chart_type" in filter else None,
+                filter,
                 wtype,
             )
         elif col_type == TranslateColDataType.BOOL:

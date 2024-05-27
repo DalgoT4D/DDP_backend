@@ -89,9 +89,6 @@ class DataInsightsConsumer(WebsocketConsumer):
 @app.task(bind=True)
 def poll_for_column_insights(
     self,
-    db_schema: str,
-    db_table: str,
-    column_name: str,
     org_warehouse_id: str,
     requestor_col: dict,
 ):
@@ -141,7 +138,10 @@ def poll_for_column_insights(
     )
 
     final_result = GenerateResult.fetch_results(
-        org_warehouse.org, db_schema, db_table, column_name
+        org_warehouse.org,
+        requestor_col.db_schema,
+        requestor_col.db_table,
+        requestor_col.column_name,
     )
 
     if not GenerateResult.validate_results(insight_objs, final_result):
