@@ -14,6 +14,7 @@ class TranslateColDataType(str, Enum):
     DATETIME = "Datetime"
     NUMERIC = "Numeric"
     BASE = "base"
+    JSON = "Json"
 
 
 MAP_TRANSLATE_TYPES = {
@@ -23,6 +24,7 @@ MAP_TRANSLATE_TYPES = {
     datetime.date: TranslateColDataType.DATETIME,
     bool: TranslateColDataType.BOOL,
     str: TranslateColDataType.STRING,
+    dict: TranslateColDataType.JSON,
 }
 
 
