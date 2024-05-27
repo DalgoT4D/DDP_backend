@@ -1,9 +1,9 @@
 from ninja import Field, Schema
 
 
-class ColumnMetrics(Schema):
+class RequestorColumnSchema(Schema):
     """
-    schema to define the payload required to create a custom org task
+    schema to query on insights for a column
     """
 
     db_schema: str

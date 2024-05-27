@@ -1,5 +1,6 @@
 import time
 import json
+import threading
 from datetime import datetime
 from sqlalchemy.sql.selectable import Select
 from channels.generic.websocket import WebsocketConsumer
@@ -13,6 +14,7 @@ from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.datainsights.insights.insight_interface import DataTypeColInsights
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.utils.taskprogress import TaskProgress
+from ddpui.schemas.warehouse_api_schemas import RequestorColumnSchema
 from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.redis_client import RedisClient
 from ddpui.utils.custom_logger import CustomLogger
@@ -91,7 +93,7 @@ def poll_for_column_insights(
     db_table: str,
     column_name: str,
     org_warehouse_id: str,
-    refresh: bool,
+    requestor_col: dict,
 ):
     """
     This will help frontend fetch insights for the column provided
@@ -99,6 +101,9 @@ def poll_for_column_insights(
     Wait for results
     Return results if all queries are completed; else return a status of error
     """
+    requestor_col: RequestorColumnSchema = RequestorColumnSchema.parse_obj(
+        requestor_col
+    )
 
     taskprogress = TaskProgress(
         self.request.id, TaskProgressHashPrefix.DATAINSIGHTS, 10 * 60
@@ -129,38 +134,10 @@ def poll_for_column_insights(
 
     wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
 
-    insight_objs = []
-
-    insight_objs.append(
-        BaseInsights(
-            wclient.get_table_columns(db_schema, db_table),
-            db_table,
-            db_schema,
-            {},
-            wclient.get_wtype(),
-        )
-    )
-    column_configs = [
-        col
-        for col in wclient.get_table_columns(db_schema, db_table)
-        if col["name"] == column_name
-    ]
-    if len(column_configs) == 0:
-        raise ValueError("Couldnt find the column in the table")
-
-    insight_objs.append(
-        InsightsFactory.initiate_insight(
-            column_configs,
-            db_table,
-            db_schema,
-            column_configs[0]["translated_type"],
-            {},
-            wclient.get_wtype(),
-        )
-    )
+    insight_objs = GenerateResult.prepare_insight_objects(wclient, requestor_col)
 
     GenerateResult.execute_insight_queries(
-        org_warehouse.org, wclient, insight_objs, refresh
+        org_warehouse.org, wclient, insight_objs, requestor_col
     )
 
     final_result = GenerateResult.fetch_results(
@@ -195,6 +172,14 @@ class GenerateResult:
     RESULT_STATUS_COMPLETED = "completed"
     RESULT_STATUS_ERROR = "completed"
 
+    org_locks: dict[str, threading.Lock] = {}
+
+    @classmethod
+    def get_org_lock(cls, org: Org) -> threading.Lock:
+        if org.slug not in cls.org_locks:
+            cls.org_locks[org.slug] = threading.Lock()
+        return cls.org_locks[org.slug]
+
     @classmethod
     def build_queries_locking_hash(cls, org: Org, query: ColInsight) -> str:
         return f"{org.slug}-{query.db_schema}-{query.db_table}-queries"
@@ -205,13 +190,22 @@ class GenerateResult:
         org: Org,
         wclient: Warehouse,
         insights: list[DataTypeColInsights],
-        refresh: bool = False,
+        requestor_col: RequestorColumnSchema,
     ) -> dict:
         """
         1. Collates all queries to run
         2. Gets locks on each query before run
         3. If lock is present; skips the query since its already running
         """
+        # clear insights based on the refresh flag
+        if requestor_col.refresh:
+            GenerateResult.clear_insights(
+                org,
+                requestor_col.db_schema,
+                requestor_col.db_table,
+                requestor_col.column_name,
+            )
+
         insight_queries: list[ColInsight] = []
         for insight in insights:
             insight_queries += insight.insights
@@ -233,7 +227,7 @@ class GenerateResult:
                     results = query.parse_results(results)
 
                     # save result to redis
-                    cls.save_results(org, query, results, refresh)
+                    cls.save_results(org, query, results)
 
                     # release the lock for this query
                     cls.release_query_lock(org, query)
@@ -304,69 +298,71 @@ class GenerateResult:
         return None
 
     @classmethod
-    def save_results(
-        cls, org: Org, query: ColInsight, parsed_results: dict, refresh: bool = False
-    ) -> None:
+    def save_results(cls, org: Org, query: ColInsight, parsed_results: dict) -> None:
         """Save results to redis"""
         # place to the save the results in redis should be created
-
-        current_results = GenerateResult.ensure_insights_setup_for_results(
-            org, query.db_schema, query.db_table, refresh
-        )
-
-        merged_results = {
-            key: {**current_results.get(key, {}), **parsed_results.get(key, {})}
-            for key in set(current_results) | set(parsed_results)
-        }
-
-        # save results to redis
-        hash = f"{org.slug}-insights"
-        key = f"{query.db_schema}-{query.db_table}"
-
         redis = RedisClient.get_instance()
-        redis.hset(hash, key, json.dumps(merged_results))
+
+        lock = GenerateResult.get_org_lock(org)
+
+        if lock.acquire(timeout=15):
+            current_results = GenerateResult.fetch_results(
+                org, query.db_schema, query.db_table
+            )
+
+            logger.info(current_results)
+
+            merged_results = {
+                key: {**current_results.get(key, {}), **parsed_results.get(key, {})}
+                for key in set(current_results) | set(parsed_results)
+            }
+
+            # save results to redis
+            hash = f"{org.slug}-insights"
+            key = f"{query.db_schema}-{query.db_table}"
+
+            redis.hset(hash, key, json.dumps(merged_results))
+
+            lock.release()
 
     @classmethod
-    def ensure_insights_setup_for_results(
-        cls, org: Org, db_schema: str, db_table: str, refresh: bool = False
-    ) -> dict:
+    def clear_insights(
+        cls, org: Org, db_schema: str, db_table: str, column_name: str = None
+    ) -> None:
         """
-        This creates the hash where all results of queries will be stored
-        If present it skips this steps
-        If refresh is set to True, it will delete the key for the schema/table and recreate it
+        Clear the results from redis
+        If column is None; clear insights for all columns
+        If column is specified: clear insights for that column
         """
         hash = f"{org.slug}-insights"
         key = f"{db_schema}-{db_table}"
 
         redis = RedisClient.get_instance()
 
-        # force refresh
-        if refresh is True:
-            payload = {}
-            logger.info(
-                f"clearing (force refresh) the hash for schema: {db_schema} & table: {db_table} to store results for insights"
-            )
-            redis.hset(hash, key, json.dumps(payload))
-        else:
-            logger.info(
-                f"creating the hash for schema: {db_schema} & table: {db_table}  to store results for insights"
-            )
-            payload = redis.hget(hash, key)
-            payload = json.loads(payload) if payload else None
-            if payload is None:
-                if redis.hsetnx(hash, key, json.dumps({})):
-                    payload = {}
-                else:
-                    payload = redis.hget(hash, key)
+        lock = GenerateResult.get_org_lock(org)
 
-        return payload
+        if lock.acquire(timeout=15):
+            results = redis.hget(hash, key)
+            results: dict = json.loads(results) if results else None
+
+            if column_name:
+                if results and column_name in results:
+                    results.pop(column_name, None)
+                    redis.hset(hash, key, json.dumps(results))
+            else:
+                # clear everything for the org
+                redis.hdel(hash, key)
+
+            lock.release()
 
     @classmethod
     def fetch_results(
-        cls, org: Org, db_schema: str, db_table: str, column_name: str
+        cls, org: Org, db_schema: str, db_table: str, column_name: str = None
     ) -> dict:
         """
         Fetch the results from redis
+        If column is None; fetch insights for all columns
+        If column is specified: fetch insights for that column
         """
         hash = f"{org.slug}-insights"
         key = f"{db_schema}-{db_table}"
@@ -376,7 +372,10 @@ class GenerateResult:
         results = redis.hget(hash, key)
         results = json.loads(results) if results else None
 
-        return results[f"{column_name}"] if column_name in results else None
+        if column_name:
+            return results[f"{column_name}"] if column_name in results else None
+
+        return results
 
     @classmethod
     def validate_results(
@@ -391,3 +390,45 @@ class GenerateResult:
                     return False
 
         return True
+
+    @classmethod
+    def prepare_insight_objects(
+        cls,
+        wclient: Warehouse,
+        requestor_col: RequestorColumnSchema,
+    ) -> list[DataTypeColInsights]:
+        db_schema = requestor_col.db_schema
+        db_table = requestor_col.db_table
+        column_name = requestor_col.column_name
+
+        insight_objs: list[DataTypeColInsights] = []
+
+        insight_objs.append(
+            BaseInsights(
+                wclient.get_table_columns(db_schema, db_table),
+                db_table,
+                db_schema,
+                requestor_col.filter,
+                wclient.get_wtype(),
+            )
+        )
+        column_configs = [
+            col
+            for col in wclient.get_table_columns(db_schema, db_table)
+            if col["name"] == column_name
+        ]
+        if len(column_configs) == 0:
+            raise ValueError("Couldnt find the column in the table")
+
+        insight_objs.append(
+            InsightsFactory.initiate_insight(
+                column_configs,
+                db_table,
+                db_schema,
+                column_configs[0]["translated_type"],
+                requestor_col.filter,
+                wclient.get_wtype(),
+            )
+        )
+
+        return insight_objs
