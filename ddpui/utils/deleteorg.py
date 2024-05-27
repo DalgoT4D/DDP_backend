@@ -221,7 +221,6 @@ def display_org(org: Org):
 
 def delete_one_org(org: Org):
     """delete one org"""
-    delete_prefect_deployments(org)
     delete_dbt_workspace(org)
     if org.airbyte_workspace_id:
         delete_airbyte_workspace(org)
