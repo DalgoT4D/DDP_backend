@@ -1,11 +1,12 @@
 import os
-from redis import Redis
 from django.http import HttpResponse, Http404
+
+from ddpui.utils.redis_client import RedisClient
 
 
 def get_elementary_report(request, tokenhex: str):
     """serve the generated docs"""
-    redis = Redis()
+    redis = RedisClient.get_instance()
     redis_key = f"elementary-report-{tokenhex}"
     htmlfilename = redis.get(redis_key)
     if htmlfilename is None:

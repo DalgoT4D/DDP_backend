@@ -6,7 +6,6 @@ from pathlib import Path
 import requests
 import re
 from uuid import uuid4
-from redis import Redis
 import boto3
 import boto3.exceptions
 
@@ -24,6 +23,7 @@ from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.utils import secretsmanager
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.taskprogress import TaskProgress
+from ddpui.utils.redis_client import RedisClient
 from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.celeryworkers.tasks import create_elementary_report
 
@@ -269,7 +269,7 @@ def make_elementary_report(org: Org):
         indexfile.close()
     logger.info("wrote elementary report to %s", htmlfilename)
 
-    redis = Redis()
+    redis = RedisClient.get_instance()
     token = uuid4()
     redis_key = f"elementary-report-{token.hex}"
     redis.set(redis_key, htmlfilename.encode("utf-8"))
