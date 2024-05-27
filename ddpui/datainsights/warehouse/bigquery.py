@@ -18,8 +18,9 @@ class BigqueryClient(Warehouse):
         """
         connection_string = "bigquery://{project_id}".format(**creds)
 
-        self.engine = create_engine(connection_string, credentials_info=creds)
-        self.connection = self.engine.connect()
+        self.engine = create_engine(
+            connection_string, credentials_info=creds, pool_size=5, pool_timeout=30
+        )
         self.inspect_obj: Inspector = inspect(
             self.engine
         )  # this will be used to fetch metadata of the database
@@ -28,9 +29,10 @@ class BigqueryClient(Warehouse):
         """
         Execute the sql query and return the results
         """
-        result = self.connection.execute(sql)
-        rows = result.fetchall()
-        return [dict(row) for row in rows]
+        with self.engine.connect() as connection:
+            result = connection.execute(sql)
+            rows = result.fetchall()
+            return [dict(row) for row in rows]
 
     def get_table_columns(self, db_schema: str, db_table: str) -> dict:
         """Fetch columns of a table; also send the translated col data type"""
