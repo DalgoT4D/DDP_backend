@@ -57,30 +57,6 @@ class Org(models.Model):
         return f"Org[{self.slug}|{self.name}|{self.airbyte_workspace_id}|{demostr}]"
 
 
-class OrgPrefectBlock(models.Model):
-    """Docstring"""
-
-    org = models.ForeignKey(Org, on_delete=models.CASCADE)
-    block_type = models.CharField(max_length=25)  # all dbt blocks have the same type!
-    block_id = models.CharField(max_length=36, unique=True)
-    block_name = models.CharField(
-        max_length=100, unique=True
-    )  # use blockname to distinguish between different dbt commands
-    display_name = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
-        max_length=100, null=True
-    )
-    command = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
-        max_length=100, null=True
-    )
-    dbt_target_schema = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
-        max_length=50, null=True
-    )
-    seq = models.SmallIntegerField(null=True)  # skipcq: PTC-W0901, PTC-W0906
-
-    def __str__(self) -> str:
-        return f"OrgPrefectBlock[{self.org.name}|{self.block_type}|{self.block_name}]"
-
-
 class OrgSchema(Schema):
     """Docstring"""
 
@@ -162,7 +138,7 @@ class OrgPrefectBlockv1(models.Model):
     )  # use blockname to distinguish between different dbt commands
 
     def __str__(self) -> str:
-        return f"OrgPrefectBlock[{self.org.name}|{self.block_type}|{self.block_name}]"
+        return f"OrgPrefectBlockv1[{self.org.name}|{self.block_type}|{self.block_name}]"
 
 
 class OrgDataFlowv1(models.Model):
