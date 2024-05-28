@@ -1,10 +1,7 @@
 """simple helper for a celery task to update its progress for its invoker to check on"""
 
 import json
-<<<<<<< HEAD
-=======
 
->>>>>>> edd9712763dd6fe62d0d041de95e58cb471a472d
 from ddpui.utils.redis_client import RedisClient
 
 
