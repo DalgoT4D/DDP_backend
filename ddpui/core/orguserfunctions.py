@@ -5,6 +5,7 @@ do not raise http errors here
 
 import os
 from datetime import datetime
+from uuid import uuid4
 
 from django.contrib.auth.models import User
 from django.db import transaction
@@ -29,6 +30,7 @@ from ddpui.models.org_user import (
     VerifyEmailSchema,
 )
 from ddpui.models.orgtnc import OrgTnC
+from ddpui.models.role_based_access import Role
 from ddpui.utils import helpers, sendgrid, timezone
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.orguserhelpers import from_invitation, from_orguser
