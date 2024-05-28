@@ -1,7 +1,6 @@
 import os
 from uuid import uuid4
 from pathlib import Path
-from redis import Redis
 from ninja import NinjaAPI
 from ninja.errors import HttpError
 
@@ -25,6 +24,7 @@ from ddpui.ddpdbt import dbt_service
 from ddpui.ddpprefect import prefect_service
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.orguserhelpers import from_orguser
+from ddpui.utils.redis_client import RedisClient
 from ddpui.auth import has_permission
 
 dbtapi = NinjaAPI(urls_namespace="dbt")
@@ -193,7 +193,7 @@ def post_dbt_makedocs(request):
         indexfile.write(html)
         indexfile.close()
 
-    redis = Redis()
+    redis = RedisClient.get_instance()
     token = uuid4()
     redis_key = f"dbtdocs-{token.hex}"
     redis.set(redis_key, htmlfilename.encode("utf-8"))

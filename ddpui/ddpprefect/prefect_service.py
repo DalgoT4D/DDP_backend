@@ -7,7 +7,6 @@ from django.db import transaction
 from ddpui.ddpprefect.schema import (
     PrefectDbtCoreSetup,
     PrefectShellSetup,
-    PrefectAirbyteConnectionSetup,
     PrefectAirbyteSync,
     PrefectDataFlowCreateSchema2,
     PrefectDataFlowCreateSchema3,
@@ -20,7 +19,6 @@ from ddpui.ddpprefect.schema import (
 )
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.tasks import DataflowOrgTask, TaskLock
-from ddpui.models.orgjobs import BlockLock, DataflowBlock
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.ddpprefect import DDP_WORK_QUEUE
@@ -593,37 +591,6 @@ def create_deployment_flow_run(
         flow_run_params if flow_run_params else {},
     )
     return res
-
-
-def lock_blocks_for_deployment(deployment_id: str, orguser: OrgUser):
-    """locks all orgprefectblocks for a deployment"""
-    dataflow_blocks = DataflowBlock.objects.filter(
-        dataflow__deployment_id=deployment_id
-    )
-
-    block_names = [
-        x["opb__block_name"] for x in dataflow_blocks.values("opb__block_name")
-    ]
-    lock = BlockLock.objects.filter(opb__block_name__in=block_names).first()
-    if lock:
-        logger.info(f"{lock.locked_by.user.email} is running this pipeline right now")
-        raise HttpError(
-            400, f"{lock.locked_by.user.email} is running this pipeline right now"
-        )
-
-    locks = []
-    try:
-        with transaction.atomic():
-            for df_block in dataflow_blocks:
-                blocklock = BlockLock.objects.create(
-                    opb=df_block.opb, locked_by=orguser
-                )
-                locks.append(blocklock)
-    except Exception as error:
-        raise HttpError(
-            400, "Someone else is trying to run this pipeline... try again"
-        ) from error
-    return locks
 
 
 def lock_tasks_for_deployment(deployment_id: str, orguser: OrgUser):
