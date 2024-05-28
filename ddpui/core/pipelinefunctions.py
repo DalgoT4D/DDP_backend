@@ -55,9 +55,7 @@ def setup_dbt_core_task_config(
     return PrefectDbtTaskSetup(
         seq=seq,
         slug=org_task.task.slug,
-        commands=[
-            f"{dbt_project_params.dbt_binary} {org_task.get_task_parameters()} --target {dbt_project_params.target}"
-        ],
+        commands=[f"{dbt_project_params.dbt_binary} {org_task.get_task_parameters()}"],
         type=DBTCORE,
         env={},
         working_dir=dbt_project_params.project_dir,
