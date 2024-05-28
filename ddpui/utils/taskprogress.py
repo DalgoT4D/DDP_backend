@@ -1,7 +1,7 @@
 """simple helper for a celery task to update its progress for its invoker to check on"""
 
 import json
-from redis import Redis
+from ddpui.utils.redis_client import RedisClient
 
 
 class TaskProgress:
@@ -14,7 +14,7 @@ class TaskProgress:
         self.hashkey = hashkey
         self.task_id = task_id
         self.taskprogress = []
-        self.redis = Redis()
+        self.redis = RedisClient.get_instance()
         # the key doesn't exist yet, can't set the expiration
         self.expiration_set = False
         self.expire_in_seconds = expire_in_seconds
@@ -35,7 +35,7 @@ class TaskProgress:
     @staticmethod
     def fetch(task_id, hashkey):
         """look up progress by task_id"""
-        redis = Redis()
+        redis = RedisClient.get_instance()
         result = redis.hget(hashkey, task_id)
         if result:
             return json.loads(result)
@@ -44,5 +44,5 @@ class TaskProgress:
     @staticmethod
     def get_running_tasks(hashkey):
         """look up any running tasks for this hashkey"""
-        redis = Redis()
+        redis = RedisClient.get_instance()
         return redis.hkeys(hashkey)
