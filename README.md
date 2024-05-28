@@ -172,3 +172,35 @@ DJANGOSECRET=
 ### Step 10: Create first org and user
 
 -   Run `python manage.py createorganduser <Org Name> <Email address>`
+
+## Using Docker
+Follow the steps below:
+
+### Step 1: Install Docker and Docker Compose
+
+-  Install [docker](https://docs.docker.com/engine/install/)
+-  Install [docker-compose](https://docs.docker.com/compose/install/)
+
+### Step 2: Create .env file
+
+-  create `.env` from `.env.template` inside the Docker folder
+
+### Step 3: Create `whitelist.py` file
+
+-  Copy the file in ddpui/assets/ to Docker/mount
+
+### Step 4: Build the image
+If using M1-based MacBook  run this before building image 
+  `export DOCKER_DEFAULT_PLATFORM=linux/amd64`
+
+
+-  `docker build -f Docker/Dockerfile.main --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') -t dalgo_backend_main_image:0.1 .` This will create the main image
+- `docker build -f Docker/Dockerfile.dev.deploy --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') -t dalgo_backend:0.1 .` 
+
+### Step 5: Start the other applications
+
+-  Follow [Step 4](#step-4-install-airbyte) and [Step 5](#step-5-install-prefect-and-start-prefect-proxy) in the Setup Instructions
+
+### Step 5: Start Backend
+
+-  `docker-compose -f Docker/docker-compose.dev.yml up`
