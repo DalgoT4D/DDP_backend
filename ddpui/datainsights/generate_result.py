@@ -132,11 +132,7 @@ def poll_for_column_insights(
 
     insight_objs = GenerateResult.prepare_insight_objects(wclient, requestor_col)
 
-    if requestor_col.refresh:
-        GenerateResult.execute_insight_queries(
-            org_warehouse.org, wclient, insight_objs, requestor_col
-        )
-
+    # fetch the results from redis and see if they can be returned
     final_result = GenerateResult.fetch_results(
         org_warehouse.org,
         requestor_col.db_schema,
@@ -144,6 +140,21 @@ def poll_for_column_insights(
         requestor_col.column_name,
     )
 
+    # if results from redis are partial; re-compute them
+    if requestor_col.refresh or not GenerateResult.validate_results(
+        insight_objs, final_result
+    ):
+        GenerateResult.execute_insight_queries(
+            org_warehouse.org, wclient, insight_objs, requestor_col
+        )
+        final_result = GenerateResult.fetch_results(
+            org_warehouse.org,
+            requestor_col.db_schema,
+            requestor_col.db_table,
+            requestor_col.column_name,
+        )
+
+    # if the results are still invalid/partial; return an error state
     if not GenerateResult.validate_results(insight_objs, final_result):
         taskprogress.add(
             {
@@ -170,7 +181,7 @@ class GenerateResult:
 
     RESULT_STATUS_FETCHING = "fetching"
     RESULT_STATUS_COMPLETED = "completed"
-    RESULT_STATUS_ERROR = "completed"
+    RESULT_STATUS_ERROR = "error"
     ORG_INSIGHTS_EXPIRY = 60 * 30  # 30 minutes = 1800 seconds
 
     org_locks: dict[str, threading.Lock] = {}
