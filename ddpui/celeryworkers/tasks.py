@@ -13,9 +13,15 @@ from ddpui.ddpairbyte.airbyte_service import abreq
 from ddpui.utils.sendgrid import send_schema_changes_email
 from ddpui.utils.timezone import UTC
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.models.org import Org, OrgDbt, OrgSchemaChange, OrgWarehouse, OrgPrefectBlockv1, OrgDataFlowv1
+from ddpui.models.org import (
+    Org,
+    OrgDbt,
+    OrgSchemaChange,
+    OrgWarehouse,
+    OrgPrefectBlockv1,
+    OrgDataFlowv1,
+)
 from ddpui.models.org_user import OrgUser
-from ddpui.models.orgjobs import BlockLock
 from ddpui.models.tasks import TaskLock, OrgTask, TaskProgressHashPrefix
 from ddpui.models.canvaslock import CanvasLock
 from ddpui.models.flow_runs import PrefectFlowRun
@@ -372,6 +378,7 @@ def run_dbt_commands(self, orguser_id: int):
         for lock in task_locks:
             lock.delete()
 
+
 @app.task()
 def schema_change_detection():
     """detects schema changes for all the orgs and sends an email to admins if there is a change"""
@@ -379,44 +386,50 @@ def schema_change_detection():
     schema_changes = {}
 
     for org in orgs:
-        org_conn = OrgTask.objects.filter(org=org, task__slug='airbyte-sync')
+        org_conn = OrgTask.objects.filter(org=org, task__slug="airbyte-sync")
         for org_task in org_conn:
             try:
-                response = abreq("web_backend/connections/get", {
-                    "withRefreshedCatalog": True,
-                    "connectionId": org_task.connection_id
-                }, timeout=60)
-                
-                change_type = response.get('schemaChange')
+                response = abreq(
+                    "web_backend/connections/get",
+                    {
+                        "withRefreshedCatalog": True,
+                        "connectionId": org_task.connection_id,
+                    },
+                    timeout=60,
+                )
+
+                change_type = response.get("schemaChange")
                 logger.info(f"Schema change detected for org {org.name}: {change_type}")
-                
-                if change_type in ['breaking', 'non_breaking']:
+
+                if change_type in ["breaking", "non_breaking"]:
                     schema_change, created = OrgSchemaChange.objects.get_or_create(
                         connection_id=org_task.connection_id,
-                        defaults={'change_type': change_type, 'org': org}
+                        defaults={"change_type": change_type, "org": org},
                     )
                     if not created:
                         # If the record already exists, update the change_type
                         schema_change.change_type = change_type
                         schema_change.save()
                     if org not in schema_changes:
-                        schema_changes[org] = {'breaking': 0, 'non_breaking': 0}
+                        schema_changes[org] = {"breaking": 0, "non_breaking": 0}
                     schema_changes[org][change_type] += 1
             except Exception as e:
                 logger.error(f"Error checking connection for org {org.name}: {e}")
                 continue
-            
+
     for org, changes in schema_changes.items():
-        breaking_changes = changes['breaking']
-        non_breaking_changes = changes['non_breaking']
-        
+        breaking_changes = changes["breaking"]
+        non_breaking_changes = changes["non_breaking"]
+
         org_users = OrgUser.objects.filter(
-            org=org,
-            new_role__slug__in=[ACCOUNT_MANAGER_ROLE, PIPELINE_MANAGER_ROLE]
+            org=org, new_role__slug__in=[ACCOUNT_MANAGER_ROLE, PIPELINE_MANAGER_ROLE]
         )
         for orguser in org_users:
             logger.info(f"sending notification email to {orguser.user.email}")
-            send_schema_changes_email(org.name, orguser.user.email, breaking_changes, non_breaking_changes)
+            send_schema_changes_email(
+                org.name, orguser.user.email, breaking_changes, non_breaking_changes
+            )
+
 
 @app.task(bind=True)
 def create_elementary_report(
@@ -483,13 +496,6 @@ def update_dbt_core_block_schema_task(block_name, default_schema):
     """single http PUT request to the prefect-proxy"""
     logger.info("updating default_schema of %s to %s", block_name, default_schema)
     update_dbt_core_block_schema(block_name, default_schema)
-
-
-@app.task()
-def delete_old_blocklocks():
-    """delete blocklocks which were created over an hour ago"""
-    onehourago = UTC.localize(datetime.now() - timedelta(seconds=3600))
-    BlockLock.objects.filter(locked_at__lt=onehourago).delete()
 
 
 @app.task()
@@ -576,11 +582,9 @@ def add_custom_connectors_to_workspace(self, workspace_id, custom_sources: list[
 def setup_periodic_tasks(sender, **kwargs):
     """check for old locks every minute"""
     sender.add_periodic_task(
-        crontab(hour=18, minute=30), schema_change_detection.s(), 
-        name="schema change detection"
-    )
-    sender.add_periodic_task(
-        60 * 1.0, delete_old_blocklocks.s(), name="remove old blocklocks"
+        crontab(hour=18, minute=30),
+        schema_change_detection.s(),
+        name="schema change detection",
     )
     sender.add_periodic_task(
         60 * 1.0, delete_old_tasklocks.s(), name="remove old tasklocks"

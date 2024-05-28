@@ -22,7 +22,6 @@ from ddpui.ddpprefect.prefect_service import (
     update_airbyte_connection_block,
     get_dbtcore_block_id,
     create_airbyte_server_block,
-    PrefectAirbyteConnectionSetup,
     delete_airbyte_server_block,
     delete_airbyte_connection_block,
     post_prefect_blocks_bulk_delete,
