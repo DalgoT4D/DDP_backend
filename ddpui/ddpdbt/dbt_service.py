@@ -1,8 +1,6 @@
 import glob
 import os
 import shutil
-import re
-from uuid import uuid4
 from datetime import datetime
 import subprocess
 from pathlib import Path
