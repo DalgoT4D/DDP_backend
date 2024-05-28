@@ -10,7 +10,7 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
 from django.contrib.auth.models import User
-from ddpui.models.org import Org, OrgPrefectBlock, OrgWarehouse
+from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser, OrgUserRole
 from ddpui.api.airbyte_api import (
     get_airbyte_source_definitions,
