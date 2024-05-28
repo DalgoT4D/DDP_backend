@@ -1,9 +1,9 @@
 """shows blocks and tasks for an org"""
+
 from django.core.management.base import BaseCommand
 from django.utils.text import slugify
 
-from ddpui.models.orgjobs import DataflowBlock
-from ddpui.models.org import Org, OrgPrefectBlock, OrgDataFlow
+from ddpui.models.org import Org, OrgPrefectBlockv1
 from ddpui.models.tasks import OrgTask, OrgDataFlowv1
 
 
@@ -20,7 +20,7 @@ class Command(BaseCommand):
     def show_orgprefectblocks(self, org: Org):
         """shows all OrgPrefectBlocks for an org"""
         print("Blocks for " + org.slug + ":")
-        for opb in OrgPrefectBlock.objects.filter(org=org).order_by("block_type"):
+        for opb in OrgPrefectBlockv1.objects.filter(org=org).order_by("block_type"):
             if opb.block_type == "Airbyte Server":
                 print(f"  {opb.block_type}")
             elif opb.block_type == "Airbyte Connection":
@@ -29,39 +29,6 @@ class Command(BaseCommand):
                 print(f"  {opb.command}")
             else:
                 print(f"  dbt {opb.command}")
-
-    def show_manual_dataflows(self, org: Org):
-        """shows all manual OrgDataFlows for an org"""
-        print("Manual Dataflows for " + org.slug + ":")
-        for dataflow in OrgDataFlow.objects.filter(org=org).filter(
-            dataflow_type="manual"
-        ):
-            assert DataflowBlock.objects.filter(dataflow=dataflow).count() == 1
-            dfb = DataflowBlock.objects.filter(dataflow=dataflow).first()
-            print(
-                f"  {dataflow.deployment_name:50} [{dfb.opb.block_type:20}] {dfb.opb.command}"
-            )
-
-    def show_orchestrated_dataflows(self, org: Org):
-        """shows all orchestrated OrgDataFlows for an org"""
-        print("Orchestrated Dataflows for " + org.slug + ":")
-        for dataflow in OrgDataFlow.objects.filter(org=org).filter(
-            dataflow_type="orchestrate"
-        ):
-            q_dfdfb = DataflowBlock.objects.filter(dataflow=dataflow)
-            if (
-                q_dfdfb.filter(opb__block_type="Airbyte Connection").count() == 1
-                and q_dfdfb.filter(opb__block_type="Shell Operation").count() == 1
-                and q_dfdfb.filter(opb__block_type="dbt Core Operation").count() == 5
-            ):
-                print(f"  {dataflow.deployment_name:50} [with all 7 blocks]")
-            else:
-                for dfb in q_dfdfb:
-                    opb = dfb.opb
-                    print(
-                        f"  {dataflow.deployment_name:50} [{opb.block_type:20}] {opb.command}"
-                    )
-            print("")
 
     def show_org_tasks(self, org: Org):
         """shows all tasks for an org"""
@@ -98,11 +65,7 @@ class Command(BaseCommand):
         print("")
         self.show_org_tasks(org)
         print("")
-        self.show_manual_dataflows(org)
-        print("")
         self.show_v1_manual_dataflows(org)
-        print("")
-        self.show_orchestrated_dataflows(org)
         print("")
         self.show_v1_orchestrated_dataflows(org)
         print("=" * 80)

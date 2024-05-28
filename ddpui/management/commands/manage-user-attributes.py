@@ -15,7 +15,7 @@ class Command(BaseCommand):
     This script manages UserAttributes for a user
     """
 
-    help = "Writes the DataflowBlock table"
+    help = "Writes the UserAttributes table"
     attributes = [
         "email_verified",
         "can_create_orgs",

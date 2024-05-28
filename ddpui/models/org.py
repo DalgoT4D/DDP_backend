@@ -57,56 +57,6 @@ class Org(models.Model):
         return f"Org[{self.slug}|{self.name}|{self.airbyte_workspace_id}|{demostr}]"
 
 
-class OrgPrefectBlock(models.Model):
-    """Docstring"""
-
-    org = models.ForeignKey(Org, on_delete=models.CASCADE)
-    block_type = models.CharField(max_length=25)  # all dbt blocks have the same type!
-    block_id = models.CharField(max_length=36, unique=True)
-    block_name = models.CharField(
-        max_length=100, unique=True
-    )  # use blockname to distinguish between different dbt commands
-    display_name = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
-        max_length=100, null=True
-    )
-    command = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
-        max_length=100, null=True
-    )
-    dbt_target_schema = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
-        max_length=50, null=True
-    )
-    seq = models.SmallIntegerField(null=True)  # skipcq: PTC-W0901, PTC-W0906
-
-    def __str__(self) -> str:
-        return f"OrgPrefectBlock[{self.org.name}|{self.block_type}|{self.block_name}]"
-
-
-class OrgDataFlow(models.Model):
-    """This contains the deployment id of an organization to schedule flows/pipelines"""
-
-    org = models.ForeignKey(Org, on_delete=models.CASCADE)
-    name = models.CharField(max_length=100)
-    deployment_name = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
-        max_length=100, null=True
-    )
-    deployment_id = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
-        max_length=36, unique=True, null=True
-    )
-    cron = models.CharField(max_length=36, null=True)  # skipcq: PTC-W0901, PTC-W0906
-    # and if deployment is manual airbyte-connection-sync,then we store the conn_id
-    connection_id = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
-        max_length=36, unique=True, null=True
-    )
-    dataflow_type = models.CharField(
-        max_length=25,
-        choices=(("orchestrate", "orchestrate"), ("manual", "manual")),
-        default="orchestrate",
-    )  # skipcq: PTC-W0901, PTC-W0906
-
-    def __str__(self) -> str:
-        return f"OrgDataFlow[{self.name}|{self.deployment_name}|{self.deployment_id}|{self.cron}|{self.connection_id}]"
-
-
 class OrgSchema(Schema):
     """Docstring"""
 
@@ -188,7 +138,7 @@ class OrgPrefectBlockv1(models.Model):
     )  # use blockname to distinguish between different dbt commands
 
     def __str__(self) -> str:
-        return f"OrgPrefectBlock[{self.org.name}|{self.block_type}|{self.block_name}]"
+        return f"OrgPrefectBlockv1[{self.org.name}|{self.block_type}|{self.block_name}]"
 
 
 class OrgDataFlowv1(models.Model):
@@ -215,7 +165,7 @@ class OrgDataFlowv1(models.Model):
     )
 
     def __str__(self) -> str:
-        return f"OrgDataFlow[{self.name}|{self.deployment_name}|{self.deployment_id}|{self.cron}]"
+        return f"OrgDataFlowv1[{self.name}|{self.deployment_name}|{self.deployment_id}|{self.cron}]"
 
 
 class OrgSchemaChange(models.Model):
