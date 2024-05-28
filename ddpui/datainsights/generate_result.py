@@ -16,7 +16,7 @@ from ddpui.models.org import Org, OrgWarehouse
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.schemas.warehouse_api_schemas import RequestorColumnSchema
 from ddpui.models.tasks import TaskProgressHashPrefix
-from ddpui.redis_client import RedisClient
+from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 
@@ -91,6 +91,7 @@ def poll_for_column_insights(
     self,
     org_warehouse_id: str,
     requestor_col: dict,
+    task_id: str,
 ):
     """
     This will help frontend fetch insights for the column provided
@@ -102,9 +103,7 @@ def poll_for_column_insights(
         requestor_col
     )
 
-    taskprogress = TaskProgress(
-        self.request.id, TaskProgressHashPrefix.DATAINSIGHTS, 10 * 60
-    )
+    taskprogress = TaskProgress(task_id, TaskProgressHashPrefix.DATAINSIGHTS, 10 * 60)
     taskprogress.add(
         {
             "message": "Fetching insights",
@@ -133,9 +132,10 @@ def poll_for_column_insights(
 
     insight_objs = GenerateResult.prepare_insight_objects(wclient, requestor_col)
 
-    GenerateResult.execute_insight_queries(
-        org_warehouse.org, wclient, insight_objs, requestor_col
-    )
+    if requestor_col.refresh:
+        GenerateResult.execute_insight_queries(
+            org_warehouse.org, wclient, insight_objs, requestor_col
+        )
 
     final_result = GenerateResult.fetch_results(
         org_warehouse.org,
@@ -171,6 +171,7 @@ class GenerateResult:
     RESULT_STATUS_FETCHING = "fetching"
     RESULT_STATUS_COMPLETED = "completed"
     RESULT_STATUS_ERROR = "completed"
+    ORG_INSIGHTS_EXPIRY = 60 * 30  # 30 minutes = 1800 seconds
 
     org_locks: dict[str, threading.Lock] = {}
 
@@ -183,6 +184,12 @@ class GenerateResult:
     @classmethod
     def build_queries_locking_hash(cls, org: Org, query: ColInsight) -> str:
         return f"{org.slug}-{query.db_schema}-{query.db_table}-queries"
+
+    @classmethod
+    def build_insights_hash_to_store_results(
+        cls, org: Org, db_schema: str, db_table: str
+    ) -> str:
+        return f"{org.slug}-{db_schema}-{db_table}-insights"
 
     @classmethod
     def execute_insight_queries(
@@ -216,6 +223,7 @@ class GenerateResult:
         for query in insight_queries:
             if cls.acquire_query_lock(org, query):
                 # run the queries and save results
+                logger.info(f"Lock acquired for the query: {query.query_id()}")
                 try:
                     stmt = query.generate_sql()
                     stmt = stmt.compile(
@@ -303,14 +311,13 @@ class GenerateResult:
         # place to the save the results in redis should be created
         redis = RedisClient.get_instance()
 
-        lock = GenerateResult.get_org_lock(org)
+        lock = cls.get_org_lock(org)
 
         if lock.acquire(timeout=15):
-            current_results = GenerateResult.fetch_results(
-                org, query.db_schema, query.db_table
-            )
+            current_results = cls.fetch_results(org, query.db_schema, query.db_table)
 
-            logger.info(current_results)
+            current_results = current_results if current_results else {}
+            parsed_results = parsed_results if parsed_results else {}
 
             merged_results = {
                 key: {**current_results.get(key, {}), **parsed_results.get(key, {})}
@@ -318,10 +325,13 @@ class GenerateResult:
             }
 
             # save results to redis
-            hash = f"{org.slug}-insights"
+            hash = cls.build_insights_hash_to_store_results(
+                org, query.db_schema, query.db_table
+            )
             key = f"{query.db_schema}-{query.db_table}"
 
             redis.hset(hash, key, json.dumps(merged_results))
+            redis.expire(hash, cls.ORG_INSIGHTS_EXPIRY)
 
             lock.release()
 
@@ -334,12 +344,12 @@ class GenerateResult:
         If column is None; clear insights for all columns
         If column is specified: clear insights for that column
         """
-        hash = f"{org.slug}-insights"
+        hash = cls.build_insights_hash_to_store_results(org, db_schema, db_table)
         key = f"{db_schema}-{db_table}"
 
         redis = RedisClient.get_instance()
 
-        lock = GenerateResult.get_org_lock(org)
+        lock = cls.get_org_lock(org)
 
         if lock.acquire(timeout=15):
             results = redis.hget(hash, key)
@@ -364,7 +374,7 @@ class GenerateResult:
         If column is None; fetch insights for all columns
         If column is specified: fetch insights for that column
         """
-        hash = f"{org.slug}-insights"
+        hash = cls.build_insights_hash_to_store_results(org, db_schema, db_table)
         key = f"{db_schema}-{db_table}"
 
         redis = RedisClient.get_instance()
@@ -372,7 +382,7 @@ class GenerateResult:
         results = redis.hget(hash, key)
         results = json.loads(results) if results else None
 
-        if column_name:
+        if results and column_name:
             return results[f"{column_name}"] if column_name in results else None
 
         return results

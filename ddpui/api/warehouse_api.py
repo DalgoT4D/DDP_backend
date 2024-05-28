@@ -1,4 +1,5 @@
 import json
+import uuid
 import sqlalchemy
 from dbt_automation.utils.warehouseclient import get_client
 from ninja import NinjaAPI
@@ -10,8 +11,10 @@ import sqlalchemy.exc
 from ddpui import auth
 from ddpui.core import dbtautomation_service
 from ddpui.models.org import OrgWarehouse
+from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.utils import secretsmanager
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.taskprogress import TaskProgress
 from ddpui.auth import has_permission
 
 from ddpui.datainsights.insights.insight_factory import InsightsFactory
@@ -231,53 +234,20 @@ def post_data_insights(request, payload: RequestorColumnSchema):
 
     try:
 
-        task = poll_for_column_insights.delay(
-            org_warehouse.id,
-            payload.dict(),
+        task_id = str(uuid.uuid4())
+
+        taskprogress = TaskProgress(task_id, TaskProgressHashPrefix.DATAINSIGHTS)
+        taskprogress.add(
+            {
+                "message": "Fetching insights",
+                "status": GenerateResult.RESULT_STATUS_FETCHING,
+                "results": [],
+            }
         )
 
-        return {"task_id": task.id}
-    except Exception as err:
-        logger.error(err)
-        raise HttpError(500, str(err))
+        poll_for_column_insights.delay(org_warehouse.id, payload.dict(), task_id)
 
-
-@warehouseapi.get("/insights/metrics/", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_view_warehouse_data"])
-def get_data_insights(request, payload: RequestorColumnSchema):
-    """
-    Run all the require queries to fetch insights for a column
-    Will also save to redis results as queries are processed
-    """
-    orguser = request.orguser
-    org = orguser.org
-
-    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
-    if not org_warehouse:
-        raise HttpError(404, "Please set up your warehouse first")
-
-    payload.filter = None
-    payload.refresh = False
-
-    try:
-        credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
-
-        wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
-
-        insight_objs = GenerateResult.prepare_insight_objects(wclient, payload)
-
-        final_result = GenerateResult.fetch_results(
-            org_warehouse.org, payload.db_schema, payload.db_table, payload.column_name
-        )
-
-        if not final_result:
-            raise HttpError(500, "Insights not found")
-
-        if not GenerateResult.validate_results(insight_objs, final_result):
-            raise HttpError(500, "Failed to fetch all insights")
-
-        # send a message to tbe websocket to start tracking progress task_id
-        return final_result
+        return {"task_id": task_id}
     except Exception as err:
         logger.error(err)
         raise HttpError(500, str(err))
