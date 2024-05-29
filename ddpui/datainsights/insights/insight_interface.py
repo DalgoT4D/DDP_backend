@@ -96,6 +96,13 @@ class ColInsight(ABC):
         """
         pass
 
+    @abstractmethod
+    def query_data_type(self) -> TranslateColDataType:
+        """
+        Returns the data type of the column
+        """
+        pass
+
 
 class DataTypeColInsights(ABC):
     """

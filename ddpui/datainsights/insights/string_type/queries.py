@@ -115,3 +115,6 @@ class DistributionChart(ColInsight):
                 validate = True
 
         return validate
+
+    def query_data_type(self) -> TranslateColDataType:
+        return TranslateColDataType.STRING

@@ -11,7 +11,10 @@ from ddpui.datainsights.insights.insight_factory import InsightsFactory
 from ddpui.datainsights.insights.common.base_insights import BaseInsights
 from ddpui.datainsights.warehouse.warehouse_interface import Warehouse
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
-from ddpui.datainsights.insights.insight_interface import DataTypeColInsights
+from ddpui.datainsights.insights.insight_interface import (
+    DataTypeColInsights,
+    TranslateColDataType,
+)
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.schemas.warehouse_api_schemas import RequestorColumnSchema
@@ -130,7 +133,18 @@ def poll_for_column_insights(
 
     wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
 
-    insight_objs = GenerateResult.prepare_insight_objects(wclient, requestor_col)
+    # clear insights based on the refresh flag
+    if requestor_col.refresh:
+        GenerateResult.clear_insights(
+            org_warehouse.org,
+            requestor_col.db_schema,
+            requestor_col.db_table,
+            requestor_col.column_name,
+        )
+
+    execute_queries = GenerateResult.queries_to_execute(
+        org_warehouse.org, wclient, requestor_col
+    )
 
     # fetch the results from redis and see if they can be returned
     final_result = GenerateResult.fetch_results(
@@ -142,10 +156,10 @@ def poll_for_column_insights(
 
     # if results from redis are partial; re-compute them
     if requestor_col.refresh or not GenerateResult.validate_results(
-        insight_objs, final_result
+        execute_queries, final_result
     ):
         GenerateResult.execute_insight_queries(
-            org_warehouse.org, wclient, insight_objs, requestor_col
+            org_warehouse.org, wclient, execute_queries, requestor_col
         )
         final_result = GenerateResult.fetch_results(
             org_warehouse.org,
@@ -155,7 +169,7 @@ def poll_for_column_insights(
         )
 
     # if the results are still invalid/partial; return an error state
-    if not GenerateResult.validate_results(insight_objs, final_result):
+    if not GenerateResult.validate_results(execute_queries, final_result):
         taskprogress.add(
             {
                 "message": "Partial data fetched",
@@ -207,7 +221,7 @@ class GenerateResult:
         cls,
         org: Org,
         wclient: Warehouse,
-        insights: list[DataTypeColInsights],
+        execute_queries: list[ColInsight],
         requestor_col: RequestorColumnSchema,
     ) -> dict:
         """
@@ -215,26 +229,16 @@ class GenerateResult:
         2. Gets locks on each query before run
         3. If lock is present; skips the query since its already running
         """
-        # clear insights based on the refresh flag
-        if requestor_col.refresh:
-            GenerateResult.clear_insights(
-                org,
-                requestor_col.db_schema,
-                requestor_col.db_table,
-                requestor_col.column_name,
-            )
 
-        insight_queries: list[ColInsight] = []
-        for insight in insights:
-            insight_queries += insight.insights
-
-        logger.info(f"Total number of queries to executed {len(insight_queries)}")
+        logger.info(f"Total number of queries to executed {len(execute_queries)}")
 
         # acquire & run the queries lock for all queries
-        for query in insight_queries:
+        for query in execute_queries:
             if cls.acquire_query_lock(org, query):
                 # run the queries and save results
-                logger.info(f"Lock acquired for the query: {query.query_id()}")
+                logger.info(
+                    f"Lock acquired & running the query: {query.query_id()} for col: {requestor_col.column_name}"
+                )
                 try:
                     stmt = query.generate_sql()
                     stmt = stmt.compile(
@@ -244,6 +248,8 @@ class GenerateResult:
 
                     # parse result of this query
                     results = query.parse_results(results)
+
+                    logger.info(results)
 
                     # save result to redis
                     cls.save_results(org, query, results)
@@ -266,7 +272,7 @@ class GenerateResult:
         hash = GenerateResult.build_queries_locking_hash(org, query)
         key = query.query_id()
 
-        logger.info(f"Acquiring lock for query hash: {key}")
+        # logger.info(f"Acquiring lock for query hash: {key}")
 
         payload = {
             "status": GenerateResult.RESULT_STATUS_FETCHING,
@@ -399,40 +405,28 @@ class GenerateResult:
         return results
 
     @classmethod
-    def validate_results(
-        cls, insights: list[DataTypeColInsights], parsed_result: dict
-    ) -> bool:
+    def validate_results(cls, queries: list[ColInsight], parsed_result: dict) -> bool:
         """
         Validate the results
         """
-        for insight in insights:
-            for query in insight.insights:
-                if not query.validate_query_results(parsed_result):
-                    return False
+        for query in queries:
+            if not query.validate_query_results(parsed_result):
+                return False
 
         return True
 
     @classmethod
-    def prepare_insight_objects(
+    def queries_to_execute(
         cls,
+        org: Org,
         wclient: Warehouse,
         requestor_col: RequestorColumnSchema,
-    ) -> list[DataTypeColInsights]:
+    ) -> list[ColInsight]:
         db_schema = requestor_col.db_schema
         db_table = requestor_col.db_table
         column_name = requestor_col.column_name
 
-        insight_objs: list[DataTypeColInsights] = []
-
-        insight_objs.append(
-            BaseInsights(
-                wclient.get_table_columns(db_schema, db_table),
-                db_table,
-                db_schema,
-                requestor_col.filter,
-                wclient.get_wtype(),
-            )
-        )
+        execute_queries: list[ColInsight] = []
         column_configs = [
             col
             for col in wclient.get_table_columns(db_schema, db_table)
@@ -441,15 +435,36 @@ class GenerateResult:
         if len(column_configs) == 0:
             raise ValueError("Couldnt find the column in the table")
 
-        insight_objs.append(
-            InsightsFactory.initiate_insight(
-                column_configs,
-                db_table,
-                db_schema,
-                column_configs[0]["translated_type"],
-                requestor_col.filter,
-                wclient.get_wtype(),
-            )
-        )
+        for specific_query in InsightsFactory.initiate_insight(
+            column_configs,
+            db_table,
+            db_schema,
+            column_configs[0]["translated_type"],
+            requestor_col.filter,
+            wclient.get_wtype(),
+        ).insights:
+            execute_queries.append(specific_query)
 
-        return insight_objs
+        base_insights = BaseInsights(
+            wclient.get_table_columns(db_schema, db_table),
+            db_table,
+            db_schema,
+            requestor_col.filter,
+            wclient.get_wtype(),
+        )
+        for common_query in base_insights.insights:
+            # for base/common queries; check if the results are already present before acquiring lock & running again
+            # if common_query.validate_query_results(
+            #     cls.fetch_results(
+            #         org,
+            #         requestor_col.db_schema,
+            #         requestor_col.db_table,
+            #         requestor_col.column_name,
+            #     )
+            # ):
+            #     continue
+
+            execute_queries.append(common_query)
+
+
+        return execute_queries
