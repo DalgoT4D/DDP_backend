@@ -3,7 +3,7 @@ from ninja.errors import HttpError
 from ddpui.models.org_user import Org, OrgUser, OrgUserRole
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.tasks import OrgTask, DataflowOrgTask
-from ddpui.models.org import OrgDataFlowv1, OrgPrefectBlockv1
+from ddpui.models.org import OrgPrefectBlockv1
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpprefect import AIRBYTESERVER
@@ -23,6 +23,16 @@ def is_valid_uuid(s):
         return True
     except ValueError:
         return False
+    except TypeError:
+        return False
+
+
+def delete_dbt_orgtasks(org: Org):
+    """deletes dbt org tasks"""
+    logger.info("deleting dbt org tasks")
+    for org_task in OrgTask.objects.filter(org=org, task__type="dbt").all():
+        logger.info(f"deleting org task {org_task.task.slug} ")
+        org_task.delete()
 
 
 def delete_dbt_workspace(org: Org):  # skipcq: PYL-R0201
@@ -60,9 +70,7 @@ def delete_warehouse_v1(org: Org):  # skipcq: PYL-R0201
                 airbyte_service.delete_connection(
                     org.airbyte_workspace_id, org_task.connection_id
                 )
-                logger.info(
-                    f"deleted connection in Airbyte - {connection['connectionId']}"
-                )
+                logger.info(f"deleted connection in Airbyte - {org_task.connection_id}")
         except Exception:
             pass
         org_task.delete()
@@ -150,6 +158,7 @@ def display_org(org: Org):
 
 def delete_one_org(org: Org):
     """delete one org"""
+    delete_dbt_orgtasks(org)
     delete_dbt_workspace(org)
     if org.airbyte_workspace_id:
         delete_airbyte_workspace_v1(org)
