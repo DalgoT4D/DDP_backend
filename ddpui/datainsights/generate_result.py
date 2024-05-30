@@ -392,16 +392,17 @@ class GenerateResult:
         column_name = requestor_col.column_name
 
         execute_queries: list[ColInsight] = []
-        base_insights = BaseInsights(
-            wclient.get_table_columns(db_schema, db_table),
-            db_table,
-            db_schema,
-            requestor_col.filter,
-            wclient.get_wtype(),
-        )
-        for common_query in base_insights.insights:
+        if not requestor_col.filter:
+            base_insights = BaseInsights(
+                wclient.get_table_columns(db_schema, db_table),
+                db_table,
+                db_schema,
+                requestor_col.filter,
+                wclient.get_wtype(),
+            )
+            for common_query in base_insights.insights:
 
-            execute_queries.append(common_query)
+                execute_queries.append(common_query)
 
         column_configs = [
             col
