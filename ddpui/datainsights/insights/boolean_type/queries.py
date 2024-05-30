@@ -62,7 +62,11 @@ class DataStats(ColInsight):
             ).label("countFalse"),
         )
 
-        return query.fetch_from(self.db_table, self.db_schema).build()
+        return (
+            query.fetch_from(self.db_table, self.db_schema)
+            .where_clause(bool_col.isnot(None))
+            .build()
+        )
 
     def parse_results(self, result: list[dict]):
         """
