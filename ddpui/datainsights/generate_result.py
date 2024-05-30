@@ -2,6 +2,7 @@ import time
 import json
 import threading
 from datetime import datetime
+from redis.lock import Lock
 from sqlalchemy.sql.selectable import Select
 from channels.generic.websocket import WebsocketConsumer
 
@@ -198,12 +199,15 @@ class GenerateResult:
     RESULT_STATUS_ERROR = "error"
     ORG_INSIGHTS_EXPIRY = 60 * 30  # 30 minutes = 1800 seconds
 
-    org_locks: dict[str, threading.Lock] = {}
+    org_locks: dict[str, Lock] = {}
 
     @classmethod
-    def get_org_lock(cls, org: Org) -> threading.Lock:
+    def get_org_lock(cls, org: Org) -> Lock:
+        """Return a persistent redis lock"""
         if org.slug not in cls.org_locks:
-            cls.org_locks[org.slug] = threading.Lock()
+            cls.org_locks[org.slug] = Lock(
+                RedisClient.get_instance(), org.slug, timeout=15
+            )
         return cls.org_locks[org.slug]
 
     @classmethod
@@ -330,7 +334,7 @@ class GenerateResult:
 
         lock = cls.get_org_lock(org)
 
-        if lock.acquire(timeout=15):
+        if lock.acquire():
             current_results = cls.fetch_results(org, query.db_schema, query.db_table)
 
             current_results = current_results if current_results else {}
@@ -368,7 +372,7 @@ class GenerateResult:
 
         lock = cls.get_org_lock(org)
 
-        if lock.acquire(timeout=15):
+        if lock.acquire():
             results = redis.hget(hash, key)
             results: dict = json.loads(results) if results else None
 
@@ -427,6 +431,17 @@ class GenerateResult:
         column_name = requestor_col.column_name
 
         execute_queries: list[ColInsight] = []
+        base_insights = BaseInsights(
+            wclient.get_table_columns(db_schema, db_table),
+            db_table,
+            db_schema,
+            requestor_col.filter,
+            wclient.get_wtype(),
+        )
+        for common_query in base_insights.insights:
+
+            execute_queries.append(common_query)
+
         column_configs = [
             col
             for col in wclient.get_table_columns(db_schema, db_table)
@@ -444,27 +459,5 @@ class GenerateResult:
             wclient.get_wtype(),
         ).insights:
             execute_queries.append(specific_query)
-
-        base_insights = BaseInsights(
-            wclient.get_table_columns(db_schema, db_table),
-            db_table,
-            db_schema,
-            requestor_col.filter,
-            wclient.get_wtype(),
-        )
-        for common_query in base_insights.insights:
-            # for base/common queries; check if the results are already present before acquiring lock & running again
-            # if common_query.validate_query_results(
-            #     cls.fetch_results(
-            #         org,
-            #         requestor_col.db_schema,
-            #         requestor_col.db_table,
-            #         requestor_col.column_name,
-            #     )
-            # ):
-            #     continue
-
-            execute_queries.append(common_query)
-
 
         return execute_queries
