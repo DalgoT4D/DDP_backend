@@ -1,5 +1,5 @@
 import json
-from django.http import StreamingHttpResponse
+from django.http import StreamingHttpResponse, FileResponse
 
 from dbt_automation.utils.warehouseclient import get_client
 from ninja import NinjaAPI
@@ -190,11 +190,14 @@ def get_download_warehouse_data(request, schema_name: str, table_name: str):
         """Yield dummy data in JSON format"""
         data = [{"id": i, "value": f"dummy{i}"} for i in range(100)]
         header = ["id", "value"]
-        yield ",".join(header) + "\n"
+        csv_data = ",".join(header) + "\n"
         for item in data:
-            yield ",".join(map(str, item.values())) + "\n"
+            csv_data += ",".join(map(str, item.values())) + "\n"
+        return csv_data
 
     """Stream and download dummy data"""
+    csv_data = generate_dummy_data()
+    # blob =
     response = StreamingHttpResponse(generate_dummy_data(), content_type="text/csv")
     response["Content-Disposition"] = "attachment; filename=data.json"
     return response
