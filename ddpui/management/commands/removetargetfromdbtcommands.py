@@ -47,10 +47,9 @@ class Command(BaseCommand):
                     if eidx > -1:
                         task["commands"][0] = task["commands"][0][:eidx].strip()
                         is_modified = True
-                    print(task["commands"])
 
-            print(json.dumps(deployment_params, indent=2))
             if options["modify"] and is_modified:
+                print(json.dumps(deployment_params, indent=2))
                 res = prefect_put(
                     f"v1/deployments/{dataflow.deployment_id}",
                     {"deployment_params": deployment_params},
