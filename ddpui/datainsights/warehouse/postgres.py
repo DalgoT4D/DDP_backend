@@ -1,6 +1,7 @@
 from sqlalchemy.engine import create_engine
 from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy import inspect
+from sqlalchemy.types import NullType
 
 from ddpui.datainsights.insights.insight_interface import MAP_TRANSLATE_TYPES
 from ddpui.datainsights.warehouse.warehouse_interface import Warehouse
@@ -42,7 +43,11 @@ class PostgresClient(Warehouse):
                 {
                     "name": column["name"],
                     "data_type": str(column["type"]),
-                    "translated_type": MAP_TRANSLATE_TYPES[column["type"].python_type],
+                    "translated_type": (
+                        None
+                        if isinstance(column["type"], NullType)
+                        else MAP_TRANSLATE_TYPES[column["type"].python_type]
+                    ),
                     "nullable": column["nullable"],
                 }
             )

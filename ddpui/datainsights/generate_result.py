@@ -134,15 +134,6 @@ def poll_for_column_insights(
 
     wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
 
-    # clear insights based on the refresh flag
-    if requestor_col.refresh:
-        GenerateResult.clear_insights(
-            org_warehouse.org,
-            requestor_col.db_schema,
-            requestor_col.db_table,
-            requestor_col.column_name,
-        )
-
     execute_queries = GenerateResult.queries_to_execute(
         org_warehouse.org, wclient, requestor_col
     )
@@ -203,7 +194,7 @@ class GenerateResult:
 
     @classmethod
     def get_org_lock(cls, org: Org) -> Lock:
-        """Return a persistent redis lock"""
+        """Return a persistent redis lock to access shared results"""
         if org.slug not in cls.org_locks:
             cls.org_locks[org.slug] = Lock(
                 RedisClient.get_instance(), org.slug, timeout=15
@@ -353,36 +344,6 @@ class GenerateResult:
 
             redis.hset(hash, key, json.dumps(merged_results))
             redis.expire(hash, cls.ORG_INSIGHTS_EXPIRY)
-
-            lock.release()
-
-    @classmethod
-    def clear_insights(
-        cls, org: Org, db_schema: str, db_table: str, column_name: str = None
-    ) -> None:
-        """
-        Clear the results from redis
-        If column is None; clear insights for all columns
-        If column is specified: clear insights for that column
-        """
-        hash = cls.build_insights_hash_to_store_results(org, db_schema, db_table)
-        key = f"{db_schema}-{db_table}"
-
-        redis = RedisClient.get_instance()
-
-        lock = cls.get_org_lock(org)
-
-        if lock.acquire():
-            results = redis.hget(hash, key)
-            results: dict = json.loads(results) if results else None
-
-            if column_name:
-                if results and column_name in results:
-                    results.pop(column_name, None)
-                    redis.hset(hash, key, json.dumps(results))
-            else:
-                # clear everything for the org
-                redis.hdel(hash, key)
 
             lock.release()
 

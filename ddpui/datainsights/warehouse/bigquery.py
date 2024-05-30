@@ -3,6 +3,7 @@ from sqlalchemy.engine import create_engine
 from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy import inspect
 from sqlalchemy_bigquery import BigQueryDialect
+from sqlalchemy.types import NullType
 
 from ddpui.datainsights.insights.insight_interface import MAP_TRANSLATE_TYPES
 from ddpui.datainsights.warehouse.warehouse_interface import Warehouse
@@ -44,7 +45,11 @@ class BigqueryClient(Warehouse):
                 {
                     "name": column["name"],
                     "data_type": str(column["type"]),
-                    "translated_type": MAP_TRANSLATE_TYPES[column["type"].python_type],
+                    "translated_type": (
+                        None
+                        if isinstance(column["type"], NullType)
+                        else MAP_TRANSLATE_TYPES[column["type"].python_type]
+                    ),
                     "nullable": column["nullable"],
                 }
             )
@@ -52,7 +57,8 @@ class BigqueryClient(Warehouse):
 
     def get_col_python_type(self, db_schema: str, db_table: str, column_name: str):
         """Fetch python type of a column"""
-        for column in self.inspect_obj.get_columns:
+        columns = self.get_table_columns(db_schema, db_table)
+        for column in columns:
             if column["name"] == column_name:
                 return column["type"].python_type
         return None
