@@ -25,6 +25,7 @@ class AggQueryBuilder:
         self.order_by_clauses: list[ColumnClause] = []
         self.limit_records: int = None
         self.offset_records: int = 0
+        self.where_clauses: list = []
 
     def add_column(self, agg_col: Function | ColumnClause):
         """Push a column to select"""
@@ -57,6 +58,11 @@ class AggQueryBuilder:
                 self.order_by_clauses.append(desc(column(col)))
         return self
 
+    def where_clause(self, condition):
+        """Add where clause"""
+        self.where_clauses.append(condition)
+        return self
+
     def limit_rows(self, limit: int):
         """Limit the number of rows"""
         self.limit_records = limit
@@ -74,6 +80,10 @@ class AggQueryBuilder:
 
         stmt: Select = select(self.column_clauses)
         stmt = stmt.select_from(self.select_from)
+
+        if len(self.where_clauses) > 0:
+            for where_clause in self.where_clauses:
+                stmt = stmt.where(where_clause)
 
         if len(self.group_by_clauses) > 0:
             stmt = stmt.group_by(*self.group_by_clauses)

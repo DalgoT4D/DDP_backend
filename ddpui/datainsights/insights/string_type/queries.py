@@ -44,6 +44,7 @@ class DistributionChart(ColInsight):
         subquery = (
             self.builder.add_column(string_col.label("category"))
             .add_column(func.count().label("count"))
+            .where_clause(string_col.isnot(None))
             .fetch_from(self.db_table, self.db_schema)
             .group_cols_by(string_col.name)
             .order_cols_by([("count", "desc")])
