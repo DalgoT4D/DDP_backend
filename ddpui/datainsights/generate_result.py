@@ -343,7 +343,7 @@ class GenerateResult:
             key = f"{query.db_schema}-{query.db_table}"
 
             redis.hset(hash, key, json.dumps(merged_results))
-            redis.expire(hash, cls.ORG_INSIGHTS_EXPIRY)
+            redis.expire(hash, cls.ORG_INSIGHTS_EXPIRY, nx=True)
 
             lock.release()
 
