@@ -92,7 +92,9 @@ class AggQueryBuilder:
             stmt = stmt.order_by(*self.order_by_clauses)
 
         if self.limit_records:
-            stmt = stmt.slice(self.offset_records, self.limit_records)
+            stmt = stmt.slice(
+                self.offset_records, self.offset_records + self.limit_records
+            )
 
         if alias:
             stmt = stmt.alias(alias)
