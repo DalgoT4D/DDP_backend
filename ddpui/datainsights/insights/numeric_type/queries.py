@@ -50,6 +50,7 @@ class DataStats(ColInsight):
             .add_column(
                 func.row_number().over(order_by=numeric_col).label("row_number")
             )
+            .where_clause(numeric_col.isnot(None))
             .fetch_from(self.db_table, self.db_schema)
             .subquery(alias="subquery")
         )
@@ -81,6 +82,7 @@ class DataStats(ColInsight):
             .add_column(
                 select([numeric_col])
                 .select_from(table(self.db_table, schema=self.db_schema))
+                .where(numeric_col.isnot(None))
                 .group_by(numeric_col)
                 .order_by(desc(func.count(numeric_col)))
                 .limit(1)
@@ -88,7 +90,11 @@ class DataStats(ColInsight):
             )
         )
 
-        return query.fetch_from(self.db_table, self.db_schema).build()
+        return (
+            query.fetch_from(self.db_table, self.db_schema)
+            .where_clause(numeric_col.isnot(None))
+            .build()
+        )
 
     def parse_results(self, result: list[dict]):
         """

@@ -89,6 +89,7 @@ class DistributionChart(ColInsight):
         query = (
             query.add_column(func.count().label("frequency"))
             .fetch_from(self.db_table, self.db_schema)
+            .where_clause(datetime_col.isnot(None))
             .group_cols_by(*groupby_cols)
             .order_cols_by(orderby_cols)
             .limit_rows(self.filter.limit)
