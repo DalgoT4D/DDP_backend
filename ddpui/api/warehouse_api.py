@@ -176,3 +176,13 @@ def get_json_column_spec(
         org_warehouse, source_schema, input_name, json_column
     )
     return json_columnspec
+
+
+@warehouseapi.get(
+    "/download/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_view_warehouse_data"])
+def get_download_warehouse_data(request, schema_name: str, table_name: str):
+    """Stream and download data from a table in the warehouse"""
+
+    return {"success": 1}
