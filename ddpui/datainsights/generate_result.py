@@ -147,8 +147,10 @@ def poll_for_column_insights(
     )
 
     # if results from redis are partial; re-compute them
-    if requestor_col.refresh or not GenerateResult.validate_results(
-        execute_queries, final_result
+    if (
+        requestor_col.refresh
+        or requestor_col.filter
+        or not GenerateResult.validate_results(execute_queries, final_result)
     ):
         GenerateResult.execute_insight_queries(
             org_warehouse.org, wclient, execute_queries, requestor_col
