@@ -104,7 +104,7 @@ class ColInsight(ABC):
         pass
 
 
-class DataTypeColInsights(ABC):
+class DataTypeColInsights:
     """
     Class that maintains a list of ColInsight for a column of particular type
     """

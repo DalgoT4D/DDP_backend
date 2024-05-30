@@ -1,13 +1,16 @@
-from sqlalchemy.sql.compiler import IdentifierPreparer
+import sqlalchemy.types as types
 from sqlalchemy.engine import create_engine
 from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy import inspect
-from sqlalchemy_bigquery import BigQueryDialect
 from sqlalchemy.types import NullType
+from sqlalchemy_bigquery._types import _type_map
 
 from ddpui.datainsights.insights.insight_interface import MAP_TRANSLATE_TYPES
 from ddpui.datainsights.warehouse.warehouse_interface import Warehouse
 from ddpui.datainsights.warehouse.warehouse_interface import WarehouseType
+
+### CAUTION: workaround for missing datatypes; complex queries on such types using sqlalchemy expression might fail
+_type_map["JSON"] = types.JSON
 
 
 class BigqueryClient(Warehouse):

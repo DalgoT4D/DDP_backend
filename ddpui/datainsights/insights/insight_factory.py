@@ -39,4 +39,6 @@ class InsightsFactory:
         elif col_type == TranslateColDataType.STRING:
             return StringColInsights(columns, db_table, db_schema, filter, wtype)
         else:
-            raise ValueError("Column type not supported for insights generation")
+            # base for unknown data types
+            # json will be handled here
+            return DataTypeColInsights([], db_table, db_schema, None, wtype)

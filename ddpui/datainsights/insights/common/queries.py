@@ -10,6 +10,7 @@ from sqlalchemy.sql.expression import (
     select,
     desc,
     literal_column,
+    literal,
 )
 from sqlalchemy.sql.functions import func, Function
 from sqlalchemy import Integer
@@ -45,32 +46,45 @@ class BaseDataStats(ColInsight):
 
         for col in self.columns:
             col_clause = column(col.name)
-            query = (
-                query.add_column(func.count().label(f"count_{col.name}"))
-                .add_column(
-                    func.sum(
-                        case(
-                            [(col_clause.is_(None), 1)],
-                            else_=0,
-                        )
-                    ).label(f"countNull_{col.name}"),
-                )
-                .add_column(
-                    func.count(distinct(col_clause)).label(f"countDistinct__{col.name}")
-                )
+            query = query.add_column(
+                func.count().label(f"count_{col.name}")
+            ).add_column(
+                func.sum(
+                    case(
+                        [(col_clause.is_(None), 1)],
+                        else_=0,
+                    )
+                ).label(f"countNull_{col.name}"),
             )
 
-            if col.translated_type != TranslateColDataType.BOOL:
+            # distinct count
+            if col.translated_type == TranslateColDataType.JSON:
                 query = query.add_column(
-                    func.max(col_clause).label(f"maxVal_{col.name}"),
-                ).add_column(
-                    func.min(col_clause).label(f"minVal_{col.name}"),
+                    literal(None).label(f"countDistinct__{col.name}")
                 )
             else:
+                query = query.add_column(
+                    func.count(distinct(col_clause)).label(f"countDistinct__{col.name}")
+                )
+
+            # min max
+            if col.translated_type == TranslateColDataType.BOOL:
                 query = query.add_column(
                     func.max(cast(col_clause, Integer)).label(f"maxVal_{col.name}"),
                 ).add_column(
                     func.min(cast(col_clause, Integer)).label(f"minVal_{col.name}"),
+                )
+            elif col.translated_type == TranslateColDataType.JSON:
+                query = query.add_column(
+                    literal(None).label(f"maxVal_{col.name}"),
+                ).add_column(
+                    literal(None).label(f"minVal_{col.name}"),
+                )
+            else:
+                query = query.add_column(
+                    func.max(col_clause).label(f"maxVal_{col.name}"),
+                ).add_column(
+                    func.min(col_clause).label(f"minVal_{col.name}"),
                 )
 
         return query.fetch_from(self.db_table, self.db_schema).build()
