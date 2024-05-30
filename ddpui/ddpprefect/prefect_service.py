@@ -136,6 +136,12 @@ def get_airbyte_server_block_id(blockname) -> str | None:
     return response["block_id"]
 
 
+def get_airbyte_server_block(blockname) -> dict | None:
+    """get the block for the server block having this name"""
+    response = prefect_get(f"blocks/airbyte/server/block/{blockname}")
+    return response
+
+
 def create_airbyte_server_block(blockname):
     """Create airbyte server block in prefect"""
     response = prefect_post(

@@ -4,12 +4,13 @@ Functions which communicate with Airbyte
 These functions do not access the Dalgo database
 """
 
-import os
 from typing import Dict, List
 import requests
 from dotenv import load_dotenv
 from ninja.errors import HttpError
+from django.utils.text import slugify
 from ddpui.ddpairbyte import schema
+from ddpui.ddpprefect import prefect_service, AIRBYTESERVER
 from ddpui.models.org import Org
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.deploymentblocks import trigger_reset_and_sync_workflow
@@ -20,6 +21,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteSourceUpdateCheckConnection,
     AirbyteDestinationUpdateCheckConnection,
 )
+from ddpui.utils import thread
 
 load_dotenv()
 
@@ -29,10 +31,22 @@ logger = CustomLogger("airbyte")
 
 def abreq(endpoint, req=None, **kwargs):
     """Request to the airbyte server"""
-    abhost = os.getenv("AIRBYTE_SERVER_HOST")
-    abport = os.getenv("AIRBYTE_SERVER_PORT")
-    abver = os.getenv("AIRBYTE_SERVER_APIVER")
-    token = os.getenv("AIRBYTE_API_TOKEN")
+
+    request = thread.get_current_request()
+    org_user = request.orguser
+    org_slug = org_user.org.slug
+
+    block_name = f"{org_slug}-{slugify(AIRBYTESERVER)}"
+
+    try:
+        airbyte_server_block = prefect_service.get_airbyte_server_block(block_name)
+    except Exception as exc:
+        raise Exception("could not connect to prefect-proxy") from exc
+
+    abhost = airbyte_server_block["host"]
+    abport = airbyte_server_block["port"]
+    abver = airbyte_server_block["version"]
+    token = airbyte_server_block["token"]
 
     logger.info("Making request to Airbyte server: %s", endpoint)
 
@@ -953,18 +967,26 @@ def get_connection_catalog(connection_id: str) -> dict:
     """get the catalog for a connection"""
     if not isinstance(connection_id, str):
         raise HttpError(400, "connection_id must be a string")
-    res = abreq("web_backend/connections/get", {"connectionId": connection_id, "withRefreshedCatalog": True})
+    res = abreq(
+        "web_backend/connections/get",
+        {"connectionId": connection_id, "withRefreshedCatalog": True},
+    )
     return res
 
-def update_schema_change(org: Org, 
-                         connection_info: schema.AirbyteConnectionSchemaUpdate, 
-                         current_connection: dict) -> dict:
+
+def update_schema_change(
+    org: Org,
+    connection_info: schema.AirbyteConnectionSchemaUpdate,
+    current_connection: dict,
+) -> dict:
     """Update the schema change for a connection."""
     if not isinstance(connection_info, schema.AirbyteConnectionSchemaUpdate):
-        raise HttpError(400, "connection_info must be an instance of AirbyteConnectionSchemaUpdate")
+        raise HttpError(
+            400, "connection_info must be an instance of AirbyteConnectionSchemaUpdate"
+        )
     if not isinstance(current_connection, dict):
         raise HttpError(400, "current_connection must be a dictionary")
-    
+
     # check syncCatalog is present in current_connection
     if "syncCatalog" not in current_connection:
         current_connection["syncCatalog"] = {}
