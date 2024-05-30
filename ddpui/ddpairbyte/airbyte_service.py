@@ -31,7 +31,6 @@ logger = CustomLogger("airbyte")
 
 def abreq(endpoint, req=None, **kwargs):
     """Request to the airbyte server"""
-
     request = thread.get_current_request()
     org_user = request.orguser
     org_slug = org_user.org.slug
