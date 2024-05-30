@@ -26,7 +26,9 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         # Your code to remove the --target parameter from dbt commands goes here
         for dforgtask in DataflowOrgTask.objects.filter(orgtask__task__type="dbt"):
+            is_modified = False
             dataflow = dforgtask.dataflow
+
             print(
                 dforgtask.orgtask.org.slug,
                 dataflow.deployment_id,
@@ -34,8 +36,9 @@ class Command(BaseCommand):
             )
             prefect_deployment = prefect_get(f"deployments/{dataflow.deployment_id}")
             deployment_params = prefect_deployment["parameters"]
-            print("=" * 80)
+
             print(json.dumps(deployment_params, indent=2))
+
             for task in deployment_params["config"]["tasks"]:
                 if task["type"] == "dbt Core Operation":
                     # there is (usually?) only one command in a dbt task
@@ -43,14 +46,17 @@ class Command(BaseCommand):
                     eidx = task["commands"][0].find("--target")
                     if eidx > -1:
                         task["commands"][0] = task["commands"][0][:eidx].strip()
+                        is_modified = True
                     print(task["commands"])
-            print("=" * 80)
+
             print(json.dumps(deployment_params, indent=2))
-            if options["modify"]:
+            if options["modify"] and is_modified:
                 res = prefect_put(
                     f"v1/deployments/{dataflow.deployment_id}",
                     {"deployment_params": deployment_params},
                 )
                 print(res)
+            else:
+                print("No changes made")
             if options["stop_at_one"]:
                 break
