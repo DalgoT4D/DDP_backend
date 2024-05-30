@@ -7,7 +7,7 @@ from ddpui.models.tasks import DataflowOrgTask
 from ddpui.ddpprefect.prefect_service import prefect_put, prefect_get
 
 
-class RemoveTargetFromDBTCommandsCommand(BaseCommand):
+class Command(BaseCommand):
     """dbt commands in our deployemnts have the --target parameter. this script removes them"""
 
     help = "Removes the --target parameter from dbt commands in deployments"
