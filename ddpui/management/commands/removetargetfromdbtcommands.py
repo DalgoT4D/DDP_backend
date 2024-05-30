@@ -52,5 +52,5 @@ class RemoveTargetFromDBTCommandsCommand(BaseCommand):
                     {"deployment_params": deployment_params},
                 )
                 print(res)
-                if options["stop_at_one"]:
-                    break
+            if options["stop_at_one"]:
+                break
