@@ -24,6 +24,7 @@ class Command(BaseCommand):
             "password",
             type=str,
             help="Password if creating a new User; can also supply via PASSWORD env var",
+            nargs="?",
         )
 
     def handle(self, *args, **options):
