@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Apply database migrations
+
 # create case of different containers
 case "$1" in
     celery)
@@ -13,15 +15,10 @@ case "$1" in
         ;;
     backend)
         echo "Starting backend"
-        # Apply database migrations
-        echo "Apply database migrations"
-        python manage.py migrate
-
-        echo "Seed database"
-        python manage.py loaddata seed/*.json
+        
 
         echo "Create first user ${FIRST_USER_EMAIL} in organization ${FIRST_ORG_NAME}"
-        python manage.py createorganduser ${FIRST_ORG_NAME} ${FIRST_USER_EMAIL}
+        python manage.py createorganduser ${FIRST_ORG_NAME} ${FIRST_USER_EMAIL} ${FIRST_USER_PASSWORD} --role ${FIRST_USER_ROLE}
 
         # Start server
         echo "Starting server"
@@ -31,6 +28,13 @@ case "$1" in
             --capture-output \
             --log-config /usr/src/backend/gunicorn-log.conf \
             --timeout 120
+        ;;
+    initdb)
+        echo "Apply database migrations"
+        python manage.py migrate
+
+        echo "Seed database"
+        python manage.py loaddata seed/*.json
         ;;
     *)
         exec "$@"

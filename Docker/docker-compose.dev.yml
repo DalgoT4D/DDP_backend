@@ -35,6 +35,10 @@ services:
     depends_on:
       database:
         condition: service_healthy
+      redis_server:
+        condition: service_started
+      initdb:
+        condition: service_completed_successfully
     ports:
       - "8002:8002"
     environment:
@@ -88,6 +92,8 @@ services:
       - DEMO_SENDGRID_SIGNUP_TEMPLATE=${DEMO_SENDGRID_SIGNUP_TEMPLATE}
       - DEMO_SUPERSET_USERNAME=${DEMO_SUPERSET_USERNAME}
       - DEMO_SUPERSET_PASSWORD=${DEMO_SUPERSET_PASSWORD}
+      - FIRST_USER_PASSWORD=${FIRST_USER_PASSWORD}
+      - FIRST_USER_ROLE=${FIRST_USER_ROLE}
     command: backend
     networks:
       - dalgo-network
@@ -107,16 +113,25 @@ services:
       - DBADMINUSER=${DBADMINUSER}
       - DBADMINPASSWORD=${DBADMINPASSWORD}
     depends_on:
-      - backend
-      - redis_server
+      backend:
+        condition: service_started
+      redis_server:
+        condition: service_started
+      initdb:
+        condition: service_completed_successfully
     networks:
       - dalgo-network
   celery_beat:
     image: dalgo_backend:0.1
     command: beat
     depends_on:
-      - backend
-      - redis_server
+      backend:
+        condition: service_started
+      redis_server:
+        condition: service_started
+      initdb:
+        condition: service_completed_successfully
+      
     environment:
       - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}
@@ -124,6 +139,24 @@ services:
       - celerybeat_volume:/data
     networks:
       - dalgo-network
+  initdb:
+    image: dalgo_backend:0.1
+    command: initdb
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      - DBNAME=${DBNAME}
+      - DBHOST=${DBHOST}
+      - DBPORT=${DBPORT}
+      - DBUSER=${DBUSER}
+      - DBPASSWORD=${DBPASSWORD}
+      - DBADMINUSER=${DBADMINUSER}
+      - DBADMINPASSWORD=${DBADMINPASSWORD}
+    networks:
+      - dalgo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 
 volumes:
