@@ -1,5 +1,6 @@
 """ Creates and Org and an OrgUser """
 
+import os
 import getpass
 from django.core.management.base import BaseCommand
 
@@ -19,6 +20,11 @@ class Command(BaseCommand):
         """adds command line arguments"""
         parser.add_argument("orgname", type=str, help="Name of the Org")
         parser.add_argument("email", type=str, help="Email address of the OrgUser")
+        parser.add_argument(
+            "password",
+            type=str,
+            help="Password if creating a new User; can also supply via PASSWORD env var",
+        )
 
     def handle(self, *args, **options):
 
@@ -41,12 +47,18 @@ class Command(BaseCommand):
 
         # fetch / create the User
         if not User.objects.filter(email=options["email"]).exists():
-            password = getpass.getpass("Enter the password for the OrgUser: ")
-            password_confirm = getpass.getpass(
-                "Re-enter the password for the OrgUser: "
-            )
-            if password != password_confirm:
-                raise ValueError("Passwords do not match")
+            password = options["password"]
+            if not password:
+                password = os.getenv("PASSWORD")
+            if not password:
+                password = getpass.getpass("Enter the password for the OrgUser: ")
+                password_confirm = getpass.getpass(
+                    "Re-enter the password for the OrgUser: "
+                )
+                if password != password_confirm:
+                    raise ValueError("Passwords do not match")
+            if not password:
+                raise ValueError("Password is required")
             User.objects.create_user(
                 email=options["email"], username=options["email"], password=password
             )
