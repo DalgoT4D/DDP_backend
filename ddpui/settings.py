@@ -44,6 +44,8 @@ ALLOWED_HOSTS = [
     "staging-api.dalgo.in",
     "api.dalgo.in",
     "host.docker.internal",
+    "10.3.0.4",
+    "api.monitoring.idinsight.io",
 ]
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_METHODS = [

@@ -88,14 +88,47 @@ services:
       - DEMO_SENDGRID_SIGNUP_TEMPLATE=${DEMO_SENDGRID_SIGNUP_TEMPLATE}
       - DEMO_SUPERSET_USERNAME=${DEMO_SUPERSET_USERNAME}
       - DEMO_SUPERSET_PASSWORD=${DEMO_SUPERSET_PASSWORD}
-
+    command: backend
     networks:
       - dalgo-network
     extra_hosts:
       - "host.docker.internal:host-gateway"
+  celery_worker:
+    image: dalgo_backend:0.1
+    command: celery
+    environment:
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - DBNAME=${DBNAME}
+      - DBHOST=${DBHOST}
+      - DBPORT=${DBPORT}
+      - DBUSER=${DBUSER}
+      - DBPASSWORD=${DBPASSWORD}
+      - DBADMINUSER=${DBADMINUSER}
+      - DBADMINPASSWORD=${DBADMINPASSWORD}
+    depends_on:
+      - backend
+      - redis_server
+    networks:
+      - dalgo-network
+  celery_beat:
+    image: dalgo_backend:0.1
+    command: beat
+    depends_on:
+      - backend
+      - redis_server
+    environment:
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+    volumes:
+      - celerybeat_volume:/data
+    networks:
+      - dalgo-network
+
 
 volumes:
   redis_data:
+  celerybeat_volume:
 
 networks:
   dalgo-network:

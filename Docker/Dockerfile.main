@@ -66,8 +66,9 @@ COPY --from=build --chown=container_user /entrypoint.sh /entrypoint.sh
 # This is added to get packages installed in the build stage
 COPY --from=build --chown=container_user /usr/local/ /usr/local/
 
+RUN mkdir -p /data
 
-
+RUN chown container_user:container_user /data
 USER container_user
 
 # Make port 8002 available to the world outside this container

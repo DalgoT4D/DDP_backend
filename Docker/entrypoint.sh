@@ -1,21 +1,37 @@
 #!/bin/bash
 
+# create case of different containers
+case "$1" in
+    celery)
+        echo "Starting celery worker"
+        celery -A ddpui worker -n ddpui
+        ;;
 
-# Apply database migrations
-echo "Apply database migrations"
-python manage.py migrate
+    beat)
+        echo "Starting celery beat"
+        celery -A ddpui beat --schedule=/data/celerybeat-schedule --loglevel=error --max-interval 60
+        ;;
+    backend)
+        echo "Starting backend"
+        # Apply database migrations
+        echo "Apply database migrations"
+        python manage.py migrate
 
-echo "Seed database"
-python manage.py loaddata seed/*.json
+        echo "Seed database"
+        python manage.py loaddata seed/*.json
 
-echo "Create first user ${FIRST_USER_EMAIL} in organization ${FIRST_ORG_NAME}"
-python manage.py createorganduser ${FIRST_ORG_NAME} ${FIRST_USER_EMAIL}
+        echo "Create first user ${FIRST_USER_EMAIL} in organization ${FIRST_ORG_NAME}"
+        python manage.py createorganduser ${FIRST_ORG_NAME} ${FIRST_USER_EMAIL}
 
-# Start server
-echo "Starting server"
+        # Start server
+        echo "Starting server"
 
 
-python3 -m gunicorn -b 0.0.0.0:8002 ddpui.wsgi \
-    --capture-output \
-    --log-config /usr/src/backend/gunicorn-log.conf \
-    --timeout 120
+        python3 -m gunicorn -b 0.0.0.0:8002 ddpui.wsgi \
+            --capture-output \
+            --log-config /usr/src/backend/gunicorn-log.conf \
+            --timeout 120
+        ;;
+    *)
+        exec "$@"
+esac
