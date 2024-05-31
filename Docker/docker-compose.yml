@@ -66,9 +66,23 @@ services:
       - DEMO_SUPERSET_PASSWORD=${DEMO_SUPERSET_PASSWORD}
     networks:
       - dalgo-network
+  celery_beat:
+    image: dalgo_backend:0.1
+    command: beat
+    depends_on:
+      - backend
+      - redis_server
+    environment:
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+    volumes:
+      - celerybeat_volume:/data
+    networks:
+      - dalgo-network
 
 volumes:
   redis_data:
+  celerybeat_volume:
 
 networks:
   dalgo-network:
