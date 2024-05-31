@@ -1,6 +1,7 @@
 """ Creates and Org and an OrgUser """
 
 import os
+import sys
 import getpass
 from django.core.management.base import BaseCommand
 
@@ -26,15 +27,22 @@ class Command(BaseCommand):
             help="Password if creating a new User; can also supply via PASSWORD env var",
             nargs="?",
         )
+        parser.add_argument(
+            "--role",
+            type=str,
+            help="Role of the OrgUser; default is 'account-manager'",
+            default="account-manager",
+        )
 
     def handle(self, *args, **options):
 
         # ensure the Role exists
-        role = Role.objects.filter(slug="account-manager").first()
+        role = Role.objects.filter(slug=options["role"]).first()
         if not role:
-            raise ValueError(
-                "Role with slug 'account-manager' does not exist, please run 'python manage.py loaddata seed/*.json'"
+            print(
+                f"Role with slug '{options['role']}' does not exist, please run 'python manage.py loaddata seed/*.json'"
             )
+            sys.exit(1)
 
         # fetch / create the Org
         if not Org.objects.filter(name=options["orgname"]).exists():
@@ -57,9 +65,11 @@ class Command(BaseCommand):
                     "Re-enter the password for the OrgUser: "
                 )
                 if password != password_confirm:
-                    raise ValueError("Passwords do not match")
+                    print("Passwords do not match")
+                    sys.exit(1)
             if not password:
-                raise ValueError("Password is required")
+                print("Password is required")
+                sys.exit(1)
             User.objects.create_user(
                 email=options["email"], username=options["email"], password=password
             )
