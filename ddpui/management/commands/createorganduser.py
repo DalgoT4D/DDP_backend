@@ -1,5 +1,6 @@
 """ Creates and Org and an OrgUser """
 
+import getpass
 from django.core.management.base import BaseCommand
 
 from django.contrib.auth.models import User
@@ -40,7 +41,15 @@ class Command(BaseCommand):
 
         # fetch / create the User
         if not User.objects.filter(email=options["email"]).exists():
-            User.objects.create_user(email=options["email"], username=options["email"])
+            password = getpass.getpass("Enter the password for the OrgUser: ")
+            password_confirm = getpass.getpass(
+                "Re-enter the password for the OrgUser: "
+            )
+            if password != password_confirm:
+                raise ValueError("Passwords do not match")
+            User.objects.create_user(
+                email=options["email"], username=options["email"], password=password
+            )
             print(f"User {options['email']} created")
         else:
             print(f"User {options['email']} already exists")
