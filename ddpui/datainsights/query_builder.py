@@ -1,4 +1,4 @@
-from sqlalchemy.sql.functions import func, Function
+from sqlalchemy.sql.functions import Function
 from sqlalchemy.sql.expression import (
     table,
     TableClause,
@@ -6,7 +6,6 @@ from sqlalchemy.sql.expression import (
     Select,
     ColumnClause,
     column,
-    text,
     asc,
     desc,
 )

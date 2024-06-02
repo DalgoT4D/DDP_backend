@@ -50,14 +50,14 @@ class ColInsight(ABC):
         columns: list[ColumnConfig],
         db_table: str,
         db_schema: str,
-        filter: dict = None,
+        filter_: dict = None,
         wtype: str = None,
     ):
         self.columns: list[ColumnConfig] = columns
         self.builder: AggQueryBuilder = AggQueryBuilder()
         self.db_table: str = db_table
         self.db_schema: str = db_schema
-        self.filter = filter
+        self.filter = filter_
         self.wtype = wtype
 
     @abstractmethod
@@ -114,7 +114,7 @@ class DataTypeColInsights:
         columns: list[dict],
         db_table: str,
         db_schema: str,
-        filter: dict = None,
+        filter_: dict = None,
         wtype: str = None,
     ):
         self.columns: list[ColumnConfig] = [
@@ -127,6 +127,6 @@ class DataTypeColInsights:
         ]
         self.db_table: str = db_table
         self.db_schema: str = db_schema
-        self.filter = filter
+        self.filter = filter_
         self.wtype = wtype if wtype else WarehouseType.POSTGRES  # default postgres
         self.insights: list[ColInsight] = []

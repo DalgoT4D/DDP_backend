@@ -1,18 +1,12 @@
 from datetime import datetime, date
 from sqlalchemy.sql.expression import (
     column,
-    ColumnClause,
     case,
     distinct,
-    table,
-    TableClause,
     cast,
-    select,
-    desc,
-    literal_column,
     literal,
 )
-from sqlalchemy.sql.functions import func, Function
+from sqlalchemy.sql.functions import func
 from sqlalchemy import Integer
 
 from ddpui.datainsights.insights.insight_interface import (

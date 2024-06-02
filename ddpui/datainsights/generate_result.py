@@ -1,9 +1,7 @@
 import time
 import json
-import threading
 from datetime import datetime
 from redis.lock import Lock
-from sqlalchemy.sql.selectable import Select
 from channels.generic.websocket import WebsocketConsumer
 
 from ddpui.celery import app
@@ -12,10 +10,6 @@ from ddpui.datainsights.insights.insight_factory import InsightsFactory
 from ddpui.datainsights.insights.common.base_insights import BaseInsights
 from ddpui.datainsights.warehouse.warehouse_interface import Warehouse
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
-from ddpui.datainsights.insights.insight_interface import (
-    DataTypeColInsights,
-    TranslateColDataType,
-)
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.schemas.warehouse_api_schemas import RequestorColumnSchema
