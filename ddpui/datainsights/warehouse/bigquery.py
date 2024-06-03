@@ -29,12 +29,12 @@ class BigqueryClient(Warehouse):
             self.engine
         )  # this will be used to fetch metadata of the database
 
-    def execute(self, sql) -> list[dict]:
+    def execute(self, sql_statement) -> list[dict]:
         """
         Execute the sql query and return the results
         """
         with self.engine.connect() as connection:
-            result = connection.execute(sql)
+            result = connection.execute(sql_statement)
             rows = result.fetchall()
             return [dict(row) for row in rows]
 

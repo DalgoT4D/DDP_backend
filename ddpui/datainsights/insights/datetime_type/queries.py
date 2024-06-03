@@ -28,11 +28,11 @@ class DistributionChart(ColInsight):
     """
 
     def __init__(
-        self, column_name: str, db_table: str, db_schema: str, filter: dict, wtype: str
+        self, column_name: str, db_table: str, db_schema: str, filter_: dict, wtype: str
     ):
-        super().__init__(column_name, db_table, db_schema, filter, wtype)
-        if filter:
-            self.filter: BarChartFilter = BarChartFilter(**filter)
+        super().__init__(column_name, db_table, db_schema, filter_, wtype)
+        if filter_:
+            self.filter: BarChartFilter = BarChartFilter(**filter_)
         else:
             self.filter: BarChartFilter = BarChartFilter("year", 10, 0)  # default
 

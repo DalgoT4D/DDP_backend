@@ -1,4 +1,3 @@
-import datetime
 from ddpui.datainsights.insights.numeric_type.numeric_insight import NumericColInsights
 from ddpui.datainsights.insights.datetime_type.datetime_insight import (
     DatetimeColInsights,
@@ -21,23 +20,23 @@ class InsightsFactory:
         db_table: str,
         db_schema: str,
         col_type: TranslateColDataType,
-        filter: dict,
+        filter_: dict,
         wtype: str,
     ) -> DataTypeColInsights:
         if col_type == TranslateColDataType.NUMERIC:
-            return NumericColInsights(columns, db_table, db_schema, filter, wtype)
+            return NumericColInsights(columns, db_table, db_schema, filter_, wtype)
         elif col_type == TranslateColDataType.DATETIME:
             return DatetimeColInsights(
                 columns,
                 db_table,
                 db_schema,
-                filter,
+                filter_,
                 wtype,
             )
         elif col_type == TranslateColDataType.BOOL:
-            return BooleanColInsights(columns, db_table, db_schema, filter, wtype)
+            return BooleanColInsights(columns, db_table, db_schema, filter_, wtype)
         elif col_type == TranslateColDataType.STRING:
-            return StringColInsights(columns, db_table, db_schema, filter, wtype)
+            return StringColInsights(columns, db_table, db_schema, filter_, wtype)
         else:
             # base for unknown data types
             # json will be handled here

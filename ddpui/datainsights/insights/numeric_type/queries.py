@@ -7,7 +7,7 @@ from sqlalchemy.sql.expression import (
     desc,
 )
 from sqlalchemy.sql.functions import func
-from sqlalchemy import Float, NUMERIC
+from sqlalchemy import NUMERIC
 
 from ddpui.datainsights.insights.insight_interface import (
     ColInsight,
@@ -23,7 +23,7 @@ class DataStats(ColInsight):
         This will be dictate whether a query is unique or not
         Returns a hash string
         """
-        hash = hash_dict(
+        hash_ = hash_dict(
             {
                 "columns": ",".join([col.name for col in self.columns]),
                 "type": TranslateColDataType.NUMERIC,
@@ -31,7 +31,7 @@ class DataStats(ColInsight):
                 "chart_type": self.chart_type(),
             }
         )
-        return hash
+        return hash_
 
     def generate_sql(self):
         """

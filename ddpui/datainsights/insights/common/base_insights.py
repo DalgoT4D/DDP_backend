@@ -1,8 +1,6 @@
 from ddpui.datainsights.insights.insight_interface import (
     DataTypeColInsights,
     ColInsight,
-    ColumnConfig,
-    TranslateColDataType,
 )
 from ddpui.datainsights.insights.common.queries import BaseDataStats
 
@@ -17,10 +15,10 @@ class BaseInsights(DataTypeColInsights):
         columns: list[dict],
         db_table: str,
         db_schema: str,
-        filter: dict = None,
+        filter_: dict = None,
         wtype: str = None,
     ):
-        super().__init__(columns, db_table, db_schema, filter, wtype)
+        super().__init__(columns, db_table, db_schema, filter_, wtype)
         self.insights: list[ColInsight] = [
             BaseDataStats(
                 self.columns, self.db_table, self.db_schema, self.filter, self.wtype

@@ -2,15 +2,8 @@ from sqlalchemy.sql.expression import (
     column,
     ColumnClause,
     case,
-    distinct,
-    table,
-    TableClause,
-    cast,
-    select,
-    desc,
 )
-from sqlalchemy.sql.functions import func, Function
-from sqlalchemy import Float
+from sqlalchemy.sql.functions import func
 
 from ddpui.datainsights.insights.insight_interface import (
     ColInsight,
@@ -49,14 +42,14 @@ class DataStats(ColInsight):
         query = self.builder.add_column(
             func.sum(
                 case(
-                    [(bool_col == True, 1)],
+                    [(bool_col is True, 1)],
                     else_=0,
                 )
             ).label("countTrue"),
         ).add_column(
             func.sum(
                 case(
-                    [(bool_col == False, 1)],
+                    [(bool_col is False, 1)],
                     else_=0,
                 )
             ).label("countFalse"),
