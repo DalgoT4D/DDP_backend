@@ -297,7 +297,7 @@ class GenerateResult:
             # poll for the lock till it releases basically till the query finishes running
             current_lock = redis.hget(hash, key)
             while current_lock is not None:
-                time.sleep(5)
+                time.sleep(1)
                 current_lock = redis.hget(hash, key)
 
         run_query = not is_locked
