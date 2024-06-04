@@ -155,7 +155,7 @@ class StringLengthStats(ColInsight):
         length_col = func.length(string_col)
 
         median_subquery = (
-            self.builder.add_column(length_col.label(f"{col.name}-len"))
+            self.builder.add_column(length_col.label(f"{col.name}_len"))
             .add_column(func.count().over().label("total_rows"))
             .add_column(func.row_number().over(order_by=length_col).label("row_number"))
             .where_clause(string_col.isnot(None))
@@ -173,7 +173,7 @@ class StringLengthStats(ColInsight):
                     [
                         func.round(
                             cast(
-                                func.avg(median_subquery.c[f"{col.name}-len"]), NUMERIC
+                                func.avg(median_subquery.c[f"{col.name}_len"]), NUMERIC
                             ),
                             2,
                         ),
@@ -190,10 +190,10 @@ class StringLengthStats(ColInsight):
                 .label("median")
             )
             .add_column(
-                select([length_col])
+                select([length_col.label(f"{col.name}_len")])
                 .select_from(table(self.db_table, schema=self.db_schema))
                 .where(length_col.isnot(None))
-                .group_by(length_col)
+                .group_by(f"{col.name}_len")
                 .order_by(desc(func.count(length_col)))
                 .limit(1)
                 .label("mode")

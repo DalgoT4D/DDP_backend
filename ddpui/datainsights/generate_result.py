@@ -236,7 +236,6 @@ class GenerateResult:
                     stmt = stmt.compile(
                         bind=wclient.engine, compile_kwargs={"literal_binds": True}
                     )
-                    logger.info(stmt)
                     results = wclient.execute(stmt)
 
                     # parse result of this query
