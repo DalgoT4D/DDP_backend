@@ -236,12 +236,11 @@ class GenerateResult:
                     stmt = stmt.compile(
                         bind=wclient.engine, compile_kwargs={"literal_binds": True}
                     )
+                    logger.info(stmt)
                     results = wclient.execute(stmt)
 
                     # parse result of this query
                     results = query.parse_results(results)
-
-                    logger.info(results)
 
                     # save result to redis
                     cls.save_results(org, query, results)

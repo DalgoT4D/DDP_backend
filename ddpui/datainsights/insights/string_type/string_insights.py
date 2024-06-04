@@ -2,7 +2,10 @@ from ddpui.datainsights.insights.insight_interface import (
     DataTypeColInsights,
     ColInsight,
 )
-from ddpui.datainsights.insights.string_type.queries import DistributionChart
+from ddpui.datainsights.insights.string_type.queries import (
+    DistributionChart,
+    StringLengthStats,
+)
 
 
 class StringColInsights(DataTypeColInsights):
@@ -21,6 +24,9 @@ class StringColInsights(DataTypeColInsights):
         super().__init__(columns, db_table, db_schema, filter_, wtype)
         self.insights: list[ColInsight] = [
             DistributionChart(
+                self.columns, self.db_table, self.db_schema, self.filter, self.wtype
+            ),
+            StringLengthStats(
                 self.columns, self.db_table, self.db_schema, self.filter, self.wtype
             ),
         ]

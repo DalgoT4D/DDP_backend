@@ -23,7 +23,7 @@ class DataStats(ColInsight):
         This will be dictate whether a query is unique or not
         Returns a hash string
         """
-        hash_ = hash_dict(
+        hash = hash_dict(
             {
                 "columns": ",".join([col.name for col in self.columns]),
                 "type": TranslateColDataType.NUMERIC,
@@ -31,7 +31,7 @@ class DataStats(ColInsight):
                 "chart_type": self.chart_type(),
             }
         )
-        return hash_
+        return hash
 
     def generate_sql(self):
         """
