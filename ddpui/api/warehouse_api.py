@@ -186,18 +186,43 @@ def get_json_column_spec(
 def get_download_warehouse_data(request, schema_name: str, table_name: str):
     """Stream and download data from a table in the warehouse"""
 
-    def generate_dummy_data():
-        """Yield dummy data in JSON format"""
-        data = [{"id": i, "value": f"dummy{i}"} for i in range(100)]
-        header = ["id", "value"]
-        csv_data = ",".join(header) + "\n"
-        for item in data:
-            csv_data += ",".join(map(str, item.values())) + "\n"
-        return csv_data
+    orguser = request.orguser
+    org = orguser.org
 
-    """Stream and download dummy data"""
-    csv_data = generate_dummy_data()
-    # blob =
-    response = StreamingHttpResponse(generate_dummy_data(), content_type="text/csv")
-    response["Content-Disposition"] = "attachment; filename=data.json"
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    def stream_warehouse_data(
+        request, schema_name, table_name, page_size=10, order_by=None, order=1
+    ):
+        page = 0
+        header_written = False
+        while True:
+            data = get_warehouse_data(
+                request,
+                "table_data",
+                schema_name=schema_name,
+                table_name=table_name,
+                page=page,
+                limit=page_size,
+                order_by=order_by,
+                order=order,
+            )
+            if not data:
+                break
+            if not header_written:
+                yield ",".join(data[0].keys()) + "\n"  # Write CSV header
+                header_written = True
+            for row in data:
+                yield ",".join(map(str, row.values())) + "\n"  # Write CSV row
+            page += 1
+
+    response = StreamingHttpResponse(
+        stream_warehouse_data(request, schema_name, table_name),
+        content_type="text/csv",
+    )
+    response["Content-Disposition"] = (
+        f"attachment; filename={schema_name}__{table_name}.csv"
+    )
     return response
