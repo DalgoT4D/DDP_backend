@@ -5,7 +5,7 @@ do not raise http errors here
 
 import uuid
 from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask, TaskLock, TaskLockStatus
-from ddpui.models.org import Org, OrgPrefectBlockv1, OrgDataFlowv1
+from ddpui.models.org import Org, OrgPrefectBlockv1, OrgDataFlowv1, TransformType
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
@@ -28,7 +28,9 @@ def create_default_transform_tasks(
         raise ValueError("dbt is not configured for this org")
 
     # if transform_type is "ui" then we don't set up git-pull
-    task_types = ["dbt", "git"] if org.dbt.transform_type == "git" else ["dbt"]
+    task_types = (
+        ["dbt", "git"] if org.dbt.transform_type == TransformType.GIT else ["dbt"]
+    )
     for task in Task.objects.filter(type__in=task_types, is_system=True).all():
         org_task = OrgTask.objects.create(org=org, task=task, uuid=uuid.uuid4())
 
