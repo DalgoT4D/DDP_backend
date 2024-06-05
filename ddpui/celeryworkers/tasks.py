@@ -5,10 +5,10 @@ from subprocess import CompletedProcess
 
 from datetime import datetime, timedelta
 import yaml
+from celery.schedules import crontab
 from django.utils.text import slugify
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, PIPELINE_MANAGER_ROLE
 from ddpui.celery import app
-from celery.schedules import crontab
 from ddpui.ddpairbyte.airbyte_service import abreq
 from ddpui.utils.sendgrid import send_schema_changes_email
 from ddpui.utils.timezone import UTC
@@ -40,6 +40,7 @@ from ddpui.utils.constants import (
     TASK_DBTDEPS,
 )
 from ddpui.ddpprefect import DBTCLIPROFILE
+from ddpui.ddpdbt.dbt_service import create_edr_command
 
 logger = CustomLogger("ddpui")
 
@@ -434,34 +435,18 @@ def schema_change_detection():
 @app.task(bind=True)
 def create_elementary_report(self, org_id: int, bucket_file_path: str):
     """run edr report to create the elementary report and write to s3"""
-    edr_binary = Path(os.getenv("DBT_VENV")) / "venv/bin/edr"
     org = Org.objects.filter(id=org_id).first()
     orgdbt = OrgDbt.objects.filter(org=org).first()
-    project_dir = Path(orgdbt.project_dir) / "dbtrepo"
-    profiles_dir = project_dir / "elementary_profiles"
-    aws_access_key_id = os.getenv("ELEMENTARY_AWS_ACCESS_KEY_ID")
-    aws_secret_access_key = os.getenv("ELEMENTARY_AWS_SECRET_ACCESS_KEY")
-    s3_bucket_name = os.getenv("ELEMENTARY_S3_BUCKET")
 
     taskprogress = TaskProgress(
         self.request.id, f"{TaskProgressHashPrefix.RUNELEMENTARY}-{org.slug}", 60
     )
 
     os.environ["PATH"] += ":" + str(Path(os.getenv("DBT_VENV")) / "venv/bin")
-    cmd = [
-        str(edr_binary),
-        "send-report",
-        "--aws-access-key-id",
-        aws_access_key_id,
-        "--aws-secret-access-key",
-        aws_secret_access_key,
-        "--s3-bucket-name",
-        s3_bucket_name,
-        "--bucket-file-path",
+    cmd, project_dir = create_edr_command(
+        orgdbt,
         bucket_file_path,
-        "--profiles-dir",
-        str(profiles_dir),
-    ]
+    )
     taskprogress.add(
         {
             "message": "started",
@@ -469,6 +454,7 @@ def create_elementary_report(self, org_id: int, bucket_file_path: str):
         }
     )
     try:
+        logger.info("running edr for %s", org.slug)
         runcmd(" ".join(cmd), project_dir)
     except subprocess.CalledProcessError:
         taskprogress.add(
@@ -575,11 +561,27 @@ def add_custom_connectors_to_workspace(self, workspace_id, custom_sources: list[
         )
 
 
+@app.task(bind=True)
+def make_daily_elementary_report(self):
+    """create the day's elementary report"""
+    logger.info("make_daily_elementary_report")
+    for org in Org.objects.filter(dbt__use_elementary=True):
+        todays_date = datetime.today().strftime("%Y-%m-%d")
+        bucket_file_path = f"reports/{org.slug}.{todays_date}.html"
+        logger.info("creating scheduled elementary report %s", bucket_file_path)
+        cmd, project_dir = create_edr_command(
+            org.dbt,
+            bucket_file_path,
+        )
+        os.environ["PATH"] += ":" + str(Path(os.getenv("DBT_VENV")) / "venv/bin")
+        runcmd(" ".join(cmd), project_dir)
+
+
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender, **kwargs):
     """check for old locks every minute"""
     sender.add_periodic_task(
-        crontab(hour=18, minute=30),
+        crontab(hour=18, minute=30),  # UTC 6:30 PM
         schema_change_detection.s(),
         name="schema change detection",
     )
@@ -588,4 +590,9 @@ def setup_periodic_tasks(sender, **kwargs):
     )
     sender.add_periodic_task(
         60 * 1.0, delete_old_canvaslocks.s(), name="remove old canvaslocks"
+    )
+    sender.add_periodic_task(
+        crontab(hour=0, minute=0),  # midnight UTC
+        make_daily_elementary_report.s(),
+        name="make daily elementary report",
     )
