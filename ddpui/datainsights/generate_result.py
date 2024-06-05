@@ -331,6 +331,9 @@ class GenerateResult:
                 query_status = json.loads(query_status)
                 query_status["status"] = GenerateResult.RESULT_STATUS_COMPLETED
 
+                logger.info("updating the status of query to completed")
+                redis.hset(hash, key, json.dumps(query_status))
+
                 expire_at = (
                     query_status["expire_at"] if "expire_at" in query_status else None
                 )
@@ -341,11 +344,8 @@ class GenerateResult:
                         is_expired = True
 
                 if is_expired:
-                    logger.info("clearing the query lock; it has expired")
+                    logger.info("clearing the query hash since it has expired")
                     redis.hdel(hash, key)
-                else:
-                    logger.info("updating the status of query to completed")
-                    redis.hset(hash, key, json.dumps(query_status))
 
             query_lock.release()
         return None
@@ -376,7 +376,8 @@ class GenerateResult:
             key = f"{query.db_schema}-{query.db_table}"
 
             redis.hset(hash, key, json.dumps(merged_results))
-            redis.expire(hash, cls.ORG_INSIGHTS_EXPIRY, nx=True)
+            if redis.ttl(hash) < 0:
+                redis.expire(hash, cls.ORG_INSIGHTS_EXPIRY)
 
             lock.release()
 
