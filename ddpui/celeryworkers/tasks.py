@@ -40,7 +40,7 @@ from ddpui.utils.constants import (
     TASK_DBTDEPS,
 )
 from ddpui.ddpprefect import DBTCLIPROFILE
-from ddpui.ddpdbt.dbt_service import create_edr_command
+from ddpui.ddpdbt.dbthelpers import create_edr_command
 
 logger = CustomLogger("ddpui")
 
@@ -592,7 +592,7 @@ def setup_periodic_tasks(sender, **kwargs):
         60 * 1.0, delete_old_canvaslocks.s(), name="remove old canvaslocks"
     )
     sender.add_periodic_task(
-        crontab(hour=0, minute=0),  # midnight UTC
+        crontab(hour=8, minute=10),  # midnight UTC
         make_daily_elementary_report.s(),
         name="make daily elementary report",
     )
