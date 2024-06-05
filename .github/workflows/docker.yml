@@ -1,0 +1,50 @@
+# This workflow builds and pushes a new docker image
+# to dockerhub whenever a new release is published
+
+name: Publish Docker image
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  push_image_to_registry:
+    name: Push Docker image to docker hub
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set build date
+        run: echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_ENV
+
+      - name: Set release number
+        run: echo "RELEASE_NUMBER=${{ github.event.release.tag_name }}" >> $GITHUB_ENV
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to docker registry
+        uses: docker/login-action@v3
+        with:
+          username: ${{secrets.DOCKERHUB_USERNAME}}
+          password: ${{secrets.DOCKERHUB_PASSWORD}}
+
+      - name: Build and push docker image to registry
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            BUILD_DATE=${{ env.BUILD_DATE }}
+            BUILD_VERSION=${{ env.RELEASE_NUMBER }}"
+          push: true
+          tags: |
+            tech4dev/dalgo_backend:${{ env.RELEASE_NUMBER }}
+            tech4dev/dalgo_backend:latest
+          cache-from: type=registry,ref=tech4dev/dalgo_backend:latest
+          cache-to: type=inline
