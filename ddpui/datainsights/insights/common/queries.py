@@ -74,6 +74,12 @@ class BaseDataStats(ColInsight):
                 ).add_column(
                     literal(None).label(f"minVal_{col.name}"),
                 )
+            elif col.translated_type == TranslateColDataType.STRING:
+                query = query.add_column(
+                    func.length(func.max(col_clause)).label(f"maxVal_{col.name}"),
+                ).add_column(
+                    func.length(func.min(col_clause)).label(f"minVal_{col.name}"),
+                )
             else:
                 query = query.add_column(
                     func.max(col_clause).label(f"maxVal_{col.name}"),
