@@ -456,12 +456,10 @@ def get_one_connection(org: Org, connection_id: str):
 
 def reset_connection(org: Org, connection_id: str):
     """reset an airbyte connection"""
-    org_task = OrgTask.objects.filter(
+    if not OrgTask.objects.filter(
         org=org,
         connection_id=connection_id,
-    ).first()
-
-    if org_task is None:
+    ).exists():
         return None, "connection not found"
 
     airbyte_service.reset_connection(connection_id)
@@ -471,12 +469,11 @@ def reset_connection(org: Org, connection_id: str):
 
 def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUpdate):
     """updates an airbyte connection"""
-    org_task = OrgTask.objects.filter(
+
+    if not OrgTask.objects.filter(
         org=org,
         connection_id=connection_id,
-    ).first()
-
-    if org_task is None:
+    ).exists():
         return None, "connection not found"
 
     warehouse = OrgWarehouse.objects.filter(org=org).first()
@@ -547,7 +544,9 @@ def delete_connection(org: Org, connection_id: str):
     # delete all dataflows
     logger.info("deleting org dataflow from db")
     for dataflow in dataflows_to_delete:
-        dataflow.delete()
+        # if there is a reset and a sync then the dataflow will appear twice in this list
+        if dataflow.id:
+            dataflow.delete()
 
     # delete all orgtasks
     logger.info("deleting orgtask")
@@ -566,6 +565,7 @@ def get_job_info_for_connection(org: Org, connection_id: str):
     org_task = OrgTask.objects.filter(
         org=org,
         connection_id=connection_id,
+        task__slug=TASK_AIRBYTESYNC,
     ).first()
 
     if org_task is None:
@@ -709,6 +709,7 @@ def delete_source(org: Org, source_id: str):
 
     return None, None
 
+
 def get_connection_catalog(org: Org, connection_id: str):
     """
     Get the catalog diff of a connection.
@@ -722,34 +723,35 @@ def get_connection_catalog(org: Org, connection_id: str):
         else:
             OrgSchemaChange.objects.update_or_create(
                 connection_id=connection_id,
-                defaults={'change_type': schema_change, 'org': org}
+                defaults={"change_type": schema_change, "org": org},
             )
-        
+
         res = {
-                "name": connection["name"],
-                "connectionId": connection["connectionId"],
-                "catalogId": connection["catalogId"],
-                "syncCatalog": connection["syncCatalog"],
-                "schemaChange": schema_change,
-                "catalogDiff": connection["catalogDiff"],
+            "name": connection["name"],
+            "connectionId": connection["connectionId"],
+            "catalogId": connection["catalogId"],
+            "syncCatalog": connection["syncCatalog"],
+            "schemaChange": schema_change,
+            "catalogDiff": connection["catalogDiff"],
         }
         return res, None
     except Exception as e:
         logger.error(f"Error getting catalog for connection {connection_id}: {e}")
         return None, f"Error getting catalog for connection {connection_id}: {e}"
 
-def update_connection_schema(org: Org, connection_id: str, payload: AirbyteConnectionSchemaUpdate):
+
+def update_connection_schema(
+    org: Org, connection_id: str, payload: AirbyteConnectionSchemaUpdate
+):
     """
     Update the schema changes of a connection.
     """
-    org_task = OrgTask.objects.filter(
+    if not OrgTask.objects.filter(
         org=org,
         connection_id=connection_id,
-    ).first()
-
-    if org_task is None:
+    ).exists():
         return None, "connection not found"
-    
+
     warehouse = OrgWarehouse.objects.filter(org=org).first()
     if warehouse is None:
         return None, "need to set up a warehouse first"
@@ -758,9 +760,7 @@ def update_connection_schema(org: Org, connection_id: str, payload: AirbyteConne
 
     connection["skipReset"] = True
 
-    res = airbyte_service.update_schema_change(
-        org, payload, connection
-    )
+    res = airbyte_service.update_schema_change(org, payload, connection)
     return res, None
 
 
