@@ -1,19 +1,14 @@
-import os
 import json
-import csv
-import tempfile
-from django.http import StreamingHttpResponse, FileResponse
 
-from dbt_automation.utils.warehouseclient import get_client
 from ninja import NinjaAPI
 from ninja.errors import HttpError, ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
+from django.http import StreamingHttpResponse
 from ddpui import auth
 from ddpui.core import dbtautomation_service
 from ddpui.models.org import OrgWarehouse
-from ddpui.utils import secretsmanager
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.auth import has_permission
 
