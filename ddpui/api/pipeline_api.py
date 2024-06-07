@@ -12,10 +12,7 @@ from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service
 
 from ddpui.ddpprefect import (
-    DBTCORE,
-    SHELLOPERATION,
     DBTCLIPROFILE,
-    AIRBYTECONNECTION,
     AIRBYTESERVER,
 )
 from ddpui.models.org import (
@@ -105,14 +102,16 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
         if not org_server_block:
             raise HttpError(400, "airbyte server block not found")
 
-        logger.info(f"Connections being pushed to the pipeline")
+        logger.info("Connections being pushed to the pipeline")
 
         # only connections with org task will be pushed to pipeline
         payload.connections.sort(key=lambda conn: conn.seq)
         for connection in payload.connections:
             logger.info(connection)
             org_task = OrgTask.objects.filter(
-                org=orguser.org, connection_id=connection.id
+                org=orguser.org,
+                connection_id=connection.id,
+                task__slug=TASK_AIRBYTESYNC,
             ).first()
             if org_task is None:
                 logger.info(
@@ -139,7 +138,7 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
     dbt_project_params = None
     dbt_git_orgtasks = []
     if payload.transformTasks and len(payload.transformTasks) > 0:
-        logger.info(f"Dbt tasks being pushed to the pipeline")
+        logger.info("Dbt tasks being pushed to the pipeline")
 
         # dbt params
         dbt_project_params, error = gather_dbt_project_params(orguser.org)
@@ -311,7 +310,7 @@ def get_prefect_dataflow_v1(request, deployment_id):
         .order_by("seq")
     ]
 
-    transformTasks = [
+    transform_tasks = [
         {"uuid": dataflow_orgtask.orgtask.uuid, "seq": dataflow_orgtask.seq}
         for dataflow_orgtask in DataflowOrgTask.objects.filter(
             dataflow=org_data_flow, orgtask__task__type__in=["git", "dbt"]
@@ -320,7 +319,7 @@ def get_prefect_dataflow_v1(request, deployment_id):
         .order_by("seq")
     ]
 
-    has_transform = len(transformTasks) > 0
+    has_transform = len(transform_tasks) > 0
 
     # differentiate between deploymentName and name
     deployment["deploymentName"] = deployment["name"]
@@ -332,7 +331,7 @@ def get_prefect_dataflow_v1(request, deployment_id):
         "cron": deployment["cron"],
         "connections": connections,
         "dbtTransform": "yes" if has_transform else "no",
-        "transformTasks": transformTasks,
+        "transformTasks": transform_tasks,
         "isScheduleActive": deployment["isScheduleActive"],
     }
 
@@ -398,7 +397,9 @@ def put_prefect_dataflow_v1(
         for connection in payload.connections:
             logger.info(connection)
             org_task = OrgTask.objects.filter(
-                org=orguser.org, connection_id=connection.id
+                org=orguser.org,
+                connection_id=connection.id,
+                task__slug=TASK_AIRBYTESYNC,
             ).first()
             if org_task is None:
                 logger.info(

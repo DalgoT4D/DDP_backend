@@ -20,6 +20,7 @@ from ddpui.models.org import (
     OrgWarehouse,
     OrgPrefectBlockv1,
     OrgDataFlowv1,
+    TransformType,
 )
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import TaskLock, OrgTask, TaskProgressHashPrefix
@@ -168,7 +169,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
         dbt_venv=os.getenv("DBT_VENV"),
         target_type=warehouse.wtype,
         default_schema=payload["profile"]["target_configs_schema"],
-        transform_type="github",
+        transform_type=TransformType.GIT,
     )
     dbt.save()
     logger.info("created orgdbt for org %s", org.name)
@@ -432,10 +433,7 @@ def schema_change_detection():
 
 
 @app.task(bind=True)
-def create_elementary_report(
-    self,
-    org_id: int,
-):
+def create_elementary_report(self, org_id: int, bucket_file_path: str):
     """run edr report to create the elementary report and write to s3"""
     edr_binary = Path(os.getenv("DBT_VENV")) / "venv/bin/edr"
     org = Org.objects.filter(id=org_id).first()
@@ -461,7 +459,7 @@ def create_elementary_report(
         "--s3-bucket-name",
         s3_bucket_name,
         "--bucket-file-path",
-        f"reports/{org.slug}.html",
+        bucket_file_path,
         "--profiles-dir",
         str(profiles_dir),
     ]

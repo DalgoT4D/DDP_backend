@@ -1,5 +1,8 @@
 """ Creates and Org and an OrgUser """
 
+import os
+import sys
+import getpass
 from django.core.management.base import BaseCommand
 
 from django.contrib.auth.models import User
@@ -18,15 +21,28 @@ class Command(BaseCommand):
         """adds command line arguments"""
         parser.add_argument("orgname", type=str, help="Name of the Org")
         parser.add_argument("email", type=str, help="Email address of the OrgUser")
+        parser.add_argument(
+            "password",
+            type=str,
+            help="Password if creating a new User; can also supply via PASSWORD env var",
+            nargs="?",
+        )
+        parser.add_argument(
+            "--role",
+            type=str,
+            help="Role of the OrgUser; default is 'account-manager'",
+            default="account-manager",
+        )
 
     def handle(self, *args, **options):
 
         # ensure the Role exists
-        role = Role.objects.filter(slug="account-manager").first()
+        role = Role.objects.filter(slug=options["role"]).first()
         if not role:
-            raise ValueError(
-                "Role with slug 'account-manager' does not exist, please run 'python manage.py loaddata seed/*.json'"
+            print(
+                f"Role with slug '{options['role']}' does not exist, please run 'python manage.py loaddata seed/*.json'"
             )
+            sys.exit(1)
 
         # fetch / create the Org
         if not Org.objects.filter(name=options["orgname"]).exists():
@@ -40,7 +56,23 @@ class Command(BaseCommand):
 
         # fetch / create the User
         if not User.objects.filter(email=options["email"]).exists():
-            User.objects.create_user(email=options["email"], username=options["email"])
+            password = options["password"]
+            if not password:
+                password = os.getenv("PASSWORD")
+            if not password:
+                password = getpass.getpass("Enter the password for the OrgUser: ")
+                password_confirm = getpass.getpass(
+                    "Re-enter the password for the OrgUser: "
+                )
+                if password != password_confirm:
+                    print("Passwords do not match")
+                    sys.exit(1)
+            if not password:
+                print("Password is required")
+                sys.exit(1)
+            User.objects.create_user(
+                email=options["email"], username=options["email"], password=password
+            )
             print(f"User {options['email']} created")
         else:
             print(f"User {options['email']} already exists")
