@@ -22,6 +22,7 @@ from ddpui.utils.constants import (
     AIRBYTE_SYNC_TIMEOUT,
     TASK_GITPULL,
     TASK_AIRBYTESYNC,
+    TASK_AIRBYTERESET,
 )
 from ddpui.ddpdbt.schema import DbtProjectParams
 
@@ -33,7 +34,7 @@ logger = CustomLogger("ddpui")
 def setup_airbyte_sync_task_config(
     org_task: OrgTask, server_block: OrgPrefectBlockv1, seq: int = 1
 ):
-    """constructs the prefect payload for an airbyte sync"""
+    """constructs the prefect payload for an airbyte sync or reset"""
     return PrefectAirbyteSyncTaskSetup(
         seq=seq,
         slug=org_task.task.slug,
@@ -182,7 +183,11 @@ def pipeline_with_orgtasks(
 
     for org_task in org_tasks:
         task_config = None
-        if org_task.task.slug == TASK_AIRBYTESYNC:
+        if org_task.task.slug == TASK_AIRBYTERESET:
+            task_config = setup_airbyte_sync_task_config(
+                org_task, server_block
+            ).to_json()
+        elif org_task.task.slug == TASK_AIRBYTESYNC:
             task_config = setup_airbyte_sync_task_config(
                 org_task, server_block
             ).to_json()

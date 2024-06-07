@@ -1,15 +1,14 @@
 import json
 
-from dbt_automation.utils.warehouseclient import get_client
 from ninja import NinjaAPI
 from ninja.errors import HttpError, ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
+from django.http import StreamingHttpResponse
 from ddpui import auth
 from ddpui.core import dbtautomation_service
 from ddpui.models.org import OrgWarehouse
-from ddpui.utils import secretsmanager
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.auth import has_permission
 
@@ -176,3 +175,54 @@ def get_json_column_spec(
         org_warehouse, source_schema, input_name, json_column
     )
     return json_columnspec
+
+
+@warehouseapi.get(
+    "/download/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_view_warehouse_data"])
+def get_download_warehouse_data(request, schema_name: str, table_name: str):
+    """Stream and download data from a table in the warehouse"""
+
+    orguser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    def stream_warehouse_data(
+        request, schema_name, table_name, page_size=10, order_by=None, order=1
+    ):
+        page = 0
+        header_written = False
+        while True:
+            data = get_warehouse_data(
+                request,
+                "table_data",
+                schema_name=schema_name,
+                table_name=table_name,
+                page=page,
+                limit=page_size,
+                order_by=order_by,
+                order=order,
+            )
+            if not data:
+                break
+            if not header_written:
+                yield ",".join(data[0].keys()) + "\n"  # Write CSV header
+                header_written = True
+            for row in data:
+                yield ",".join(map(str, row.values())) + "\n"  # Write CSV row
+            page += 1
+            logger.info(f"Streaming page {page} of {schema_name}.{table_name}")
+
+    response = StreamingHttpResponse(
+        stream_warehouse_data(request, schema_name, table_name, page_size=30000),
+        content_type="application/octet-stream",
+    )
+    response["Content-Disposition"] = (
+        f"attachment; filename={schema_name}__{table_name}.csv"
+    )
+
+    return response

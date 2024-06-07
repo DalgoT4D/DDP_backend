@@ -442,12 +442,10 @@ def get_one_connection(org: Org, connection_id: str):
 
 def reset_connection(org: Org, connection_id: str):
     """reset an airbyte connection"""
-    org_task = OrgTask.objects.filter(
+    if not OrgTask.objects.filter(
         org=org,
         connection_id=connection_id,
-    ).first()
-
-    if org_task is None:
+    ).exists():
         return None, "connection not found"
 
     airbyte_service.reset_connection(connection_id)
@@ -457,12 +455,11 @@ def reset_connection(org: Org, connection_id: str):
 
 def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUpdate):
     """updates an airbyte connection"""
-    org_task = OrgTask.objects.filter(
+
+    if not OrgTask.objects.filter(
         org=org,
         connection_id=connection_id,
-    ).first()
-
-    if org_task is None:
+    ).exists():
         return None, "connection not found"
 
     warehouse = OrgWarehouse.objects.filter(org=org).first()
@@ -517,7 +514,9 @@ def delete_connection(org: Org, connection_id: str):
     # delete all dataflows
     logger.info("deleting org dataflow from db")
     for dataflow in dataflows_to_delete:
-        dataflow.delete()
+        # if there is a reset and a sync then the dataflow will appear twice in this list
+        if dataflow.id:
+            dataflow.delete()
 
     # delete all orgtasks
     logger.info("deleting orgtask")
@@ -536,6 +535,7 @@ def get_job_info_for_connection(org: Org, connection_id: str):
     org_task = OrgTask.objects.filter(
         org=org,
         connection_id=connection_id,
+        task__slug=TASK_AIRBYTESYNC,
     ).first()
 
     if org_task is None:
@@ -716,12 +716,10 @@ def update_connection_schema(
     """
     Update the schema changes of a connection.
     """
-    org_task = OrgTask.objects.filter(
+    if not OrgTask.objects.filter(
         org=org,
         connection_id=connection_id,
-    ).first()
-
-    if org_task is None:
+    ).exists():
         return None, "connection not found"
 
     warehouse = OrgWarehouse.objects.filter(org=org).first()
