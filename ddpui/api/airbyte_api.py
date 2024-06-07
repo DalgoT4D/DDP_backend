@@ -489,7 +489,6 @@ def get_airbyte_connections_v1(request):
     deployment_ids = [body["deploymentId"] for body in res]
     sync_flow_runs_of_deployments.delay(deployment_ids)
 
-    # by default normalization is going as False here because we dont do anything with it
     return res
 
 
@@ -623,8 +622,8 @@ def delete_airbyte_source_v1(request, source_id):
 
 
 @airbyteapi.get(
-    "/v1/connections/{connection_id}/catalog", 
-    auth=auth.CustomAuthMiddleware(), 
+    "/v1/connections/{connection_id}/catalog",
+    auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_view_connection"])
 def get_connection_catalog_v1(request, connection_id):
@@ -643,13 +642,15 @@ def get_connection_catalog_v1(request, connection_id):
     "/v1/connections/{connection_id}/schema_update", auth=auth.CustomAuthMiddleware()
 )
 @has_permission(["can_edit_connection"])
-def update_connection_schema(request, connection_id, payload: AirbyteConnectionSchemaUpdate):
+def update_connection_schema(
+    request, connection_id, payload: AirbyteConnectionSchemaUpdate
+):
     """update schema change in a connection"""
     orguser: OrgUser = request.orguser
     org = orguser.org
     if org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
-    
+
     res, error = airbytehelpers.update_connection_schema(org, connection_id, payload)
     if error:
         raise HttpError(400, error)
@@ -658,7 +659,7 @@ def update_connection_schema(request, connection_id, payload: AirbyteConnectionS
 
 @airbyteapi.get(
     "/v1/connection/schema_change",
-    auth=auth.CustomAuthMiddleware(), 
+    auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_view_connection"])
 def get_schema_changes_for_connection(request):

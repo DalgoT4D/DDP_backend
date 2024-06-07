@@ -19,6 +19,7 @@ from testclient.testclient import TestClient
 logger = CustomLogger("ddpui")
 load_dotenv()
 
+
 class Command(BaseCommand):
     """
     This script loads the configuration of an org from a file
@@ -51,7 +52,7 @@ class Command(BaseCommand):
         with open(options["input"], "r", encoding="utf-8") as f:
             input_config = json.load(f)
 
-        ngoClient = TestClient(options['port'])
+        ngoClient = TestClient(options["port"])
 
         ngoClient.login(options["email"], options["password"])
         ngoClient.clientheaders["x-dalgo-org"] = options["org"]
@@ -64,8 +65,13 @@ class Command(BaseCommand):
 
     def import_warehouse(self, ngoClient: TestClient, org: Org, config: dict):
         """creates a warehouse for an org from the json"""
-        existing_destination = airbyte_service.get_destinations(org.airbyte_workspace_id)
-        if existing_destination.get("destinations") and existing_destination["destinations"]:
+        existing_destination = airbyte_service.get_destinations(
+            org.airbyte_workspace_id
+        )
+        if (
+            existing_destination.get("destinations")
+            and existing_destination["destinations"]
+        ):
             logger.info("Warehouse already exists")
             return None, "warehouse already exists"
 
@@ -78,7 +84,7 @@ class Command(BaseCommand):
             wtype=wtype,
             name=name,
             destinationDefId=warehousedef_id,
-            airbyteConfig=airbyte_config
+            airbyteConfig=airbyte_config,
         ).dict()
 
         response = ngoClient.clientpost("organizations/warehouse/", json=payload)
@@ -86,7 +92,9 @@ class Command(BaseCommand):
         if response.get("success"):
             print(f"Warehouse created successfully")
         else:
-            print(f"Error creating warehouse: {response.get('detail', 'Unknown error')}")
+            print(
+                f"Error creating warehouse: {response.get('detail', 'Unknown error')}"
+            )
 
     def import_sources(self, ngoClient: TestClient, org: Org, config: dict):
         """Imports all sources for an org"""
@@ -94,7 +102,9 @@ class Command(BaseCommand):
         name = config["name"]
         sourcedef_name = config["sourceName"]
 
-        source_definitions = airbyte_service.get_source_definitions(workspace_id)["sourceDefinitions"]
+        source_definitions = airbyte_service.get_source_definitions(workspace_id)[
+            "sourceDefinitions"
+        ]
 
         sourceDefId = None
         for sdef in source_definitions:
@@ -114,7 +124,7 @@ class Command(BaseCommand):
 
         response = ngoClient.clientpost("airbyte/sources/", json=payload)
 
-        if 'sourceId' in response:
+        if "sourceId" in response:
             print(f"Source with id {response['sourceId']} created successfully.")
         else:
             print(f"Error creating source: {response}")
@@ -129,18 +139,21 @@ class Command(BaseCommand):
             return
         source_id = source["sourceId"]
         streams = config["streams"]
-        
+
         payload = AirbyteConnectionCreate(
             name=config["name"],
             sourceId=source_id,
             destinationSchema=config["destinationSchema"],
             streams=streams,
-            normalize=False
         ).dict()
 
-        response = ngoClient.clientpost("airbyte/v1/connections/", json=payload, timeout=60)
+        response = ngoClient.clientpost(
+            "airbyte/v1/connections/", json=payload, timeout=60
+        )
 
-        if 'connectionId' in response:
-            print(f"Connection with id {response['connectionId']} created successfully.")
+        if "connectionId" in response:
+            print(
+                f"Connection with id {response['connectionId']} created successfully."
+            )
         else:
             print(f"Error creating connection: {response}")

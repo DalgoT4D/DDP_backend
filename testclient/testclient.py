@@ -198,7 +198,6 @@ class TestClient:
         """create a connection"""
         payload = {
             "name": connection_config["name"],
-            "normalize": False,
             "sourceId": source_id,
             "streams": [],
             "destinationSchema": connection_config["destinationSchema"],
