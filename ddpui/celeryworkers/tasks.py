@@ -20,6 +20,7 @@ from ddpui.models.org import (
     OrgWarehouse,
     OrgPrefectBlockv1,
     OrgDataFlowv1,
+    TransformType,
 )
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import TaskLock, OrgTask, TaskProgressHashPrefix
@@ -168,7 +169,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
         dbt_venv=os.getenv("DBT_VENV"),
         target_type=warehouse.wtype,
         default_schema=payload["profile"]["target_configs_schema"],
-        transform_type="github",
+        transform_type=TransformType.GIT,
     )
     dbt.save()
     logger.info("created orgdbt for org %s", org.name)

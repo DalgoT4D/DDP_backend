@@ -12,7 +12,7 @@ from ninja.errors import HttpError, ValidationError
 from dbt_automation import assets
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.org_user import OrgUser
-from ddpui.models.org import OrgWarehouse, OrgDbt
+from ddpui.models.org import OrgWarehouse, OrgDbt, TransformType
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation, DbtEdge
 from ddpui.auth import (
     GUEST_ROLE,
@@ -341,7 +341,7 @@ def test_delete_dbt_project_success(orguser: OrgUser, tmp_path):
         dbt_venv="some/venv/bin/dbt",
         target_type="postgres",
         default_schema="default",
-        transform_type="github",
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = dbt
     orguser.org.save()
@@ -390,7 +390,7 @@ def test_sync_sources_success(orguser: OrgUser, tmp_path):
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",
-        transform_type="ui",
+        transform_type=TransformType.UI,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -467,7 +467,7 @@ def test_post_construct_dbt_model_operation_failure_invalid_op_type(
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",
-        transform_type="ui",
+        transform_type=TransformType.UI,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -497,7 +497,7 @@ def test_post_construct_dbt_model_operation_failure_validate_input(
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",
-        transform_type="ui",
+        transform_type=TransformType.UI,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -584,7 +584,7 @@ def test_post_construct_dbt_model_operation_success_chain1(orguser: OrgUser, tmp
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",
-        transform_type="ui",
+        transform_type=TransformType.UI,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -690,7 +690,7 @@ def test_post_construct_dbt_model_operation_success_chain2(orguser: OrgUser, tmp
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",
-        transform_type="ui",
+        transform_type=TransformType.UI,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -806,7 +806,7 @@ def test_post_save_model_failure_invalid_target_model(orguser: OrgUser, tmp_path
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",
-        transform_type="ui",
+        transform_type=TransformType.UI,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -846,7 +846,7 @@ def test_post_save_model_success_save_chained_model(orguser: OrgUser, tmp_path):
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",
-        transform_type="ui",
+        transform_type=TransformType.UI,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
