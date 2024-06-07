@@ -220,6 +220,7 @@ def get_download_warehouse_data(request, schema_name: str, table_name: str):
             for row in data:
                 yield ",".join(map(str, row.values())) + "\n"  # Write CSV row
             page += 1
+            logger.info(f"Streaming page {page} of {schema_name}.{table_name}")
 
     response = StreamingHttpResponse(
         stream_warehouse_data(request, schema_name, table_name, page_size=30000),
