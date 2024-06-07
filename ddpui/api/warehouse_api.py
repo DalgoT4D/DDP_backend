@@ -1,3 +1,4 @@
+import os
 import json
 import csv
 import tempfile
@@ -195,45 +196,11 @@ def get_download_warehouse_data(request, schema_name: str, table_name: str):
     if not org_warehouse:
         raise HttpError(404, "Please set up your warehouse first")
 
-    # def stream_warehouse_data(
-    #     request, schema_name, table_name, page_size=10, order_by=None, order=1
-    # ):
-    #     page = 0
-    #     header_written = False
-    #     while True:
-    #         data = get_warehouse_data(
-    #             request,
-    #             "table_data",
-    #             schema_name=schema_name,
-    #             table_name=table_name,
-    #             page=page,
-    #             limit=page_size,
-    #             order_by=order_by,
-    #             order=order,
-    #         )
-    #         if not data:
-    #             break
-    #         if not header_written:
-    #             yield ",".join(data[0].keys()) + "\n"  # Write CSV header
-    #             header_written = True
-    #         for row in data:
-    #             yield ",".join(map(str, row.values())) + "\n"  # Write CSV row
-    #         page += 1
-
-    # response = StreamingHttpResponse(
-    #     stream_warehouse_data(request, schema_name, table_name, page_size=30000),
-    #     content_type="text/csv",
-    # )
-    # response["Content-Disposition"] = (
-    #     f"attachment; filename={schema_name}__{table_name}.csv"
-    # )
-    with tempfile.NamedTemporaryFile(
-        mode="w+",
-        delete=False,
-        dir="/Users/ishankoradia/Tech4dev/Dalgo/platform/DDP_backend/tmp",
-    ) as f:
-        writer = csv.writer(f)
+    def stream_warehouse_data(
+        request, schema_name, table_name, page_size=10, order_by=None, order=1
+    ):
         page = 0
+        header_written = False
         while True:
             data = get_warehouse_data(
                 request,
@@ -241,21 +208,23 @@ def get_download_warehouse_data(request, schema_name: str, table_name: str):
                 schema_name=schema_name,
                 table_name=table_name,
                 page=page,
-                limit=5000,
-                order_by=None,
-                order=1,
+                limit=page_size,
+                order_by=order_by,
+                order=order,
             )
             if not data:
                 break
-            if page == 0:
-                writer.writerow(data[0].keys())  # Write CSV header
+            if not header_written:
+                yield ",".join(data[0].keys()) + "\n"  # Write CSV header
+                header_written = True
             for row in data:
-                writer.writerow(row.values())  # Write CSV row
+                yield ",".join(map(str, row.values())) + "\n"  # Write CSV row
             page += 1
 
-        f.flush()
-
-    response = FileResponse(open(f.name, "rb"), content_type="text/csv")
+    response = StreamingHttpResponse(
+        stream_warehouse_data(request, schema_name, table_name, page_size=30000),
+        content_type="application/octet-stream",
+    )
     response["Content-Disposition"] = (
         f"attachment; filename={schema_name}__{table_name}.csv"
     )
