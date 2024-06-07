@@ -97,5 +97,16 @@
             "command": null,
             "is_system": false
         }
+    },
+    {
+        "model": "ddpui.Task",
+        "pk": 10,
+        "fields": {
+            "type": "edr",
+            "slug": "generate-edr",
+            "label": "EDR generate",
+            "command": "send-report",
+            "is_system": true
+        }
     }
 ]
