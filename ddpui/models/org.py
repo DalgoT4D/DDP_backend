@@ -99,24 +99,6 @@ class OrgWarehouse(models.Model):
             f"OrgWarehouse[{self.org.slug}|{self.wtype}|{self.airbyte_destination_id}]"
         )
 
-    def is_destinations_v2(self):
-        """returns True if the warehouse is using destinations v2"""
-        if (
-            self.airbyte_docker_repository
-            and self.airbyte_docker_repository.find("postgres") > -1
-            and self.airbyte_docker_image_tag
-            and self.airbyte_docker_image_tag >= "0.6.0"
-        ):
-            return True
-        if (
-            self.airbyte_docker_repository
-            and self.airbyte_docker_repository.find("bigquery") > -1
-            and self.airbyte_docker_image_tag
-            and self.airbyte_docker_image_tag >= "1.9.1"
-        ):
-            return True
-        return False
-
 
 class OrgWarehouseSchema(Schema):
     """payload to register an organization's data warehouse"""
