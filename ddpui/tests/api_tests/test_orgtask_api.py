@@ -218,7 +218,7 @@ def test_seed_data(seed_db):
 
 def test_seed_master_tasks(seed_master_tasks_db):
     """a test to seed the database"""
-    assert Task.objects.count() == 9
+    assert Task.objects.count() == 10
 
 
 # ================================================================================
