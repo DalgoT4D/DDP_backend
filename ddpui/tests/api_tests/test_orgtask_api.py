@@ -20,13 +20,17 @@ from ddpui.api.orgtask_api import (
     post_run_prefect_org_task,
 )
 from ddpui.ddpprefect import DBTCLIPROFILE, SECRET
+from ddpui.ddpprefect.schema import PrefectShellTaskSetup
 from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1, OrgWarehouse
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.org_user import OrgUser, OrgUserRole
 from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask, Task
-from ddpui.utils.constants import TASK_DBTDEPS, TASK_GITPULL
+from ddpui.utils.constants import TASK_DBTDEPS, TASK_GITPULL, TASK_GENERATE_EDR
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
+from ddpui.tests.core.test_orgtaskfunctions import (
+    seed_master_tasks as seed_master_tasks_edr,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -453,3 +457,36 @@ def test_post_run_prefect_org_task_dbt_deps_success(orguser_transform_tasks):
         raise Exception("Task not found")
 
     post_run_prefect_org_task(request, org_task.uuid)
+
+
+def test_post_run_prefect_org_task_generate_edr(
+    orguser_dbt_workspace, seed_master_tasks_edr, seed_db
+):
+    """tests POST /tasks/{orgtask_uuid}/run/ success"""
+
+    request = mock_request(orguser_dbt_workspace)
+    task = Task.objects.filter(slug=TASK_GENERATE_EDR).first()
+
+    org_task = OrgTask.objects.create(
+        org=request.orguser.org, task=task, uuid=uuid.uuid4()
+    )
+
+    with patch(
+        "ddpui.api.orgtask_api.setup_edr_send_report_task_config"
+    ) as setup_edr_send_report_task_config_mock:
+        with patch(
+            "ddpui.ddpprefect.prefect_service.run_shell_task_sync"
+        ) as run_shell_task_sync_mock:
+            task_config = PrefectShellTaskSetup(
+                type="",
+                slug="",
+                commands=[],
+                working_dir="",
+                env={},
+                orgtask_uuid=str(org_task.uuid),
+            )
+            setup_edr_send_report_task_config_mock.return_value = task_config
+            run_shell_task_sync_mock.return_value = "retval"
+            retval = post_run_prefect_org_task(request, org_task.uuid)
+            assert retval == "retval"
+            run_shell_task_sync_mock.assert_called_once_with(task_config)
