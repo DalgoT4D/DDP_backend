@@ -15,6 +15,13 @@ class OrgVizLoginType(str, Enum):
         return [(key.value, key.name) for key in cls]
 
 
+class TransformType(str, Enum):
+    """an enum for transform type available either via ui or github"""
+
+    UI = "ui"
+    GIT = "github"
+
+
 class OrgDbt(models.Model):
     """Docstring"""
 

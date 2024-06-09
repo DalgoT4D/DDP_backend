@@ -9,7 +9,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from ddpui.models.org import Org, OrgDbt, OrgWarehouse
+from ddpui.models.org import Org, OrgDbt, OrgWarehouse, TransformType
 from ddpui.models.org_user import OrgUser
 from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.tests.api_tests.test_user_org_api import (
@@ -139,7 +139,7 @@ def test_sync_sources_failed_to_connect_to_warehouse(orguser: OrgUser, tmp_path)
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",
-        transform_type="ui",
+        transform_type=TransformType.UI,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -186,7 +186,7 @@ def test_sync_sources_failed_to_fetch_schemas(orguser: OrgUser, tmp_path):
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",
-        transform_type="ui",
+        transform_type=TransformType.UI,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -248,7 +248,7 @@ def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",
-        transform_type="ui",
+        transform_type=TransformType.UI,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()

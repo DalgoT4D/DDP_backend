@@ -1,6 +1,7 @@
 import glob
 import os
 import shutil
+from datetime import datetime
 import subprocess
 from pathlib import Path
 import requests
@@ -16,7 +17,7 @@ from ddpui.ddpprefect import (
     DBTCLIPROFILE,
     SECRET,
 )
-from ddpui.models.org import OrgDbt, OrgPrefectBlockv1, OrgWarehouse
+from ddpui.models.org import OrgDbt, OrgPrefectBlockv1, OrgWarehouse, TransformType
 from ddpui.models.org_user import Org
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask
 from ddpui.models.dbt_workflow import OrgDbtModel
@@ -177,7 +178,7 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
         dbt_venv=os.getenv("DBT_VENV"),
         target_type=warehouse.wtype,
         default_schema=default_schema,
-        transform_type="ui",
+        transform_type=TransformType.UI,
     )
     dbt.save()
     logger.info("created orgdbt for org %s", org.name)
@@ -237,10 +238,12 @@ def make_elementary_report(org: Org):
         aws_access_key_id=os.getenv("ELEMENTARY_AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=os.getenv("ELEMENTARY_AWS_SECRET_ACCESS_KEY"),
     )
+    todays_date = datetime.today().strftime("%Y-%m-%d")
+    bucket_file_path = f"reports/{org.slug}.{todays_date}.html"
     try:
         s3response = s3.get_object(
             Bucket=os.getenv("ELEMENTARY_S3_BUCKET"),
-            Key=f"reports/{org.slug}.html",
+            Key=bucket_file_path,
         )
         logger.info("fetched s3response")
     except boto3.exceptions.botocore.exceptions.ClientError:
@@ -256,7 +259,7 @@ def make_elementary_report(org: Org):
             return None, {"task_id": task_id}
 
         logger.info("creating new elementary report")
-        task = create_elementary_report.delay(org.id)
+        task = create_elementary_report.delay(org.id, bucket_file_path)
         logger.info(task.id)
         return None, {"task_id": task.id}
     except Exception:
