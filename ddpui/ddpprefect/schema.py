@@ -230,7 +230,6 @@ class PrefectAirbyteConnectionBlockSchema(Schema):
     deploymentId: str = None
     lastRun: Optional[dict | None]
     destinationSchema: str = ""
-    normalize: bool = False
     lock: Optional[dict | None]
 
 
