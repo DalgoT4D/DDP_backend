@@ -574,6 +574,14 @@ def get_flow_run_logs(flow_run_id: str, offset: int) -> dict:  # pragma: no cove
     return {"logs": res}
 
 
+def get_flow_run_logs_v2(flow_run_id: str) -> dict:  # pragma: no cover
+    """retreive the logs from a flow-run from prefect"""
+    res = prefect_get(
+        f"flow_runs/v1/logs/{flow_run_id}",
+    )
+    return res
+
+
 def get_flow_run(flow_run_id: str) -> dict:
     """retreive the logs from a flow-run from prefect"""
     res = prefect_get(f"flow_runs/{flow_run_id}")
