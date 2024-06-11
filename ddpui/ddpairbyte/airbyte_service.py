@@ -34,26 +34,29 @@ logger = CustomLogger("airbyte")
 def abreq(endpoint, req=None, **kwargs):
     """Request to the airbyte server"""
     request = thread.get_current_request()
-    org_user = request.orguser
 
-    if flag_enabled("AIRBYTE_PROFILE", request_org_id=str(org_user.org.id)):
-        org_slug = org_user.org.slug
-        block_name = f"{org_slug}-{slugify(AIRBYTESERVER)}"
-        try:
-            airbyte_server_block = prefect_service.get_airbyte_server_block(block_name)
-        except Exception as exc:
-            raise Exception("could not connect to prefect-proxy") from exc
+    abhost = os.getenv("AIRBYTE_SERVER_HOST")
+    abport = os.getenv("AIRBYTE_SERVER_PORT")
+    abver = os.getenv("AIRBYTE_SERVER_APIVER")
+    token = os.getenv("AIRBYTE_API_TOKEN")
 
-        abhost = airbyte_server_block["host"]
-        abport = airbyte_server_block["port"]
-        abver = airbyte_server_block["version"]
-        token = airbyte_server_block["token"]
+    if request is not None:
+        org_user = request.orguser
 
-    else:
-        abhost = os.getenv("AIRBYTE_SERVER_HOST")
-        abport = os.getenv("AIRBYTE_SERVER_PORT")
-        abver = os.getenv("AIRBYTE_SERVER_APIVER")
-        token = os.getenv("AIRBYTE_API_TOKEN")
+        if flag_enabled("AIRBYTE_PROFILE", request_org_id=str(org_user.org.id)):
+            org_slug = org_user.org.slug
+            block_name = f"{org_slug}-{slugify(AIRBYTESERVER)}"
+            try:
+                airbyte_server_block = prefect_service.get_airbyte_server_block(
+                    block_name
+                )
+            except Exception as exc:
+                raise Exception("could not connect to prefect-proxy") from exc
+
+            abhost = airbyte_server_block["host"]
+            abport = airbyte_server_block["port"]
+            abver = airbyte_server_block["version"]
+            token = airbyte_server_block["token"]
 
     logger.info("Making request to Airbyte server: %s", endpoint)
     try:
