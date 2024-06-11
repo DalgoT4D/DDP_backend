@@ -17,7 +17,7 @@ from corsheaders.defaults import default_headers
 from ddpui.utils.django_logger import setup_logger as setup_django_logger
 from ddpui.utils.ddp_logger import setup_logger as setup_ddp_logger
 from ddpui.utils.ab_logger import setup_logger as setup_ab_logger
-from ddpui.utils.flags import org_condition
+import ddpui.utils.flags  # pylint: disable=unused-import
 
 load_dotenv()
 

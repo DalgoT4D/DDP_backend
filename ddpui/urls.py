@@ -19,7 +19,7 @@ from ddpui.html.docs import get_dbt_docs
 from ddpui.html.elementary import get_elementary_report
 
 urlpatterns = [
-    path("admin/", admin.site.urls), # Uncomment if you want to use django-admin app
+    path("admin/", admin.site.urls),  # Uncomment if you want to use django-admin app
     path("api/dashboard/", dashboardapi.urls),
     path("api/airbyte/", airbyteapi.urls),
     path("api/data/", dataapi.urls),
