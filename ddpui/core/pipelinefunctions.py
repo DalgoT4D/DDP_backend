@@ -97,7 +97,7 @@ def setup_edr_send_report_task_config(
     org_task: OrgTask, project_dir: str, dbt_env_dir: Path, seq: int = 1
 ):
     """constructs the prefect payload for edr"""
-    shell_env = {"PATH": str(dbt_env_dir / "venv/bin")}
+    shell_env = {"PATH": str(dbt_env_dir / "venv/bin"), "shell": "/bin/bash"}
     return PrefectShellTaskSetup(
         commands=[
             org_task.task.type + " " + org_task.get_task_parameters(),
