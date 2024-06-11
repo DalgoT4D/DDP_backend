@@ -689,67 +689,8 @@ def get_connection(workspace_id: str, connection_id: str) -> dict:
     return res
 
 
-def create_normalization_operation(workspace_id: str) -> str:
-    """create a normalization operation for this airbyte workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "workspace_id must be a string")
-
-    # create normalization operation
-    res = abreq(
-        "/operations/create",
-        {
-            "workspaceId": workspace_id,
-            "name": "op-normalize",
-            "operatorConfiguration": {
-                "operatorType": "normalization",
-                "normalization": {"option": "basic"},
-            },
-        },
-    )
-    if "operationId" not in res:
-        error_message = f"could not create normalization operation for {workspace_id}"
-        logger.error(error_message)
-        raise HttpError(404, error_message)
-
-    return res
-
-
-def get_airbyte_operation(operation_id: str):
-    """fetch the operation details from the id, operation can be normalization┃dbt┃webhook"""
-    if not isinstance(operation_id, str):
-        raise HttpError(400, "operation_id must be a string")
-
-    res = abreq(
-        "/operations/get",
-        {"operationId": operation_id},
-    )
-
-    if "operationId" not in res:
-        error_message = f"could not fetch the operation with id {operation_id}"
-        logger.error(error_message)
-        raise HttpError(404, error_message)
-
-    return res
-
-
-def is_operation_normalization(operation_id: str):
-    """Return boolean to mark if the operation is a normalization operation or not"""
-    res = get_airbyte_operation(operation_id)
-
-    if "operatorConfiguration" in res:
-        # for now the only operator we know about is normalization
-        if (
-            "operatorType" in res["operatorConfiguration"]
-            and res["operatorConfiguration"]["operatorType"] == "normalization"
-        ):
-            return True
-
-    return False
-
-
 def create_connection(
     workspace_id: str,
-    airbyte_norm_op_id: str | None,
     connection_info: schema.AirbyteConnectionCreate,
 ) -> dict:
     """Create a connection in an airbyte workspace"""
@@ -786,9 +727,6 @@ def create_connection(
     if connection_info.destinationSchema:
         payload["namespaceDefinition"] = "customformat"
         payload["namespaceFormat"] = connection_info.destinationSchema
-
-    if connection_info.normalize:
-        payload["operationIds"] = [airbyte_norm_op_id]
 
     # one stream per table
     selected_streams = {x["name"]: x for x in connection_info.streams}

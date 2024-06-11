@@ -217,12 +217,6 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
         return None, "warehouse has no airbyte_destination_id"
     payload.destinationId = warehouse.airbyte_destination_id
 
-    if warehouse.airbyte_norm_op_id is None and not warehouse.is_destinations_v2():
-        warehouse.airbyte_norm_op_id = airbyte_service.create_normalization_operation(
-            org.airbyte_workspace_id
-        )["operationId"]
-        warehouse.save()
-
     org_airbyte_server_block = OrgPrefectBlockv1.objects.filter(
         org=org,
         block_type=AIRBYTESERVER,
@@ -238,9 +232,7 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
     if reset_task is None:
         return None, "reset task not supported"
 
-    airbyte_conn = airbyte_service.create_connection(
-        org.airbyte_workspace_id, warehouse.airbyte_norm_op_id, payload
-    )
+    airbyte_conn = airbyte_service.create_connection(org.airbyte_workspace_id, payload)
 
     try:
         with transaction.atomic():
@@ -286,7 +278,6 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
         "syncCatalog": airbyte_conn["syncCatalog"],
         "status": airbyte_conn["status"],
         "deploymentId": sync_dataflow.deployment_id,
-        "normalize": payload.normalize,
         "resetConnDeploymentId": reset_dataflow.deployment_id,
     }
     return res, None
@@ -440,11 +431,6 @@ def get_one_connection(org: Org, connection_id: str):
             if dataflow_orgtask.dataflow
             else None
         ),
-        "normalize": (
-            airbyte_service.is_operation_normalization(airbyte_conn["operationIds"][0])
-            if "operationIds" in airbyte_conn and len(airbyte_conn["operationIds"]) == 1
-            else False
-        ),
         "lock": lock,
         "resetConnDeploymentId": (
             reset_dataflow.deployment_id if reset_dataflow else None
@@ -456,12 +442,10 @@ def get_one_connection(org: Org, connection_id: str):
 
 def reset_connection(org: Org, connection_id: str):
     """reset an airbyte connection"""
-    org_task = OrgTask.objects.filter(
+    if not OrgTask.objects.filter(
         org=org,
         connection_id=connection_id,
-    ).first()
-
-    if org_task is None:
+    ).exists():
         return None, "connection not found"
 
     airbyte_service.reset_connection(connection_id)
@@ -471,12 +455,11 @@ def reset_connection(org: Org, connection_id: str):
 
 def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUpdate):
     """updates an airbyte connection"""
-    org_task = OrgTask.objects.filter(
+
+    if not OrgTask.objects.filter(
         org=org,
         connection_id=connection_id,
-    ).first()
-
-    if org_task is None:
+    ).exists():
         return None, "connection not found"
 
     warehouse = OrgWarehouse.objects.filter(org=org).first()
@@ -492,23 +475,7 @@ def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUp
 
     # fetch connection by id from airbyte
     connection = airbyte_service.get_connection(org.airbyte_workspace_id, connection_id)
-
-    # update normalization of data
-    if payload.normalize:
-        if "operationIds" not in connection or len(connection["operationIds"]) == 0:
-            if (
-                warehouse.airbyte_norm_op_id is None
-                and not warehouse.is_destinations_v2()
-            ):
-                warehouse.airbyte_norm_op_id = (
-                    airbyte_service.create_normalization_operation(
-                        org.airbyte_workspace_id
-                    )["operationId"]
-                )
-                warehouse.save()
-            connection["operationIds"] = [warehouse.airbyte_norm_op_id]
-    else:
-        connection["operationIds"] = []
+    connection["operationIds"] = []
 
     # update name
     if payload.name:
@@ -547,7 +514,9 @@ def delete_connection(org: Org, connection_id: str):
     # delete all dataflows
     logger.info("deleting org dataflow from db")
     for dataflow in dataflows_to_delete:
-        dataflow.delete()
+        # if there is a reset and a sync then the dataflow will appear twice in this list
+        if dataflow.id:
+            dataflow.delete()
 
     # delete all orgtasks
     logger.info("deleting orgtask")
@@ -566,6 +535,7 @@ def get_job_info_for_connection(org: Org, connection_id: str):
     org_task = OrgTask.objects.filter(
         org=org,
         connection_id=connection_id,
+        task__slug=TASK_AIRBYTESYNC,
     ).first()
 
     if org_task is None:
@@ -709,6 +679,7 @@ def delete_source(org: Org, source_id: str):
 
     return None, None
 
+
 def get_connection_catalog(org: Org, connection_id: str):
     """
     Get the catalog diff of a connection.
@@ -722,34 +693,35 @@ def get_connection_catalog(org: Org, connection_id: str):
         else:
             OrgSchemaChange.objects.update_or_create(
                 connection_id=connection_id,
-                defaults={'change_type': schema_change, 'org': org}
+                defaults={"change_type": schema_change, "org": org},
             )
-        
+
         res = {
-                "name": connection["name"],
-                "connectionId": connection["connectionId"],
-                "catalogId": connection["catalogId"],
-                "syncCatalog": connection["syncCatalog"],
-                "schemaChange": schema_change,
-                "catalogDiff": connection["catalogDiff"],
+            "name": connection["name"],
+            "connectionId": connection["connectionId"],
+            "catalogId": connection["catalogId"],
+            "syncCatalog": connection["syncCatalog"],
+            "schemaChange": schema_change,
+            "catalogDiff": connection["catalogDiff"],
         }
         return res, None
     except Exception as e:
         logger.error(f"Error getting catalog for connection {connection_id}: {e}")
         return None, f"Error getting catalog for connection {connection_id}: {e}"
 
-def update_connection_schema(org: Org, connection_id: str, payload: AirbyteConnectionSchemaUpdate):
+
+def update_connection_schema(
+    org: Org, connection_id: str, payload: AirbyteConnectionSchemaUpdate
+):
     """
     Update the schema changes of a connection.
     """
-    org_task = OrgTask.objects.filter(
+    if not OrgTask.objects.filter(
         org=org,
         connection_id=connection_id,
-    ).first()
-
-    if org_task is None:
+    ).exists():
         return None, "connection not found"
-    
+
     warehouse = OrgWarehouse.objects.filter(org=org).first()
     if warehouse is None:
         return None, "need to set up a warehouse first"
@@ -758,9 +730,7 @@ def update_connection_schema(org: Org, connection_id: str, payload: AirbyteConne
 
     connection["skipReset"] = True
 
-    res = airbyte_service.update_schema_change(
-        org, payload, connection
-    )
+    res = airbyte_service.update_schema_change(org, payload, connection)
     return res, None
 
 

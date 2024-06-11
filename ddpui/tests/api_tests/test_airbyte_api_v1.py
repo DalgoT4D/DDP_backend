@@ -285,7 +285,6 @@ def test_post_airbyte_connection_v1_without_workspace(orguser):
         destinationId="dest-id",
         destinationSchema="dest-schema",
         streams=["stream-1", "stream-2"],
-        normalize=False,
     )
     with pytest.raises(HttpError) as excinfo:
         post_airbyte_connection_v1(request, payload)
@@ -303,7 +302,6 @@ def test_post_airbyte_connection_v1_without_stream_names(orguser_workspace):
         destinationId="dest-id",
         destinationSchema="dest-schema",
         streams=[],
-        normalize=False,
     )
     with pytest.raises(HttpError) as excinfo:
         post_airbyte_connection_v1(request, payload)
@@ -321,7 +319,6 @@ def test_post_airbyte_connection_v1_without_warehouse(orguser_workspace):
         destinationId="dest-id",
         destinationSchema="dest-schema",
         streams=["stream_1", "stream_2"],
-        normalize=False,
     )
     with pytest.raises(HttpError) as excinfo:
         post_airbyte_connection_v1(request, payload)
@@ -357,7 +354,6 @@ def test_post_airbyte_connection_v1_without_destination_id(
         destinationId="dest-id",
         destinationSchema="dest-schema",
         streams=["stream_1", "stream_2"],
-        normalize=False,
     )
     with pytest.raises(HttpError) as excinfo:
         post_airbyte_connection_v1(request, payload)
@@ -365,12 +361,6 @@ def test_post_airbyte_connection_v1_without_destination_id(
     assert str(excinfo.value) == "warehouse has no airbyte_destination_id"
 
 
-@patch.multiple(
-    "ddpui.ddpairbyte.airbyte_service",
-    create_normalization_operation=Mock(
-        return_value={"operationId": "fake-operation-id"}
-    ),
-)
 def test_post_airbyte_connection_v1_without_server_block(
     orguser_workspace, warehouse_with_destination
 ):
@@ -383,7 +373,6 @@ def test_post_airbyte_connection_v1_without_server_block(
         destinationId="dest-id",
         destinationSchema="dest-schema",
         streams=["stream_1", "stream_2"],
-        normalize=False,
     )
     with pytest.raises(Exception) as excinfo:
         post_airbyte_connection_v1(request, payload)
@@ -407,9 +396,6 @@ def airbyte_server_block(org_with_workspace):
 
 @patch.multiple(
     "ddpui.ddpairbyte.airbyte_service",
-    create_normalization_operation=Mock(
-        return_value={"operationId": "fake-operation-id"}
-    ),
     create_connection=Mock(
         return_value={
             "sourceId": "fake-source-id",
@@ -433,7 +419,6 @@ def test_post_airbyte_connection_v1_task_not_supported(
         destinationId="dest-id",
         destinationSchema="dest-schema",
         streams=["stream_1", "stream_2"],
-        normalize=False,
     )
     with pytest.raises(Exception) as excinfo:
         post_airbyte_connection_v1(request, payload)
@@ -442,9 +427,6 @@ def test_post_airbyte_connection_v1_task_not_supported(
 
 @patch.multiple(
     "ddpui.ddpairbyte.airbyte_service",
-    create_normalization_operation=Mock(
-        return_value={"operationId": "fake-operation-id"}
-    ),
     create_connection=Mock(
         return_value={
             "sourceId": "fake-source-id",
@@ -492,7 +474,6 @@ def test_post_airbyte_connection_v1_success(
         destinationId="dest-id",
         destinationSchema="dest-schema",
         streams=["stream_1", "stream_2"],
-        normalize=False,
     )
 
     # create the master task
@@ -512,12 +493,6 @@ def test_post_airbyte_connection_v1_success(
     Task.objects.create(**airbyte_reset_task_config)
 
     response = post_airbyte_connection_v1(request, payload)
-
-    # reload the warehouse from the database
-    warehouse_with_destination = OrgWarehouse.objects.filter(
-        org=request.orguser.org, airbyte_destination_id="destination-id"
-    ).first()
-    assert warehouse_with_destination.airbyte_norm_op_id is not None
 
     assert response["name"] == "conn-name"
     assert response["connectionId"] == "fake-connection-id"
@@ -665,8 +640,8 @@ def test_put_airbyte_connection_v1_no_streams(
     "ddpui.ddpairbyte.airbyte_service",
     get_connection=Mock(return_value={"conn-key": "conn-val"}),
 )
-def test_put_airbyte_connection_v1_without_normalization(orguser_workspace):
-    """tests PUT /v1/connections/{connection_id}/update succes with no normalization"""
+def test_put_airbyte_connection_v1(orguser_workspace):
+    """tests PUT /v1/connections/{connection_id}/update success"""
     payload = AirbyteConnectionUpdate(name="connection-name", streams=[1])
     connection_id = "connection_id"
     request = mock_request(orguser_workspace)
@@ -696,100 +671,6 @@ def test_put_airbyte_connection_v1_without_normalization(orguser_workspace):
     connection = {
         "conn-key": "conn-val",
         "operationIds": [],
-        "name": payload.name,
-        "skipReset": False,
-    }
-    payload.destinationId = warehouse.airbyte_destination_id
-    update_connection_mock.assert_called_with(
-        request.orguser.org.airbyte_workspace_id, payload, connection
-    )
-
-
-@patch.multiple(
-    "ddpui.ddpairbyte.airbyte_service",
-    get_connection=Mock(return_value={"operationIds": [1]}),
-)
-def test_put_airbyte_connection_v1_with_normalization_with_opids(orguser_workspace):
-    """tests PUT /v1/connections/{connection_id}/update succes with normalization with opids"""
-    payload = AirbyteConnectionUpdate(
-        name="connection-block-name", streams=[1], normalize=True
-    )
-    connection_id = "connection_id"
-    request = mock_request(orguser_workspace)
-
-    airbyte_task_config = {
-        "type": "airbyte",
-        "slug": "airbyte-sync",
-        "label": "AIRBYTE sync",
-        "command": None,
-    }
-    task = Task.objects.create(**airbyte_task_config)
-
-    OrgTask.objects.create(
-        task=task, org=request.orguser.org, connection_id=connection_id
-    )
-
-    warehouse = OrgWarehouse.objects.create(
-        org=request.orguser.org, airbyte_destination_id="airbyte_destination_id"
-    )
-
-    update_connection_mock = MagicMock()
-    with patch(
-        "ddpui.ddpairbyte.airbyte_service.update_connection"
-    ) as update_connection_mock:
-        put_airbyte_connection_v1(request, connection_id, payload)
-
-    connection = {
-        "operationIds": [1],
-        "name": payload.name,
-        "skipReset": False,
-    }
-    payload.destinationId = warehouse.airbyte_destination_id
-    update_connection_mock.assert_called_with(
-        request.orguser.org.airbyte_workspace_id, payload, connection
-    )
-
-
-@patch.multiple(
-    "ddpui.ddpairbyte.airbyte_service",
-    get_connection=Mock(return_value={"operationIds": []}),
-    create_normalization_operation=Mock(return_value={"operationId": "norm-op-id"}),
-)
-def test_put_airbyte_connection_v1_with_normalization_without_opids(orguser_workspace):
-    """tests PUT /v1/connections/{connection_id}/update succes with normalization without opids"""
-    payload = AirbyteConnectionUpdate(
-        name="connection-block-name", streams=[1], normalize=True
-    )
-    connection_id = "connection_id"
-    request = mock_request(orguser_workspace)
-
-    airbyte_task_config = {
-        "type": "airbyte",
-        "slug": "airbyte-sync",
-        "label": "AIRBYTE sync",
-        "command": None,
-    }
-    task = Task.objects.create(**airbyte_task_config)
-
-    OrgTask.objects.create(
-        task=task, org=request.orguser.org, connection_id=connection_id
-    )
-
-    warehouse = OrgWarehouse.objects.create(
-        org=request.orguser.org, airbyte_destination_id="airbyte_destination_id"
-    )
-
-    update_connection_mock = MagicMock()
-    with patch(
-        "ddpui.ddpairbyte.airbyte_service.update_connection"
-    ) as update_connection_mock:
-        put_airbyte_connection_v1(request, connection_id, payload)
-
-    warehouse.refresh_from_db()
-    assert warehouse.airbyte_norm_op_id == "norm-op-id"
-
-    connection = {
-        "operationIds": [warehouse.airbyte_norm_op_id],
         "name": payload.name,
         "skipReset": False,
     }
@@ -1085,13 +966,17 @@ def test_update_schema_changes_connection_with_no_workspace(orguser):
 
 # write success test case for update_connection_schema
 
+
 def test_update_schema_changes_connection_success(orguser_workspace):
     """Tests update_connection_schema when updating schema changes is successful"""
     request = mock_request(orguser_workspace)
 
     connection_id = "connection_123"
     payload = AirbyteConnectionSchemaUpdate(
-        name="Updated Connection", connectionId="connection_123", syncCatalog={}, sourceCatalogId="source_catalog_id"
+        name="Updated Connection",
+        connectionId="connection_123",
+        syncCatalog={},
+        sourceCatalogId="source_catalog_id",
     )
 
     with patch(
@@ -1102,7 +987,7 @@ def test_update_schema_changes_connection_success(orguser_workspace):
             "name": "Updated Connection",
             "syncCatalog": {},
             "catalogId": "source_catalog_id",
-            "schemaChange": "no_change"
+            "schemaChange": "no_change",
         }
         update_schema_changes_connection_mock.return_value = (updated_connection, None)
 
