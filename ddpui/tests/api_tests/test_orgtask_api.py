@@ -28,9 +28,6 @@ from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask, Task
 from ddpui.utils.constants import TASK_DBTDEPS, TASK_GITPULL, TASK_GENERATE_EDR
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
-from ddpui.tests.core.test_orgtaskfunctions import (
-    seed_master_tasks as seed_master_tasks_edr,
-)
 
 pytestmark = pytest.mark.django_db
 
@@ -460,7 +457,7 @@ def test_post_run_prefect_org_task_dbt_deps_success(orguser_transform_tasks):
 
 
 def test_post_run_prefect_org_task_generate_edr(
-    orguser_dbt_workspace, seed_master_tasks_edr, seed_db
+    orguser_dbt_workspace, seed_master_tasks_db, seed_db
 ):
     """tests POST /tasks/{orgtask_uuid}/run/ success"""
 
