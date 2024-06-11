@@ -13,10 +13,11 @@ https://docs.djangoproject.com/en/4.1/ref/settings/
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+from corsheaders.defaults import default_headers
 from ddpui.utils.django_logger import setup_logger as setup_django_logger
 from ddpui.utils.ddp_logger import setup_logger as setup_ddp_logger
 from ddpui.utils.ab_logger import setup_logger as setup_ab_logger
-from corsheaders.defaults import default_headers
+from ddpui.utils.flags import org_condition
 
 load_dotenv()
 
@@ -31,7 +32,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv("DJANGOSECRET")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv("DEBUG", "") == "True"
+DEBUG = "True"
 
 # CORS
 ALLOWED_HOSTS = [
@@ -67,7 +68,10 @@ INSTALLED_APPS = [
     "ddpui",
     "django_prometheus",
     "django_extensions",
+    "flags",
 ]
+
+FLAGS = {"AIRBYTE_PROFILE": []}
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [

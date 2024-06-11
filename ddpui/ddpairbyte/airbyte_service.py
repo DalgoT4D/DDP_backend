@@ -5,10 +5,12 @@ These functions do not access the Dalgo database
 """
 
 from typing import Dict, List
+import os
 import requests
 from dotenv import load_dotenv
 from ninja.errors import HttpError
 from django.utils.text import slugify
+from flags.state import flag_enabled
 from ddpui.ddpairbyte import schema
 from ddpui.ddpprefect import prefect_service, AIRBYTESERVER
 from ddpui.models.org import Org
@@ -33,22 +35,27 @@ def abreq(endpoint, req=None, **kwargs):
     """Request to the airbyte server"""
     request = thread.get_current_request()
     org_user = request.orguser
-    org_slug = org_user.org.slug
 
-    block_name = f"{org_slug}-{slugify(AIRBYTESERVER)}"
+    if flag_enabled("AIRBYTE_PROFILE", request_org_id=str(org_user.org.id)):
+        org_slug = org_user.org.slug
+        block_name = f"{org_slug}-{slugify(AIRBYTESERVER)}"
+        try:
+            airbyte_server_block = prefect_service.get_airbyte_server_block(block_name)
+        except Exception as exc:
+            raise Exception("could not connect to prefect-proxy") from exc
 
-    try:
-        airbyte_server_block = prefect_service.get_airbyte_server_block(block_name)
-    except Exception as exc:
-        raise Exception("could not connect to prefect-proxy") from exc
+        abhost = airbyte_server_block["host"]
+        abport = airbyte_server_block["port"]
+        abver = airbyte_server_block["version"]
+        token = airbyte_server_block["token"]
 
-    abhost = airbyte_server_block["host"]
-    abport = airbyte_server_block["port"]
-    abver = airbyte_server_block["version"]
-    token = airbyte_server_block["token"]
+    else:
+        abhost = os.getenv("AIRBYTE_SERVER_HOST")
+        abport = os.getenv("AIRBYTE_SERVER_PORT")
+        abver = os.getenv("AIRBYTE_SERVER_APIVER")
+        token = os.getenv("AIRBYTE_API_TOKEN")
 
     logger.info("Making request to Airbyte server: %s", endpoint)
-
     try:
         res = requests.post(
             f"http://{abhost}:{abport}/api/{abver}/{endpoint}",
