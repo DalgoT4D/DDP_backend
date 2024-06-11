@@ -7,23 +7,12 @@ import pytest
 from ddpui.models.org import Org
 from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.models.tasks import Task
+from ddpui.tests.api_tests.test_pipeline_api import seed_master_tasks_db
 
 pytestmark = pytest.mark.django_db
 
 
-@pytest.fixture
-def seed_master_tasks():
-    """seeds the tasks table"""
-    app_dir = os.path.join(Path(apps.get_app_config("ddpui").path), "..")
-    seed_dir = os.path.abspath(os.path.join(app_dir, "seed"))
-    with open(os.path.join(seed_dir, "tasks.json"), encoding="utf8") as f:
-        tasks = json.load(f)
-        for task in tasks:
-            if not Task.objects.filter(slug=task["fields"]["slug"]).exists():
-                Task.objects.create(**task["fields"])
-
-
-def test_get_edr_send_report_task(seed_master_tasks):
+def test_get_edr_send_report_task(seed_master_tasks_db):
     """test get_edr_send_report_task"""
 
     org = Org.objects.create(name="del", slug="del")
