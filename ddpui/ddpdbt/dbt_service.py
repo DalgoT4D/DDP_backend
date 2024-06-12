@@ -1,3 +1,5 @@
+import re
+from uuid import uuid4
 import glob
 import os
 import shutil
@@ -5,8 +7,6 @@ from datetime import datetime
 import subprocess
 from pathlib import Path
 import requests
-import re
-from uuid import uuid4
 import boto3
 import boto3.exceptions
 
@@ -22,6 +22,7 @@ from ddpui.models.org_user import Org
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask
 from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.utils import secretsmanager
+from ddpui.utils.timezone import as_ist
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.redis_client import RedisClient
@@ -279,4 +280,12 @@ def make_elementary_report(org: Org):
     redis.expire(redis_key, 3600 * 24)
     logger.info("created redis key %s", redis_key)
 
-    return None, {"token": token.hex}
+    return None, {
+        "token": token.hex,
+        "created_on_utc": s3response[
+            "LastModified"
+        ].isoformat(),  # e.g. 2024-06-07T00:44:08+00:00
+        "created_on_ist": as_ist(
+            s3response["LastModified"]
+        ).isoformat(),  # e.g. 2024-06-07T06:14:08+05:30
+    }
