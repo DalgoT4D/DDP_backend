@@ -32,7 +32,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
 
-from ddpui.celeryworkers.tasks import sync_flow_runs_of_deployments
+from ddpui.celeryworkers.tasks import get_connection_catalog_task, sync_flow_runs_of_deployments
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
 logger = CustomLogger("airbyte")
@@ -632,9 +632,11 @@ def get_connection_catalog_v1(request, connection_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    res, error = airbytehelpers.get_connection_catalog(orguser.org, connection_id)
-    if error:
-        raise HttpError(400, error)
+    org_dict = orguser.org.__dict__
+    org_dict.pop('_state')
+    task = get_connection_catalog_task.delay(org_dict, connection_id)
+    res = task.get()
+
     return res
 
 

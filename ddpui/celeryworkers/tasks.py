@@ -29,7 +29,7 @@ from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
-from ddpui.ddpairbyte import airbyte_service
+from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 from ddpui.ddpprefect.prefect_service import (
     update_dbt_core_block_schema,
     get_dbt_cli_profile_block,
@@ -430,6 +430,19 @@ def schema_change_detection():
             send_schema_changes_email(
                 org.name, orguser.user.email, breaking_changes, non_breaking_changes
             )
+
+
+@app.task(bind=True)
+def get_connection_catalog_task(self, org, connection_id):
+    """Fetch a connection in the user organization workspace as a Celery task"""
+    try:
+        res, error = airbytehelpers.get_connection_catalog(org, connection_id)
+        if error:
+            raise Exception(error)
+        return res
+    except Exception as e:
+        logger.error(f"Error getting catalog for connection {connection_id}: {e}")
+        return f"Error getting catalog for connection {connection_id}: {e}"
 
 
 @app.task(bind=True)
