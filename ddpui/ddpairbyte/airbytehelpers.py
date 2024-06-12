@@ -555,6 +555,45 @@ def get_job_info_for_connection(org: Org, connection_id: str):
     return job_info, None
 
 
+def get_sync_job_history_for_connection(
+    org: Org, connection_id: str, limit: int = 10, offset: int = 0
+):
+    """
+    Get all sync jobs (paginated) for a connection
+    Returns
+    - Date
+    - Records synced
+    - Bytes synced
+    - Duration
+    - logs
+
+    In case there no sync jobs, return an empty list
+    """
+
+    org_task = OrgTask.objects.filter(
+        org=org,
+        connection_id=connection_id,
+        task__slug=TASK_AIRBYTESYNC,
+    ).first()
+
+    if org_task is None:
+        return None, "connection not found"
+
+    res = {"history": [], "totalSyncs": 0}
+    result = airbyte_service.get_jobs_for_connection(connection_id, limit, offset)
+    res["totalSyncs"] = result["totalJobCount"]
+    if len(result["jobs"]) == 0:
+        return []
+
+    for job in result["jobs"]:
+        job_info = airbyte_service.parse_job_info(job)
+        logs = airbyte_service.get_logs_for_job(job_info["job_id"])
+        job_info["logs"] = logs["logs"]["logLines"]
+        res["history"].append(job_info)
+
+    return res, None
+
+
 def update_destination(
     org: Org, destination_id: str, payload: AirbyteDestinationUpdate
 ):
