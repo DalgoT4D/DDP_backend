@@ -220,6 +220,30 @@ def check_repo_exists(gitrepo_url: str, gitrepo_access_token: str | None) -> boo
     return response.status_code == 200
 
 
+def make_edr_report_s3_path(org: Org):
+    """make s3 path for elementary report"""
+    todays_date = datetime.today().strftime("%Y-%m-%d")
+    bucket_file_path = f"reports/{org.slug}.{todays_date}.html"
+    return bucket_file_path
+
+
+def refresh_elementary_report(org: Org):
+    """refreshes the elementary report for the current date"""
+    running_task = TaskProgress.get_running_tasks(
+        f"{TaskProgressHashPrefix.RUNELEMENTARY}-{org.slug}"
+    )
+    logger.info("running_task %s", str(running_task))
+    if running_task and len(running_task) > 0:
+        logger.info("edr already running for org %s", org.slug)
+        task_id = running_task[0].decode("utf8")
+        return task_id
+
+    bucket_file_path = make_edr_report_s3_path(org)
+    logger.info("creating new elementary report at %s", bucket_file_path)
+    task = create_elementary_report.delay(org.id, bucket_file_path)
+    return task.id
+
+
 def make_elementary_report(org: Org):
     """generate elementary report"""
     if org.dbt is None:
@@ -239,8 +263,7 @@ def make_elementary_report(org: Org):
         aws_access_key_id=os.getenv("ELEMENTARY_AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=os.getenv("ELEMENTARY_AWS_SECRET_ACCESS_KEY"),
     )
-    todays_date = datetime.today().strftime("%Y-%m-%d")
-    bucket_file_path = f"reports/{org.slug}.{todays_date}.html"
+    bucket_file_path = make_edr_report_s3_path(org)
     try:
         s3response = s3.get_object(
             Bucket=os.getenv("ELEMENTARY_S3_BUCKET"),
@@ -250,19 +273,8 @@ def make_elementary_report(org: Org):
     except boto3.exceptions.botocore.exceptions.ClientError:
         # the report doesn't exist, trigger a celery task to generate it
         # see if there is an existing TaskProgress for this org
-        running_task = TaskProgress.get_running_tasks(
-            f"{TaskProgressHashPrefix.RUNELEMENTARY}-{org.slug}"
-        )
-        logger.info("running_task %s", str(running_task))
-        if running_task and len(running_task) > 0:
-            logger.info("edr already running for org %s", org.slug)
-            task_id = running_task[0].decode("utf8")
-            return None, {"task_id": task_id}
-
-        logger.info("creating new elementary report")
-        task = create_elementary_report.delay(org.id, bucket_file_path)
-        logger.info(task.id)
-        return None, {"task_id": task.id}
+        task_id = refresh_elementary_report(org)
+        return None, {"task_id": task_id}
     except Exception:
         return "error fetching elementary report", None
 

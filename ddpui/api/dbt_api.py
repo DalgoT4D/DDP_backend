@@ -271,3 +271,15 @@ def post_make_elementary_report(request):
         raise HttpError(400, error)
 
     return result
+
+
+@dbtapi.post("/refresh-elementary-report/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_dbt_workspace"])
+def post_refresh_elementary_report(request):
+    """prepare the dbt docs single html"""
+    orguser: OrgUser = request.orguser
+    error, result = dbt_service.refresh_elementary_report(orguser.org)
+    if error:
+        raise HttpError(400, error)
+
+    return result
