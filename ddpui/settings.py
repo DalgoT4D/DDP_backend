@@ -71,6 +71,7 @@ INSTALLED_APPS = [
     "flags",
 ]
 
+# Feature flag to get airbyte credentials through prefect block
 FLAGS = {"AIRBYTE_PROFILE": []}
 
 REST_FRAMEWORK = {

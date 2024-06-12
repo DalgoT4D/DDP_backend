@@ -24,6 +24,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteDestinationUpdateCheckConnection,
 )
 from ddpui.utils import thread
+from ddpui.models.org import OrgPrefectBlockv1
 
 load_dotenv()
 
@@ -42,10 +43,18 @@ def abreq(endpoint, req=None, **kwargs):
 
     if request is not None:
         org_user = request.orguser
+        org_slug = org_user.org.slug
+        if flag_enabled("AIRBYTE_PROFILE", request_org_slug=org_slug):
 
-        if flag_enabled("AIRBYTE_PROFILE", request_org_id=str(org_user.org.id)):
-            org_slug = org_user.org.slug
-            block_name = f"{org_slug}-{slugify(AIRBYTESERVER)}"
+            org_server_block = OrgPrefectBlockv1.objects.filter(
+                org=org_user.org, block_type=AIRBYTESERVER
+            ).first()
+
+            if not org_server_block:
+                raise HttpError(400, "airbyte server block not found")
+
+            block_name = org_server_block.block_name
+
             try:
                 airbyte_server_block = prefect_service.get_airbyte_server_block(
                     block_name
@@ -53,6 +62,9 @@ def abreq(endpoint, req=None, **kwargs):
             except Exception as exc:
                 raise Exception("could not connect to prefect-proxy") from exc
 
+            logger.info(
+                "Making request to Airbyte server through prefect block: %s", endpoint
+            )
             abhost = airbyte_server_block["host"]
             abport = airbyte_server_block["port"]
             abver = airbyte_server_block["version"]
