@@ -14,7 +14,7 @@ from ddpui.ddpairbyte import schema
 from ddpui.models.org import Org
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.deploymentblocks import trigger_reset_and_sync_workflow
-from ddpui.utils.helpers import remove_nested_attribute
+from ddpui.utils.helpers import remove_nested_attribute, nice_bytes
 from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
     AirbyteDestinationCreate,
@@ -876,23 +876,21 @@ def parse_job_info(jobinfo: dict) -> dict:
         "status": jobinfo["job"]["status"],
         "date": None,
         "recordsSynced": 0,
-        "bytesSynced": 0,
+        "bytesSynced": nice_bytes(0),
         "recordsEmitted": 0,
-        "bytesEmitted": 0,
+        "bytesEmitted": nice_bytes(0),
         "recordsCommitted": 0,
         "totalTimeInSeconds": 0,
     }
     for attempt in jobinfo["attempts"]:
         if attempt["status"] == "succeeded":
             retval["recordsSynced"] = attempt["recordsSynced"]
-            retval["bytesSynced"] = attempt["bytesSynced"]
+            retval["bytesSynced"] = nice_bytes(attempt["bytesSynced"])
             retval["recordsEmitted"] = attempt["totalStats"]["recordsEmitted"]
-            retval["bytesEmitted"] = attempt["totalStats"]["bytesEmitted"]
+            retval["bytesEmitted"] = nice_bytes(attempt["totalStats"]["bytesEmitted"])
             retval["recordsCommitted"] = attempt["totalStats"]["recordsCommitted"]
             retval["totalTimeInSeconds"] = attempt["endedAt"] - attempt["createdAt"]
-            retval["date"] = datetime.fromtimestamp(
-                attempt["endedAt"]
-            ).date()
+            retval["date"] = datetime.fromtimestamp(attempt["endedAt"]).date()
             break
     return retval
 
