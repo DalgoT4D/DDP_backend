@@ -587,7 +587,7 @@ def get_latest_job_for_connection(request, connection_id):
     "/v1/connections/{connection_id}/sync/history", auth=auth.CustomAuthMiddleware()
 )
 @has_permission(["can_view_connection"])
-def get_latest_job_for_connection(
+def get_sync_history_for_connection(
     request, connection_id, limit: int = 10, offset: int = 0
 ):
     """get the job info from airbyte for a connection"""

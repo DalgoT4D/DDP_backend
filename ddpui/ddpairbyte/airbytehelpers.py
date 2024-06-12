@@ -583,7 +583,7 @@ def get_sync_job_history_for_connection(
     result = airbyte_service.get_jobs_for_connection(connection_id, limit, offset)
     res["totalSyncs"] = result["totalJobCount"]
     if len(result["jobs"]) == 0:
-        return []
+        return [], None
 
     for job in result["jobs"]:
         job_info = airbyte_service.parse_job_info(job)
