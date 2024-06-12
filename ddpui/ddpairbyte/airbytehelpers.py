@@ -19,11 +19,12 @@ from ddpui.ddpairbyte.schema import (
 )
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
+    PrefectDataFlowUpdateSchema3,
 )
 from ddpui.ddpprefect import AIRBYTESERVER
 from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.models.org import OrgDataFlowv1, OrgWarehouse
-from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskLock
+from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask
 from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTERESET
 from ddpui.utils.helpers import generate_hash_id, update_dict_but_not_stars
 from ddpui.utils import secretsmanager
@@ -497,34 +498,72 @@ def delete_connection(org: Org, connection_id: str):
 
     dataflows_to_delete: list[OrgDataFlowv1] = []
     orgtask_to_delete: list[OrgTask] = []
+
+    # delete manual-sync and manual-reset dataflows
     for org_task in OrgTask.objects.filter(
         org=org,
         connection_id=connection_id,
-    ).all():
-        for dataflow_orgtask in DataflowOrgTask.objects.filter(orgtask=org_task).all():
+    ):
+        for dataflow_orgtask in DataflowOrgTask.objects.filter(
+            orgtask=org_task, dataflow__dataflow_type="manual"
+        ):
             dataflows_to_delete.append(dataflow_orgtask.dataflow)
+            logger.info("will delete %s", dataflow_orgtask.dataflow.deployment_name)
 
         orgtask_to_delete.append(org_task)
 
     # delete all deployments
-    logger.info("deleting prefect deployment")
     for dataflow in dataflows_to_delete:
+        logger.info("deleting prefect deployment %s", dataflow.deployment_name)
         prefect_service.delete_deployment_by_id(dataflow.deployment_id)
 
     # delete all dataflows
-    logger.info("deleting org dataflow from db")
+    logger.info("deleting org dataflows from db")
     for dataflow in dataflows_to_delete:
         # if there is a reset and a sync then the dataflow will appear twice in this list
         if dataflow.id:
             dataflow.delete()
 
+    # remove from orchestration dataflows
+    for org_task in OrgTask.objects.filter(
+        org=org,
+        connection_id=connection_id,
+    ):
+        # this org_task is already in the to_delete list from above
+
+        for dataflow_orgtask in DataflowOrgTask.objects.filter(
+            orgtask=org_task, dataflow__dataflow_type="orchestrate"
+        ):
+            # fetch config from prefect
+            deployment = prefect_service.get_deployment(
+                dataflow_orgtask.dataflow.deployment_id
+            )
+            # { name, deploymentId, tags, cron, isScheduleActive, parameters }
+            # parameters = {config: {org_slug, tasks}}
+            # tasks = list of
+            #    {seq, slug, type, timeout, orgtask__uuid, connection_id, airbyte_server_block}
+            parameters = deployment["parameters"]
+            # logger.info(parameters)
+            for task in parameters["config"]["tasks"]:
+                if task["connection_id"] == connection_id:
+                    logger.info(f"deleting task {task['slug']} from deployment")
+                    parameters["config"]["tasks"].remove(task)
+            # logger.info(parameters)
+            payload = PrefectDataFlowUpdateSchema3(deployment_params=parameters)
+            prefect_service.update_dataflow_v1(
+                dataflow_orgtask.dataflow.deployment_id, payload
+            )
+            logger.info(
+                "updated deployment %s", dataflow_orgtask.dataflow.deployment_name
+            )
+
     # delete all orgtasks
-    logger.info("deleting orgtask")
     for org_task in orgtask_to_delete:
+        logger.info("deleting orgtask %s", org_task.task.slug)
         org_task.delete()
 
     # delete airbyte connection
-    logger.info("deleting airbyte connection")
+    logger.info("deleting airbyte connection %s", connection_id)
     airbyte_service.delete_connection(org.airbyte_workspace_id, connection_id)
 
     return None, None
