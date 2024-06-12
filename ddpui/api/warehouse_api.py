@@ -21,6 +21,7 @@ from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.datainsights.generate_result import GenerateResult, poll_for_column_insights
 
 from ddpui.schemas.warehouse_api_schemas import RequestorColumnSchema
+from ddpui.utils import secretsmanager
 
 warehouseapi = NinjaAPI(urls_namespace="warehouse")
 logger = CustomLogger("ddpui")
