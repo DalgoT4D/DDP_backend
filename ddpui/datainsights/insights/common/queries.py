@@ -52,7 +52,10 @@ class BaseDataStats(ColInsight):
             )
 
             # distinct count
-            if col.translated_type == TranslateColDataType.JSON:
+            if (
+                col.translated_type == TranslateColDataType.JSON
+                and self.wtype == "bigquery"
+            ):
                 query = query.add_column(
                     literal(None).label(f"countDistinct__{col.name}")
                 )
