@@ -221,9 +221,21 @@ class StringLengthStats(ColInsight):
         if len(result) > 0:
             return {
                 self.columns[0].name: {
-                    "mean": float(result[0]["mean"]),
-                    "median": float(result[0]["median"]),
-                    "mode": float(result[0]["mode"]),
+                    "mean": (
+                        float(result[0]["mean"])
+                        if result[0]["mean"]
+                        else result[0]["mean"]
+                    ),
+                    "median": (
+                        float(result[0]["median"])
+                        if result[0]["median"]
+                        else result[0]["median"]
+                    ),
+                    "mode": (
+                        float(result[0]["mode"])
+                        if result[0]["mode"]
+                        else result[0]["mode"]
+                    ),
                 }
             }
 
