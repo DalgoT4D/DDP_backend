@@ -132,6 +132,43 @@ def poll_for_column_insights(
         org_warehouse.org, wclient, requestor_col
     )
 
+    # if filter is present; run query & return result directly without saving to org results
+    if requestor_col.filter:
+        query_results = GenerateResult.execute_insight_queries(
+            org_warehouse.org, wclient, execute_queries, requestor_col
+        )
+        current = GenerateResult.fetch_results(
+            org_warehouse.org,
+            requestor_col.db_schema,
+            requestor_col.db_table,
+        )
+        final = {}
+        # there should be only one query result
+        if len(query_results) == 1:
+            final = GenerateResult.merge_results(current, query_results[0])[
+                requestor_col.column_name
+            ]
+
+        # return the saved results
+        if GenerateResult.validate_results(execute_queries, final):
+            taskprogress.add(
+                {
+                    "message": "Fetched results",
+                    "status": GenerateResult.RESULT_STATUS_COMPLETED,
+                    "results": final,
+                }
+            )
+            return
+        else:
+            taskprogress.add(
+                {
+                    "message": "Partial data fetched",
+                    "status": GenerateResult.RESULT_STATUS_ERROR,
+                    "results": [],
+                }
+            )
+        return
+
     # fetch the results from redis and see if they can be returned
     final_result = GenerateResult.fetch_results(
         org_warehouse.org,
@@ -141,10 +178,8 @@ def poll_for_column_insights(
     )
 
     # if results from redis are partial; re-compute them
-    if (
-        requestor_col.refresh
-        or requestor_col.filter
-        or not GenerateResult.validate_results(execute_queries, final_result)
+    if requestor_col.refresh or not GenerateResult.validate_results(
+        execute_queries, final_result
     ):
         GenerateResult.execute_insight_queries(
             org_warehouse.org, wclient, execute_queries, requestor_col
@@ -224,9 +259,11 @@ class GenerateResult:
 
         logger.info(f"Total number of queries to executed {len(execute_queries)}")
 
+        output_of_all_queries = []
         # acquire & run the queries lock for all queries
         for query in execute_queries:
-            if cls.acquire_query_lock(org, query):
+            is_filter = True if requestor_col.filter else False
+            if cls.acquire_query_lock(org, query, force_acquire=is_filter):
                 # run the queries and save results
                 logger.info(
                     f"Lock acquired & running the query: {query.query_id()} for col: {requestor_col.column_name}"
@@ -236,13 +273,18 @@ class GenerateResult:
                     stmt = stmt.compile(
                         bind=wclient.engine, compile_kwargs={"literal_binds": True}
                     )
+                    logger.info(stmt)
                     results = wclient.execute(stmt)
 
                     # parse result of this query
                     results = query.parse_results(results)
+                    output_of_all_queries.append(results)
 
-                    # save result to redis
-                    cls.save_results(org, query, results)
+                    # when you are just filtering on an insight or chart; we dont update the saved org results
+                    # instead just return result below
+                    if not is_filter:
+                        # save result to redis
+                        cls.save_results(org, query, results)
 
                     # release the lock for this query
                     cls.release_query_lock(org, query)
@@ -252,6 +294,8 @@ class GenerateResult:
                     )
                     logger.error(err)
                     cls.release_query_lock(org, query, force_expire=True)
+
+        return output_of_all_queries
 
     @classmethod
     def is_query_locked(cls, query_payload: str, check_expiry: bool = False) -> bool:
@@ -285,7 +329,9 @@ class GenerateResult:
             return False
 
     @classmethod
-    def acquire_query_lock(cls, org: Org, query: ColInsight) -> bool:
+    def acquire_query_lock(
+        cls, org: Org, query: ColInsight, force_acquire: bool = False
+    ) -> bool:
         """
         Acquire lock to run the query: return True
         Poll till you get the lock
@@ -294,6 +340,9 @@ class GenerateResult:
         key = query.query_id()
 
         redis = RedisClient.get_instance()
+
+        if force_acquire:
+            cls.release_query_lock(org, query, force_expire=True)
 
         run_query = False
 
@@ -356,6 +405,18 @@ class GenerateResult:
         return None
 
     @classmethod
+    def merge_results(cls, current: dict, parsed: dict) -> dict:
+        current_results = current if current else {}
+        parsed_results = parsed if parsed else {}
+
+        merged_results = {
+            key: {**current_results.get(key, {}), **parsed_results.get(key, {})}
+            for key in set(current_results) | set(parsed_results)
+        }
+
+        return merged_results
+
+    @classmethod
     def save_results(cls, org: Org, query: ColInsight, parsed_results: dict) -> None:
         """Save results to redis"""
         # place to the save the results in redis should be created
@@ -366,13 +427,7 @@ class GenerateResult:
         if lock.acquire():
             current_results = cls.fetch_results(org, query.db_schema, query.db_table)
 
-            current_results = current_results if current_results else {}
-            parsed_results = parsed_results if parsed_results else {}
-
-            merged_results = {
-                key: {**current_results.get(key, {}), **parsed_results.get(key, {})}
-                for key in set(current_results) | set(parsed_results)
-            }
+            final_result = cls.merge_results(current_results, parsed_results)
 
             # save results to redis
             hash = cls.build_insights_hash_to_store_results(
@@ -380,7 +435,7 @@ class GenerateResult:
             )
             key = f"{query.db_schema}-{query.db_table}"
 
-            redis.hset(hash, key, json.dumps(merged_results))
+            redis.hset(hash, key, json.dumps(final_result))
             if redis.ttl(hash) < 0:
                 redis.expire(hash, cls.ORG_INSIGHTS_EXPIRY)
 
