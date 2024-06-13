@@ -223,17 +223,17 @@ class StringLengthStats(ColInsight):
                 self.columns[0].name: {
                     "mean": (
                         float(result[0]["mean"])
-                        if result[0]["mean"]
+                        if result[0]["mean"] is None
                         else result[0]["mean"]
                     ),
                     "median": (
                         float(result[0]["median"])
-                        if result[0]["median"]
+                        if result[0]["median"] is None
                         else result[0]["median"]
                     ),
                     "mode": (
                         float(result[0]["mode"])
-                        if result[0]["mode"]
+                        if result[0]["mode"] is None
                         else result[0]["mode"]
                     ),
                 }
