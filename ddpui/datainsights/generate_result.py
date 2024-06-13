@@ -254,6 +254,37 @@ class GenerateResult:
                     cls.release_query_lock(org, query, force_expire=True)
 
     @classmethod
+    def is_query_locked(cls, query_payload: str, check_expiry: bool = False) -> bool:
+        """
+        Input is the query string picked from redis, can be none if query key is not present in redis
+        payload: {"status": "fetching", "expire_at": "2021-09-01}
+        """
+        if query_payload is None:
+            return False
+
+        try:
+            is_locked = False
+            payload = json.loads(query_payload)
+            if "status" in payload:
+                if payload["status"] != GenerateResult.RESULT_STATUS_COMPLETED:
+                    is_locked = True
+                else:
+                    if check_expiry:
+                        # check for expiry, query remains locked until it expires
+                        expire_at = payload["expire_at"]
+                        if expire_at:
+                            query_expiry_at = datetime.fromisoformat(expire_at)
+                            diff = datetime.now() - query_expiry_at
+                            if diff.total_seconds() < cls.QUERY_LOCK_TIME:
+                                is_locked = True
+
+            return is_locked
+
+        except Exception as e:
+            logger.error(f"Could not convert query payload {query_payload} to json")
+            return False
+
+    @classmethod
     def acquire_query_lock(cls, org: Org, query: ColInsight) -> bool:
         """
         Acquire lock to run the query: return True
@@ -262,44 +293,28 @@ class GenerateResult:
         hash = GenerateResult.build_queries_locking_hash(org, query)
         key = query.query_id()
 
-        # logger.info(f"Acquiring lock for query hash: {key}")
-
-        query_status = {
-            "status": GenerateResult.RESULT_STATUS_FETCHING,
-            "expire_at": str(
-                datetime.now().isoformat()
-            ),  # will help the scheduler release locks
-        }
-
         redis = RedisClient.get_instance()
 
-        is_locked = False
+        run_query = False
+
         current_lock = redis.hget(hash, key)
-        if current_lock is not None:
-            is_locked = True
-
-        if is_locked is False:
-            logger.info("creating the hash for queries")
-            # set if key does not exist
-            if redis.hsetnx(hash, key, json.dumps(query_status)):
-                pass
-            else:
-                is_locked = True
-
-        if is_locked:
-            # poll for the lock till it releases basically till the query finishes running
-            current_lock = redis.hget(hash, key)
-            query_status = json.loads(current_lock) if current_lock else None
-            while (
-                query_status
-                and "status" in query_status
-                and query_status["status"] != GenerateResult.RESULT_STATUS_COMPLETED
-            ):
+        if cls.is_query_locked(current_lock, check_expiry=True):
+            # poll for the lock till it releases
+            # expiry is longer so we dont wait till then
+            while cls.is_query_locked(current_lock):
+                logger.info(f"Polling query id : {key}")
                 time.sleep(1)
                 current_lock = redis.hget(hash, key)
-                query_status = json.loads(current_lock) if current_lock else None
+        else:
+            # create a new lock
+            logger.info("creating a new lock the query")
+            payload = {
+                "status": GenerateResult.RESULT_STATUS_FETCHING,
+                "expire_at": str(datetime.now().isoformat()),
+            }
+            redis.hset(hash, key, json.dumps(payload))
 
-        run_query = not is_locked
+            run_query = True
 
         return run_query
 
@@ -326,24 +341,14 @@ class GenerateResult:
         if query_lock.acquire():
             query_status = redis.hget(hash, key)
             if query_status:
-                is_expired = False
-
                 query_status = json.loads(query_status)
                 query_status["status"] = GenerateResult.RESULT_STATUS_COMPLETED
 
                 logger.info("updating the status of query to completed")
                 redis.hset(hash, key, json.dumps(query_status))
 
-                expire_at = (
-                    query_status["expire_at"] if "expire_at" in query_status else None
-                )
-                if expire_at:
-                    query_expiry_at = datetime.fromisoformat(expire_at)
-                    diff = datetime.now() - query_expiry_at
-                    if diff.total_seconds() >= cls.QUERY_LOCK_TIME:
-                        is_expired = True
-
-                if is_expired:
+                query_status = redis.hget(hash, key)
+                if not cls.is_query_locked(query_status, check_expiry=True):
                     logger.info("clearing the query hash since it has expired")
                     redis.hdel(hash, key)
 
