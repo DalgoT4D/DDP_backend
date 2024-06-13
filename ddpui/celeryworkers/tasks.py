@@ -419,16 +419,17 @@ def schema_change_detection():
                 continue
 
     for org, changes in schema_changes.items():
-        breaking_changes = changes["breaking"]
-        non_breaking_changes = changes["non_breaking"]
-
         org_users = OrgUser.objects.filter(
             org=org, new_role__slug__in=[ACCOUNT_MANAGER_ROLE, PIPELINE_MANAGER_ROLE]
         )
+        message = """We are sending you this email to let you know about the schema modifications 
+                    that admin@dalgo.in has done in the platform. Please take some time to go over, review,
+                    and approve the schema changes
+                """
         for orguser in org_users:
             logger.info(f"sending notification email to {orguser.user.email}")
             send_schema_changes_email(
-                org.name, orguser.user.email, breaking_changes, non_breaking_changes
+                org.name, orguser.user.email, message
             )
 
 
