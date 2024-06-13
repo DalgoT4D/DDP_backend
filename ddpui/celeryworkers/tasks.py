@@ -434,9 +434,10 @@ def schema_change_detection():
 
 
 @app.task(bind=True)
-def get_connection_catalog_task(self, org, connection_id):
+def get_connection_catalog_task(self, org_dict, connection_id):
     """Fetch a connection in the user organization workspace as a Celery task"""
     try:
+        org = Org(**org_dict)
         res, error = airbytehelpers.get_connection_catalog(org, connection_id)
         if error:
             raise Exception(error)
