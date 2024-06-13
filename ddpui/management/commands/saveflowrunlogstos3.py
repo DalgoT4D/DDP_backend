@@ -53,8 +53,11 @@ class Command(BaseCommand):
                 flow_run_id = flow_run["id"]
                 all_task_logs = prefect_service.get_flow_run_logs_v2(flow_run_id)
                 for task_logs in all_task_logs:
-                    if "logs" in task_logs["logs"]:
+                    if "logs" in task_logs:
                         label = task_logs["label"]
+                        print(
+                            f"Found logs for flow_run_id : {flow_run_id} and for task : {label}"
+                        )
 
                         # check which slug is embedded in the label
                         # do string operation & get index of substring
@@ -69,7 +72,7 @@ class Command(BaseCommand):
 
                         # upload logs for the current flow_run_id under the task_slug
                         flow_run_logs = task_logs["logs"]
-                        s3key = f"logs/dbt/{org}/{flow_run_id}/{task_slug}/.json"
+                        s3key = f"logs/dbt/{org}/{flow_run_id}/{task_slug}.json"
                         s3.put_object(
                             Bucket="dalgo-t4dai",
                             Key=s3key,
