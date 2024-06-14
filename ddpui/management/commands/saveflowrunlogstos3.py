@@ -184,6 +184,6 @@ class Command(BaseCommand):
             aws_access_key_id=options["aws_access_key_id"],
             aws_secret_access_key=options["aws_secret"],
         )
-        # self.fetch_airbyte_logs(org, s3)
+        self.fetch_airbyte_logs(org, s3)
         self.fetch_grouped_task_prefect_logs_from_deployments(org, s3)
         # self.fetch_prefect_logs_from_deployments(org, s3)
