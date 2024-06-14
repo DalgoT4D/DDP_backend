@@ -45,18 +45,23 @@ class Command(BaseCommand):
         fetches logs grouped by pipeline task for all deployments of an org and saves them to s3 bucket
         push only dbt related task's logs
         """
-        dbt_tasks = Task.objects.filter(type="dbt").all()
-        dbt_slugs = [task.slug for task in dbt_tasks]
+        # dbt_tasks = Task.objects.filter(type="dbt").all()
+        dbt_slugs = ["dbt-test", "dbt-run"]
+        summ = {
+            "dbt-test": {self.SUCCESS_LOGS: 0, self.FAILURE_LOGS: 0},
+            "dbt-run": {self.SUCCESS_LOGS: 0, self.FAILURE_LOGS: 0},
+        }
 
         for dataflow in OrgDataFlowv1.objects.filter(org__slug=org):
             flow_runs = prefect_service.get_flow_runs_by_deployment_id(
-                dataflow.deployment_id
+                dataflow.deployment_id, 100
             )
             for flow_run in flow_runs:
+                status = None
                 flow_run_id = flow_run["id"]
                 all_task_logs = prefect_service.get_flow_run_logs_v2(flow_run_id)
                 for task_logs in all_task_logs:
-                    if "logs" in task_logs:
+                    if "logs" in task_logs and len(task_logs["logs"]) > 0:
                         label = task_logs["label"]
                         print(
                             f"Found logs for flow_run_id : {flow_run_id} and for task : {label}"
@@ -73,15 +78,38 @@ class Command(BaseCommand):
                         if task_slug is None:
                             continue
 
+                        # set status of the task run
+                        if task_slug == "dbt-test":
+                            if (
+                                task_logs["state_type"] == "FAILED"
+                                or flow_run["state_name"] == "DBT_TEST_FAILED"
+                            ):
+                                status = self.FAILURE_LOGS
+                            elif task_logs["state_type"] == "COMPLETED":
+                                status = self.SUCCESS_LOGS
+                        elif task_slug == "dbt-run":
+                            if task_logs["state_type"] == "COMPLETED":
+                                status = self.SUCCESS_LOGS
+                            elif task_logs["state_type"] == "FAILED":
+                                status = self.FAILURE_LOGS
+
                         # upload logs for the current flow_run_id under the task_slug
                         flow_run_logs = task_logs["logs"]
-                        s3key = f"logs/dbt/{org}/{flow_run_id}/{task_slug}.json"
-                        s3.put_object(
-                            Bucket="dalgo-t4dai",
-                            Key=s3key,
-                            Body=json.dumps(flow_run_logs),
-                        )
-                        print(f"Saved s3://dalgo-t4dai/{s3key}")
+
+                        if status is not None:
+                            summ[task_slug][status] += 1
+                            print(
+                                f"Found {status} logs for task : {task_slug} in flow_run : {flow_run_id}"
+                            )
+                            s3key = f"logs/dbt/{org}/{flow_run_id}/{task_slug}/{status}.json"
+                            s3.put_object(
+                                Bucket="dalgo-t4dai",
+                                Key=s3key,
+                                Body=json.dumps(flow_run_logs),
+                            )
+                            print(f"Saved s3://dalgo-t4dai/{s3key}")
+
+        print(summ)
 
     def fetch_airbyte_logs(self, org: str, s3):
         """fetches airbyte logs for and org"""
@@ -156,6 +184,6 @@ class Command(BaseCommand):
             aws_access_key_id=options["aws_access_key_id"],
             aws_secret_access_key=options["aws_secret"],
         )
-        self.fetch_airbyte_logs(org, s3)
+        # self.fetch_airbyte_logs(org, s3)
+        self.fetch_grouped_task_prefect_logs_from_deployments(org, s3)
         # self.fetch_prefect_logs_from_deployments(org, s3)
-        # self.fetch_grouped_task_prefect_logs_from_deployments(org, s3)
