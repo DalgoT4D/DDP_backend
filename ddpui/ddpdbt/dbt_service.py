@@ -236,12 +236,12 @@ def refresh_elementary_report(org: Org):
     if running_task and len(running_task) > 0:
         logger.info("edr already running for org %s", org.slug)
         task_id = running_task[0].decode("utf8")
-        return task_id
+        return None, {"task_id": task_id}
 
     bucket_file_path = make_edr_report_s3_path(org)
     logger.info("creating new elementary report at %s", bucket_file_path)
     task = create_elementary_report.delay(org.id, bucket_file_path)
-    return task.id
+    return None, {"task_id": task.id}
 
 
 def make_elementary_report(org: Org):
@@ -273,8 +273,7 @@ def make_elementary_report(org: Org):
     except boto3.exceptions.botocore.exceptions.ClientError:
         # the report doesn't exist, trigger a celery task to generate it
         # see if there is an existing TaskProgress for this org
-        task_id = refresh_elementary_report(org)
-        return None, {"task_id": task_id}
+        return refresh_elementary_report(org)
     except Exception:
         return "error fetching elementary report", None
 
