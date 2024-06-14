@@ -25,6 +25,7 @@ from ddpui.api.airbyte_api import (
     put_airbyte_connection_v1,
     put_airbyte_destination_v1,
     update_connection_schema,
+    get_sync_history_for_connection,
 )
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.ddpairbyte.schema import (
@@ -842,6 +843,67 @@ def test_get_latest_job_for_connection_with_error(orguser):
             get_latest_job_for_connection(request, connection_id)
 
     get_job_info_mock.assert_called_once_with(request.orguser.org, connection_id)
+
+    assert excinfo.value.status_code == 400
+    assert str(excinfo.value) == error_message
+
+
+def test_get_sync_history_for_connection_with_no_workspace(orguser):
+    """Tests get_latest_job_for_connection when organization has no workspace"""
+    request = mock_request(orguser)
+
+    connection_id = "connection_123"
+
+    with pytest.raises(HttpError) as excinfo:
+        get_sync_history_for_connection(request, connection_id)
+
+    assert excinfo.value.status_code == 400
+    assert str(excinfo.value) == "create an airbyte workspace first"
+
+
+def test_get_sync_history_for_connection_with_workspace(orguser):
+    """Tests get_latest_job_for_connection when organization has a workspace"""
+    orguser.org.airbyte_workspace_id = "workspace_123"
+
+    request = mock_request(orguser)
+
+    connection_id = "connection_123"
+
+    with patch(
+        "ddpui.ddpairbyte.airbytehelpers.get_sync_job_history_for_connection"
+    ) as get_job_info_mock:
+        job_info = {"status": "success", "details": "Job completed successfully"}
+        get_job_info_mock.return_value = (job_info, None)
+
+        returned_job_info = get_sync_history_for_connection(
+            request, connection_id, limit=1, offset=0
+        )
+
+    get_job_info_mock.assert_called_once_with(
+        request.orguser.org, connection_id, limit=1, offset=0
+    )
+
+    assert returned_job_info == job_info
+
+
+def test_get_sync_history_for_connection_with_error(orguser):
+    """Tests get_latest_job_for_connection when job information retrieval returns an error"""
+    orguser.org.airbyte_workspace_id = "workspace_123"
+
+    request = mock_request(orguser)
+
+    connection_id = "connection_123"
+
+    with patch(
+        "ddpui.ddpairbyte.airbytehelpers.get_sync_job_history_for_connection"
+    ) as get_job_info_mock:
+        error_message = "Failed to retrieve job information"
+        get_job_info_mock.return_value = (None, error_message)
+
+        with pytest.raises(HttpError) as excinfo:
+            get_sync_history_for_connection(request, connection_id, limit=1, offset=0)
+
+    get_job_info_mock.assert_called_once_with(request.orguser.org, connection_id, limit=1, offset=0)
 
     assert excinfo.value.status_code == 400
     assert str(excinfo.value) == error_message

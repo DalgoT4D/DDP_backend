@@ -1424,6 +1424,7 @@ def test_get_jobs_for_connection():
             {
                 "configTypes": ["sync"],
                 "configId": "connection_id",
+                "pagination": {"rowOffset": 0, "pageSize": 1},
             },
         )
 
@@ -1440,7 +1441,19 @@ def test_parse_job_info():
             "job": {"id": "job-id", "status": "job-status"},
             "attempts": [
                 {"status": "failed", "recordsSynced": 0},
-                {"status": "succeeded", "recordsSynced": 10},
+                {
+                    "status": "succeeded",
+                    "createdAt": 300,
+                    "endedAt": 400,
+                    "recordsSynced": 10,
+                    "bytesSynced": 1000,
+                    "recordsEmitted": 400,
+                    "totalStats": {
+                        "bytesEmitted": 400,
+                        "recordsCommitted": 500,
+                        "recordsEmitted": 500,
+                    },
+                },
                 {"status": "succeeded", "recordsSynced": 20},
             ],
         }

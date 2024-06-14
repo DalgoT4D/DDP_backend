@@ -10,8 +10,12 @@ from ddpui.ddpairbyte.airbytehelpers import (
     get_job_info_for_connection,
     update_destination,
     delete_source,
+    get_sync_job_history_for_connection,
 )
-from ddpui.ddpairbyte.schema import AirbyteConnectionSchemaUpdate, AirbyteDestinationUpdate
+from ddpui.ddpairbyte.schema import (
+    AirbyteConnectionSchemaUpdate,
+    AirbyteDestinationUpdate,
+)
 from ddpui.models.org import Org, OrgPrefectBlockv1, OrgWarehouse
 from ddpui.models.tasks import Task, OrgTask, OrgDataFlowv1, DataflowOrgTask
 from ddpui.ddpprefect import DBTCLIPROFILE
@@ -328,12 +332,21 @@ def test_get_job_info_for_connection(
                         "recordsSynced": 0,
                     },
                     {
+                        "endedAt": 123123123,
+                        "createdAt": 123123123,
                         "status": "succeeded",
                         "recordsSynced": 100,
+                        "bytesSynced": 0,
+                        "totalStats": {
+                            "recordsEmitted": 0,
+                            "recordsCommitted": 0,
+                            "bytesEmitted": 500,
+                        },
                     },
                 ],
             }
-        ]
+        ],
+        "totalJobCount": 1,
     }
     mock_get_logs_for_job.return_value = {
         "logs": {
@@ -351,6 +364,106 @@ def test_get_job_info_for_connection(
         "line1",
         "line2",
     ]
+
+
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_jobs_for_connection",
+    mock_get_jobs_for_connection=Mock(),
+)
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_logs_for_job",
+    mock_get_logs_for_job=Mock(),
+)
+def test_get_sync_history_for_connection_no_jobs(
+    mock_get_logs_for_job: Mock, mock_get_jobs_for_connection: Mock
+):
+    """tests get_sync_job_history_for_connection for success"""
+    org = Org.objects.create(name="org", slug="org")
+    task = Task.objects.create(
+        type="airbyte", slug="airbyte-sync", label="AIRBYTE sync"
+    )
+    OrgTask.objects.create(org=org, task=task, connection_id="connection_id")
+
+    mock_get_jobs_for_connection.return_value = {
+        "jobs": [
+            {
+                "job": {
+                    "id": "JOB_ID",
+                    "status": "JOB_STATUS",
+                },
+                "attempts": [
+                    {
+                        "status": "failed",
+                        "recordsSynced": 0,
+                    },
+                    {
+                        "endedAt": 123123123,
+                        "createdAt": 123123123,
+                        "status": "succeeded",
+                        "recordsSynced": 100,
+                        "bytesSynced": 0,
+                        "totalStats": {
+                            "recordsEmitted": 0,
+                            "recordsCommitted": 0,
+                            "bytesEmitted": 500,
+                        },
+                    },
+                ],
+            }
+        ],
+        "totalJobCount": 1,
+    }
+    mock_get_logs_for_job.return_value = {
+        "logs": {
+            "logLines": [
+                "line1",
+                "line2",
+            ],
+        },
+    }
+
+    result, error = get_sync_job_history_for_connection(org, "connection_id")
+    assert error is None
+    assert "history" in result
+    assert len(result["history"]) == 1
+    assert result["history"][0]["logs"] == [
+        "line1",
+        "line2",
+    ]
+    assert result["totalSyncs"] == 1
+
+
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_jobs_for_connection",
+    mock_get_jobs_for_connection=Mock(),
+)
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_logs_for_job",
+    mock_get_logs_for_job=Mock(),
+)
+def test_get_sync_history_for_connection_success(
+    mock_get_logs_for_job: Mock, mock_get_jobs_for_connection: Mock
+):
+    """tests get_sync_job_history_for_connection for the case when the connection has no syncs created yet"""
+    org = Org.objects.create(name="org", slug="org")
+    task = Task.objects.create(
+        type="airbyte", slug="airbyte-sync", label="AIRBYTE sync"
+    )
+    OrgTask.objects.create(org=org, task=task, connection_id="connection_id")
+
+    mock_get_jobs_for_connection.return_value = {"jobs": [], "totalJobCount": 0}
+    mock_get_logs_for_job.return_value = {
+        "logs": {
+            "logLines": [
+                "line1",
+                "line2",
+            ],
+        },
+    }
+
+    result, error = get_sync_job_history_for_connection(org, "connection_id")
+    assert error is None
+    assert result == []
 
 
 @patch(
@@ -658,7 +771,15 @@ def test_get_connection_catalog(
     result, error = get_connection_catalog(org, "connection_id")
 
     assert error is None
-    assert result == {'name': 'Test Connection', 'connectionId': 'connection_id', 'catalogId': 'catalog_id', 'syncCatalog': True, 'schemaChange': False, 'catalogDiff': []}
+    assert result == {
+        "name": "Test Connection",
+        "connectionId": "connection_id",
+        "catalogId": "catalog_id",
+        "syncCatalog": True,
+        "schemaChange": False,
+        "catalogDiff": [],
+    }
+
 
 @patch(
     "ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection_catalog",
@@ -671,9 +792,9 @@ def test_get_connection_catalog_fail(
     org_save = Mock()
     org = Mock(save=org_save)
     mock_get_connection_catalog.side_effect = Exception("error")
-    
+
     res, error = get_connection_catalog(org, "connection_name")
-    
+
     assert res is None
     assert error == "Error getting catalog for connection connection_name: error"
 
@@ -690,7 +811,13 @@ def test_update_schema_changes_connection(
     org = Org.objects.create(name="Test Org", slug="test-org")
 
     # Create a test task
-    task = Task.objects.create(type="test-type", slug="test-slug", label="test-task", command="test-command", is_system=True)
+    task = Task.objects.create(
+        type="test-type",
+        slug="test-slug",
+        label="test-task",
+        command="test-command",
+        is_system=True,
+    )
 
     # Create a test OrgTask
     org_task = OrgTask.objects.create(
@@ -698,7 +825,7 @@ def test_update_schema_changes_connection(
         task=task,
         connection_id="test-connection-id",
         parameters={},
-        generated_by="system"
+        generated_by="system",
     )
 
     # Create a test OrgWarehouse
@@ -708,7 +835,7 @@ def test_update_schema_changes_connection(
         credentials='{"key": "value"}',
         org=org,
         airbyte_destination_id="test-airbyte-destination-id",
-        bq_location="us-central1"
+        bq_location="us-central1",
     )
 
     # Set up mock responses
@@ -720,7 +847,7 @@ def test_update_schema_changes_connection(
         name="Updated Connection",
         syncCatalog={},
         connectionId="test-connection-id",
-        sourceCatalogId="test-source-catalog-id"
+        sourceCatalogId="test-source-catalog-id",
     )
     response, error = update_connection_schema(org, "test-connection-id", payload)
 
@@ -729,4 +856,6 @@ def test_update_schema_changes_connection(
     assert error is None
 
     # Assert the mock functions were called with the expected arguments
-    mock_get_connection.assert_called_once_with(org.airbyte_workspace_id, "test-connection-id")
+    mock_get_connection.assert_called_once_with(
+        org.airbyte_workspace_id, "test-connection-id"
+    )
