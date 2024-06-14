@@ -13,6 +13,9 @@ class Command(BaseCommand):
 
     help = "fetches prefect and airbyte logs for an org"
 
+    SUCCESS_LOGS = "success"  # grouping logs in s3 by their status
+    FAILURE_LOGS = "failure"  # grouping logs in s3 by their status
+
     def add_arguments(self, parser):
         parser.add_argument("org", type=str)
         parser.add_argument("--aws-access-key-id", required=True)
@@ -82,27 +85,67 @@ class Command(BaseCommand):
 
     def fetch_airbyte_logs(self, org: str, s3):
         """fetches airbyte logs for and org"""
+        summ = []
         for dataflow in OrgTask.objects.filter(
             org__slug=org,
             task__slug="airbyte-sync",
         ):
+            cnt_failure = 0
+            cnt_success = 0
             connection_id = dataflow.connection_id
-            result = airbyte_service.get_jobs_for_connection(connection_id)
+            # get recent 100 sync for this connection
+            result = airbyte_service.get_jobs_for_connection(connection_id, 100, 0)
             if len(result["jobs"]) == 0:
                 continue
             for job in result["jobs"]:
-                job_info = airbyte_service.parse_job_info(job)
-                job_id = job_info["job_id"]
-                logs = airbyte_service.get_logs_for_job(job_id)
-                logs = logs["logs"]
-                if len(logs["logLines"]) > 0:
-                    s3key = f"logs/airbyte/{org}/{job_id}.json"
+                status = None
+                jobinfo = job["job"]
+                attempts = job["attempts"]
+                job_id = jobinfo["id"]
+                logs = {"logLines": []}
+                if jobinfo["status"] == "succeeded":
+                    for attempt in attempts:
+                        if attempt["status"] == "succeeded":
+                            print(
+                                f"Found success logs for connection id : {connection_id} job_id : {job_id}"
+                            )
+                            status = self.SUCCESS_LOGS
+                            logs = airbyte_service.get_logs_for_job(
+                                job_id, attempt["id"]
+                            )
+                            logs = logs["logs"]
+                            break
+                elif jobinfo["status"] == "failed":
+                    for attempt in attempts:
+                        if attempt["status"] == "failed":
+                            print(
+                                f"Found failure logs for connection id : {connection_id} job_id : {job_id}"
+                            )
+                            status = self.FAILURE_LOGS
+                            logs = airbyte_service.get_logs_for_job(
+                                job_id, attempt["id"]
+                            )
+                            logs = logs["logs"]
+                            break
+
+                if len(logs["logLines"]) > 0 and status is not None:
+                    s3key = f"logs/airbyte/{org}/{job_id}/{status}.json"
+                    if status == self.SUCCESS_LOGS:
+                        cnt_success += 1
+                    if status == self.FAILURE_LOGS:
+                        cnt_failure += 1
                     s3.put_object(
                         Bucket="dalgo-t4dai",
                         Key=s3key,
                         Body=json.dumps(logs),
                     )
                     print(f"Saved s3://dalgo-t4dai/{s3key}")
+
+            summ.append(
+                f"Saved {cnt_success} success logs, {cnt_failure} failure logs to s3 for connection: {connection_id}"
+            )
+        # print summary
+        print("\n".join(summ))
 
     def handle(self, *args, **options):
         # Your command logic goes here
@@ -113,6 +156,6 @@ class Command(BaseCommand):
             aws_access_key_id=options["aws_access_key_id"],
             aws_secret_access_key=options["aws_secret"],
         )
+        self.fetch_airbyte_logs(org, s3)
         # self.fetch_prefect_logs_from_deployments(org, s3)
-        self.fetch_grouped_task_prefect_logs_from_deployments(org, s3)
-        # self.fetch_airbyte_logs(org, s3)
+        # self.fetch_grouped_task_prefect_logs_from_deployments(org, s3)
