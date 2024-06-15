@@ -13,10 +13,11 @@ https://docs.djangoproject.com/en/4.1/ref/settings/
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+from corsheaders.defaults import default_headers
 from ddpui.utils.django_logger import setup_logger as setup_django_logger
 from ddpui.utils.ddp_logger import setup_logger as setup_ddp_logger
 from ddpui.utils.ab_logger import setup_logger as setup_ab_logger
-from corsheaders.defaults import default_headers
+import ddpui.utils.flags  # pylint: disable=unused-import
 
 load_dotenv()
 
@@ -67,7 +68,11 @@ INSTALLED_APPS = [
     "ddpui",
     "django_prometheus",
     "django_extensions",
+    "flags",
 ]
+
+# Feature flag to get airbyte credentials through prefect block
+FLAGS = {"AIRBYTE_PROFILE": []}
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
