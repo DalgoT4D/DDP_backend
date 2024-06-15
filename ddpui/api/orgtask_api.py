@@ -6,12 +6,12 @@ import yaml
 
 from ninja import NinjaAPI
 from ninja.errors import HttpError
-from django.forms.models import model_to_dict
-
 from ninja.errors import ValidationError
+
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
+from django.forms.models import model_to_dict
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service
@@ -47,10 +47,16 @@ from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
 from ddpui.utils.helpers import map_airbyte_keys_to_postgres_keys
-from ddpui.utils.constants import TASK_DBTRUN, TASK_GITPULL, TRANSFORM_TASKS_SEQ
+from ddpui.utils.constants import (
+    TASK_DBTRUN,
+    TASK_GITPULL,
+    TRANSFORM_TASKS_SEQ,
+    TASK_GENERATE_EDR,
+)
 from ddpui.core.pipelinefunctions import (
     setup_dbt_core_task_config,
     setup_git_pull_shell_task_config,
+    setup_edr_send_report_task_config,
 )
 from ddpui.auth import has_permission
 
@@ -374,7 +380,7 @@ def post_run_prefect_org_task(
     if org_task is None:
         raise HttpError(400, "task not found")
 
-    if org_task.task.type not in ["dbt", "git"]:
+    if org_task.task.type not in ["dbt", "git", "edr"]:
         raise HttpError(400, "task not supported")
 
     if orguser.org.dbt is None:
@@ -417,6 +423,31 @@ def post_run_prefect_org_task(
             raise HttpError(
                 400, f"failed to run the shell task {org_task.task.slug}"
             ) from error
+
+    elif org_task.task.slug == TASK_GENERATE_EDR:
+        dbt_env_dir = Path(orguser.org.dbt.dbt_venv)
+        if not dbt_env_dir.exists():
+            raise HttpError(400, "create the dbt env first")
+
+        task_config = setup_edr_send_report_task_config(
+            org_task, dbt_project_params.project_dir, dbt_env_dir
+        )
+
+        if task_config.flow_name is None:
+            task_config.flow_name = f"{orguser.org.name}-edr-send-report"
+        if task_config.flow_run_name is None:
+            now = timezone.as_ist(datetime.now())
+            task_config.flow_run_name = f"{now.isoformat()}"
+
+        try:
+            result = prefect_service.run_shell_task_sync(task_config)
+        except Exception as error:
+            task_lock.delete()
+            logger.exception(error)
+            raise HttpError(
+                400, f"failed to run the shell task {org_task.task.slug}"
+            ) from error
+
     else:
         dbt_env_dir = Path(orguser.org.dbt.dbt_venv)
         if not dbt_env_dir.exists():
@@ -475,7 +506,7 @@ def post_delete_orgtask(request, orgtask_uuid):  # pylint: disable=unused-argume
     if org_task is None:
         raise HttpError(400, "task not found")
 
-    if org_task.task.type not in ["dbt", "git"]:
+    if org_task.task.type not in ["dbt", "git", "edr"]:
         raise HttpError(400, "task not supported")
 
     if orguser.org.dbt is None:

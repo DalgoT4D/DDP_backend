@@ -313,10 +313,10 @@ class PrefectDataFlowUpdateSchema2(Schema):
 class PrefectDataFlowUpdateSchema3(Schema):
     """Edit the data flow"""
 
-    name: str
-    connections: list[PrefectFlowAirbyteConnection2]
-    cron: str
-    transformTasks: list[PrefectDataFlowOrgTasks]
+    name: str = None
+    connections: list[PrefectFlowAirbyteConnection2] = None
+    cron: str = None
+    transformTasks: list[PrefectDataFlowOrgTasks] = None
     deployment_params: dict = None
 
 

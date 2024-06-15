@@ -6,6 +6,7 @@ These functions do not access the Dalgo database
 
 from typing import Dict, List
 import os
+from datetime import datetime
 import requests
 from dotenv import load_dotenv
 from ninja.errors import HttpError
@@ -16,7 +17,7 @@ from ddpui.ddpprefect import prefect_service, AIRBYTESERVER
 from ddpui.models.org import Org
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.deploymentblocks import trigger_reset_and_sync_workflow
-from ddpui.utils.helpers import remove_nested_attribute
+from ddpui.utils.helpers import remove_nested_attribute, nice_bytes
 from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
     AirbyteDestinationCreate,
@@ -874,7 +875,9 @@ def get_job_info(job_id: str) -> dict:
     return res
 
 
-def get_jobs_for_connection(connection_id: str) -> int | None:
+def get_jobs_for_connection(
+    connection_id: str, limit: int = 1, offset: int = 0
+) -> int | None:
     """
     returns most recent job for a connection
     possible configTypes are
@@ -884,6 +887,8 @@ def get_jobs_for_connection(connection_id: str) -> int | None:
     - get_spec
     - sync
     - reset_connection
+
+    by default this function fetches the last job
     """
     if not isinstance(connection_id, str):
         raise HttpError(400, "connection_id must be a string")
@@ -893,6 +898,7 @@ def get_jobs_for_connection(connection_id: str) -> int | None:
         {
             "configTypes": ["sync"],
             "configId": connection_id,
+            "pagination": {"rowOffset": offset, "pageSize": limit},
         },
     )
     return result
@@ -903,10 +909,23 @@ def parse_job_info(jobinfo: dict) -> dict:
     retval = {
         "job_id": jobinfo["job"]["id"],
         "status": jobinfo["job"]["status"],
+        "date": None,
+        "recordsSynced": 0,
+        "bytesSynced": nice_bytes(0),
+        "recordsEmitted": 0,
+        "bytesEmitted": nice_bytes(0),
+        "recordsCommitted": 0,
+        "totalTimeInSeconds": 0,
     }
     for attempt in jobinfo["attempts"]:
         if attempt["status"] == "succeeded":
             retval["recordsSynced"] = attempt["recordsSynced"]
+            retval["bytesSynced"] = nice_bytes(attempt["bytesSynced"])
+            retval["recordsEmitted"] = attempt["totalStats"]["recordsEmitted"]
+            retval["bytesEmitted"] = nice_bytes(attempt["totalStats"]["bytesEmitted"])
+            retval["recordsCommitted"] = attempt["totalStats"]["recordsCommitted"]
+            retval["totalTimeInSeconds"] = attempt["endedAt"] - attempt["createdAt"]
+            retval["date"] = datetime.fromtimestamp(attempt["endedAt"]).date()
             break
     return retval
 

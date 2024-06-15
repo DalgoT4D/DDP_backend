@@ -8,7 +8,7 @@ TASK_DOCSGENERATE = "dbt-docs-generate"
 TASK_AIRBYTESYNC = "airbyte-sync"
 TASK_AIRBYTERESET = "airbyte-reset"
 TASK_SEED = "dbt-seed"
-
+TASK_GENERATE_EDR = "generate-edr"
 
 # Dbt transformation sequence task slugs; we can always take this from the user/frontend also
 TRANSFORM_TASKS_SEQ = {
@@ -19,6 +19,7 @@ TRANSFORM_TASKS_SEQ = {
     TASK_DBTTEST: 5,
     TASK_DOCSGENERATE: 6,
     TASK_SEED: 0,
+    TASK_GENERATE_EDR: 7,
 }
 
 # airbyte sync timeout in deployment params

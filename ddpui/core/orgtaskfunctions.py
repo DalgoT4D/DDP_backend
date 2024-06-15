@@ -14,7 +14,7 @@ from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpprefect import prefect_service
 from ddpui.core.pipelinefunctions import setup_dbt_core_task_config
-from ddpui.utils.constants import TASK_DBTRUN
+from ddpui.utils.constants import TASK_DBTRUN, TASK_GENERATE_EDR
 from ddpui.utils.helpers import generate_hash_id
 
 logger = CustomLogger("ddpui")
@@ -41,6 +41,31 @@ def create_default_transform_tasks(
             )
 
     return None, None
+
+
+def get_edr_send_report_task(org: Org, **kwargs) -> OrgTask | None:
+    """creates an OrgTask for edr send-report"""
+    task = Task.objects.filter(slug=TASK_GENERATE_EDR).first()
+    if task is None:
+        raise ValueError("TASK_GENERATE_EDR not found")
+
+    org_task = OrgTask.objects.filter(task__slug=TASK_GENERATE_EDR, org=org).first()
+    if org_task:
+        return org_task
+
+    if kwargs.get("create"):
+        org_task = OrgTask.objects.create(
+            org=org,
+            task=task,
+            uuid=uuid.uuid4(),
+            parameters={
+                "options": {
+                    "profiles-dir": "elementary_profiles",
+                    "bucket-file-path": f"reports/{org.slug}.TODAYS_DATE.html",
+                }
+            },
+        )
+    return org_task
 
 
 def create_prefect_deployment_for_dbtcore_task(
