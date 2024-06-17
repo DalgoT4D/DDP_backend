@@ -8,10 +8,8 @@ from ddpui.ddpprefect.schema import (
     PrefectDbtCoreSetup,
     PrefectShellSetup,
     PrefectAirbyteSync,
-    PrefectDataFlowCreateSchema2,
     PrefectDataFlowCreateSchema3,
     PrefectDbtCore,
-    PrefectDataFlowUpdateSchema2,
     PrefectSecretBlockCreate,
     PrefectShellTaskSetup,
     PrefectDbtTaskSetup,
@@ -422,25 +420,6 @@ def run_shell_task_sync(task: PrefectShellTaskSetup) -> dict:  # pragma: no cove
 
 
 # Flows and deployments
-def create_dataflow(payload: PrefectDataFlowCreateSchema2) -> dict:  # pragma: no cover
-    """create a prefect deployment out of a flow and a cron schedule"""
-    res = prefect_post(
-        "deployments/",
-        {
-            "flow_name": payload.flow_name,
-            "deployment_name": payload.deployment_name,
-            "org_slug": payload.orgslug,
-            "connection_blocks": [
-                {"seq": conn.seq, "blockName": conn.blockName}
-                for conn in payload.connection_blocks
-            ],
-            "dbt_blocks": payload.dbt_blocks,
-            "cron": payload.cron,
-        },
-    )
-    return res
-
-
 def create_dataflow_v1(
     payload: PrefectDataFlowCreateSchema3, queue_name=DDP_WORK_QUEUE
 ) -> dict:  # pragma: no cover
@@ -455,24 +434,6 @@ def create_dataflow_v1(
             "cron": payload.cron,
             "work_pool_name": os.getenv("PREFECT_WORKER_POOL_NAME"),
             "work_queue_name": queue_name,
-        },
-    )
-    return res
-
-
-def update_dataflow(
-    deployment_id: str, payload: PrefectDataFlowUpdateSchema2
-) -> dict:  # pragma: no cover
-    """update a prefect deployment with a new cron schedule"""
-    res = prefect_put(
-        f"deployments/{deployment_id}",
-        {
-            "cron": payload.cron,
-            "connection_blocks": [
-                {"seq": conn.seq, "blockName": conn.blockName}
-                for conn in payload.connection_blocks
-            ],
-            "dbt_blocks": payload.dbt_blocks,
         },
     )
     return res

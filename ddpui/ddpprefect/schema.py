@@ -247,26 +247,6 @@ class PrefectFlowAirbyteConnection2(Schema):
     seq: int
 
 
-class PrefectDataFlowCreateSchema(Schema):
-    """Payload sent by the frontend to create a dataflow"""
-
-    name: str
-    connectionBlocks: list[PrefectFlowAirbyteConnection]
-    dbtTransform: str
-    cron: str
-
-
-class PrefectDataFlowCreateSchema2(Schema):
-    """Payload to be sent to the prefect-proxy"""
-
-    deployment_name: str
-    flow_name: str
-    orgslug: str
-    connection_blocks: list[PrefectFlowAirbyteConnection]
-    dbt_blocks: list
-    cron: str = None
-
-
 class PrefectDataFlowCreateSchema3(Schema):
     """Payload to be sent to the prefect-proxy to go away with prefect blocks"""
 
@@ -291,23 +271,6 @@ class PrefectDataFlowCreateSchema4(Schema):
     connections: list[PrefectFlowAirbyteConnection2]
     cron: str
     transformTasks: list[PrefectDataFlowOrgTasks]
-
-
-class PrefectDataFlowUpdateSchema(Schema):
-    """Edit the data flow"""
-
-    name: str
-    connectionBlocks: list[PrefectFlowAirbyteConnection]
-    dbtTransform: str
-    cron: str
-
-
-class PrefectDataFlowUpdateSchema2(Schema):
-    """Edit the data flow"""
-
-    connection_blocks: list[PrefectFlowAirbyteConnection]
-    dbt_blocks: list
-    cron: str = None
 
 
 class PrefectDataFlowUpdateSchema3(Schema):
