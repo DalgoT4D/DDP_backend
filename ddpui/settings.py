@@ -14,7 +14,6 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 from corsheaders.defaults import default_headers
-from ddpui.utils.django_logger import setup_logger as setup_django_logger
 from ddpui.utils.ddp_logger import setup_logger as setup_ddp_logger
 from ddpui.utils.ab_logger import setup_logger as setup_ab_logger
 import ddpui.utils.flags  # pylint: disable=unused-import
@@ -200,7 +199,6 @@ AIRBYTE_CUSTOM_SOURCES = {
 }
 
 # finally set up the loggers
-setup_django_logger()
 setup_ddp_logger()
 setup_ab_logger()
 
