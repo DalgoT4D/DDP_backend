@@ -770,6 +770,9 @@ def update_connection_schema(
     connection["skipReset"] = True
 
     res = airbyte_service.update_schema_change(org, payload, connection)
+    if res:
+        OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+    
     return res, None
 
 

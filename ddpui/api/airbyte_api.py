@@ -2,6 +2,7 @@
 
 import os
 from typing import List
+from django.forms import model_to_dict
 from ninja import NinjaAPI
 from ninja.errors import HttpError
 
@@ -632,10 +633,10 @@ def get_connection_catalog_v1(request, connection_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    task = get_connection_catalog_task.delay(orguser.org.__dict__, connection_id)
-    res = task.get()
+    org_dict = model_to_dict(orguser.org)
+    task = get_connection_catalog_task.delay(org_dict, connection_id)
 
-    return res
+    return {"task_id": task.id}
 
 
 @airbyteapi.put(

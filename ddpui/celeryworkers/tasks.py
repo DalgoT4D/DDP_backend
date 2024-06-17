@@ -436,15 +436,44 @@ def schema_change_detection():
 @app.task(bind=True)
 def get_connection_catalog_task(self, org_dict, connection_id):
     """Fetch a connection in the user organization workspace as a Celery task"""
+    taskprogress = None
     try:
-        org = Org(**org_dict)
+        org_dbt_id = org_dict.pop('dbt', None)
+        if org_dbt_id is not None:
+            org_dbt = OrgDbt.objects.get(id=org_dbt_id)
+            org = Org(dbt=org_dbt, **org_dict)
+        else:
+            org = Org(**org_dict)
+
+        taskprogress = TaskProgress(
+            self.request.id, f"{TaskProgressHashPrefix.SCHEMA_CHANGE}-{org.slug}"
+        )
+        taskprogress.add({
+            "message": "started",
+            "status": "running",
+        })
+
         res, error = airbytehelpers.get_connection_catalog(org, connection_id)
         if error:
-            raise Exception(error)
+            taskprogress.add(
+                {
+                    "message": "unable to fetch catalog response",
+                    "status": "failed",
+                }
+            )
+            logger.error("unable to fetch catalog")
+            raise Exception("unable to fetch catalog")
+
+        taskprogress.add({
+            "message": "fetched catalog data",
+            "status": "completed",
+            "result": res
+        })
         return res
+
     except Exception as e:
-        logger.error(f"Error getting catalog for connection {connection_id}: {e}")
-        return f"Error getting catalog for connection {connection_id}: {e}"
+        error_message = f"Error getting catalog for connection {connection_id}: {e}"
+        logger.error(error_message)
 
 
 @app.task(bind=True)
