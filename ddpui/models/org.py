@@ -151,7 +151,7 @@ class OrgDataFlowv1(models.Model):
     )
 
     def __str__(self) -> str:
-        return f"OrgDataFlowv1[{self.name}|{self.deployment_name}|{self.deployment_id}|{self.cron}|{self.generated_by}]"
+        return f"OrgDataFlowv1[{self.name}|{self.deployment_name}|{self.deployment_id}|{self.cron}]"
 
 
 class OrgSchemaChange(models.Model):
