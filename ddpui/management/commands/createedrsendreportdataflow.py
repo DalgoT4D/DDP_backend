@@ -61,7 +61,7 @@ class Command(BaseCommand):
 
             hash_code = generate_hash_id(8)
             deployment_name = (
-                f"manual-{org_task.org.slug}-{org_task.task.slug}-{hash_code}"
+                f"pipeline-{org_task.org.slug}-{org_task.task.slug}-{hash_code}"
             )
             print(f"creating deployment {deployment_name}")
 
