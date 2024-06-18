@@ -37,6 +37,8 @@ from ddpui.celeryworkers.tasks import (
     sync_flow_runs_of_deployments,
     add_custom_connectors_to_workspace,
 )
+from ddpui.models.tasks import TaskProgressHashPrefix
+from ddpui.utils.singletaskprogress import SingleTaskProgress
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
 logger = CustomLogger("airbyte")
@@ -661,9 +663,14 @@ def get_connection_catalog_v1(request, connection_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    task = get_connection_catalog_task.delay(orguser.org.id, connection_id)
+    task_key = f"{TaskProgressHashPrefix.SCHEMA_CHANGE}-{orguser.org.slug}"
+    if SingleTaskProgress.fetch(task_key):
+        return {"task_id": task_key, "message": "already running"}
 
-    return {"task_id": task.id}
+    # ignore the returned celery task id
+    get_connection_catalog_task.delay(task_key, orguser.org.id, connection_id)
+
+    return {"task_id": task_key}
 
 
 @airbyteapi.put(

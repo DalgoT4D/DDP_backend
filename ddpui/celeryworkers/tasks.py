@@ -29,6 +29,7 @@ from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
+from ddpui.utils.singletaskprogress import SingleTaskProgress
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 from ddpui.ddpprefect.prefect_service import (
     update_dbt_core_block_schema,
@@ -429,41 +430,34 @@ def schema_change_detection():
             send_schema_changes_email(org.name, orguser.user.email, message)
 
 
-@app.task(bind=True)
-def get_connection_catalog_task(self, org_id, connection_id):
+@app.task(bind=False)
+def get_connection_catalog_task(task_key, org_id, connection_id):
     """Fetch a connection in the user organization workspace as a Celery task"""
-    taskprogress = None
     org = Org.objects.get(id=org_id)
-    try:
-        taskprogress = TaskProgress(
-            self.request.id, f"{TaskProgressHashPrefix.SCHEMA_CHANGE}-{org.slug}"
+    taskprogress = SingleTaskProgress(task_key, 180)
+    taskprogress.add(
+        {
+            "message": "started",
+            "status": "running",
+        }
+    )
+
+    res, error = airbytehelpers.get_connection_catalog(org, connection_id)
+    if error:
+        logger.error(
+            "unable to fetch schema catalog for %s %s", org.slug, connection_id
         )
         taskprogress.add(
             {
-                "message": "started",
-                "status": "running",
+                "message": "unable to fetch catalog response",
+                "status": "failed",
             }
         )
 
-        res, error = airbytehelpers.get_connection_catalog(org, connection_id)
-        if error:
-            taskprogress.add(
-                {
-                    "message": "unable to fetch catalog response",
-                    "status": "failed",
-                }
-            )
-            logger.error("unable to fetch catalog")
-            raise Exception("unable to fetch catalog")
-
-        taskprogress.add(
-            {"message": "fetched catalog data", "status": "completed", "result": res}
-        )
-        return res
-
-    except Exception as e:
-        error_message = f"Error getting catalog for connection {connection_id}: {e}"
-        logger.error(error_message)
+    taskprogress.add(
+        {"message": "fetched catalog data", "status": "completed", "result": res}
+    )
+    return res
 
 
 @app.task(bind=True)
