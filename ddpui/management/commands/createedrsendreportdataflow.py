@@ -3,7 +3,7 @@
 from pathlib import Path
 from django.core.management.base import BaseCommand
 
-from ddpui.models.org import Org, OrgDataFlowv1
+from ddpui.models.org import Org, OrgDataFlowv1, DataflowGeneratedBy
 from ddpui.models.tasks import DataflowOrgTask
 from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.core.pipelinefunctions import setup_edr_send_report_task_config
@@ -90,4 +90,5 @@ class Command(BaseCommand):
                 deployment_id=dataflow["deployment"]["id"],
                 dataflow_type=options["schedule"],
                 cron=options["cron"] if options["schedule"] == "orchestrate" else None,
+                generated_by=DataflowGeneratedBy.SYSTEM,
             )
