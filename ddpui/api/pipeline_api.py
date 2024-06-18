@@ -225,7 +225,6 @@ def get_prefect_dataflows_v1(request):
     org_data_flows = OrgDataFlowv1.objects.filter(
         org=orguser.org,
         dataflow_type="orchestrate",
-        generated_by=DataflowGeneratedBy.CLIENT,
     ).all()
 
     deployment_ids = [flow.deployment_id for flow in org_data_flows]

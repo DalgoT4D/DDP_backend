@@ -57,7 +57,7 @@ def get_dashboard_v1(request):
     orguser = request.orguser
 
     org_data_flows = OrgDataFlowv1.objects.filter(
-        org=orguser.org, dataflow_type="orchestrate", generated_by="client"
+        org=orguser.org, dataflow_type="orchestrate"
     ).all()
 
     res = []

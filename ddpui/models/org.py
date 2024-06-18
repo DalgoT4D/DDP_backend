@@ -22,18 +22,6 @@ class TransformType(str, Enum):
     GIT = "github"
 
 
-class DataflowGeneratedBy(str, Enum):
-    """an enum for roles assignable to org-users"""
-
-    SYSTEM = "system"
-    CLIENT = "client"
-
-    @classmethod
-    def choices(cls):
-        """django model definition needs an iterable for `choices`"""
-        return [(key.value, key.name) for key in cls]
-
-
 class OrgDbt(models.Model):
     """Docstring"""
 
@@ -160,10 +148,6 @@ class OrgDataFlowv1(models.Model):
 
     reset_conn_dataflow = models.ForeignKey(
         "self", on_delete=models.SET_NULL, null=True
-    )
-
-    generated_by = models.CharField(
-        choices=DataflowGeneratedBy.choices(), max_length=50, default="client"
     )
 
     def __str__(self) -> str:
