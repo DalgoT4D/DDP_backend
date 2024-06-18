@@ -2,7 +2,6 @@
 
 import os
 from typing import List
-from django.forms import model_to_dict
 from ninja import NinjaAPI
 from ninja.errors import HttpError
 
@@ -11,6 +10,7 @@ from ninja.responses import Response
 
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from ddpui import auth
+from ddpui import settings
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import (
     AirbyteConnectionCreate,
@@ -32,8 +32,11 @@ from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
-
-from ddpui.celeryworkers.tasks import get_connection_catalog_task, sync_flow_runs_of_deployments
+from ddpui.celeryworkers.tasks import (
+    get_connection_catalog_task,
+    sync_flow_runs_of_deployments,
+    add_custom_connectors_to_workspace,
+)
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
 logger = CustomLogger("airbyte")
@@ -441,6 +444,10 @@ def post_airbyte_workspace_v1(request, payload: AirbyteWorkspaceCreate):
         raise HttpError(400, "org already has a workspace")
 
     workspace = airbytehelpers.setup_airbyte_workspace_v1(payload.name, orguser.org)
+    # add custom sources to this workspace
+    add_custom_connectors_to_workspace.delay(
+        workspace.workspaceId, list(settings.AIRBYTE_CUSTOM_SOURCES.values())
+    )
 
     return workspace
 
@@ -633,8 +640,7 @@ def get_connection_catalog_v1(request, connection_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    org_dict = model_to_dict(orguser.org)
-    task = get_connection_catalog_task.delay(org_dict, connection_id)
+    task = get_connection_catalog_task.delay(orguser.org.id, connection_id)
 
     return {"task_id": task.id}
 
