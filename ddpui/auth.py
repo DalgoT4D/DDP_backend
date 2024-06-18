@@ -1,13 +1,15 @@
+from functools import wraps
 from ninja.security import HttpBearer
 from ninja.errors import HttpError
-from functools import wraps
+
 
 from rest_framework.authentication import TokenAuthentication
 from rest_framework.authtoken.models import Token
 
 from ddpui.models.org_user import OrgUser
 from ddpui.models.admin_user import AdminUser
-from ddpui.models.role_based_access import Permission, RolePermission
+from ddpui.models.role_based_access import RolePermission
+from ddpui.utils import thread
 
 from ddpui.models.org_user import OrgUserRole
 
@@ -111,6 +113,7 @@ class CustomAuthMiddleware(HttpBearer):
 
                 request.permissions = list(permission_slugs) or []
                 request.orguser = orguser
+                thread.set_current_request(request)
                 return request
 
         raise HttpError(400, UNAUTHORIZED)

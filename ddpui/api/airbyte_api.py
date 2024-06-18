@@ -591,6 +591,27 @@ def get_latest_job_for_connection(request, connection_id):
     return job_info
 
 
+@airbyteapi.get(
+    "/v1/connections/{connection_id}/sync/history", auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_view_connection"])
+def get_sync_history_for_connection(
+    request, connection_id, limit: int = 10, offset: int = 0
+):
+    """get the job info from airbyte for a connection"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    if org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    job_info, error = airbytehelpers.get_sync_job_history_for_connection(
+        org, connection_id, limit=limit, offset=offset
+    )
+    if error:
+        raise HttpError(400, error)
+    return job_info
+
+
 @airbyteapi.put("/v1/destinations/{destination_id}/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_warehouse"])
 def put_airbyte_destination_v1(

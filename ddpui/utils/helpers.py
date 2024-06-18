@@ -113,3 +113,17 @@ def update_dict_but_not_stars(input_config: dict):
             output_config[key] = val
 
     return output_config
+
+
+def nice_bytes(n: int) -> str:
+    """Convert bytes to string with appropriate units"""
+
+    units = ["bytes", "KB", "MB", "GB", "TB", "PB"]
+
+    l = 0
+
+    while n >= 1024 and l < len(units):
+        n = n / 1024
+        l += 1
+
+    return str(round(n, 2)) + " " + units[l]
