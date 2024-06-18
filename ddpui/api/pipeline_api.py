@@ -15,7 +15,7 @@ from ddpui.ddpprefect import (
     DBTCLIPROFILE,
     AIRBYTESERVER,
 )
-from ddpui.models.org import OrgDataFlowv1, OrgPrefectBlockv1, DataflowGeneratedBy
+from ddpui.models.org import OrgDataFlowv1, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import DataflowOrgTask, OrgTask
 from ddpui.ddpprefect.schema import (
