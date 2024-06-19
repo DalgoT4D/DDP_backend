@@ -31,7 +31,6 @@ from ddpui.utils import secretsmanager
 from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
 from ddpui.core.pipelinefunctions import setup_airbyte_sync_task_config
 from ddpui.core.orgtaskfunctions import fetch_orgtask_lock
-from ddpui.celeryworkers.tasks import add_custom_connectors_to_workspace
 
 logger = CustomLogger("airbyte")
 
@@ -151,11 +150,6 @@ def setup_airbyte_workspace_v1(wsname: str, org: Org) -> AirbyteWorkspace:
             raise Exception(
                 "could not create orgprefectblock for airbyte-server"
             ) from error
-
-    # add custom sources to this workspace
-    add_custom_connectors_to_workspace.delay(
-        workspace["workspaceId"], list(settings.AIRBYTE_CUSTOM_SOURCES.values())
-    )
 
     return AirbyteWorkspace(
         name=workspace["name"],
@@ -566,6 +560,10 @@ def delete_connection(org: Org, connection_id: str):
     logger.info("deleting airbyte connection %s", connection_id)
     airbyte_service.delete_connection(org.airbyte_workspace_id, connection_id)
 
+    if OrgSchemaChange.objects.filter(connection_id=connection_id).exists():
+        OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+        logger.info(f"Deleted schema changes for connection {connection_id}")
+
     return None, None
 
 
@@ -809,6 +807,9 @@ def update_connection_schema(
     connection["skipReset"] = True
 
     res = airbyte_service.update_schema_change(org, payload, connection)
+    if res:
+        OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+
     return res, None
 
 

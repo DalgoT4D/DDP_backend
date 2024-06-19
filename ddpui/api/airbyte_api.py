@@ -10,6 +10,7 @@ from ninja.responses import Response
 
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from ddpui import auth
+from ddpui import settings
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import (
     AirbyteConnectionCreate,
@@ -31,8 +32,13 @@ from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
-
-from ddpui.celeryworkers.tasks import sync_flow_runs_of_deployments
+from ddpui.celeryworkers.tasks import (
+    get_connection_catalog_task,
+    sync_flow_runs_of_deployments,
+    add_custom_connectors_to_workspace,
+)
+from ddpui.models.tasks import TaskProgressHashPrefix
+from ddpui.utils.singletaskprogress import SingleTaskProgress
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
 logger = CustomLogger("airbyte")
@@ -440,6 +446,10 @@ def post_airbyte_workspace_v1(request, payload: AirbyteWorkspaceCreate):
         raise HttpError(400, "org already has a workspace")
 
     workspace = airbytehelpers.setup_airbyte_workspace_v1(payload.name, orguser.org)
+    # add custom sources to this workspace
+    add_custom_connectors_to_workspace.delay(
+        workspace.workspaceId, list(settings.AIRBYTE_CUSTOM_SOURCES.values())
+    )
 
     return workspace
 
@@ -653,10 +663,14 @@ def get_connection_catalog_v1(request, connection_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    res, error = airbytehelpers.get_connection_catalog(orguser.org, connection_id)
-    if error:
-        raise HttpError(400, error)
-    return res
+    task_key = f"{TaskProgressHashPrefix.SCHEMA_CHANGE}-{orguser.org.slug}"
+    if SingleTaskProgress.fetch(task_key):
+        return {"task_id": task_key, "message": "already running"}
+
+    # ignore the returned celery task id
+    get_connection_catalog_task.delay(task_key, orguser.org.id, connection_id)
+
+    return {"task_id": task_key}
 
 
 @airbyteapi.put(
