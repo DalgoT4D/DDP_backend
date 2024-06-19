@@ -24,7 +24,7 @@ from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.utils import secretsmanager
 from ddpui.utils.timezone import as_ist
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.taskprogress import TaskProgress
+from ddpui.utils.singletaskprogress import SingleTaskProgress
 from ddpui.utils.redis_client import RedisClient
 from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.celeryworkers.tasks import create_elementary_report
@@ -229,23 +229,29 @@ def make_edr_report_s3_path(org: Org):
 
 def refresh_elementary_report(org: Org):
     """refreshes the elementary report for the current date"""
-    running_task = TaskProgress.get_running_tasks(
-        f"{TaskProgressHashPrefix.RUNELEMENTARY}-{org.slug}"
-    )
-    logger.info("running_task %s", str(running_task))
-    if running_task and len(running_task) > 0:
+    if org.dbt is None:
+        return "dbt is not configured for this client", None
+
+    project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
+    if not os.path.exists(project_dir):
+        return "create the dbt env first", None
+
+    repo_dir = project_dir / "dbtrepo"
+    if not os.path.exists(repo_dir / "elementary_profiles"):
+        return "set up elementary profile first", None
+
+    task_str = f"{TaskProgressHashPrefix.RUNELEMENTARY}-{org.slug}"
+    if SingleTaskProgress.fetch(task_str) is None:
+        bucket_file_path = make_edr_report_s3_path(org)
+        logger.info("creating new elementary report at %s", bucket_file_path)
+        create_elementary_report.delay(task_str, org.id, bucket_file_path)
+    else:
         logger.info("edr already running for org %s", org.slug)
-        task_id = running_task[0].decode("utf8")
-        return None, {"task_id": task_id}
-
-    bucket_file_path = make_edr_report_s3_path(org)
-    logger.info("creating new elementary report at %s", bucket_file_path)
-    task = create_elementary_report.delay(org.id, bucket_file_path)
-    return None, {"task_id": task.id}
+    return None, {"task_id": task_str, "ttl": SingleTaskProgress.get_ttl(task_str)}
 
 
-def make_elementary_report(org: Org):
-    """generate elementary report"""
+def fetch_elementary_report(org: Org):
+    """fetch previously generated elementary report"""
     if org.dbt is None:
         return "dbt is not configured for this client", None
 
@@ -271,9 +277,7 @@ def make_elementary_report(org: Org):
         )
         logger.info("fetched s3response")
     except boto3.exceptions.botocore.exceptions.ClientError:
-        # the report doesn't exist, trigger a celery task to generate it
-        # see if there is an existing TaskProgress for this org
-        return refresh_elementary_report(org)
+        return "report has not been generated", None
     except Exception:
         return "error fetching elementary report", None
 
@@ -287,8 +291,7 @@ def make_elementary_report(org: Org):
     redis = RedisClient.get_instance()
     token = uuid4()
     redis_key = f"elementary-report-{token.hex}"
-    redis.set(redis_key, htmlfilename.encode("utf-8"))
-    redis.expire(redis_key, 3600 * 24)
+    redis.set(redis_key, htmlfilename.encode("utf-8"), 600)
     logger.info("created redis key %s", redis_key)
 
     return None, {
