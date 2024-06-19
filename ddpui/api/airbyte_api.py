@@ -664,7 +664,7 @@ def get_connection_catalog_v1(request, connection_id):
         raise HttpError(400, "create an airbyte workspace first")
 
     task_key = f"{TaskProgressHashPrefix.SCHEMA_CHANGE}-{orguser.org.slug}"
-    if SingleTaskProgress.fetch(task_key):
+    if SingleTaskProgress.fetch(task_key) is not None:
         return {"task_id": task_key, "message": "already running"}
 
     # ignore the returned celery task id
