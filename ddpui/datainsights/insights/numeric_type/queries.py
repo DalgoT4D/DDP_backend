@@ -84,6 +84,7 @@ class DataStats(ColInsight):
                 .select_from(table(self.db_table, schema=self.db_schema))
                 .where(numeric_col.isnot(None))
                 .group_by(numeric_col)
+                .having(func.count(numeric_col) > 1)
                 .order_by(desc(func.count(numeric_col)))
                 .limit(1)
                 .label("mode")
@@ -111,9 +112,11 @@ class DataStats(ColInsight):
         if len(result) > 0:
             return {
                 self.columns[0].name: {
-                    "mean": float(result[0]["mean"]),
-                    "median": float(result[0]["median"]),
-                    "mode": float(result[0]["mode"]),
+                    "mean": float(result[0]["mean"]) if result[0]["mean"] else None,
+                    "median": (
+                        float(result[0]["median"]) if result[0]["median"] else None
+                    ),
+                    "mode": float(result[0]["mode"]) if result[0]["mode"] else None,
                 }
             }
 
