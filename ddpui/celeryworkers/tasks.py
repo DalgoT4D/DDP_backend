@@ -434,7 +434,9 @@ def schema_change_detection():
 def get_connection_catalog_task(task_key, org_id, connection_id):
     """Fetch a connection in the user organization workspace as a Celery task"""
     org = Org.objects.get(id=org_id)
-    taskprogress = SingleTaskProgress(task_key, 180)
+    taskprogress = SingleTaskProgress(
+        task_key, int(os.getenv("SCHEMA_REFRESH_TTL", "180"))
+    )
     taskprogress.add(
         {
             "message": "started",
@@ -463,7 +465,7 @@ def get_connection_catalog_task(task_key, org_id, connection_id):
 @app.task(bind=False)
 def create_elementary_report(task_key: str, org_id: int, bucket_file_path: str):
     """run edr report to create the elementary report and write to s3"""
-    taskprogress = SingleTaskProgress(task_key, 180)
+    taskprogress = SingleTaskProgress(task_key, int(os.getenv("EDR_TTL", "180")))
 
     edr_binary = Path(os.getenv("DBT_VENV")) / "venv/bin/edr"
     org = Org.objects.filter(id=org_id).first()
