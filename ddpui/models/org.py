@@ -92,33 +92,12 @@ class OrgWarehouse(models.Model):
     airbyte_docker_image_tag = models.TextField(  # skipcq: PTC-W0901, PTC-W0906
         max_length=10, null=True
     )
-    airbyte_norm_op_id = models.TextField(  # skipcq: PTC-W0901, PTC-W0906
-        max_length=36, null=True
-    )
     bq_location = models.CharField(max_length=100, null=True)
 
     def __str__(self) -> str:
         return (
             f"OrgWarehouse[{self.org.slug}|{self.wtype}|{self.airbyte_destination_id}]"
         )
-
-    def is_destinations_v2(self):
-        """returns True if the warehouse is using destinations v2"""
-        if (
-            self.airbyte_docker_repository
-            and self.airbyte_docker_repository.find("postgres") > -1
-            and self.airbyte_docker_image_tag
-            and self.airbyte_docker_image_tag >= "0.6.0"
-        ):
-            return True
-        if (
-            self.airbyte_docker_repository
-            and self.airbyte_docker_repository.find("bigquery") > -1
-            and self.airbyte_docker_image_tag
-            and self.airbyte_docker_image_tag >= "1.9.1"
-        ):
-            return True
-        return False
 
 
 class OrgWarehouseSchema(Schema):

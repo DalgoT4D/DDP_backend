@@ -1,5 +1,5 @@
 # main urls
-# from django.contrib import admin
+from django.contrib import admin
 from django.urls import include, path
 
 from ddpui.api.airbyte_api import airbyteapi
@@ -21,7 +21,7 @@ from ddpui.html.elementary import get_elementary_report
 from ddpui.datainsights.generate_result import DataInsightsConsumer
 
 urlpatterns = [
-    # path("admin/", admin.site.urls), # Uncomment if you want to use django-admin app
+    path("admin/", admin.site.urls),  # Uncomment if you want to use django-admin app
     path("api/dashboard/", dashboardapi.urls),
     path("api/airbyte/", airbyteapi.urls),
     path("api/data/", dataapi.urls),

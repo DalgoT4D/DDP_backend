@@ -168,7 +168,7 @@ def create_dbt_model_in_project(
             merge_input.append(
                 {
                     "input_type": source_model.type,
-                    "input_name": source_model.name,
+                    "input_name": source_model.name if source_model.type == 'model' else source_model.display_name,
                     "source_name": source_model.source_name,
                 }
             )

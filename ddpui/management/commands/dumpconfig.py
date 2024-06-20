@@ -17,6 +17,7 @@ from ddpui.ddpairbyte import airbyte_service
 logger = CustomLogger("ddpui")
 load_dotenv()
 
+
 class Command(BaseCommand):
     """
     This script dumps the configuration of an org to file
@@ -69,13 +70,17 @@ class Command(BaseCommand):
 
     def dump_connections(self, org: Org):
         """dumps airbyte connection info"""
-        connections = airbyte_service.get_connections(org.airbyte_workspace_id)["connections"]
+        connections = airbyte_service.get_connections(org.airbyte_workspace_id)[
+            "connections"
+        ]
         formatted_connections = []
         for connection in connections:
             connection["destination"] = airbyte_service.get_destination(
-                org.airbyte_workspace_id, connection["destinationId"])
+                org.airbyte_workspace_id, connection["destinationId"]
+            )
             connection["source"] = airbyte_service.get_source(
-                org.airbyte_workspace_id, connection["sourceId"])
+                org.airbyte_workspace_id, connection["sourceId"]
+            )
             streams = connection["syncCatalog"]["streams"]
             formatted_streams = []
             for stream in streams:
@@ -84,13 +89,15 @@ class Command(BaseCommand):
                     "selected": stream["config"]["selected"],
                     "syncMode": stream["config"]["syncMode"],
                     "destinationSyncMode": stream["config"]["destinationSyncMode"],
-                    "cursorField": stream["config"]["cursorField"]
+                    "cursorField": stream["config"]["cursorField"],
                 }
                 formatted_streams.append(formatted_stream)
 
             schema = None
             if connection["destination"]["destinationName"] == "BigQuery":
-                schema = connection["destination"]["connectionConfiguration"]["dataset_id"]
+                schema = connection["destination"]["connectionConfiguration"][
+                    "dataset_id"
+                ]
             elif connection["destination"]["destinationName"] == "Postgres":
                 schema = connection["destination"]["connectionConfiguration"]["schema"]
 
@@ -98,28 +105,31 @@ class Command(BaseCommand):
                 "name": connection["name"],
                 "source_name": connection["source"]["name"],
                 "streams": formatted_streams,
-                "normalize": False,
                 "destinationSchema": schema,
             }
             formatted_connections.append(formatted_connection)
         return formatted_connections
-    
+
     def dump_dataflow(self, org: Org):
         """dumps dataflow info"""
-        dataflows = OrgDataFlowv1.objects.filter(org=org).exclude(dataflow_type='manual')
+        dataflows = OrgDataFlowv1.objects.filter(org=org).exclude(
+            dataflow_type="manual"
+        )
         if dataflows is None:
             logger.error(f"No dataflow found for {org.slug}")
             return None
         retval = []
         for dataflow in dataflows:
-            retval.append({
-                'org': dataflow.org.id,
-                'name': dataflow.name,
-                'deployment_name': dataflow.deployment_name,
-                'deployment_id': dataflow.deployment_id,
-                'cron': dataflow.cron,
-                'dataflow_type': dataflow.dataflow_type,
-            })
+            retval.append(
+                {
+                    "org": dataflow.org.id,
+                    "name": dataflow.name,
+                    "deployment_name": dataflow.deployment_name,
+                    "deployment_id": dataflow.deployment_id,
+                    "cron": dataflow.cron,
+                    "dataflow_type": dataflow.dataflow_type,
+                }
+            )
         return retval
 
     def handle(self, *args, **options):
@@ -132,7 +142,7 @@ class Command(BaseCommand):
         self.output_config["sources"] = self.dump_sources(org)
         self.output_config["connections"] = self.dump_connections(org)
         self.output_config["flows"] = self.dump_dataflow(org)
-        
+
         if options["output"]:
             options["output"] = options["output"] + ".json"
             with open(options["output"], "w", encoding="utf-8") as f:

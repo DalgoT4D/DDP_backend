@@ -416,16 +416,10 @@ class TestConnection:
                     "cursorField": "default",
                 }
             ],
-            normalize=False,
         )
 
-        test_airbyte_norm_op_id = create_normalization_operation(test_workspace_id)[
-            "operationId"
-        ]
         try:
-            res = create_connection(
-                workspace_id, test_airbyte_norm_op_id, connection_info
-            )
+            res = create_connection(workspace_id, connection_info)
             CreateConnectionTestResponse(**res)
             TestConnection.connection_id = res["connectionId"]
             # check if the streams have been set in the connection

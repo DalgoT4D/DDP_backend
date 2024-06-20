@@ -4,22 +4,28 @@ Functions which communicate with Airbyte
 These functions do not access the Dalgo database
 """
 
-import os
 from typing import Dict, List
+import os
+from datetime import datetime
 import requests
 from dotenv import load_dotenv
 from ninja.errors import HttpError
+from django.utils.text import slugify
+from flags.state import flag_enabled
 from ddpui.ddpairbyte import schema
+from ddpui.ddpprefect import prefect_service, AIRBYTESERVER
 from ddpui.models.org import Org
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.deploymentblocks import trigger_reset_and_sync_workflow
-from ddpui.utils.helpers import remove_nested_attribute
+from ddpui.utils.helpers import remove_nested_attribute, nice_bytes
 from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
     AirbyteDestinationCreate,
     AirbyteSourceUpdateCheckConnection,
     AirbyteDestinationUpdateCheckConnection,
 )
+from ddpui.utils import thread
+from ddpui.models.org import OrgPrefectBlockv1
 
 load_dotenv()
 
@@ -29,13 +35,43 @@ logger = CustomLogger("airbyte")
 
 def abreq(endpoint, req=None, **kwargs):
     """Request to the airbyte server"""
+    request = thread.get_current_request()
+
     abhost = os.getenv("AIRBYTE_SERVER_HOST")
     abport = os.getenv("AIRBYTE_SERVER_PORT")
     abver = os.getenv("AIRBYTE_SERVER_APIVER")
     token = os.getenv("AIRBYTE_API_TOKEN")
 
-    logger.info("Making request to Airbyte server: %s", endpoint)
+    if request is not None:
+        org_user = request.orguser
+        org_slug = org_user.org.slug
+        if flag_enabled("AIRBYTE_PROFILE", request_org_slug=org_slug):
 
+            org_server_block = OrgPrefectBlockv1.objects.filter(
+                org=org_user.org, block_type=AIRBYTESERVER
+            ).first()
+
+            if not org_server_block:
+                raise HttpError(400, "airbyte server block not found")
+
+            block_name = org_server_block.block_name
+
+            try:
+                airbyte_server_block = prefect_service.get_airbyte_server_block(
+                    block_name
+                )
+            except Exception as exc:
+                raise Exception("could not connect to prefect-proxy") from exc
+
+            logger.info(
+                "Making request to Airbyte server through prefect block: %s", endpoint
+            )
+            abhost = airbyte_server_block["host"]
+            abport = airbyte_server_block["port"]
+            abver = airbyte_server_block["version"]
+            token = airbyte_server_block["token"]
+
+    logger.info("Making request to Airbyte server: %s", endpoint)
     try:
         res = requests.post(
             f"http://{abhost}:{abport}/api/{abver}/{endpoint}",
@@ -666,67 +702,8 @@ def get_connection(workspace_id: str, connection_id: str) -> dict:
     return res
 
 
-def create_normalization_operation(workspace_id: str) -> str:
-    """create a normalization operation for this airbyte workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "workspace_id must be a string")
-
-    # create normalization operation
-    res = abreq(
-        "/operations/create",
-        {
-            "workspaceId": workspace_id,
-            "name": "op-normalize",
-            "operatorConfiguration": {
-                "operatorType": "normalization",
-                "normalization": {"option": "basic"},
-            },
-        },
-    )
-    if "operationId" not in res:
-        error_message = f"could not create normalization operation for {workspace_id}"
-        logger.error(error_message)
-        raise HttpError(404, error_message)
-
-    return res
-
-
-def get_airbyte_operation(operation_id: str):
-    """fetch the operation details from the id, operation can be normalization┃dbt┃webhook"""
-    if not isinstance(operation_id, str):
-        raise HttpError(400, "operation_id must be a string")
-
-    res = abreq(
-        "/operations/get",
-        {"operationId": operation_id},
-    )
-
-    if "operationId" not in res:
-        error_message = f"could not fetch the operation with id {operation_id}"
-        logger.error(error_message)
-        raise HttpError(404, error_message)
-
-    return res
-
-
-def is_operation_normalization(operation_id: str):
-    """Return boolean to mark if the operation is a normalization operation or not"""
-    res = get_airbyte_operation(operation_id)
-
-    if "operatorConfiguration" in res:
-        # for now the only operator we know about is normalization
-        if (
-            "operatorType" in res["operatorConfiguration"]
-            and res["operatorConfiguration"]["operatorType"] == "normalization"
-        ):
-            return True
-
-    return False
-
-
 def create_connection(
     workspace_id: str,
-    airbyte_norm_op_id: str | None,
     connection_info: schema.AirbyteConnectionCreate,
 ) -> dict:
     """Create a connection in an airbyte workspace"""
@@ -763,9 +740,6 @@ def create_connection(
     if connection_info.destinationSchema:
         payload["namespaceDefinition"] = "customformat"
         payload["namespaceFormat"] = connection_info.destinationSchema
-
-    if connection_info.normalize:
-        payload["operationIds"] = [airbyte_norm_op_id]
 
     # one stream per table
     selected_streams = {x["name"]: x for x in connection_info.streams}
@@ -901,7 +875,9 @@ def get_job_info(job_id: str) -> dict:
     return res
 
 
-def get_jobs_for_connection(connection_id: str) -> int | None:
+def get_jobs_for_connection(
+    connection_id: str, limit: int = 1, offset: int = 0
+) -> int | None:
     """
     returns most recent job for a connection
     possible configTypes are
@@ -911,6 +887,8 @@ def get_jobs_for_connection(connection_id: str) -> int | None:
     - get_spec
     - sync
     - reset_connection
+
+    by default this function fetches the last job
     """
     if not isinstance(connection_id, str):
         raise HttpError(400, "connection_id must be a string")
@@ -920,6 +898,7 @@ def get_jobs_for_connection(connection_id: str) -> int | None:
         {
             "configTypes": ["sync"],
             "configId": connection_id,
+            "pagination": {"rowOffset": offset, "pageSize": limit},
         },
     )
     return result
@@ -930,10 +909,23 @@ def parse_job_info(jobinfo: dict) -> dict:
     retval = {
         "job_id": jobinfo["job"]["id"],
         "status": jobinfo["job"]["status"],
+        "date": None,
+        "recordsSynced": 0,
+        "bytesSynced": nice_bytes(0),
+        "recordsEmitted": 0,
+        "bytesEmitted": nice_bytes(0),
+        "recordsCommitted": 0,
+        "totalTimeInSeconds": 0,
     }
     for attempt in jobinfo["attempts"]:
         if attempt["status"] == "succeeded":
             retval["recordsSynced"] = attempt["recordsSynced"]
+            retval["bytesSynced"] = nice_bytes(attempt["bytesSynced"])
+            retval["recordsEmitted"] = attempt["totalStats"]["recordsEmitted"]
+            retval["bytesEmitted"] = nice_bytes(attempt["totalStats"]["bytesEmitted"])
+            retval["recordsCommitted"] = attempt["totalStats"]["recordsCommitted"]
+            retval["totalTimeInSeconds"] = attempt["endedAt"] - attempt["createdAt"]
+            retval["date"] = datetime.fromtimestamp(attempt["endedAt"]).date()
             break
     return retval
 
@@ -953,18 +945,26 @@ def get_connection_catalog(connection_id: str) -> dict:
     """get the catalog for a connection"""
     if not isinstance(connection_id, str):
         raise HttpError(400, "connection_id must be a string")
-    res = abreq("web_backend/connections/get", {"connectionId": connection_id, "withRefreshedCatalog": True})
+    res = abreq(
+        "web_backend/connections/get",
+        {"connectionId": connection_id, "withRefreshedCatalog": True},
+    )
     return res
 
-def update_schema_change(org: Org, 
-                         connection_info: schema.AirbyteConnectionSchemaUpdate, 
-                         current_connection: dict) -> dict:
+
+def update_schema_change(
+    org: Org,
+    connection_info: schema.AirbyteConnectionSchemaUpdate,
+    current_connection: dict,
+) -> dict:
     """Update the schema change for a connection."""
     if not isinstance(connection_info, schema.AirbyteConnectionSchemaUpdate):
-        raise HttpError(400, "connection_info must be an instance of AirbyteConnectionSchemaUpdate")
+        raise HttpError(
+            400, "connection_info must be an instance of AirbyteConnectionSchemaUpdate"
+        )
     if not isinstance(current_connection, dict):
         raise HttpError(400, "current_connection must be a dictionary")
-    
+
     # check syncCatalog is present in current_connection
     if "syncCatalog" not in current_connection:
         current_connection["syncCatalog"] = {}

@@ -5,10 +5,10 @@ from subprocess import CompletedProcess
 
 from datetime import datetime, timedelta
 import yaml
+from celery.schedules import crontab
 from django.utils.text import slugify
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, PIPELINE_MANAGER_ROLE
 from ddpui.celery import app
-from celery.schedules import crontab
 from ddpui.ddpairbyte.airbyte_service import abreq
 from ddpui.utils.sendgrid import send_schema_changes_email
 from ddpui.utils.timezone import UTC
@@ -29,7 +29,8 @@ from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
-from ddpui.ddpairbyte import airbyte_service
+from ddpui.utils.singletaskprogress import SingleTaskProgress
+from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 from ddpui.ddpprefect.prefect_service import (
     update_dbt_core_block_schema,
     get_dbt_cli_profile_block,
@@ -39,6 +40,7 @@ from ddpui.utils.constants import (
     TASK_DBTRUN,
     TASK_DBTCLEAN,
     TASK_DBTDEPS,
+    TASK_AIRBYTESYNC,
 )
 from ddpui.ddpprefect import DBTCLIPROFILE
 
@@ -387,7 +389,7 @@ def schema_change_detection():
     schema_changes = {}
 
     for org in orgs:
-        org_conn = OrgTask.objects.filter(org=org, task__slug="airbyte-sync")
+        org_conn = OrgTask.objects.filter(org=org, task__slug=TASK_AIRBYTESYNC)
         for org_task in org_conn:
             try:
                 response = abreq(
@@ -418,18 +420,44 @@ def schema_change_detection():
                 logger.error(f"Error checking connection for org {org.name}: {e}")
                 continue
 
-    for org, changes in schema_changes.items():
-        breaking_changes = changes["breaking"]
-        non_breaking_changes = changes["non_breaking"]
-
+    for org in schema_changes:
         org_users = OrgUser.objects.filter(
             org=org, new_role__slug__in=[ACCOUNT_MANAGER_ROLE, PIPELINE_MANAGER_ROLE]
         )
+        message = """This email is to let you know that schema changes have been detected in your Dalgo pipeline, which require your review."""
         for orguser in org_users:
             logger.info(f"sending notification email to {orguser.user.email}")
-            send_schema_changes_email(
-                org.name, orguser.user.email, breaking_changes, non_breaking_changes
-            )
+            send_schema_changes_email(org.name, orguser.user.email, message)
+
+
+@app.task(bind=False)
+def get_connection_catalog_task(task_key, org_id, connection_id):
+    """Fetch a connection in the user organization workspace as a Celery task"""
+    org = Org.objects.get(id=org_id)
+    taskprogress = SingleTaskProgress(task_key, 180)
+    taskprogress.add(
+        {
+            "message": "started",
+            "status": "running",
+        }
+    )
+
+    res, error = airbytehelpers.get_connection_catalog(org, connection_id)
+    if error:
+        logger.error(
+            "unable to fetch schema catalog for %s %s", org.slug, connection_id
+        )
+        taskprogress.add(
+            {
+                "message": "unable to fetch catalog response",
+                "status": "failed",
+            }
+        )
+
+    taskprogress.add(
+        {"message": "fetched catalog data", "status": "completed", "result": res}
+    )
+    return res
 
 
 @app.task(bind=True)

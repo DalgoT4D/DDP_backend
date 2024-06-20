@@ -19,18 +19,18 @@ from ddpui.ddpairbyte.schema import (
 )
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
+    PrefectDataFlowUpdateSchema3,
 )
 from ddpui.ddpprefect import AIRBYTESERVER
 from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.models.org import OrgDataFlowv1, OrgWarehouse
-from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskLock
+from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask
 from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTERESET
 from ddpui.utils.helpers import generate_hash_id, update_dict_but_not_stars
 from ddpui.utils import secretsmanager
 from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
 from ddpui.core.pipelinefunctions import setup_airbyte_sync_task_config
 from ddpui.core.orgtaskfunctions import fetch_orgtask_lock
-from ddpui.celeryworkers.tasks import add_custom_connectors_to_workspace
 
 logger = CustomLogger("airbyte")
 
@@ -151,11 +151,6 @@ def setup_airbyte_workspace_v1(wsname: str, org: Org) -> AirbyteWorkspace:
                 "could not create orgprefectblock for airbyte-server"
             ) from error
 
-    # add custom sources to this workspace
-    add_custom_connectors_to_workspace.delay(
-        workspace["workspaceId"], list(settings.AIRBYTE_CUSTOM_SOURCES.values())
-    )
-
     return AirbyteWorkspace(
         name=workspace["name"],
         workspaceId=workspace["workspaceId"],
@@ -217,12 +212,6 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
         return None, "warehouse has no airbyte_destination_id"
     payload.destinationId = warehouse.airbyte_destination_id
 
-    if warehouse.airbyte_norm_op_id is None and not warehouse.is_destinations_v2():
-        warehouse.airbyte_norm_op_id = airbyte_service.create_normalization_operation(
-            org.airbyte_workspace_id
-        )["operationId"]
-        warehouse.save()
-
     org_airbyte_server_block = OrgPrefectBlockv1.objects.filter(
         org=org,
         block_type=AIRBYTESERVER,
@@ -238,9 +227,7 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
     if reset_task is None:
         return None, "reset task not supported"
 
-    airbyte_conn = airbyte_service.create_connection(
-        org.airbyte_workspace_id, warehouse.airbyte_norm_op_id, payload
-    )
+    airbyte_conn = airbyte_service.create_connection(org.airbyte_workspace_id, payload)
 
     try:
         with transaction.atomic():
@@ -286,7 +273,6 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
         "syncCatalog": airbyte_conn["syncCatalog"],
         "status": airbyte_conn["status"],
         "deploymentId": sync_dataflow.deployment_id,
-        "normalize": payload.normalize,
         "resetConnDeploymentId": reset_dataflow.deployment_id,
     }
     return res, None
@@ -440,11 +426,6 @@ def get_one_connection(org: Org, connection_id: str):
             if dataflow_orgtask.dataflow
             else None
         ),
-        "normalize": (
-            airbyte_service.is_operation_normalization(airbyte_conn["operationIds"][0])
-            if "operationIds" in airbyte_conn and len(airbyte_conn["operationIds"]) == 1
-            else False
-        ),
         "lock": lock,
         "resetConnDeploymentId": (
             reset_dataflow.deployment_id if reset_dataflow else None
@@ -489,23 +470,7 @@ def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUp
 
     # fetch connection by id from airbyte
     connection = airbyte_service.get_connection(org.airbyte_workspace_id, connection_id)
-
-    # update normalization of data
-    if payload.normalize:
-        if "operationIds" not in connection or len(connection["operationIds"]) == 0:
-            if (
-                warehouse.airbyte_norm_op_id is None
-                and not warehouse.is_destinations_v2()
-            ):
-                warehouse.airbyte_norm_op_id = (
-                    airbyte_service.create_normalization_operation(
-                        org.airbyte_workspace_id
-                    )["operationId"]
-                )
-                warehouse.save()
-            connection["operationIds"] = [warehouse.airbyte_norm_op_id]
-    else:
-        connection["operationIds"] = []
+    connection["operationIds"] = []
 
     # update name
     if payload.name:
@@ -527,35 +492,77 @@ def delete_connection(org: Org, connection_id: str):
 
     dataflows_to_delete: list[OrgDataFlowv1] = []
     orgtask_to_delete: list[OrgTask] = []
+
+    # delete manual-sync and manual-reset dataflows
     for org_task in OrgTask.objects.filter(
         org=org,
         connection_id=connection_id,
-    ).all():
-        for dataflow_orgtask in DataflowOrgTask.objects.filter(orgtask=org_task).all():
+    ):
+        for dataflow_orgtask in DataflowOrgTask.objects.filter(
+            orgtask=org_task, dataflow__dataflow_type="manual"
+        ):
             dataflows_to_delete.append(dataflow_orgtask.dataflow)
+            logger.info("will delete %s", dataflow_orgtask.dataflow.deployment_name)
 
         orgtask_to_delete.append(org_task)
 
     # delete all deployments
-    logger.info("deleting prefect deployment")
     for dataflow in dataflows_to_delete:
+        logger.info("deleting prefect deployment %s", dataflow.deployment_name)
         prefect_service.delete_deployment_by_id(dataflow.deployment_id)
 
     # delete all dataflows
-    logger.info("deleting org dataflow from db")
+    logger.info("deleting org dataflows from db")
     for dataflow in dataflows_to_delete:
         # if there is a reset and a sync then the dataflow will appear twice in this list
         if dataflow.id:
             dataflow.delete()
 
+    # remove from orchestration dataflows
+    for org_task in OrgTask.objects.filter(
+        org=org,
+        connection_id=connection_id,
+    ):
+        # this org_task is already in the to_delete list from above
+
+        for dataflow_orgtask in DataflowOrgTask.objects.filter(
+            orgtask=org_task, dataflow__dataflow_type="orchestrate"
+        ):
+            # fetch config from prefect
+            deployment = prefect_service.get_deployment(
+                dataflow_orgtask.dataflow.deployment_id
+            )
+            # { name, deploymentId, tags, cron, isScheduleActive, parameters }
+            # parameters = {config: {org_slug, tasks}}
+            # tasks = list of
+            #    {seq, slug, type, timeout, orgtask__uuid, connection_id, airbyte_server_block}
+            parameters = deployment["parameters"]
+            # logger.info(parameters)
+            for task in parameters["config"]["tasks"]:
+                if task["connection_id"] == connection_id:
+                    logger.info(f"deleting task {task['slug']} from deployment")
+                    parameters["config"]["tasks"].remove(task)
+            # logger.info(parameters)
+            payload = PrefectDataFlowUpdateSchema3(deployment_params=parameters)
+            prefect_service.update_dataflow_v1(
+                dataflow_orgtask.dataflow.deployment_id, payload
+            )
+            logger.info(
+                "updated deployment %s", dataflow_orgtask.dataflow.deployment_name
+            )
+
     # delete all orgtasks
-    logger.info("deleting orgtask")
     for org_task in orgtask_to_delete:
+        logger.info("deleting orgtask %s", org_task.task.slug)
         org_task.delete()
 
     # delete airbyte connection
-    logger.info("deleting airbyte connection")
+    logger.info("deleting airbyte connection %s", connection_id)
     airbyte_service.delete_connection(org.airbyte_workspace_id, connection_id)
+
+    if OrgSchemaChange.objects.filter(connection_id=connection_id).exists():
+        OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+        logger.info(f"Deleted schema changes for connection {connection_id}")
 
     return None, None
 
@@ -583,6 +590,45 @@ def get_job_info_for_connection(org: Org, connection_id: str):
     job_info["logs"] = logs["logs"]["logLines"]
 
     return job_info, None
+
+
+def get_sync_job_history_for_connection(
+    org: Org, connection_id: str, limit: int = 10, offset: int = 0
+):
+    """
+    Get all sync jobs (paginated) for a connection
+    Returns
+    - Date
+    - Records synced
+    - Bytes synced
+    - Duration
+    - logs
+
+    In case there no sync jobs, return an empty list
+    """
+
+    org_task = OrgTask.objects.filter(
+        org=org,
+        connection_id=connection_id,
+        task__slug=TASK_AIRBYTESYNC,
+    ).first()
+
+    if org_task is None:
+        return None, "connection not found"
+
+    res = {"history": [], "totalSyncs": 0}
+    result = airbyte_service.get_jobs_for_connection(connection_id, limit, offset)
+    res["totalSyncs"] = result["totalJobCount"]
+    if len(result["jobs"]) == 0:
+        return [], None
+
+    for job in result["jobs"]:
+        job_info = airbyte_service.parse_job_info(job)
+        logs = airbyte_service.get_logs_for_job(job_info["job_id"])
+        job_info["logs"] = logs["logs"]["logLines"]
+        res["history"].append(job_info)
+
+    return res, None
 
 
 def update_destination(
@@ -761,6 +807,9 @@ def update_connection_schema(
     connection["skipReset"] = True
 
     res = airbyte_service.update_schema_change(org, payload, connection)
+    if res:
+        OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+
     return res, None
 
 

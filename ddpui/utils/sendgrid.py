@@ -54,7 +54,7 @@ def send_invite_user_email(
 
 
 def send_schema_changes_email(
-    org: str, to_email: str, breaking_changes: str, non_breaking_changes: str
+    org: str, to_email: str, message: str
 ) -> None:
     """sends an email notification informing platform admins
     and account managers that there is a schema change detected
@@ -65,8 +65,7 @@ def send_schema_changes_email(
             to_email,
             {
                 "org": org,
-                "breaking_changes": breaking_changes,
-                "non_breaking_changes": non_breaking_changes,
+                "message": message
             },
         )
 

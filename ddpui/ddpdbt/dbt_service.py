@@ -1,3 +1,5 @@
+import re
+from uuid import uuid4
 import glob
 import os
 import shutil
@@ -5,8 +7,6 @@ from datetime import datetime
 import subprocess
 from pathlib import Path
 import requests
-import re
-from uuid import uuid4
 import boto3
 import boto3.exceptions
 
@@ -22,6 +22,7 @@ from ddpui.models.org_user import Org
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask
 from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.utils import secretsmanager
+from ddpui.utils.timezone import as_ist
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.redis_client import RedisClient
@@ -219,6 +220,30 @@ def check_repo_exists(gitrepo_url: str, gitrepo_access_token: str | None) -> boo
     return response.status_code == 200
 
 
+def make_edr_report_s3_path(org: Org):
+    """make s3 path for elementary report"""
+    todays_date = datetime.today().strftime("%Y-%m-%d")
+    bucket_file_path = f"reports/{org.slug}.{todays_date}.html"
+    return bucket_file_path
+
+
+def refresh_elementary_report(org: Org):
+    """refreshes the elementary report for the current date"""
+    running_task = TaskProgress.get_running_tasks(
+        f"{TaskProgressHashPrefix.RUNELEMENTARY}-{org.slug}"
+    )
+    logger.info("running_task %s", str(running_task))
+    if running_task and len(running_task) > 0:
+        logger.info("edr already running for org %s", org.slug)
+        task_id = running_task[0].decode("utf8")
+        return None, {"task_id": task_id}
+
+    bucket_file_path = make_edr_report_s3_path(org)
+    logger.info("creating new elementary report at %s", bucket_file_path)
+    task = create_elementary_report.delay(org.id, bucket_file_path)
+    return None, {"task_id": task.id}
+
+
 def make_elementary_report(org: Org):
     """generate elementary report"""
     if org.dbt is None:
@@ -238,8 +263,7 @@ def make_elementary_report(org: Org):
         aws_access_key_id=os.getenv("ELEMENTARY_AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=os.getenv("ELEMENTARY_AWS_SECRET_ACCESS_KEY"),
     )
-    todays_date = datetime.today().strftime("%Y-%m-%d")
-    bucket_file_path = f"reports/{org.slug}.{todays_date}.html"
+    bucket_file_path = make_edr_report_s3_path(org)
     try:
         s3response = s3.get_object(
             Bucket=os.getenv("ELEMENTARY_S3_BUCKET"),
@@ -249,19 +273,7 @@ def make_elementary_report(org: Org):
     except boto3.exceptions.botocore.exceptions.ClientError:
         # the report doesn't exist, trigger a celery task to generate it
         # see if there is an existing TaskProgress for this org
-        running_task = TaskProgress.get_running_tasks(
-            f"{TaskProgressHashPrefix.RUNELEMENTARY}-{org.slug}"
-        )
-        logger.info("running_task %s", str(running_task))
-        if running_task and len(running_task) > 0:
-            logger.info("edr already running for org %s", org.slug)
-            task_id = running_task[0].decode("utf8")
-            return None, {"task_id": task_id}
-
-        logger.info("creating new elementary report")
-        task = create_elementary_report.delay(org.id, bucket_file_path)
-        logger.info(task.id)
-        return None, {"task_id": task.id}
+        return refresh_elementary_report(org)
     except Exception:
         return "error fetching elementary report", None
 
@@ -279,4 +291,12 @@ def make_elementary_report(org: Org):
     redis.expire(redis_key, 3600 * 24)
     logger.info("created redis key %s", redis_key)
 
-    return None, {"token": token.hex}
+    return None, {
+        "token": token.hex,
+        "created_on_utc": s3response[
+            "LastModified"
+        ].isoformat(),  # e.g. 2024-06-07T00:44:08+00:00
+        "created_on_ist": as_ist(
+            s3response["LastModified"]
+        ).isoformat(),  # e.g. 2024-06-07T06:14:08+05:30
+    }

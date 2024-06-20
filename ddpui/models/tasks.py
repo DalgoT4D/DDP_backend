@@ -23,6 +23,7 @@ class TaskProgressHashPrefix(str, Enum):
     RUNDBTCMDS = "run-dbt-commands"
     RUNELEMENTARY = "run-elementary"
     DATAINSIGHTS = "data-insights"
+    SCHEMA_CHANGE = "schema-change"
 
 
 class OrgTaskGeneratedBy(str, Enum):
