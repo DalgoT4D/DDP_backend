@@ -25,6 +25,7 @@ class AggQueryBuilder:
         self.limit_records: int = None
         self.offset_records: int = 0
         self.where_clauses: list = []
+        self.having_clauses: list = []
 
     def add_column(self, agg_col: Function | ColumnClause):
         """Push a column to select"""
@@ -46,6 +47,11 @@ class AggQueryBuilder:
                 self.group_by_clauses.append(column(col))
             else:
                 self.group_by_clauses.append(col)
+        return self
+
+    def having_clause(self, condition):
+        """Having clause"""
+        self.having_clauses.append(condition)
         return self
 
     def order_cols_by(self, cols: list[tuple[str, str]]):
@@ -86,6 +92,9 @@ class AggQueryBuilder:
 
         if len(self.group_by_clauses) > 0:
             stmt = stmt.group_by(*self.group_by_clauses)
+            if len(self.having_clauses) > 0:
+                for having_clause in self.having_clauses:
+                    stmt = stmt.having(having_clause)
 
         if len(self.order_by_clauses) > 0:
             stmt = stmt.order_by(*self.order_by_clauses)

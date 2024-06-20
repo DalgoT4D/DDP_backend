@@ -52,7 +52,20 @@ class DataStats(ColInsight):
             )
             .where_clause(numeric_col.isnot(None))
             .fetch_from(self.db_table, self.db_schema)
-            .subquery(alias="subquery")
+            .subquery(alias="median_subquery")
+        )
+
+        mode_subquery = (
+            self.builder.reset()
+            .add_column(numeric_col)
+            .add_column(func.count().label("count"))
+            .where_clause(numeric_col.isnot(None))
+            .fetch_from(self.db_table, self.db_schema)
+            .group_cols_by(numeric_col)
+            .having_clause(func.count() > 1)
+            .order_cols_by([("count", "desc"), (col.name, "desc")])
+            .limit_rows(5)
+            .subquery(alias="mode_subquery")
         )
 
         query = (
@@ -79,15 +92,14 @@ class DataStats(ColInsight):
                 )
                 .label("median")
             )
+            .add_column(select([mode_subquery.c[f"{col.name}"]]).limit(1).label("mode"))
             .add_column(
-                select([numeric_col])
-                .select_from(table(self.db_table, schema=self.db_schema))
-                .where(numeric_col.isnot(None))
-                .group_by(numeric_col)
-                .having(func.count(numeric_col) > 1)
-                .order_by(desc(func.count(numeric_col)))
-                .limit(1)
-                .label("mode")
+                select([func.array_agg(mode_subquery.c[f"{col.name}"])])
+                .where(
+                    mode_subquery.c["count"]
+                    == select([mode_subquery.c["count"]]).limit(1)
+                )
+                .label("other_modes")
             )
         )
 
@@ -105,11 +117,13 @@ class DataStats(ColInsight):
             {
                 "mean": 12.00,
                 "mode": 100,
-                "media": 50
+                "media": 50,
+                "other_modes": [50, 60, ...] # 5 modes with same frequency (the highest frequency)
             }
         ]
         """
         if len(result) > 0:
+            print(result)
             return {
                 self.columns[0].name: {
                     "mean": float(result[0]["mean"]) if result[0]["mean"] else None,
@@ -117,15 +131,14 @@ class DataStats(ColInsight):
                         float(result[0]["median"]) if result[0]["median"] else None
                     ),
                     "mode": float(result[0]["mode"]) if result[0]["mode"] else None,
+                    "other_modes": (
+                        result[0]["other_modes"] if result[0]["other_modes"] else None
+                    ),
                 }
             }
 
         return {
-            self.columns[0].name: {
-                "mean": 0,
-                "median": 0,
-                "mode": 0,
-            }
+            self.columns[0].name: {"mean": 0, "median": 0, "mode": 0, "other_modes": []}
         }
 
     def validate_query_results(self, parsed_results):
@@ -137,7 +150,10 @@ class DataStats(ColInsight):
         if (
             parsed_results
             and isinstance(parsed_results, dict)
-            and all(key in parsed_results for key in ["mean", "median", "mode"])
+            and all(
+                key in parsed_results
+                for key in ["mean", "median", "mode", "other_modes"]
+            )
         ):
             validate = True
 

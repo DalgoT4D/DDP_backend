@@ -163,6 +163,19 @@ class StringLengthStats(ColInsight):
             .subquery(alias="subquery")
         )
 
+        mode_subquery = (
+            self.builder.reset()
+            .add_column(length_col.label(f"{col.name}_len"))
+            .add_column(func.count().label("count"))
+            .where_clause(length_col.isnot(None))
+            .fetch_from(self.db_table, self.db_schema)
+            .group_cols_by(f"{col.name}_len")
+            .having_clause(func.count() > 1)
+            .order_cols_by([("count", "desc"), (f"{col.name}_len", "desc")])
+            .limit_rows(5)
+            .subquery(alias="mode_subquery")
+        )
+
         query = (
             self.builder.reset()
             .add_column(
@@ -190,14 +203,15 @@ class StringLengthStats(ColInsight):
                 .label("median")
             )
             .add_column(
-                select([length_col.label(f"{col.name}_len")])
-                .select_from(table(self.db_table, schema=self.db_schema))
-                .where(length_col.isnot(None))
-                .group_by(f"{col.name}_len")
-                .having(func.count(length_col) > 1)
-                .order_by(desc(func.count()))
-                .limit(1)
-                .label("mode")
+                select([mode_subquery.c[f"{col.name}_len"]]).limit(1).label("mode")
+            )
+            .add_column(
+                select([func.array_agg(mode_subquery.c[f"{col.name}_len"])])
+                .where(
+                    mode_subquery.c["count"]
+                    == select([mode_subquery.c["count"]]).limit(1)
+                )
+                .label("other_modes")
             )
         )
 
@@ -215,7 +229,8 @@ class StringLengthStats(ColInsight):
             {
                 "mean": 12.00,
                 "mode": 100,
-                "media": 50
+                "media": 50,
+                "other_modes": [50, 60] # 5 modes with same frequency (the highest frequency)
             }
         ]
         """
@@ -237,15 +252,14 @@ class StringLengthStats(ColInsight):
                         if result[0]["mode"] is not None
                         else result[0]["mode"]
                     ),
+                    "other_modes": (
+                        result[0]["other_modes"] if result[0]["other_modes"] else None
+                    ),
                 }
             }
 
         return {
-            self.columns[0].name: {
-                "mean": 0,
-                "median": 0,
-                "mode": 0,
-            }
+            self.columns[0].name: {"mean": 0, "median": 0, "mode": 0, "other_modes": []}
         }
 
     def validate_query_results(self, parsed_results):
@@ -257,7 +271,10 @@ class StringLengthStats(ColInsight):
         if (
             parsed_results
             and isinstance(parsed_results, dict)
-            and all(key in parsed_results for key in ["mean", "median", "mode"])
+            and all(
+                key in parsed_results
+                for key in ["mean", "median", "mode", "other_modes"]
+            )
         ):
             validate = True
 
