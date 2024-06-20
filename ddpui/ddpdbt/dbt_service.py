@@ -245,9 +245,11 @@ def refresh_elementary_report(org: Org):
         bucket_file_path = make_edr_report_s3_path(org)
         logger.info("creating new elementary report at %s", bucket_file_path)
         create_elementary_report.delay(task_str, org.id, bucket_file_path)
+        ttl = int(os.getenv("EDR_TTL", "180"))
     else:
         logger.info("edr already running for org %s", org.slug)
-    return None, {"task_id": task_str, "ttl": SingleTaskProgress.get_ttl(task_str)}
+        ttl = SingleTaskProgress.get_ttl(task_str)
+    return None, {"task_id": task_str, "ttl": ttl}
 
 
 def fetch_elementary_report(org: Org):
