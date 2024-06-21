@@ -3,6 +3,8 @@ import subprocess
 import re
 import string
 import secrets
+import hashlib
+import json
 
 
 def runcmd(cmd: str, cwd: str):
@@ -115,6 +117,12 @@ def update_dict_but_not_stars(input_config: dict):
     return output_config
 
 
+def hash_dict(payload: dict) -> str:
+    hasher = hashlib.sha256()
+
+    hasher.update(json.dumps(payload, sort_keys=True).encode("utf-8"))
+
+    return hasher.hexdigest()
 def nice_bytes(n: int) -> str:
     """Convert bytes to string with appropriate units"""
 

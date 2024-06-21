@@ -22,6 +22,7 @@ class TaskProgressHashPrefix(str, Enum):
     DBTWORKSPACE = "setup-dbt-workspace"
     RUNDBTCMDS = "run-dbt-commands"
     RUNELEMENTARY = "run-elementary"
+    DATAINSIGHTS = "data-insights"
     SCHEMA_CHANGE = "schema-change"
 
 
