@@ -26,6 +26,6 @@ def get_task(
 def get_singletask(request, task_key):  # pylint: disable=unused-argument
     """returns the progress for a celery task"""
     result = SingleTaskProgress.fetch(task_key=task_key)
-    if result:
+    if result is not None:
         return {"progress": result}
     raise HttpError(400, "no such task id")

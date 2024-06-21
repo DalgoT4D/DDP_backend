@@ -40,3 +40,9 @@ class SingleTaskProgress:
         if result:
             return json.loads(result)
         return None
+
+    @staticmethod
+    def get_ttl(task_key: str) -> int:
+        """return the ttl for the key"""
+        redis = RedisClient.get_instance()
+        return redis.ttl(task_key)

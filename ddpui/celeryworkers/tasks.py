@@ -434,7 +434,9 @@ def schema_change_detection():
 def get_connection_catalog_task(task_key, org_id, connection_id):
     """Fetch a connection in the user organization workspace as a Celery task"""
     org = Org.objects.get(id=org_id)
-    taskprogress = SingleTaskProgress(task_key, 180)
+    taskprogress = SingleTaskProgress(
+        task_key, int(os.getenv("SCHEMA_REFRESH_TTL", "180"))
+    )
     taskprogress.add(
         {
             "message": "started",
@@ -460,9 +462,11 @@ def get_connection_catalog_task(task_key, org_id, connection_id):
     return res
 
 
-@app.task(bind=True)
-def create_elementary_report(self, org_id: int, bucket_file_path: str):
+@app.task(bind=False)
+def create_elementary_report(task_key: str, org_id: int, bucket_file_path: str):
     """run edr report to create the elementary report and write to s3"""
+    taskprogress = SingleTaskProgress(task_key, int(os.getenv("EDR_TTL", "180")))
+
     edr_binary = Path(os.getenv("DBT_VENV")) / "venv/bin/edr"
     org = Org.objects.filter(id=org_id).first()
     orgdbt = OrgDbt.objects.filter(org=org).first()
@@ -471,10 +475,6 @@ def create_elementary_report(self, org_id: int, bucket_file_path: str):
     aws_access_key_id = os.getenv("ELEMENTARY_AWS_ACCESS_KEY_ID")
     aws_secret_access_key = os.getenv("ELEMENTARY_AWS_SECRET_ACCESS_KEY")
     s3_bucket_name = os.getenv("ELEMENTARY_S3_BUCKET")
-
-    taskprogress = TaskProgress(
-        self.request.id, f"{TaskProgressHashPrefix.RUNELEMENTARY}-{org.slug}", 60
-    )
 
     os.environ["PATH"] += ":" + str(Path(os.getenv("DBT_VENV")) / "venv/bin")
     cmd = [
