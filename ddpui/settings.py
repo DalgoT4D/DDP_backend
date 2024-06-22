@@ -206,6 +206,12 @@ AIRBYTE_CUSTOM_SOURCES = {
         "docker_image_tag": "0.1.1",
         "documentation_url": "",
     },
+    "tech4dev/source-glific": {
+        "name": "Glific",
+        "docker_repository": "tech4dev/source-glific",
+        "docker_image_tag": "0.1.0",
+        "documentation_url": "",
+    },
 }
 
 # finally set up the loggers
