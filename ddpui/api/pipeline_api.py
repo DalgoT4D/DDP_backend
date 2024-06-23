@@ -15,10 +15,7 @@ from ddpui.ddpprefect import (
     DBTCLIPROFILE,
     AIRBYTESERVER,
 )
-from ddpui.models.org import (
-    OrgDataFlowv1,
-    OrgPrefectBlockv1,
-)
+from ddpui.models.org import OrgDataFlowv1, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import DataflowOrgTask, OrgTask
 from ddpui.ddpprefect.schema import (
@@ -226,7 +223,8 @@ def get_prefect_dataflows_v1(request):
         raise HttpError(400, "register an organization first")
 
     org_data_flows = OrgDataFlowv1.objects.filter(
-        org=orguser.org, dataflow_type="orchestrate"
+        org=orguser.org,
+        dataflow_type="orchestrate",
     ).all()
 
     deployment_ids = [flow.deployment_id for flow in org_data_flows]

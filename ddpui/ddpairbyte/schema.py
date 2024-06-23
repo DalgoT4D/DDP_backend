@@ -63,7 +63,6 @@ class AirbyteConnectionCreate(Schema):
     destinationId: str = None
     destinationSchema: str = None
     streams: list
-    normalize: bool = False
 
 
 class AirbyteConnectionCreateResponse(Schema):
@@ -79,7 +78,6 @@ class AirbyteConnectionCreateResponse(Schema):
     deploymentId: str = None
     lastRun: Optional[dict | None]
     destinationSchema: str = ""
-    normalize: bool = False
     lock: Optional[dict | None]
     isRunning: bool = False
     resetConnDeploymentId: str = None
@@ -96,7 +94,6 @@ class AirbyteGetConnectionsResponse(Schema):
     deploymentId: str = None
     lastRun: Optional[dict | None]
     destinationSchema: str = ""
-    normalize: bool = False
     lock: Optional[dict | None]
     isRunning: bool = False
     resetConnDeploymentId: str = None
@@ -107,7 +104,6 @@ class AirbyteConnectionUpdate(Schema):
 
     name: str
     streams: list
-    normalize: bool = False
     destinationId: str = None
     destinationSchema: str = None
 
