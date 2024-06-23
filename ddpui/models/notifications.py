@@ -5,9 +5,9 @@ class Notification(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
     message = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
-    status = models.CharField(max_length=20, default='unread')
+    read_status = models.BooleanField(default=False)
     urgent = models.BooleanField(default=False)
-    channel = models.CharField(max_length=20, default='dashboard')
+    author = models.TextField()
 
 class UserPreference(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='preference')

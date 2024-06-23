@@ -5,13 +5,25 @@ from django.contrib.auth.models import User
 from ddpui.models import Notification, UserPreference
 import json
 import requests
+import os
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
 
 
+SENDGRID_APIKEY = os.getenv("SENDGRID_APIKEY")
+SENDGRID_SENDER = os.getenv("SENDGRID_SENDER")
 
 
 # Send notification via email
 def send_email_notification(to_email, message):
-    print(to_email, message)
+    sendgrid_client = SendGridAPIClient(SENDGRID_APIKEY)
+    email_message = Mail(from_email=SENDGRID_SENDER, to_emails=to_email, subject="Message from Dalgo Team", html_content=message)
+
+    try:
+        sendgrid_client.send(email_message)
+    except Exception as error:
+        raise Exception(f"Failed to send notification through mail. Response: {error}")
+
 
 # send notification via discord
 def send_discord_notification(webhook_url, message):
@@ -26,7 +38,7 @@ def send_discord_notification(webhook_url, message):
 
 
 # send notification
-def create_notifications(user_ids, message, channel='dashboard', urgent=False):
+def create_notifications(user_ids, message, author, urgent=False):
     if not user_ids or not message:
         return {'error': 'user_ids and message are required'}
         
@@ -40,33 +52,25 @@ def create_notifications(user_ids, message, channel='dashboard', urgent=False):
             if not user_preference.enable_notification:
                 errors.append({f'User with user_id:{user_id} has not opted to receive notifications.'})
                 continue
-            
-            elif channel == 'email' and not user_preference.enable_email:
-                errors.append({f'User with user_id:{user_id} has not opted to receive email notifications.'})
-                continue
-            
-            elif channel == 'discord' and not user_preference.enable_discord:
-                errors.append({f'User with user_id:{user_id} has not opted to receive discord notifications.'})
-                continue
 
             # Send the notification based on the preferred channel
             try:
-                if channel == 'email':
+                if user_preference.enable_email:
                     send_email_notification(user_preference.email_id, message)
-                elif channel == 'discord':
+
+                if user_preference.enable_discord:
                     send_discord_notification(user_preference.discord_webhook, message)
 
             except Exception as e:
                 errors.append({'user_id': user_id, 'error': str(e)})
                 continue
             
-            notification = Notification.objects.create(user=user, message=message, urgent=urgent, channel=channel)
+            notification = Notification.objects.create(user=user, message=message, urgent=urgent, author=author)
             notifications.append({
                 'id': notification.id,
                 'user_id': user.id,
                 'message': notification.message,
-                'urgent': notification.urgent,
-                'channel' : notification.channel
+                'urgent': notification.urgent
             })
 
 
@@ -82,7 +86,7 @@ def create_notifications(user_ids, message, channel='dashboard', urgent=False):
 def get_notifications(user_id):
     user = User.objects.get(id=user_id)
     notifications = Notification.objects.filter(user=user)
-    notifications_data = [{'id': n.id, 'message': n.message, 'created_at': n.created_at, 'status': n.status, 'urgent': n.urgent} for n in notifications]
+    notifications_data = [{'id': n.id, 'message': n.message, 'created_at': n.created_at, 'read_status': n.read_status, 'urgent': n.urgent} for n in notifications]
     
     return notifications_data
 
@@ -91,9 +95,9 @@ def get_notifications(user_id):
 def mark_as_read(notification_id):
     try:
         notification = Notification.objects.get(id=notification_id)
-        notification.status = "read"
+        notification.read_status = True
         notification.save()
-        return {'id': notification.id, 'status': notification.status}
+        return {'id': notification.id, 'status': notification.read_status}
     except Notification.DoesNotExist:
         return {'error': 'Notification not found'}
     
