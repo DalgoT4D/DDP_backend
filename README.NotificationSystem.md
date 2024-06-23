@@ -1,23 +1,13 @@
 # Notification System for Dalgo
 
-## Project Overview
-
-The Dalgo Notification System is designed to streamline communication within the Dalgo platform, facilitating administrators to disseminate important information to users effectively. With a focus on versatility and user engagement, this system offers administrators an intuitive interface within the Dalgo admin tool to compose and post notifications.
-<br>
-Additionally, the system maintains a comprehensive notification history, stored securely in the backend database. This enables both administrators and users to access past notifications for reference and auditing purposes, ensuring transparency and accountability within the platform.
-<br>
-In summary, the Dalgo Notification System serves as a pivotal component in enhancing communication and user engagement within the Dalgo ecosystem. By offering administrators a streamlined process for broadcasting notifications and empowering users with customizable preferences, the system contributes to a more efficient and informed collaborative environment.
-
 ## Project Details
 
 ### Understanding of the Project
-The Dalgo Notification System aims to facilitate effective communication between administrators and users by providing a versatile platform for sending notifications via multiple channels. It will include
 - Interface for admin to post notifications
 - Interface for users to see notifications
 - Python backend for managing notifications
 
 ## Admin UI Framework
-The admin UI for Dalgo Notifications empowers administrators to compose and broadcast messages effortlessly. It offers intuitive controls for defining recipients, composing messages, setting urgency levels, and selecting communication channels.
 
 ### Dashboard Overview
 
@@ -69,7 +59,6 @@ The admin UI for Dalgo Notifications empowers administrators to compose and broa
   - Ensure authentication and permission-based access to the notification system.
 
 ## Interface for users to see notifications
-For the interface allowing users to see notifications in the Dalgo Notification System, consider a user-friendly web interface integrated into the Dalgo frontend application.
 
 ### Notification Icon/Button
 
@@ -107,8 +96,6 @@ For the interface allowing users to see notifications in the Dalgo Notification 
 
 ## Python Backend for Managing Notifications
 
-The backend will provide a robust infrastructure for managing notifications, including creation, storage, retrieval, and delivery through various channels like email and Discord. It will offer a RESTful API for interaction with the front end and incorporate a pub-sub model for efficient notification distribution.
-
 ### Notification Model
 Creation of a Django model named `Notification` to store notification details such as:
 - Sender
@@ -124,9 +111,6 @@ Development of Django REST Framework API endpoints for:
 - Fetching unread notifications for a user.
 - Fetching notification history.
 - Managing user notification preferences.
-
-### Pub-Sub Model
-Implement a pub-sub architecture using Django signals or Django Channels, allowing handlers for various notification channels to subscribe and receive new notifications for sending.
 
 ### Email and Discord Handlers
 - Creation of handler functions to process notifications and send them via configured email and Discord channels.
