@@ -9,49 +9,30 @@
 
 ## Admin UI Framework
 
-### Dashboard Overview
-
-- **Displays recent notifications**: Show the most recent notifications received by the user.
-- **Unread count**: Display the number of unread notifications.
-- **Urgent notifications**: Highlight urgent notifications prominently.
-
-### Create Notification Form
-
-- **Recipient(s)**: 
-  - Dropdown or input field for selecting users or groups to receive the notification.
-- **Message Content**: 
-  - Text area with support for rich text formatting.
-- **Urgency Level**: 
-  - Dropdown for selecting the urgency of the notification.
-- **Notification Channels**: 
-  - Checkboxes or dropdowns to select the channels (e.g., Email, Discord) through which the notification will be sent.
-- **Send Now or Schedule**: 
-  - Option to send the notification immediately or schedule it for a later time.
-
 ### Notification History
 
 - **Lists past notifications**: 
-  - Display notifications with details such as sender, recipients, message content, timestamp, and urgency level.
+  - Display notifications with details such as sender, recipients, message content, timestamp, send status, and urgency level.
 - **Actions**: 
-  - View notification details.
-  - Mark notifications as read.
-  - Delete notifications.
+  - View notification details(show recipients, time for which notification is scheduled, etc).
+  - Delete notifications(only the future notifications).
 
-### Notification Preferences Management
+### Send Notification
 
-- **Admins manage user/group notification preferences**: 
-  - Options for enabling or disabling notification channels.
-  - Adjust settings for each channel.
+- **Notification can be sent to**
+  - all users
+  - all users in an org
+  - all users in an org having role >= manager
+  - a single-user
 
-### Notification Alerts
+The send Notification form will have:
+- **Message Content**: 
+  - Text area for entering the notification message.
+- **Urgency Level**: 
+  - Can be a toggle switch to set urgent to `True` or `False`.
+- **Send Now or Schedule**: 
+  - Option to send the notification immediately or schedule it for a later time.
 
-- **Real-time alerts**: 
-  - Provide real-time notifications for new messages and urgent notifications.
-
-### Pub-Sub System Integration
-
-- **Integration**: 
-  - Seamlessly integrate with the Pub-sub system for publishing notifications.
 
 ### User Authentication and Permissions
 
@@ -79,11 +60,11 @@
 ### Notification Preferences
 
 - **Access preferences/settings**: 
-  - Manage channels and frequency.
+  - Manage channels and notification preferences.
 
-### Urgent Notifications Bar
+### Urgent Notifications
 
-- **Separate section for urgent notifications**.
+- **Highlight urgent notifications with a different color**.
 
 ### Real-Time Updates
 
@@ -98,26 +79,35 @@
 
 ### Notification Model
 Creation of a Django model named `Notification` to store notification details such as:
-- Sender
-- Recipients
+- Author(sender)
 - Message content
 - Timestamp
 - Urgency level
 - Read status
+- Sent status
+
+### User Preference Model
+Creation of a Django model named `User_Preferences` to store user's preference details such as:
+- Enable Notifications
+- Enable discord notifications
+- Enable email notifications
+- Discord Webhook (to receive discord notification)
+- Email Id (to receive email notification) 
 
 ### API Endpoints
 Development of Django REST Framework API endpoints for:
 - Creating new notifications.
 - Fetching unread notifications for a user.
 - Fetching notification history.
+- Deleting notifications.
 - Managing user notification preferences.
 
 ### Email and Discord Handlers
 - Creation of handler functions to process notifications and send them via configured email and Discord channels.
-- Utilization of Django's built-in `EmailMessage` for emails and the `discord.py` library for Discord messages.
+- Use `SendGrid API` for emails and the `Discord Webhooks` for Discord messages.
 
 ### Database Storage
-Ensuring that notification history is stored in the database for auditing and reference purposes.
+Ensure that notification history is stored in the database for auditing and reference purposes.
 
 ## Timeline
 
@@ -133,23 +123,23 @@ Week 2 is the first part of Backend Development. During this phase, the Django p
 
 Week 3 continues the Backend Development process. Here, database models for notifications and users are implemented, and RESTful APIs for core functionalities are developed.
 
-### Week 4 (Admin Panel Frontend Development)
-
-UI components for the admin dashboard are created, and admin-specific features such as notification creation and preference management are implemented. Integration with backend APIs for data retrieval and manipulation is also carried out.
-
-### Week 5 (User Panel Frontend Development)
+### Week 4 and Week 5 (User Panel Frontend Development)
 
 UI components for the user notification interface are designed, and features for viewing notifications, managing preferences, and marking notifications as read are developed.
 
-### Week 6 (Integration and Testing)
+### Week 6 and Week 7 (Admin Panel Frontend Development)
+
+UI components for the admin dashboard are created, and admin-specific features such as notification creation and preference management are implemented. Integration with backend APIs for data retrieval and manipulation is also carried out.
+
+### Week 8 (Integration and Testing)
 
 In Week 6, integration of admin and user frontend components takes place, followed by thorough integration testing to ensure seamless communication with the backend.
 
-### Week 7 (Additional Features Development)
+### Week 9 (Additional Features Development)
 
 Any remaining features or enhancements for both admin and user panels are implemented. Support for responsive design and accessibility is also added during this phase.
 
-### Week 8 (Refinement and Optimization)
+### Week 10 (Refinement and Optimization)
 
 Frontend code is fine-tuned for performance and efficiency, and usability testing is conducted to address any usability issues. Additionally, Final Testing and Quality Assurance are performed, involving thorough testing of admin and user panels, and any bugs or issues identified during testing are fixed promptly.
 
