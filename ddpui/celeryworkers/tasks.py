@@ -2,6 +2,9 @@ import os
 import shutil
 from pathlib import Path
 from subprocess import CompletedProcess
+from pydantic import BaseModel
+import requests
+from io import BytesIO
 
 from datetime import datetime, timedelta
 import yaml
@@ -26,6 +29,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import TaskLock, OrgTask, TaskProgressHashPrefix
 from ddpui.models.canvaslock import CanvasLock
 from ddpui.models.flow_runs import PrefectFlowRun
+from ddpui.models.llm import AssistantPrompt, LlmAssistantType
 from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
@@ -35,6 +39,7 @@ from ddpui.ddpprefect.prefect_service import (
     update_dbt_core_block_schema,
     get_dbt_cli_profile_block,
     prefect_get,
+    get_flow_run_logs_v2,
 )
 from ddpui.utils.constants import (
     TASK_DBTRUN,
@@ -42,7 +47,9 @@ from ddpui.utils.constants import (
     TASK_DBTDEPS,
     TASK_AIRBYTESYNC,
 )
-from ddpui.ddpprefect import DBTCLIPROFILE
+from ddpui.ddpprefect import DBTCLIPROFILE, FLOW_RUN_FAILED, FLOW_RUN_CRASHED
+from ddpui.ddpprefect.schema import GroupedFlowRunLogs
+from ddpui.core import llm_service
 
 logger = CustomLogger("ddpui")
 
@@ -602,6 +609,67 @@ def add_custom_connectors_to_workspace(self, workspace_id, custom_sources: list[
         logger.info(
             f"added custom source {source['name']} [{source['docker_repository']}:{source['docker_image_tag']}]"
         )
+
+
+@app.task(bind=True)
+def summarize_deployment_flow_run_logs(self, flow_run_id: str):
+    """
+    For subtask or subflowrun in the flow run; this function will
+    1. Fetch all subtasks or subflowruns from prefect along with their logs
+    2. Upload logs as a file to llm service
+    3. Query the llm service with two prompts one for the summarizing & other for figuring out how to resolve errors
+    4. Only summarize failures and dbt tasks (deps, clean, run, test)
+    """
+
+    all_task_logs = get_flow_run_logs_v2(flow_run_id)
+    dbt_failed_tasks = [
+        task
+        for task in all_task_logs
+        if (
+            task["state_type"] in [FLOW_RUN_CRASHED, FLOW_RUN_FAILED]
+            or task["state_name"] == "DBT_TEST_FAILED"
+        )
+        and task["kind"] == "task-run"
+        and "dbt-" in task["label"]
+    ]
+
+    # for each task run these prompts
+    user_prompts = [
+        "Summarize the primary error that occurred in this run",
+        "What steps can I take to solve the error you identified?",
+    ]
+    assistant_prompt = AssistantPrompt.objects.filter(
+        type=LlmAssistantType.LOG_SUMMARIZATION
+    ).first()
+    if not assistant_prompt:
+        raise Exception("Assistant/System prompt not found for log summarization")
+
+    summary_result = []
+    for task in dbt_failed_tasks:
+        logger.info(
+            f"Uploading logs for flow_run_id : {flow_run_id} and for task : {task['label']} to llm service"
+        )
+
+        # upload logs for the task
+        logs_text = "\n".join([log["message"] for log in task["logs"]])
+        fpath = llm_service.upload_text_as_file(logs_text, f"{task['label']}_logs")
+        logger.info("Uploaded file successfully to LLM service at " + str(fpath))
+
+        # start a file search session in the llm service
+        logger.info(f"Querying the uploaded file: total queries {len(user_prompts)}")
+        result = llm_service.file_search_query_and_poll(
+            fpath, assistant_prompt.prompt, user_prompts
+        )
+        task["summary"] = "\n\n".join(result["result"])  # merge the query results
+
+        # close the session
+        logger.info("Closing the session")
+        llm_service.close_file_search_session(result["session_id"])
+
+        del task["logs"]
+        summary_result.append(task)
+
+    logger.info(summary_result)
 
 
 @app.on_after_finalize.connect
