@@ -11,7 +11,7 @@
 
 ### Notification History
 
-- **Lists past notifications**: 
+- **Lists notifications**: 
   - Display notifications with details such as sender, recipients, message content, timestamp, send status, and urgency level.
 - **Actions**: 
   - View notification details(show recipients, time for which notification is scheduled, etc).
@@ -55,7 +55,6 @@ The send Notification form will have:
 ### Notification Details
 
 - **Click the notification to view full details**: 
-  - Options to mark as read or delete.
 
 ### Notification Preferences
 
@@ -83,24 +82,33 @@ Creation of a Django model named `Notification` to store notification details su
 - Message content
 - Timestamp
 - Urgency level
+- Scheduled Time
+- Sent Time
+
+### NotificationRecipients Model
+Creation of a Django model named `Notification Recipients` to store n details such as:
+- Notification Id (Foreign Key)
+- Recipient
 - Read status
-- Sent status
 
 ### User Preference Model
 Creation of a Django model named `User_Preferences` to store user's preference details such as:
-- Enable Notifications
 - Enable discord notifications
 - Enable email notifications
 - Discord Webhook (to receive discord notification)
-- Email Id (to receive email notification) 
+- Email Id (to be taken from the user object)
 
-### API Endpoints
+### API Endpoints(for user panel)
+Development of Django REST Framework API endpoints for:
+- Fetching notifications for a single user(through user id).
+- Mark notifications as read or unread
+- Managing user notification preferences.
+
+### API Endpoints(for admin panel)
 Development of Django REST Framework API endpoints for:
 - Creating new notifications.
-- Fetching unread notifications for a user.
 - Fetching notification history.
-- Deleting notifications.
-- Managing user notification preferences.
+- Deleting notifications(only the future ones).
 
 ### Email and Discord Handlers
 - Creation of handler functions to process notifications and send them via configured email and Discord channels.
@@ -111,35 +119,28 @@ Ensure that notification history is stored in the database for auditing and refe
 
 ## Timeline
 
-### Week 1 (Requirement Gathering and Planning)
+### Week 1 (Project Setup and learning migrations)
 
 Week 1 is dedicated to Requirement Gathering and Planning. Here, the project scope and objectives are defined, and requirements for the admin and user panels are gathered separately.
 
-### Week 2 (Backend Framework Source-Code Architecture)
+### Week 2 (Backend Development)
 
-Week 2 is the first part of Backend Development. During this phase, the Django project structure is established, and initial setup tasks are completed.
+Week 3 is for the Backend Development process. Here, database models for notifications and users are implemented, and RESTful APIs for core functionalities are developed.
 
-### Week 3 (Backend Development)
-
-Week 3 continues the Backend Development process. Here, database models for notifications and users are implemented, and RESTful APIs for core functionalities are developed.
-
-### Week 4 and Week 5 (User Panel Frontend Development)
+### Week 3 (Functionalities for User Panel Frontend)
 
 UI components for the user notification interface are designed, and features for viewing notifications, managing preferences, and marking notifications as read are developed.
 
-### Week 6 and Week 7 (Admin Panel Frontend Development)
+### Week 4 (Writing JEST Tests)
+
+JEST tests are written for the User Panel Frontend application.
+
+
+### Week 5 (Functionalities for Admin Panel Frontend)
 
 UI components for the admin dashboard are created, and admin-specific features such as notification creation and preference management are implemented. Integration with backend APIs for data retrieval and manipulation is also carried out.
 
-### Week 8 (Integration and Testing)
-
-In Week 6, integration of admin and user frontend components takes place, followed by thorough integration testing to ensure seamless communication with the backend.
-
-### Week 9 (Additional Features Development)
+### Week 6 (Buffer Week)
 
 Any remaining features or enhancements for both admin and user panels are implemented. Support for responsive design and accessibility is also added during this phase.
-
-### Week 10 (Refinement and Optimization)
-
-Frontend code is fine-tuned for performance and efficiency, and usability testing is conducted to address any usability issues. Additionally, Final Testing and Quality Assurance are performed, involving thorough testing of admin and user panels, and any bugs or issues identified during testing are fixed promptly.
 
