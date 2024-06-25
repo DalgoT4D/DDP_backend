@@ -48,7 +48,6 @@ from ddpui.utils.constants import (
     TASK_AIRBYTESYNC,
 )
 from ddpui.ddpprefect import DBTCLIPROFILE, FLOW_RUN_FAILED, FLOW_RUN_CRASHED
-from ddpui.ddpprefect.schema import GroupedFlowRunLogs
 from ddpui.core import llm_service
 
 logger = CustomLogger("ddpui")
@@ -620,6 +619,7 @@ def summarize_deployment_flow_run_logs(self, flow_run_id: str):
     3. Query the llm service with two prompts one for the summarizing & other for figuring out how to resolve errors
     4. Only summarize failures and dbt tasks (deps, clean, run, test)
     """
+    taskprogress = SingleTaskProgress(self.request.id, 60 * 10)
 
     all_task_logs = get_flow_run_logs_v2(flow_run_id)
     dbt_failed_tasks = [
@@ -632,6 +632,10 @@ def summarize_deployment_flow_run_logs(self, flow_run_id: str):
         and task["kind"] == "task-run"
         and "dbt-" in task["label"]
     ]
+
+    taskprogress.add(
+        {"message": "Fetch all logs for subtasks", "status": "running", "result": []}
+    )
 
     # for each task run these prompts
     user_prompts = [
@@ -669,7 +673,14 @@ def summarize_deployment_flow_run_logs(self, flow_run_id: str):
         del task["logs"]
         summary_result.append(task)
 
-    logger.info(summary_result)
+    logger.info("Completed log summarization for all failed tasks")
+    taskprogress.add(
+        {
+            "message": "Fetch all logs for subtasks",
+            "status": "completed",
+            "result": summary_result,
+        }
+    )
 
 
 @app.on_after_finalize.connect
