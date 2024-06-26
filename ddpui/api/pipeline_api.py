@@ -666,6 +666,6 @@ def get_prefect_flow_runs_log_history(
     if fetchlogs:
         for flow_run in flow_runs:
             logs_dict = prefect_service.get_flow_run_logs_v2(flow_run["id"])
-            flow_run["logs"] = logs_dict
+            flow_run["runs"] = logs_dict
 
     return flow_runs
