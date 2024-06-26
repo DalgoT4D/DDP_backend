@@ -607,7 +607,7 @@ def get_flow_runs_logs(
 ):  # pylint: disable=unused-argument
     """return the logs from a flow-run"""
     try:
-        result = prefect_service.get_flow_run_logs(flow_run_id, offset)
+        result = prefect_service.get_flow_run_logs_v2(flow_run_id)
     except Exception as error:
         logger.exception(error)
         raise HttpError(400, "failed to retrieve logs") from error
@@ -665,9 +665,7 @@ def get_prefect_flow_runs_log_history(
 
     if fetchlogs:
         for flow_run in flow_runs:
-            logs_dict = prefect_service.get_flow_run_logs(flow_run["id"], 0)
-            flow_run["logs"] = (
-                logs_dict["logs"]["logs"] if "logs" in logs_dict["logs"] else []
-            )
+            logs_dict = prefect_service.get_flow_run_logs_v2(flow_run["id"])
+            flow_run["logs"] = logs_dict
 
     return flow_runs
