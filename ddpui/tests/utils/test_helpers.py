@@ -1,7 +1,72 @@
 from ddpui.utils.helpers import (
+    remove_nested_attribute,
+    isvalid_email,
+    generate_hash_id,
+    cleaned_name_for_prefectblock,
     map_airbyte_keys_to_postgres_keys,
     update_dict_but_not_stars,
+    nice_bytes,
 )
+
+
+def test_remove_nested_attribute():
+    """tests remove_nested_attribute"""
+    payload = {
+        "k1": "v1",
+        "k2": 100,
+        "k3": "v3",
+        "k4": {
+            "k5": "v5",
+            "k6": 101,
+            "k7": "v7",
+            "k8": [
+                {"k9": "v9", "k10": "v10", "k11": 11},
+                {"k12": "v12", "k13": "v13", "k14": 14, "k15": "v15"},
+                200,
+                "v8",
+            ],
+        },
+    }
+    result = remove_nested_attribute(payload, "k7")
+    assert result == {
+        "k1": "v1",
+        "k2": 100,
+        "k3": "v3",
+        "k4": {
+            "k5": "v5",
+            "k6": 101,
+            "k8": [
+                {"k9": "v9", "k10": "v10", "k11": 11},
+                {"k12": "v12", "k13": "v13", "k14": 14, "k15": "v15"},
+                200,
+                "v8",
+            ],
+        },
+    }
+
+
+def test_isvalid_email_0():
+    """valid email address"""
+    assert isvalid_email("abc@abc.com")
+
+
+def test_isvalid_email_1():
+    """invalid email address"""
+    assert isvalid_email("abc@abc.com@foo")
+
+
+def test_generate_hash_id():
+    """tests length of generate_hash_id"""
+    assert len(generate_hash_id(10)) == 10
+    assert len(generate_hash_id(100)) == 100
+
+
+def test_cleaned_name_for_prefectblock():
+    """tests cleaned_name_for_prefectblock"""
+    assert cleaned_name_for_prefectblock("blockname") == "blockname"
+    assert cleaned_name_for_prefectblock("BLOCKNAME") == "blockname"
+    assert cleaned_name_for_prefectblock("blockName0") == "blockname0"
+    assert cleaned_name_for_prefectblock("blockName0@") == "blockname0"
 
 
 def test_map_airbyte_keys_to_postgres_keys_oldconfig():
@@ -114,3 +179,10 @@ def test_update_dict_but_not_stars():
             "k8": [{"k10": "v10", "k11": 11}, {"k13": "v13", "k14": 14}, 200, "v8"],
         },
     }
+
+
+def test_nice_bytes():
+    """tests nice_bytes"""
+    assert nice_bytes(1024) == "1.0 KB"
+    assert nice_bytes(1024 * 1024) == "1.0 MB"
+    assert nice_bytes(3 * 1024 * 1024) == "3.0 MB"
