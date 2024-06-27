@@ -10,7 +10,6 @@ django.setup()
 
 import pytest
 import pandas as pd
-from sqlalchemy.orm import Session
 from sqlalchemy import (
     create_engine,
     MetaData,
@@ -21,6 +20,8 @@ from sqlalchemy import (
     DateTime,
     Float,
 )
+from sqlalchemy.orm import Mapped, sessionmaker, Session
+from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import inspect
 from sqlalchemy.types import NullType
 
@@ -39,7 +40,8 @@ def engine():
 
 @pytest.fixture
 def target_table(engine):
-    meta = MetaData()
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base = declarative_base()
     table_name = "dummy_data"
     dummy_table = Table(
         table_name,
@@ -49,7 +51,7 @@ def target_table(engine):
         Column("c2", String),
         Column("c3", DateTime),
     )
-    meta.create_all(engine)
+    Base.metadata.create_all(engine)
 
     records = [
         {
