@@ -658,7 +658,7 @@ def summarize_deployment_flow_run_logs(
     ]
 
     taskprogress.add(
-        {"message": "Fetch all logs for subtasks", "status": "running", "result": []}
+        {"message": "Fetch all logs for subtasks", "status": "running", "result": None}
     )
 
     # for each task run these prompts
@@ -666,55 +666,68 @@ def summarize_deployment_flow_run_logs(
         "Summarize the primary error that occurred in this run",
         "What steps can I take to solve the error you identified?",
     ]
-    assistant_prompt = AssistantPrompt.objects.filter(
-        type=LlmAssistantType.LOG_SUMMARIZATION
-    ).first()
-    if not assistant_prompt:
-        raise Exception("Assistant/System prompt not found for log summarization")
 
-    summary_result = []
-    for task in dbt_failed_tasks:
-        logger.info(
-            f"Uploading logs for flow_run_id : {flow_run_id} and for task : {task['label']} to llm service"
+    try:
+        assistant_prompt = AssistantPrompt.objects.filter(
+            type=LlmAssistantType.LOG_SUMMARIZATION
+        ).first()
+        if not assistant_prompt:
+            raise Exception("Assistant/System prompt not found for log summarization")
+
+        summary_result = []
+        for task in dbt_failed_tasks:
+            logger.info(
+                f"Uploading logs for flow_run_id : {flow_run_id} and for task : {task['label']} to llm service"
+            )
+
+            # upload logs for the task
+            logs_text = "\n".join([log["message"] for log in task["logs"]])
+            fpath = llm_service.upload_text_as_file(logs_text, f"{task['label']}_logs")
+            logger.info("Uploaded file successfully to LLM service at " + str(fpath))
+
+            # start a file search session in the llm service
+            logger.info(
+                f"Querying the uploaded file: total queries {len(user_prompts)}"
+            )
+            result = llm_service.file_search_query_and_poll(
+                fpath, assistant_prompt.prompt, user_prompts
+            )
+            task["summary"] = "\n\n".join(result["result"])  # merge the query results
+
+            # close the session
+            logger.info("Closing the session")
+            llm_service.close_file_search_session(result["session_id"])
+
+            llm_session = LlmSession.objects.create(
+                orguser=orguser,
+                org=orguser.org,
+                flow_run_id=flow_run_id,
+                assistant_prompt=assistant_prompt.prompt,
+                user_prompts=user_prompts,
+                response=task,  # {"id": ... ,"label": ..., "summary": ... }
+                session_id=result["session_id"],
+            )
+
+            del task["logs"]
+            summary_result.append(llm_session.response)
+
+        logger.info("Completed log summarization for all failed tasks")
+        taskprogress.add(
+            {
+                "message": "Generated summary for the run",
+                "status": "completed",
+                "result": summary_result,
+            }
         )
-
-        # upload logs for the task
-        logs_text = "\n".join([log["message"] for log in task["logs"]])
-        fpath = llm_service.upload_text_as_file(logs_text, f"{task['label']}_logs")
-        logger.info("Uploaded file successfully to LLM service at " + str(fpath))
-
-        # start a file search session in the llm service
-        logger.info(f"Querying the uploaded file: total queries {len(user_prompts)}")
-        result = llm_service.file_search_query_and_poll(
-            fpath, assistant_prompt.prompt, user_prompts
+    except Exception as err:
+        logger.error(err)
+        taskprogress.add(
+            {
+                "message": str(err),
+                "status": "failed",
+                "result": None,
+            }
         )
-        task["summary"] = "\n\n".join(result["result"])  # merge the query results
-
-        # close the session
-        logger.info("Closing the session")
-        llm_service.close_file_search_session(result["session_id"])
-
-        llm_session = LlmSession.objects.create(
-            orguser=orguser,
-            org=orguser.org,
-            flow_run_id=flow_run_id,
-            assistant_prompt=assistant_prompt.prompt,
-            user_prompts=user_prompts,
-            response=task,  # {"id": ... ,"label": ..., "summary": ... }
-            session_id=result["session_id"],
-        )
-
-        del task["logs"]
-        summary_result.append(llm_session.response)
-
-    logger.info("Completed log summarization for all failed tasks")
-    taskprogress.add(
-        {
-            "message": "Generated summary for the run",
-            "status": "completed",
-            "result": summary_result,
-        }
-    )
 
 
 @app.on_after_finalize.connect

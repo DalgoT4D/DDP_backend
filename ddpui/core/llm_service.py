@@ -13,6 +13,7 @@ from celery.states import SUCCESS, FAILURE, REVOKED, REJECTED, IGNORED
 LLM_SERVICE_API_URL = os.getenv("LLM_SERVICE_API_URL")
 LLM_SERVICE_API_KEY = os.getenv("LLM_SERVICE_API_KEY")
 CELERY_TERMINAL_STATES = [SUCCESS, FAILURE, REVOKED, REJECTED, IGNORED]
+CELERY_ERROR_STATES = [FAILURE, REVOKED, REJECTED]
 headers = {"Authorization": LLM_SERVICE_API_KEY}
 
 logger = CustomLogger("ddpui")
@@ -31,6 +32,11 @@ def poll_llm_service_task(task_id: str, poll_interval: int = 5) -> dict:
             break
         logger.info(f"Polling : Task {task_id} is in state {response['status']}")
         time.sleep(poll_interval)
+
+    if response["status"] in CELERY_ERROR_STATES:
+        raise Exception(
+            response["error"] if response["error"] else "error occured in llm service"
+        )
 
     return response["result"]
 
