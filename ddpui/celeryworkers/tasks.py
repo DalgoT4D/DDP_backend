@@ -29,7 +29,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import TaskLock, OrgTask, TaskProgressHashPrefix
 from ddpui.models.canvaslock import CanvasLock
 from ddpui.models.flow_runs import PrefectFlowRun
-from ddpui.models.llm import AssistantPrompt, LlmAssistantType
+from ddpui.models.llm import AssistantPrompt, LlmAssistantType, LlmSession
 from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
@@ -611,15 +611,39 @@ def add_custom_connectors_to_workspace(self, workspace_id, custom_sources: list[
 
 
 @app.task(bind=True)
-def summarize_deployment_flow_run_logs(self, flow_run_id: str):
+def summarize_deployment_flow_run_logs(
+    self, flow_run_id: str, orguser_id: str, regenerate: bool = False
+):
     """
     For subtask or subflowrun in the flow run; this function will
     1. Fetch all subtasks or subflowruns from prefect along with their logs
     2. Upload logs as a file to llm service
     3. Query the llm service with two prompts one for the summarizing & other for figuring out how to resolve errors
     4. Only summarize failures and dbt tasks (deps, clean, run, test)
+
+    If regenerate is True and the summary is not found, the program will generate it again & return
     """
     taskprogress = SingleTaskProgress(self.request.id, 60 * 10)
+
+    taskprogress.add({"message": "Started", "status": "running", "result": []})
+
+    orguser = OrgUser.objects.filter(id=orguser_id).first()
+
+    if not regenerate:
+        # try to fetch response from db
+        llm_sessions = LlmSession.objects.filter(
+            orguser=orguser, org=orguser.org, flow_run_id=flow_run_id
+        ).all()
+
+        if llm_sessions and len(llm_sessions) > 0:
+            taskprogress.add(
+                {
+                    "message": "Generated summary for the run",
+                    "status": "completed",
+                    "result": [llm_session.response for llm_session in llm_sessions],
+                }
+            )
+            return
 
     all_task_logs = get_flow_run_logs_v2(flow_run_id)
     dbt_failed_tasks = [
@@ -670,13 +694,23 @@ def summarize_deployment_flow_run_logs(self, flow_run_id: str):
         logger.info("Closing the session")
         llm_service.close_file_search_session(result["session_id"])
 
+        llm_session = LlmSession.objects.create(
+            orguser=orguser,
+            org=orguser.org,
+            flow_run_id=flow_run_id,
+            assistant_prompt=assistant_prompt.prompt,
+            user_prompts=user_prompts,
+            response=task,  # {"id": ... ,"label": ..., "summary": ... }
+            session_id=result["session_id"],
+        )
+
         del task["logs"]
-        summary_result.append(task)
+        summary_result.append(llm_session.response)
 
     logger.info("Completed log summarization for all failed tasks")
     taskprogress.add(
         {
-            "message": "Fetch all logs for subtasks",
+            "message": "Generated summary for the run",
             "status": "completed",
             "result": summary_result,
         }
