@@ -44,6 +44,6 @@ class LlmSession(models.Model):
     response = models.JSONField(
         null=False
     )  # one request might have multiple summaries; we store all of them as a json
-    response_meta = models.JSONField(null=False)
+    response_meta = models.JSONField(null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
