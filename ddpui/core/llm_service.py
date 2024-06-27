@@ -34,6 +34,9 @@ def poll_llm_service_task(task_id: str, poll_interval: int = 5) -> dict:
         time.sleep(poll_interval)
 
     if response["status"] in CELERY_ERROR_STATES:
+        logger.error(
+            f"Error occured while polling llm service job {str(response['error'])}"
+        )
         raise Exception(
             response["error"] if response["error"] else "error occured in llm service"
         )
@@ -57,7 +60,11 @@ def upload_text_as_file(file_text: str, file_name: str) -> str:
 
 
 def file_search_query_and_poll(
-    file_path: str, assistant_prompt: str, queries: list[str], poll_interval: int = 5
+    file_path: str,
+    assistant_prompt: str,
+    queries: list[str],
+    poll_interval: int = 5,
+    session_id: str = None,
 ) -> dict:
     """
     Submits the user prompts to llm service and waits till the task is completed
@@ -75,6 +82,7 @@ def file_search_query_and_poll(
             "file_path": file_path,
             "assistant_prompt": assistant_prompt,
             "queries": queries,
+            "session_id": None,
         },
     )
 
