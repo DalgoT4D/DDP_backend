@@ -34,6 +34,7 @@ from ddpui.core.pipelinefunctions import (
     pipeline_with_orgtasks,
     fetch_pipeline_lock,
 )
+from ddpui.celeryworkers.tasks import summarize_deployment_flow_run_logs
 from ddpui.core.dbtfunctions import gather_dbt_project_params
 from ddpui.auth import has_permission
 
@@ -671,3 +672,24 @@ def get_prefect_flow_runs_log_history(
             )
 
     return flow_runs
+
+
+@pipelineapi.get(
+    "v1/flow_runs/{flow_run_id}/logsummary", auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_view_pipeline"])
+def get_flow_runs_logsummary_v1(
+    request, flow_run_id, regenerate: int
+):  # pylint: disable=unused-argument
+    """
+    Use llms to summarize logs
+    """
+    try:
+        orguser: OrgUser = request.orguser
+        task = summarize_deployment_flow_run_logs.delay(
+            flow_run_id, orguser.id, regenerate == 1
+        )
+        return {"task_id": task.id}
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to retrieve logs") from error
