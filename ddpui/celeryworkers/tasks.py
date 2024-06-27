@@ -1,12 +1,9 @@
 import os
 import shutil
 from pathlib import Path
-from subprocess import CompletedProcess
-from pydantic import BaseModel
-import requests
-from io import BytesIO
-
 from datetime import datetime, timedelta
+from subprocess import CompletedProcess
+
 import yaml
 from celery.schedules import crontab
 from django.utils.text import slugify
@@ -633,12 +630,12 @@ def summarize_deployment_flow_run_logs(
         # try to fetch response from db
         llm_sessions = LlmSession.objects.filter(
             orguser=orguser, org=orguser.org, flow_run_id=flow_run_id
-        ).all()
+        )
 
-        if llm_sessions and len(llm_sessions) > 0:
+        if llm_sessions.count() > 0:
             taskprogress.add(
                 {
-                    "message": "Generated summary for the run",
+                    "message": "Retrieved saved summary for the run",
                     "status": "completed",
                     "result": [llm_session.response for llm_session in llm_sessions],
                 }
