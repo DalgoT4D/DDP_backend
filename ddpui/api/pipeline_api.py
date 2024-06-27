@@ -679,7 +679,7 @@ def get_prefect_flow_runs_log_history(
 )
 @has_permission(["can_view_pipeline"])
 def get_flow_runs_logsummary_v1(
-    request, flow_run_id, regenerate
+    request, flow_run_id, regenerate: int
 ):  # pylint: disable=unused-argument
     """
     Use llms to summarize logs
@@ -687,7 +687,7 @@ def get_flow_runs_logsummary_v1(
     try:
         orguser: OrgUser = request.orguser
         task = summarize_deployment_flow_run_logs.delay(
-            flow_run_id, orguser.id, regenerate
+            flow_run_id, orguser.id, regenerate == 1
         )
         return {"task_id": task.id}
     except Exception as error:
