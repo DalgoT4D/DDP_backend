@@ -608,6 +608,137 @@ def add_custom_connectors_to_workspace(self, workspace_id, custom_sources: list[
 
 
 @app.task(bind=True)
+def summarize_airbyte_logs(
+    self,
+    connection_id: str,
+    orguser_id: str,
+    job_id: int,
+    attempt_number: int = 0,
+    regenerate: bool = False,
+):
+    """
+    Summarize airbyte logs
+    """
+    taskprogress = SingleTaskProgress(self.request.id, 60 * 10)
+
+    taskprogress.add({"message": "Started", "status": "running", "result": []})
+
+    orguser = OrgUser.objects.filter(id=orguser_id).first()
+
+    try:
+        job_info = airbyte_service.get_job_info(str(job_id))
+
+        if job_info["job"]["configId"] != connection_id:
+            taskprogress.add(
+                {
+                    "message": "Invalid job id",
+                    "status": "failed",
+                    "result": None,
+                }
+            )
+            return
+    except Exception as err:
+        logger.error(err)
+        taskprogress.add(
+            {
+                "message": "Failed to fetch the sync job",
+                "status": "failed",
+                "result": None,
+            }
+        )
+        return
+
+    if not regenerate:
+        # try to fetch response from db
+        llm_session = LlmSession.objects.filter(
+            orguser=orguser, org=orguser.org, airbyte_job_id=job_id
+        ).first()
+
+        if llm_session:
+            taskprogress.add(
+                {
+                    "message": "Retrieved saved summary for the run",
+                    "status": "completed",
+                    "result": llm_session.response,
+                }
+            )
+            return
+
+    logs = airbyte_service.get_logs_for_job(
+        job_id=job_id, attempt_number=attempt_number
+    )
+
+    taskprogress.add(
+        {
+            "message": "Fetched logs need for summarization",
+            "status": "running",
+            "result": None,
+        }
+    )
+
+    # for each task run these prompts
+    user_prompts = [
+        "Summarize the primary error that occurred in this run",
+        "What steps can I take to solve the error you identified?",
+    ]
+
+    try:
+        assistant_prompt = AssistantPrompt.objects.filter(
+            type=LlmAssistantType.LOG_SUMMARIZATION
+        ).first()
+        if not assistant_prompt:
+            raise Exception("Assistant/System prompt not found for log summarization")
+
+        # upload logs for the task
+        logs_text = "\n".join(logs["logs"]["logLines"])
+        fpath = llm_service.upload_text_as_file(logs_text, f"{job_id}_{attempt_number}")
+        logger.info("Uploaded file successfully to LLM service at " + str(fpath))
+
+        # start a file search session in the llm service
+        logger.info(f"Querying the uploaded file: total queries {len(user_prompts)}")
+        result = llm_service.file_search_query_and_poll(
+            fpath, assistant_prompt.prompt, user_prompts
+        )
+        summary = "\n\n".join(result["result"])  # merge the query results
+
+        # close the session
+        logger.info("Closing the session")
+        llm_service.close_file_search_session(result["session_id"])
+
+        llm_session = LlmSession.objects.create(
+            orguser=orguser,
+            org=orguser.org,
+            airbyte_job_id=job_id,
+            assistant_prompt=assistant_prompt.prompt,
+            user_prompts=user_prompts,
+            response={
+                "job_id": job_id,
+                "attempt_number": attempt_number,
+                "summary": summary,
+            },
+            session_id=result["session_id"],
+        )
+
+        logger.info("Completed log summarization for airbyte logs")
+        taskprogress.add(
+            {
+                "message": "Generated summary for the run",
+                "status": "completed",
+                "result": llm_session.response,
+            }
+        )
+    except Exception as err:
+        logger.error(err)
+        taskprogress.add(
+            {
+                "message": str(err),
+                "status": "failed",
+                "result": None,
+            }
+        )
+
+
+@app.task(bind=True)
 def summarize_deployment_flow_run_logs(
     self, flow_run_id: str, orguser_id: str, regenerate: bool = False
 ):
@@ -655,7 +786,11 @@ def summarize_deployment_flow_run_logs(
     ]
 
     taskprogress.add(
-        {"message": "Fetch all logs for subtasks", "status": "running", "result": None}
+        {
+            "message": "Fetched all logs for subtasks",
+            "status": "running",
+            "result": None,
+        }
     )
 
     # for each task run these prompts
@@ -695,6 +830,8 @@ def summarize_deployment_flow_run_logs(
             logger.info("Closing the session")
             llm_service.close_file_search_session(result["session_id"])
 
+            del task["logs"]
+
             llm_session = LlmSession.objects.create(
                 orguser=orguser,
                 org=orguser.org,
@@ -704,8 +841,6 @@ def summarize_deployment_flow_run_logs(
                 response=task,  # {"id": ... ,"label": ..., "summary": ... }
                 session_id=result["session_id"],
             )
-
-            del task["logs"]
             summary_result.append(llm_session.response)
 
         logger.info("Completed log summarization for all failed tasks")
