@@ -38,6 +38,7 @@ class LlmSession(models.Model):
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     orguser = models.ForeignKey(OrgUser, null=True, on_delete=models.SET_NULL)
     flow_run_id = models.TextField(null=True)
+    airbyte_job_id = models.IntegerField(null=True)
     assistant_prompt = models.TextField(null=True)
     user_prompts = models.JSONField(default=list, null=True)
     session_id = models.CharField(max_length=200, null=True)
