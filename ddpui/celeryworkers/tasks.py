@@ -22,7 +22,7 @@ from ddpui.models.org import (
     OrgDataFlowv1,
     TransformType,
 )
-from ddpui.models.notifications import NotificationRecipient
+from ddpui.models.notifications import Notification, UserPreference
 from django.utils import timezone
 from ddpui.utils.discord import send_discord_notification
 from ddpui.models.org_user import OrgUser
@@ -880,16 +880,19 @@ def setup_periodic_tasks(sender, **kwargs):
         60 * 1.0, delete_old_canvaslocks.s(), name="remove old canvaslocks"
     )
 
-@app.task()
-def schedule_notification_task(notification, recipient, user_preference):
+@app.task(bind=True)
+def schedule_notification_task(self, notification_id, recipient_id):
+    notification = Notification.objects.get(id=notification_id)
+    recipient = OrgUser.objects.get(user_id=recipient_id)
+    user_preference = UserPreference.objects.get(user=recipient)
     if user_preference.enable_email_notifications:
-        send_email_notification(user_preference.email, notification.message)
+        send_email_notification(user_preference.user.user.email, notification.message)
     if user_preference.enable_discord_notifications and user_preference.discord_webhook:
         try:
             send_discord_notification(user_preference.discord_webhook, notification.message)
         except Exception as e:
             raise Exception(f"Error sending discord notification: {str(e)}")
     
-    NotificationRecipient.objects.filter(notification=notification, recipient=recipient).update(read_status=True)
     notification.sent_time = timezone.now()
     notification.save()
+    return notification

@@ -25,7 +25,7 @@ class Migration(migrations.Migration):
                 ("author", models.EmailField(max_length=254)),
                 ("message", models.TextField()),
                 ("timestamp", models.DateTimeField(auto_now_add=True)),
-                ("urgency_level", models.BooleanField(default=False)),
+                ("urgent", models.BooleanField(default=False)),
                 ("scheduled_time", models.DateTimeField(blank=True, null=True)),
                 ("sent_time", models.DateTimeField(blank=True, null=True)),
             ],

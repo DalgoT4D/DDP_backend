@@ -5,13 +5,13 @@ from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from ddpui import auth
 from ddpui.models.notifications import UserPreference
-from ddpui.schemas.user_preference_schema import CreateUserPreferencesSchema, UpdateUserPreferencesSchema
+from ddpui.schemas.user_preferences_schema import CreateUserPreferencesSchema, UpdateUserPreferencesSchema
 
 
-userpreferenceapi = NinjaAPI(urls_namespace="user-preference")
+userpreferencesapi = NinjaAPI(urls_namespace="user-preference")
 
 
-@userpreferenceapi.exception_handler(ValidationError)
+@userpreferencesapi.exception_handler(ValidationError)
 def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
     """
     Handle any ninja validation errors raised in the apis
@@ -21,7 +21,7 @@ def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argu
     return Response({"detail": exc.errors}, status=422)
 
 
-@userpreferenceapi.exception_handler(PydanticValidationError)
+@userpreferencesapi.exception_handler(PydanticValidationError)
 def pydantic_validation_error_handler(
     request, exc: PydanticValidationError
 ):  # pylint: disable=unused-argument
@@ -33,7 +33,7 @@ def pydantic_validation_error_handler(
     return Response({"detail": exc.errors()}, status=500)
 
 
-@userpreferenceapi.exception_handler(Exception)
+@userpreferencesapi.exception_handler(Exception)
 def ninja_default_error_handler(
     request, exc: Exception  # skipcq PYL-W0613
 ):  # pylint: disable=unused-argument
@@ -41,34 +41,32 @@ def ninja_default_error_handler(
     return Response({"detail": "something went wrong"}, status=500)
 
 
-@userpreferenceapi.post("/create/", auth=auth.CustomAuthMiddleware())
+@userpreferencesapi.post("/create/", auth=auth.CustomAuthMiddleware())
 def create_user_preferences(request, payload: CreateUserPreferencesSchema):
     orguser = request.orguser
     
     preferences = UserPreference.objects.create(
-        user=orguser.user,
+        user=orguser,
         enable_discord_notifications=payload.enable_discord_notifications,
         enable_email_notifications=payload.enable_email_notifications,
         discord_webhook=payload.discord_webhook,
-        email= orguser.user.email
     )
 
     return {'success': True, 'message': 'Preferences created successfully', 'res': preferences}
 
 
-@userpreferenceapi.put("/update/", auth=auth.CustomAuthMiddleware())
+@userpreferencesapi.put("/update/", auth=auth.CustomAuthMiddleware())
 def update_user_preferences(request, payload: UpdateUserPreferencesSchema):
     orguser = request.orguser
     
     try:
-        preferences = UserPreference.objects.get(user=orguser.user)
+        preferences = UserPreference.objects.get(user=orguser)
     except UserPreference.DoesNotExist:
         new_preferences = UserPreference.objects.create(
-            user=orguser.user,
+            user=orguser,
             enable_discord_notifications=False,
             enable_email_notifications=False,
-            discord_webhook=None,
-            email= orguser.user.email
+            discord_webhook=None
         )
         return {'success': True, 'message': 'Preferences created successfully', 'res': new_preferences}
     
@@ -84,12 +82,12 @@ def update_user_preferences(request, payload: UpdateUserPreferencesSchema):
     return {'success': True, 'message': 'Preferences updated successfully'}
 
 
-@userpreferenceapi.get("/get/", auth=auth.CustomAuthMiddleware())
+@userpreferencesapi.get("/get/", auth=auth.CustomAuthMiddleware())
 def get_user_preferences(request):
     orguser = request.orguser
 
     try:
-        user_preference = UserPreference.objects.get(user=orguser.user)
+        user_preference = UserPreference.objects.get(user=orguser)
         preferences = {
             'user': orguser.user,
             'discord_webhook': user_preference.discord_webhook,
@@ -101,11 +99,10 @@ def get_user_preferences(request):
     
     except UserPreference.DoesNotExist:
         new_preferences = UserPreference.objects.create(
-            user=orguser.user,
+            user=orguser,
             enable_discord_notifications=False,
             enable_email_notifications=False,
-            discord_webhook=None,
-            email= orguser.user.email
+            discord_webhook=None
         )
         return {'success': True, 'res': new_preferences}
     

@@ -5,7 +5,7 @@ class Notification(models.Model):
     author = models.EmailField()
     message = models.TextField()
     timestamp = models.DateTimeField(auto_now_add=True)
-    urgency_level = models.BooleanField(default=False)
+    urgent = models.BooleanField(default=False)
     scheduled_time = models.DateTimeField(null=True, blank=True)
     sent_time = models.DateTimeField(null=True, blank=True)
 
