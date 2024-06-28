@@ -1,16 +1,27 @@
 import json
-
+import uuid
+import sqlalchemy
 from ninja import NinjaAPI
 from ninja.errors import HttpError, ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
+import sqlalchemy.exc
 
 from django.http import StreamingHttpResponse
 from ddpui import auth
 from ddpui.core import dbtautomation_service
 from ddpui.models.org import OrgWarehouse
+from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.taskprogress import TaskProgress
 from ddpui.auth import has_permission
+
+from ddpui.datainsights.insights.insight_factory import InsightsFactory
+from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
+from ddpui.datainsights.generate_result import GenerateResult, poll_for_column_insights
+
+from ddpui.schemas.warehouse_api_schemas import RequestorColumnSchema
+from ddpui.utils import secretsmanager
 
 warehouseapi = NinjaAPI(urls_namespace="warehouse")
 logger = CustomLogger("ddpui")
@@ -175,6 +186,71 @@ def get_json_column_spec(
         org_warehouse, source_schema, input_name, json_column
     )
     return json_columnspec
+
+
+@warehouseapi.get(
+    "/v1/table_data/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_view_warehouse_data"])
+def get_table_data_v1(request, schema_name: str, table_name: str):
+    """
+    Get the json column spec of a table in a warehouse
+    This fetches table data using the sqlalchemy engine
+    """
+    orguser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+
+    wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
+
+    try:
+        cols = wclient.get_table_columns(schema_name, table_name)
+        return cols
+    except sqlalchemy.exc.NoSuchTableError:
+        raise HttpError(404, "Table not found")
+    except Exception as err:
+        logger.error(err)
+        raise HttpError(500, str(err))
+
+
+@warehouseapi.post("/insights/metrics/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse_data"])
+def post_data_insights(request, payload: RequestorColumnSchema):
+    """
+    Run all the require queries to fetch insights for a column
+    Will also save to redis results as queries are processed
+    """
+    orguser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    try:
+
+        task_id = str(uuid.uuid4())
+
+        taskprogress = TaskProgress(task_id, TaskProgressHashPrefix.DATAINSIGHTS)
+        taskprogress.add(
+            {
+                "message": "Fetching insights",
+                "status": GenerateResult.RESULT_STATUS_FETCHING,
+                "results": [],
+            }
+        )
+
+        poll_for_column_insights.delay(org_warehouse.id, payload.dict(), task_id)
+
+        return {"task_id": task_id}
+    except Exception as err:
+        logger.error(err)
+        raise HttpError(500, str(err))
 
 
 @warehouseapi.get(

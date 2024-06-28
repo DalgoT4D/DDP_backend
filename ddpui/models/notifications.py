@@ -1,18 +1,21 @@
 from django.db import models
-from django.contrib.auth.models import User
+from ddpui.models.org_user import OrgUser
 
 class Notification(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    author = models.EmailField()
     message = models.TextField()
-    created_at = models.DateTimeField(auto_now_add=True)
+    timestamp = models.DateTimeField(auto_now_add=True)
+    urgency_level = models.BooleanField(default=False)
+    scheduled_time = models.DateTimeField(null=True, blank=True)
+    sent_time = models.DateTimeField(null=True, blank=True)
+
+class NotificationRecipient(models.Model):
+    notification = models.ForeignKey(Notification, on_delete=models.CASCADE, related_name='recipients')
+    recipient = models.ForeignKey(OrgUser, on_delete=models.CASCADE, related_name='notifications_received')
     read_status = models.BooleanField(default=False)
-    urgent = models.BooleanField(default=False)
-    author = models.TextField()
 
 class UserPreference(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='preference')
-    enable_email = models.BooleanField(default=True)
-    enable_discord = models.BooleanField(default=True)
-    email_id = models.EmailField(blank=True, null=True)
+    user = models.OneToOneField(OrgUser, on_delete=models.CASCADE, related_name='preferences')
+    enable_discord_notifications = models.BooleanField(default=True)
+    enable_email_notifications = models.BooleanField(default=True)
     discord_webhook = models.URLField(blank=True, null=True)
-    enable_notification = models.BooleanField(default=True)

@@ -1,5 +1,5 @@
 # main urls
-# from django.contrib import admin
+from django.contrib import admin
 from django.urls import include, path
 
 from ddpui.api.airbyte_api import airbyteapi
@@ -14,12 +14,15 @@ from ddpui.api.transform_api import transformapi
 from ddpui.api.user_org_api import user_org_api
 from ddpui.api.warehouse_api import warehouseapi
 from ddpui.api.webhook_api import webhookapi
+from ddpui.api.user_preference_api import userpreferenceapi
 from ddpui.healthcheck import healthcheck
 from ddpui.html.docs import get_dbt_docs
 from ddpui.html.elementary import get_elementary_report
 
+from ddpui.datainsights.generate_result import DataInsightsConsumer
+
 urlpatterns = [
-    # path("admin/", admin.site.urls), # Uncomment if you want to use django-admin app
+    path("admin/", admin.site.urls),  # Uncomment if you want to use django-admin app
     path("api/dashboard/", dashboardapi.urls),
     path("api/airbyte/", airbyteapi.urls),
     path("api/data/", dataapi.urls),
@@ -36,4 +39,8 @@ urlpatterns = [
     path("elementary/<tokenhex>/", get_elementary_report),
     path("prometheus/", include("django_prometheus.urls")),
     path("webhooks/", webhookapi.urls),
+    path("api/userpreference/", userpreferenceapi.urls)
 ]
+
+# socket endpoints
+ws_urlpatterns = [path("ws/data_insights/", DataInsightsConsumer.as_asgi())]

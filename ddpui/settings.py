@@ -13,10 +13,10 @@ https://docs.djangoproject.com/en/4.1/ref/settings/
 from pathlib import Path
 import os
 from dotenv import load_dotenv
-from ddpui.utils.django_logger import setup_logger as setup_django_logger
+from corsheaders.defaults import default_headers
 from ddpui.utils.ddp_logger import setup_logger as setup_ddp_logger
 from ddpui.utils.ab_logger import setup_logger as setup_ab_logger
-from corsheaders.defaults import default_headers
+import ddpui.utils.flags  # pylint: disable=unused-import
 
 load_dotenv()
 
@@ -67,7 +67,12 @@ INSTALLED_APPS = [
     "ddpui",
     "django_prometheus",
     "django_extensions",
+    "channels",
+    "flags",
 ]
+
+# Feature flag to get airbyte credentials through prefect block
+FLAGS = {"AIRBYTE_PROFILE": []}
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
@@ -109,6 +114,15 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "ddpui.wsgi.application"
 
+ASGI_APPLICATION = "ddpui.asgi.application"  # for websockets
+
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {"hosts": [("127.0.0.1", "6379")]},
+    }
+}
 
 # Database
 # https://docs.djangoproject.com/en/4.1/ref/settings/#databases
@@ -192,10 +206,15 @@ AIRBYTE_CUSTOM_SOURCES = {
         "docker_image_tag": "0.1.1",
         "documentation_url": "",
     },
+    "tech4dev/source-glific": {
+        "name": "Glific",
+        "docker_repository": "tech4dev/source-glific",
+        "docker_image_tag": "0.1.0",
+        "documentation_url": "",
+    },
 }
 
 # finally set up the loggers
-setup_django_logger()
 setup_ddp_logger()
 setup_ab_logger()
 

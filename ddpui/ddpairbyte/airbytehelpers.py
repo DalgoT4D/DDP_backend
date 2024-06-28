@@ -31,7 +31,6 @@ from ddpui.utils import secretsmanager
 from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
 from ddpui.core.pipelinefunctions import setup_airbyte_sync_task_config
 from ddpui.core.orgtaskfunctions import fetch_orgtask_lock
-from ddpui.celeryworkers.tasks import add_custom_connectors_to_workspace
 
 logger = CustomLogger("airbyte")
 
@@ -151,11 +150,6 @@ def setup_airbyte_workspace_v1(wsname: str, org: Org) -> AirbyteWorkspace:
             raise Exception(
                 "could not create orgprefectblock for airbyte-server"
             ) from error
-
-    # add custom sources to this workspace
-    add_custom_connectors_to_workspace.delay(
-        workspace["workspaceId"], list(settings.AIRBYTE_CUSTOM_SOURCES.values())
-    )
 
     return AirbyteWorkspace(
         name=workspace["name"],
@@ -566,6 +560,10 @@ def delete_connection(org: Org, connection_id: str):
     logger.info("deleting airbyte connection %s", connection_id)
     airbyte_service.delete_connection(org.airbyte_workspace_id, connection_id)
 
+    if OrgSchemaChange.objects.filter(connection_id=connection_id).exists():
+        OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+        logger.info(f"Deleted schema changes for connection {connection_id}")
+
     return None, None
 
 
@@ -592,6 +590,45 @@ def get_job_info_for_connection(org: Org, connection_id: str):
     job_info["logs"] = logs["logs"]["logLines"]
 
     return job_info, None
+
+
+def get_sync_job_history_for_connection(
+    org: Org, connection_id: str, limit: int = 10, offset: int = 0
+):
+    """
+    Get all sync jobs (paginated) for a connection
+    Returns
+    - Date
+    - Records synced
+    - Bytes synced
+    - Duration
+    - logs
+
+    In case there no sync jobs, return an empty list
+    """
+
+    org_task = OrgTask.objects.filter(
+        org=org,
+        connection_id=connection_id,
+        task__slug=TASK_AIRBYTESYNC,
+    ).first()
+
+    if org_task is None:
+        return None, "connection not found"
+
+    res = {"history": [], "totalSyncs": 0}
+    result = airbyte_service.get_jobs_for_connection(connection_id, limit, offset)
+    res["totalSyncs"] = result["totalJobCount"]
+    if len(result["jobs"]) == 0:
+        return [], None
+
+    for job in result["jobs"]:
+        job_info = airbyte_service.parse_job_info(job)
+        logs = airbyte_service.get_logs_for_job(job_info["job_id"])
+        job_info["logs"] = logs["logs"]["logLines"]
+        res["history"].append(job_info)
+
+    return res, None
 
 
 def update_destination(
@@ -770,6 +807,9 @@ def update_connection_schema(
     connection["skipReset"] = True
 
     res = airbyte_service.update_schema_change(org, payload, connection)
+    if res:
+        OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+
     return res, None
 
 
