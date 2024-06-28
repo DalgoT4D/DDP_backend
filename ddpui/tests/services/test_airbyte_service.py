@@ -1582,9 +1582,6 @@ def test_update_schema_change_invalid_current_connection():
     assert str(excinfo.value) == "current_connection must be a dictionary"
 
 
-from ddpui.ddpairbyte.airbyte_service import trigger_reset_and_sync_workflow
-
-
 def test_update_schema_change_missing_syncCatalog():
     org = Mock()
     connection_info = AirbyteConnectionSchemaUpdate(
