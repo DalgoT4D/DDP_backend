@@ -71,10 +71,10 @@ def get_notification_history():
     return notification_history
 
 # get notification data
-def get_user_notifications(user):
+def get_user_notifications(orguser):
 
     notifications = NotificationRecipient.objects.filter(
-        recipient=user,
+        recipient=orguser,
         notification__sent_time__isnull=False
     ).select_related('notification').order_by('-notification__timestamp')
 

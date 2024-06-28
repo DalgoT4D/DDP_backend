@@ -46,7 +46,7 @@ def create_user_preferences(request, payload: CreateUserPreferencesSchema):
     orguser = request.orguser
     
     preferences = UserPreference.objects.create(
-        user=orguser,
+        orguser=orguser,
         enable_discord_notifications=payload.enable_discord_notifications,
         enable_email_notifications=payload.enable_email_notifications,
         discord_webhook=payload.discord_webhook,
@@ -60,10 +60,10 @@ def update_user_preferences(request, payload: UpdateUserPreferencesSchema):
     orguser = request.orguser
     
     try:
-        preferences = UserPreference.objects.get(user=orguser)
+        preferences = UserPreference.objects.get(orguser=orguser)
     except UserPreference.DoesNotExist:
         new_preferences = UserPreference.objects.create(
-            user=orguser,
+            orguser=orguser,
             enable_discord_notifications=False,
             enable_email_notifications=False,
             discord_webhook=None
@@ -87,9 +87,9 @@ def get_user_preferences(request):
     orguser = request.orguser
 
     try:
-        user_preference = UserPreference.objects.get(user=orguser)
+        user_preference = UserPreference.objects.get(orguser=orguser)
         preferences = {
-            'user': orguser.user,
+            'orguser': orguser.user,
             'discord_webhook': user_preference.discord_webhook,
             'enable_email_notifications': user_preference.enable_email_notifications,
             'enable_discord_notifications': user_preference.enable_discord_notifications,
@@ -99,7 +99,7 @@ def get_user_preferences(request):
     
     except UserPreference.DoesNotExist:
         new_preferences = UserPreference.objects.create(
-            user=orguser,
+            orguser=orguser,
             enable_discord_notifications=False,
             enable_email_notifications=False,
             discord_webhook=None

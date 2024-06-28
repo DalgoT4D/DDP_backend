@@ -15,7 +15,7 @@ class NotificationRecipient(models.Model):
     read_status = models.BooleanField(default=False)
 
 class UserPreference(models.Model):
-    user = models.OneToOneField(OrgUser, on_delete=models.CASCADE, related_name='preferences')
+    orguser = models.OneToOneField(OrgUser, on_delete=models.CASCADE, related_name='preferences')
     enable_discord_notifications = models.BooleanField(default=True)
     enable_email_notifications = models.BooleanField(default=True)
     discord_webhook = models.URLField(blank=True, null=True)

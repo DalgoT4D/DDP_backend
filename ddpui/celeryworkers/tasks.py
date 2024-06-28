@@ -884,9 +884,9 @@ def setup_periodic_tasks(sender, **kwargs):
 def schedule_notification_task(self, notification_id, recipient_id):
     notification = Notification.objects.get(id=notification_id)
     recipient = OrgUser.objects.get(user_id=recipient_id)
-    user_preference = UserPreference.objects.get(user=recipient)
+    user_preference = UserPreference.objects.get(orguser=recipient)
     if user_preference.enable_email_notifications:
-        send_email_notification(user_preference.user.user.email, notification.message)
+        send_email_notification(user_preference.orguser.user.email, notification.message)
     if user_preference.enable_discord_notifications and user_preference.discord_webhook:
         try:
             send_discord_notification(user_preference.discord_webhook, notification.message)
