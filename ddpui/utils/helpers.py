@@ -123,6 +123,8 @@ def hash_dict(payload: dict) -> str:
     hasher.update(json.dumps(payload, sort_keys=True).encode("utf-8"))
 
     return hasher.hexdigest()
+
+
 def nice_bytes(n: int) -> str:
     """Convert bytes to string with appropriate units"""
 
