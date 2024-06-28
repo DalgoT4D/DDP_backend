@@ -63,6 +63,8 @@ jobs:
           ddpui/tests/services/test_prefect_service.py \
           ddpui/tests/services/test_dbt_service.py \
           ddpui/tests/utils/test_deleteorg.py \
+          ddpui/tests/utils/test_deploymentblocks.py \
+          ddpui/tests/utils/test_helpers.py \
           ddpui/tests/helper/test_airbyte_unit_schemas.py \
           ddpui/tests/helper/test_auth.py \
           ddpui/tests/helper/test_dev_secretsmanager.py \
