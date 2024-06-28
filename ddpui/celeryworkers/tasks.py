@@ -695,6 +695,8 @@ def summarize_deployment_flow_run_logs(
             logger.info("Closing the session")
             llm_service.close_file_search_session(result["session_id"])
 
+            del task["logs"]
+
             llm_session = LlmSession.objects.create(
                 orguser=orguser,
                 org=orguser.org,
@@ -704,8 +706,6 @@ def summarize_deployment_flow_run_logs(
                 response=task,  # {"id": ... ,"label": ..., "summary": ... }
                 session_id=result["session_id"],
             )
-
-            del task["logs"]
             summary_result.append(llm_session.response)
 
         logger.info("Completed log summarization for all failed tasks")
