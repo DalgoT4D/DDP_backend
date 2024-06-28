@@ -52,7 +52,7 @@ def test_isvalid_email_0():
 
 def test_isvalid_email_1():
     """invalid email address"""
-    assert isvalid_email("abc@abc.com@foo")
+    assert not isvalid_email("abc@abc.com@foo")
 
 
 def test_generate_hash_id():
