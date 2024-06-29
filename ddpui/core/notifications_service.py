@@ -1,7 +1,11 @@
+from datetime import datetime
 from ddpui.models.notifications import Notification, NotificationRecipient, UserPreference
-from celery.app.control import Control
-from ddpui.celeryworkers.tasks import schedule_notification_task
+# from ddpui.celeryworkers.tasks import schedule_notification_task
 from ddpui.models.org_user import OrgUser
+from ddpui.utils import timezone
+from ddpui.utils.discord import send_discord_notification
+from ddpui.utils.sendgrid import send_email_notification
+from celery.result import AsyncResult
 
 
 
@@ -24,20 +28,36 @@ def create_notification(notification_data):
     
     for recipient_id in recipients:
         try:
-            recipient = OrgUser.objects.get(user_id=recipient_id)
+            recipient = OrgUser.objects.get(id=recipient_id)
+            user_preference = UserPreference.objects.get(orguser=recipient)
             notification = Notification.objects.create(
                 author=author,
                 message=message,
                 urgent=urgent,
                 scheduled_time=scheduled_time
             )
-            NotificationRecipient.objects.create(notification=notification, recipient=recipient)
+            notification_recipient = NotificationRecipient.objects.create(notification=notification, recipient=recipient)
             
             if scheduled_time:
-                schedule_notification_task.apply_async((notification.id, recipient_id), eta=scheduled_time)
+                # logic for scheduling notification goes here
+                # result = schedule_notification_task.apply_async((notification.id, recipient_id), eta=scheduled_time)
+                # notification_recipient.task_id = result.task_id
+                notification_recipient.save()
             else:
-                celery = schedule_notification_task.delay(notification.id, recipient_id)
-                print(celery.status)
+                notification.sent_time = timezone.as_utc(datetime.utcnow())
+                notification.save()
+
+                if user_preference.enable_email_notifications:
+                    try:
+                        send_email_notification(user_preference.orguser.user.email, notification.message)
+                    except Exception as e:
+                        raise Exception(f"Error sending discord notification: {str(e)}")
+                    
+                if user_preference.enable_discord_notifications and user_preference.discord_webhook:
+                    try:
+                        send_discord_notification(user_preference.discord_webhook, notification.message)
+                    except Exception as e:
+                        raise Exception(f"Error sending discord notification: {str(e)}")
         
         except OrgUser.DoesNotExist:
             errors.append({'recipient_id': recipient_id, 'error': 'Recipient does not exist'})
@@ -55,7 +75,7 @@ def get_notification_history():
 
     for notification in notifications:
         recipients = NotificationRecipient.objects.filter(notification=notification)
-        recipient_list = [{'id': recipient.recipient.id, 'username': recipient.recipient.username, 'read_status': recipient.read_status} for recipient in recipients]
+        recipient_list = [{'id': recipient.recipient_id, 'username': recipient.recipient.user.username, 'read_status': recipient.read_status} for recipient in recipients]
         
         notification_history.append({
             'id': notification.id,
@@ -93,14 +113,14 @@ def get_user_notifications(orguser):
             'read_status': recipient.read_status
         })
 
-    return {'user': user, 'notifications': user_notifications}
+    return {'orguser': orguser, 'notifications': user_notifications}
 
 
 # mark notificaiton as read
-def mark_notification_as_read_or_unread(user_id, notification_id, read_status):
+def mark_notification_as_read_or_unread(orguser_id, notification_id, read_status):
     try:
         notification_recipient = NotificationRecipient.objects.get(
-            recipient__id=user_id,
+            recipient__id=orguser_id,
             notification__id=notification_id
         )
         notification_recipient.read_status = read_status
@@ -118,21 +138,15 @@ def delete_scheduled_notification(notification_id):
         if notification.sent_time is not None:
             return {'error': 'Notification has already been sent and cannot be deleted.'}
         
-        # Revoke the scheduled Celery tasks
         notification_recipients = NotificationRecipient.objects.filter(notification=notification)
         
-        control = Control(app=schedule_notification_task.app)
-        
         for recipient in notification_recipients:
-            task_id = schedule_notification_task.AsyncResult((notification.id, recipient.id)).task_id
-            if task_id:
-                control.revoke(task_id, terminate=True)
-        
-        # Delete the notification and its recipients
+            task_id = recipient.task_id
+            async_result = AsyncResult(task_id)
+            async_result.revoke(terminate=True)
+
         notification.delete()
         notification_recipients.delete()
-        
-        return {'success': 'Scheduled notification has been successfully deleted.'}
     
     except Notification.DoesNotExist:
         return {'error': 'Notification does not exist.'}

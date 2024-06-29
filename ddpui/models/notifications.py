@@ -10,9 +10,10 @@ class Notification(models.Model):
     sent_time = models.DateTimeField(null=True, blank=True)
 
 class NotificationRecipient(models.Model):
-    notification = models.ForeignKey(Notification, on_delete=models.CASCADE, related_name='recipients')
-    recipient = models.ForeignKey(OrgUser, on_delete=models.CASCADE, related_name='notifications_received')
+    notification = models.ForeignKey(Notification, on_delete=models.CASCADE, related_name='notifications_received')
+    recipient = models.ForeignKey(OrgUser, on_delete=models.CASCADE, related_name='recipients')
     read_status = models.BooleanField(default=False)
+    task_id = models.TextField()
 
 class UserPreference(models.Model):
     orguser = models.OneToOneField(OrgUser, on_delete=models.CASCADE, related_name='preferences')
