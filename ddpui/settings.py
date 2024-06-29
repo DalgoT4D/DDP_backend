@@ -15,7 +15,6 @@ from pathlib import Path
 
 from corsheaders.defaults import default_headers
 from dotenv import load_dotenv
-from corsheaders.defaults import default_headers
 from ddpui.utils.ddp_logger import setup_logger as setup_ddp_logger
 from ddpui.utils.ab_logger import setup_logger as setup_ab_logger
 import ddpui.utils.flags  # pylint: disable=unused-import
