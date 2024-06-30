@@ -79,8 +79,8 @@ class DistributionChart(ColInsight):
         Result:
         [
             {
-                "chartType": "bar",
-                "data": []
+                "category": "xyx",
+                "count": 4
             }
         ]
         """
@@ -281,4 +281,4 @@ class StringLengthStats(ColInsight):
         return validate
 
     def query_data_type(self) -> TranslateColDataType:
-        return TranslateColDataType.NUMERIC
+        return TranslateColDataType.STRING
