@@ -1,6 +1,8 @@
 import os
+
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
+
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
