@@ -203,7 +203,6 @@ if "sources" in spec:
 
         connPayload = {
             "name": f"test-conn-{idx}",
-            "normalize": False,
             "sourceId": src["sourceId"],
             "streams": [],
         }

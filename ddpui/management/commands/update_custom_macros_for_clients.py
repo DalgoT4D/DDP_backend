@@ -4,7 +4,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from django.core.management.base import BaseCommand
 
-from ddpui.models.org_user import OrgUser, Org
+from ddpui.models.org import TransformType
 from ddpui.models.dbt_workflow import OrgDbt
 from ddpui.models.role_based_access import Role
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
@@ -30,7 +30,7 @@ class Command(BaseCommand):
             project_dir: Path = Path(org_dbt.project_dir)
             dbtrepo_dir: Path = project_dir / project_name
 
-            if org_dbt.transform_type == "ui" and dbtrepo_dir.exists():
+            if org_dbt.transform_type == TransformType.UI and dbtrepo_dir.exists():
                 # update all macros with .sql extension from assets
                 assets_dir = assets.__path__[0]
 

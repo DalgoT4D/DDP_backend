@@ -5,15 +5,16 @@ do not raise http errors here
 
 import uuid
 from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask, TaskLock, TaskLockStatus
-from ddpui.models.org import Org, OrgPrefectBlockv1, OrgDataFlowv1
+from ddpui.models.org import Org, OrgPrefectBlockv1, OrgDataFlowv1, TransformType
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
 )
+from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpprefect import prefect_service
 from ddpui.core.pipelinefunctions import setup_dbt_core_task_config
-from ddpui.utils.constants import TASK_DBTRUN
+from ddpui.utils.constants import TASK_DBTRUN, TASK_GENERATE_EDR
 from ddpui.utils.helpers import generate_hash_id
 
 logger = CustomLogger("ddpui")
@@ -27,7 +28,9 @@ def create_default_transform_tasks(
         raise ValueError("dbt is not configured for this org")
 
     # if transform_type is "ui" then we don't set up git-pull
-    task_types = ["dbt", "git"] if org.dbt.transform_type == "git" else ["dbt"]
+    task_types = (
+        ["dbt", "git"] if org.dbt.transform_type == TransformType.GIT else ["dbt"]
+    )
     for task in Task.objects.filter(type__in=task_types, is_system=True).all():
         org_task = OrgTask.objects.create(org=org, task=task, uuid=uuid.uuid4())
 
@@ -38,6 +41,31 @@ def create_default_transform_tasks(
             )
 
     return None, None
+
+
+def get_edr_send_report_task(org: Org, **kwargs) -> OrgTask | None:
+    """creates an OrgTask for edr send-report"""
+    task = Task.objects.filter(slug=TASK_GENERATE_EDR).first()
+    if task is None:
+        raise ValueError("TASK_GENERATE_EDR not found")
+
+    org_task = OrgTask.objects.filter(task__slug=TASK_GENERATE_EDR, org=org).first()
+    if org_task:
+        return org_task
+
+    if kwargs.get("create"):
+        org_task = OrgTask.objects.create(
+            org=org,
+            task=task,
+            uuid=uuid.uuid4(),
+            parameters={
+                "options": {
+                    "profiles-dir": "elementary_profiles",
+                    "bucket-file-path": f"reports/{org.slug}.TODAYS_DATE.html",
+                }
+            },
+        )
+    return org_task
 
 
 def create_prefect_deployment_for_dbtcore_task(
@@ -65,7 +93,8 @@ def create_prefect_deployment_for_dbtcore_task(
                     "org_slug": org_task.org.slug,
                 }
             },
-        )
+        ),
+        MANUL_DBT_WORK_QUEUE,
     )
 
     # store deployment record in django db
@@ -140,6 +169,7 @@ def fetch_orgtask_lock(org_task: OrgTask):
             "lockedAt": lock.locked_at,
             "flowRunId": lock.flow_run_id,
             "status": lock_status,
+            "task_slug": org_task.task.slug,
         }
 
     return None

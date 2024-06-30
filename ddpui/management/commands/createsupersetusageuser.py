@@ -13,10 +13,10 @@ load_dotenv()
 
 class Command(BaseCommand):
     """
-    This script populates the DataflowBlock table
+    Adds user for superset usage dashboard
     """
 
-    help = "Writes the DataflowBlock table"
+    help = "Adds user for superset usage dashboard"
 
     def add_arguments(self, parser):  # skipcq: PYL-R0201
         parser.add_argument("--username", required=True)

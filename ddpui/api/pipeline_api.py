@@ -12,16 +12,10 @@ from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service
 
 from ddpui.ddpprefect import (
-    DBTCORE,
-    SHELLOPERATION,
     DBTCLIPROFILE,
-    AIRBYTECONNECTION,
     AIRBYTESERVER,
 )
-from ddpui.models.org import (
-    OrgDataFlowv1,
-    OrgPrefectBlockv1,
-)
+from ddpui.models.org import OrgDataFlowv1, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import DataflowOrgTask, OrgTask
 from ddpui.ddpprefect.schema import (
@@ -40,6 +34,7 @@ from ddpui.core.pipelinefunctions import (
     pipeline_with_orgtasks,
     fetch_pipeline_lock,
 )
+from ddpui.celeryworkers.tasks import summarize_deployment_flow_run_logs
 from ddpui.core.dbtfunctions import gather_dbt_project_params
 from ddpui.auth import has_permission
 
@@ -105,14 +100,16 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
         if not org_server_block:
             raise HttpError(400, "airbyte server block not found")
 
-        logger.info(f"Connections being pushed to the pipeline")
+        logger.info("Connections being pushed to the pipeline")
 
         # only connections with org task will be pushed to pipeline
         payload.connections.sort(key=lambda conn: conn.seq)
         for connection in payload.connections:
             logger.info(connection)
             org_task = OrgTask.objects.filter(
-                org=orguser.org, connection_id=connection.id
+                org=orguser.org,
+                connection_id=connection.id,
+                task__slug=TASK_AIRBYTESYNC,
             ).first()
             if org_task is None:
                 logger.info(
@@ -139,7 +136,7 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
     dbt_project_params = None
     dbt_git_orgtasks = []
     if payload.transformTasks and len(payload.transformTasks) > 0:
-        logger.info(f"Dbt tasks being pushed to the pipeline")
+        logger.info("Dbt tasks being pushed to the pipeline")
 
         # dbt params
         dbt_project_params, error = gather_dbt_project_params(orguser.org)
@@ -227,7 +224,8 @@ def get_prefect_dataflows_v1(request):
         raise HttpError(400, "register an organization first")
 
     org_data_flows = OrgDataFlowv1.objects.filter(
-        org=orguser.org, dataflow_type="orchestrate"
+        org=orguser.org,
+        dataflow_type="orchestrate",
     ).all()
 
     deployment_ids = [flow.deployment_id for flow in org_data_flows]
@@ -311,7 +309,7 @@ def get_prefect_dataflow_v1(request, deployment_id):
         .order_by("seq")
     ]
 
-    transformTasks = [
+    transform_tasks = [
         {"uuid": dataflow_orgtask.orgtask.uuid, "seq": dataflow_orgtask.seq}
         for dataflow_orgtask in DataflowOrgTask.objects.filter(
             dataflow=org_data_flow, orgtask__task__type__in=["git", "dbt"]
@@ -320,7 +318,7 @@ def get_prefect_dataflow_v1(request, deployment_id):
         .order_by("seq")
     ]
 
-    has_transform = len(transformTasks) > 0
+    has_transform = len(transform_tasks) > 0
 
     # differentiate between deploymentName and name
     deployment["deploymentName"] = deployment["name"]
@@ -332,7 +330,7 @@ def get_prefect_dataflow_v1(request, deployment_id):
         "cron": deployment["cron"],
         "connections": connections,
         "dbtTransform": "yes" if has_transform else "no",
-        "transformTasks": transformTasks,
+        "transformTasks": transform_tasks,
         "isScheduleActive": deployment["isScheduleActive"],
     }
 
@@ -398,7 +396,9 @@ def put_prefect_dataflow_v1(
         for connection in payload.connections:
             logger.info(connection)
             org_task = OrgTask.objects.filter(
-                org=orguser.org, connection_id=connection.id
+                org=orguser.org,
+                connection_id=connection.id,
+                task__slug=TASK_AIRBYTESYNC,
             ).first()
             if org_task is None:
                 logger.info(
@@ -672,3 +672,45 @@ def get_prefect_flow_runs_log_history(
             )
 
     return flow_runs
+
+
+@pipelineapi.get(
+    "v1/flows/{deployment_id}/flow_runs/history", auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_view_pipeline"])
+def get_prefect_flow_runs_log_history_v1(
+    request, deployment_id, limit: int = 0, fetchlogs=True
+):
+    # pylint: disable=unused-argument
+    """Fetch all flow runs for the deployment and the logs for each flow run"""
+    flow_runs = prefect_service.get_flow_runs_by_deployment_id(
+        deployment_id, limit=limit
+    )
+
+    if fetchlogs:
+        for flow_run in flow_runs:
+            logs_dict = prefect_service.get_flow_run_logs_v2(flow_run["id"])
+            flow_run["runs"] = logs_dict
+
+    return flow_runs
+
+
+@pipelineapi.get(
+    "v1/flow_runs/{flow_run_id}/logsummary", auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_view_pipeline"])
+def get_flow_runs_logsummary_v1(
+    request, flow_run_id, regenerate: int
+):  # pylint: disable=unused-argument
+    """
+    Use llms to summarize logs
+    """
+    try:
+        orguser: OrgUser = request.orguser
+        task = summarize_deployment_flow_run_logs.delay(
+            flow_run_id, orguser.id, regenerate == 1
+        )
+        return {"task_id": task.id}
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to retrieve logs") from error

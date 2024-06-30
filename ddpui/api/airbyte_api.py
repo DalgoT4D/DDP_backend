@@ -10,10 +10,13 @@ from ninja.responses import Response
 
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from ddpui import auth
+from ddpui import settings
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import (
     AirbyteConnectionCreate,
     AirbyteConnectionCreateResponse,
+    AirbyteGetConnectionsResponse,
+    AirbyteConnectionSchemaUpdate,
     AirbyteDestinationCreate,
     AirbyteDestinationUpdate,
     AirbyteSourceCreate,
@@ -29,7 +32,14 @@ from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
-
+from ddpui.celeryworkers.tasks import (
+    get_connection_catalog_task,
+    sync_flow_runs_of_deployments,
+    add_custom_connectors_to_workspace,
+    summarize_airbyte_logs,
+)
+from ddpui.models.tasks import TaskProgressHashPrefix
+from ddpui.utils.singletaskprogress import SingleTaskProgress
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
 logger = CustomLogger("airbyte")
@@ -437,6 +447,10 @@ def post_airbyte_workspace_v1(request, payload: AirbyteWorkspaceCreate):
         raise HttpError(400, "org already has a workspace")
 
     workspace = airbytehelpers.setup_airbyte_workspace_v1(payload.name, orguser.org)
+    # add custom sources to this workspace
+    add_custom_connectors_to_workspace.delay(
+        workspace.workspaceId, list(settings.AIRBYTE_CUSTOM_SOURCES.values())
+    )
 
     return workspace
 
@@ -468,7 +482,7 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
 @airbyteapi.get(
     "/v1/connections",
     auth=auth.CustomAuthMiddleware(),
-    response=List[AirbyteConnectionCreateResponse],
+    response=List[AirbyteGetConnectionsResponse],
 )
 @has_permission(["can_view_connections"])
 def get_airbyte_connections_v1(request):
@@ -482,7 +496,10 @@ def get_airbyte_connections_v1(request):
         raise HttpError(400, error)
     logger.debug(res)
 
-    # by default normalization is going as False here because we dont do anything with it
+    # sync the deployment flow runs into our db; a bit heavy task
+    deployment_ids = [body["deploymentId"] for body in res]
+    sync_flow_runs_of_deployments.delay(deployment_ids)
+
     return res
 
 
@@ -577,6 +594,27 @@ def get_latest_job_for_connection(request, connection_id):
     return job_info
 
 
+@airbyteapi.get(
+    "/v1/connections/{connection_id}/sync/history", auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_view_connection"])
+def get_sync_history_for_connection(
+    request, connection_id, limit: int = 10, offset: int = 0
+):
+    """get the job info from airbyte for a connection"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    if org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    job_info, error = airbytehelpers.get_sync_job_history_for_connection(
+        org, connection_id, limit=limit, offset=offset
+    )
+    if error:
+        raise HttpError(400, error)
+    return job_info
+
+
 @airbyteapi.put("/v1/destinations/{destination_id}/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_warehouse"])
 def put_airbyte_destination_v1(
@@ -613,3 +651,82 @@ def delete_airbyte_source_v1(request, source_id):
         raise HttpError(400, error)
 
     return {"success": 1}
+
+
+@airbyteapi.get(
+    "/v1/connections/{connection_id}/catalog",
+    auth=auth.CustomAuthMiddleware(),
+)
+@has_permission(["can_view_connection"])
+def get_connection_catalog_v1(request, connection_id):
+    """Fetch a connection in the user organization workspace"""
+    orguser: OrgUser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    task_key = f"{TaskProgressHashPrefix.SCHEMA_CHANGE}-{orguser.org.slug}"
+    if SingleTaskProgress.fetch(task_key) is not None:
+        return {"task_id": task_key, "message": "already running"}
+
+    # ignore the returned celery task id
+    get_connection_catalog_task.delay(task_key, orguser.org.id, connection_id)
+
+    return {"task_id": task_key}
+
+
+@airbyteapi.put(
+    "/v1/connections/{connection_id}/schema_update", auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_edit_connection"])
+def update_connection_schema(
+    request, connection_id, payload: AirbyteConnectionSchemaUpdate
+):
+    """update schema change in a connection"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    if org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    res, error = airbytehelpers.update_connection_schema(org, connection_id, payload)
+    if error:
+        raise HttpError(400, error)
+    return res
+
+
+@airbyteapi.get(
+    "/v1/connection/schema_change",
+    auth=auth.CustomAuthMiddleware(),
+)
+@has_permission(["can_view_connection"])
+def get_schema_changes_for_connection(request):
+    """Get schema changes for an org"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    if org.airbyte_workspace_id is None:
+        raise HttpError(400, "Create an Airbyte workspace first")
+
+    res, error = airbytehelpers.get_schema_changes(org)
+    if error:
+        raise HttpError(400, error)
+    return res
+
+
+@airbyteapi.get(
+    "/v1/connections/{connection_id}/logsummary", auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_view_pipeline"])
+def get_flow_runs_logsummary_v1(
+    request, connection_id: str, job_id: int, attempt_number: int, regenerate: int
+):  # pylint: disable=unused-argument
+    """
+    Use llms to summarize logs
+    """
+    try:
+        orguser: OrgUser = request.orguser
+        task = summarize_airbyte_logs.delay(
+            connection_id, orguser.id, job_id, attempt_number, regenerate == 1
+        )
+        return {"task_id": task.id}
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to retrieve logs") from error

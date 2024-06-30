@@ -34,6 +34,4 @@ class Command(BaseCommand):
                 print("no such org")
                 return
 
-            display_org(org)
-            if options["yes_really"]:
-                delete_one_org(org)
+            delete_one_org(org, dry_run=not options["yes_really"])

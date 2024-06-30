@@ -230,7 +230,6 @@ class PrefectAirbyteConnectionBlockSchema(Schema):
     deploymentId: str = None
     lastRun: Optional[dict | None]
     destinationSchema: str = ""
-    normalize: bool = False
     lock: Optional[dict | None]
 
 
@@ -246,26 +245,6 @@ class PrefectFlowAirbyteConnection2(Schema):
 
     id: str
     seq: int
-
-
-class PrefectDataFlowCreateSchema(Schema):
-    """Payload sent by the frontend to create a dataflow"""
-
-    name: str
-    connectionBlocks: list[PrefectFlowAirbyteConnection]
-    dbtTransform: str
-    cron: str
-
-
-class PrefectDataFlowCreateSchema2(Schema):
-    """Payload to be sent to the prefect-proxy"""
-
-    deployment_name: str
-    flow_name: str
-    orgslug: str
-    connection_blocks: list[PrefectFlowAirbyteConnection]
-    dbt_blocks: list
-    cron: str = None
 
 
 class PrefectDataFlowCreateSchema3(Schema):
@@ -294,30 +273,13 @@ class PrefectDataFlowCreateSchema4(Schema):
     transformTasks: list[PrefectDataFlowOrgTasks]
 
 
-class PrefectDataFlowUpdateSchema(Schema):
-    """Edit the data flow"""
-
-    name: str
-    connectionBlocks: list[PrefectFlowAirbyteConnection]
-    dbtTransform: str
-    cron: str
-
-
-class PrefectDataFlowUpdateSchema2(Schema):
-    """Edit the data flow"""
-
-    connection_blocks: list[PrefectFlowAirbyteConnection]
-    dbt_blocks: list
-    cron: str = None
-
-
 class PrefectDataFlowUpdateSchema3(Schema):
     """Edit the data flow"""
 
-    name: str
-    connections: list[PrefectFlowAirbyteConnection2]
-    cron: str
-    transformTasks: list[PrefectDataFlowOrgTasks]
+    name: str = None
+    connections: list[PrefectFlowAirbyteConnection2] = None
+    cron: str = None
+    transformTasks: list[PrefectDataFlowOrgTasks] = None
     deployment_params: dict = None
 
 

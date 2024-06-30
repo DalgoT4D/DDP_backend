@@ -9,12 +9,9 @@ from ddpui import settings
 from ddpui.ddpprefect.schema import (
     PrefectDbtCoreSetup,
     PrefectShellSetup,
-    PrefectAirbyteConnectionSetup,
     PrefectAirbyteSync,
-    PrefectDataFlowCreateSchema2,
     PrefectDataFlowCreateSchema3,
     PrefectDbtCore,
-    PrefectDataFlowUpdateSchema2,
     PrefectSecretBlockCreate,
     PrefectShellTaskSetup,
     PrefectDbtTaskSetup,
@@ -22,9 +19,9 @@ from ddpui.ddpprefect.schema import (
 )
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.tasks import DataflowOrgTask, TaskLock
-from ddpui.models.orgjobs import BlockLock, DataflowBlock
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
+from ddpui.ddpprefect import DDP_WORK_QUEUE
 
 load_dotenv()
 
@@ -139,6 +136,12 @@ def get_airbyte_server_block_id(blockname) -> str | None:
     return response["block_id"]
 
 
+def get_airbyte_server_block(blockname) -> dict | None:
+    """get the block for the server block having this name"""
+    response = prefect_get(f"blocks/airbyte/server/block/{blockname}")
+    return response
+
+
 def create_airbyte_server_block(blockname):
     """Create airbyte server block in prefect"""
     response = prefect_post(
@@ -164,14 +167,6 @@ def delete_airbyte_server_block(block_id):
 
 
 # ================================================================================================
-def get_airbyte_connection_block_id(blockname) -> str | None:
-    """get the block_id for the connection block having this name"""
-    response = prefect_get(
-        f"blocks/airbyte/connection/byblockname/{blockname}",
-    )
-    return response["block_id"]
-
-
 def get_airbye_connection_blocks(block_names) -> dict:
     """Filter out blocks by query params"""
     response = prefect_post(
@@ -179,29 +174,6 @@ def get_airbye_connection_blocks(block_names) -> dict:
         {"block_names": block_names},
     )
     return response
-
-
-def get_airbyte_connection_block_by_id(block_id: str) -> dict:
-    """look up a prefect airbyte-connection block by id"""
-    response = prefect_get(
-        f"blocks/airbyte/connection/byblockid/{block_id}",
-    )
-    return response
-
-
-def create_airbyte_connection_block(
-    conninfo: PrefectAirbyteConnectionSetup,
-) -> str:
-    """Create airbyte connection block"""
-    response = prefect_post(
-        "blocks/airbyte/connection/",
-        {
-            "serverBlockName": conninfo.serverBlockName,
-            "connectionId": conninfo.connectionId,
-            "connectionBlockName": conninfo.connectionBlockName,
-        },
-    )
-    return response["block_id"]
 
 
 def update_airbyte_connection_block(blockname):
@@ -459,27 +431,8 @@ def run_shell_task_sync(task: PrefectShellTaskSetup) -> dict:  # pragma: no cove
 
 
 # Flows and deployments
-def create_dataflow(payload: PrefectDataFlowCreateSchema2) -> dict:  # pragma: no cover
-    """create a prefect deployment out of a flow and a cron schedule"""
-    res = prefect_post(
-        "deployments/",
-        {
-            "flow_name": payload.flow_name,
-            "deployment_name": payload.deployment_name,
-            "org_slug": payload.orgslug,
-            "connection_blocks": [
-                {"seq": conn.seq, "blockName": conn.blockName}
-                for conn in payload.connection_blocks
-            ],
-            "dbt_blocks": payload.dbt_blocks,
-            "cron": payload.cron,
-        },
-    )
-    return res
-
-
 def create_dataflow_v1(
-    payload: PrefectDataFlowCreateSchema3,
+    payload: PrefectDataFlowCreateSchema3, queue_name=DDP_WORK_QUEUE
 ) -> dict:  # pragma: no cover
     """create a prefect deployment out of a flow and a cron schedule; to go away with the blocks"""
     res = prefect_post(
@@ -490,24 +443,8 @@ def create_dataflow_v1(
             "org_slug": payload.orgslug,
             "deployment_params": payload.deployment_params,
             "cron": payload.cron,
-        },
-    )
-    return res
-
-
-def update_dataflow(
-    deployment_id: str, payload: PrefectDataFlowUpdateSchema2
-) -> dict:  # pragma: no cover
-    """update a prefect deployment with a new cron schedule"""
-    res = prefect_put(
-        f"deployments/{deployment_id}",
-        {
-            "cron": payload.cron,
-            "connection_blocks": [
-                {"seq": conn.seq, "blockName": conn.blockName}
-                for conn in payload.connection_blocks
-            ],
-            "dbt_blocks": payload.dbt_blocks,
+            "work_pool_name": os.getenv("PREFECT_WORKER_POOL_NAME"),
+            "work_queue_name": queue_name,
         },
     )
     return res
@@ -615,6 +552,14 @@ def get_flow_run_logs(flow_run_id: str, offset: int) -> dict:  # pragma: no cove
     return {"logs": res}
 
 
+def get_flow_run_logs_v2(flow_run_id: str) -> dict:  # pragma: no cover
+    """retreive the logs from a flow-run from prefect"""
+    res = prefect_get(
+        f"flow_runs/v1/logs/{flow_run_id}",
+    )
+    return res
+
+
 def get_flow_run(flow_run_id: str) -> dict:
     """retreive the logs from a flow-run from prefect"""
     res = prefect_get(f"flow_runs/{flow_run_id}")
@@ -632,37 +577,6 @@ def create_deployment_flow_run(
         flow_run_params if flow_run_params else {},
     )
     return res
-
-
-def lock_blocks_for_deployment(deployment_id: str, orguser: OrgUser):
-    """locks all orgprefectblocks for a deployment"""
-    dataflow_blocks = DataflowBlock.objects.filter(
-        dataflow__deployment_id=deployment_id
-    )
-
-    block_names = [
-        x["opb__block_name"] for x in dataflow_blocks.values("opb__block_name")
-    ]
-    lock = BlockLock.objects.filter(opb__block_name__in=block_names).first()
-    if lock:
-        logger.info(f"{lock.locked_by.user.email} is running this pipeline right now")
-        raise HttpError(
-            400, f"{lock.locked_by.user.email} is running this pipeline right now"
-        )
-
-    locks = []
-    try:
-        with transaction.atomic():
-            for df_block in dataflow_blocks:
-                blocklock = BlockLock.objects.create(
-                    opb=df_block.opb, locked_by=orguser
-                )
-                locks.append(blocklock)
-    except Exception as error:
-        raise HttpError(
-            400, "Someone else is trying to run this pipeline... try again"
-        ) from error
-    return locks
 
 
 def lock_tasks_for_deployment(deployment_id: str, orguser: OrgUser):

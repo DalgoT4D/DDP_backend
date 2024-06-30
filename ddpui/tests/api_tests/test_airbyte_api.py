@@ -10,7 +10,7 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
 from django.contrib.auth.models import User
-from ddpui.models.org import Org, OrgPrefectBlock, OrgWarehouse
+from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser, OrgUserRole
 from ddpui.api.airbyte_api import (
     get_airbyte_source_definitions,
@@ -697,31 +697,6 @@ def warehouse_with_destination(org_with_workspace):
     )
     yield warehouse
     warehouse.delete()
-
-
-@pytest.fixture
-def airbyte_server_block(org_with_workspace):
-    block = OrgPrefectBlock.objects.create(
-        org=org_with_workspace,
-        block_type=ddpprefect.AIRBYTESERVER,
-        block_id="fake-serverblock-id",
-        block_name="fake ab server block",
-    )
-    yield block
-    block.delete()
-
-
-# ================================================================================
-@pytest.fixture
-def org_prefect_connection_block(org_with_workspace):
-    block = OrgPrefectBlock.objects.create(
-        org=org_with_workspace,
-        block_id="connection_block_id",
-        block_name="temp-conn-block-name",
-        block_type=ddpprefect.AIRBYTECONNECTION,
-    )
-    yield block
-    block.delete()
 
 
 # ================================================================================

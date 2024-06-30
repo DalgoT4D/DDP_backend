@@ -63,7 +63,6 @@ class AirbyteConnectionCreate(Schema):
     destinationId: str = None
     destinationSchema: str = None
     streams: list
-    normalize: bool = False
 
 
 class AirbyteConnectionCreateResponse(Schema):
@@ -79,9 +78,25 @@ class AirbyteConnectionCreateResponse(Schema):
     deploymentId: str = None
     lastRun: Optional[dict | None]
     destinationSchema: str = ""
-    normalize: bool = False
     lock: Optional[dict | None]
     isRunning: bool = False
+    resetConnDeploymentId: str = None
+
+
+class AirbyteGetConnectionsResponse(Schema):
+    """Docstring"""
+
+    name: str
+    connectionId: str
+    source: dict
+    destination: dict
+    status: str
+    deploymentId: str = None
+    lastRun: Optional[dict | None]
+    destinationSchema: str = ""
+    lock: Optional[dict | None]
+    isRunning: bool = False
+    resetConnDeploymentId: str = None
 
 
 class AirbyteConnectionUpdate(Schema):
@@ -89,7 +104,6 @@ class AirbyteConnectionUpdate(Schema):
 
     name: str
     streams: list
-    normalize: bool = False
     destinationId: str = None
     destinationSchema: str = None
 
@@ -101,3 +115,11 @@ class AirbyteWorkspace(Schema):
     name: str
     workspaceId: str
     initialSetupComplete: bool
+
+
+class AirbyteConnectionSchemaUpdate(Schema):
+    """Docstring"""
+
+    syncCatalog: dict
+    connectionId: str
+    sourceCatalogId: str

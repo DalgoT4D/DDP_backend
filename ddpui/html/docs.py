@@ -1,11 +1,13 @@
 import os
-from redis import Redis
-from django.http import HttpResponse, Http404
+
+from django.http import Http404, HttpResponse
+
+from ddpui.utils.redis_client import RedisClient
 
 
 def get_dbt_docs(request, tokenhex: str):
     """serve the generated docs"""
-    redis = Redis()
+    redis = RedisClient.get_instance()
     redis_key = f"dbtdocs-{tokenhex}"
     htmlfilename = redis.get(redis_key)
     if htmlfilename is None:
@@ -24,7 +26,7 @@ def get_dbt_docs(request, tokenhex: str):
         # but if we set it to an invalid value, it makes its way to the browser where
         # it is ignored
         response.headers["X-Frame-Options"] = "ignore"
-        response.headers[
-            "Content-Security-Policy"
-        ] = f"frame-src localhost:8002 {request.headers['Host']};"
+        response.headers["Content-Security-Policy"] = (
+            f"frame-src localhost:8002 {request.headers['Host']};"
+        )
         return response

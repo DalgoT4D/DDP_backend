@@ -1,4 +1,5 @@
 """creates sources and connections in an airbyte workspace"""
+
 #!env python
 
 import os
@@ -76,7 +77,6 @@ for connection in spec["connections"]:
     src = [s for s in sources if s["name"] == connection["source"]][0]
     connPayload = {
         "name": connection["name"],
-        "normalize": False,
         "sourceId": src["sourceId"],
         "streams": [],
         "destinationSchema": connection["destinationSchema"],

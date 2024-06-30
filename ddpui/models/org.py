@@ -15,6 +15,13 @@ class OrgVizLoginType(str, Enum):
         return [(key.value, key.name) for key in cls]
 
 
+class TransformType(str, Enum):
+    """an enum for transform type available either via ui or github"""
+
+    UI = "ui"
+    GIT = "github"
+
+
 class OrgDbt(models.Model):
     """Docstring"""
 
@@ -57,56 +64,6 @@ class Org(models.Model):
         return f"Org[{self.slug}|{self.name}|{self.airbyte_workspace_id}|{demostr}]"
 
 
-class OrgPrefectBlock(models.Model):
-    """Docstring"""
-
-    org = models.ForeignKey(Org, on_delete=models.CASCADE)
-    block_type = models.CharField(max_length=25)  # all dbt blocks have the same type!
-    block_id = models.CharField(max_length=36, unique=True)
-    block_name = models.CharField(
-        max_length=100, unique=True
-    )  # use blockname to distinguish between different dbt commands
-    display_name = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
-        max_length=100, null=True
-    )
-    command = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
-        max_length=100, null=True
-    )
-    dbt_target_schema = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
-        max_length=50, null=True
-    )
-    seq = models.SmallIntegerField(null=True)  # skipcq: PTC-W0901, PTC-W0906
-
-    def __str__(self) -> str:
-        return f"OrgPrefectBlock[{self.org.name}|{self.block_type}|{self.block_name}]"
-
-
-class OrgDataFlow(models.Model):
-    """This contains the deployment id of an organization to schedule flows/pipelines"""
-
-    org = models.ForeignKey(Org, on_delete=models.CASCADE)
-    name = models.CharField(max_length=100)
-    deployment_name = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
-        max_length=100, null=True
-    )
-    deployment_id = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
-        max_length=36, unique=True, null=True
-    )
-    cron = models.CharField(max_length=36, null=True)  # skipcq: PTC-W0901, PTC-W0906
-    # and if deployment is manual airbyte-connection-sync,then we store the conn_id
-    connection_id = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
-        max_length=36, unique=True, null=True
-    )
-    dataflow_type = models.CharField(
-        max_length=25,
-        choices=(("orchestrate", "orchestrate"), ("manual", "manual")),
-        default="orchestrate",
-    )  # skipcq: PTC-W0901, PTC-W0906
-
-    def __str__(self) -> str:
-        return f"OrgDataFlow[{self.name}|{self.deployment_name}|{self.deployment_id}|{self.cron}|{self.connection_id}]"
-
-
 class OrgSchema(Schema):
     """Docstring"""
 
@@ -135,33 +92,12 @@ class OrgWarehouse(models.Model):
     airbyte_docker_image_tag = models.TextField(  # skipcq: PTC-W0901, PTC-W0906
         max_length=10, null=True
     )
-    airbyte_norm_op_id = models.TextField(  # skipcq: PTC-W0901, PTC-W0906
-        max_length=36, null=True
-    )
     bq_location = models.CharField(max_length=100, null=True)
 
     def __str__(self) -> str:
         return (
             f"OrgWarehouse[{self.org.slug}|{self.wtype}|{self.airbyte_destination_id}]"
         )
-
-    def is_destinations_v2(self):
-        """returns True if the warehouse is using destinations v2"""
-        if (
-            self.airbyte_docker_repository
-            and self.airbyte_docker_repository.find("postgres") > -1
-            and self.airbyte_docker_image_tag
-            and self.airbyte_docker_image_tag >= "0.6.0"
-        ):
-            return True
-        if (
-            self.airbyte_docker_repository
-            and self.airbyte_docker_repository.find("bigquery") > -1
-            and self.airbyte_docker_image_tag
-            and self.airbyte_docker_image_tag >= "1.9.1"
-        ):
-            return True
-        return False
 
 
 class OrgWarehouseSchema(Schema):
@@ -188,7 +124,7 @@ class OrgPrefectBlockv1(models.Model):
     )  # use blockname to distinguish between different dbt commands
 
     def __str__(self) -> str:
-        return f"OrgPrefectBlock[{self.org.name}|{self.block_type}|{self.block_name}]"
+        return f"OrgPrefectBlockv1[{self.org.name}|{self.block_type}|{self.block_name}]"
 
 
 class OrgDataFlowv1(models.Model):
@@ -210,5 +146,17 @@ class OrgDataFlowv1(models.Model):
         default="orchestrate",
     )  # skipcq: PTC-W0901, PTC-W0906
 
+    reset_conn_dataflow = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True
+    )
+
     def __str__(self) -> str:
-        return f"OrgDataFlow[{self.name}|{self.deployment_name}|{self.deployment_id}|{self.cron}]"
+        return f"OrgDataFlowv1[{self.name}|{self.deployment_name}|{self.deployment_id}|{self.cron}]"
+
+
+class OrgSchemaChange(models.Model):
+    """This contains the deployment id of an organization to schedule flows/pipelines"""
+
+    org = models.ForeignKey(Org, on_delete=models.CASCADE)
+    connection_id = models.CharField(max_length=36, unique=True, null=True)
+    change_type = models.CharField(max_length=36, null=True)

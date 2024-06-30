@@ -1,33 +1,29 @@
 import os
-from uuid import uuid4
 from pathlib import Path
-from redis import Redis
+from uuid import uuid4
 
 from ninja import NinjaAPI
-from ninja.errors import HttpError
-
-from ninja.errors import ValidationError
+from ninja.errors import HttpError, ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from ddpui import auth
-from ddpui.ddpprefect.schema import OrgDbtSchema, OrgDbtGitHub, OrgDbtTarget
-from ddpui.models.org_user import OrgUserResponse, OrgUser
-from ddpui.models.org import OrgPrefectBlockv1
-from ddpui.ddpprefect import DBTCLIPROFILE
-from ddpui.utils.helpers import runcmd
-from ddpui.utils.dbtdocs import create_single_html
+from ddpui.auth import has_permission
 from ddpui.celeryworkers.tasks import (
-    setup_dbtworkspace,
     clone_github_repo,
     run_dbt_commands,
+    setup_dbtworkspace,
 )
 from ddpui.ddpdbt import dbt_service
-from ddpui.ddpprefect import prefect_service
+from ddpui.ddpprefect import DBTCLIPROFILE, prefect_service
+from ddpui.ddpprefect.schema import OrgDbtGitHub, OrgDbtSchema, OrgDbtTarget
+from ddpui.models.org import OrgPrefectBlockv1
+from ddpui.models.org_user import OrgUser, OrgUserResponse
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.dbtdocs import create_single_html
+from ddpui.utils.helpers import runcmd
 from ddpui.utils.orguserhelpers import from_orguser
-from ddpui.auth import has_permission
-
+from ddpui.utils.redis_client import RedisClient
 
 dbtapi = NinjaAPI(urls_namespace="dbt")
 logger = CustomLogger("ddpui")
@@ -74,6 +70,13 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
         org.dbt = None
         org.save()
 
+    repo_exists = dbt_service.check_repo_exists(
+        payload.gitrepoUrl, payload.gitrepoAccessToken
+    )
+
+    if not repo_exists:
+        raise HttpError(400, "Github repository does not exist")
+
     task = setup_dbtworkspace.delay(org.id, payload.dict())
 
     return {"task_id": task.id}
@@ -86,7 +89,14 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
     orguser: OrgUser = request.orguser
     org = orguser.org
     if org.dbt is None:
-        raise HttpError(400, "create a dbt workspace first")
+        raise HttpError(400, "Create a dbt workspace first")
+
+    repo_exists = dbt_service.check_repo_exists(
+        payload.gitrepoUrl, payload.gitrepoAccessToken
+    )
+
+    if not repo_exists:
+        raise HttpError(400, "Github repository does not exist")
 
     org.dbt.gitrepo_url = payload.gitrepoUrl
     org.dbt.gitrepo_access_token_secret = payload.gitrepoAccessToken
@@ -181,7 +191,7 @@ def post_dbt_makedocs(request):
         indexfile.write(html)
         indexfile.close()
 
-    redis = Redis()
+    redis = RedisClient.get_instance()
     token = uuid4()
     redis_key = f"dbtdocs-{token.hex}"
     redis.set(redis_key, htmlfilename.encode("utf-8"))
@@ -247,3 +257,27 @@ def post_run_dbt_commands(request):
     task = run_dbt_commands.delay(orguser.id)
 
     return {"task_id": task.id}
+
+
+@dbtapi.post("/fetch-elementary-report/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_dbt_workspace"])
+def post_fetch_elementary_report(request):
+    """prepare the dbt docs single html"""
+    orguser: OrgUser = request.orguser
+    error, result = dbt_service.fetch_elementary_report(orguser.org)
+    if error:
+        raise HttpError(400, error)
+
+    return result
+
+
+@dbtapi.post("/refresh-elementary-report/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_dbt_workspace"])
+def post_refresh_elementary_report(request):
+    """prepare the dbt docs single html"""
+    orguser: OrgUser = request.orguser
+    error, result = dbt_service.refresh_elementary_report(orguser.org)
+    if error:
+        raise HttpError(400, error)
+
+    return result

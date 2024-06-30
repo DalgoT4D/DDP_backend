@@ -4,7 +4,7 @@ from time import sleep
 from dotenv import load_dotenv
 from django.core.management.base import BaseCommand
 
-from redis import Redis
+from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.org import Org
 from ddpui.models.tasks import TaskProgressHashPrefix
@@ -30,7 +30,7 @@ class Command(BaseCommand):
         if org is None:
             print("Org not found")
             return
-        redis = Redis()
+        redis = RedisClient.get_instance()
         hashkey = f"{TaskProgressHashPrefix.SYNCSOURCES}-{org.slug}"
         redis.expire(hashkey, 1)
         sleep(2)

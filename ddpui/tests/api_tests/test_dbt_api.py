@@ -1,7 +1,7 @@
 import os
-import django
-
 from unittest.mock import Mock, patch
+
+import django
 import pytest
 from ninja.errors import HttpError
 
@@ -11,22 +11,21 @@ django.setup()
 
 from django.contrib.auth.models import User
 
-from ddpui.models.org import Org, OrgDbt
-from ddpui.models.role_based_access import Role, RolePermission, Permission
-from ddpui.models.org_user import OrgUser, OrgUserRole
 from ddpui.api.dbt_api import (
-    post_dbt_workspace,
-    put_dbt_github,
     dbt_delete,
     get_dbt_workspace,
     post_dbt_git_pull,
     post_dbt_makedocs,
+    post_dbt_workspace,
+    put_dbt_github,
 )
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.ddpprefect.schema import DbtProfile, OrgDbtSchema, OrgDbtGitHub
-from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
+from ddpui.ddpprefect.schema import DbtProfile, OrgDbtGitHub, OrgDbtSchema
+from ddpui.models.org import Org, OrgDbt
+from ddpui.models.org_user import OrgUser, OrgUserRole
+from ddpui.models.role_based_access import Permission, Role, RolePermission
+from ddpui.tests.api_tests.test_user_org_api import mock_request, seed_db
 from ddpui.utils.custom_logger import CustomLogger
-
 
 logger = CustomLogger("ddpui-pytest")
 
@@ -99,9 +98,12 @@ def test_post_dbt_workspace(orguser):
     with patch(
         "ddpui.celeryworkers.tasks.setup_dbtworkspace.delay", return_value=mocked_task
     ) as delay:
-        post_dbt_workspace(request, payload)
-        delay.assert_called_once_with(orguser.org.id, payload.dict())
-        assert orguser.org.dbt is None
+        with patch(
+            "ddpui.api.dbt_api.dbt_service.check_repo_exists", return_value=True
+        ):
+            post_dbt_workspace(request, payload)
+            delay.assert_called_once_with(orguser.org.id, payload.dict())
+            assert orguser.org.dbt is None
 
 
 def test_put_dbt_github(orguser):
@@ -122,16 +124,22 @@ def test_put_dbt_github(orguser):
     with patch(
         "ddpui.celeryworkers.tasks.clone_github_repo.delay", return_value=mocked_task
     ) as delay:
-        put_dbt_github(request, payload)
-        delay.assert_called_once_with(
-            "org-slug",
-            "new-url",
-            "new-access-token",
-            os.getenv("CLIENTDBT_ROOT") + "/org-slug",
-            None,
-        )
-        assert request.orguser.org.dbt.gitrepo_url == "new-url"
-        assert request.orguser.org.dbt.gitrepo_access_token_secret == "new-access-token"
+        with patch(
+            "ddpui.api.dbt_api.dbt_service.check_repo_exists", return_value=True
+        ):
+            put_dbt_github(request, payload)
+            delay.assert_called_once_with(
+                "org-slug",
+                "new-url",
+                "new-access-token",
+                os.getenv("CLIENTDBT_ROOT") + "/org-slug",
+                None,
+            )
+            assert request.orguser.org.dbt.gitrepo_url == "new-url"
+            assert (
+                request.orguser.org.dbt.gitrepo_access_token_secret
+                == "new-access-token"
+            )
 
 
 def test_dbt_delete_no_org(orguser):
@@ -271,8 +279,8 @@ def test_post_dbt_makedocs_no_target(orguser: OrgUser):
 )
 @patch("builtins.open", mock_open=Mock(write=Mock(), close=Mock()))
 @patch(
-    "ddpui.api.dbt_api.Redis",
-    mock_Redis=Mock(return_value=Mock(set=Mock(), expire=Mock())),
+    "ddpui.api.dbt_api.RedisClient",
+    mock_Redis=Mock(return_value=Mock(get_instance=Mock(set=Mock(), expire=Mock()))),
 )
 def test_post_dbt_makedocs(
     mock_Redis: Mock,
