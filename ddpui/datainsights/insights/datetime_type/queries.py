@@ -104,10 +104,16 @@ class DistributionChart(ColInsight):
         Result:
         [
             {
-
+                "frequency": 10,
+                "year": 2021,
+                "month": 1,
+                "day": 1
             },
             {
-
+                "frequency": 10,
+                "year": 2021,
+                "month": 1,
+                "day": 1
             }
         ]
         """
