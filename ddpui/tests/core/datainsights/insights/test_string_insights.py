@@ -137,12 +137,8 @@ def test_distribution_chart_query_validate_results(
 ):
     """Success test case of validating the parsed results of the query"""
     mock_results = [
-        {
-            "mean": Decimal(1.2),
-            "median": Decimal(1.5),
-            "mode": Decimal(2),
-            "other_modes": [],
-        }
+        {"category": "NGO1", "count": 10},
+        {"category": "NGO2", "count": 20},
     ]
     mock_output = distribution_chart_query.parse_results(mock_results)
     result_to_be_validated = mock_output[distribution_chart_query.columns[0].name]
