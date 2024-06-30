@@ -1,7 +1,7 @@
 import os
-import django
-
 from unittest.mock import Mock, patch
+
+import django
 import pytest
 from ninja.errors import HttpError
 
@@ -11,22 +11,21 @@ django.setup()
 
 from django.contrib.auth.models import User
 
-from ddpui.models.org import Org, OrgDbt
-from ddpui.models.role_based_access import Role, RolePermission, Permission
-from ddpui.models.org_user import OrgUser, OrgUserRole
 from ddpui.api.dbt_api import (
-    post_dbt_workspace,
-    put_dbt_github,
     dbt_delete,
     get_dbt_workspace,
     post_dbt_git_pull,
     post_dbt_makedocs,
+    post_dbt_workspace,
+    put_dbt_github,
 )
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.ddpprefect.schema import DbtProfile, OrgDbtSchema, OrgDbtGitHub
-from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
+from ddpui.ddpprefect.schema import DbtProfile, OrgDbtGitHub, OrgDbtSchema
+from ddpui.models.org import Org, OrgDbt
+from ddpui.models.org_user import OrgUser, OrgUserRole
+from ddpui.models.role_based_access import Permission, Role, RolePermission
+from ddpui.tests.api_tests.test_user_org_api import mock_request, seed_db
 from ddpui.utils.custom_logger import CustomLogger
-
 
 logger = CustomLogger("ddpui-pytest")
 
