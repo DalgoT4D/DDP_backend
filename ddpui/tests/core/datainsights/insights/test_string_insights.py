@@ -78,6 +78,9 @@ def string_length_stats_query(string_payload):
     return obj.insights[1]
 
 
+# ============================== String Insights Tests ================================
+
+
 def test_string_insights_num_of_queries(string_payload):
     """
     Success test
@@ -89,6 +92,9 @@ def test_string_insights_num_of_queries(string_payload):
     assert len(obj.insights) == 2
     assert isinstance(obj.insights[0], DistributionChart)
     assert isinstance(obj.insights[1], StringLengthStats)
+
+
+# ============================== Distribution chart query ================================
 
 
 def test_distribution_chart_query_when_no_col_specified(
@@ -105,22 +111,6 @@ def test_distribution_chart_query_data_type(
     distribution_chart_query: DistributionChart,
 ):
     assert distribution_chart_query.query_data_type() == TranslateColDataType.STRING
-
-
-def test_string_length_stats_query_when_no_col_specified(
-    string_length_stats_query: StringLengthStats,
-):
-    """Failure case: numeric insights should have atleast one column to generate sql"""
-    string_length_stats_query.columns = []
-
-    with pytest.raises(ValueError):
-        string_length_stats_query.generate_sql()
-
-
-def test_string_length_stats_query_data_type(
-    string_length_stats_query: StringLengthStats,
-):
-    assert string_length_stats_query.query_data_type() == TranslateColDataType.STRING
 
 
 def test_distribution_chart_query_parse_results(
@@ -140,56 +130,6 @@ def test_distribution_chart_query_parse_results(
         output[distribution_chart_query.columns[0].name]["charts"][0]["data"]
         == mock_results
     )
-
-
-def test_string_length_stats_query_validate_results(
-    string_length_stats_query: StringLengthStats,
-):
-    """Success test case of validating the parsed results of the query"""
-    mock_results = [
-        {
-            "mean": Decimal(1.2),
-            "median": Decimal(1.5),
-            "mode": Decimal(2),
-            "other_modes": [],
-        }
-    ]
-    mock_output = string_length_stats_query.parse_results(mock_results)
-    result_to_be_validated = mock_output[string_length_stats_query.columns[0].name]
-    assert string_length_stats_query.validate_query_results(result_to_be_validated)
-
-
-def test_data_stats_query_parse_results_failure(
-    string_length_stats_query: StringLengthStats,
-):
-    """Failure test case of parsing the results of the query; missing keys"""
-
-    mock_results = [
-        {
-            "mean": Decimal(1.2),
-            "median": Decimal(1.5),
-            "other_modes": [],
-        }
-    ]
-    with pytest.raises(KeyError):
-        string_length_stats_query.parse_results(mock_results)
-
-
-def test_string_length_stats_query_validate_results(
-    string_length_stats_query: StringLengthStats,
-):
-    """Success test case of validating the parsed results of the query"""
-    mock_results = [
-        {
-            "mean": Decimal(1.2),
-            "median": Decimal(1.5),
-            "mode": Decimal(2),
-            "other_modes": [],
-        }
-    ]
-    mock_output = string_length_stats_query.parse_results(mock_results)
-    result_to_be_validated = mock_output[string_length_stats_query.columns[0].name]
-    assert string_length_stats_query.validate_query_results(result_to_be_validated)
 
 
 def test_distribution_chart_query_validate_results(
@@ -226,6 +166,75 @@ def test_distribution_chart_query_uniqueness_of_query_id(
     query_id3 = distribution_chart_query.query_id()
 
     assert query_id2 != query_id3
+
+
+# ============================== String length stats query ================================
+
+
+def test_string_length_stats_query_when_no_col_specified(
+    string_length_stats_query: StringLengthStats,
+):
+    """Failure case: numeric insights should have atleast one column to generate sql"""
+    string_length_stats_query.columns = []
+
+    with pytest.raises(ValueError):
+        string_length_stats_query.generate_sql()
+
+
+def test_string_length_stats_query_data_type(
+    string_length_stats_query: StringLengthStats,
+):
+    assert string_length_stats_query.query_data_type() == TranslateColDataType.STRING
+
+
+def test_string_length_stats_query_parse_results_failure(
+    string_length_stats_query: StringLengthStats,
+):
+    """Failure test case of parsing the results of the query; missing keys"""
+
+    mock_results = [
+        {
+            "mean": Decimal(1.2),
+            "median": Decimal(1.5),
+            "other_modes": [],
+        }
+    ]
+    with pytest.raises(KeyError):
+        string_length_stats_query.parse_results(mock_results)
+
+
+def test_string_length_stats_query_validate_results(
+    string_length_stats_query: StringLengthStats,
+):
+    """Success test case of validating the parsed results of the query"""
+    mock_results = [
+        {
+            "mean": Decimal(1.2),
+            "median": Decimal(1.5),
+            "mode": Decimal(2),
+            "other_modes": [],
+        }
+    ]
+    mock_output = string_length_stats_query.parse_results(mock_results)
+    result_to_be_validated = mock_output[string_length_stats_query.columns[0].name]
+    assert string_length_stats_query.validate_query_results(result_to_be_validated)
+
+
+def test_string_length_stats_query_validate_results(
+    string_length_stats_query: StringLengthStats,
+):
+    """Success test case of validating the parsed results of the query"""
+    mock_results = [
+        {
+            "mean": Decimal(1.2),
+            "median": Decimal(1.5),
+            "mode": Decimal(2),
+            "other_modes": [],
+        }
+    ]
+    mock_output = string_length_stats_query.parse_results(mock_results)
+    result_to_be_validated = mock_output[string_length_stats_query.columns[0].name]
+    assert string_length_stats_query.validate_query_results(result_to_be_validated)
 
 
 def test_string_length_stats_query_uniqueness_of_query_id(
