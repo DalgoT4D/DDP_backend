@@ -1,5 +1,6 @@
 import os
 import django
+from decimal import Decimal
 from django.core.management import call_command
 from django.apps import apps
 
@@ -9,93 +10,167 @@ django.setup()
 
 
 import pytest
-import pandas as pd
-from sqlalchemy import (
-    create_engine,
-    MetaData,
-    Table,
-    Column,
-    Integer,
-    String,
-    DateTime,
-    Float,
-)
-from sqlalchemy.orm import Mapped, sessionmaker, Session
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import inspect
-from sqlalchemy.types import NullType
 
 from ddpui.datainsights.insights.numeric_type.queries import DataStats
-from ddpui.datainsights.insights.insight_interface import MAP_TRANSLATE_TYPES
+from ddpui.datainsights.insights.insight_interface import (
+    MAP_TRANSLATE_TYPES,
+    TranslateColDataType,
+)
 from ddpui.datainsights.insights.numeric_type.numeric_insight import NumericColInsights
 
 
 @pytest.fixture
-def engine():
-    my_engine = create_engine(
-        "sqlite:///file:test_db?mode=memory&cache=shared&uri=true", echo=True
-    )
-    return my_engine
+def numeric_payload():
+    """
+    Fixture to create an instance of NumericColInsights
+    """
+    columns = [
+        {
+            "name": "col1",
+            "data_type": int,
+            "translated_type": TranslateColDataType.NUMERIC,
+        }
+    ]
+    db_table = "test_table"
+    db_schema = "test_schema"
+    filter_ = {}
+    wtype = "postgres"
+    return {
+        "columns": columns,
+        "db_table": db_table,
+        "db_schema": db_schema,
+        "filter_": filter_,
+        "wtype": wtype,
+    }
 
 
 @pytest.fixture
-def target_table(engine):
-    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    Base = declarative_base()
-    table_name = "dummy_data"
-    dummy_table = Table(
-        table_name,
-        meta,
-        Column("id", Integer, primary_key=True),
-        Column("c1", Float),
-        Column("c2", String),
-        Column("c3", DateTime),
-    )
-    Base.metadata.create_all(engine)
+def invalid_numeric_payload():
+    """
+    Fixture to create an instance of NumericColInsights
+    """
+    columns = []
+    db_table = "test_table"
+    db_schema = "test_schema"
+    filter_ = {}
+    wtype = "postgres"
+    return {
+        "columns": columns,
+        "db_table": db_table,
+        "db_schema": db_schema,
+        "filter_": filter_,
+        "wtype": wtype,
+    }
 
-    records = [
+
+def test_numeric_insights_num_of_queries(numeric_payload):
+    """
+    Success test
+    - checking no of queries to run
+    - checking the type of queries
+    """
+    obj = NumericColInsights(**numeric_payload)
+
+    assert len(obj.insights) == 1
+    assert isinstance(obj.insights[0], DataStats)
+
+
+def test_data_stats_query_when_no_col_specified(invalid_numeric_payload):
+    """Failure case: numeric insights should have atleast one column to generate sql"""
+    obj = NumericColInsights(**invalid_numeric_payload)
+
+    with pytest.raises(ValueError):
+        obj.insights[0].generate_sql()
+
+
+def test_data_stats_query_data_type(numeric_payload):
+    obj = NumericColInsights(**numeric_payload)
+
+    data_stats_insights = obj.insights[0]
+    assert data_stats_insights.query_data_type() == TranslateColDataType.NUMERIC
+
+
+def test_data_stats_query_parse_results(numeric_payload):
+    """Success test case of parsing the results of the query"""
+    obj = NumericColInsights(**numeric_payload)
+
+    data_stats_insights = obj.insights[0]
+
+    mock_results = [
         {
-            "c1": 1,
-            "c2": "somestring",
-            "c3": "2024-04-26 06:20:29+00",
-        },
-        {
-            "c1": 2,
-            "c2": "somestring1",
-            "c3": "2023-04-26 06:20:29+00",
-        },
-        {
-            "c1": 3,
-            "c2": "somestring12",
-            "c3": "2022-04-26 06:20:29+00",
-        },
+            "mean": Decimal(1.2),
+            "median": Decimal(1.5),
+            "mode": Decimal(2),
+            "other_modes": [],
+        }
     ]
+    output = data_stats_insights.parse_results(mock_results)
 
-    df = pd.DataFrame(records)
-    df.to_sql(table_name, engine, if_exists="append", index=False)
-    return dummy_table
+    assert data_stats_insights.columns[0].name in output
+    assert output[data_stats_insights.columns[0].name]["mean"] == 1.2
+    assert output[data_stats_insights.columns[0].name]["median"] == 1.5
+    assert output[data_stats_insights.columns[0].name]["mode"] == 2
 
 
-def test_numeric_data_stats(engine, target_table):
-    """Tests mean, media and mode values"""
-    with Session(engine) as session:
-        cols = []
-        for column in inspect(engine).get_columns(
-            table_name=target_table, schema="test_db"
-        ):
-            cols.append(
-                {
-                    "name": column["name"],
-                    "data_type": str(column["type"]),
-                    "translated_type": (
-                        None
-                        if isinstance(column["type"], NullType)
-                        else MAP_TRANSLATE_TYPES[column["type"].python_type]
-                    ),
-                    "nullable": column["nullable"],
-                }
-            )
-        insight = NumericColInsights(cols, target_table, "test_db")
+def test_data_stats_query_parse_results_failure(numeric_payload):
+    """Failure test case of parsing the results of the query; missing keys"""
 
-        df = pd.read_sql_query(insight.insights[0].generate_sql(), session.bind)
-        print(df)
+    obj = NumericColInsights(**numeric_payload)
+
+    data_stats_insights = obj.insights[0]
+
+    mock_results = [
+        {
+            "mean": Decimal(1.2),
+            "median": Decimal(1.5),
+            "other_modes": [],
+        }
+    ]
+    with pytest.raises(KeyError):
+        data_stats_insights.parse_results(mock_results)
+
+
+def test_data_stats_query_validate_results(numeric_payload):
+    """Success test case of validating the parsed results of the query"""
+    obj = NumericColInsights(**numeric_payload)
+
+    data_stats_insights = obj.insights[0]
+
+    mock_results = [
+        {
+            "mean": Decimal(1.2),
+            "median": Decimal(1.5),
+            "mode": Decimal(2),
+            "other_modes": [],
+        }
+    ]
+    mock_output = data_stats_insights.parse_results(mock_results)
+    result_to_be_validated = mock_output[data_stats_insights.columns[0].name]
+    assert data_stats_insights.validate_query_results(result_to_be_validated)
+
+
+def test_data_stats_query_uniqueness_of_query_id(numeric_payload):
+    """Different payload should generated different query ids & hence a different hash"""
+    obj = NumericColInsights(**numeric_payload)
+    data_stats_insights = obj.insights[0]
+
+    # for a differnet col under same table, schema; a new query id (hash) should be generated
+    numeric_payload["columns"][0]["name"] = "col2"
+
+    obj = NumericColInsights(**numeric_payload)
+    data_stats_insights1 = obj.insights[0]
+
+    assert data_stats_insights.query_id() != data_stats_insights1.query_id()
+
+    # if i add a filter, the query id should change
+    numeric_payload["filter_"] = {"condition": 1}
+
+    obj = NumericColInsights(**numeric_payload)
+    data_stats_insights2 = obj.insights[0]
+
+    assert data_stats_insights1.query_id() != data_stats_insights2.query_id()
+
+
+def test_data_stats_query_generate_sql():
+    """TODO"""
+    pass
