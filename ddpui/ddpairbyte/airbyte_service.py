@@ -917,10 +917,12 @@ def parse_job_info(jobinfo: dict) -> dict:
         "recordsCommitted": 0,
         "totalTimeInSeconds": 0,
     }
+    retval["attempt_no"] = 0
     for attempt in jobinfo["attempts"]:
         if attempt["status"] == "succeeded":
-            retval["recordsSynced"] = attempt["recordsSynced"]
-            retval["bytesSynced"] = nice_bytes(attempt["bytesSynced"])
+            retval["attempt_no"] = attempt["id"]
+            retval["recordsSynced"] = attempt.get("recordsSynced", 0)
+            retval["bytesSynced"] = nice_bytes(attempt.get("bytesSynced", 0))
             retval["recordsEmitted"] = attempt["totalStats"]["recordsEmitted"]
             retval["bytesEmitted"] = nice_bytes(attempt["totalStats"]["bytesEmitted"])
             retval["recordsCommitted"] = attempt["totalStats"]["recordsCommitted"]

@@ -10,10 +10,11 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.1/ref/settings/
 """
 
-from pathlib import Path
 import os
-from dotenv import load_dotenv
+from pathlib import Path
+
 from corsheaders.defaults import default_headers
+from dotenv import load_dotenv
 from ddpui.utils.ddp_logger import setup_logger as setup_ddp_logger
 from ddpui.utils.ab_logger import setup_logger as setup_ab_logger
 import ddpui.utils.flags  # pylint: disable=unused-import
@@ -33,24 +34,32 @@ SECRET_KEY = os.getenv("DJANGOSECRET")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "") == "True"
 
+
 # CORS
+
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
     "staging-api.dalgo.in",
     "api.dalgo.in",
 ]
-CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_METHODS = [
+    "GET",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "OPTIONS",
+]
 CORS_ORIGIN_WHITELIST = (
     "http://localhost:3000",
+    "http://host.docker.internal:3000",
     "http://127.0.0.1:3000",
     "https://staging.dalgo.in",
     "https://dashboard.dalgo.in",
 )
-CORS_ALLOW_HEADERS = (
-    *default_headers,
-    "x-dalgo-org",
-)
+CORS_ALLOW_HEADERS = (*default_headers, "x-dalgo-org")
 
 # Application definition
 

@@ -36,6 +36,7 @@ from ddpui.celeryworkers.tasks import (
     get_connection_catalog_task,
     sync_flow_runs_of_deployments,
     add_custom_connectors_to_workspace,
+    summarize_airbyte_logs,
 )
 from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.utils.singletaskprogress import SingleTaskProgress
@@ -708,3 +709,24 @@ def get_schema_changes_for_connection(request):
     if error:
         raise HttpError(400, error)
     return res
+
+
+@airbyteapi.get(
+    "/v1/connections/{connection_id}/logsummary", auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_view_pipeline"])
+def get_flow_runs_logsummary_v1(
+    request, connection_id: str, job_id: int, attempt_number: int, regenerate: int
+):  # pylint: disable=unused-argument
+    """
+    Use llms to summarize logs
+    """
+    try:
+        orguser: OrgUser = request.orguser
+        task = summarize_airbyte_logs.delay(
+            connection_id, orguser.id, job_id, attempt_number, regenerate == 1
+        )
+        return {"task_id": task.id}
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to retrieve logs") from error

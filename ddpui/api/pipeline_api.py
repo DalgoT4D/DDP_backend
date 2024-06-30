@@ -34,6 +34,7 @@ from ddpui.core.pipelinefunctions import (
     pipeline_with_orgtasks,
     fetch_pipeline_lock,
 )
+from ddpui.celeryworkers.tasks import summarize_deployment_flow_run_logs
 from ddpui.core.dbtfunctions import gather_dbt_project_params
 from ddpui.auth import has_permission
 
@@ -671,3 +672,45 @@ def get_prefect_flow_runs_log_history(
             )
 
     return flow_runs
+
+
+@pipelineapi.get(
+    "v1/flows/{deployment_id}/flow_runs/history", auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_view_pipeline"])
+def get_prefect_flow_runs_log_history_v1(
+    request, deployment_id, limit: int = 0, fetchlogs=True
+):
+    # pylint: disable=unused-argument
+    """Fetch all flow runs for the deployment and the logs for each flow run"""
+    flow_runs = prefect_service.get_flow_runs_by_deployment_id(
+        deployment_id, limit=limit
+    )
+
+    if fetchlogs:
+        for flow_run in flow_runs:
+            logs_dict = prefect_service.get_flow_run_logs_v2(flow_run["id"])
+            flow_run["runs"] = logs_dict
+
+    return flow_runs
+
+
+@pipelineapi.get(
+    "v1/flow_runs/{flow_run_id}/logsummary", auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_view_pipeline"])
+def get_flow_runs_logsummary_v1(
+    request, flow_run_id, regenerate: int
+):  # pylint: disable=unused-argument
+    """
+    Use llms to summarize logs
+    """
+    try:
+        orguser: OrgUser = request.orguser
+        task = summarize_deployment_flow_run_logs.delay(
+            flow_run_id, orguser.id, regenerate == 1
+        )
+        return {"task_id": task.id}
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to retrieve logs") from error
