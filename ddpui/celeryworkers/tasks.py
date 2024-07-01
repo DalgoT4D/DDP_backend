@@ -883,7 +883,7 @@ def setup_periodic_tasks(sender, **kwargs):
 # @app.task(bind=True)
 # def schedule_notification_task(self, notification_id, recipient_id):
 #     notification = Notification.objects.get(id=notification_id)
-#     recipient = OrgUser.objects.get(id=recipient_id)
+#     recipient = OrgUser.objects.get(user_id=recipient_id)
 #     user_preference = UserPreference.objects.get(orguser=recipient)
 
 #     notification.sent_time = as_utc(datetime.utcnow())

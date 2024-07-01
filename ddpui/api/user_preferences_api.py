@@ -5,10 +5,11 @@ from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from ddpui import auth
 from ddpui.models.notifications import UserPreference
-from ddpui.schemas.user_preferences_schema import CreateUserPreferencesSchema, UpdateUserPreferencesSchema
+from ddpui.schemas.notifications_api_schemas import CreateUserPreferencesSchema, UpdateUserPreferencesSchema
+from ddpui.models.org_user import OrgUser
 
 
-userpreferencesapi = NinjaAPI(urls_namespace="user-preference")
+userpreferencesapi = NinjaAPI(urls_namespace="userpreference")
 
 
 @userpreferencesapi.exception_handler(ValidationError)
@@ -41,61 +42,96 @@ def ninja_default_error_handler(
     return Response({"detail": "something went wrong"}, status=500)
 
 
-@userpreferencesapi.post("/create/", auth=auth.CustomAuthMiddleware())
+@userpreferencesapi.post("/create", auth=auth.CustomAuthMiddleware())
 def create_user_preferences(request, payload: CreateUserPreferencesSchema):
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     
-    preferences = UserPreference.objects.create(
+    new_preferences = UserPreference.objects.create(
         orguser=orguser,
         enable_discord_notifications=payload.enable_discord_notifications,
         enable_email_notifications=payload.enable_email_notifications,
         discord_webhook=payload.discord_webhook,
     )
 
-    return {'success': True, 'message': 'Preferences created successfully', 'res': preferences}
+    preferences = {
+        'orguser': {
+            'user_id': orguser.user_id,
+            'username': orguser.user.username,
+        },
+        'discord_webhook': new_preferences.discord_webhook,
+        'enable_email_notifications': new_preferences.enable_email_notifications,
+        'enable_discord_notifications': new_preferences.enable_discord_notifications,
+        'email': orguser.user.email
+    }
+
+    return Response({'success': True, 'message': 'Preferences created successfully', 'res': preferences})
 
 
-@userpreferencesapi.put("/update/", auth=auth.CustomAuthMiddleware())
+@userpreferencesapi.put("/update", auth=auth.CustomAuthMiddleware())
 def update_user_preferences(request, payload: UpdateUserPreferencesSchema):
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     
     try:
-        preferences = UserPreference.objects.get(orguser=orguser)
+        user_preferences = UserPreference.objects.get(orguser=orguser)
     except UserPreference.DoesNotExist:
         new_preferences = UserPreference.objects.create(
             orguser=orguser,
-            enable_discord_notifications=False,
-            enable_email_notifications=False,
-            discord_webhook=None
+            enable_discord_notifications=payload.enable_discord_notifications,
+            enable_email_notifications=payload.enable_email_notifications,
+            discord_webhook=payload.discord_webhook
         )
-        return {'success': True, 'message': 'Preferences created successfully', 'res': new_preferences}
+        preferences = {
+            'orguser': {
+                'user_id': orguser.user_id,
+                'username': orguser.user.username,
+            },
+            'discord_webhook': new_preferences.discord_webhook,
+            'enable_email_notifications': new_preferences.enable_email_notifications,
+            'enable_discord_notifications': new_preferences.enable_discord_notifications,
+            'email': orguser.user.email
+        }
+        return Response({'success': True, 'message': 'Preferences updated successfully', 'res': preferences})
     
     if payload.enable_discord_notifications is not None:
-        preferences.enable_discord_notifications = payload.enable_discord_notifications
+        user_preferences.enable_discord_notifications = payload.enable_discord_notifications
     if payload.enable_email_notifications is not None:
-        preferences.enable_email_notifications = payload.enable_email_notifications
+        user_preferences.enable_email_notifications = payload.enable_email_notifications
     if payload.discord_webhook is not None:
-        preferences.discord_webhook = payload.discord_webhook
+        user_preferences.discord_webhook = payload.discord_webhook
     
-    preferences.save()
+    user_preferences.save()
+
+    preferences = {
+        'orguser': {
+            'user_id': orguser.user_id,
+            'username': orguser.user.username,
+        },
+        'discord_webhook': user_preferences.discord_webhook,
+        'enable_email_notifications': user_preferences.enable_email_notifications,
+        'enable_discord_notifications': user_preferences.enable_discord_notifications,
+        'email': orguser.user.email
+    }
     
-    return {'success': True, 'message': 'Preferences updated successfully'}
+    return Response({'success': True, 'message': 'Preferences updated successfully', 'res': preferences })
 
 
-@userpreferencesapi.get("/get/", auth=auth.CustomAuthMiddleware())
+@userpreferencesapi.get("/get", auth=auth.CustomAuthMiddleware())
 def get_user_preferences(request):
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
 
     try:
         user_preference = UserPreference.objects.get(orguser=orguser)
         preferences = {
-            'orguser': orguser.user,
+            'orguser': {
+                'user_id': orguser.user_id,
+                'username': orguser.user.username,
+            },
             'discord_webhook': user_preference.discord_webhook,
             'enable_email_notifications': user_preference.enable_email_notifications,
             'enable_discord_notifications': user_preference.enable_discord_notifications,
-            'email': user_preference.email
+            'email': orguser.user.email
         }
-        return {'status': 'success', 'preferences': preferences}
+        return Response({'success': True, 'res': preferences})
     
     except UserPreference.DoesNotExist:
         new_preferences = UserPreference.objects.create(
@@ -104,7 +140,17 @@ def get_user_preferences(request):
             enable_email_notifications=False,
             discord_webhook=None
         )
-        return {'success': True, 'res': new_preferences}
+        preferences = {
+            'orguser': {
+                'user_id': orguser.user_id,
+                'username': orguser.user.username,
+            },
+            'discord_webhook': new_preferences.discord_webhook,
+            'enable_email_notifications': new_preferences.enable_email_notifications,
+            'enable_discord_notifications': new_preferences.enable_discord_notifications,
+            'email': orguser.user.email
+        }
+        return Response({'success': True, 'res': preferences})
     
     except Exception as e:
         raise HttpError(500, str(e))
