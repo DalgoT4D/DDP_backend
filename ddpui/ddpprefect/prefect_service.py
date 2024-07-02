@@ -489,16 +489,17 @@ def get_flow_runs_by_deployment_id(deployment_id: str, limit=None):  # pragma: n
     result.reverse()
     return result[:50]
 
-def get_flow_runs_by_deployment_id_v1(deployment_id: str, limit=10, offset=0): 
+
+def get_flow_runs_by_deployment_id_v1(deployment_id: str, limit=10, offset=0):
     """
     Fetch flow runs of a deployment that are FAILED/COMPLETED
     sorted by start time of each run
     """
     result = []
-    # sorted by start-time 
+    # sorted by start-time
     for prefect_flow_run in PrefectFlowRun.objects.filter(
         deployment_id=deployment_id
-    ).order_by("-start_time")[offset:offset+limit]:
+    ).order_by("-start_time")[offset : offset + limit]:
         result.append(prefect_flow_run.to_json())
 
     return result
