@@ -78,7 +78,8 @@ jobs:
           ddpui/tests/api_tests/test_airbyte_api_v1.py \
           ddpui/tests/api_tests/test_pipeline_api.py \
           ddpui/tests/api_tests/test_orgtask_api.py \
-          ddpui/tests/core/test_pipelinefunctions.py
+          ddpui/tests/core/test_pipelinefunctions.py \
+          ddpui/tests/core/datainsights
           coverage report --fail-under=70
           coverage xml
       - name: Check coverage percentage

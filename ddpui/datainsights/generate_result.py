@@ -123,67 +123,55 @@ def poll_for_column_insights(
         )
         return
 
-    # if the lock is not acquire, then acquire a lock and run the queries for this column
-    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+    try:
 
-    wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
+        # if the lock is not acquire, then acquire a lock and run the queries for this column
+        credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
 
-    execute_queries = GenerateResult.queries_to_execute(
-        org_warehouse.org, wclient, requestor_col
-    )
+        wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
 
-    # if filter is present; run query & return result directly without saving to org results
-    if requestor_col.filter:
-        query_results = GenerateResult.execute_insight_queries(
-            org_warehouse.org, wclient, execute_queries, requestor_col
+        execute_queries = GenerateResult.queries_to_execute(
+            org_warehouse.org, wclient, requestor_col
         )
-        current = GenerateResult.fetch_results(
-            org_warehouse.org,
-            requestor_col.db_schema,
-            requestor_col.db_table,
-        )
-        final = {}
-        # there should be only one query result
-        if len(query_results) == 1:
-            final = GenerateResult.merge_results(current, query_results[0])[
-                requestor_col.column_name
-            ]
 
-        # return the saved results
-        if GenerateResult.validate_results(execute_queries, final):
-            taskprogress.add(
-                {
-                    "message": "Fetched results",
-                    "status": GenerateResult.RESULT_STATUS_COMPLETED,
-                    "results": final,
-                }
+        # if filter is present; run query & return result directly without saving to org results
+        if requestor_col.filter:
+            query_results = GenerateResult.execute_insight_queries(
+                org_warehouse.org, wclient, execute_queries, requestor_col
             )
+            current = GenerateResult.fetch_results(
+                org_warehouse.org,
+                requestor_col.db_schema,
+                requestor_col.db_table,
+            )
+            final = {}
+            # there should be only one query result
+            if len(query_results) == 1:
+                final = GenerateResult.merge_results(current, query_results[0])[
+                    requestor_col.column_name
+                ]
+
+            # return the saved results
+            if GenerateResult.validate_results(execute_queries, final):
+                taskprogress.add(
+                    {
+                        "message": "Fetched results",
+                        "status": GenerateResult.RESULT_STATUS_COMPLETED,
+                        "results": final,
+                    }
+                )
+                return
+            else:
+                taskprogress.add(
+                    {
+                        "message": "Partial data fetched",
+                        "status": GenerateResult.RESULT_STATUS_ERROR,
+                        "results": [],
+                    }
+                )
             return
-        else:
-            taskprogress.add(
-                {
-                    "message": "Partial data fetched",
-                    "status": GenerateResult.RESULT_STATUS_ERROR,
-                    "results": [],
-                }
-            )
-        return
 
-    # fetch the results from redis and see if they can be returned
-    final_result = GenerateResult.fetch_results(
-        org_warehouse.org,
-        requestor_col.db_schema,
-        requestor_col.db_table,
-        requestor_col.column_name,
-    )
-
-    # if results from redis are partial; re-compute them
-    if requestor_col.refresh or not GenerateResult.validate_results(
-        execute_queries, final_result
-    ):
-        GenerateResult.execute_insight_queries(
-            org_warehouse.org, wclient, execute_queries, requestor_col
-        )
+        # fetch the results from redis and see if they can be returned
         final_result = GenerateResult.fetch_results(
             org_warehouse.org,
             requestor_col.db_schema,
@@ -191,22 +179,45 @@ def poll_for_column_insights(
             requestor_col.column_name,
         )
 
-    # if the results are still invalid/partial; return an error state
-    if not GenerateResult.validate_results(execute_queries, final_result):
+        # if results from redis are partial; re-compute them
+        if requestor_col.refresh or not GenerateResult.validate_results(
+            execute_queries, final_result
+        ):
+            GenerateResult.execute_insight_queries(
+                org_warehouse.org, wclient, execute_queries, requestor_col
+            )
+            final_result = GenerateResult.fetch_results(
+                org_warehouse.org,
+                requestor_col.db_schema,
+                requestor_col.db_table,
+                requestor_col.column_name,
+            )
+
+        # if the results are still invalid/partial; return an error state
+        if not GenerateResult.validate_results(execute_queries, final_result):
+            taskprogress.add(
+                {
+                    "message": "Partial data fetched",
+                    "status": GenerateResult.RESULT_STATUS_ERROR,
+                    "results": [],
+                }
+            )
+        else:
+            # return the saved results
+            taskprogress.add(
+                {
+                    "message": "Fetched results",
+                    "status": GenerateResult.RESULT_STATUS_COMPLETED,
+                    "results": final_result,
+                }
+            )
+    except Exception as err:
+        logger.error(err)
         taskprogress.add(
             {
-                "message": "Partial data fetched",
+                "message": "Error while fetching insights",
                 "status": GenerateResult.RESULT_STATUS_ERROR,
                 "results": [],
-            }
-        )
-    else:
-        # return the saved results
-        taskprogress.add(
-            {
-                "message": "Fetched results",
-                "status": GenerateResult.RESULT_STATUS_COMPLETED,
-                "results": final_result,
             }
         )
 

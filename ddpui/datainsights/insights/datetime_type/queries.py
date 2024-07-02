@@ -67,14 +67,19 @@ class DistributionChart(ColInsight):
 
         if self.filter.range == "year":
             query = query.add_column(extract("year", datetime_col).label("year"))
-            groupby_cols = ["year"]
+            groupby_cols = [
+                extract("year", datetime_col),
+            ]
             orderby_cols = [("year", "desc")]
 
         if self.filter.range == "month":
             query = query.add_column(
                 extract("year", datetime_col).label("year")
             ).add_column(extract("month", datetime_col).label("month"))
-            groupby_cols = ["year", "month"]
+            groupby_cols = [
+                extract("year", datetime_col),
+                extract("month", datetime_col),
+            ]
             orderby_cols = [("year", "desc"), ("month", "desc")]
 
         if self.filter.range == "day":
@@ -83,7 +88,11 @@ class DistributionChart(ColInsight):
                 .add_column(extract("month", datetime_col).label("month"))
                 .add_column(extract("day", datetime_col).label("day"))
             )
-            groupby_cols = ["year", "month", "day"]
+            groupby_cols = [
+                extract("year", datetime_col),
+                extract("month", datetime_col),
+                extract("day", datetime_col),
+            ]
             orderby_cols = [("year", "desc"), ("month", "desc"), ("day", "desc")]
 
         query = (
@@ -104,10 +113,16 @@ class DistributionChart(ColInsight):
         Result:
         [
             {
-
+                "frequency": 10,
+                "year": 2021,
+                "month": 1,
+                "day": 1
             },
             {
-
+                "frequency": 10,
+                "year": 2021,
+                "month": 1,
+                "day": 1
             }
         ]
         """

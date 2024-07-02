@@ -123,7 +123,6 @@ class DataStats(ColInsight):
         ]
         """
         if len(result) > 0:
-            print(result)
             return {
                 self.columns[0].name: {
                     "mean": float(result[0]["mean"]) if result[0]["mean"] else None,
