@@ -489,10 +489,10 @@ def get_flow_runs_by_deployment_id(deployment_id: str, limit=None):  # pragma: n
     result.reverse()
     return result[:50]
 
-def get_flow_runs_by_deployment_id_v1(deployment_id: str, limit=10, offset=0):  # pragma: no cover
+def get_flow_runs_by_deployment_id_v1(deployment_id: str, limit=10, offset=0): 
     """
     Fetch flow runs of a deployment that are FAILED/COMPLETED
-    sorted by descending start time of each run
+    sorted by start time of each run
     """
     result = []
     # sorted by start-time DESC
@@ -501,32 +501,7 @@ def get_flow_runs_by_deployment_id_v1(deployment_id: str, limit=10, offset=0):  
     ).order_by("-start_time")[offset:offset+limit]:
         result.append(prefect_flow_run.to_json())
 
-    params = {"deployment_id": deployment_id, "limit": limit}
-    if len(result) > 0:
-        params["start_time_gt"] = result[-1]["startTime"]
-    res = prefect_get("flow_runs", params=params, timeout=60)
-
-    # iterate so that start-time is ASC
-    for flow_run in res["flow_runs"][::-1]:
-        if not PrefectFlowRun.objects.filter(flow_run_id=flow_run["id"]).exists():
-            if flow_run["startTime"] in ["", None]:
-                flow_run["startTime"] = flow_run["expectedStartTime"]
-            prefect_flow_run = PrefectFlowRun.objects.create(
-                deployment_id=deployment_id,
-                flow_run_id=flow_run["id"],
-                name=flow_run["name"],
-                start_time=flow_run["startTime"],
-                expected_start_time=flow_run["expectedStartTime"],
-                total_run_time=flow_run["totalRunTime"],
-                status=flow_run["status"],
-                state_name=flow_run["state_name"],
-            )
-            prefect_flow_run.refresh_from_db()
-            result.append(prefect_flow_run.to_json())
-
-    # sorted by start-time DESC
-    result.reverse()
-    return result[:50]
+    return result
 
 
 def get_last_flow_run_by_deployment_id(deployment_id: str):  # pragma: no cover
