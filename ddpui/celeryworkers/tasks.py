@@ -672,11 +672,14 @@ def summarize_logs(
                 org=orguser.org,
                 flow_run_id=flow_run_id,
                 task_id=task_id,
-            ).first()
+            )
+
         elif type == LogsSummarizationType.AIRBYTE_SYNC:
             llm_session = LlmSession.objects.filter(
                 orguser=orguser, org=orguser.org, airbyte_job_id=job_id
-            ).first()
+            )
+
+        llm_session = llm_session.order_by("-created_at").first()
 
         if llm_session:
             taskprogress.add(
@@ -687,19 +690,6 @@ def summarize_logs(
                 }
             )
             return
-    else:
-        # delete the existing summary
-        if type == LogsSummarizationType.DEPLOYMENT:
-            LlmSession.objects.filter(
-                orguser=orguser,
-                org=orguser.org,
-                flow_run_id=flow_run_id,
-                task_id=task_id,
-            ).delete()
-        elif type == LogsSummarizationType.AIRBYTE_SYNC:
-            LlmSession.objects.filter(
-                orguser=orguser, org=orguser.org, airbyte_job_id=job_id
-            ).delete()
 
     # logs
     logs_text = ""
