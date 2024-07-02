@@ -490,6 +490,21 @@ def get_flow_runs_by_deployment_id(deployment_id: str, limit=None):  # pragma: n
     return result[:50]
 
 
+def get_flow_runs_by_deployment_id_v1(deployment_id: str, limit=10, offset=0):
+    """
+    Fetch flow runs of a deployment that are FAILED/COMPLETED
+    sorted by start time of each run
+    """
+    result = []
+    # sorted by start-time
+    for prefect_flow_run in PrefectFlowRun.objects.filter(
+        deployment_id=deployment_id
+    ).order_by("-start_time")[offset : offset + limit]:
+        result.append(prefect_flow_run.to_json())
+
+    return result
+
+
 def get_last_flow_run_by_deployment_id(deployment_id: str):  # pragma: no cover
     """Fetch most recent flow run of a deployment that is FAILED/COMPLETED"""
     res = get_flow_runs_by_deployment_id(deployment_id, limit=1)

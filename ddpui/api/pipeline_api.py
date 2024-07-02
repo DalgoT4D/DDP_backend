@@ -679,12 +679,12 @@ def get_prefect_flow_runs_log_history(
 )
 @has_permission(["can_view_pipeline"])
 def get_prefect_flow_runs_log_history_v1(
-    request, deployment_id, limit: int = 0, fetchlogs=True
+    request, deployment_id, limit: int = 0, fetchlogs=True, offset: int = 0
 ):
     # pylint: disable=unused-argument
     """Fetch all flow runs for the deployment and the logs for each flow run"""
-    flow_runs = prefect_service.get_flow_runs_by_deployment_id(
-        deployment_id, limit=limit
+    flow_runs = prefect_service.get_flow_runs_by_deployment_id_v1(
+        deployment_id, limit=limit, offset=offset
     )
 
     if fetchlogs:
