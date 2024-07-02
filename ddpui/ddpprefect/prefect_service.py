@@ -495,7 +495,7 @@ def get_flow_runs_by_deployment_id_v1(deployment_id: str, limit=10, offset=0):
     sorted by start time of each run
     """
     result = []
-    # sorted by start-time DESC
+    # sorted by start-time 
     for prefect_flow_run in PrefectFlowRun.objects.filter(
         deployment_id=deployment_id
     ).order_by("-start_time")[offset:offset+limit]:
