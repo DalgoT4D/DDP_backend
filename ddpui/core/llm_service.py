@@ -56,15 +56,14 @@ def upload_text_as_file(file_text: str, file_name: str) -> str:
         headers=headers,
     )
 
-    return response["file_path"]
+    return (response["file_path"], response["session_id"])
 
 
 def file_search_query_and_poll(
-    file_path: str,
     assistant_prompt: str,
     queries: list[str],
+    session_id: str,
     poll_interval: int = 5,
-    session_id: str = None,
 ) -> dict:
     """
     Submits the user prompts to llm service and waits till the task is completed
@@ -79,10 +78,9 @@ def file_search_query_and_poll(
         f"{LLM_SERVICE_API_URL}/api/file/query",
         headers=headers,
         json={
-            "file_path": file_path,
             "assistant_prompt": assistant_prompt,
             "queries": queries,
-            "session_id": None,
+            "session_id": session_id,
         },
     )
 
