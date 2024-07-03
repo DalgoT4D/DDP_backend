@@ -1,7 +1,10 @@
 from django.db import models
 from ddpui.models.org_user import OrgUser
 
+
 class Notification(models.Model):
+    """Model to store notifications for users"""
+
     author = models.EmailField()
     message = models.TextField()
     timestamp = models.DateTimeField(auto_now_add=True)
@@ -9,14 +12,15 @@ class Notification(models.Model):
     scheduled_time = models.DateTimeField(null=True, blank=True)
     sent_time = models.DateTimeField(null=True, blank=True)
 
+
 class NotificationRecipient(models.Model):
-    notification = models.ForeignKey(Notification, on_delete=models.CASCADE, related_name='notifications_received')
-    recipient = models.ForeignKey(OrgUser, on_delete=models.CASCADE, related_name='recipients')
+    """Model to store notification recipients and their read status"""
+
+    notification = models.ForeignKey(
+        Notification, on_delete=models.CASCADE, related_name="notifications_received"
+    )
+    recipient = models.ForeignKey(
+        OrgUser, on_delete=models.CASCADE, related_name="recipients"
+    )
     read_status = models.BooleanField(default=False)
     task_id = models.TextField()
-
-class UserPreference(models.Model):
-    orguser = models.OneToOneField(OrgUser, on_delete=models.CASCADE, related_name='preferences')
-    enable_discord_notifications = models.BooleanField(default=True)
-    enable_email_notifications = models.BooleanField(default=True)
-    discord_webhook = models.URLField(blank=True, null=True)
