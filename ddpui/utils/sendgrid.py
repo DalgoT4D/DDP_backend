@@ -103,14 +103,3 @@ def send_demo_account_post_verify_email(to_email: str) -> None:
                 "password": os.getenv("DEMO_SUPERSET_PASSWORD"),
             },
         )
-
-def send_email_notification(to_email, message):
-    sendgrid_client = SendGridAPIClient(SENDGRID_APIKEY)
-    email_message = Mail(from_email=SENDGRID_SENDER, to_emails=to_email, subject="Message from Dalgo Team", html_content=message)
-
-    try:
-        sendgrid_client.send(email_message)
-        logger.info(f"Notification has been sent to {to_email}")
-    except Exception as error:
-        logger.exception(error)
-        raise
