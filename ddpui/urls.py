@@ -15,6 +15,7 @@ from ddpui.api.user_org_api import user_org_api
 from ddpui.api.warehouse_api import warehouseapi
 from ddpui.api.webhook_api import webhookapi
 from ddpui.api.user_preferences_api import userpreferencesapi
+
 # from ddpui.api.notifications_api import notificationsapi
 from ddpui.healthcheck import healthcheck
 from ddpui.html.docs import get_dbt_docs
@@ -40,7 +41,7 @@ urlpatterns = [
     path("elementary/<tokenhex>/", get_elementary_report),
     path("prometheus/", include("django_prometheus.urls")),
     path("webhooks/", webhookapi.urls),
-    path("api/userpreference/", userpreferencesapi.urls),
+    path("api/userpreferences/", userpreferencesapi.urls),
     # path("api/notification/", notificationsapi.urls)
 ]
 
