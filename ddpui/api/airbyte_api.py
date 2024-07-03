@@ -30,13 +30,14 @@ from ddpui.ddpairbyte.schema import (
 from ddpui.auth import has_permission
 
 from ddpui.models.org_user import OrgUser
+from ddpui.models.llm import LogsSummarizationType
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.celeryworkers.tasks import (
     get_connection_catalog_task,
     sync_flow_runs_of_deployments,
     add_custom_connectors_to_workspace,
-    summarize_airbyte_logs,
+    summarize_logs,
 )
 from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.utils.singletaskprogress import SingleTaskProgress
@@ -716,15 +717,22 @@ def get_schema_changes_for_connection(request):
 )
 @has_permission(["can_view_pipeline"])
 def get_flow_runs_logsummary_v1(
-    request, connection_id: str, job_id: int, attempt_number: int, regenerate: int
+    request, connection_id: str, job_id: int, attempt_number: int, regenerate: int = 0
 ):  # pylint: disable=unused-argument
     """
     Use llms to summarize logs
     """
     try:
         orguser: OrgUser = request.orguser
-        task = summarize_airbyte_logs.delay(
-            connection_id, orguser.id, job_id, attempt_number, regenerate == 1
+        task = summarize_logs.apply_async(
+            kwargs={
+                "orguser_id": orguser.id,
+                "type": LogsSummarizationType.AIRBYTE_SYNC,
+                "job_id": job_id,
+                "connection_id": connection_id,
+                "attempt_number": attempt_number,
+                "regenerate": regenerate == 1,
+            },
         )
         return {"task_id": task.id}
     except Exception as error:
