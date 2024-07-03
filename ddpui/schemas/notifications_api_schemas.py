@@ -1,23 +1,17 @@
 from typing import List, Optional
-from ninja import Schema
 from datetime import datetime
+from ninja import Schema
 
-# class CreateUserPreferencesSchema(Schema):
-#     enable_discord_notifications: bool
-#     enable_email_notifications: bool
-#     discord_webhook: Optional[str] = None
-
-# class UpdateUserPreferencesSchema(Schema):
-#     enable_discord_notifications: Optional[bool] = None
-#     enable_email_notifications: Optional[bool] = None
-#     discord_webhook: Optional[str] = None
 
 class CreateNotificationSchema(Schema):
+    """Schema for creating a new notification."""
+
     author: str
     message: str
     urgent: bool
     scheduled_time: Optional[datetime] = None
     recipients: List[int]
+
 
 # class UpdateReadStatusSchema(Schema):
 #     notification_id: int

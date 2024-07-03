@@ -5,7 +5,7 @@ from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from ddpui import auth
 from ddpui.models.userpreferences import UserPreferences
-from ddpui.schemas.notifications_api_schemas import (
+from ddpui.schemas.userpreferences_schema import (
     CreateUserPreferencesSchema,
     UpdateUserPreferencesSchema,
 )
