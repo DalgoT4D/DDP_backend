@@ -534,8 +534,8 @@ def update_dbt_core_block_schema_task(block_name, default_schema):
 
 @app.task()
 def delete_old_tasklocks():
-    """delete task locks which were created over an hour ago"""
-    onehourago = UTC.localize(datetime.now() - timedelta(seconds=3600))
+    """delete task locks which were created over 24 hours ago"""
+    onehourago = UTC.localize(datetime.now() - timedelta(seconds=24 * 3600))
     TaskLock.objects.filter(locked_at__lt=onehourago).delete()
 
 
