@@ -10,6 +10,8 @@ from ddpui.utils import timezone
 from ddpui.utils.discord import send_discord_notification
 from ddpui.utils.sendgrid import send_email_notification
 from ddpui.schemas.notifications_api_schemas import CreateNotificationSchema
+from ddpui.celeryworkers.tasks import schedule_notification_task
+from celery.result import AsyncResult
 
 
 # send notification
@@ -51,7 +53,10 @@ def create_notification(
                 notification=notification, recipient=recipient
             )
             if scheduled_time:
-                # logic for scheduling notification goes here
+                result = schedule_notification_task.apply_async(
+                    (notification.id, recipient_id), eta=scheduled_time
+                )
+                notification_recipient.task_id = result.task_id
                 notification_recipient.save()
             else:
                 notification.sent_time = timezone.as_utc(datetime.utcnow())
@@ -199,10 +204,11 @@ def delete_scheduled_notification(
             notification=notification
         )
 
-        # for recipient in notification_recipients:
-        #     task_id = recipient.task_id
-        #     async_result = AsyncResult(task_id)
-        #     async_result.revoke(terminate=True)
+        # removing notification from celery queue
+        for recipient in notification_recipients:
+            task_id = recipient.task_id
+            async_result = AsyncResult(task_id)
+            async_result.revoke(terminate=True)
 
         notification.delete()
         notification_recipients.delete()
