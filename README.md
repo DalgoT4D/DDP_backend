@@ -59,6 +59,15 @@ Django application for the DDP platform's management backend. Exposes API endpoi
 
 -   In your virtual environment run `pylint ddpui/`
 
+### Running celery
+
+- In your virtual environment run:<br>
+ `celery -A ddpui worker -n ddpui`
+- For windows run:<br>
+`celery -A ddpui worker -n ddpui -P solo`
+- To start celery beat run:<br>
+`celery -A ddpui beat`
+
 ## Setup instructions
 
 ### Step 1: Create a Python Virtual Environment
