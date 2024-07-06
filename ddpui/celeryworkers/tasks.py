@@ -816,7 +816,7 @@ def setup_periodic_tasks(sender, **kwargs):
 def schedule_notification_task(self, notification_id, recipient_id):
     notification = Notification.objects.get(id=notification_id)
     recipient = OrgUser.objects.get(user_id=recipient_id)
-    user_preference = UserPreferences.objects.get(orguser=recipient)
+    user_preference, created = UserPreferences.objects.get_or_create(orguser=recipient)
 
     notification.sent_time = as_utc(datetime.utcnow())
     notification.save()

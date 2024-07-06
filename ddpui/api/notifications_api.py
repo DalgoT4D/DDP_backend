@@ -8,7 +8,6 @@ from ddpui.schemas.notifications_api_schemas import (
     CreateNotificationPayloadSchema,
     UpdateReadStatusSchema,
     DeleteNotificationSchema,
-    SentToEnum,
     CreateNotificationSchema,
 )
 from ddpui.models.org_user import OrgUser
@@ -52,45 +51,12 @@ def create_notification(request, payload: CreateNotificationPayloadSchema):
     """Handle the task of creating a notification"""
 
     # Filter OrgUser data based on sent_to field
-    recipients = []
+    error, recipients = notifications_service.get_recipients(
+        payload.sent_to, payload.org_slug, payload.user_email, payload.manager_or_above
+    )
 
-    # send to all users
-    if payload.sent_to == SentToEnum.ALL_USERS:
-        recipients = OrgUser.objects.all().values_list("user_id", flat=True)
-
-    # send to all users in an org
-    elif payload.sent_to == SentToEnum.ALL_ORG_USERS:
-        if payload.org_slug:
-            recipients = OrgUser.objects.filter(org__slug=payload.org_slug).values_list(
-                "user_id", flat=True
-            )
-            if not recipients:
-                raise HttpError(400, "No users found with the provided org_slug")
-        else:
-            raise HttpError(
-                400, "org_slug is required to sent notification to all org users."
-            )
-
-    # send to a single user
-    elif payload.sent_to == SentToEnum.SINGLE_USER:
-        if payload.user_email:
-            try:
-                recipient = OrgUser.objects.get(user__email=payload.user_email)
-                recipients = [recipient.user_id]
-            except OrgUser.DoesNotExist:
-                raise HttpError(400, "User with the provided email does not exist")
-        else:
-            raise HttpError(
-                400, "user email is required to sent notification to a user."
-            )
-
-    # role based filtering
-    if payload.manager_or_above and payload.sent_to != SentToEnum.SINGLE_USER:
-        recipients = OrgUser.objects.filter(
-            new_role_id__lte=3, user_id__in=recipients
-        ).values_list("user_id", flat=True)
-        if not recipients:
-            raise HttpError(400, "No users found for the given information")
+    if error is not None:
+        raise HttpError(400, error)
 
     payload_dict = {
         "author": payload.author,

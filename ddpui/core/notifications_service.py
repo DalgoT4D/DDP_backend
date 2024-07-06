@@ -9,21 +9,112 @@ from ddpui.models.org_user import OrgUser
 from ddpui.utils import timezone
 from ddpui.utils.discord import send_discord_notification
 from ddpui.utils.sendgrid import send_email_notification
-from ddpui.schemas.notifications_api_schemas import CreateNotificationSchema
+from ddpui.schemas.notifications_api_schemas import CreateNotificationSchema, SentToEnum
 from ddpui.celeryworkers.tasks import schedule_notification_task
 from celery.result import AsyncResult
 
 
-# send notification
+def get_recipients(
+    sent_to: str, org_slug: str, user_email: str, manager_or_above: bool
+) -> Tuple[Optional[str], Optional[List[int]]]:
+    """Returns the list of recipients based on the request parameters"""
+
+    recipients = []
+    # send to all users
+    if sent_to == SentToEnum.ALL_USERS:
+        recipients = OrgUser.objects.all().values_list("user_id", flat=True)
+
+    # send to all users in an org
+    elif sent_to == SentToEnum.ALL_ORG_USERS:
+        if org_slug:
+            recipients = OrgUser.objects.filter(org__slug=org_slug).values_list(
+                "user_id", flat=True
+            )
+        else:
+            return "org_slug is required to sent notification to all org users.", None
+
+    # send to a single user
+    elif sent_to == SentToEnum.SINGLE_USER:
+        if user_email:
+            try:
+                recipient = OrgUser.objects.get(user__email=user_email)
+                recipients = [recipient.user_id]
+            except OrgUser.DoesNotExist:
+                return "User with the provided email does not exist", None
+        else:
+            return "user email is required to sent notification to a user.", None
+
+    # role based filtering
+    if manager_or_above and sent_to != SentToEnum.SINGLE_USER:
+        recipients = OrgUser.objects.filter(
+            new_role_id__lte=3, user_id__in=recipients
+        ).values_list("user_id", flat=True)
+
+    if not recipients:
+        return "No users found for the given information", None
+
+    return None, recipients
+
+
+# manage recipients for a notification
+def handle_recipient(
+    recipient_id: int, scheduled_time: Optional[datetime], notification: Notification
+) -> Optional[Dict[str, str]]:
+    """
+    Add recipients to the recipients table and
+    sent notification through email and discord
+    """
+    recipient = OrgUser.objects.get(user_id=recipient_id)
+    user_preference, created = UserPreferences.objects.get_or_create(orguser=recipient)
+    notification_recipient = NotificationRecipient.objects.create(
+        notification=notification, recipient=recipient
+    )
+    if scheduled_time:
+        result = schedule_notification_task.apply_async(
+            (notification.id, recipient_id), eta=scheduled_time
+        )
+        notification_recipient.task_id = result.task_id
+        notification_recipient.save()
+    else:
+        notification.sent_time = timezone.as_utc(datetime.utcnow())
+        notification.save()
+
+        if user_preference.enable_email_notifications:
+            try:
+                send_email_notification(
+                    user_preference.orguser.user.email, notification.message
+                )
+            except Exception as e:
+                return {
+                    "recipient": notification_recipient.recipient.user.email,
+                    "error": f"Error sending email notification: {str(e)}",
+                }
+
+        if (
+            user_preference.enable_discord_notifications
+            and user_preference.discord_webhook
+        ):
+            try:
+                send_discord_notification(
+                    user_preference.discord_webhook, notification.message
+                )
+            except Exception as e:
+                return {
+                    "recipient": notification_recipient.recipient.user.email,
+                    "error": f"Error sending discord notification: {str(e)}",
+                }
+
+    return None
+
+
+# main function for sending notification
 def create_notification(
     notification_data: CreateNotificationSchema,
 ) -> Tuple[Optional[Dict[str, str]], Optional[Dict[str, Any]]]:
-    if not notification_data:
-        return {
-            "message": "Error sending discord notification: notifications_data is required"
-        }, None
-
-    errors = []
+    """
+    main function for creating notification.
+    Add notification to the notification table.
+    """
 
     author = notification_data.author
     message = notification_data.message
@@ -31,73 +122,21 @@ def create_notification(
     scheduled_time = notification_data.scheduled_time
     recipients = notification_data.recipients
 
-    if not author or not message or not recipients:
-        return (
-            "author, message, and recipients are required for each notification",
-            None,
-        )
+    errors = []
+    notification = Notification.objects.create(
+        author=author,
+        message=message,
+        urgent=urgent,
+        scheduled_time=scheduled_time,
+    )
+
+    if not notification:
+        return {"message": "Failed to sent notification."}, None
 
     for recipient_id in recipients:
-        try:
-            recipient = OrgUser.objects.get(user_id=recipient_id)
-            user_preference, created = UserPreferences.objects.get_or_create(
-                orguser=recipient
-            )
-            notification = Notification.objects.create(
-                author=author,
-                message=message,
-                urgent=urgent,
-                scheduled_time=scheduled_time,
-            )
-            notification_recipient = NotificationRecipient.objects.create(
-                notification=notification, recipient=recipient
-            )
-            if scheduled_time:
-                result = schedule_notification_task.apply_async(
-                    (notification.id, recipient_id), eta=scheduled_time
-                )
-                notification_recipient.task_id = result.task_id
-                notification_recipient.save()
-            else:
-                notification.sent_time = timezone.as_utc(datetime.utcnow())
-                notification.save()
-
-                if user_preference.enable_email_notifications:
-                    try:
-                        send_email_notification(
-                            user_preference.orguser.user.email, notification.message
-                        )
-                    except Exception as e:
-                        errors.append(
-                            {
-                                "recipient": notification_recipient.recipient.user.email,
-                                "error": f"Error sending email notification: {str(e)}",
-                            }
-                        )
-
-                if (
-                    user_preference.enable_discord_notifications
-                    and user_preference.discord_webhook
-                ):
-                    try:
-                        send_discord_notification(
-                            user_preference.discord_webhook, notification.message
-                        )
-                    except Exception as e:
-                        errors.append(
-                            {
-                                "recipient": notification_recipient.recipient.user.email,
-                                "error": f"Error sending discord notification: {str(e)}",
-                            }
-                        )
-
-        except OrgUser.DoesNotExist:
-            errors.append(
-                {
-                    "recipient": notification_recipient.recipient.user.email,
-                    "error": "Recipient does not exist",
-                }
-            )
+        error = handle_recipient(recipient_id, scheduled_time, notification)
+        if error:
+            errors.append(error)
 
     response = {
         "notification_id": notification.id,
@@ -108,11 +147,15 @@ def create_notification(
         "author": notification.author,
     }
 
-    return None, {"res": response, "errors": errors}
+    return None, {
+        "res": response,
+        "errors": errors,
+    }
 
 
 # get notification history
-def get_notification_history() -> Tuple[Optional[Dict[str, str]], List[Dict[str, Any]]]:
+def get_notification_history() -> Tuple[Optional[None], Dict[str, Any]]:
+    """returns history of sent notifications"""
     notifications = Notification.objects.all().order_by("-timestamp")
     notification_history = []
 
@@ -139,13 +182,12 @@ def get_notification_history() -> Tuple[Optional[Dict[str, str]], List[Dict[str,
             }
         )
 
-    return None, notification_history
+    return None, {"res": notification_history}
 
 
 # get notification data
-def get_user_notifications(
-    orguser: OrgUser,
-) -> Tuple[Optional[None], Dict[str, List[Dict[str, Any]]]]:
+def get_user_notifications(orguser: OrgUser) -> Tuple[Optional[None], Dict[str, Any]]:
+    """returns all notifications for a specific user"""
 
     notifications = (
         NotificationRecipient.objects.filter(
@@ -178,7 +220,8 @@ def get_user_notifications(
 # mark notificaiton as read
 def mark_notification_as_read_or_unread(
     user_id: int, notification_id: int, read_status: bool
-) -> Tuple[Optional[Dict[str, str]], Optional[Dict[str, str]]]:
+) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """update the read status of a recipient for a notification"""
     try:
         notification_recipient = NotificationRecipient.objects.get(
             recipient__user_id=user_id, notification__id=notification_id
@@ -193,7 +236,8 @@ def mark_notification_as_read_or_unread(
 # delete notification
 def delete_scheduled_notification(
     notification_id: int,
-) -> Tuple[Optional[Dict[str, str]], Optional[Dict[str, str]]]:
+) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """deletes the futute scheduled notifications"""
     try:
         notification = Notification.objects.get(id=notification_id)
 
