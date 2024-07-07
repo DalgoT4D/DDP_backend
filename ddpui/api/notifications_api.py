@@ -73,7 +73,7 @@ def create_notification(request, payload: CreateNotificationPayloadSchema):
     if error is not None:
         raise HttpError(400, error)
 
-    return Response(result)
+    return result
 
 
 @notificationsapi.get("/history")
@@ -86,7 +86,7 @@ def get_notification_history(request):
     if error is not None:
         raise HttpError(400, error)
 
-    return Response(result)
+    return result
 
 
 @notificationsapi.get("/", auth=auth.CustomAuthMiddleware())
@@ -101,7 +101,7 @@ def get_user_notifications(request):
     if error is not None:
         raise HttpError(400, error)
 
-    return Response(result)
+    return result
 
 
 @notificationsapi.put("/", auth=auth.CustomAuthMiddleware())
@@ -117,7 +117,7 @@ def mark_as_read(request, payload: UpdateReadStatusSchema):
     if error is not None:
         raise HttpError(400, error)
 
-    return Response(result)
+    return result
 
 
 @notificationsapi.delete("/")
@@ -133,4 +133,4 @@ def delete_notification(request, payload: DeleteNotificationSchema):
     if error is not None:
         raise HttpError(400, error)
 
-    return Response(result)
+    return result

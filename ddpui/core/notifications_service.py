@@ -182,7 +182,7 @@ def get_notification_history() -> Tuple[Optional[None], Dict[str, Any]]:
             }
         )
 
-    return None, {"res": notification_history}
+    return None, {"success": True, "res": notification_history}
 
 
 # get notification data
@@ -214,7 +214,7 @@ def get_user_notifications(orguser: OrgUser) -> Tuple[Optional[None], Dict[str, 
             }
         )
 
-    return None, {"res": user_notifications}
+    return None, {"success": True, "res": user_notifications}
 
 
 # mark notificaiton as read
@@ -258,7 +258,8 @@ def delete_scheduled_notification(
         notification_recipients.delete()
 
         return None, {
-            "message": f"Notification with id: {notification_id} has been successfully deleted"
+            "success": True,
+            "message": f"Notification with id: {notification_id} has been successfully deleted",
         }
 
     except Notification.DoesNotExist:
