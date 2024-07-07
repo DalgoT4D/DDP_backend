@@ -7,7 +7,6 @@ from ddpui.core import notifications_service
 from ddpui.schemas.notifications_api_schemas import (
     CreateNotificationPayloadSchema,
     UpdateReadStatusSchema,
-    DeleteNotificationSchema,
     CreateNotificationSchema,
 )
 from ddpui.models.org_user import OrgUser
@@ -121,15 +120,13 @@ def mark_as_read(request, payload: UpdateReadStatusSchema):
 
 
 @notificationsapi.delete("/")
-def delete_notification(request, payload: DeleteNotificationSchema):
+def delete_notification(request, notification_id: int):
     """
     Used to delete past notifications,i.e, notifications
     which are already sent. Accepts notification_id in the
     payload and deletes it.
     """
-    error, result = notifications_service.delete_scheduled_notification(
-        payload.notification_id
-    )
+    error, result = notifications_service.delete_scheduled_notification(notification_id)
     if error is not None:
         raise HttpError(400, error)
 

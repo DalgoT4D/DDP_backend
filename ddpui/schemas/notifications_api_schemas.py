@@ -47,9 +47,3 @@ class UpdateReadStatusSchema(Schema):
 
     notification_id: int
     read_status: bool
-
-
-class DeleteNotificationSchema(Schema):
-    """Schema for deleting a notification."""
-
-    notification_id: int
