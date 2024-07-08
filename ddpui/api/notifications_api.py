@@ -7,7 +7,6 @@ from ddpui.core import notifications_service
 from ddpui.schemas.notifications_api_schemas import (
     CreateNotificationPayloadSchema,
     UpdateReadStatusSchema,
-    CreateNotificationSchema,
 )
 from ddpui.models.org_user import OrgUser
 
@@ -57,7 +56,7 @@ def create_notification(request, payload: CreateNotificationPayloadSchema):
     if error is not None:
         raise HttpError(400, error)
 
-    payload_dict = {
+    notification_data = {
         "author": payload.author,
         "message": payload.message,
         "urgent": payload.urgent,
@@ -65,9 +64,7 @@ def create_notification(request, payload: CreateNotificationPayloadSchema):
         "recipients": list(recipients),
     }
 
-    error, result = notifications_service.create_notification(
-        CreateNotificationSchema(**payload_dict)
-    )
+    error, result = notifications_service.create_notification(notification_data)
 
     if error is not None:
         raise HttpError(400, error)
@@ -76,12 +73,24 @@ def create_notification(request, payload: CreateNotificationPayloadSchema):
 
 
 @notificationsapi.get("/history")
-def get_notification_history(request):
+def get_notification_history(request, page: int = 1, limit: int = 10):
     """
     Returns all the notifications including the
     past and the future scheduled notifications
     """
-    error, result = notifications_service.get_notification_history()
+    error, result = notifications_service.get_notification_history(page, limit)
+    if error is not None:
+        raise HttpError(400, error)
+
+    return result
+
+
+@notificationsapi.get("/recipients")
+def get_notification_recipients(request, notification_id: int):
+    """
+    Returns all the recipients for a notification
+    """
+    error, result = notifications_service.get_notification_recipients(notification_id)
     if error is not None:
         raise HttpError(400, error)
 
@@ -89,14 +98,14 @@ def get_notification_history(request):
 
 
 @notificationsapi.get("/", auth=auth.CustomAuthMiddleware())
-def get_user_notifications(request):
+def get_user_notifications(request, page: int = 1, limit: int = 10):
     """
     Returns all the notifications for a particular user.
     It returns only the past notifications,i.e,notifications
     which are already sent
     """
     orguser = request.orguser
-    error, result = notifications_service.get_user_notifications(orguser)
+    error, result = notifications_service.get_user_notifications(orguser, page, limit)
     if error is not None:
         raise HttpError(400, error)
 

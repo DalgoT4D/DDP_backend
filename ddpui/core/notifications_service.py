@@ -1,5 +1,6 @@
 from typing import Tuple, Optional, Dict, Any, List
 from datetime import datetime
+from django.core.paginator import Paginator
 from ddpui.models.notifications import (
     Notification,
     NotificationRecipient,
@@ -9,7 +10,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.utils import timezone
 from ddpui.utils.discord import send_discord_notification
 from ddpui.utils.sendgrid import send_email_notification
-from ddpui.schemas.notifications_api_schemas import CreateNotificationSchema, SentToEnum
+from ddpui.schemas.notifications_api_schemas import SentToEnum
 from ddpui.celeryworkers.tasks import schedule_notification_task
 from celery.result import AsyncResult
 
@@ -53,7 +54,7 @@ def get_recipients(
     if not recipients:
         return "No users found for the given information", None
 
-    return None, recipients
+    return None, recipients.distinct()
 
 
 # manage recipients for a notification
@@ -109,7 +110,7 @@ def handle_recipient(
 
 # main function for sending notification
 def create_notification(
-    notification_data: CreateNotificationSchema,
+    notification_data,
 ) -> Tuple[Optional[Dict[str, str]], Optional[Dict[str, Any]]]:
     """
     main function for creating notification.
@@ -154,13 +155,49 @@ def create_notification(
 
 
 # get notification history
-def get_notification_history() -> Tuple[Optional[None], Dict[str, Any]]:
+def get_notification_history(
+    page: int, limit: int
+) -> Tuple[Optional[None], Dict[str, Any]]:
     """returns history of sent notifications"""
     notifications = Notification.objects.all().order_by("-timestamp")
-    notification_history = []
 
-    for notification in notifications:
-        recipients = NotificationRecipient.objects.filter(notification=notification)
+    paginator = Paginator(notifications, limit)
+    paginated_notifications: Notification = paginator.get_page(page)
+
+    notification_history = [
+        {
+            "id": notification.id,
+            "author": notification.author,
+            "message": notification.message,
+            "timestamp": notification.timestamp,
+            "urgent": notification.urgent,
+            "scheduled_time": notification.scheduled_time,
+            "sent_time": notification.sent_time,
+        }
+        for notification in paginated_notifications
+    ]
+
+    return None, {
+        "success": True,
+        "res": notification_history,
+        "page": paginated_notifications.number,
+        "total_pages": paginated_notifications.paginator.num_pages,
+        "total_notifications": paginated_notifications.paginator.count,
+    }
+
+
+# get notification recipients
+def get_notification_recipients(
+    notification_id: int,
+) -> Tuple[Optional[None], Dict[str, Any]]:
+    """returns recipients for a particular notification"""
+    try:
+        notification = Notification.objects.get(id=notification_id)
+
+        recipients = NotificationRecipient.objects.filter(
+            notification=notification
+        ).distinct()
+
         recipient_list = [
             {
                 "username": recipient.recipient.user.username,
@@ -169,24 +206,16 @@ def get_notification_history() -> Tuple[Optional[None], Dict[str, Any]]:
             for recipient in recipients
         ]
 
-        notification_history.append(
-            {
-                "id": notification.id,
-                "author": notification.author,
-                "message": notification.message,
-                "timestamp": notification.timestamp,
-                "urgent": notification.urgent,
-                "scheduled_time": notification.scheduled_time,
-                "sent_time": notification.sent_time,
-                "recipients": recipient_list,
-            }
-        )
+        return None, {"success": True, "res": recipient_list}
 
-    return None, {"success": True, "res": notification_history}
+    except Notification.DoesNotExist:
+        return "Notification does not exist.", None
 
 
 # get notification data
-def get_user_notifications(orguser: OrgUser) -> Tuple[Optional[None], Dict[str, Any]]:
+def get_user_notifications(
+    orguser: OrgUser, page: int, limit: int
+) -> Tuple[Optional[None], Dict[str, Any]]:
     """returns all notifications for a specific user"""
 
     notifications = (
@@ -197,9 +226,12 @@ def get_user_notifications(orguser: OrgUser) -> Tuple[Optional[None], Dict[str, 
         .order_by("-notification__timestamp")
     )
 
+    paginator = Paginator(notifications, limit)
+    paginated_notifications = paginator.get_page(page)
+
     user_notifications = []
 
-    for recipient in notifications:
+    for recipient in paginated_notifications:
         notification = recipient.notification
         user_notifications.append(
             {
@@ -214,7 +246,13 @@ def get_user_notifications(orguser: OrgUser) -> Tuple[Optional[None], Dict[str, 
             }
         )
 
-    return None, {"success": True, "res": user_notifications}
+    return None, {
+        "success": True,
+        "res": user_notifications,
+        "page": paginated_notifications.number,
+        "total_pages": paginated_notifications.paginator.num_pages,
+        "total_notifications": paginated_notifications.paginator.count,
+    }
 
 
 # mark notificaiton as read

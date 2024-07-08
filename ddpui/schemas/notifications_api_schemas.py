@@ -32,16 +32,6 @@ class CreateNotificationPayloadSchema(BaseModel):
         use_enum_values = True
 
 
-class CreateNotificationSchema(Schema):
-    """Schema for creating a new notification function."""
-
-    author: str
-    message: str
-    urgent: Optional[bool] = False
-    scheduled_time: Optional[datetime] = None
-    recipients: List[int]
-
-
 class UpdateReadStatusSchema(Schema):
     """Schema for updating the read status of a notification."""
 
