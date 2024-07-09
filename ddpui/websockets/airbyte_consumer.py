@@ -22,7 +22,8 @@ class SourceCheckConnectionConsumer(BaseConsumer):
         )
         payload = json.loads(message["text"])
         source_id = payload.get("sourceId", None)
-        del payload["sourceId"]
+        if "sourceId" in payload:
+            del payload["sourceId"]
         if source_id:
             payload = AirbyteSourceUpdateCheckConnection(**payload)
         else:
@@ -90,7 +91,8 @@ class DestinationCheckConnectionConsumer(BaseConsumer):
         )
         payload = json.loads(message["text"])
         destination_id = payload.get("destinationId", None)
-        del payload["destinationId"]
+        if "destinationId" in payload:
+            del payload["destinationId"]
         if destination_id:
             payload = AirbyteDestinationUpdateCheckConnection(**payload)
         else:
