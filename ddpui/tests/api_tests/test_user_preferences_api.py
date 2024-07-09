@@ -3,12 +3,12 @@ import django
 import pytest
 from ninja.errors import HttpError
 from ddpui.models.org import Org
-from ddpui.models.role_based_access import Role
+from ddpui.models.role_based_access import Permission, Role, RolePermission
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.org_user import OrgUser, OrgUserRole
 from ddpui import auth
 from django.contrib.auth.models import User
-from ddpui.tests.api_tests.test_user_org_api import mock_request
+from ddpui.tests.api_tests.test_user_org_api import mock_request, seed_db
 from ddpui.api.user_preferences_api import (
     create_user_preferences,
     get_user_preferences,
@@ -66,6 +66,13 @@ def user_preferences(orguser):
         enable_email_notifications=True,
         discord_webhook="http://example.com/webhook",
     )
+
+
+def test_seed_data(seed_db):
+    """a test to seed the database"""
+    assert Role.objects.count() == 5
+    assert RolePermission.objects.count() > 5
+    assert Permission.objects.count() > 5
 
 
 def test_create_user_preferences_success(orguser):

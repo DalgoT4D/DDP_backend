@@ -61,7 +61,7 @@ def create_notification(request, payload: CreateNotificationPayloadSchema):
         "message": payload.message,
         "urgent": payload.urgent,
         "scheduled_time": payload.scheduled_time,
-        "recipients": list(recipients),
+        "recipients": recipients,
     }
 
     error, result = notifications_service.create_notification(notification_data)

@@ -38,8 +38,9 @@ def get_recipients(
     elif sent_to == SentToEnum.SINGLE_USER:
         if user_email:
             try:
-                recipient = OrgUser.objects.get(user__email=user_email)
-                recipients = [recipient.user_id]
+                recipients = OrgUser.objects.filter(user__email=user_email).values_list(
+                    "user_id", flat=True
+                )
             except OrgUser.DoesNotExist:
                 return "User with the provided email does not exist", None
         else:
@@ -54,7 +55,7 @@ def get_recipients(
     if not recipients:
         return "No users found for the given information", None
 
-    return None, recipients.distinct()
+    return None, list(recipients.distinct())
 
 
 # manage recipients for a notification
@@ -117,11 +118,11 @@ def create_notification(
     Add notification to the notification table.
     """
 
-    author = notification_data.author
-    message = notification_data.message
-    urgent = notification_data.urgent
-    scheduled_time = notification_data.scheduled_time
-    recipients = notification_data.recipients
+    author = notification_data["author"]
+    message = notification_data["message"]
+    urgent = notification_data["urgent"]
+    scheduled_time = notification_data["scheduled_time"]
+    recipients = notification_data["recipients"]
 
     errors = []
     notification = Notification.objects.create(
