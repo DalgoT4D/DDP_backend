@@ -691,30 +691,52 @@ def summarize_logs(
             )
             return
 
+    # create a partial session
+    llm_session = LlmSession.objects.create(
+        request_uuid=self.request.id,
+        orguser=orguser,
+        org=orguser.org,
+        flow_run_id=flow_run_id,
+        task_id=task_id,
+        airbyte_job_id=job_id,
+    )
+
     # logs
     logs_text = ""
     log_file_name = ""
-    if type == LogsSummarizationType.DEPLOYMENT:
-        all_task_logs = get_flow_run_logs_v2(flow_run_id)
-        dbt_tasks = [task for task in all_task_logs if task["id"] == task_id]
-        if len(dbt_tasks) == 0:
-            taskprogress.add(
-                {
-                    "message": "No logs found for the task",
-                    "status": "failed",
-                    "result": None,
-                }
+    try:
+        if type == LogsSummarizationType.DEPLOYMENT:
+            all_task_logs = get_flow_run_logs_v2(flow_run_id)
+            dbt_tasks = [task for task in all_task_logs if task["id"] == task_id]
+            if len(dbt_tasks) == 0:
+                taskprogress.add(
+                    {
+                        "message": "No logs found for the task",
+                        "status": "failed",
+                        "result": None,
+                    }
+                )
+                return
+            task = dbt_tasks[0]
+            logs_text = "\n".join([log["message"] for log in task["logs"]])
+            log_file_name = f"{flow_run_id}_{task_id}"
+        elif type == LogsSummarizationType.AIRBYTE_SYNC:
+            logs = airbyte_service.get_logs_for_job(
+                job_id=job_id, attempt_number=attempt_number
             )
-            return
-        task = dbt_tasks[0]
-        logs_text = "\n".join([log["message"] for log in task["logs"]])
-        log_file_name = f"{flow_run_id}_{task_id}"
-    elif type == LogsSummarizationType.AIRBYTE_SYNC:
-        logs = airbyte_service.get_logs_for_job(
-            job_id=job_id, attempt_number=attempt_number
+            logs_text = "\n".join(logs["logs"]["logLines"])
+            log_file_name = f"{job_id}_{attempt_number}"
+    except Exception as err:
+        logger.error(err)
+        taskprogress.add(
+            {
+                "message": str(err),
+                "status": "failed",
+                "result": None,
+            }
         )
-        logs_text = "\n".join(logs["logs"]["logLines"])
-        log_file_name = f"{job_id}_{attempt_number}"
+        llm_session.delete()
+        return
 
     taskprogress.add(
         {
@@ -759,20 +781,14 @@ def summarize_logs(
         logger.info("Closing the session")
         llm_service.close_file_search_session(result["session_id"])
 
-        llm_session = LlmSession.objects.create(
-            orguser=orguser,
-            org=orguser.org,
-            flow_run_id=flow_run_id,
-            task_id=task_id,
-            airbyte_job_id=job_id,
-            assistant_prompt=assistant_prompt.prompt,
-            user_prompts=user_prompts,
-            response=[
-                {"prompt": prompt, "response": response}
-                for prompt, response in zip(user_prompts, result["result"])
-            ],
-            session_id=result["session_id"],
-        )
+        llm_session.user_prompts = user_prompts
+        llm_session.assistant_prompt = assistant_prompt.prompt
+        llm_session.response = [
+            {"prompt": prompt, "response": response}
+            for prompt, response in zip(user_prompts, result["result"])
+        ]
+        llm_session.session_id = result["session_id"]
+        llm_session.save()
 
         logger.info("Completed log summarization")
         taskprogress.add(
@@ -791,6 +807,7 @@ def summarize_logs(
                 "result": None,
             }
         )
+        llm_session.delete()
 
 
 @app.on_after_finalize.connect
