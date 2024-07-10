@@ -1,9 +1,9 @@
 import os
+from datetime import datetime
+from unittest.mock import patch, Mock
 import django
 import pytest
-from datetime import datetime
 from django.utils import timezone
-from unittest.mock import patch, Mock
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.models.notifications import Notification, NotificationRecipient
 from ddpui.models.org import Org
@@ -22,7 +22,6 @@ from ddpui.core.notifications_service import (
 )
 from ddpui.schemas.notifications_api_schemas import SentToEnum
 from ddpui.tests.api_tests.test_user_org_api import mock_request, seed_db
-from celery.result import AsyncResult
 
 from django.contrib.auth.models import User
 
