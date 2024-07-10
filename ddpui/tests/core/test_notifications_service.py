@@ -180,13 +180,13 @@ def test_get_recipients_invalid_user_email():
 
 
 def test_handle_recipient_success(orguser, unsent_notification):
-    error = handle_recipient(orguser.user_id, None, unsent_notification)
+    error = handle_recipient(orguser.id, None, unsent_notification)
     assert error is None
 
 
 def test_handle_recipient_with_scheduled_time(orguser, scheduled_notification):
     scheduled_time = timezone.now() + timezone.timedelta(days=1)
-    error = handle_recipient(orguser.user_id, scheduled_time, scheduled_notification)
+    error = handle_recipient(orguser.id, scheduled_time, scheduled_notification)
     assert error is None
 
 
@@ -198,7 +198,7 @@ def test_handle_recipient_email_error(mocker: Mock, orguser, unsent_notification
         discord_webhook="http://example.com/webhook",
     )
     mocker.side_effect = Exception("Email error")
-    error = handle_recipient(orguser.user_id, None, unsent_notification)
+    error = handle_recipient(orguser.id, None, unsent_notification)
     assert error is not None
 
 
@@ -210,7 +210,7 @@ def test_handle_recipient_discord_error(mocker: Mock, orguser, unsent_notificati
         discord_webhook="http://example.com/webhook",
     )
     mocker.side_effect = Exception("Discord error")
-    error = handle_recipient(orguser.user_id, None, unsent_notification)
+    error = handle_recipient(orguser.id, None, unsent_notification)
     assert error is not None
 
 
@@ -220,7 +220,7 @@ def test_create_notification_success(orguser):
         "message": "test_message",
         "urgent": True,
         "scheduled_time": None,
-        "recipients": [orguser.user_id],
+        "recipients": [orguser.id],
     }
     error, result = create_notification(notification_data)
     assert error is None
@@ -256,7 +256,7 @@ def test_get_user_notifications(orguser):
 
 def test_mark_notification_as_read(orguser, unsent_notification):
     error, result = mark_notification_as_read_or_unread(
-        orguser.user_id, unsent_notification.id, True
+        orguser.id, unsent_notification.id, True
     )
     assert error is None
     assert result["success"] is True
