@@ -301,7 +301,7 @@ def test_mark_as_read_success(orguser):
         response = mark_as_read(request, payload)
         assert response["success"] is True
         assert response["message"] is "Notification updated successfully"
-        mock_mark_as_read.assert_called_once_with(orguser.user_id, 1, True)
+        mock_mark_as_read.assert_called_once_with(orguser.id, 1, True)
 
 
 def test_mark_as_read_invalid_notification_id(orguser):
@@ -323,7 +323,7 @@ def test_mark_as_read_invalid_notification_id(orguser):
         with pytest.raises(HttpError) as excinfo:
             mark_as_read(request, payload)
         assert "Notification not found for the given user" in str(excinfo.value)
-        mock_mark_as_read.assert_called_once_with(orguser.user_id, 0, True)
+        mock_mark_as_read.assert_called_once_with(orguser.id, 0, True)
 
 
 def test_delete_notification_success():
