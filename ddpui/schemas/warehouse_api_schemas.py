@@ -11,3 +11,13 @@ class RequestorColumnSchema(Schema):
     column_name: str
     filter: dict = None
     refresh: bool = False
+
+
+class AskWarehouseRequest(Schema):
+    """
+    Payload to ask warehouse a question to be responded via llm
+    """
+
+    sql: str
+    session_name: str
+    user_prompt: str

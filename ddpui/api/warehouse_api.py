@@ -1,4 +1,6 @@
 import json
+import sqlparse
+from sqlparse.tokens import Keyword, Number, Token
 import uuid
 import sqlalchemy
 from ninja import NinjaAPI
@@ -11,16 +13,22 @@ from django.http import StreamingHttpResponse
 from ddpui import auth
 from ddpui.core import dbtautomation_service
 from ddpui.models.org import OrgWarehouse
+from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.auth import has_permission
 
-from ddpui.datainsights.insights.insight_factory import InsightsFactory
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.datainsights.generate_result import GenerateResult, poll_for_column_insights
+from ddpui.celeryworkers.tasks import summarize_warehouse_results
 
-from ddpui.schemas.warehouse_api_schemas import RequestorColumnSchema
+from ddpui.schemas.warehouse_api_schemas import (
+    RequestorColumnSchema,
+    AskWarehouseRequest,
+)
+from ddpui.models.llm import LogsSummarizationType, LlmSession
+from ddpui.datainsights.warehouse import warehouse_factory
 from ddpui.utils import secretsmanager
 
 warehouseapi = NinjaAPI(urls_namespace="warehouse")
@@ -302,3 +310,86 @@ def get_download_warehouse_data(request, schema_name: str, table_name: str):
     )
 
     return response
+
+
+@warehouseapi.post("/ask/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse_data"])
+def post_warehouse_prompt(request, payload: AskWarehouseRequest):
+    """
+    Ask the warehouse a question/prompt on a result set and get a response from llm service
+    """
+    LIMIT_ROWS_TO_SEND_TO_LLM = 1000
+
+    stmts = sqlparse.parse(payload.sql)
+
+    if len(stmts) > 1:
+        raise HttpError(400, "Only one query is allowed")
+
+    if len(stmts) == 0:
+        raise HttpError(400, "No query provided")
+
+    if not stmts[0].get_type() == "SELECT":
+        raise HttpError(400, "Only SELECT queries are allowed")
+
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    # limit the records going to llm
+    limit = float("inf")
+    limit_found = False
+    for stmt in stmts:
+        for token in stmt.tokens:
+            if (
+                not limit_found
+                and token.ttype is Keyword
+                and token.value.upper() == "LIMIT"
+            ):
+                limit_found = True
+            if limit_found and token.ttype is Token.Literal.Number.Integer:
+                limit = int(token.value)
+                break
+
+    limit = min(limit, LIMIT_ROWS_TO_SEND_TO_LLM)
+
+    if limit_found and limit > LIMIT_ROWS_TO_SEND_TO_LLM:
+        raise HttpError(
+            400,
+            f"Please make sure the limit in query is less than {LIMIT_ROWS_TO_SEND_TO_LLM}",
+        )
+
+    if not limit_found:
+        logger.info(f"Setting LIMIT {LIMIT_ROWS_TO_SEND_TO_LLM} to the query")
+        payload.sql = f"{payload.sql} LIMIT {limit}"
+
+    logger.info(f"Submitting query to warehouse for execution \n '''{payload.sql}'''")
+
+    # credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+
+    # wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
+
+    # rows = []
+    # try:
+    #     rows = wclient.execute(payload.sql)
+    # except Exception as err:
+    #     logger.error(err)
+    #     raise HttpError(400, str(err))
+
+    try:
+
+        task = summarize_warehouse_results.apply_async(
+            kwargs={
+                "orguser_id": orguser.id,
+                "sql": payload.sql,
+                "session_name": payload.session_name,
+                "user_prompt": payload.user_prompt,
+                "org_warehouse_id": org_warehouse.id,
+            },
+        )
+        return {"task_id": task.id}
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to summarize warehouse results") from error
