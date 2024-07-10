@@ -20,6 +20,8 @@ from ddpui.html.docs import get_dbt_docs
 from ddpui.html.elementary import get_elementary_report
 
 from ddpui.datainsights.generate_result import DataInsightsConsumer
+from ddpui.websockets.airbyte_consumer import SourceCheckConnectionConsumer
+from ddpui.websockets.airbyte_consumer import DestinationCheckConnectionConsumer
 
 urlpatterns = [
     path("admin/", admin.site.urls),  # Uncomment if you want to use django-admin app
@@ -43,4 +45,13 @@ urlpatterns = [
 ]
 
 # socket endpoints
-ws_urlpatterns = [path("ws/data_insights/", DataInsightsConsumer.as_asgi())]
+ws_urlpatterns = [
+    path("wss/data_insights/", DataInsightsConsumer.as_asgi()),
+    path(
+        "wss/airbyte/source/check_connection", SourceCheckConnectionConsumer.as_asgi()
+    ),
+    path(
+        "wss/airbyte/destination/check_connection",
+        DestinationCheckConnectionConsumer.as_asgi(),
+    ),
+]
