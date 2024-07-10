@@ -39,7 +39,7 @@ from ddpui.celeryworkers.tasks import (
     add_custom_connectors_to_workspace,
     summarize_logs,
 )
-from ddpui.models.tasks import TaskProgressHashPrefix
+from ddpui.models.tasks import TaskProgressHashPrefix, TaskProgressStatus
 from ddpui.utils.singletaskprogress import SingleTaskProgress
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
@@ -732,16 +732,8 @@ def get_flow_runs_logsummary_v1(
             .order_by("-created_at")
             .first()
         )
-        if llm_session:
-            result = SingleTaskProgress.fetch(task_key=str(llm_session.request_uuid))
-            logger.info(result)
-            if (
-                result
-                and len(result) > 0
-                and "status" in result[-1]
-                and result[-1]["status"] == "running"
-            ):
-                return {"task_id": llm_session.request_uuid}
+        if llm_session and llm_session.session_status == TaskProgressStatus.RUNNING:
+            return {"task_id": llm_session.request_uuid}
 
         task = summarize_logs.apply_async(
             kwargs={

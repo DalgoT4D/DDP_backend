@@ -23,7 +23,12 @@ from ddpui.models.org import (
     TransformType,
 )
 from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import TaskLock, OrgTask, TaskProgressHashPrefix
+from ddpui.models.tasks import (
+    TaskLock,
+    OrgTask,
+    TaskProgressHashPrefix,
+    TaskProgressStatus,
+)
 from ddpui.models.canvaslock import CanvasLock
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.models.llm import (
@@ -647,7 +652,7 @@ def summarize_logs(
                 taskprogress.add(
                     {
                         "message": "Invalid job id",
-                        "status": "failed",
+                        "status": TaskProgressStatus.FAILED,
                         "result": None,
                     }
                 )
@@ -657,7 +662,7 @@ def summarize_logs(
             taskprogress.add(
                 {
                     "message": "Failed to fetch the sync job",
-                    "status": "failed",
+                    "status": TaskProgressStatus.FAILED,
                     "result": None,
                 }
             )
@@ -685,7 +690,7 @@ def summarize_logs(
             taskprogress.add(
                 {
                     "message": "Retrieved saved summary for the run",
-                    "status": "completed",
+                    "status": TaskProgressStatus.COMPLETED,
                     "result": llm_session.response,
                 }
             )
@@ -699,6 +704,7 @@ def summarize_logs(
         flow_run_id=flow_run_id,
         task_id=task_id,
         airbyte_job_id=job_id,
+        session_status=TaskProgressStatus.RUNNING,
     )
 
     # logs
@@ -712,7 +718,7 @@ def summarize_logs(
                 taskprogress.add(
                     {
                         "message": "No logs found for the task",
-                        "status": "failed",
+                        "status": TaskProgressStatus.FAILED,
                         "result": None,
                     }
                 )
@@ -731,17 +737,18 @@ def summarize_logs(
         taskprogress.add(
             {
                 "message": str(err),
-                "status": "failed",
+                "status": TaskProgressStatus.FAILED,
                 "result": None,
             }
         )
-        llm_session.delete()
+        llm_session.session_status = TaskProgressStatus.FAILED
+        llm_session.save()
         return
 
     taskprogress.add(
         {
             "message": "Fetched all logs to summarize",
-            "status": "running",
+            "status": TaskProgressStatus.RUNNING,
             "result": None,
         }
     )
@@ -788,13 +795,14 @@ def summarize_logs(
             for prompt, response in zip(user_prompts, result["result"])
         ]
         llm_session.session_id = result["session_id"]
+        llm_session.session_status = TaskProgressStatus.COMPLETED
         llm_session.save()
 
         logger.info("Completed log summarization")
         taskprogress.add(
             {
                 "message": f"Generated summary for the {type} job",
-                "status": "completed",
+                "status": TaskProgressStatus.COMPLETED,
                 "result": llm_session.response,
             }
         )
@@ -803,11 +811,12 @@ def summarize_logs(
         taskprogress.add(
             {
                 "message": str(err),
-                "status": "failed",
+                "status": TaskProgressStatus.FAILED,
                 "result": None,
             }
         )
-        llm_session.delete()
+        llm_session.session_status = TaskProgressStatus.FAILED
+        llm_session.save()
 
 
 @app.on_after_finalize.connect
