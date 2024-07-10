@@ -1,5 +1,6 @@
 from typing import Tuple, Optional, Dict, Any, List
 from datetime import datetime
+from celery.result import AsyncResult
 from django.core.paginator import Paginator
 from ddpui.models.notifications import (
     Notification,
@@ -12,7 +13,6 @@ from ddpui.utils.discord import send_discord_notification
 from ddpui.utils.sendgrid import send_email_notification
 from ddpui.schemas.notifications_api_schemas import SentToEnum
 from ddpui.celeryworkers.tasks import schedule_notification_task
-from celery.result import AsyncResult
 
 
 def get_recipients(
@@ -23,13 +23,13 @@ def get_recipients(
     recipients = []
     # send to all users
     if sent_to == SentToEnum.ALL_USERS:
-        recipients = OrgUser.objects.all().values_list("user_id", flat=True)
+        recipients = OrgUser.objects.all().values_list("id", flat=True)
 
     # send to all users in an org
     elif sent_to == SentToEnum.ALL_ORG_USERS:
         if org_slug:
             recipients = OrgUser.objects.filter(org__slug=org_slug).values_list(
-                "user_id", flat=True
+                "id", flat=True
             )
         else:
             return "org_slug is required to sent notification to all org users.", None
@@ -39,7 +39,7 @@ def get_recipients(
         if user_email:
             try:
                 recipients = OrgUser.objects.filter(user__email=user_email).values_list(
-                    "user_id", flat=True
+                    "id", flat=True
                 )
             except OrgUser.DoesNotExist:
                 return "User with the provided email does not exist", None
@@ -49,8 +49,8 @@ def get_recipients(
     # role based filtering
     if manager_or_above and sent_to != SentToEnum.SINGLE_USER:
         recipients = OrgUser.objects.filter(
-            new_role_id__lte=3, user_id__in=recipients
-        ).values_list("user_id", flat=True)
+            new_role_id__lte=3, id__in=recipients
+        ).values_list("id", flat=True)
 
     if not recipients:
         return "No users found for the given information", None
@@ -66,7 +66,7 @@ def handle_recipient(
     Add recipients to the recipients table and
     sent notification through email and discord
     """
-    recipient = OrgUser.objects.get(user_id=recipient_id)
+    recipient = OrgUser.objects.get(id=recipient_id)
     user_preference, created = UserPreferences.objects.get_or_create(orguser=recipient)
     notification_recipient = NotificationRecipient.objects.create(
         notification=notification, recipient=recipient
@@ -78,7 +78,7 @@ def handle_recipient(
         notification_recipient.task_id = result.task_id
         notification_recipient.save()
     else:
-        notification.sent_time = timezone.as_utc(datetime.utcnow())
+        notification.sent_time = timezone.as_utc(datetime.now())
         notification.save()
 
         if user_preference.enable_email_notifications:
@@ -258,12 +258,12 @@ def get_user_notifications(
 
 # mark notificaiton as read
 def mark_notification_as_read_or_unread(
-    user_id: int, notification_id: int, read_status: bool
+    orguser_id: int, notification_id: int, read_status: bool
 ) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
     """update the read status of a recipient for a notification"""
     try:
         notification_recipient = NotificationRecipient.objects.get(
-            recipient__user_id=user_id, notification__id=notification_id
+            recipient__id=orguser_id, notification__id=notification_id
         )
         notification_recipient.read_status = read_status
         notification_recipient.save()

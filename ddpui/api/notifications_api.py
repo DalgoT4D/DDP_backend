@@ -120,7 +120,7 @@ def mark_as_read(request, payload: UpdateReadStatusSchema):
     """
     orguser: OrgUser = request.orguser
     error, result = notifications_service.mark_notification_as_read_or_unread(
-        orguser.user_id, payload.notification_id, payload.read_status
+        orguser.id, payload.notification_id, payload.read_status
     )
     if error is not None:
         raise HttpError(400, error)
