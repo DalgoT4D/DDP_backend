@@ -1,4 +1,5 @@
 import os
+import uuid
 
 from ninja import NinjaAPI
 from ninja.errors import HttpError
@@ -6,6 +7,7 @@ from ninja.errors import HttpError
 from ninja.errors import ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
+from django.forms.models import model_to_dict
 
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
@@ -18,6 +20,7 @@ from ddpui.ddpprefect import (
 from ddpui.models.org import OrgDataFlowv1, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import DataflowOrgTask, OrgTask
+from ddpui.models.llm import LlmSession, LogsSummarizationType
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
     PrefectFlowRunSchema,
@@ -34,7 +37,7 @@ from ddpui.core.pipelinefunctions import (
     pipeline_with_orgtasks,
     fetch_pipeline_lock,
 )
-from ddpui.celeryworkers.tasks import summarize_deployment_flow_run_logs
+from ddpui.celeryworkers.tasks import summarize_logs
 from ddpui.core.dbtfunctions import gather_dbt_project_params
 from ddpui.auth import has_permission
 
@@ -679,12 +682,12 @@ def get_prefect_flow_runs_log_history(
 )
 @has_permission(["can_view_pipeline"])
 def get_prefect_flow_runs_log_history_v1(
-    request, deployment_id, limit: int = 0, fetchlogs=True
+    request, deployment_id, limit: int = 0, fetchlogs=True, offset: int = 0
 ):
     # pylint: disable=unused-argument
     """Fetch all flow runs for the deployment and the logs for each flow run"""
-    flow_runs = prefect_service.get_flow_runs_by_deployment_id(
-        deployment_id, limit=limit
+    flow_runs = prefect_service.get_flow_runs_by_deployment_id_v1(
+        deployment_id, limit=limit, offset=offset
     )
 
     if fetchlogs:
@@ -700,15 +703,21 @@ def get_prefect_flow_runs_log_history_v1(
 )
 @has_permission(["can_view_pipeline"])
 def get_flow_runs_logsummary_v1(
-    request, flow_run_id, regenerate: int
+    request, flow_run_id, task_id, regenerate: int = 0, request_uuid: str = None
 ):  # pylint: disable=unused-argument
     """
-    Use llms to summarize logs
+    Use llms to summarize logs. Summarize logs of a task run in the pipeline run
     """
     try:
         orguser: OrgUser = request.orguser
-        task = summarize_deployment_flow_run_logs.delay(
-            flow_run_id, orguser.id, regenerate == 1
+        task = summarize_logs.apply_async(
+            kwargs={
+                "orguser_id": orguser.id,
+                "type": LogsSummarizationType.DEPLOYMENT,
+                "flow_run_id": flow_run_id,
+                "task_id": task_id,
+                "regenerate": regenerate == 1,
+            },
         )
         return {"task_id": task.id}
     except Exception as error:

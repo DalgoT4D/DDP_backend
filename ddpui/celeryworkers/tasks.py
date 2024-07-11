@@ -10,8 +10,11 @@ from django.utils.text import slugify
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, PIPELINE_MANAGER_ROLE
 from ddpui.celery import app
 from ddpui.ddpairbyte.airbyte_service import abreq
-from ddpui.utils.sendgrid import send_schema_changes_email
-from ddpui.utils.timezone import UTC
+from ddpui.models.notifications import Notification
+from ddpui.models.userpreferences import UserPreferences
+from ddpui.utils.discord import send_discord_notification
+from ddpui.utils.sendgrid import send_email_notification, send_schema_changes_email
+from ddpui.utils.timezone import UTC, as_utc
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.org import (
     Org,
@@ -23,10 +26,20 @@ from ddpui.models.org import (
     TransformType,
 )
 from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import TaskLock, OrgTask, TaskProgressHashPrefix
+from ddpui.models.tasks import (
+    TaskLock,
+    OrgTask,
+    TaskProgressHashPrefix,
+    TaskProgressStatus,
+)
 from ddpui.models.canvaslock import CanvasLock
 from ddpui.models.flow_runs import PrefectFlowRun
-from ddpui.models.llm import AssistantPrompt, LlmAssistantType, LlmSession
+from ddpui.models.llm import (
+    AssistantPrompt,
+    LlmAssistantType,
+    LlmSession,
+    LogsSummarizationType,
+)
 from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
@@ -529,8 +542,8 @@ def update_dbt_core_block_schema_task(block_name, default_schema):
 
 @app.task()
 def delete_old_tasklocks():
-    """delete task locks which were created over an hour ago"""
-    onehourago = UTC.localize(datetime.now() - timedelta(seconds=3600))
+    """delete task locks which were created over 24 hours ago"""
+    onehourago = UTC.localize(datetime.now() - timedelta(seconds=24 * 3600))
     TaskLock.objects.filter(locked_at__lt=onehourago).delete()
 
 
@@ -608,146 +621,22 @@ def add_custom_connectors_to_workspace(self, workspace_id, custom_sources: list[
 
 
 @app.task(bind=True)
-def summarize_airbyte_logs(
+def summarize_logs(
     self,
-    connection_id: str,
     orguser_id: str,
-    job_id: int,
+    type: str = LogsSummarizationType.DEPLOYMENT,  # deployment or airbyte_sync (two types of logs in Dalgo)
+    flow_run_id: str = None,
+    task_id: str = None,
+    job_id: int = None,
+    connection_id: str = None,
     attempt_number: int = 0,
     regenerate: bool = False,
 ):
     """
-    Summarize airbyte logs
-    """
-    taskprogress = SingleTaskProgress(self.request.id, 60 * 10)
-
-    taskprogress.add({"message": "Started", "status": "running", "result": []})
-
-    orguser = OrgUser.objects.filter(id=orguser_id).first()
-
-    try:
-        job_info = airbyte_service.get_job_info(str(job_id))
-
-        if job_info["job"]["configId"] != connection_id:
-            taskprogress.add(
-                {
-                    "message": "Invalid job id",
-                    "status": "failed",
-                    "result": None,
-                }
-            )
-            return
-    except Exception as err:
-        logger.error(err)
-        taskprogress.add(
-            {
-                "message": "Failed to fetch the sync job",
-                "status": "failed",
-                "result": None,
-            }
-        )
-        return
-
-    if not regenerate:
-        # try to fetch response from db
-        llm_session = LlmSession.objects.filter(
-            orguser=orguser, org=orguser.org, airbyte_job_id=job_id
-        ).first()
-
-        if llm_session:
-            taskprogress.add(
-                {
-                    "message": "Retrieved saved summary for the run",
-                    "status": "completed",
-                    "result": llm_session.response,
-                }
-            )
-            return
-
-    logs = airbyte_service.get_logs_for_job(
-        job_id=job_id, attempt_number=attempt_number
-    )
-
-    taskprogress.add(
-        {
-            "message": "Fetched logs need for summarization",
-            "status": "running",
-            "result": None,
-        }
-    )
-
-    # for each task run these prompts
-    user_prompts = [
-        "Summarize the primary error that occurred in this run",
-        "What steps can I take to solve the error you identified?",
-    ]
-
-    try:
-        assistant_prompt = AssistantPrompt.objects.filter(
-            type=LlmAssistantType.LOG_SUMMARIZATION
-        ).first()
-        if not assistant_prompt:
-            raise Exception("Assistant/System prompt not found for log summarization")
-
-        # upload logs for the task
-        logs_text = "\n".join(logs["logs"]["logLines"])
-        fpath = llm_service.upload_text_as_file(logs_text, f"{job_id}_{attempt_number}")
-        logger.info("Uploaded file successfully to LLM service at " + str(fpath))
-
-        # start a file search session in the llm service
-        logger.info(f"Querying the uploaded file: total queries {len(user_prompts)}")
-        result = llm_service.file_search_query_and_poll(
-            fpath, assistant_prompt.prompt, user_prompts
-        )
-        summary = "\n\n".join(result["result"])  # merge the query results
-
-        # close the session
-        logger.info("Closing the session")
-        llm_service.close_file_search_session(result["session_id"])
-
-        llm_session = LlmSession.objects.create(
-            orguser=orguser,
-            org=orguser.org,
-            airbyte_job_id=job_id,
-            assistant_prompt=assistant_prompt.prompt,
-            user_prompts=user_prompts,
-            response={
-                "job_id": job_id,
-                "attempt_number": attempt_number,
-                "summary": summary,
-            },
-            session_id=result["session_id"],
-        )
-
-        logger.info("Completed log summarization for airbyte logs")
-        taskprogress.add(
-            {
-                "message": "Generated summary for the run",
-                "status": "completed",
-                "result": llm_session.response,
-            }
-        )
-    except Exception as err:
-        logger.error(err)
-        taskprogress.add(
-            {
-                "message": str(err),
-                "status": "failed",
-                "result": None,
-            }
-        )
-
-
-@app.task(bind=True)
-def summarize_deployment_flow_run_logs(
-    self, flow_run_id: str, orguser_id: str, regenerate: bool = False
-):
-    """
-    For subtask or subflowrun in the flow run; this function will
+    Fetch logs from either prefect or airbyte
     1. Fetch all subtasks or subflowruns from prefect along with their logs
     2. Upload logs as a file to llm service
     3. Query the llm service with two prompts one for the summarizing & other for figuring out how to resolve errors
-    4. Only summarize failures and dbt tasks (deps, clean, run, test)
 
     If regenerate is True and the summary is not found, the program will generate it again & return
     """
@@ -757,38 +646,112 @@ def summarize_deployment_flow_run_logs(
 
     orguser = OrgUser.objects.filter(id=orguser_id).first()
 
-    if not regenerate:
-        # try to fetch response from db
-        llm_sessions = LlmSession.objects.filter(
-            orguser=orguser, org=orguser.org, flow_run_id=flow_run_id
-        )
+    # validations
+    if type == LogsSummarizationType.AIRBYTE_SYNC:
+        try:
+            job_info = airbyte_service.get_job_info(str(job_id))
 
-        if llm_sessions.count() > 0:
+            if job_info["job"]["configId"] != connection_id:
+                taskprogress.add(
+                    {
+                        "message": "Invalid job id",
+                        "status": TaskProgressStatus.FAILED,
+                        "result": None,
+                    }
+                )
+                return
+        except Exception as err:
+            logger.error(err)
             taskprogress.add(
                 {
-                    "message": "Retrieved saved summary for the run",
-                    "status": "completed",
-                    "result": [llm_session.response for llm_session in llm_sessions],
+                    "message": "Failed to fetch the sync job",
+                    "status": TaskProgressStatus.FAILED,
+                    "result": None,
                 }
             )
             return
 
-    all_task_logs = get_flow_run_logs_v2(flow_run_id)
-    dbt_failed_tasks = [
-        task
-        for task in all_task_logs
-        if (
-            task["state_type"] in [FLOW_RUN_CRASHED, FLOW_RUN_FAILED]
-            or task["state_name"] == "DBT_TEST_FAILED"
+    # regenrate or return saved
+    if not regenerate:
+        # try to fetch response from db
+        if type == LogsSummarizationType.DEPLOYMENT:
+            llm_session = LlmSession.objects.filter(
+                orguser=orguser,
+                org=orguser.org,
+                flow_run_id=flow_run_id,
+                task_id=task_id,
+            )
+
+        elif type == LogsSummarizationType.AIRBYTE_SYNC:
+            llm_session = LlmSession.objects.filter(
+                orguser=orguser, org=orguser.org, airbyte_job_id=job_id
+            )
+
+        llm_session = llm_session.order_by("-created_at").first()
+
+        if llm_session:
+            taskprogress.add(
+                {
+                    "message": "Retrieved saved summary for the run",
+                    "status": TaskProgressStatus.COMPLETED,
+                    "result": llm_session.response,
+                }
+            )
+            return
+
+    # create a partial session
+    llm_session = LlmSession.objects.create(
+        request_uuid=self.request.id,
+        orguser=orguser,
+        org=orguser.org,
+        flow_run_id=flow_run_id,
+        task_id=task_id,
+        airbyte_job_id=job_id,
+        session_status=TaskProgressStatus.RUNNING,
+    )
+
+    # logs
+    logs_text = ""
+    log_file_name = ""
+    try:
+        if type == LogsSummarizationType.DEPLOYMENT:
+            all_task_logs = get_flow_run_logs_v2(flow_run_id)
+            dbt_tasks = [task for task in all_task_logs if task["id"] == task_id]
+            if len(dbt_tasks) == 0:
+                taskprogress.add(
+                    {
+                        "message": "No logs found for the task",
+                        "status": TaskProgressStatus.FAILED,
+                        "result": None,
+                    }
+                )
+                return
+            task = dbt_tasks[0]
+            logs_text = "\n".join([log["message"] for log in task["logs"]])
+            log_file_name = f"{flow_run_id}_{task_id}"
+        elif type == LogsSummarizationType.AIRBYTE_SYNC:
+            logs = airbyte_service.get_logs_for_job(
+                job_id=job_id, attempt_number=attempt_number
+            )
+            logs_text = "\n".join(logs["logs"]["logLines"])
+            log_file_name = f"{job_id}_{attempt_number}"
+    except Exception as err:
+        logger.error(err)
+        taskprogress.add(
+            {
+                "message": str(err),
+                "status": TaskProgressStatus.FAILED,
+                "result": None,
+            }
         )
-        and task["kind"] == "task-run"
-        and "dbt-" in task["label"]
-    ]
+        llm_session.session_status = TaskProgressStatus.FAILED
+        llm_session.save()
+        return
 
     taskprogress.add(
         {
-            "message": "Fetched all logs for subtasks",
-            "status": "running",
+            "message": "Fetched all logs to summarize",
+            "status": TaskProgressStatus.RUNNING,
             "result": None,
         }
     )
@@ -806,49 +769,44 @@ def summarize_deployment_flow_run_logs(
         if not assistant_prompt:
             raise Exception("Assistant/System prompt not found for log summarization")
 
-        summary_result = []
-        for task in dbt_failed_tasks:
-            logger.info(
-                f"Uploading logs for flow_run_id : {flow_run_id} and for task : {task['label']} to llm service"
-            )
+        # for task in dbt_failed_tasks:
+        logger.info(f"Uploading logs for {type} to llm service")
 
-            # upload logs for the task
-            logs_text = "\n".join([log["message"] for log in task["logs"]])
-            fpath = llm_service.upload_text_as_file(logs_text, f"{task['label']}_logs")
-            logger.info("Uploaded file successfully to LLM service at " + str(fpath))
+        # upload logs for the task & start the session
+        fpath, session_id = llm_service.upload_text_as_file(
+            logs_text, f"{log_file_name}_logs"
+        )
+        logger.info("Uploaded file successfully to LLM service at " + str(fpath))
+        logger.info("Session ID: " + session_id)
 
-            # start a file search session in the llm service
-            logger.info(
-                f"Querying the uploaded file: total queries {len(user_prompts)}"
-            )
-            result = llm_service.file_search_query_and_poll(
-                fpath, assistant_prompt.prompt, user_prompts
-            )
-            task["summary"] = "\n\n".join(result["result"])  # merge the query results
+        # start a file search session in the llm service
+        logger.info(f"Querying the uploaded file: total queries {len(user_prompts)}")
+        result = llm_service.file_search_query_and_poll(
+            assistant_prompt=assistant_prompt.prompt,
+            queries=user_prompts,
+            session_id=session_id,
+        )
 
-            # close the session
-            logger.info("Closing the session")
-            llm_service.close_file_search_session(result["session_id"])
+        # close the session
+        logger.info("Closing the session")
+        llm_service.close_file_search_session(result["session_id"])
 
-            del task["logs"]
+        llm_session.user_prompts = user_prompts
+        llm_session.assistant_prompt = assistant_prompt.prompt
+        llm_session.response = [
+            {"prompt": prompt, "response": response}
+            for prompt, response in zip(user_prompts, result["result"])
+        ]
+        llm_session.session_id = result["session_id"]
+        llm_session.session_status = TaskProgressStatus.COMPLETED
+        llm_session.save()
 
-            llm_session = LlmSession.objects.create(
-                orguser=orguser,
-                org=orguser.org,
-                flow_run_id=flow_run_id,
-                assistant_prompt=assistant_prompt.prompt,
-                user_prompts=user_prompts,
-                response=task,  # {"id": ... ,"label": ..., "summary": ... }
-                session_id=result["session_id"],
-            )
-            summary_result.append(llm_session.response)
-
-        logger.info("Completed log summarization for all failed tasks")
+        logger.info("Completed log summarization")
         taskprogress.add(
             {
-                "message": "Generated summary for the run",
-                "status": "completed",
-                "result": summary_result,
+                "message": f"Generated summary for the {type} job",
+                "status": TaskProgressStatus.COMPLETED,
+                "result": llm_session.response,
             }
         )
     except Exception as err:
@@ -856,10 +814,12 @@ def summarize_deployment_flow_run_logs(
         taskprogress.add(
             {
                 "message": str(err),
-                "status": "failed",
+                "status": TaskProgressStatus.FAILED,
                 "result": None,
             }
         )
+        llm_session.session_status = TaskProgressStatus.FAILED
+        llm_session.save()
 
 
 @app.on_after_finalize.connect
@@ -876,3 +836,29 @@ def setup_periodic_tasks(sender, **kwargs):
     sender.add_periodic_task(
         60 * 1.0, delete_old_canvaslocks.s(), name="remove old canvaslocks"
     )
+
+
+@app.task(bind=True)
+def schedule_notification_task(self, notification_id, recipient_id):
+    notification = Notification.objects.get(id=notification_id)
+    recipient = OrgUser.objects.get(user_id=recipient_id)
+    user_preference, created = UserPreferences.objects.get_or_create(orguser=recipient)
+
+    notification.sent_time = as_utc(datetime.utcnow())
+    notification.save()
+
+    if user_preference.enable_email_notifications:
+        try:
+            send_email_notification(
+                user_preference.orguser.user.email, notification.message
+            )
+        except Exception as e:
+            raise Exception(f"Error sending discord notification: {str(e)}")
+
+    if user_preference.enable_discord_notifications and user_preference.discord_webhook:
+        try:
+            send_discord_notification(
+                user_preference.discord_webhook, notification.message
+            )
+        except Exception as e:
+            raise Exception(f"Error sending discord notification: {str(e)}")

@@ -624,10 +624,14 @@ def get_sync_job_history_for_connection(
 
     for job in result["jobs"]:
         job_info = airbyte_service.parse_job_info(job)
-        logs = airbyte_service.get_logs_for_job(
-            job_info["job_id"], job_info["attempt_no"]
-        )
-        job_info["logs"] = logs["logs"]["logLines"]
+        try:
+            logs = airbyte_service.get_logs_for_job(
+                job_info["job_id"], job_info["attempt_no"]
+            )
+            job_info["logs"] = logs["logs"]["logLines"]
+        except Exception as error:
+            logger.exception(error)
+            job_info["logs"] = ["An error occured while fetching logs!"]
         res["history"].append(job_info)
 
     return res, None

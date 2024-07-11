@@ -1455,7 +1455,7 @@ def test_parse_job_info():
                         "recordsEmitted": 500,
                     },
                 },
-                {"status": "succeeded", "recordsSynced": 20},
+                {"id": 3, "status": "succeeded", "recordsSynced": 20},
             ],
         }
     )

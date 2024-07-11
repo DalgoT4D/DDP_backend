@@ -93,7 +93,11 @@ def email_orgusers(org: Org, email_body: str):
     subject = f"Prefect notification{tag}"
     if org.ses_whitelisted_email:
         logger.info(f"sending email to {org.ses_whitelisted_email}")
-        send_text_message(org.ses_whitelisted_email, subject, email_body)
+        send_text_message(
+            org.ses_whitelisted_email,
+            subject,
+            "There is a problem with the pipeline; we are working on a fix",
+        )
     for orguser in OrgUser.objects.filter(
         org=org,
         new_role__slug=SUPER_ADMIN_ROLE,

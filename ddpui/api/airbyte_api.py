@@ -30,15 +30,16 @@ from ddpui.ddpairbyte.schema import (
 from ddpui.auth import has_permission
 
 from ddpui.models.org_user import OrgUser
+from ddpui.models.llm import LogsSummarizationType, LlmSession
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.celeryworkers.tasks import (
     get_connection_catalog_task,
     sync_flow_runs_of_deployments,
     add_custom_connectors_to_workspace,
-    summarize_airbyte_logs,
+    summarize_logs,
 )
-from ddpui.models.tasks import TaskProgressHashPrefix
+from ddpui.models.tasks import TaskProgressHashPrefix, TaskProgressStatus
 from ddpui.utils.singletaskprogress import SingleTaskProgress
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
@@ -664,7 +665,9 @@ def get_connection_catalog_v1(request, connection_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    task_key = f"{TaskProgressHashPrefix.SCHEMA_CHANGE}-{orguser.org.slug}"
+    task_key = (
+        f"{TaskProgressHashPrefix.SCHEMA_CHANGE}-{orguser.org.slug}-{connection_id}"
+    )
     if SingleTaskProgress.fetch(task_key) is not None:
         return {"task_id": task_key, "message": "already running"}
 
@@ -716,15 +719,31 @@ def get_schema_changes_for_connection(request):
 )
 @has_permission(["can_view_pipeline"])
 def get_flow_runs_logsummary_v1(
-    request, connection_id: str, job_id: int, attempt_number: int, regenerate: int
+    request, connection_id: str, job_id: int, attempt_number: int, regenerate: int = 0
 ):  # pylint: disable=unused-argument
     """
     Use llms to summarize logs
     """
     try:
         orguser: OrgUser = request.orguser
-        task = summarize_airbyte_logs.delay(
-            connection_id, orguser.id, job_id, attempt_number, regenerate == 1
+
+        llm_session = (
+            LlmSession.objects.filter(orguser=orguser, airbyte_job_id=job_id)
+            .order_by("-created_at")
+            .first()
+        )
+        if llm_session and llm_session.session_status == TaskProgressStatus.RUNNING:
+            return {"task_id": llm_session.request_uuid}
+
+        task = summarize_logs.apply_async(
+            kwargs={
+                "orguser_id": orguser.id,
+                "type": LogsSummarizationType.AIRBYTE_SYNC,
+                "job_id": job_id,
+                "connection_id": connection_id,
+                "attempt_number": attempt_number,
+                "regenerate": regenerate == 1,
+            },
         )
         return {"task_id": task.id}
     except Exception as error:
