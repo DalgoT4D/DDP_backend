@@ -80,7 +80,7 @@ INSTALLED_APPS = [
     "flags",
 ]
 
-# Feature flags 
+# Feature flags
 # AIRBYTE_PROFILE: to get airbyte credentials through prefect block
 # LOG_SUMMARY: allow summarizing logs through open AI
 FLAGS = {"AIRBYTE_PROFILE": [], "LOG_SUMMARY": []}
