@@ -30,7 +30,7 @@ from ddpui.ddpairbyte.schema import (
 from ddpui.auth import has_permission
 
 from ddpui.models.org_user import OrgUser
-from ddpui.models.llm import LogsSummarizationType
+from ddpui.models.llm import LogsSummarizationType, LlmSession
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.celeryworkers.tasks import (
@@ -39,7 +39,7 @@ from ddpui.celeryworkers.tasks import (
     add_custom_connectors_to_workspace,
     summarize_logs,
 )
-from ddpui.models.tasks import TaskProgressHashPrefix
+from ddpui.models.tasks import TaskProgressHashPrefix, TaskProgressStatus
 from ddpui.utils.singletaskprogress import SingleTaskProgress
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
@@ -665,7 +665,9 @@ def get_connection_catalog_v1(request, connection_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    task_key = f"{TaskProgressHashPrefix.SCHEMA_CHANGE}-{orguser.org.slug}-{connection_id}"
+    task_key = (
+        f"{TaskProgressHashPrefix.SCHEMA_CHANGE}-{orguser.org.slug}-{connection_id}"
+    )
     if SingleTaskProgress.fetch(task_key) is not None:
         return {"task_id": task_key, "message": "already running"}
 
@@ -724,6 +726,15 @@ def get_flow_runs_logsummary_v1(
     """
     try:
         orguser: OrgUser = request.orguser
+
+        llm_session = (
+            LlmSession.objects.filter(orguser=orguser, airbyte_job_id=job_id)
+            .order_by("-created_at")
+            .first()
+        )
+        if llm_session and llm_session.session_status == TaskProgressStatus.RUNNING:
+            return {"task_id": llm_session.request_uuid}
+
         task = summarize_logs.apply_async(
             kwargs={
                 "orguser_id": orguser.id,

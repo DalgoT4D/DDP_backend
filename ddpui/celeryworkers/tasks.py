@@ -26,7 +26,12 @@ from ddpui.models.org import (
     TransformType,
 )
 from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import TaskLock, OrgTask, TaskProgressHashPrefix
+from ddpui.models.tasks import (
+    TaskLock,
+    OrgTask,
+    TaskProgressHashPrefix,
+    TaskProgressStatus,
+)
 from ddpui.models.canvaslock import CanvasLock
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.models.llm import (
@@ -650,7 +655,7 @@ def summarize_logs(
                 taskprogress.add(
                     {
                         "message": "Invalid job id",
-                        "status": "failed",
+                        "status": TaskProgressStatus.FAILED,
                         "result": None,
                     }
                 )
@@ -660,7 +665,7 @@ def summarize_logs(
             taskprogress.add(
                 {
                     "message": "Failed to fetch the sync job",
-                    "status": "failed",
+                    "status": TaskProgressStatus.FAILED,
                     "result": None,
                 }
             )
@@ -688,41 +693,65 @@ def summarize_logs(
             taskprogress.add(
                 {
                     "message": "Retrieved saved summary for the run",
-                    "status": "completed",
+                    "status": TaskProgressStatus.COMPLETED,
                     "result": llm_session.response,
                 }
             )
             return
 
+    # create a partial session
+    llm_session = LlmSession.objects.create(
+        request_uuid=self.request.id,
+        orguser=orguser,
+        org=orguser.org,
+        flow_run_id=flow_run_id,
+        task_id=task_id,
+        airbyte_job_id=job_id,
+        session_status=TaskProgressStatus.RUNNING,
+    )
+
     # logs
     logs_text = ""
     log_file_name = ""
-    if type == LogsSummarizationType.DEPLOYMENT:
-        all_task_logs = get_flow_run_logs_v2(flow_run_id)
-        dbt_tasks = [task for task in all_task_logs if task["id"] == task_id]
-        if len(dbt_tasks) == 0:
-            taskprogress.add(
-                {
-                    "message": "No logs found for the task",
-                    "status": "failed",
-                    "result": None,
-                }
+    try:
+        if type == LogsSummarizationType.DEPLOYMENT:
+            all_task_logs = get_flow_run_logs_v2(flow_run_id)
+            dbt_tasks = [task for task in all_task_logs if task["id"] == task_id]
+            if len(dbt_tasks) == 0:
+                taskprogress.add(
+                    {
+                        "message": "No logs found for the task",
+                        "status": TaskProgressStatus.FAILED,
+                        "result": None,
+                    }
+                )
+                return
+            task = dbt_tasks[0]
+            logs_text = "\n".join([log["message"] for log in task["logs"]])
+            log_file_name = f"{flow_run_id}_{task_id}"
+        elif type == LogsSummarizationType.AIRBYTE_SYNC:
+            logs = airbyte_service.get_logs_for_job(
+                job_id=job_id, attempt_number=attempt_number
             )
-            return
-        task = dbt_tasks[0]
-        logs_text = "\n".join([log["message"] for log in task["logs"]])
-        log_file_name = f"{flow_run_id}_{task_id}"
-    elif type == LogsSummarizationType.AIRBYTE_SYNC:
-        logs = airbyte_service.get_logs_for_job(
-            job_id=job_id, attempt_number=attempt_number
+            logs_text = "\n".join(logs["logs"]["logLines"])
+            log_file_name = f"{job_id}_{attempt_number}"
+    except Exception as err:
+        logger.error(err)
+        taskprogress.add(
+            {
+                "message": str(err),
+                "status": TaskProgressStatus.FAILED,
+                "result": None,
+            }
         )
-        logs_text = "\n".join(logs["logs"]["logLines"])
-        log_file_name = f"{job_id}_{attempt_number}"
+        llm_session.session_status = TaskProgressStatus.FAILED
+        llm_session.save()
+        return
 
     taskprogress.add(
         {
             "message": "Fetched all logs to summarize",
-            "status": "running",
+            "status": TaskProgressStatus.RUNNING,
             "result": None,
         }
     )
@@ -762,26 +791,21 @@ def summarize_logs(
         logger.info("Closing the session")
         llm_service.close_file_search_session(result["session_id"])
 
-        llm_session = LlmSession.objects.create(
-            orguser=orguser,
-            org=orguser.org,
-            flow_run_id=flow_run_id,
-            task_id=task_id,
-            airbyte_job_id=job_id,
-            assistant_prompt=assistant_prompt.prompt,
-            user_prompts=user_prompts,
-            response=[
-                {"prompt": prompt, "response": response}
-                for prompt, response in zip(user_prompts, result["result"])
-            ],
-            session_id=result["session_id"],
-        )
+        llm_session.user_prompts = user_prompts
+        llm_session.assistant_prompt = assistant_prompt.prompt
+        llm_session.response = [
+            {"prompt": prompt, "response": response}
+            for prompt, response in zip(user_prompts, result["result"])
+        ]
+        llm_session.session_id = result["session_id"]
+        llm_session.session_status = TaskProgressStatus.COMPLETED
+        llm_session.save()
 
         logger.info("Completed log summarization")
         taskprogress.add(
             {
                 "message": f"Generated summary for the {type} job",
-                "status": "completed",
+                "status": TaskProgressStatus.COMPLETED,
                 "result": llm_session.response,
             }
         )
@@ -790,10 +814,12 @@ def summarize_logs(
         taskprogress.add(
             {
                 "message": str(err),
-                "status": "failed",
+                "status": TaskProgressStatus.FAILED,
                 "result": None,
             }
         )
+        llm_session.session_status = TaskProgressStatus.FAILED
+        llm_session.save()
 
 
 @app.on_after_finalize.connect

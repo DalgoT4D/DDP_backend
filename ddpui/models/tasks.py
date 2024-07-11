@@ -10,6 +10,14 @@ from ddpui.models.org import OrgDataFlowv1
 from ddpui.models.org_user import OrgUser
 
 
+class TaskProgressStatus(str, Enum):
+    """all possible statuses of a task progress"""
+
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class TaskProgressHashPrefix(str, Enum):
     """
     all possible hash prefixes used to run long running process via celery/redis
