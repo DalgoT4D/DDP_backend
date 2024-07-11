@@ -14,11 +14,15 @@ from ddpui.api.transform_api import transformapi
 from ddpui.api.user_org_api import user_org_api
 from ddpui.api.warehouse_api import warehouseapi
 from ddpui.api.webhook_api import webhookapi
+from ddpui.api.user_preferences_api import userpreferencesapi
+from ddpui.api.notifications_api import notificationsapi
 from ddpui.healthcheck import healthcheck
 from ddpui.html.docs import get_dbt_docs
 from ddpui.html.elementary import get_elementary_report
 
 from ddpui.datainsights.generate_result import DataInsightsConsumer
+from ddpui.websockets.airbyte_consumer import SourceCheckConnectionConsumer
+from ddpui.websockets.airbyte_consumer import DestinationCheckConnectionConsumer
 
 urlpatterns = [
     path("admin/", admin.site.urls),  # Uncomment if you want to use django-admin app
@@ -38,7 +42,18 @@ urlpatterns = [
     path("elementary/<tokenhex>/", get_elementary_report),
     path("prometheus/", include("django_prometheus.urls")),
     path("webhooks/", webhookapi.urls),
+    path("api/userpreferences/", userpreferencesapi.urls),
+    path("api/notifications/", notificationsapi.urls),
 ]
 
 # socket endpoints
-ws_urlpatterns = [path("ws/data_insights/", DataInsightsConsumer.as_asgi())]
+ws_urlpatterns = [
+    path("wss/data_insights/", DataInsightsConsumer.as_asgi()),
+    path(
+        "wss/airbyte/source/check_connection", SourceCheckConnectionConsumer.as_asgi()
+    ),
+    path(
+        "wss/airbyte/destination/check_connection",
+        DestinationCheckConnectionConsumer.as_asgi(),
+    ),
+]

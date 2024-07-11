@@ -10,6 +10,13 @@ from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 
 
+class LogsSummarizationType(str, Enum):
+    """enum for log summarization types"""
+
+    DEPLOYMENT = "deployment"
+    AIRBYTE_SYNC = "airbyte_sync"
+
+
 class LlmAssistantType(str, Enum):
     """enum for llm assistant types"""
 
@@ -37,13 +44,15 @@ class LlmSession(models.Model):
     request_uuid = models.UUIDField(editable=False, unique=True, default=uuid.uuid4)
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     orguser = models.ForeignKey(OrgUser, null=True, on_delete=models.SET_NULL)
-    flow_run_id = models.TextField(null=True)
+    flow_run_id = models.CharField(max_length=200, null=True)
+    task_id = models.CharField(max_length=200, null=True)
     airbyte_job_id = models.IntegerField(null=True)
     assistant_prompt = models.TextField(null=True)
     user_prompts = models.JSONField(default=list, null=True)
     session_id = models.CharField(max_length=200, null=True)
+    session_status = models.CharField(max_length=200, null=True)
     response = models.JSONField(
-        null=False
+        null=True
     )  # one request might have multiple summaries; we store all of them as a json
     response_meta = models.JSONField(null=True)
     created_at = models.DateTimeField(auto_now_add=True)

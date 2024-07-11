@@ -291,10 +291,12 @@ def test_get_job_info_for_connection(
                 },
                 "attempts": [
                     {
+                        "id": 1,
                         "status": "failed",
                         "recordsSynced": 0,
                     },
                     {
+                        "id": 2,
                         "endedAt": 123123123,
                         "createdAt": 123123123,
                         "status": "succeeded",
@@ -356,10 +358,12 @@ def test_get_sync_history_for_connection_no_jobs(
                 },
                 "attempts": [
                     {
+                        "id": 1,
                         "status": "failed",
                         "recordsSynced": 0,
                     },
                     {
+                        "id": 2,
                         "endedAt": 123123123,
                         "createdAt": 123123123,
                         "status": "succeeded",

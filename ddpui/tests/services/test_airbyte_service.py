@@ -1440,8 +1440,9 @@ def test_parse_job_info():
         {
             "job": {"id": "job-id", "status": "job-status"},
             "attempts": [
-                {"status": "failed", "recordsSynced": 0},
+                {"id": 1, "status": "failed", "recordsSynced": 0},
                 {
+                    "id": 2,
                     "status": "succeeded",
                     "createdAt": 300,
                     "endedAt": 400,
@@ -1454,7 +1455,7 @@ def test_parse_job_info():
                         "recordsEmitted": 500,
                     },
                 },
-                {"status": "succeeded", "recordsSynced": 20},
+                {"id": 3, "status": "succeeded", "recordsSynced": 20},
             ],
         }
     )
