@@ -7,6 +7,7 @@ from ninja.errors import HttpError, ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from rest_framework.authtoken import views
+from flags.state import flag_enabled
 
 from ddpui import auth
 from ddpui.auth import has_permission
@@ -544,3 +545,18 @@ def post_organization_accept_tnc(request):
     if error:
         raise HttpError(400, error)
     return {"success": 1}
+
+
+@user_org_api.get("/organizations/flags", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_flags"])
+def get_organization_feature_flags(request):
+    """get"""
+    orguser: OrgUser = request.orguser
+    org_slug = orguser.org.slug
+
+    flags = {"allowLogsSummary": False}
+
+    if flag_enabled("LOG_SUMMARY", request_org_slug=org_slug):
+        flags["allowLogsSummary"] = True
+
+    return flags
