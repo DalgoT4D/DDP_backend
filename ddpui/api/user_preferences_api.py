@@ -71,30 +71,21 @@ def create_user_preferences(request, payload: CreateUserPreferencesSchema):
 
 @userpreferencesapi.put("/", auth=auth.CustomAuthMiddleware())
 def update_user_preferences(request, payload: UpdateUserPreferencesSchema):
-    """updates user preferences for the user"""
+    """Updates user preferences for the user"""
     orguser: OrgUser = request.orguser
 
-    try:
-        user_preferences = UserPreferences.objects.get(orguser=orguser)
-        if payload.enable_discord_notifications is not None:
-            user_preferences.enable_discord_notifications = (
-                payload.enable_discord_notifications
-            )
-        if payload.enable_email_notifications is not None:
-            user_preferences.enable_email_notifications = (
-                payload.enable_email_notifications
-            )
-        if payload.discord_webhook is not None:
-            user_preferences.discord_webhook = payload.discord_webhook
+    user_preferences, created = UserPreferences.objects.get_or_create(orguser=orguser)
 
-        user_preferences.save()
-    except UserPreferences.DoesNotExist:
-        user_preferences = UserPreferences.objects.create(
-            orguser=orguser,
-            enable_discord_notifications=payload.enable_discord_notifications,
-            enable_email_notifications=payload.enable_email_notifications,
-            discord_webhook=payload.discord_webhook,
+    if payload.enable_discord_notifications is not None:
+        user_preferences.enable_discord_notifications = (
+            payload.enable_discord_notifications
         )
+    if payload.enable_email_notifications is not None:
+        user_preferences.enable_email_notifications = payload.enable_email_notifications
+    if payload.discord_webhook is not None:
+        user_preferences.discord_webhook = payload.discord_webhook
+
+    user_preferences.save()
 
     preferences = {
         "discord_webhook": user_preferences.discord_webhook,
@@ -110,16 +101,7 @@ def get_user_preferences(request):
     """gets user preferences for the user"""
     orguser: OrgUser = request.orguser
 
-    try:
-        user_preferences = UserPreferences.objects.get(orguser=orguser)
-
-    except UserPreferences.DoesNotExist:
-        user_preferences = UserPreferences.objects.create(
-            orguser=orguser,
-            enable_discord_notifications=False,
-            enable_email_notifications=False,
-            discord_webhook=None,
-        )
+    user_preferences, created = UserPreferences.objects.get_or_create(orguser=orguser)
 
     preferences = {
         "discord_webhook": user_preferences.discord_webhook,
