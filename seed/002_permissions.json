@@ -1,1 +1,402 @@
-[{"model": "ddpui.Permission", "pk": 1, "fields": {"name": "Can View Dashboard", "slug": "can_view_dashboard"}}, {"model": "ddpui.Permission", "pk": 2, "fields": {"name": "Can View Sources", "slug": "can_view_sources"}}, {"model": "ddpui.Permission", "pk": 3, "fields": {"name": "Can Create Source", "slug": "can_create_source"}}, {"model": "ddpui.Permission", "pk": 4, "fields": {"name": "Can Edit Source", "slug": "can_edit_source"}}, {"model": "ddpui.Permission", "pk": 5, "fields": {"name": "Can View Source", "slug": "can_view_source"}}, {"model": "ddpui.Permission", "pk": 6, "fields": {"name": "Can View Warehouses", "slug": "can_view_warehouses"}}, {"model": "ddpui.Permission", "pk": 7, "fields": {"name": "Can View Warehouse", "slug": "can_view_warehouse"}}, {"model": "ddpui.Permission", "pk": 8, "fields": {"name": "Can Create Warehouse", "slug": "can_create_warehouse"}}, {"model": "ddpui.Permission", "pk": 9, "fields": {"name": "Can Edit Warehouse", "slug": "can_edit_warehouse"}}, {"model": "ddpui.Permission", "pk": 10, "fields": {"name": "Can View Connection", "slug": "can_view_connection"}}, {"model": "ddpui.Permission", "pk": 11, "fields": {"name": "Can Create Org", "slug": "can_create_org"}}, {"model": "ddpui.Permission", "pk": 12, "fields": {"name": "Can Create Connection", "slug": "can_create_connection"}}, {"model": "ddpui.Permission", "pk": 13, "fields": {"name": "Can View Connections", "slug": "can_view_connections"}}, {"model": "ddpui.Permission", "pk": 14, "fields": {"name": "Can Reset Connection", "slug": "can_reset_connection"}}, {"model": "ddpui.Permission", "pk": 15, "fields": {"name": "Can Edit Connection", "slug": "can_edit_connection"}}, {"model": "ddpui.Permission", "pk": 16, "fields": {"name": "Can Delete Connection", "slug": "can_delete_connection"}}, {"model": "ddpui.Permission", "pk": 17, "fields": {"name": "Can Delete Source", "slug": "can_delete_source"}}, {"model": "ddpui.Permission", "pk": 18, "fields": {"name": "View Tasks", "slug": "can_view_master_tasks"}}, {"model": "ddpui.Permission", "pk": 19, "fields": {"name": "View Task Config", "slug": "can_view_master_task"}}, {"model": "ddpui.Permission", "pk": 20, "fields": {"name": "Can Create Dbt Workspace", "slug": "can_create_dbt_workspace"}}, {"model": "ddpui.Permission", "pk": 21, "fields": {"name": "Can Edit Dbt Workspace", "slug": "can_edit_dbt_workspace"}}, {"model": "ddpui.Permission", "pk": 22, "fields": {"name": "Can Delete Dbt Workspace", "slug": "can_delete_dbt_workspace"}}, {"model": "ddpui.Permission", "pk": 23, "fields": {"name": "Can View Dbt Workspace", "slug": "can_view_dbt_workspace"}}, {"model": "ddpui.Permission", "pk": 24, "fields": {"name": "Can Run Orgtask", "slug": "can_run_orgtask"}}, {"model": "ddpui.Permission", "pk": 25, "fields": {"name": "Can Generate Dbt Docs", "slug": "can_create_dbt_docs"}}, {"model": "ddpui.Permission", "pk": 26, "fields": {"name": "Can Create Orgtask", "slug": "can_create_orgtask"}}, {"model": "ddpui.Permission", "pk": 27, "fields": {"name": "Can View Orgtasks", "slug": "can_view_orgtasks"}}, {"model": "ddpui.Permission", "pk": 28, "fields": {"name": "Can Delete Orgtask", "slug": "can_delete_orgtask"}}, {"model": "ddpui.Permission", "pk": 29, "fields": {"name": "Can Create Pipeline", "slug": "can_create_pipeline"}}, {"model": "ddpui.Permission", "pk": 30, "fields": {"name": "Can View Pipelines", "slug": "can_view_pipelines"}}, {"model": "ddpui.Permission", "pk": 31, "fields": {"name": "Can View Pipeline", "slug": "can_view_pipeline"}}, {"model": "ddpui.Permission", "pk": 32, "fields": {"name": "Can Delete Pipeline", "slug": "can_delete_pipeline"}}, {"model": "ddpui.Permission", "pk": 33, "fields": {"name": "Can Edit Pipeline", "slug": "can_edit_pipeline"}}, {"model": "ddpui.Permission", "pk": 34, "fields": {"name": "Can Run Pipeline", "slug": "can_run_pipeline"}}, {"model": "ddpui.Permission", "pk": 35, "fields": {"name": "Can View Task Progress", "slug": "can_view_task_progress"}}, {"model": "ddpui.Permission", "pk": 36, "fields": {"name": "Can View Usage Dashboard", "slug": "can_view_usage_dashboard"}}, {"model": "ddpui.Permission", "pk": 37, "fields": {"name": "Can Sync Sources", "slug": "can_sync_sources"}}, {"model": "ddpui.Permission", "pk": 38, "fields": {"name": "Can Create Dbt Model", "slug": "can_create_dbt_model"}}, {"model": "ddpui.Permission", "pk": 39, "fields": {"name": "Can Edit Dbt Operation", "slug": "can_edit_dbt_operation"}}, {"model": "ddpui.Permission", "pk": 40, "fields": {"name": "Can View Dbt Operation", "slug": "can_view_dbt_operation"}}, {"model": "ddpui.Permission", "pk": 41, "fields": {"name": "Can Edit Dbt Model", "slug": "can_edit_dbt_model"}}, {"model": "ddpui.Permission", "pk": 42, "fields": {"name": "Can View Dbt Models", "slug": "can_view_dbt_models"}}, {"model": "ddpui.Permission", "pk": 43, "fields": {"name": "Can Delete Dbt Model", "slug": "can_delete_dbt_model"}}, {"model": "ddpui.Permission", "pk": 44, "fields": {"name": "Can Delete Dbt Operation", "slug": "can_delete_dbt_operation"}}, {"model": "ddpui.Permission", "pk": 45, "fields": {"name": "Can View Warehouse Data", "slug": "can_view_warehouse_data"}}, {"model": "ddpui.Permission", "pk": 46, "fields": {"name": "Can View Org Users", "slug": "can_view_orgusers"}}, {"model": "ddpui.Permission", "pk": 47, "fields": {"name": "Can Create Org User", "slug": "can_create_orguser"}}, {"model": "ddpui.Permission", "pk": 48, "fields": {"name": "Can Delete Org User", "slug": "can_delete_orguser"}}, {"model": "ddpui.Permission", "pk": 49, "fields": {"name": "Can Edit Org User", "slug": "can_edit_orguser"}}, {"model": "ddpui.Permission", "pk": 50, "fields": {"name": "Can Edit Org User Role", "slug": "can_edit_orguser_role"}}, {"model": "ddpui.Permission", "pk": 51, "fields": {"name": "Can Create Invitation", "slug": "can_create_invitation"}}, {"model": "ddpui.Permission", "pk": 52, "fields": {"name": "Public", "slug": "public"}}, {"model": "ddpui.Permission", "pk": 53, "fields": {"name": "Can View Invitations", "slug": "can_view_invitations"}}, {"model": "ddpui.Permission", "pk": 54, "fields": {"name": "Can Edit Invitation", "slug": "can_edit_invitation"}}, {"model": "ddpui.Permission", "pk": 55, "fields": {"name": "Can Delete Invitation", "slug": "can_delete_invitation"}}, {"model": "ddpui.Permission", "pk": 56, "fields": {"name": "Can Resend Email Verification", "slug": "can_resend_email_verification"}}, {"model": "ddpui.Permission", "pk": 57, "fields": {"name": "Can Delete Warehouse", "slug": "can_delete_warehouses"}}, {"model": "ddpui.Permission", "pk": 58, "fields": {"name": "Can Accept Terms And Conditions", "slug": "can_accept_tnc"}}]
+[
+    {
+        "model": "ddpui.Permission",
+        "pk": 1,
+        "fields": { "name": "Can View Dashboard", "slug": "can_view_dashboard" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 2,
+        "fields": { "name": "Can View Sources", "slug": "can_view_sources" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 3,
+        "fields": { "name": "Can Create Source", "slug": "can_create_source" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 4,
+        "fields": { "name": "Can Edit Source", "slug": "can_edit_source" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 5,
+        "fields": { "name": "Can View Source", "slug": "can_view_source" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 6,
+        "fields": {
+            "name": "Can View Warehouses",
+            "slug": "can_view_warehouses"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 7,
+        "fields": { "name": "Can View Warehouse", "slug": "can_view_warehouse" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 8,
+        "fields": {
+            "name": "Can Create Warehouse",
+            "slug": "can_create_warehouse"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 9,
+        "fields": { "name": "Can Edit Warehouse", "slug": "can_edit_warehouse" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 10,
+        "fields": {
+            "name": "Can View Connection",
+            "slug": "can_view_connection"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 11,
+        "fields": { "name": "Can Create Org", "slug": "can_create_org" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 12,
+        "fields": {
+            "name": "Can Create Connection",
+            "slug": "can_create_connection"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 13,
+        "fields": {
+            "name": "Can View Connections",
+            "slug": "can_view_connections"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 14,
+        "fields": {
+            "name": "Can Reset Connection",
+            "slug": "can_reset_connection"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 15,
+        "fields": {
+            "name": "Can Edit Connection",
+            "slug": "can_edit_connection"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 16,
+        "fields": {
+            "name": "Can Delete Connection",
+            "slug": "can_delete_connection"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 17,
+        "fields": { "name": "Can Delete Source", "slug": "can_delete_source" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 18,
+        "fields": { "name": "View Tasks", "slug": "can_view_master_tasks" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 19,
+        "fields": { "name": "View Task Config", "slug": "can_view_master_task" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 20,
+        "fields": {
+            "name": "Can Create Dbt Workspace",
+            "slug": "can_create_dbt_workspace"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 21,
+        "fields": {
+            "name": "Can Edit Dbt Workspace",
+            "slug": "can_edit_dbt_workspace"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 22,
+        "fields": {
+            "name": "Can Delete Dbt Workspace",
+            "slug": "can_delete_dbt_workspace"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 23,
+        "fields": {
+            "name": "Can View Dbt Workspace",
+            "slug": "can_view_dbt_workspace"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 24,
+        "fields": { "name": "Can Run Orgtask", "slug": "can_run_orgtask" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 25,
+        "fields": {
+            "name": "Can Generate Dbt Docs",
+            "slug": "can_create_dbt_docs"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 26,
+        "fields": { "name": "Can Create Orgtask", "slug": "can_create_orgtask" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 27,
+        "fields": { "name": "Can View Orgtasks", "slug": "can_view_orgtasks" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 28,
+        "fields": { "name": "Can Delete Orgtask", "slug": "can_delete_orgtask" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 29,
+        "fields": {
+            "name": "Can Create Pipeline",
+            "slug": "can_create_pipeline"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 30,
+        "fields": { "name": "Can View Pipelines", "slug": "can_view_pipelines" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 31,
+        "fields": { "name": "Can View Pipeline", "slug": "can_view_pipeline" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 32,
+        "fields": {
+            "name": "Can Delete Pipeline",
+            "slug": "can_delete_pipeline"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 33,
+        "fields": { "name": "Can Edit Pipeline", "slug": "can_edit_pipeline" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 34,
+        "fields": { "name": "Can Run Pipeline", "slug": "can_run_pipeline" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 35,
+        "fields": {
+            "name": "Can View Task Progress",
+            "slug": "can_view_task_progress"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 36,
+        "fields": {
+            "name": "Can View Usage Dashboard",
+            "slug": "can_view_usage_dashboard"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 37,
+        "fields": { "name": "Can Sync Sources", "slug": "can_sync_sources" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 38,
+        "fields": {
+            "name": "Can Create Dbt Model",
+            "slug": "can_create_dbt_model"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 39,
+        "fields": {
+            "name": "Can Edit Dbt Operation",
+            "slug": "can_edit_dbt_operation"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 40,
+        "fields": {
+            "name": "Can View Dbt Operation",
+            "slug": "can_view_dbt_operation"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 41,
+        "fields": { "name": "Can Edit Dbt Model", "slug": "can_edit_dbt_model" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 42,
+        "fields": {
+            "name": "Can View Dbt Models",
+            "slug": "can_view_dbt_models"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 43,
+        "fields": {
+            "name": "Can Delete Dbt Model",
+            "slug": "can_delete_dbt_model"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 44,
+        "fields": {
+            "name": "Can Delete Dbt Operation",
+            "slug": "can_delete_dbt_operation"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 45,
+        "fields": {
+            "name": "Can View Warehouse Data",
+            "slug": "can_view_warehouse_data"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 46,
+        "fields": { "name": "Can View Org Users", "slug": "can_view_orgusers" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 47,
+        "fields": {
+            "name": "Can Create Org User",
+            "slug": "can_create_orguser"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 48,
+        "fields": {
+            "name": "Can Delete Org User",
+            "slug": "can_delete_orguser"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 49,
+        "fields": { "name": "Can Edit Org User", "slug": "can_edit_orguser" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 50,
+        "fields": {
+            "name": "Can Edit Org User Role",
+            "slug": "can_edit_orguser_role"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 51,
+        "fields": {
+            "name": "Can Create Invitation",
+            "slug": "can_create_invitation"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 52,
+        "fields": { "name": "Public", "slug": "public" }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 53,
+        "fields": {
+            "name": "Can View Invitations",
+            "slug": "can_view_invitations"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 54,
+        "fields": {
+            "name": "Can Edit Invitation",
+            "slug": "can_edit_invitation"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 55,
+        "fields": {
+            "name": "Can Delete Invitation",
+            "slug": "can_delete_invitation"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 56,
+        "fields": {
+            "name": "Can Resend Email Verification",
+            "slug": "can_resend_email_verification"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 57,
+        "fields": {
+            "name": "Can Delete Warehouse",
+            "slug": "can_delete_warehouses"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 58,
+        "fields": {
+            "name": "Can Accept Terms And Conditions",
+            "slug": "can_accept_tnc"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 59,
+        "fields": {
+            "name": "Can view feature flags of an organization",
+            "slug": "can_view_flags"
+        }
+    }
+]
