@@ -749,3 +749,21 @@ def get_flow_runs_logsummary_v1(
     except Exception as error:
         logger.exception(error)
         raise HttpError(400, "failed to retrieve logs") from error
+
+
+@airbyteapi.get("v1/logs", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_connection"])
+def get_job_logs(
+    request,
+    job_id: int,
+    attempt_number: int,
+):
+    """get the log info from airbyte for a job attempt"""
+    try:
+        logs = airbyte_service.get_logs_for_job(job_id, attempt_number)
+        log_details = logs["logs"]["logLines"]
+    except Exception as error:
+        logger.exception(error)
+        log_details = ["An error occured while fetching logs!"]
+
+    return log_details

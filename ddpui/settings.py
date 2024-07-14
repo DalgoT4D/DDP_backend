@@ -80,8 +80,10 @@ INSTALLED_APPS = [
     "flags",
 ]
 
-# Feature flag to get airbyte credentials through prefect block
-FLAGS = {"AIRBYTE_PROFILE": []}
+# Feature flags
+# AIRBYTE_PROFILE: to get airbyte credentials through prefect block
+# LOG_SUMMARY: allow summarizing logs through open AI
+FLAGS = {"AIRBYTE_PROFILE": [], "LOG_SUMMARY": []}
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
