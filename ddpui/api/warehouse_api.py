@@ -365,28 +365,15 @@ def post_warehouse_prompt(request, payload: AskWarehouseRequest):
         logger.info(f"Setting LIMIT {LIMIT_ROWS_TO_SEND_TO_LLM} to the query")
         payload.sql = f"{payload.sql} LIMIT {limit}"
 
-    logger.info(f"Submitting query to warehouse for execution \n '''{payload.sql}'''")
-
-    # credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
-
-    # wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
-
-    # rows = []
-    # try:
-    #     rows = wclient.execute(payload.sql)
-    # except Exception as err:
-    #     logger.error(err)
-    #     raise HttpError(400, str(err))
-
     try:
 
         task = summarize_warehouse_results.apply_async(
             kwargs={
                 "orguser_id": orguser.id,
+                "org_warehouse_id": org_warehouse.id,
                 "sql": payload.sql,
                 "session_name": payload.session_name,
                 "user_prompt": payload.user_prompt,
-                "org_warehouse_id": org_warehouse.id,
             },
         )
         return {"task_id": task.id}

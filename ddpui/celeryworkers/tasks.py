@@ -872,6 +872,7 @@ def summarize_warehouse_results(
     wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
 
     # fetch the results of the query
+    logger.info(f"Submitting query to warehouse for execution \n '''{sql}'''")
     rows = []
     try:
         rows = wclient.execute(sql)
@@ -903,15 +904,16 @@ def summarize_warehouse_results(
     try:
         # prepare the text data to be uploaded
         headers = rows[0].keys()
-        csv_lines = [",".join(headers)]  # Add header row
+        csv_lines = [",".join(headers) + "\n"]  # Add header row
         for item in rows:
-            row = [item[header] for header in headers]  # Extract values in header order
-            csv_lines.append(" ".join(row))
-            csv_lines.append("\n")
+            row = [
+                str(item[header]) for header in headers
+            ]  # Extract values in header order
+            csv_lines.append(" ".join(row) + "\n")
 
         # upload the results as a file to llm service
         fpath, session_id = llm_service.upload_text_as_file(
-            csv_lines, "warehouse_results"
+            "".join(csv_lines), "warehouse_results"
         )
         logger.info("Uploaded file successfully to LLM service at " + str(fpath))
         logger.info("Session ID: " + session_id)
@@ -944,6 +946,15 @@ def summarize_warehouse_results(
         llm_session.session_id = result["session_id"]
         llm_session.session_status = TaskProgressStatus.COMPLETED
         llm_session.save()
+
+        logger.info("Completed summarization")
+        taskprogress.add(
+            {
+                "message": f"Generated summary response",
+                "status": TaskProgressStatus.COMPLETED,
+                "result": llm_session.response,
+            }
+        )
 
     except Exception as err:
         logger.error(err)
