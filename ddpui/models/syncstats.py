@@ -15,9 +15,9 @@ class SyncStats(models.Model):
         choices=[("manual", "manual"), ("orchestrate", "orchestrate")]
     )
     sync_time = models.DateTimeField()
-    sync_duration_s = models.IntegerField(default=0)
-    sync_records = models.IntegerField(default=0)
-    sync_data_volume_b = models.IntegerField(default=0)
+    sync_duration_s = models.BigIntegerField(default=0)
+    sync_records = models.BigIntegerField(default=0)
+    sync_data_volume_b = models.BigIntegerField(default=0)
 
     def __str__(self) -> str:
         return f"SyncStats[{self.org.name}|{self.connection_id}]"
