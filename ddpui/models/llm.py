@@ -50,6 +50,7 @@ class LlmSession(models.Model):
     assistant_prompt = models.TextField(null=True)
     user_prompts = models.JSONField(default=list, null=True)
     session_id = models.CharField(max_length=200, null=True)
+    session_name = models.CharField(max_length=500, null=True, unique=True)
     session_status = models.CharField(max_length=200, null=True)
     response = models.JSONField(
         null=True
