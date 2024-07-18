@@ -17,6 +17,7 @@ from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
+from ddpui.utils.helpers import convert_to_standard_types
 
 
 logger = CustomLogger("ddpui")
@@ -155,7 +156,7 @@ def poll_for_column_insights(
                 {
                     "message": "Fetched results",
                     "status": GenerateResult.RESULT_STATUS_COMPLETED,
-                    "results": final,
+                    "results": convert_to_standard_types(final),
                 }
             )
             return
@@ -184,11 +185,13 @@ def poll_for_column_insights(
         GenerateResult.execute_insight_queries(
             org_warehouse.org, wclient, execute_queries, requestor_col
         )
-        final_result = GenerateResult.fetch_results(
-            org_warehouse.org,
-            requestor_col.db_schema,
-            requestor_col.db_table,
-            requestor_col.column_name,
+        final_result = convert_to_standard_types(
+            GenerateResult.fetch_results(
+                org_warehouse.org,
+                requestor_col.db_schema,
+                requestor_col.db_table,
+                requestor_col.column_name,
+            )
         )
 
     # if the results are still invalid/partial; return an error state
@@ -295,7 +298,7 @@ class GenerateResult:
                     logger.error(err)
                     cls.release_query_lock(org, query, force_expire=True)
 
-        return output_of_all_queries
+        return convert_to_standard_types(output_of_all_queries)
 
     @classmethod
     def is_query_locked(cls, query_payload: str, check_expiry: bool = False) -> bool:
