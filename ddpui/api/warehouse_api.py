@@ -26,6 +26,22 @@ from ddpui.utils import secretsmanager
 warehouseapi = NinjaAPI(urls_namespace="warehouse")
 logger = CustomLogger("ddpui")
 
+from decimal import Decimal
+from django.http import JsonResponse
+
+
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return float(obj)
+        elif isinstance(obj, dict):
+            return {key: self.default(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [self.default(element) for element in obj]
+        elif isinstance(obj, tuple):
+            return tuple(self.default(element) for element in obj)
+        return super(DecimalEncoder, self).default(obj)
+
 
 @warehouseapi.exception_handler(ValidationError)
 def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
@@ -134,15 +150,18 @@ def get_table_data(
     order: int = 1,
 ):
     """Fetches data from a specific table in a warehouse"""
-    return get_warehouse_data(
-        request,
-        "table_data",
-        schema_name=schema_name,
-        table_name=table_name,
-        page=page,
-        limit=limit,
-        order_by=order_by,
-        order=order,
+    return JsonResponse(
+        get_warehouse_data(
+            request,
+            "table_data",
+            schema_name=schema_name,
+            table_name=table_name,
+            page=page,
+            limit=limit,
+            order_by=order_by,
+            order=order,
+        ),
+        encoder=DecimalEncoder,
     )
 
 
