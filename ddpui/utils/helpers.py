@@ -144,10 +144,11 @@ def convert_to_standard_types(obj):
     """convert a dictionary with Decimal values to float"""
     if isinstance(obj, Decimal):
         return float(obj)
-    elif isinstance(obj, dict):
+    # add other special cases here
+    if isinstance(obj, dict):
         return {key: convert_to_standard_types(value) for key, value in obj.items()}
-    elif isinstance(obj, list):
+    if isinstance(obj, list):
         return [convert_to_standard_types(element) for element in obj]
-    elif isinstance(obj, tuple):
+    if isinstance(obj, tuple):
         return tuple(convert_to_standard_types(element) for element in obj)
     return obj
