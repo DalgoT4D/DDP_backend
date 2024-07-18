@@ -430,7 +430,9 @@ class GenerateResult:
         if lock.acquire():
             current_results = cls.fetch_results(org, query.db_schema, query.db_table)
 
-            final_result = cls.merge_results(current_results, parsed_results)
+            final_result = convert_to_standard_types(
+                cls.merge_results(current_results, parsed_results)
+            )
 
             # save results to redis
             hash = cls.build_insights_hash_to_store_results(
