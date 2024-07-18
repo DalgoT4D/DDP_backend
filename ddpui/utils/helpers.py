@@ -5,6 +5,7 @@ import string
 import secrets
 import hashlib
 import json
+from decimal import Decimal
 
 
 def runcmd(cmd: str, cwd: str):
@@ -137,3 +138,16 @@ def nice_bytes(n: int) -> str:
         l += 1
 
     return str(round(n, 2)) + " " + units[l]
+
+
+def convert_to_standard_types(obj):
+    """convert a dictionary with Decimal values to float"""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    elif isinstance(obj, dict):
+        return {key: convert_to_standard_types(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_to_standard_types(element) for element in obj]
+    elif isinstance(obj, tuple):
+        return tuple(convert_to_standard_types(element) for element in obj)
+    return obj

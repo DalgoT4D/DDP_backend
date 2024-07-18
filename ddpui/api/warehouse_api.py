@@ -22,25 +22,10 @@ from ddpui.datainsights.generate_result import GenerateResult, poll_for_column_i
 
 from ddpui.schemas.warehouse_api_schemas import RequestorColumnSchema
 from ddpui.utils import secretsmanager
+from ddpui.utils.helpers import convert_to_standard_types
 
 warehouseapi = NinjaAPI(urls_namespace="warehouse")
 logger = CustomLogger("ddpui")
-
-from decimal import Decimal
-from django.http import JsonResponse
-
-
-class DecimalEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, Decimal):
-            return float(obj)
-        elif isinstance(obj, dict):
-            return {key: self.default(value) for key, value in obj.items()}
-        elif isinstance(obj, list):
-            return [self.default(element) for element in obj]
-        elif isinstance(obj, tuple):
-            return tuple(self.default(element) for element in obj)
-        return super(DecimalEncoder, self).default(obj)
 
 
 @warehouseapi.exception_handler(ValidationError)
@@ -108,7 +93,7 @@ def get_warehouse_data(request, data_type: str, **kwargs):
         logger.exception(f"Exception occurred in get_{data_type}: {error}")
         raise HttpError(500, f"Failed to get {data_type}")
 
-    return data
+    return convert_to_standard_types(data)
 
 
 @warehouseapi.get("/tables/{schema_name}", auth=auth.CustomAuthMiddleware())
@@ -150,18 +135,15 @@ def get_table_data(
     order: int = 1,
 ):
     """Fetches data from a specific table in a warehouse"""
-    return JsonResponse(
-        get_warehouse_data(
-            request,
-            "table_data",
-            schema_name=schema_name,
-            table_name=table_name,
-            page=page,
-            limit=limit,
-            order_by=order_by,
-            order=order,
-        ),
-        encoder=DecimalEncoder,
+    return get_warehouse_data(
+        request,
+        "table_data",
+        schema_name=schema_name,
+        table_name=table_name,
+        page=page,
+        limit=limit,
+        order_by=order_by,
+        order=order,
     )
 
 
