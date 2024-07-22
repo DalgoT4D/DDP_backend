@@ -25,8 +25,9 @@ from ddpui.websockets.airbyte_consumer import SourceCheckConnectionConsumer
 from ddpui.websockets.airbyte_consumer import DestinationCheckConnectionConsumer
 
 
-def trigger_error(request):
-    division_by_zero = 1 / 0
+def trigger_error(request):  # pylint: disable=unused-argument # skipcq PYK-W0612
+    """endpoint to test sentry"""
+    division_by_zero = 1 / 0  # pylint: disable=unused-variable
 
 
 urlpatterns = [
