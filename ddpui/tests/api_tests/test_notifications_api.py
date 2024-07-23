@@ -400,7 +400,6 @@ def test_get_unread_notifications_count_success(orguser):
         response = get_unread_notifications_count(request)
         assert response["success"] is True
         assert (
-            response["res"]
-            is 0
+            response["res"] == 0
         )
         mock_get_unread_notifications_count.assert_called_once_with(orguser)
