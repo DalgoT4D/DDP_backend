@@ -6,6 +6,7 @@ import secrets
 import hashlib
 import json
 from decimal import Decimal
+from datetime import datetime, date
 
 
 def runcmd(cmd: str, cwd: str):
@@ -141,10 +142,15 @@ def nice_bytes(n: int) -> str:
 
 
 def convert_to_standard_types(obj):
-    """convert a dictionary with Decimal values to float"""
+    """convert a sql alchemy python types to json serializable types"""
+    if obj is None:
+        return obj
     if isinstance(obj, Decimal):
         return float(obj)
+
     # add other special cases here
+    if isinstance(obj, (datetime, date)):
+        return str(obj)
     if isinstance(obj, dict):
         return {key: convert_to_standard_types(value) for key, value in obj.items()}
     if isinstance(obj, list):

@@ -17,7 +17,6 @@ from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
-from ddpui.utils.helpers import convert_to_standard_types
 
 
 logger = CustomLogger("ddpui")
@@ -156,7 +155,7 @@ def poll_for_column_insights(
                 {
                     "message": "Fetched results",
                     "status": GenerateResult.RESULT_STATUS_COMPLETED,
-                    "results": convert_to_standard_types(final),
+                    "results": final,
                 }
             )
             return
@@ -185,13 +184,11 @@ def poll_for_column_insights(
         GenerateResult.execute_insight_queries(
             org_warehouse.org, wclient, execute_queries, requestor_col
         )
-        final_result = convert_to_standard_types(
-            GenerateResult.fetch_results(
-                org_warehouse.org,
-                requestor_col.db_schema,
-                requestor_col.db_table,
-                requestor_col.column_name,
-            )
+        final_result = GenerateResult.fetch_results(
+            org_warehouse.org,
+            requestor_col.db_schema,
+            requestor_col.db_table,
+            requestor_col.column_name,
         )
 
     # if the results are still invalid/partial; return an error state
@@ -292,13 +289,14 @@ class GenerateResult:
                     # release the lock for this query
                     cls.release_query_lock(org, query)
                 except Exception as err:
+                    logger.info(results)
                     logger.error(
                         "Something went wrong while executing the query or saving the results; clearing the lock"
                     )
                     logger.error(err)
                     cls.release_query_lock(org, query, force_expire=True)
 
-        return convert_to_standard_types(output_of_all_queries)
+        return output_of_all_queries
 
     @classmethod
     def is_query_locked(cls, query_payload: str, check_expiry: bool = False) -> bool:
@@ -430,9 +428,7 @@ class GenerateResult:
         if lock.acquire():
             current_results = cls.fetch_results(org, query.db_schema, query.db_table)
 
-            final_result = convert_to_standard_types(
-                cls.merge_results(current_results, parsed_results)
-            )
+            final_result = cls.merge_results(current_results, parsed_results)
 
             # save results to redis
             hash = cls.build_insights_hash_to_store_results(
