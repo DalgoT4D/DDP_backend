@@ -303,3 +303,17 @@ def delete_scheduled_notification(
 
     except Notification.DoesNotExist:
         return "Notification does not exist.", None
+
+
+# get count of unread notifications
+def get_unread_notifications_count(
+    orguser: OrgUser,
+) -> Tuple[Optional[None], Dict[str, Any]]:
+    """
+    Returns the count of unread notifications for a specific user.
+    """
+    unread_count = NotificationRecipient.objects.filter(
+        recipient=orguser, read_status=False
+    ).count()
+
+    return None, {"success": True, "res": unread_count}

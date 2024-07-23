@@ -19,6 +19,7 @@ from ddpui.core.notifications_service import (
     get_user_notifications,
     mark_notification_as_read_or_unread,
     delete_scheduled_notification,
+    get_unread_notifications_count
 )
 from ddpui.schemas.notifications_api_schemas import SentToEnum
 from ddpui.tests.api_tests.test_user_org_api import mock_request, seed_db
@@ -283,3 +284,10 @@ def test_delete_scheduled_notification_not_exist():
     error, result = delete_scheduled_notification(9999)
     assert error is not None
     assert result is None
+
+
+def test_count_unread_notifications_success(orguser):
+    error, result = get_unread_notifications_count(orguser)
+    assert error is None
+    assert result["success"] is True
+    assert result["res"] >= 0
