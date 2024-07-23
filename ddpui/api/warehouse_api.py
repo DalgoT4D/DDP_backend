@@ -22,6 +22,7 @@ from ddpui.datainsights.generate_result import GenerateResult, poll_for_column_i
 
 from ddpui.schemas.warehouse_api_schemas import RequestorColumnSchema
 from ddpui.utils import secretsmanager
+from ddpui.utils.helpers import convert_to_standard_types
 
 warehouseapi = NinjaAPI(urls_namespace="warehouse")
 logger = CustomLogger("ddpui")
@@ -92,7 +93,7 @@ def get_warehouse_data(request, data_type: str, **kwargs):
         logger.exception(f"Exception occurred in get_{data_type}: {error}")
         raise HttpError(500, f"Failed to get {data_type}")
 
-    return data
+    return convert_to_standard_types(data)
 
 
 @warehouseapi.get("/tables/{schema_name}", auth=auth.CustomAuthMiddleware())

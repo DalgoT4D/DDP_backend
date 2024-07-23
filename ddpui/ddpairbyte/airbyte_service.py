@@ -938,7 +938,8 @@ def get_logs_for_job(job_id: int, attempt_number: int = 0) -> list:
         raise HttpError(400, "job_id must be an integer")
 
     res = abreq(
-        "attempt/get_for_job", {"jobId": job_id, "attemptNumber": attempt_number}
+        "attempt/get_for_job",
+        {"jobId": job_id, "attemptNumber": attempt_number},
     )
     return res
 

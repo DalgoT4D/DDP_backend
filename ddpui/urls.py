@@ -24,6 +24,12 @@ from ddpui.datainsights.generate_result import DataInsightsConsumer
 from ddpui.websockets.airbyte_consumer import SourceCheckConnectionConsumer
 from ddpui.websockets.airbyte_consumer import DestinationCheckConnectionConsumer
 
+
+def trigger_error(request):  # pylint: disable=unused-argument # skipcq PYK-W0612
+    """endpoint to test sentry"""
+    division_by_zero = 1 / 0  # pylint: disable=unused-variable
+
+
 urlpatterns = [
     path("admin/", admin.site.urls),  # Uncomment if you want to use django-admin app
     path("api/dashboard/", dashboardapi.urls),
@@ -44,6 +50,7 @@ urlpatterns = [
     path("webhooks/", webhookapi.urls),
     path("api/userpreferences/", userpreferencesapi.urls),
     path("api/notifications/", notificationsapi.urls),
+    path("sentry-debug/", trigger_error),
 ]
 
 # socket endpoints

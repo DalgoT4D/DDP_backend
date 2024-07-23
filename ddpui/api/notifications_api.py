@@ -140,3 +140,14 @@ def delete_notification(request, notification_id: int):
         raise HttpError(400, error)
 
     return result
+
+
+@notificationsapi.get("/unread_count", auth=auth.CustomAuthMiddleware())
+def get_unread_notifications_count(request):
+    """Get count of unread notifications"""
+    orguser: OrgUser = request.orguser
+    error, result = notifications_service.get_unread_notifications_count(orguser)
+    if error is not None:
+        raise HttpError(400, error)
+
+    return result
