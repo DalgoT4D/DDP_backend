@@ -336,11 +336,11 @@ def test_get_job_info_for_connection(
     mock_get_jobs_for_connection=Mock(),
 )
 @patch(
-    "ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_logs_for_job",
-    mock_get_logs_for_job=Mock(),
+    "ddpui.ddpairbyte.airbytehelpers.airbyte_service.parse_job_info",
+    mock_parse_job_info=Mock(),
 )
 def test_get_sync_history_for_connection_no_jobs(
-    mock_get_logs_for_job: Mock, mock_get_jobs_for_connection: Mock
+    mock_parse_job_info: Mock, mock_get_jobs_for_connection: Mock
 ):
     """tests get_sync_job_history_for_connection for success"""
     org = Org.objects.create(name="org", slug="org")
@@ -380,23 +380,13 @@ def test_get_sync_history_for_connection_no_jobs(
         ],
         "totalJobCount": 1,
     }
-    mock_get_logs_for_job.return_value = {
-        "logs": {
-            "logLines": [
-                "line1",
-                "line2",
-            ],
-        },
-    }
+    mock_parse_job_info.return_value = "job-info"
 
     result, error = get_sync_job_history_for_connection(org, "connection_id")
     assert error is None
     assert "history" in result
     assert len(result["history"]) == 1
-    assert result["history"][0]["logs"] == [
-        "line1",
-        "line2",
-    ]
+    assert result["history"][0] == "job-info"
     assert result["totalSyncs"] == 1
 
 

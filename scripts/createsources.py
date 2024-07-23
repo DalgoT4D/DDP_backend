@@ -7,7 +7,7 @@ import sys
 import argparse
 import yaml
 from dotenv import load_dotenv
-from testclient import TestClient
+from testclient.testclient import TestClient
 from ddpui.utils.helpers import remove_nested_attribute
 
 

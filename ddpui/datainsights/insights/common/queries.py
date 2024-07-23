@@ -13,7 +13,7 @@ from ddpui.datainsights.insights.insight_interface import (
     ColInsight,
     TranslateColDataType,
 )
-from ddpui.utils.helpers import hash_dict
+from ddpui.utils.helpers import hash_dict, convert_to_standard_types
 
 
 class BaseDataStats(ColInsight):
@@ -135,15 +135,11 @@ class BaseDataStats(ColInsight):
                     "count": result[0][f"count_{col.name}"],
                     "countNull": result[0][f"countNull_{col.name}"],
                     "countDistinct": result[0][f"countDistinct__{col.name}"],
-                    "maxVal": (
-                        str(result[0][f"maxVal_{col.name}"])
-                        if isinstance(result[0][f"maxVal_{col.name}"], (datetime, date))
-                        else result[0][f"maxVal_{col.name}"]
+                    "maxVal": convert_to_standard_types(
+                        result[0][f"maxVal_{col.name}"]
                     ),
-                    "minVal": (
-                        str(result[0][f"minVal_{col.name}"])
-                        if isinstance(result[0][f"minVal_{col.name}"], (datetime, date))
-                        else result[0][f"minVal_{col.name}"]
+                    "minVal": convert_to_standard_types(
+                        result[0][f"minVal_{col.name}"]
                     ),
                 }
 
