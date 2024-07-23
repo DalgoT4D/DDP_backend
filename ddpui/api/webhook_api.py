@@ -55,42 +55,60 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
         # 'Flow run {flow_run_name} with id {flow_run_id} entered state {flow_run_state_name}'
         flow_run_id, state = get_flowrun_id_and_state(message)
 
-    if flow_run_id:
-        logger.info("found flow-run id %s, state %s", flow_run_id, state)
-        flow_run = prefect_service.get_flow_run(flow_run_id)
-        deployment_id = flow_run["deployment_id"]
+    if not flow_run_id:
+        return {"status": "ok"}
 
-        if deployment_id and state in ["Cancelled", "Completed", "Failed", "Crashed"]:
-            logger.info("deleting the task locks")
-            TaskLock.objects.filter(flow_run_id=flow_run_id).delete()
-            if state in ["Completed", "Failed"]:
-                PrefectFlowRun.objects.create(
-                    deployment_id=deployment_id,
-                    flow_run_id=flow_run["id"],
-                    name=flow_run["name"],
-                    start_time=flow_run["start_time"],
-                    expected_start_time=flow_run["expected_start_time"],
-                    total_run_time=flow_run["total_run_time"],
-                    status=flow_run["status"],
-                    state_name=flow_run["state_name"],
-                )
+    logger.info("found flow-run id %s, state %s", flow_run_id, state)
+    flow_run = prefect_service.get_flow_run(flow_run_id)
+    deployment_id = flow_run.get("deployment_id")
 
-        elif state in ["Pending"]:
-            system_user = OrgUser.objects.filter(user__email="System User").first()
-            try:
-                prefect_service.lock_tasks_for_deployment(deployment_id, system_user)
-            except HttpError:
-                # silently ignore
-                logger.info(
-                    "failed to lock blocks for deployment %s, ignoring", deployment_id
-                )
+    if deployment_id and state in ["Cancelled", "Completed", "Failed", "Crashed"]:
+        handle_deletion_and_creation(flow_run, deployment_id, state)
 
-        if state in ["Failed", "Crashed"]:
-            org = get_org_from_flow_run(flow_run)
-            if org:
-                email_flowrun_logs_to_orgusers(org, flow_run_id)
+    elif state == "Pending":
+        lock_tasks_for_pending_deployment(deployment_id)
+
+    if state in ["Failed", "Crashed"]:
+        email_logs_to_org_users(flow_run)
 
     return {"status": "ok"}
+
+
+def handle_deletion_and_creation(flow_run, deployment_id, state):
+    """delete task lock and create a prefect flow run if not already present"""
+    logger.info("deleting the task locks")
+    TaskLock.objects.filter(flow_run_id=flow_run["id"]).delete()
+
+    if (
+        state in ["Completed", "Failed"]
+        and not PrefectFlowRun.objects.filter(flow_run_id=flow_run["id"]).exists()
+    ):
+        PrefectFlowRun.objects.create(
+            deployment_id=deployment_id,
+            flow_run_id=flow_run["id"],
+            name=flow_run["name"],
+            start_time=flow_run["start_time"],
+            expected_start_time=flow_run["expected_start_time"],
+            total_run_time=flow_run["total_run_time"],
+            status=flow_run["status"],
+            state_name=flow_run["state_name"],
+        )
+
+
+def lock_tasks_for_pending_deployment(deployment_id):
+    """lock tasks for pending deployment"""
+    system_user = OrgUser.objects.filter(user__email="System User").first()
+    try:
+        prefect_service.lock_tasks_for_deployment(deployment_id, system_user)
+    except HttpError:
+        logger.info("failed to lock blocks for deployment %s, ignoring", deployment_id)
+
+
+def email_logs_to_org_users(flow_run):
+    """email flow run logs to users"""
+    org = get_org_from_flow_run(flow_run)
+    if org:
+        email_flowrun_logs_to_orgusers(org, flow_run["id"])
 
 
 # setting up the notification and customizing the message format

@@ -1,1 +1,1778 @@
-[{"model": "ddpui.RolePermission", "pk": 1, "fields": {"role": 1, "permission": 1}}, {"model": "ddpui.RolePermission", "pk": 2, "fields": {"role": 2, "permission": 1}}, {"model": "ddpui.RolePermission", "pk": 3, "fields": {"role": 3, "permission": 1}}, {"model": "ddpui.RolePermission", "pk": 4, "fields": {"role": 4, "permission": 1}}, {"model": "ddpui.RolePermission", "pk": 5, "fields": {"role": 5, "permission": 1}}, {"model": "ddpui.RolePermission", "pk": 6, "fields": {"role": 1, "permission": 2}}, {"model": "ddpui.RolePermission", "pk": 7, "fields": {"role": 2, "permission": 2}}, {"model": "ddpui.RolePermission", "pk": 8, "fields": {"role": 3, "permission": 2}}, {"model": "ddpui.RolePermission", "pk": 9, "fields": {"role": 4, "permission": 2}}, {"model": "ddpui.RolePermission", "pk": 10, "fields": {"role": 5, "permission": 2}}, {"model": "ddpui.RolePermission", "pk": 11, "fields": {"role": 1, "permission": 3}}, {"model": "ddpui.RolePermission", "pk": 12, "fields": {"role": 2, "permission": 3}}, {"model": "ddpui.RolePermission", "pk": 13, "fields": {"role": 3, "permission": 3}}, {"model": "ddpui.RolePermission", "pk": 14, "fields": {"role": 1, "permission": 4}}, {"model": "ddpui.RolePermission", "pk": 15, "fields": {"role": 2, "permission": 4}}, {"model": "ddpui.RolePermission", "pk": 16, "fields": {"role": 3, "permission": 4}}, {"model": "ddpui.RolePermission", "pk": 17, "fields": {"role": 1, "permission": 5}}, {"model": "ddpui.RolePermission", "pk": 18, "fields": {"role": 2, "permission": 5}}, {"model": "ddpui.RolePermission", "pk": 19, "fields": {"role": 3, "permission": 5}}, {"model": "ddpui.RolePermission", "pk": 20, "fields": {"role": 4, "permission": 5}}, {"model": "ddpui.RolePermission", "pk": 21, "fields": {"role": 5, "permission": 5}}, {"model": "ddpui.RolePermission", "pk": 22, "fields": {"role": 1, "permission": 6}}, {"model": "ddpui.RolePermission", "pk": 23, "fields": {"role": 2, "permission": 6}}, {"model": "ddpui.RolePermission", "pk": 24, "fields": {"role": 3, "permission": 6}}, {"model": "ddpui.RolePermission", "pk": 25, "fields": {"role": 4, "permission": 6}}, {"model": "ddpui.RolePermission", "pk": 26, "fields": {"role": 5, "permission": 6}}, {"model": "ddpui.RolePermission", "pk": 27, "fields": {"role": 1, "permission": 7}}, {"model": "ddpui.RolePermission", "pk": 28, "fields": {"role": 2, "permission": 7}}, {"model": "ddpui.RolePermission", "pk": 29, "fields": {"role": 3, "permission": 7}}, {"model": "ddpui.RolePermission", "pk": 30, "fields": {"role": 4, "permission": 7}}, {"model": "ddpui.RolePermission", "pk": 31, "fields": {"role": 5, "permission": 7}}, {"model": "ddpui.RolePermission", "pk": 32, "fields": {"role": 1, "permission": 8}}, {"model": "ddpui.RolePermission", "pk": 33, "fields": {"role": 2, "permission": 8}}, {"model": "ddpui.RolePermission", "pk": 34, "fields": {"role": 1, "permission": 9}}, {"model": "ddpui.RolePermission", "pk": 35, "fields": {"role": 2, "permission": 9}}, {"model": "ddpui.RolePermission", "pk": 36, "fields": {"role": 1, "permission": 10}}, {"model": "ddpui.RolePermission", "pk": 37, "fields": {"role": 2, "permission": 10}}, {"model": "ddpui.RolePermission", "pk": 38, "fields": {"role": 3, "permission": 10}}, {"model": "ddpui.RolePermission", "pk": 39, "fields": {"role": 4, "permission": 10}}, {"model": "ddpui.RolePermission", "pk": 40, "fields": {"role": 5, "permission": 10}}, {"model": "ddpui.RolePermission", "pk": 41, "fields": {"role": 1, "permission": 11}}, {"model": "ddpui.RolePermission", "pk": 42, "fields": {"role": 1, "permission": 12}}, {"model": "ddpui.RolePermission", "pk": 43, "fields": {"role": 2, "permission": 12}}, {"model": "ddpui.RolePermission", "pk": 44, "fields": {"role": 3, "permission": 12}}, {"model": "ddpui.RolePermission", "pk": 45, "fields": {"role": 1, "permission": 13}}, {"model": "ddpui.RolePermission", "pk": 46, "fields": {"role": 2, "permission": 13}}, {"model": "ddpui.RolePermission", "pk": 47, "fields": {"role": 3, "permission": 13}}, {"model": "ddpui.RolePermission", "pk": 48, "fields": {"role": 4, "permission": 13}}, {"model": "ddpui.RolePermission", "pk": 49, "fields": {"role": 5, "permission": 13}}, {"model": "ddpui.RolePermission", "pk": 50, "fields": {"role": 1, "permission": 14}}, {"model": "ddpui.RolePermission", "pk": 51, "fields": {"role": 2, "permission": 14}}, {"model": "ddpui.RolePermission", "pk": 52, "fields": {"role": 3, "permission": 14}}, {"model": "ddpui.RolePermission", "pk": 53, "fields": {"role": 1, "permission": 15}}, {"model": "ddpui.RolePermission", "pk": 54, "fields": {"role": 2, "permission": 15}}, {"model": "ddpui.RolePermission", "pk": 55, "fields": {"role": 3, "permission": 15}}, {"model": "ddpui.RolePermission", "pk": 56, "fields": {"role": 1, "permission": 16}}, {"model": "ddpui.RolePermission", "pk": 57, "fields": {"role": 2, "permission": 16}}, {"model": "ddpui.RolePermission", "pk": 58, "fields": {"role": 3, "permission": 16}}, {"model": "ddpui.RolePermission", "pk": 59, "fields": {"role": 1, "permission": 17}}, {"model": "ddpui.RolePermission", "pk": 60, "fields": {"role": 2, "permission": 17}}, {"model": "ddpui.RolePermission", "pk": 61, "fields": {"role": 3, "permission": 17}}, {"model": "ddpui.RolePermission", "pk": 62, "fields": {"role": 1, "permission": 18}}, {"model": "ddpui.RolePermission", "pk": 63, "fields": {"role": 2, "permission": 18}}, {"model": "ddpui.RolePermission", "pk": 64, "fields": {"role": 3, "permission": 18}}, {"model": "ddpui.RolePermission", "pk": 65, "fields": {"role": 4, "permission": 18}}, {"model": "ddpui.RolePermission", "pk": 66, "fields": {"role": 5, "permission": 18}}, {"model": "ddpui.RolePermission", "pk": 67, "fields": {"role": 1, "permission": 19}}, {"model": "ddpui.RolePermission", "pk": 68, "fields": {"role": 2, "permission": 19}}, {"model": "ddpui.RolePermission", "pk": 69, "fields": {"role": 3, "permission": 19}}, {"model": "ddpui.RolePermission", "pk": 70, "fields": {"role": 4, "permission": 19}}, {"model": "ddpui.RolePermission", "pk": 71, "fields": {"role": 5, "permission": 19}}, {"model": "ddpui.RolePermission", "pk": 72, "fields": {"role": 1, "permission": 20}}, {"model": "ddpui.RolePermission", "pk": 73, "fields": {"role": 2, "permission": 20}}, {"model": "ddpui.RolePermission", "pk": 74, "fields": {"role": 3, "permission": 20}}, {"model": "ddpui.RolePermission", "pk": 75, "fields": {"role": 4, "permission": 20}}, {"model": "ddpui.RolePermission", "pk": 76, "fields": {"role": 1, "permission": 21}}, {"model": "ddpui.RolePermission", "pk": 77, "fields": {"role": 2, "permission": 21}}, {"model": "ddpui.RolePermission", "pk": 78, "fields": {"role": 3, "permission": 21}}, {"model": "ddpui.RolePermission", "pk": 79, "fields": {"role": 4, "permission": 21}}, {"model": "ddpui.RolePermission", "pk": 80, "fields": {"role": 1, "permission": 22}}, {"model": "ddpui.RolePermission", "pk": 81, "fields": {"role": 2, "permission": 22}}, {"model": "ddpui.RolePermission", "pk": 82, "fields": {"role": 3, "permission": 22}}, {"model": "ddpui.RolePermission", "pk": 83, "fields": {"role": 4, "permission": 22}}, {"model": "ddpui.RolePermission", "pk": 84, "fields": {"role": 1, "permission": 23}}, {"model": "ddpui.RolePermission", "pk": 85, "fields": {"role": 2, "permission": 23}}, {"model": "ddpui.RolePermission", "pk": 86, "fields": {"role": 3, "permission": 23}}, {"model": "ddpui.RolePermission", "pk": 87, "fields": {"role": 4, "permission": 23}}, {"model": "ddpui.RolePermission", "pk": 88, "fields": {"role": 5, "permission": 23}}, {"model": "ddpui.RolePermission", "pk": 89, "fields": {"role": 1, "permission": 24}}, {"model": "ddpui.RolePermission", "pk": 90, "fields": {"role": 2, "permission": 24}}, {"model": "ddpui.RolePermission", "pk": 91, "fields": {"role": 3, "permission": 24}}, {"model": "ddpui.RolePermission", "pk": 92, "fields": {"role": 4, "permission": 24}}, {"model": "ddpui.RolePermission", "pk": 93, "fields": {"role": 1, "permission": 25}}, {"model": "ddpui.RolePermission", "pk": 94, "fields": {"role": 2, "permission": 25}}, {"model": "ddpui.RolePermission", "pk": 95, "fields": {"role": 3, "permission": 25}}, {"model": "ddpui.RolePermission", "pk": 96, "fields": {"role": 4, "permission": 25}}, {"model": "ddpui.RolePermission", "pk": 97, "fields": {"role": 1, "permission": 26}}, {"model": "ddpui.RolePermission", "pk": 98, "fields": {"role": 2, "permission": 26}}, {"model": "ddpui.RolePermission", "pk": 99, "fields": {"role": 3, "permission": 26}}, {"model": "ddpui.RolePermission", "pk": 100, "fields": {"role": 4, "permission": 26}}, {"model": "ddpui.RolePermission", "pk": 101, "fields": {"role": 1, "permission": 27}}, {"model": "ddpui.RolePermission", "pk": 102, "fields": {"role": 2, "permission": 27}}, {"model": "ddpui.RolePermission", "pk": 103, "fields": {"role": 3, "permission": 27}}, {"model": "ddpui.RolePermission", "pk": 104, "fields": {"role": 4, "permission": 27}}, {"model": "ddpui.RolePermission", "pk": 105, "fields": {"role": 5, "permission": 27}}, {"model": "ddpui.RolePermission", "pk": 106, "fields": {"role": 1, "permission": 28}}, {"model": "ddpui.RolePermission", "pk": 107, "fields": {"role": 2, "permission": 28}}, {"model": "ddpui.RolePermission", "pk": 108, "fields": {"role": 3, "permission": 28}}, {"model": "ddpui.RolePermission", "pk": 109, "fields": {"role": 4, "permission": 28}}, {"model": "ddpui.RolePermission", "pk": 110, "fields": {"role": 1, "permission": 29}}, {"model": "ddpui.RolePermission", "pk": 111, "fields": {"role": 2, "permission": 29}}, {"model": "ddpui.RolePermission", "pk": 112, "fields": {"role": 3, "permission": 29}}, {"model": "ddpui.RolePermission", "pk": 113, "fields": {"role": 1, "permission": 30}}, {"model": "ddpui.RolePermission", "pk": 114, "fields": {"role": 2, "permission": 30}}, {"model": "ddpui.RolePermission", "pk": 115, "fields": {"role": 3, "permission": 30}}, {"model": "ddpui.RolePermission", "pk": 116, "fields": {"role": 4, "permission": 30}}, {"model": "ddpui.RolePermission", "pk": 117, "fields": {"role": 5, "permission": 30}}, {"model": "ddpui.RolePermission", "pk": 118, "fields": {"role": 1, "permission": 31}}, {"model": "ddpui.RolePermission", "pk": 119, "fields": {"role": 2, "permission": 31}}, {"model": "ddpui.RolePermission", "pk": 120, "fields": {"role": 3, "permission": 31}}, {"model": "ddpui.RolePermission", "pk": 121, "fields": {"role": 4, "permission": 31}}, {"model": "ddpui.RolePermission", "pk": 122, "fields": {"role": 5, "permission": 31}}, {"model": "ddpui.RolePermission", "pk": 123, "fields": {"role": 1, "permission": 32}}, {"model": "ddpui.RolePermission", "pk": 124, "fields": {"role": 2, "permission": 32}}, {"model": "ddpui.RolePermission", "pk": 125, "fields": {"role": 3, "permission": 32}}, {"model": "ddpui.RolePermission", "pk": 126, "fields": {"role": 1, "permission": 33}}, {"model": "ddpui.RolePermission", "pk": 127, "fields": {"role": 2, "permission": 33}}, {"model": "ddpui.RolePermission", "pk": 128, "fields": {"role": 3, "permission": 33}}, {"model": "ddpui.RolePermission", "pk": 129, "fields": {"role": 1, "permission": 34}}, {"model": "ddpui.RolePermission", "pk": 130, "fields": {"role": 2, "permission": 34}}, {"model": "ddpui.RolePermission", "pk": 131, "fields": {"role": 3, "permission": 34}}, {"model": "ddpui.RolePermission", "pk": 132, "fields": {"role": 1, "permission": 35}}, {"model": "ddpui.RolePermission", "pk": 133, "fields": {"role": 2, "permission": 35}}, {"model": "ddpui.RolePermission", "pk": 134, "fields": {"role": 3, "permission": 35}}, {"model": "ddpui.RolePermission", "pk": 135, "fields": {"role": 4, "permission": 35}}, {"model": "ddpui.RolePermission", "pk": 136, "fields": {"role": 5, "permission": 35}}, {"model": "ddpui.RolePermission", "pk": 137, "fields": {"role": 1, "permission": 36}}, {"model": "ddpui.RolePermission", "pk": 138, "fields": {"role": 2, "permission": 36}}, {"model": "ddpui.RolePermission", "pk": 139, "fields": {"role": 3, "permission": 36}}, {"model": "ddpui.RolePermission", "pk": 140, "fields": {"role": 4, "permission": 36}}, {"model": "ddpui.RolePermission", "pk": 141, "fields": {"role": 5, "permission": 36}}, {"model": "ddpui.RolePermission", "pk": 142, "fields": {"role": 1, "permission": 37}}, {"model": "ddpui.RolePermission", "pk": 143, "fields": {"role": 2, "permission": 37}}, {"model": "ddpui.RolePermission", "pk": 144, "fields": {"role": 3, "permission": 37}}, {"model": "ddpui.RolePermission", "pk": 145, "fields": {"role": 4, "permission": 37}}, {"model": "ddpui.RolePermission", "pk": 146, "fields": {"role": 1, "permission": 38}}, {"model": "ddpui.RolePermission", "pk": 147, "fields": {"role": 2, "permission": 38}}, {"model": "ddpui.RolePermission", "pk": 148, "fields": {"role": 3, "permission": 38}}, {"model": "ddpui.RolePermission", "pk": 149, "fields": {"role": 4, "permission": 38}}, {"model": "ddpui.RolePermission", "pk": 150, "fields": {"role": 1, "permission": 39}}, {"model": "ddpui.RolePermission", "pk": 151, "fields": {"role": 2, "permission": 39}}, {"model": "ddpui.RolePermission", "pk": 152, "fields": {"role": 3, "permission": 39}}, {"model": "ddpui.RolePermission", "pk": 153, "fields": {"role": 4, "permission": 39}}, {"model": "ddpui.RolePermission", "pk": 154, "fields": {"role": 1, "permission": 40}}, {"model": "ddpui.RolePermission", "pk": 155, "fields": {"role": 2, "permission": 40}}, {"model": "ddpui.RolePermission", "pk": 156, "fields": {"role": 3, "permission": 40}}, {"model": "ddpui.RolePermission", "pk": 157, "fields": {"role": 4, "permission": 40}}, {"model": "ddpui.RolePermission", "pk": 158, "fields": {"role": 5, "permission": 40}}, {"model": "ddpui.RolePermission", "pk": 159, "fields": {"role": 1, "permission": 41}}, {"model": "ddpui.RolePermission", "pk": 160, "fields": {"role": 2, "permission": 41}}, {"model": "ddpui.RolePermission", "pk": 161, "fields": {"role": 3, "permission": 41}}, {"model": "ddpui.RolePermission", "pk": 162, "fields": {"role": 4, "permission": 41}}, {"model": "ddpui.RolePermission", "pk": 163, "fields": {"role": 1, "permission": 42}}, {"model": "ddpui.RolePermission", "pk": 164, "fields": {"role": 2, "permission": 42}}, {"model": "ddpui.RolePermission", "pk": 165, "fields": {"role": 3, "permission": 42}}, {"model": "ddpui.RolePermission", "pk": 166, "fields": {"role": 4, "permission": 42}}, {"model": "ddpui.RolePermission", "pk": 167, "fields": {"role": 5, "permission": 42}}, {"model": "ddpui.RolePermission", "pk": 168, "fields": {"role": 1, "permission": 43}}, {"model": "ddpui.RolePermission", "pk": 169, "fields": {"role": 2, "permission": 43}}, {"model": "ddpui.RolePermission", "pk": 170, "fields": {"role": 3, "permission": 43}}, {"model": "ddpui.RolePermission", "pk": 171, "fields": {"role": 4, "permission": 43}}, {"model": "ddpui.RolePermission", "pk": 172, "fields": {"role": 1, "permission": 44}}, {"model": "ddpui.RolePermission", "pk": 173, "fields": {"role": 2, "permission": 44}}, {"model": "ddpui.RolePermission", "pk": 174, "fields": {"role": 3, "permission": 44}}, {"model": "ddpui.RolePermission", "pk": 175, "fields": {"role": 4, "permission": 44}}, {"model": "ddpui.RolePermission", "pk": 176, "fields": {"role": 1, "permission": 45}}, {"model": "ddpui.RolePermission", "pk": 177, "fields": {"role": 2, "permission": 45}}, {"model": "ddpui.RolePermission", "pk": 178, "fields": {"role": 3, "permission": 45}}, {"model": "ddpui.RolePermission", "pk": 179, "fields": {"role": 4, "permission": 45}}, {"model": "ddpui.RolePermission", "pk": 180, "fields": {"role": 5, "permission": 45}}, {"model": "ddpui.RolePermission", "pk": 181, "fields": {"role": 1, "permission": 46}}, {"model": "ddpui.RolePermission", "pk": 182, "fields": {"role": 2, "permission": 46}}, {"model": "ddpui.RolePermission", "pk": 183, "fields": {"role": 3, "permission": 46}}, {"model": "ddpui.RolePermission", "pk": 184, "fields": {"role": 4, "permission": 46}}, {"model": "ddpui.RolePermission", "pk": 185, "fields": {"role": 5, "permission": 46}}, {"model": "ddpui.RolePermission", "pk": 186, "fields": {"role": 1, "permission": 47}}, {"model": "ddpui.RolePermission", "pk": 187, "fields": {"role": 2, "permission": 47}}, {"model": "ddpui.RolePermission", "pk": 188, "fields": {"role": 1, "permission": 48}}, {"model": "ddpui.RolePermission", "pk": 189, "fields": {"role": 2, "permission": 48}}, {"model": "ddpui.RolePermission", "pk": 190, "fields": {"role": 1, "permission": 49}}, {"model": "ddpui.RolePermission", "pk": 191, "fields": {"role": 2, "permission": 49}}, {"model": "ddpui.RolePermission", "pk": 192, "fields": {"role": 1, "permission": 50}}, {"model": "ddpui.RolePermission", "pk": 193, "fields": {"role": 2, "permission": 50}}, {"model": "ddpui.RolePermission", "pk": 194, "fields": {"role": 1, "permission": 51}}, {"model": "ddpui.RolePermission", "pk": 195, "fields": {"role": 2, "permission": 51}}, {"model": "ddpui.RolePermission", "pk": 196, "fields": {"role": 1, "permission": 52}}, {"model": "ddpui.RolePermission", "pk": 197, "fields": {"role": 2, "permission": 52}}, {"model": "ddpui.RolePermission", "pk": 198, "fields": {"role": 3, "permission": 52}}, {"model": "ddpui.RolePermission", "pk": 199, "fields": {"role": 4, "permission": 52}}, {"model": "ddpui.RolePermission", "pk": 200, "fields": {"role": 5, "permission": 52}}, {"model": "ddpui.RolePermission", "pk": 201, "fields": {"role": 1, "permission": 53}}, {"model": "ddpui.RolePermission", "pk": 202, "fields": {"role": 2, "permission": 53}}, {"model": "ddpui.RolePermission", "pk": 203, "fields": {"role": 3, "permission": 53}}, {"model": "ddpui.RolePermission", "pk": 204, "fields": {"role": 4, "permission": 53}}, {"model": "ddpui.RolePermission", "pk": 205, "fields": {"role": 1, "permission": 54}}, {"model": "ddpui.RolePermission", "pk": 206, "fields": {"role": 2, "permission": 54}}, {"model": "ddpui.RolePermission", "pk": 207, "fields": {"role": 1, "permission": 55}}, {"model": "ddpui.RolePermission", "pk": 208, "fields": {"role": 2, "permission": 55}}, {"model": "ddpui.RolePermission", "pk": 209, "fields": {"role": 1, "permission": 56}}, {"model": "ddpui.RolePermission", "pk": 210, "fields": {"role": 2, "permission": 56}}, {"model": "ddpui.RolePermission", "pk": 211, "fields": {"role": 1, "permission": 57}}, {"model": "ddpui.RolePermission", "pk": 212, "fields": {"role": 2, "permission": 57}}, {"model": "ddpui.RolePermission", "pk": 213, "fields": {"role": 1, "permission": 58}}, {"model": "ddpui.RolePermission", "pk": 214, "fields": {"role": 2, "permission": 58}}, {"model": "ddpui.RolePermission", "pk": 215, "fields": {"role": 3, "permission": 58}}, {"model": "ddpui.RolePermission", "pk": 216, "fields": {"role": 4, "permission": 58}}]
+[
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 1,
+    "fields": {
+      "role": 1,
+      "permission": 1
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 2,
+    "fields": {
+      "role": 2,
+      "permission": 1
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 3,
+    "fields": {
+      "role": 3,
+      "permission": 1
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 4,
+    "fields": {
+      "role": 4,
+      "permission": 1
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 5,
+    "fields": {
+      "role": 5,
+      "permission": 1
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 6,
+    "fields": {
+      "role": 1,
+      "permission": 2
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 7,
+    "fields": {
+      "role": 2,
+      "permission": 2
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 8,
+    "fields": {
+      "role": 3,
+      "permission": 2
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 9,
+    "fields": {
+      "role": 4,
+      "permission": 2
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 10,
+    "fields": {
+      "role": 5,
+      "permission": 2
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 11,
+    "fields": {
+      "role": 1,
+      "permission": 3
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 12,
+    "fields": {
+      "role": 2,
+      "permission": 3
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 13,
+    "fields": {
+      "role": 3,
+      "permission": 3
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 14,
+    "fields": {
+      "role": 1,
+      "permission": 4
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 15,
+    "fields": {
+      "role": 2,
+      "permission": 4
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 16,
+    "fields": {
+      "role": 3,
+      "permission": 4
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 17,
+    "fields": {
+      "role": 1,
+      "permission": 5
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 18,
+    "fields": {
+      "role": 2,
+      "permission": 5
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 19,
+    "fields": {
+      "role": 3,
+      "permission": 5
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 20,
+    "fields": {
+      "role": 4,
+      "permission": 5
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 21,
+    "fields": {
+      "role": 5,
+      "permission": 5
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 22,
+    "fields": {
+      "role": 1,
+      "permission": 6
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 23,
+    "fields": {
+      "role": 2,
+      "permission": 6
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 24,
+    "fields": {
+      "role": 3,
+      "permission": 6
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 25,
+    "fields": {
+      "role": 4,
+      "permission": 6
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 26,
+    "fields": {
+      "role": 5,
+      "permission": 6
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 27,
+    "fields": {
+      "role": 1,
+      "permission": 7
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 28,
+    "fields": {
+      "role": 2,
+      "permission": 7
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 29,
+    "fields": {
+      "role": 3,
+      "permission": 7
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 30,
+    "fields": {
+      "role": 4,
+      "permission": 7
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 31,
+    "fields": {
+      "role": 5,
+      "permission": 7
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 32,
+    "fields": {
+      "role": 1,
+      "permission": 8
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 33,
+    "fields": {
+      "role": 2,
+      "permission": 8
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 34,
+    "fields": {
+      "role": 1,
+      "permission": 9
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 35,
+    "fields": {
+      "role": 2,
+      "permission": 9
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 36,
+    "fields": {
+      "role": 1,
+      "permission": 10
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 37,
+    "fields": {
+      "role": 2,
+      "permission": 10
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 38,
+    "fields": {
+      "role": 3,
+      "permission": 10
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 39,
+    "fields": {
+      "role": 4,
+      "permission": 10
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 40,
+    "fields": {
+      "role": 5,
+      "permission": 10
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 41,
+    "fields": {
+      "role": 1,
+      "permission": 11
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 42,
+    "fields": {
+      "role": 1,
+      "permission": 12
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 43,
+    "fields": {
+      "role": 2,
+      "permission": 12
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 44,
+    "fields": {
+      "role": 3,
+      "permission": 12
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 45,
+    "fields": {
+      "role": 1,
+      "permission": 13
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 46,
+    "fields": {
+      "role": 2,
+      "permission": 13
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 47,
+    "fields": {
+      "role": 3,
+      "permission": 13
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 48,
+    "fields": {
+      "role": 4,
+      "permission": 13
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 49,
+    "fields": {
+      "role": 5,
+      "permission": 13
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 50,
+    "fields": {
+      "role": 1,
+      "permission": 14
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 51,
+    "fields": {
+      "role": 2,
+      "permission": 14
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 52,
+    "fields": {
+      "role": 3,
+      "permission": 14
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 53,
+    "fields": {
+      "role": 1,
+      "permission": 15
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 54,
+    "fields": {
+      "role": 2,
+      "permission": 15
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 55,
+    "fields": {
+      "role": 3,
+      "permission": 15
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 56,
+    "fields": {
+      "role": 1,
+      "permission": 16
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 57,
+    "fields": {
+      "role": 2,
+      "permission": 16
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 58,
+    "fields": {
+      "role": 3,
+      "permission": 16
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 59,
+    "fields": {
+      "role": 1,
+      "permission": 17
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 60,
+    "fields": {
+      "role": 2,
+      "permission": 17
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 61,
+    "fields": {
+      "role": 3,
+      "permission": 17
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 62,
+    "fields": {
+      "role": 1,
+      "permission": 18
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 63,
+    "fields": {
+      "role": 2,
+      "permission": 18
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 64,
+    "fields": {
+      "role": 3,
+      "permission": 18
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 65,
+    "fields": {
+      "role": 4,
+      "permission": 18
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 66,
+    "fields": {
+      "role": 5,
+      "permission": 18
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 67,
+    "fields": {
+      "role": 1,
+      "permission": 19
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 68,
+    "fields": {
+      "role": 2,
+      "permission": 19
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 69,
+    "fields": {
+      "role": 3,
+      "permission": 19
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 70,
+    "fields": {
+      "role": 4,
+      "permission": 19
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 71,
+    "fields": {
+      "role": 5,
+      "permission": 19
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 72,
+    "fields": {
+      "role": 1,
+      "permission": 20
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 73,
+    "fields": {
+      "role": 2,
+      "permission": 20
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 74,
+    "fields": {
+      "role": 3,
+      "permission": 20
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 75,
+    "fields": {
+      "role": 4,
+      "permission": 20
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 76,
+    "fields": {
+      "role": 1,
+      "permission": 21
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 77,
+    "fields": {
+      "role": 2,
+      "permission": 21
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 78,
+    "fields": {
+      "role": 3,
+      "permission": 21
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 79,
+    "fields": {
+      "role": 4,
+      "permission": 21
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 80,
+    "fields": {
+      "role": 1,
+      "permission": 22
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 81,
+    "fields": {
+      "role": 2,
+      "permission": 22
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 82,
+    "fields": {
+      "role": 3,
+      "permission": 22
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 83,
+    "fields": {
+      "role": 4,
+      "permission": 22
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 84,
+    "fields": {
+      "role": 1,
+      "permission": 23
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 85,
+    "fields": {
+      "role": 2,
+      "permission": 23
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 86,
+    "fields": {
+      "role": 3,
+      "permission": 23
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 87,
+    "fields": {
+      "role": 4,
+      "permission": 23
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 88,
+    "fields": {
+      "role": 5,
+      "permission": 23
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 89,
+    "fields": {
+      "role": 1,
+      "permission": 24
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 90,
+    "fields": {
+      "role": 2,
+      "permission": 24
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 91,
+    "fields": {
+      "role": 3,
+      "permission": 24
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 92,
+    "fields": {
+      "role": 4,
+      "permission": 24
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 93,
+    "fields": {
+      "role": 1,
+      "permission": 25
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 94,
+    "fields": {
+      "role": 2,
+      "permission": 25
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 95,
+    "fields": {
+      "role": 3,
+      "permission": 25
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 96,
+    "fields": {
+      "role": 4,
+      "permission": 25
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 97,
+    "fields": {
+      "role": 1,
+      "permission": 26
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 98,
+    "fields": {
+      "role": 2,
+      "permission": 26
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 99,
+    "fields": {
+      "role": 3,
+      "permission": 26
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 100,
+    "fields": {
+      "role": 4,
+      "permission": 26
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 101,
+    "fields": {
+      "role": 1,
+      "permission": 27
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 102,
+    "fields": {
+      "role": 2,
+      "permission": 27
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 103,
+    "fields": {
+      "role": 3,
+      "permission": 27
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 104,
+    "fields": {
+      "role": 4,
+      "permission": 27
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 105,
+    "fields": {
+      "role": 5,
+      "permission": 27
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 106,
+    "fields": {
+      "role": 1,
+      "permission": 28
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 107,
+    "fields": {
+      "role": 2,
+      "permission": 28
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 108,
+    "fields": {
+      "role": 3,
+      "permission": 28
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 109,
+    "fields": {
+      "role": 4,
+      "permission": 28
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 110,
+    "fields": {
+      "role": 1,
+      "permission": 29
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 111,
+    "fields": {
+      "role": 2,
+      "permission": 29
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 112,
+    "fields": {
+      "role": 3,
+      "permission": 29
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 113,
+    "fields": {
+      "role": 1,
+      "permission": 30
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 114,
+    "fields": {
+      "role": 2,
+      "permission": 30
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 115,
+    "fields": {
+      "role": 3,
+      "permission": 30
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 116,
+    "fields": {
+      "role": 4,
+      "permission": 30
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 117,
+    "fields": {
+      "role": 5,
+      "permission": 30
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 118,
+    "fields": {
+      "role": 1,
+      "permission": 31
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 119,
+    "fields": {
+      "role": 2,
+      "permission": 31
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 120,
+    "fields": {
+      "role": 3,
+      "permission": 31
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 121,
+    "fields": {
+      "role": 4,
+      "permission": 31
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 122,
+    "fields": {
+      "role": 5,
+      "permission": 31
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 123,
+    "fields": {
+      "role": 1,
+      "permission": 32
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 124,
+    "fields": {
+      "role": 2,
+      "permission": 32
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 125,
+    "fields": {
+      "role": 3,
+      "permission": 32
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 126,
+    "fields": {
+      "role": 1,
+      "permission": 33
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 127,
+    "fields": {
+      "role": 2,
+      "permission": 33
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 128,
+    "fields": {
+      "role": 3,
+      "permission": 33
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 129,
+    "fields": {
+      "role": 1,
+      "permission": 34
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 130,
+    "fields": {
+      "role": 2,
+      "permission": 34
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 131,
+    "fields": {
+      "role": 3,
+      "permission": 34
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 132,
+    "fields": {
+      "role": 1,
+      "permission": 35
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 133,
+    "fields": {
+      "role": 2,
+      "permission": 35
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 134,
+    "fields": {
+      "role": 3,
+      "permission": 35
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 135,
+    "fields": {
+      "role": 4,
+      "permission": 35
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 136,
+    "fields": {
+      "role": 5,
+      "permission": 35
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 137,
+    "fields": {
+      "role": 1,
+      "permission": 36
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 138,
+    "fields": {
+      "role": 2,
+      "permission": 36
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 139,
+    "fields": {
+      "role": 3,
+      "permission": 36
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 140,
+    "fields": {
+      "role": 4,
+      "permission": 36
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 141,
+    "fields": {
+      "role": 5,
+      "permission": 36
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 142,
+    "fields": {
+      "role": 1,
+      "permission": 37
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 143,
+    "fields": {
+      "role": 2,
+      "permission": 37
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 144,
+    "fields": {
+      "role": 3,
+      "permission": 37
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 145,
+    "fields": {
+      "role": 4,
+      "permission": 37
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 146,
+    "fields": {
+      "role": 1,
+      "permission": 38
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 147,
+    "fields": {
+      "role": 2,
+      "permission": 38
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 148,
+    "fields": {
+      "role": 3,
+      "permission": 38
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 149,
+    "fields": {
+      "role": 4,
+      "permission": 38
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 150,
+    "fields": {
+      "role": 1,
+      "permission": 39
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 151,
+    "fields": {
+      "role": 2,
+      "permission": 39
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 152,
+    "fields": {
+      "role": 3,
+      "permission": 39
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 153,
+    "fields": {
+      "role": 4,
+      "permission": 39
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 154,
+    "fields": {
+      "role": 1,
+      "permission": 40
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 155,
+    "fields": {
+      "role": 2,
+      "permission": 40
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 156,
+    "fields": {
+      "role": 3,
+      "permission": 40
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 157,
+    "fields": {
+      "role": 4,
+      "permission": 40
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 158,
+    "fields": {
+      "role": 5,
+      "permission": 40
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 159,
+    "fields": {
+      "role": 1,
+      "permission": 41
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 160,
+    "fields": {
+      "role": 2,
+      "permission": 41
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 161,
+    "fields": {
+      "role": 3,
+      "permission": 41
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 162,
+    "fields": {
+      "role": 4,
+      "permission": 41
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 163,
+    "fields": {
+      "role": 1,
+      "permission": 42
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 164,
+    "fields": {
+      "role": 2,
+      "permission": 42
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 165,
+    "fields": {
+      "role": 3,
+      "permission": 42
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 166,
+    "fields": {
+      "role": 4,
+      "permission": 42
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 167,
+    "fields": {
+      "role": 5,
+      "permission": 42
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 168,
+    "fields": {
+      "role": 1,
+      "permission": 43
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 169,
+    "fields": {
+      "role": 2,
+      "permission": 43
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 170,
+    "fields": {
+      "role": 3,
+      "permission": 43
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 171,
+    "fields": {
+      "role": 4,
+      "permission": 43
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 172,
+    "fields": {
+      "role": 1,
+      "permission": 44
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 173,
+    "fields": {
+      "role": 2,
+      "permission": 44
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 174,
+    "fields": {
+      "role": 3,
+      "permission": 44
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 175,
+    "fields": {
+      "role": 4,
+      "permission": 44
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 176,
+    "fields": {
+      "role": 1,
+      "permission": 45
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 177,
+    "fields": {
+      "role": 2,
+      "permission": 45
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 178,
+    "fields": {
+      "role": 3,
+      "permission": 45
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 179,
+    "fields": {
+      "role": 4,
+      "permission": 45
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 180,
+    "fields": {
+      "role": 5,
+      "permission": 45
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 181,
+    "fields": {
+      "role": 1,
+      "permission": 46
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 182,
+    "fields": {
+      "role": 2,
+      "permission": 46
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 183,
+    "fields": {
+      "role": 3,
+      "permission": 46
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 184,
+    "fields": {
+      "role": 4,
+      "permission": 46
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 185,
+    "fields": {
+      "role": 5,
+      "permission": 46
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 186,
+    "fields": {
+      "role": 1,
+      "permission": 47
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 187,
+    "fields": {
+      "role": 2,
+      "permission": 47
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 188,
+    "fields": {
+      "role": 1,
+      "permission": 48
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 189,
+    "fields": {
+      "role": 2,
+      "permission": 48
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 190,
+    "fields": {
+      "role": 1,
+      "permission": 49
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 191,
+    "fields": {
+      "role": 2,
+      "permission": 49
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 192,
+    "fields": {
+      "role": 1,
+      "permission": 50
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 193,
+    "fields": {
+      "role": 2,
+      "permission": 50
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 194,
+    "fields": {
+      "role": 1,
+      "permission": 51
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 195,
+    "fields": {
+      "role": 2,
+      "permission": 51
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 196,
+    "fields": {
+      "role": 1,
+      "permission": 52
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 197,
+    "fields": {
+      "role": 2,
+      "permission": 52
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 198,
+    "fields": {
+      "role": 3,
+      "permission": 52
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 199,
+    "fields": {
+      "role": 4,
+      "permission": 52
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 200,
+    "fields": {
+      "role": 5,
+      "permission": 52
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 201,
+    "fields": {
+      "role": 1,
+      "permission": 53
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 202,
+    "fields": {
+      "role": 2,
+      "permission": 53
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 203,
+    "fields": {
+      "role": 3,
+      "permission": 53
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 204,
+    "fields": {
+      "role": 4,
+      "permission": 53
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 205,
+    "fields": {
+      "role": 1,
+      "permission": 54
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 206,
+    "fields": {
+      "role": 2,
+      "permission": 54
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 207,
+    "fields": {
+      "role": 1,
+      "permission": 55
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 208,
+    "fields": {
+      "role": 2,
+      "permission": 55
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 209,
+    "fields": {
+      "role": 1,
+      "permission": 56
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 210,
+    "fields": {
+      "role": 2,
+      "permission": 56
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 211,
+    "fields": {
+      "role": 1,
+      "permission": 57
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 212,
+    "fields": {
+      "role": 2,
+      "permission": 57
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 213,
+    "fields": {
+      "role": 1,
+      "permission": 58
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 214,
+    "fields": {
+      "role": 2,
+      "permission": 58
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 215,
+    "fields": {
+      "role": 3,
+      "permission": 58
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 216,
+    "fields": {
+      "role": 4,
+      "permission": 58
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 213,
+    "fields": {
+      "role": 1,
+      "permission": 59
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 214,
+    "fields": {
+      "role": 2,
+      "permission": 59
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 215,
+    "fields": {
+      "role": 3,
+      "permission": 59
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 216,
+    "fields": {
+      "role": 4,
+      "permission": 59
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 217,
+    "fields": {
+      "role": 1,
+      "permission": 58
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 218,
+    "fields": {
+      "role": 2,
+      "permission": 58
+    }
+  }
+]

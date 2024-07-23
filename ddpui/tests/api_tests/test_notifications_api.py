@@ -15,6 +15,7 @@ from ddpui.api.notifications_api import (
     get_user_notifications,
     delete_notification,
     mark_as_read,
+    get_unread_notifications_count
 )
 from ddpui.schemas.notifications_api_schemas import (
     CreateNotificationPayloadSchema,
@@ -381,3 +382,24 @@ def test_delete_already_sent_notification():
             excinfo.value
         )
         mock_delete_notification.assert_called_once_with(1)
+
+def test_get_unread_notifications_count_success(orguser):
+    """tests the success of api endpoint for fetching unread notification count"""
+    request = MagicMock()
+    request.orguser = orguser
+    with patch(
+        "ddpui.core.notifications_service.get_unread_notifications_count"
+    ) as mock_get_unread_notifications_count:
+        mock_get_unread_notifications_count.return_value = (
+            None,
+            {
+                "success": True,
+                "res": 0,
+            },
+        )
+        response = get_unread_notifications_count(request)
+        assert response["success"] is True
+        assert (
+            response["res"] == 0
+        )
+        mock_get_unread_notifications_count.assert_called_once_with(orguser)

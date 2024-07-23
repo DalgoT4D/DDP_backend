@@ -130,9 +130,10 @@ class DataStats(ColInsight):
                         float(result[0]["median"]) if result[0]["median"] else None
                     ),
                     "mode": float(result[0]["mode"]) if result[0]["mode"] else None,
-                    "other_modes": (
-                        result[0]["other_modes"] if result[0]["other_modes"] else None
-                    ),
+                    "other_modes": [
+                        (float(other_mode) if other_mode else None)
+                        for other_mode in result[0]["other_modes"]
+                    ],
                 }
             }
 

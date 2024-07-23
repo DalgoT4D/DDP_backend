@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import datetime
 from enum import Enum
 from sqlalchemy.sql.selectable import Select
+from decimal import Decimal
 
 from ddpui.datainsights.query_builder import AggQueryBuilder
 from ddpui.datainsights.warehouse.warehouse_interface import WarehouseType
@@ -25,6 +26,7 @@ MAP_TRANSLATE_TYPES = {
     bool: TranslateColDataType.BOOL,
     str: TranslateColDataType.STRING,
     dict: TranslateColDataType.JSON,
+    Decimal: TranslateColDataType.NUMERIC,
 }
 
 

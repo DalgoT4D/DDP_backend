@@ -41,9 +41,7 @@ coverage==7.2.5
 croniter==1.3.8
 cryptography==39.0.2
 dateparser==1.1.7
-dbt-automation @ git+https://github.com/DalgoT4D/dbt-automation.git@main
-dbt-core==1.6.6
-dbt-extractor==0.4.1
+dbt_automation @ git+https://github.com/DalgoT4D/dbt-automation.git@main
 decorator==5.1.1
 dill==0.3.6
 Django==4.2
@@ -165,6 +163,7 @@ rich==13.3.2
 rsa==4.9
 s3transfer==0.6.0
 sendgrid==6.10.0
+sentry-sdk==2.10.0
 sgqlc==16.1
 six==1.16.0
 sniffio==1.3.0

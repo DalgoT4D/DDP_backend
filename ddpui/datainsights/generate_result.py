@@ -300,6 +300,7 @@ class GenerateResult:
                     # release the lock for this query
                     cls.release_query_lock(org, query)
                 except Exception as err:
+                    logger.info(results)
                     logger.error(
                         "Something went wrong while executing the query or saving the results; clearing the lock"
                     )
