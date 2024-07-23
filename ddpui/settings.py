@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/4.1/ref/settings/
 
 import os
 from pathlib import Path
+import sentry_sdk
 
 from corsheaders.defaults import default_headers
 from dotenv import load_dotenv
@@ -20,6 +21,17 @@ from ddpui.utils.ab_logger import setup_logger as setup_ab_logger
 import ddpui.utils.flags  # pylint: disable=unused-import
 
 load_dotenv()
+
+sentry_sdk.init(
+    dsn=os.getenv("SENTRY_DSN"),
+    # Set traces_sample_rate to 1.0 to capture 100%
+    # of transactions for performance monitoring.
+    traces_sample_rate=float(os.getenv("SENTRY_TSR", "1.0")),
+    # Set profiles_sample_rate to 1.0 to profile 100%
+    # of sampled transactions.
+    # We recommend adjusting this value in production.
+    profiles_sample_rate=float(os.getenv("SENTRY_PSR", "1.0")),
+)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
