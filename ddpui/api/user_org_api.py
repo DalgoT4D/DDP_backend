@@ -11,7 +11,6 @@ from flags.state import flag_enabled
 from django.utils.text import slugify
 from django.db.models import Prefetch
 from django.contrib.auth.models import User
-from django.forms import model_to_dict
 from django.db.models import F
 
 from ddpui import auth
@@ -134,7 +133,7 @@ def get_current_user_v2(request):
                 new_role_slug=curr_orguser.new_role.slug,
                 wtype=warehouse.wtype if warehouse else None,
                 permissions=[
-                    model_to_dict(rolep)
+                    {"slug": rolep.permission.slug, "name": rolep.permission.name}
                     for rolep in curr_orguser.new_role.rolepermissions.all()
                 ],
                 is_demo=org.is_demo if org else False,
