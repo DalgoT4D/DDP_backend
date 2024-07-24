@@ -3,6 +3,8 @@ from ninja.errors import ValidationError
 
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
+from django.forms import model_to_dict
+from django.db.models import Prefetch
 
 # dependencies
 from ddpui import auth
@@ -58,19 +60,26 @@ def get_dashboard_v1(request):
 
     org_data_flows = OrgDataFlowv1.objects.filter(
         org=orguser.org, dataflow_type="orchestrate"
-    ).all()
+    ).prefetch_related(
+        Prefetch(
+            "datafloworgtask_set",
+            queryset=DataflowOrgTask.objects.all().select_related("orgtask"),
+        )
+    )
 
     res = []
 
     # fetch 50 (default limit) flow runs for each flow
     sync_flowruns_for_deployment_ids = []
     for flow in org_data_flows:
-        orgtask_ids = DataflowOrgTask.objects.filter(dataflow=flow).values_list(
-            "orgtask__id", flat=True
-        )
         # if there is one there will typically be several - a sync,
         # a git-run, a git-test... we return the userinfo only for the first one
-        lock = TaskLock.objects.filter(orgtask__id__in=orgtask_ids).first()
+        lock = TaskLock.objects.filter(
+            orgtask__id__in=[
+                dataflow_org_task.orgtask.id
+                for dataflow_org_task in flow.datafloworgtask_set.all()
+            ]
+        ).first()
         res.append(
             {
                 "name": flow.name,
