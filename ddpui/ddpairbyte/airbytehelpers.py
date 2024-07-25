@@ -6,6 +6,8 @@ import json
 from django.utils.text import slugify
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Prefetch
+
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import AirbyteConnectionSchemaUpdate, AirbyteWorkspace
 from ddpui.ddpprefect import prefect_service
@@ -30,7 +32,8 @@ from ddpui.utils.helpers import generate_hash_id, update_dict_but_not_stars
 from ddpui.utils import secretsmanager
 from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
 from ddpui.core.pipelinefunctions import setup_airbyte_sync_task_config
-from ddpui.core.orgtaskfunctions import fetch_orgtask_lock
+from ddpui.core.orgtaskfunctions import fetch_orgtask_lock, fetch_orgtask_lock_v1
+from ddpui.models.tasks import TaskLock
 
 logger = CustomLogger("airbyte")
 
@@ -280,9 +283,25 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
 
 def get_connections(org: Org):
     """return connections with last run details"""
-    org_tasks = OrgTask.objects.filter(org=org, task__slug=TASK_AIRBYTESYNC).all()
 
-    res = []
+    sync_dataflows = (
+        OrgDataFlowv1.objects.filter(
+            org=org,
+            dataflow_type="manual",
+            reset_conn_dataflow_id__isnull=False
+        )
+        .select_related("reset_conn_dataflow")
+        .prefetch_related(
+            Prefetch(
+                "datafloworgtasks",
+                queryset=DataflowOrgTask.objects.all()
+                .select_related("orgtask")
+                .prefetch_related(
+                    Prefetch("orgtask__tasklock", queryset=TaskLock.objects.all()),
+                ),
+            )
+        )
+    )
 
     warehouse = OrgWarehouse.objects.filter(org=org).first()
 
@@ -290,8 +309,29 @@ def get_connections(org: Org):
         org.airbyte_workspace_id
     )
 
-    for org_task in org_tasks:
-        # fetch the connection
+    res = []
+
+    for sync_dataflow in sync_dataflows:
+        org_tasks: list[OrgTask] = [
+            dataflow_orgtask.orgtask
+            for dataflow_orgtask in sync_dataflow.datafloworgtasks.all()
+        ]
+
+        if len(org_tasks) == 0:
+            logger.error(
+                f"Something wrong with the sync dataflow {sync_dataflow.deployment_name}; no orgtasks found"
+            )
+            continue
+
+        if len(org_tasks) > 1:
+            logger.error(
+                f"Something wrong with the sync dataflow {sync_dataflow.deployment_name}; more than 1 orgtasks attached"
+            )
+            continue
+
+        org_task: OrgTask = org_tasks[0]
+
+        # find the airbyte connection
         connection = [
             conn
             for conn in airbyte_connections
@@ -304,8 +344,6 @@ def get_connections(org: Org):
             continue
         connection = connection[0]
 
-        # a single connection will have a manual deployment and (usually) a pipeline
-        # we want to show the last sync, from whichever
         last_runs = []
         for df_orgtask in DataflowOrgTask.objects.filter(
             orgtask=org_task,
@@ -327,23 +365,27 @@ def get_connections(org: Org):
             )
         )
 
-        sync_dataflow_orgtask = DataflowOrgTask.objects.filter(
-            orgtask=org_task, dataflow__dataflow_type="manual"
-        ).first()
+        reset_dataflow: OrgDataFlowv1 = sync_dataflow.reset_conn_dataflow
 
-        reset_dataflow: OrgDataFlowv1 = (
-            sync_dataflow_orgtask.dataflow.reset_conn_dataflow
-        )
+        lock = None
 
-        lock = fetch_orgtask_lock(org_task)
+        sync_lock = None
+        for dataflow_orgtask in sync_dataflow.datafloworgtasks.all():
+            orgtask = dataflow_orgtask.orgtask
+            if hasattr(orgtask, "tasklock"):
+                sync_lock = orgtask.tasklock
+                break
+
+        if sync_lock:
+            lock = fetch_orgtask_lock_v1(org_task, sync_lock)
 
         if not lock and reset_dataflow:
-            reset_dataflow_orgtask = DataflowOrgTask.objects.filter(
-                dataflow=reset_dataflow
-            ).first()
-
-            if reset_dataflow_orgtask.orgtask:
-                lock = fetch_orgtask_lock(reset_dataflow_orgtask.orgtask)
+            for dataflow_orgtask in reset_dataflow.datafloworgtasks.all():
+                orgtask = dataflow_orgtask.orgtask
+                if hasattr(orgtask, "tasklock"):
+                    reset_lock = orgtask.tasklock
+                    lock = fetch_orgtask_lock_v1(org_task, reset_lock)
+                    break
 
         connection["destination"]["name"] = warehouse.name
         res.append(
@@ -353,11 +395,7 @@ def get_connections(org: Org):
                 "source": connection["source"],
                 "destination": connection["destination"],
                 "status": connection["status"],
-                "deploymentId": (
-                    sync_dataflow_orgtask.dataflow.deployment_id
-                    if sync_dataflow_orgtask
-                    else None
-                ),
+                "deploymentId": sync_dataflow.deployment_id,
                 "lastRun": last_runs[-1] if len(last_runs) > 0 else None,
                 "lock": lock,  # this will have the status of the flow run
                 "resetConnDeploymentId": (
@@ -366,6 +404,7 @@ def get_connections(org: Org):
             }
         )
 
+    
     return res, None
 
 

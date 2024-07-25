@@ -4,6 +4,7 @@ do not raise http errors here
 """
 
 from pathlib import Path
+from typing import Union
 from ddpui.models.tasks import OrgTask, DataflowOrgTask, TaskLock, TaskLockStatus
 from ddpui.models.org import Org, OrgPrefectBlockv1, OrgDataFlowv1
 from ddpui.utils.custom_logger import CustomLogger
@@ -199,7 +200,7 @@ def fetch_pipeline_lock(dataflow: OrgDataFlowv1):
     return None
 
 
-def fetch_pipeline_lock_v1(dataflow: OrgDataFlowv1, lock: TaskLock):
+def fetch_pipeline_lock_v1(dataflow: OrgDataFlowv1, lock: Union[TaskLock, None]):
     """
     fetch the lock status of an dataflow/deployment
     """
