@@ -556,7 +556,7 @@ def delete_old_canvaslocks():
 
 @app.task(bind=False)
 def sync_flow_runs_of_deployments(
-    deployment_ids: list[str] = None, go_back_hours: int = 24
+    deployment_ids: list[str] = None, look_back_hours: int = 24
 ):
     """
     This function will sync (create) latest flow runs of deployment(s) if missing from our db
@@ -567,7 +567,7 @@ def sync_flow_runs_of_deployments(
         query = query.filter(deployment_id__in=deployment_ids)
 
     # sync recent 50 flow runs of each deployment
-    start_time_gt = UTC.localize(datetime.now() - timedelta(hours=go_back_hours))
+    start_time_gt = UTC.localize(datetime.now() - timedelta(hours=look_back_hours))
     for dataflow in query.all():
         try:
             deployment_id = dataflow.deployment_id
@@ -596,6 +596,7 @@ def sync_flow_runs_of_deployments(
                         "state_name": flow_run["state_name"],
                     },
                 )
+            logger.info("synced flow runs for deployment %s | org %s", deployment_id, dataflow.org.slug)
         except Exception as e:
             logger.error(
                 "failed to sync flow runs for deployment %s ; moving to next one",
