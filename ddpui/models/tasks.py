@@ -134,7 +134,9 @@ class TaskLockStatus(str, Enum):
 class TaskLock(models.Model):
     """A locking implementation for OrgTask"""
 
-    orgtask = models.OneToOneField(OrgTask, on_delete=models.CASCADE)
+    orgtask = models.OneToOneField(
+        OrgTask, on_delete=models.CASCADE, related_name="tasklock"
+    )
     flow_run_id = models.TextField(max_length=36, blank=True, default="")
     locked_at = models.DateTimeField(auto_now_add=True)
     locked_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE)

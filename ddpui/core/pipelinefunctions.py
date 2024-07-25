@@ -197,3 +197,34 @@ def fetch_pipeline_lock(dataflow: OrgDataFlowv1):
         }
 
     return None
+
+
+def fetch_pipeline_lock_v1(dataflow: OrgDataFlowv1, lock: TaskLock):
+    """
+    fetch the lock status of an dataflow/deployment
+    """
+    if lock:
+        lock_status = TaskLockStatus.QUEUED
+        if lock.flow_run_id:
+            flow_run = prefect_service.get_flow_run(
+                lock.flow_run_id
+            )  # can taken from db now
+            if flow_run and flow_run["state_type"] in ["SCHEDULED", "PENDING"]:
+                lock_status = TaskLockStatus.QUEUED
+            elif flow_run and flow_run["state_type"] == "RUNNING":
+                lock_status = TaskLockStatus.RUNNING
+            else:
+                lock_status = TaskLockStatus.COMPLETED
+
+        return {
+            "lockedBy": lock.locked_by.user.email,
+            "lockedAt": lock.locked_at,
+            "flowRunId": lock.flow_run_id,
+            "status": (
+                lock_status
+                if lock.locking_dataflow == dataflow
+                else TaskLockStatus.LOCKED
+            ),
+        }
+
+    return None

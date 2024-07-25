@@ -7,7 +7,7 @@ from ninja.errors import HttpError
 from ninja.errors import ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
-from django.forms.models import model_to_dict
+from django.db.models import Prefetch
 
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
@@ -36,10 +36,12 @@ from ddpui.core.pipelinefunctions import (
     setup_dbt_core_task_config,
     pipeline_with_orgtasks,
     fetch_pipeline_lock,
+    fetch_pipeline_lock_v1,
 )
 from ddpui.celeryworkers.tasks import summarize_logs
 from ddpui.core.dbtfunctions import gather_dbt_project_params
 from ddpui.auth import has_permission
+from ddpui.models.tasks import TaskLock
 
 pipelineapi = NinjaAPI(urls_namespace="pipeline")
 # http://127.0.0.1:8000/api/docs
@@ -227,9 +229,17 @@ def get_prefect_dataflows_v1(request):
         raise HttpError(400, "register an organization first")
 
     org_data_flows = OrgDataFlowv1.objects.filter(
-        org=orguser.org,
-        dataflow_type="orchestrate",
-    ).all()
+        org=orguser.org, dataflow_type="orchestrate"
+    ).prefetch_related(
+        Prefetch(
+            "datafloworgtask",
+            queryset=DataflowOrgTask.objects.all()
+            .select_related("orgtask")
+            .prefetch_related(
+                Prefetch("orgtask__tasklock", queryset=TaskLock.objects.all()),
+            ),
+        )
+    )
 
     deployment_ids = [flow.deployment_id for flow in org_data_flows]
 
@@ -250,6 +260,13 @@ def get_prefect_dataflows_v1(request):
 
     for flow in org_data_flows:
 
+        lock = None
+        for dataflow_orgtask in flow.datafloworgtask.all():
+            orgtask = dataflow_orgtask.orgtask
+            if hasattr(orgtask, "tasklock"):
+                lock = orgtask.tasklock
+                break
+
         res.append(
             {
                 "name": flow.name,
@@ -264,7 +281,7 @@ def get_prefect_dataflows_v1(request):
                     if flow.deployment_id in is_deployment_active
                     else False
                 ),
-                "lock": fetch_pipeline_lock(flow),
+                "lock": fetch_pipeline_lock_v1(flow, lock),
             }
         )
 

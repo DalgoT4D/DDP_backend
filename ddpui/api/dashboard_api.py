@@ -63,7 +63,11 @@ def get_dashboard_v1(request):
     ).prefetch_related(
         Prefetch(
             "datafloworgtask",
-            queryset=DataflowOrgTask.objects.all().select_related("orgtask"),
+            queryset=DataflowOrgTask.objects.all()
+            .select_related("orgtask")
+            .prefetch_related(
+                Prefetch("orgtask__tasklock", queryset=TaskLock.objects.all()),
+            ),
         )
     )
 
@@ -74,12 +78,13 @@ def get_dashboard_v1(request):
     for flow in org_data_flows:
         # if there is one there will typically be several - a sync,
         # a git-run, a git-test... we return the userinfo only for the first one
-        lock = TaskLock.objects.filter(
-            orgtask__id__in=[
-                dataflow_org_task.orgtask.id
-                for dataflow_org_task in flow.datafloworgtask.all()
-            ]
-        ).first()
+        lock = None
+        for dataflow_orgtask in flow.datafloworgtask.all():
+            orgtask = dataflow_orgtask.orgtask
+            if hasattr(orgtask, "tasklock"):
+                lock = orgtask.tasklock
+                break
+
         res.append(
             {
                 "name": flow.name,
