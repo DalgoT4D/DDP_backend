@@ -554,8 +554,10 @@ def delete_old_canvaslocks():
     CanvasLock.objects.filter(locked_at__lt=tenminutesago).delete()
 
 
-@app.task(bind=True)
-def sync_flow_runs_of_deployments(self, deployment_ids: list[str] = None):
+@app.task(bind=False)
+def sync_flow_runs_of_deployments(
+    deployment_ids: list[str] = None, go_back_hours: int = 24
+):
     """
     This function will sync (create) latest flow runs of deployment(s) if missing from our db
     """
@@ -565,7 +567,7 @@ def sync_flow_runs_of_deployments(self, deployment_ids: list[str] = None):
         query = query.filter(deployment_id__in=deployment_ids)
 
     # sync recent 50 flow runs of each deployment
-    start_time_gt = UTC.localize(datetime.now() - timedelta(hours=24))
+    start_time_gt = UTC.localize(datetime.now() - timedelta(hours=go_back_hours))
     for dataflow in query.all():
         try:
             deployment_id = dataflow.deployment_id
@@ -578,21 +580,22 @@ def sync_flow_runs_of_deployments(self, deployment_ids: list[str] = None):
 
             # iterate so that start-time is ASC
             for flow_run in res["flow_runs"][::-1]:
-                if not PrefectFlowRun.objects.filter(
-                    flow_run_id=flow_run["id"]
-                ).exists():
-                    if flow_run["startTime"] in ["", None]:
-                        flow_run["startTime"] = flow_run["expectedStartTime"]
-                    PrefectFlowRun.objects.create(
-                        deployment_id=deployment_id,
-                        flow_run_id=flow_run["id"],
-                        name=flow_run["name"],
-                        start_time=flow_run["startTime"],
-                        expected_start_time=flow_run["expectedStartTime"],
-                        total_run_time=flow_run["totalRunTime"],
-                        status=flow_run["status"],
-                        state_name=flow_run["state_name"],
-                    )
+                PrefectFlowRun.objects.update_or_create(
+                    flow_run_id=flow_run["id"],
+                    defaults={
+                        "deployment_id": deployment_id,
+                        "name": flow_run["name"],
+                        "start_time": (
+                            flow_run["startTime"]
+                            if flow_run["startTime"] not in ["", None]
+                            else flow_run["expectedStartTime"]
+                        ),
+                        "expected_start_time": flow_run["expectedStartTime"],
+                        "total_run_time": flow_run["totalRunTime"],
+                        "status": flow_run["status"],
+                        "state_name": flow_run["state_name"],
+                    },
+                )
         except Exception as e:
             logger.error(
                 "failed to sync flow runs for deployment %s ; moving to next one",
@@ -835,6 +838,11 @@ def setup_periodic_tasks(sender, **kwargs):
     )
     sender.add_periodic_task(
         60 * 1.0, delete_old_canvaslocks.s(), name="remove old canvaslocks"
+    )
+    sender.add_periodic_task(
+        crontab(minute=0, hour="*/6"),
+        sync_flow_runs_of_deployments.s(),
+        name="sync flow runs of deployments into our db",
     )
 
 

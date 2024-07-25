@@ -15,9 +15,6 @@ from ddpui.models.tasks import DataflowOrgTask, TaskLock
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.auth import has_permission
 
-# celery task
-from ddpui.celeryworkers.tasks import sync_flow_runs_of_deployments
-
 
 dashboardapi = NinjaAPI(urls_namespace="dashboard")
 
@@ -108,9 +105,6 @@ def get_dashboard_v1(request):
             }
         )
         sync_flowruns_for_deployment_ids.append(flow.deployment_id)
-
-    # sync the deployment flow runs into our db; a bit heavy task
-    sync_flow_runs_of_deployments.delay(sync_flowruns_for_deployment_ids)
 
     # we might add more stuff here , system logs etc.
     return res
