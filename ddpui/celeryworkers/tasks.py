@@ -57,7 +57,7 @@ from ddpui.utils.constants import (
     TASK_DBTDEPS,
     TASK_AIRBYTESYNC,
 )
-from ddpui.ddpprefect import DBTCLIPROFILE, FLOW_RUN_FAILED, FLOW_RUN_CRASHED
+from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.core import llm_service
 
 logger = CustomLogger("ddpui")
