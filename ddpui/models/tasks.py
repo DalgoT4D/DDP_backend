@@ -114,10 +114,10 @@ class DataflowOrgTask(models.Model):
     """Association of OrgPrefectBlocks to their deployments"""
 
     dataflow = models.ForeignKey(
-        OrgDataFlowv1, on_delete=models.CASCADE, related_name="datafloworgtask"
+        OrgDataFlowv1, on_delete=models.CASCADE, related_name="datafloworgtasks"
     )
     orgtask = models.ForeignKey(
-        OrgTask, on_delete=models.CASCADE, related_name="orgtaskdataflow"
+        OrgTask, on_delete=models.CASCADE, related_name="orgtaskdataflows"
     )
     seq = models.IntegerField(default=1)
 

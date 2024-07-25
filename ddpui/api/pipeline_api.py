@@ -232,7 +232,7 @@ def get_prefect_dataflows_v1(request):
         org=orguser.org, dataflow_type="orchestrate"
     ).prefetch_related(
         Prefetch(
-            "datafloworgtask",
+            "datafloworgtasks",
             queryset=DataflowOrgTask.objects.all()
             .select_related("orgtask")
             .prefetch_related(
@@ -261,7 +261,7 @@ def get_prefect_dataflows_v1(request):
     for flow in org_data_flows:
 
         lock = None
-        for dataflow_orgtask in flow.datafloworgtask.all():
+        for dataflow_orgtask in flow.datafloworgtasks.all():
             orgtask = dataflow_orgtask.orgtask
             if hasattr(orgtask, "tasklock"):
                 lock = orgtask.tasklock
