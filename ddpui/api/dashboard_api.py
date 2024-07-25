@@ -62,7 +62,7 @@ def get_dashboard_v1(request):
         org=orguser.org, dataflow_type="orchestrate"
     ).prefetch_related(
         Prefetch(
-            "datafloworgtask_set",
+            "datafloworgtask",
             queryset=DataflowOrgTask.objects.all().select_related("orgtask"),
         )
     )
@@ -77,7 +77,7 @@ def get_dashboard_v1(request):
         lock = TaskLock.objects.filter(
             orgtask__id__in=[
                 dataflow_org_task.orgtask.id
-                for dataflow_org_task in flow.datafloworgtask_set.all()
+                for dataflow_org_task in flow.datafloworgtask.all()
             ]
         ).first()
         res.append(
