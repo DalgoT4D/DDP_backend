@@ -87,6 +87,7 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
         for tasklock in locks:
             tasklock.flow_run_id = flow_run.get("id")
             tasklock.save()
+        create_or_update_flowrun(flow_run, deployment_id)
 
     elif state == FLOW_RUN_RUNNING_STATE_NAME:  # non-terminal states
         create_or_update_flowrun(flow_run, deployment_id)
@@ -105,7 +106,11 @@ def create_or_update_flowrun(flow_run, deployment_id):
         defaults={
             "deployment_id": deployment_id,
             "name": flow_run["name"],
-            "start_time": flow_run["start_time"],
+            "start_time": (
+                flow_run["start_time"]
+                if flow_run["start_time"]
+                else flow_run["expected_start_time"]
+            ),
             "expected_start_time": flow_run["expected_start_time"],
             "total_run_time": flow_run["total_run_time"],
             "status": flow_run["status"],
