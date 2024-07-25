@@ -108,7 +108,7 @@ def create_or_update_flowrun(flow_run, deployment_id):
             "name": flow_run["name"],
             "start_time": (
                 flow_run["start_time"]
-                if flow_run["start_time"]
+                if flow_run["startTime"] not in ["", None]
                 else flow_run["expected_start_time"]
             ),
             "expected_start_time": flow_run["expected_start_time"],
