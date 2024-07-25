@@ -267,15 +267,16 @@ def get_prefect_dataflows_v1(request):
                 lock = orgtask.tasklock
                 break
 
+        last_runs = prefect_service.get_flow_runs_by_deployment_id_v1(
+            flow.deployment_id, limit=1, offset=0
+        )
         res.append(
             {
                 "name": flow.name,
                 "deploymentId": flow.deployment_id,
                 "cron": flow.cron,
                 "deploymentName": flow.deployment_name,
-                "lastRun": prefect_service.get_last_flow_run_by_deployment_id(
-                    flow.deployment_id
-                ),
+                "lastRun": last_runs[0] if last_runs and len(last_runs) > 0 else None,
                 "status": (
                     is_deployment_active[flow.deployment_id]
                     if flow.deployment_id in is_deployment_active
