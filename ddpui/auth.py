@@ -102,7 +102,7 @@ class CustomAuthMiddleware(HttpBearer):
             if request.headers.get("x-dalgo-org"):
                 orgslug = request.headers["x-dalgo-org"]
                 q_orguser = q_orguser.filter(org__slug=orgslug)
-            orguser = q_orguser.first()
+            orguser = q_orguser.select_related("org", "user").first()
             if orguser is not None:
                 if orguser.org is None:
                     raise HttpError(400, "register an organization first")

@@ -87,7 +87,9 @@ def seed_db(django_db_setup, django_db_blocker):
 @pytest.fixture
 def org_without_workspace():
     """a pytest fixture which creates an Org without an airbyte workspace"""
-    org = Org.objects.create(airbyte_workspace_id=None, slug="test-org-WO-slug", name="test-org-WO-name")
+    org = Org.objects.create(
+        airbyte_workspace_id=None, slug="test-org-WO-slug", name="test-org-WO-name"
+    )
     yield org
     org.delete()
 
@@ -1642,7 +1644,7 @@ def test_post_organization_accept_tnc(orguser: OrgUser, org_without_workspace: O
     request = mock_request(orguser)
 
     currentuserv2response = get_current_user_v2(request)
-    assert currentuserv2response[0].org.tnc_accepted is False
+    assert currentuserv2response[0].org.tnc_accepted is None
 
     response = post_organization_accept_tnc(request)
     assert response["success"] == 1
