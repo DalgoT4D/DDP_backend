@@ -286,9 +286,7 @@ def get_connections(org: Org):
 
     sync_dataflows = (
         OrgDataFlowv1.objects.filter(
-            org=org,
-            dataflow_type="manual",
-            reset_conn_dataflow_id__isnull=False
+            org=org, dataflow_type="manual", reset_conn_dataflow_id__isnull=False
         )
         .select_related("reset_conn_dataflow")
         .prefetch_related(
@@ -348,16 +346,12 @@ def get_connections(org: Org):
         for df_orgtask in DataflowOrgTask.objects.filter(
             orgtask=org_task,
         ):
-            # if dataflow_last_run is not preset; fetch from prefect
-            run = (
-                PrefectFlowRun.objects.filter(
-                    deployment_id=df_orgtask.dataflow.deployment_id
-                )
-                .order_by("-start_time")
-                .first()
+            run = prefect_service.get_flow_runs_by_deployment_id_v1(
+                df_orgtask.dataflow.deployment_id, limit=1, offset=0
             )
-            if run:
-                last_runs.append(run.to_json())
+
+            if len(run) > 0:
+                last_runs.append(run[0])
 
         last_runs.sort(
             key=lambda run: (
@@ -404,7 +398,6 @@ def get_connections(org: Org):
             }
         )
 
-    
     return res, None
 
 

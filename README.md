@@ -176,6 +176,8 @@ DJANGOSECRET=
 
 -   Seed the DB `python manage.py loaddata seed/*.json`
 
+-   Create the system user `python manage.py create-system-orguser`
+
 -   Start the server `python manage.py runserver`
 
 ### Step 10: Create first org and user

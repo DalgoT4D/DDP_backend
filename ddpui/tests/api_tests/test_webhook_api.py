@@ -1,11 +1,14 @@
 import os
 import django
 from datetime import datetime
+from pathlib import Path
 from uuid import uuid4
 import json
 from unittest.mock import Mock, patch
 import pytest
 from ninja.errors import HttpError
+from django.core.management import call_command
+from django.apps import apps
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
@@ -29,8 +32,20 @@ from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser, User, OrgUserRole, UserAttributes
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.flow_runs import PrefectFlowRun
+from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskLock
+from ddpui.models.org import OrgDataFlowv1
 from ddpui.settings import PRODUCTION
 from ddpui.tests.api_tests.test_user_org_api import seed_db
+from ddpui.ddpprefect import (
+    FLOW_RUN_PENDING_STATE_TYPE,
+    FLOW_RUN_RUNNING_STATE_TYPE,
+    FLOW_RUN_PENDING_STATE_NAME,
+    FLOW_RUN_RUNNING_STATE_NAME,
+    FLOW_RUN_FAILED_STATE_NAME,
+    FLOW_RUN_FAILED_STATE_TYPE,
+    FLOW_RUN_COMPLETED_STATE_NAME,
+    FLOW_RUN_COMPLETED_STATE_TYPE,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -42,6 +57,16 @@ def test_seed_data(seed_db):
     assert Role.objects.count() == 5
     assert RolePermission.objects.count() > 5
     assert Permission.objects.count() > 5
+
+
+@pytest.fixture
+def seed_master_tasks():
+    app_dir = os.path.join(Path(apps.get_app_config("ddpui").path), "..")
+    seed_dir = os.path.abspath(os.path.join(app_dir, "seed"))
+    f = open(os.path.join(seed_dir, "tasks.json"))
+    tasks = json.load(f)
+    for task in tasks:
+        Task.objects.create(**task["fields"])
 
 
 # ================================================================================
@@ -180,9 +205,11 @@ def test_post_notification_v1():
         "X-Notification-Key": os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY")
     }
     blockid = str(uuid4())
+    org = Org.objects.create(name="temp", slug="temp")
     flow_run = {
         "parameters": {
             "airbyte_connection": {"_block_document_id": blockid},
+            "config": {"org_slug": org.slug},
         },
         "deployment_id": "test-deployment-id",
         "id": "test-run-id",
@@ -190,15 +217,14 @@ def test_post_notification_v1():
         "start_time": str(datetime.now()),
         "expected_start_time": str(datetime.now()),
         "total_run_time": 12,
-        "status": "Failed",
-        "state_name": "FAILED",
+        "status": FLOW_RUN_FAILED_STATE_TYPE,
+        "state_name": FLOW_RUN_FAILED_STATE_NAME,
     }
-    org = Org.objects.create(name="temp", slug="temp")
     with patch(
         "ddpui.ddpprefect.prefect_service.get_flow_run"
     ) as mock_get_flow_run, patch(
-        "ddpui.utils.webhook_helpers.send_text_message"
-    ) as mock_send_text_message:
+        "ddpui.api.webhook_api.email_logs_to_org_users"
+    ) as email_logs_org_users:
         mock_get_flow_run.return_value = flow_run
         user = User.objects.create(email="email", username="username")
         new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
@@ -208,3 +234,158 @@ def test_post_notification_v1():
         response = post_notification_v1(request)
         assert response["status"] == "ok"
         assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
+
+
+def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
+    """
+    This test cases make sure that the states of prefect flow runs are being updated as notifications from prefect come
+    Also checks for locks being created/deleted at the correct times
+    """
+    blockid = str(uuid4())
+    org = Org.objects.create(name="temp", slug="temp")
+    dataflow = OrgDataFlowv1.objects.create(
+        org=org,
+        name="test-dataflow-name",
+        deployment_id="test-deployment-id",
+        deployment_name="test-deployment-name",
+        cron=None,
+        dataflow_type="orchestrate",
+    )
+    # add sync orgtask and a dbt run to the above pipeline
+    for slugs in ["airbyte-sync", "dbt-run"]:
+        task = Task.objects.filter(slug=slugs).first()
+        orgtask = OrgTask.objects.create(task=task, org=org)
+        DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=orgtask)
+
+    flow_run = {
+        "parameters": {
+            "airbyte_connection": {"_block_document_id": blockid},
+            "config": {"org_slug": org.slug},
+        },
+        "deployment_id": dataflow.deployment_id,
+        "id": "test-run-id",
+        "name": "test-flow-run-name",
+        "start_time": str(datetime.now()),
+        "expected_start_time": str(datetime.now()),
+        "total_run_time": 12,
+        "status": FLOW_RUN_PENDING_STATE_TYPE,
+        "state_name": FLOW_RUN_PENDING_STATE_NAME,
+    }
+    # make sure the system orguser is present
+    call_command("create-system-orguser")
+
+    # Pending; first message from prefect; deployment has just been triggered
+    with patch("ddpui.ddpprefect.prefect_service.get_flow_run") as mock_get_flow_run:
+        mock_get_flow_run.return_value = flow_run
+        request = Mock()
+        body = f"""
+        Flow run test-flow-run-name with id test-run-id entered state {FLOW_RUN_PENDING_STATE_NAME}
+        """
+        request.body = json.dumps({"body": body})
+        request.headers = {
+            "X-Notification-Key": os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY")
+        }
+        response = post_notification_v1(request)
+        assert response["status"] == "ok"
+        assert (
+            PrefectFlowRun.objects.filter(
+                flow_run_id=flow_run["id"], status=FLOW_RUN_PENDING_STATE_TYPE
+            ).count()
+            == 1
+        )
+        # the dataflow & its orgtasks should be locked
+        assert (
+            TaskLock.objects.filter(
+                locking_dataflow=dataflow, flow_run_id=flow_run["id"]
+            ).count()
+            == 2
+        )
+
+    # Running; second message from prefect; deployment is running
+    with patch("ddpui.ddpprefect.prefect_service.get_flow_run") as mock_get_flow_run:
+        flow_run["status"] = FLOW_RUN_RUNNING_STATE_TYPE
+        flow_run["state_name"] = FLOW_RUN_RUNNING_STATE_NAME
+        mock_get_flow_run.return_value = flow_run
+        request = Mock()
+        body = f"""
+        Flow run test-flow-run-name with id test-run-id entered state {FLOW_RUN_RUNNING_STATE_NAME}
+        """
+        request.body = json.dumps({"body": body})
+        request.headers = {
+            "X-Notification-Key": os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY")
+        }
+        response = post_notification_v1(request)
+        assert response["status"] == "ok"
+        assert PrefectFlowRun.objects.filter(flow_run_id=flow_run["id"]).count() == 1
+        # the dataflow & its orgtasks should still be locked
+        assert (
+            TaskLock.objects.filter(
+                locking_dataflow=dataflow, flow_run_id=flow_run["id"]
+            ).count()
+            == 2
+        )
+
+    # Failed (any terminal state); third message from prefect; deployment has failed
+    with patch(
+        "ddpui.ddpprefect.prefect_service.get_flow_run"
+    ) as mock_get_flow_run, patch(
+        "ddpui.api.webhook_api.email_logs_to_org_users"
+    ) as email_logs_org_users:
+        flow_run["status"] = FLOW_RUN_FAILED_STATE_TYPE
+        flow_run["state_name"] = FLOW_RUN_FAILED_STATE_NAME
+        mock_get_flow_run.return_value = flow_run
+        request = Mock()
+        body = f"""
+        Flow run test-flow-run-name with id test-run-id entered state {FLOW_RUN_FAILED_STATE_NAME}
+        """
+        request.body = json.dumps({"body": body})
+        request.headers = {
+            "X-Notification-Key": os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY")
+        }
+        response = post_notification_v1(request)
+        assert response["status"] == "ok"
+        assert (
+            PrefectFlowRun.objects.filter(
+                flow_run_id=flow_run["id"], status=FLOW_RUN_FAILED_STATE_TYPE
+            ).count()
+            == 1
+        )
+        assert (
+            TaskLock.objects.filter(
+                locking_dataflow=dataflow, flow_run_id=flow_run["id"]
+            ).count()
+            == 0
+        )
+        email_logs_org_users.assert_called_once()
+
+    # or
+    # Completed (any terminal state); third message from prefect; deployment has completed
+    PrefectFlowRun.objects.filter(flow_run_id=flow_run["id"]).update(
+        status=FLOW_RUN_PENDING_STATE_TYPE, state_name=FLOW_RUN_PENDING_STATE_NAME
+    )
+    with patch("ddpui.ddpprefect.prefect_service.get_flow_run") as mock_get_flow_run:
+        flow_run["status"] = FLOW_RUN_COMPLETED_STATE_TYPE
+        flow_run["state_name"] = FLOW_RUN_COMPLETED_STATE_NAME
+        mock_get_flow_run.return_value = flow_run
+        request = Mock()
+        body = f"""
+        Flow run test-flow-run-name with id test-run-id entered state {FLOW_RUN_COMPLETED_STATE_NAME}
+        """
+        request.body = json.dumps({"body": body})
+        request.headers = {
+            "X-Notification-Key": os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY")
+        }
+        response = post_notification_v1(request)
+        assert response["status"] == "ok"
+        assert (
+            PrefectFlowRun.objects.filter(
+                flow_run_id=flow_run["id"], status=FLOW_RUN_COMPLETED_STATE_TYPE
+            ).count()
+            == 1
+        )
+        assert (
+            TaskLock.objects.filter(
+                locking_dataflow=dataflow, flow_run_id=flow_run["id"]
+            ).count()
+            == 0
+        )
