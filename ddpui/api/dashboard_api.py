@@ -14,7 +14,7 @@ from ddpui.models.org import OrgDataFlowv1
 from ddpui.models.tasks import DataflowOrgTask, TaskLock
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.auth import has_permission
-
+from ddpui.ddpprefect import prefect_service
 
 dashboardapi = NinjaAPI(urls_namespace="dashboard")
 
@@ -87,12 +87,9 @@ def get_dashboard_v1(request):
                 "deploymentId": flow.deployment_id,
                 "cron": flow.cron,
                 "deploymentName": flow.deployment_name,
-                "runs": [
-                    flow_run.to_json()
-                    for flow_run in PrefectFlowRun.objects.filter(
-                        deployment_id=flow.deployment_id
-                    ).order_by("-start_time")[:50]
-                ],
+                "runs": prefect_service.get_flow_runs_by_deployment_id_v1(
+                    flow.deployment_id, limit=50, offset=0
+                ),
                 "lock": (
                     {
                         "lockedBy": lock.locked_by.user.email,
