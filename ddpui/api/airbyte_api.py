@@ -35,7 +35,6 @@ from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.celeryworkers.tasks import (
     get_connection_catalog_task,
-    sync_flow_runs_of_deployments,
     add_custom_connectors_to_workspace,
     summarize_logs,
 )
@@ -496,10 +495,6 @@ def get_airbyte_connections_v1(request):
     if error:
         raise HttpError(400, error)
     logger.debug(res)
-
-    # sync the deployment flow runs into our db; a bit heavy task
-    deployment_ids = [body["deploymentId"] for body in res]
-    sync_flow_runs_of_deployments.delay(deployment_ids)
 
     return res
 

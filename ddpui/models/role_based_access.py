@@ -28,8 +28,13 @@ class Permission(models.Model):
 class RolePermission(models.Model):
     """Mapping of roles to permissions"""
 
-    role = models.ForeignKey(Role, on_delete=models.CASCADE)
-    permission = models.ForeignKey(Permission, on_delete=models.CASCADE)
+    role = models.ForeignKey(
+        Role, on_delete=models.CASCADE, related_name="rolepermissions"
+    )
+    permission = models.ForeignKey(
+        Permission,
+        on_delete=models.CASCADE,
+    )
 
     def __str__(self):
         return f"{self.role.slug} | {self.permission.slug}"
