@@ -97,10 +97,6 @@ def get_current_user_v2(request):
     # warehouse
     warehouse = OrgWarehouse.objects.filter(org=org).first()
 
-    # org tnc
-    if org:
-        org.tnc_accepted = OrgTnC.objects.filter(org=org).exists()
-
     res = []
     for curr_orguser in OrgUser.objects.filter(user=user).prefetch_related(
         Prefetch(
