@@ -7,7 +7,7 @@ from ddpui.models.org_user import OrgUser
 class OrgTnC(models.Model):
     """Docstring"""
 
-    org = models.ForeignKey(Org, on_delete=models.CASCADE)
+    org = models.ForeignKey(Org, on_delete=models.CASCADE, related_name="orgtncs")
     tnc_accepted_on = models.DateField(null=False)
     tnc_accepted_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE, null=False)
 

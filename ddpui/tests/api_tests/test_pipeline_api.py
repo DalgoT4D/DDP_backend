@@ -45,6 +45,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask, Task, TaskLock
 from ddpui.models.org_user import OrgUser, OrgUserRole
+from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.constants import TASK_DBTRUN
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
@@ -434,9 +435,6 @@ def test_get_prefect_dataflows_v1_success(orguser_transform_tasks):
             {"deploymentId": "test-dep-id-2", "isScheduleActive": False},
         ]
     ),
-    get_last_flow_run_by_deployment_id=Mock(
-        return_value="some-last-run-prefect-object"
-    ),
     create_dataflow_v1=Mock(
         return_value={"deployment": {"name": "test-deploy", "id": "test-deploy-id"}}
     ),
@@ -453,6 +451,18 @@ def test_get_prefect_dataflows_v1_success2(orguser_transform_tasks):
         deployment_id="test-dep-id-1",
         dataflow_type="orchestrate",
     )
+    # last run of this sync deployment/dataflow
+    PrefectFlowRun.objects.create(
+        deployment_id="test-dep-id-1",
+        flow_run_id="some-fake-run-id",
+        name="pipeline-run",
+        start_time="2022-01-01",
+        expected_start_time="2022-01-01",
+        total_run_time=12,
+        status="COMPLETED",
+        state_name="Completed",
+    )
+
     flow1 = OrgDataFlowv1.objects.create(
         org=request.orguser.org,
         name="flow-2",
@@ -468,7 +478,7 @@ def test_get_prefect_dataflows_v1_success2(orguser_transform_tasks):
     assert dataflows[0]["name"] == flow0.name
     assert dataflows[0]["cron"] == flow0.cron
     assert dataflows[0]["deploymentName"] == flow0.deployment_name
-    assert dataflows[0]["lastRun"] == "some-last-run-prefect-object"
+    assert dataflows[0]["lastRun"]["id"] == "some-fake-run-id"
     assert dataflows[0]["status"] is True
     assert dataflows[0]["lock"] is None
 

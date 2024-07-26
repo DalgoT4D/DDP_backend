@@ -232,6 +232,16 @@ def test_get_airbyte_connections_success(orguser_workspace):
         task=task, org=request.orguser.org, connection_id="fake-connection-id-1"
     )
 
+    # each connection will also have this
+    reset_dataflow = OrgDataFlowv1.objects.create(
+        org=request.orguser.org,
+        name="test-reset-deployment",
+        deployment_id="fake-reset-conn-deployment-id",
+        deployment_name="test-reset-deployment",
+        cron=None,
+        dataflow_type="manual",
+    )
+
     dataflow = OrgDataFlowv1.objects.create(
         org=request.orguser.org,
         name="test-deployment",
@@ -239,6 +249,7 @@ def test_get_airbyte_connections_success(orguser_workspace):
         deployment_name="test-deployment",
         cron=None,
         dataflow_type="manual",
+        reset_conn_dataflow=reset_dataflow,
     )
 
     # last run of this sync deployment/dataflow
@@ -903,7 +914,9 @@ def test_get_sync_history_for_connection_with_error(orguser):
         with pytest.raises(HttpError) as excinfo:
             get_sync_history_for_connection(request, connection_id, limit=1, offset=0)
 
-    get_job_info_mock.assert_called_once_with(request.orguser.org, connection_id, limit=1, offset=0)
+    get_job_info_mock.assert_called_once_with(
+        request.orguser.org, connection_id, limit=1, offset=0
+    )
 
     assert excinfo.value.status_code == 400
     assert str(excinfo.value) == error_message

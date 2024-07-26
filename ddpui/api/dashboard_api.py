@@ -3,6 +3,8 @@ from ninja.errors import ValidationError
 
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
+from django.forms import model_to_dict
+from django.db.models import Prefetch
 
 # dependencies
 from ddpui import auth
@@ -12,10 +14,7 @@ from ddpui.models.org import OrgDataFlowv1
 from ddpui.models.tasks import DataflowOrgTask, TaskLock
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.auth import has_permission
-
-# celery task
-from ddpui.celeryworkers.tasks import sync_flow_runs_of_deployments
-
+from ddpui.ddpprefect import prefect_service
 
 dashboardapi = NinjaAPI(urls_namespace="dashboard")
 
@@ -58,31 +57,39 @@ def get_dashboard_v1(request):
 
     org_data_flows = OrgDataFlowv1.objects.filter(
         org=orguser.org, dataflow_type="orchestrate"
-    ).all()
+    ).prefetch_related(
+        Prefetch(
+            "datafloworgtasks",
+            queryset=DataflowOrgTask.objects.all()
+            .select_related("orgtask")
+            .prefetch_related(
+                Prefetch("orgtask__tasklock", queryset=TaskLock.objects.all()),
+            ),
+        )
+    )
 
     res = []
 
     # fetch 50 (default limit) flow runs for each flow
-    sync_flowruns_for_deployment_ids = []
     for flow in org_data_flows:
-        orgtask_ids = DataflowOrgTask.objects.filter(dataflow=flow).values_list(
-            "orgtask__id", flat=True
-        )
         # if there is one there will typically be several - a sync,
         # a git-run, a git-test... we return the userinfo only for the first one
-        lock = TaskLock.objects.filter(orgtask__id__in=orgtask_ids).first()
+        lock = None
+        for dataflow_orgtask in flow.datafloworgtasks.all():
+            orgtask = dataflow_orgtask.orgtask
+            if hasattr(orgtask, "tasklock"):
+                lock = orgtask.tasklock
+                break
+
         res.append(
             {
                 "name": flow.name,
                 "deploymentId": flow.deployment_id,
                 "cron": flow.cron,
                 "deploymentName": flow.deployment_name,
-                "runs": [
-                    flow_run.to_json()
-                    for flow_run in PrefectFlowRun.objects.filter(
-                        deployment_id=flow.deployment_id
-                    ).order_by("-start_time")[:50]
-                ],
+                "runs": prefect_service.get_flow_runs_by_deployment_id_v1(
+                    flow.deployment_id, limit=50, offset=0
+                ),
                 "lock": (
                     {
                         "lockedBy": lock.locked_by.user.email,
@@ -93,10 +100,6 @@ def get_dashboard_v1(request):
                 ),
             }
         )
-        sync_flowruns_for_deployment_ids.append(flow.deployment_id)
-
-    # sync the deployment flow runs into our db; a bit heavy task
-    sync_flow_runs_of_deployments.delay(sync_flowruns_for_deployment_ids)
 
     # we might add more stuff here , system logs etc.
     return res

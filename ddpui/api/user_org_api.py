@@ -8,6 +8,10 @@ from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from rest_framework.authtoken import views
 from flags.state import flag_enabled
+from django.utils.text import slugify
+from django.db.models import Prefetch
+from django.contrib.auth.models import User
+from django.db.models import F
 
 from ddpui import auth
 from ddpui.auth import has_permission
@@ -32,10 +36,12 @@ from ddpui.models.org_user import (
     UserAttributes,
     VerifyEmailSchema,
 )
-from ddpui.models.role_based_access import Role
+from ddpui.models.role_based_access import Role, RolePermission
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.deleteorg import delete_warehouse_v1
 from ddpui.utils.orguserhelpers import from_orguser
+from ddpui.models.org import OrgWarehouse, Org
+from ddpui.models.orgtnc import OrgTnC
 
 user_org_api = NinjaAPI(urls_namespace="userorg")
 # http://127.0.0.1:8000/api/docs
@@ -84,8 +90,53 @@ def get_current_user_v2(request):
     """return all the OrgUsers for the User making this request"""
     if request.orguser is None:
         raise HttpError(400, "requestor is not an OrgUser")
-    user = request.orguser.user
-    return [from_orguser(orguser) for orguser in OrgUser.objects.filter(user=user)]
+    orguser: OrgUser = request.orguser
+    user: User = request.orguser.user
+    org: Org = orguser.org
+
+    # warehouse
+    warehouse = OrgWarehouse.objects.filter(org=org).first()
+
+    res = []
+    for curr_orguser in OrgUser.objects.filter(user=user).prefetch_related(
+        Prefetch(
+            "new_role",
+            queryset=Role.objects.prefetch_related(
+                Prefetch(
+                    "rolepermissions",
+                    queryset=RolePermission.objects.filter(
+                        role_id=F("role__id")
+                    ).select_related("permission"),
+                )
+            ),
+        ),
+        Prefetch(
+            "org",
+            queryset=Org.objects.prefetch_related(
+                "orgtncs",  # Assuming 'orgtnc' is a related name from Org to its related model
+            ),
+        ),
+    ):
+        if curr_orguser.org.orgtncs.exists():
+            curr_orguser.org.tnc_accepted = curr_orguser.org.orgtncs.exists()
+        res.append(
+            OrgUserResponse(
+                email=user.email,
+                org=curr_orguser.org,
+                active=user.is_active,
+                role=curr_orguser.role,
+                role_slug=slugify(OrgUserRole(curr_orguser.role).name),
+                new_role_slug=curr_orguser.new_role.slug,
+                wtype=warehouse.wtype if warehouse else None,
+                permissions=[
+                    {"slug": rolep.permission.slug, "name": rolep.permission.name}
+                    for rolep in curr_orguser.new_role.rolepermissions.all()
+                ],
+                is_demo=org.is_demo if org else False,
+            )
+        )
+
+    return res
 
 
 @user_org_api.post("/organizations/users/", response=OrgUserResponse)

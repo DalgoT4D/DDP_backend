@@ -20,6 +20,9 @@ case "$1" in
         echo "Create first user ${FIRST_USER_EMAIL} in organization ${FIRST_ORG_NAME}"
         python manage.py createorganduser ${FIRST_ORG_NAME} ${FIRST_USER_EMAIL} ${FIRST_USER_PASSWORD} --role ${FIRST_USER_ROLE}
 
+        echo "Create system user"
+        python manage.py create-system-orguser
+
         # Start server
         echo "Starting server"
 
