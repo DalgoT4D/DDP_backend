@@ -19,6 +19,9 @@ from ddpui.ddpprefect import (
     SECRET,
     SHELLOPERATION,
     prefect_service,
+    FLOW_RUN_PENDING_STATE_TYPE,
+    FLOW_RUN_RUNNING_STATE_TYPE,
+    FLOW_RUN_SCHEDULED_STATE_TYPE,
 )
 from ddpui.utils.constants import (
     AIRBYTE_SYNC_TIMEOUT,
@@ -210,9 +213,12 @@ def fetch_pipeline_lock_v1(dataflow: OrgDataFlowv1, lock: Union[TaskLock, None])
             flow_run = prefect_service.get_flow_run(
                 lock.flow_run_id
             )  # can taken from db now
-            if flow_run and flow_run["state_type"] in ["SCHEDULED", "PENDING"]:
+            if flow_run and flow_run["state_type"] in [
+                FLOW_RUN_SCHEDULED_STATE_TYPE,
+                FLOW_RUN_PENDING_STATE_TYPE,
+            ]:
                 lock_status = TaskLockStatus.QUEUED
-            elif flow_run and flow_run["state_type"] == "RUNNING":
+            elif flow_run and flow_run["state_type"] == FLOW_RUN_RUNNING_STATE_TYPE:
                 lock_status = TaskLockStatus.RUNNING
             else:
                 lock_status = TaskLockStatus.COMPLETED
