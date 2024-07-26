@@ -80,8 +80,8 @@ jobs:
           ddpui/tests/api_tests/test_orgtask_api.py \
           ddpui/tests/api_tests/test_user_preferences_api.py \
           ddpui/tests/api_tests/test_notifications_api.py \
-          ddpui/tests/core/test_pipelinefunctions.py
           ddpui/tests/core/test_notifications_service.py \
+          ddpui/tests/core/test_pipelinefunctions.py
           coverage report --fail-under=70
           coverage xml
       - name: Check coverage percentage
