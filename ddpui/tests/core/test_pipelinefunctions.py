@@ -86,7 +86,6 @@ def generate_transform_org_tasks(seed_master_tasks, org_with_server_block):
         OrgTask.objects.create(task=task, org=org_with_server_block)
 
 
-# ================================================================================
 @pytest.fixture
 def test_dataflow(
     org_with_server_block, generate_sync_org_tasks, generate_transform_org_tasks
@@ -101,6 +100,9 @@ def test_dataflow(
     )
     yield dataflow
     dataflow.delete()
+
+
+# ================================================================================
 
 
 def test_fetch_pipeline_lock_v1_no_lock(test_dataflow):

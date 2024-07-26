@@ -89,8 +89,11 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
             tasklock.save()
         create_or_update_flowrun(flow_run, deployment_id)
 
-    elif state == FLOW_RUN_RUNNING_STATE_NAME:  # non-terminal states
-        create_or_update_flowrun(flow_run, deployment_id)
+    # # this might be triggered multiple times and we dont want to load our db for the same update again and again
+    # # we also dont care so much about this state yet
+    # # also this state doesn't have deployment_id for some reason
+    # elif state == FLOW_RUN_RUNNING_STATE_NAME:  # non-terminal states
+    #     create_or_update_flowrun(flow_run, deployment_id)
 
     if state in [FLOW_RUN_FAILED_STATE_NAME, FLOW_RUN_CRASHED_STATE_NAME]:
         email_logs_to_org_users(flow_run)
