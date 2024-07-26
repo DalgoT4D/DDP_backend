@@ -71,7 +71,6 @@ def get_dashboard_v1(request):
     res = []
 
     # fetch 50 (default limit) flow runs for each flow
-    sync_flowruns_for_deployment_ids = []
     for flow in org_data_flows:
         # if there is one there will typically be several - a sync,
         # a git-run, a git-test... we return the userinfo only for the first one
@@ -104,7 +103,6 @@ def get_dashboard_v1(request):
                 ),
             }
         )
-        sync_flowruns_for_deployment_ids.append(flow.deployment_id)
 
     # we might add more stuff here , system logs etc.
     return res
