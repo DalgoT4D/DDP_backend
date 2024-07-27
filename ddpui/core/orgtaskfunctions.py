@@ -4,6 +4,7 @@ do not raise http errors here
 """
 
 import uuid
+from typing import Union
 from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask, TaskLock, TaskLockStatus
 from ddpui.models.org import Org, OrgPrefectBlockv1, OrgDataFlowv1, TransformType
 from ddpui.utils.custom_logger import CustomLogger
@@ -157,6 +158,32 @@ def fetch_orgtask_lock(org_task: OrgTask):
         lock_status = TaskLockStatus.QUEUED
         if lock.flow_run_id:
             flow_run = prefect_service.get_flow_run(lock.flow_run_id)
+            if flow_run and flow_run["state_type"] in ["SCHEDULED", "PENDING"]:
+                lock_status = TaskLockStatus.QUEUED
+            elif flow_run and flow_run["state_type"] == "RUNNING":
+                lock_status = TaskLockStatus.RUNNING
+            else:
+                lock_status = TaskLockStatus.COMPLETED
+
+        return {
+            "lockedBy": lock.locked_by.user.email,
+            "lockedAt": lock.locked_at,
+            "flowRunId": lock.flow_run_id,
+            "status": lock_status,
+            "task_slug": org_task.task.slug,
+        }
+
+    return None
+
+
+def fetch_orgtask_lock_v1(org_task: OrgTask, lock: Union[TaskLock, None]):
+    """fetch the lock status of an orgtask"""
+    if lock:
+        lock_status = TaskLockStatus.QUEUED
+        if lock.flow_run_id:
+            flow_run = prefect_service.get_flow_run(
+                lock.flow_run_id
+            )  # can taken from db now
             if flow_run and flow_run["state_type"] in ["SCHEDULED", "PENDING"]:
                 lock_status = TaskLockStatus.QUEUED
             elif flow_run and flow_run["state_type"] == "RUNNING":

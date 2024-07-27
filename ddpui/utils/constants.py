@@ -24,3 +24,9 @@ TRANSFORM_TASKS_SEQ = {
 
 # airbyte sync timeout in deployment params
 AIRBYTE_SYNC_TIMEOUT = 15
+
+
+# system user email
+SYSTEM_USER_EMAIL = "System User"
+
+# prefect flow run states
