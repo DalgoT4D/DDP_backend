@@ -127,7 +127,7 @@ def test_email_orgusers():
     ) as mock_send_text_message:
         email_orgusers(org, "hello")
         tag = " [STAGING]" if not PRODUCTION else ""
-        subject = f"Prefect notification{tag}"
+        subject = f"Dalgo notification{tag}"
         mock_send_text_message.assert_called_once_with("useremail", subject, "hello")
 
 
@@ -223,8 +223,10 @@ def test_post_notification_v1():
     with patch(
         "ddpui.ddpprefect.prefect_service.get_flow_run"
     ) as mock_get_flow_run, patch(
-        "ddpui.api.webhook_api.email_logs_to_org_users"
-    ) as email_logs_org_users:
+        "ddpui.api.webhook_api.email_flowrun_logs_to_orgusers"
+    ) as mock_email_flowrun_logs_to_orgusers, patch(
+        "ddpui.api.webhook_api.email_orgusers_ses_whitelisted"
+    ) as mock_email_orgusers_ses_whitelisted:
         mock_get_flow_run.return_value = flow_run
         user = User.objects.create(email="email", username="username")
         new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
@@ -234,6 +236,8 @@ def test_post_notification_v1():
         response = post_notification_v1(request)
         assert response["status"] == "ok"
         assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
+        mock_email_flowrun_logs_to_orgusers.assert_called_once()
+        mock_email_orgusers_ses_whitelisted.assert_called_once()
 
 
 def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
@@ -329,8 +333,8 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
     with patch(
         "ddpui.ddpprefect.prefect_service.get_flow_run"
     ) as mock_get_flow_run, patch(
-        "ddpui.api.webhook_api.email_logs_to_org_users"
-    ) as email_logs_org_users:
+        "ddpui.api.webhook_api.email_flowrun_logs_to_orgusers"
+    ) as mock_email_flowrun_logs_to_orgusers:
         flow_run["status"] = FLOW_RUN_FAILED_STATE_TYPE
         flow_run["state_name"] = FLOW_RUN_FAILED_STATE_NAME
         mock_get_flow_run.return_value = flow_run
@@ -356,7 +360,7 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
             ).count()
             == 0
         )
-        email_logs_org_users.assert_called_once()
+        mock_email_flowrun_logs_to_orgusers.assert_called_once()
 
     # or
     # Completed (any terminal state); third message from prefect; deployment has completed
