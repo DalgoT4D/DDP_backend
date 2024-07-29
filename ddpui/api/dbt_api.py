@@ -251,10 +251,10 @@ def get_transform_type(request):
 @has_permission(["can_edit_dbt_workspace"])
 def post_run_dbt_commands(request):
     """Run dbt commands via celery"""
-    org: OrgUser = request.orguser.org
+    orguser: OrgUser = request.orguser
 
     # executes clean, deps, run
-    task = run_dbt_commands.delay(org)
+    task = run_dbt_commands.delay(orguser)
 
     return {"task_id": task.id}
 
