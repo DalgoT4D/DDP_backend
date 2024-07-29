@@ -667,7 +667,7 @@ def get_connection_catalog_v1(request, connection_id):
         return {"task_id": task_key, "message": "already running"}
 
     # ignore the returned celery task id
-    get_connection_catalog_task.delay(task_key, orguser.org.id, connection_id)
+    get_connection_catalog_task.delay(task_key, orguser.org, connection_id)
 
     return {"task_id": task_key}
 

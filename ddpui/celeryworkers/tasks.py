@@ -443,9 +443,8 @@ def schema_change_detection():
 
 
 @app.task(bind=False)
-def get_connection_catalog_task(task_key, org_id, connection_id):
+def get_connection_catalog_task(task_key, org, connection_id):
     """Fetch a connection in the user organization workspace as a Celery task"""
-    org = Org.objects.get(id=org_id)
     taskprogress = SingleTaskProgress(
         task_key, int(os.getenv("SCHEMA_REFRESH_TTL", "180"))
     )
