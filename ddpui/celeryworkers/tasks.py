@@ -209,14 +209,10 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
 
 
 @app.task(bind=True)
-def run_dbt_commands(self, orguser_id: int):
+def run_dbt_commands(self, orguser: OrgUser):
     """run a dbt command via celery instead of via prefect"""
     try:
-
-        orguser: OrgUser = OrgUser.objects.filter(id=orguser_id).first()
-
         org: Org = orguser.org
-        logger.info("found org %s", org.name)
 
         taskprogress = TaskProgress(
             self.request.id, f"{TaskProgressHashPrefix.RUNDBTCMDS}-{org.slug}"
@@ -596,7 +592,11 @@ def sync_flow_runs_of_deployments(
                         "state_name": flow_run["state_name"],
                     },
                 )
-            logger.info("synced flow runs for deployment %s | org %s", deployment_id, dataflow.org.slug)
+            logger.info(
+                "synced flow runs for deployment %s | org %s",
+                deployment_id,
+                dataflow.org.slug,
+            )
         except Exception as e:
             logger.error(
                 "failed to sync flow runs for deployment %s ; moving to next one",
