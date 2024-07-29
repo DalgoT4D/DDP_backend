@@ -132,7 +132,7 @@ def get_current_user_v2(request):
                     {"slug": rolep.permission.slug, "name": rolep.permission.name}
                     for rolep in curr_orguser.new_role.rolepermissions.all()
                 ],
-                is_demo=org.is_demo if org else False,
+                is_demo=curr_orguser.org.is_demo if curr_orguser.org else False,
             )
         )
 
