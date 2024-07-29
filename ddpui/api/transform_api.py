@@ -572,17 +572,10 @@ def get_dbt_project_DAG(request):
     res["nodes"] = [
         nn for nn in res_nodes if not (nn["id"] in seen or seen.add(nn["id"]))
     ]
-    res["nodes"] = res_nodes
     seen = set()
     res["edges"] = [
         edg for edg in res_edges if not (edg["id"] in seen or seen.add(edg["id"]))
     ]
-
-    logger.info(
-        "Total nodes %s and edges %s fetched in the graph",
-        len(res["nodes"]),
-        len(res["edges"]),
-    )
 
     return res
 
