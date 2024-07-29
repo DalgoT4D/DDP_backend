@@ -503,24 +503,13 @@ def get_dbt_project_DAG(request):
     )
 
     seen_model_node_ids = set()
-    seen_op_node_ids = set()
     for edge in edges:
         if edge.from_node.id not in seen_model_node_ids:
             model_nodes.append(edge.from_node)
+        seen_model_node_ids.add(edge.from_node.id)
         if edge.to_node.id not in seen_model_node_ids:
             model_nodes.append(edge.to_node)
-        seen_model_node_ids.add(edge.from_node.id)
         seen_model_node_ids.add(edge.to_node.id)
-
-        for op in edge.from_node.operations.all():
-            if op.id not in seen_op_node_ids:
-                operation_nodes.append(op)
-            seen_op_node_ids.add(op.id)
-
-        for op in edge.to_node.operations.all():
-            if op.id not in seen_op_node_ids:
-                operation_nodes.append(op)
-            seen_op_node_ids.add(op.id)
 
     # push operation nodes and edges if any
     for target_node in model_nodes:
@@ -528,7 +517,7 @@ def get_dbt_project_DAG(request):
         # start building edges from the source
         prev_op = None
         for operation in target_node.operations.order_by("seq").all():
-            # operation_nodes.append(operation)
+            operation_nodes.append(operation)
             if (
                 "input_models" in operation.config
                 and len(operation.config["input_models"]) > 0
