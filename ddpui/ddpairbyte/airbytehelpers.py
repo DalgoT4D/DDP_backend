@@ -6,7 +6,8 @@ import json
 from django.utils.text import slugify
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Prefetch
+from django.db.models import Prefetch, F, Window
+from django.db.models.functions import RowNumber
 
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import AirbyteConnectionSchemaUpdate, AirbyteWorkspace
@@ -342,22 +343,11 @@ def get_connections(org: Org):
             continue
         connection = connection[0]
 
-        last_runs = []
+        look_up_last_run_deployment_ids = []
         for df_orgtask in DataflowOrgTask.objects.filter(
             orgtask=org_task,
         ):
-            run = prefect_service.get_flow_runs_by_deployment_id_v1(
-                df_orgtask.dataflow.deployment_id, limit=1, offset=0
-            )
-
-            if len(run) > 0:
-                last_runs.append(run[0])
-
-        last_runs.sort(
-            key=lambda run: (
-                run["startTime"] if run["startTime"] else run["expectedStartTime"]
-            )
-        )
+            look_up_last_run_deployment_ids.append(df_orgtask.dataflow.deployment_id)
 
         reset_dataflow: OrgDataFlowv1 = sync_dataflow.reset_conn_dataflow
 
@@ -390,13 +380,46 @@ def get_connections(org: Org):
                 "destination": connection["destination"],
                 "status": connection["status"],
                 "deploymentId": sync_dataflow.deployment_id,
-                "lastRun": last_runs[-1] if len(last_runs) > 0 else None,
+                "lastRun": None,  # updated below
                 "lock": lock,  # this will have the status of the flow run
                 "resetConnDeploymentId": (
                     reset_dataflow.deployment_id if reset_dataflow else None
                 ),
+                "look_up_last_run_deployment_ids": look_up_last_run_deployment_ids,
             }
         )
+
+    # fetch all last runs in one go
+    all_last_run_deployment_ids = []
+    for conn in res:
+        all_last_run_deployment_ids.extend(conn["look_up_last_run_deployment_ids"])
+
+    flow_runs_with_row_number = PrefectFlowRun.objects.filter(
+        deployment_id__in=all_last_run_deployment_ids
+    ).annotate(
+        row_number=Window(
+            expression=RowNumber(),
+            partition_by=[F("deployment_id")],
+            order_by=F("start_time").desc(),
+        )
+    )
+    last_flow_run_per_deployment = flow_runs_with_row_number.filter(row_number=1)
+
+    # attach last run for each conn based on latest(look_up_last_run_deployment_ids)
+    for conn in res:
+        last_runs = []
+        for run in last_flow_run_per_deployment:
+            if run.deployment_id in conn["look_up_last_run_deployment_ids"]:
+                last_runs.append(run.to_json())
+
+        last_runs.sort(
+            key=lambda run: (
+                run["startTime"] if run["startTime"] else run["expectedStartTime"]
+            )
+        )
+
+        conn["lastRun"] = last_runs[-1] if len(last_runs) > 0 else None
+        del conn["look_up_last_run_deployment_ids"]
 
     return res, None
 
