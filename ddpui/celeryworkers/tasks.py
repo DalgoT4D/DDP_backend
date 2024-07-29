@@ -209,7 +209,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
 
 
 @app.task(bind=True)
-def run_dbt_commands(self, orguser_id: int):
+def run_dbt_commands(self, orguser_id: int, task_id: str):
     """run a dbt command via celery instead of via prefect"""
     try:
 
@@ -219,7 +219,7 @@ def run_dbt_commands(self, orguser_id: int):
         logger.info("found org %s", org.name)
 
         taskprogress = TaskProgress(
-            self.request.id, f"{TaskProgressHashPrefix.RUNDBTCMDS}-{org.slug}"
+            task_id, f"{TaskProgressHashPrefix.RUNDBTCMDS}-{org.slug}"
         )
 
         taskprogress.add(
@@ -239,7 +239,7 @@ def run_dbt_commands(self, orguser_id: int):
         ).all()
         for org_task in org_tasks:
             task_lock = TaskLock.objects.create(
-                orgtask=org_task, locked_by=orguser, celery_task_id=self.request.id
+                orgtask=org_task, locked_by=orguser, celery_task_id=task_id
             )
             task_locks.append(task_lock)
 
@@ -596,7 +596,11 @@ def sync_flow_runs_of_deployments(
                         "state_name": flow_run["state_name"],
                     },
                 )
-            logger.info("synced flow runs for deployment %s | org %s", deployment_id, dataflow.org.slug)
+            logger.info(
+                "synced flow runs for deployment %s | org %s",
+                deployment_id,
+                dataflow.org.slug,
+            )
         except Exception as e:
             logger.error(
                 "failed to sync flow runs for deployment %s ; moving to next one",
