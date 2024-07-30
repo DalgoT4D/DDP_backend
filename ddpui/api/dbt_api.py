@@ -265,9 +265,9 @@ def post_run_dbt_commands(request):
     taskprogress.add({"message": "Added dbt commands in queue", "status": "queued"})
 
     # executes clean, deps, run
-    task = run_dbt_commands.delay(orguser.id, task_id)
+    run_dbt_commands.delay(orguser.id, task_id)
 
-    return {"task_id": task.id}
+    return {"task_id": task_id}
 
 
 @dbtapi.post("/fetch-elementary-report/", auth=auth.CustomAuthMiddleware())
