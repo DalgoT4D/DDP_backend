@@ -405,9 +405,22 @@ def schema_change_detection():
     schema_changes = {}
 
     for org in orgs:
-        org_conn = OrgTask.objects.filter(org=org, task__slug=TASK_AIRBYTESYNC)
-        for org_task in org_conn:
+        org_tasks = OrgTask.objects.filter(org=org, task__slug=TASK_AIRBYTESYNC)
+
+        # remove invalid schema changes whose connections are no longer in our db
+        org_conn_ids = [org_task.connection_id for org_task in org_tasks]
+        for schema_change in OrgSchemaChange.objects.filter(org=org).exclude(
+            connection_id__in=org_conn_ids
+        ):
+            schema_change.delete()
+
+        # check for schema changes
+        for org_task in org_tasks:
             try:
+                logger.info(
+                    f"Fetching schema change (catalog) for connection {org.name}|{org_task.connection_id}"
+                )
+
                 response = abreq(
                     "web_backend/connections/get",
                     {
@@ -433,7 +446,9 @@ def schema_change_detection():
                         schema_changes[org] = {"breaking": 0, "non_breaking": 0}
                     schema_changes[org][change_type] += 1
             except Exception as e:
-                logger.error(f"Error checking connection for org {org.name}: {e}")
+                logger.error(
+                    f"Error checking connection for org {org.name}|{org_task.connection_id}: {e}"
+                )
                 continue
 
     for org in schema_changes:
