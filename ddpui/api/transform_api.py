@@ -6,7 +6,9 @@ from datetime import datetime
 
 from dotenv import load_dotenv
 from django.db.models import Q
+from django.forms import model_to_dict
 from django.utils.text import slugify
+from django.db.models import Prefetch
 from ninja import NinjaAPI
 from ninja.errors import ValidationError, HttpError
 from ninja.responses import Response
@@ -484,23 +486,38 @@ def get_dbt_project_DAG(request):
     operation_nodes: list[OrgDbtOperation] = []
     res_edges = []  # will go directly in the res
 
-    for edge in DbtEdge.objects.filter(
-        Q(from_node__orgdbt=orgdbt) | Q(to_node__orgdbt=orgdbt)
-    ).all():
+    edges = (
+        DbtEdge.objects.filter(Q(from_node__orgdbt=orgdbt) | Q(to_node__orgdbt=orgdbt))
+        .select_related("from_node", "to_node")
+        .prefetch_related(
+            Prefetch(
+                "from_node__operations",
+                queryset=OrgDbtOperation.objects.order_by("seq"),
+            ),
+            Prefetch(
+                "to_node__operations",
+                queryset=OrgDbtOperation.objects.order_by("seq"),
+            ),
+        )
+        .all()
+    )
 
-        model_nodes.append(edge.from_node)
-        model_nodes.append(edge.to_node)
+    seen_model_node_ids = set()
+    for edge in edges:
+        if edge.from_node.id not in seen_model_node_ids:
+            model_nodes.append(edge.from_node)
+        seen_model_node_ids.add(edge.from_node.id)
+        if edge.to_node.id not in seen_model_node_ids:
+            model_nodes.append(edge.to_node)
+        seen_model_node_ids.add(edge.to_node.id)
 
     # push operation nodes and edges if any
     for target_node in model_nodes:
         # src_node -> op1 -> op2 -> op3 -> op4
-        # start building edges fromt the source
+        # start building edges from the source
         prev_op = None
-        for operation in (
-            OrgDbtOperation.objects.filter(dbtmodel=target_node).order_by("seq").all()
-        ):
+        for operation in target_node.operations.order_by("seq").all():
             operation_nodes.append(operation)
-
             if (
                 "input_models" in operation.config
                 and len(operation.config["input_models"]) > 0
