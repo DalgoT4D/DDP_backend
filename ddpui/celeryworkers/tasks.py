@@ -477,15 +477,15 @@ def get_connection_catalog_task(task_key, org_id, connection_id):
 
     res, error = airbytehelpers.get_connection_catalog(org, connection_id)
     if error:
-        logger.error(
-            "unable to fetch schema catalog for %s %s", org.slug, connection_id
-        )
+        logger.error(error)
         taskprogress.add(
             {
                 "message": "unable to fetch catalog response",
                 "status": "failed",
+                "res": None
             }
         )
+        return
 
     taskprogress.add(
         {"message": "fetched catalog data", "status": "completed", "result": res}
