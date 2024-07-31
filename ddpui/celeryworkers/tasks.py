@@ -402,7 +402,6 @@ def run_dbt_commands(self, orguser_id: int, task_id: str):
 def schema_change_detection():
     """detects schema changes for all the orgs and sends an email to admins if there is a change"""
     orgs = Org.objects.all()
-    schema_changes = {}
 
     for org in orgs:
         org_tasks = OrgTask.objects.filter(org=org, task__slug=TASK_AIRBYTESYNC)
@@ -416,49 +415,42 @@ def schema_change_detection():
 
         # check for schema changes
         for org_task in org_tasks:
-            try:
-                logger.info(
-                    f"Fetching schema change (catalog) for connection {org.name}|{org_task.connection_id}"
+            connection_catalog, err = (
+                airbytehelpers.fetch_and_update_org_schema_changes(
+                    org, org_task.connection_id
                 )
+            )
 
-                response = abreq(
-                    "web_backend/connections/get",
-                    {
-                        "withRefreshedCatalog": True,
-                        "connectionId": org_task.connection_id,
-                    },
-                    timeout=60,
-                )
-
-                change_type = response.get("schemaChange")
-                logger.info(f"Schema change detected for org {org.name}: {change_type}")
-
-                if change_type in ["breaking", "non_breaking"]:
-                    schema_change, created = OrgSchemaChange.objects.get_or_create(
-                        connection_id=org_task.connection_id,
-                        defaults={"change_type": change_type, "org": org},
-                    )
-                    if not created:
-                        # If the record already exists, update the change_type
-                        schema_change.change_type = change_type
-                        schema_change.save()
-                    if org not in schema_changes:
-                        schema_changes[org] = {"breaking": 0, "non_breaking": 0}
-                    schema_changes[org][change_type] += 1
-            except Exception as e:
-                logger.error(
-                    f"Error checking connection for org {org.name}|{org_task.connection_id}: {e}"
-                )
+            if err:
+                logger.error(err)
                 continue
 
-    for org in schema_changes:
-        org_users = OrgUser.objects.filter(
-            org=org, new_role__slug__in=[ACCOUNT_MANAGER_ROLE, PIPELINE_MANAGER_ROLE]
-        )
-        message = """This email is to let you know that schema changes have been detected in your Dalgo pipeline, which require your review."""
-        for orguser in org_users:
-            logger.info(f"sending notification email to {orguser.user.email}")
-            send_schema_changes_email(org.name, orguser.user.email, message)
+            change_type = connection_catalog.get("schemaChange")
+
+            logger.info(
+                "Found schema changes for connection %s of type %s",
+                org_task.connection_id,
+                change_type,
+            )
+
+            # notify users
+            if change_type in ["breaking", "non_breaking"]:
+                try:
+                    org_users = OrgUser.objects.filter(
+                        org=org,
+                        new_role__slug__in=[
+                            ACCOUNT_MANAGER_ROLE,
+                            PIPELINE_MANAGER_ROLE,
+                        ],
+                    )
+                    message = """This email is to let you know that schema changes have been detected in your Dalgo pipeline, which require your review."""
+                    for orguser in org_users:
+                        logger.info(
+                            f"sending notification email to {orguser.user.email}"
+                        )
+                        send_schema_changes_email(org.name, orguser.user.email, message)
+                except Exception as err:
+                    logger.error(err)
 
 
 @app.task(bind=False)
@@ -469,28 +461,39 @@ def get_connection_catalog_task(task_key, org_id, connection_id):
         task_key, int(os.getenv("SCHEMA_REFRESH_TTL", "180"))
     )
     taskprogress.add(
-        {
-            "message": "started",
-            "status": "running",
-        }
+        {"message": "started", "status": TaskProgressStatus.RUNNING, "result": None}
     )
 
-    res, error = airbytehelpers.get_connection_catalog(org, connection_id)
-    if error:
-        logger.error(error)
+    connection_catalog, err = airbytehelpers.fetch_and_update_org_schema_changes(
+        org, connection_id
+    )
+
+    if err:
+        logger.error(err)
         taskprogress.add(
             {
-                "message": "unable to fetch catalog response",
-                "status": "failed",
-                "res": None
+                "message": err,
+                "status": TaskProgressStatus.FAILED,
+                "result": None,
             }
         )
         return
 
     taskprogress.add(
-        {"message": "fetched catalog data", "status": "completed", "result": res}
+        {
+            "message": "fetched catalog data",
+            "status": TaskProgressStatus.COMPLETED,
+            "result": {
+                "name": connection_catalog["name"],
+                "connectionId": connection_catalog["connectionId"],
+                "catalogId": connection_catalog["catalogId"],
+                "syncCatalog": connection_catalog["syncCatalog"],
+                "schemaChange": connection_catalog["schemaChange"],
+                "catalogDiff": connection_catalog["catalogDiff"],
+            },
+        }
     )
-    return res
+    return connection_catalog
 
 
 @app.task(bind=False)
