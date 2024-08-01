@@ -53,7 +53,7 @@ jobs:
         run: |
           eval `ssh-agent -s`
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh -L 8080:localhost:8080 -L 5433:${{ secrets.DBHOST }}:5432 ${{ secrets.SERVER }} -f -N
+          ssh -L 8080:localhost:8080 -L 8001:localhost:8000  ${{ secrets.SERVER }} -f -N
       - name: Test with pytest
         env:
           AIRBYTE_SERVER_HOST: localhost
