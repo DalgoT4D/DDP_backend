@@ -235,7 +235,7 @@ def test_sync_sources_failed_to_fetch_schemas(orguser: OrgUser, tmp_path):
         )
         get_wclient_mock.assert_called_once_with(warehouse)
 
-
+@pytest.mark.skip(reason="Skipping this test as celery integration needs to be done on CI")
 def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
     """
     a success test that syncs all sources of warehouse
