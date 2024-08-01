@@ -13,12 +13,12 @@ jobs:
       postgres:
         image: postgres:15
         env:
-          POSTGRES_USER: ${{ secrets.DBUSER }}
+          POSTGRES_USER: ddp
           POSTGRES_PASSWORD: ${{ secrets.DBPASSWORD }}
           POSTGRES_DB: ${{ secrets.DBNAME }}
         ports:
           - 5432:5432
-        options: --health-cmd "pg_isready -U ${{ secrets.DBUSER }}" --health-interval 10s --health-timeout 5s --health-retries 5
+        options: --health-cmd "pg_isready -U ddp" --health-interval 10s --health-timeout 5s --health-retries 5
           
     strategy:
       matrix:
@@ -63,7 +63,7 @@ jobs:
           DBHOST: localhost
           DBPORT: 5432
           DBNAME: ${{ secrets.DBNAME }}
-          DBUSER: ${{ secrets.DBUSER }}
+          DBUSER: ddp
           DBPASSWORD: ${{ secrets.DBPASSWORD }}
           PREFECT_PROXY_API_URL: http://localhost:8080
           DEV_SECRETS_DIR: /tmp/
