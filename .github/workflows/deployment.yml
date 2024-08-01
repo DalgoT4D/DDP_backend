@@ -2,7 +2,7 @@ name: DDP backend deployment
 
 on:
   push:
-    branches: [main, bug/deploy]
+    branches: [main]
 
 jobs:
     build:
