@@ -9,6 +9,17 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: ${{ secrets.DBUSER }}
+          POSTGRES_PASSWORD: ${{ secrets.DBPASSWORD }}
+          POSTGRES_DB: ${{ secrets.DBNAME }}
+        ports:
+          - 5432:5432
+        options: --health-cmd "pg_isready -U ${{ secrets.DBUSER }}" --health-interval 10s --health-timeout 5s --health-retries 5
+          
     strategy:
       matrix:
         python-version: ["3.10"]
@@ -50,7 +61,7 @@ jobs:
           AIRBYTE_SERVER_APIVER: v1
           AIRBYTE_API_TOKEN: ${{ secrets.AIRBYTE_API_TOKEN }}
           DBHOST: localhost
-          DBPORT: 5433
+          DBPORT: 5432
           DBNAME: ${{ secrets.DBNAME }}
           DBUSER: ${{ secrets.DBUSER }}
           DBPASSWORD: ${{ secrets.DBPASSWORD }}
