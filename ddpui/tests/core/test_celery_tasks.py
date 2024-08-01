@@ -9,8 +9,8 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from ddpui.models.org import Org, OrgDbt, OrgWarehouse, TransformType
-from ddpui.models.org_user import OrgUser
+from ddpui.models.org import Org, OrgDbt, OrgWarehouse, TransformType, OrgSchemaChange
+from ddpui.models.org_user import OrgUser, Role
 from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.tests.api_tests.test_user_org_api import (
     seed_db,
@@ -21,10 +21,17 @@ from ddpui.tests.api_tests.test_user_org_api import (
     org_without_workspace,
 )
 from ddpui.ddpprefect.schema import DbtProfile, OrgDbtSchema
-from ddpui.celeryworkers.tasks import setup_dbtworkspace
+from ddpui.celeryworkers.tasks import (
+    setup_dbtworkspace,
+    detect_schema_changes_for_org,
+    get_connection_catalog_task,
+)
+from ddpui.models.tasks import TaskProgressStatus
 from ddpui.core.dbtautomation_service import sync_sources_for_warehouse
 from ddpui.utils.taskprogress import TaskProgress
-
+from ddpui.models.tasks import Task, OrgTask
+from ddpui.utils.constants import TASK_AIRBYTESYNC
+from ddpui.utils.singletaskprogress import SingleTaskProgress
 
 pytestmark = pytest.mark.django_db
 
@@ -228,7 +235,7 @@ def test_sync_sources_failed_to_fetch_schemas(orguser: OrgUser, tmp_path):
         )
         get_wclient_mock.assert_called_once_with(warehouse)
 
-
+@pytest.mark.skip(reason="Skipping this test as celery integration needs to be done on CI")
 def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
     """
     a success test that syncs all sources of warehouse
@@ -340,3 +347,122 @@ def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
                     type="source", orgdbt=orgdbt, schema=schema
                 ).values_list("name", flat=True)
             ) == set(SCHEMAS_TABLES[schema])
+
+
+def test_detect_schema_changes_for_org_ensure_orphan_connections_are_deleted(
+    org_without_workspace: Org,
+):
+    """test detect_schema_changes_for_org function"""
+    synctask = Task.objects.filter(slug=TASK_AIRBYTESYNC).first()
+    if synctask is None:
+        synctask = Task.objects.create(
+            slug=TASK_AIRBYTESYNC, type="Airbyte Sync", label="Airbyte Sync"
+        )
+    synctask = OrgTask.objects.create(
+        org=org_without_workspace, task=synctask, connection_id="some-connection-id"
+    )
+    OrgSchemaChange.objects.create(
+        org=org_without_workspace, connection_id="fake-connection-id"
+    )
+    assert OrgSchemaChange.objects.filter(org=org_without_workspace).count() == 1
+    with patch(
+        "ddpui.ddpairbyte.airbytehelpers.fetch_and_update_org_schema_changes"
+    ) as fetch_and_update_org_schema_changes_mock:
+        fetch_and_update_org_schema_changes_mock.return_value = None, "error"
+        detect_schema_changes_for_org(org_without_workspace)
+    assert OrgSchemaChange.objects.filter(org=org_without_workspace).count() == 0
+
+
+def test_detect_schema_changes_for_org_send_schema_changes_email(
+    org_without_workspace: Org, orguser: OrgUser
+):
+    """test detect_schema_changes_for_org function"""
+    synctask = Task.objects.filter(slug=TASK_AIRBYTESYNC).first()
+    if synctask is None:
+        synctask = Task.objects.create(
+            slug=TASK_AIRBYTESYNC, type="Airbyte Sync", label="Airbyte Sync"
+        )
+    synctask = OrgTask.objects.create(
+        org=org_without_workspace, task=synctask, connection_id="some-connection-id"
+    )
+    OrgSchemaChange.objects.create(
+        org=org_without_workspace, connection_id="fake-connection-id"
+    )
+    assert OrgSchemaChange.objects.filter(org=org_without_workspace).count() == 1
+    with patch(
+        "ddpui.ddpairbyte.airbytehelpers.fetch_and_update_org_schema_changes"
+    ) as fetch_and_update_org_schema_changes_mock, patch(
+        "ddpui.celeryworkers.tasks.send_schema_changes_email"
+    ) as send_schema_changes_email_mock:
+        fetch_and_update_org_schema_changes_mock.return_value = {
+            "schemaChange": "breaking"
+        }, None
+        orguser.org = org_without_workspace
+        role = Role.objects.filter(slug="account-manager").first()
+        if role is None:
+            role = Role.objects.create(slug="account-manager", name="account-manager")
+        orguser.new_role = role
+        orguser.save()
+        detect_schema_changes_for_org(org_without_workspace)
+    assert OrgSchemaChange.objects.filter(org=org_without_workspace).count() == 0
+    send_schema_changes_email_mock.assert_called_once_with(
+        org_without_workspace.name,
+        orguser.user.email,
+        """This email is to let you know that schema changes have been detected in your Dalgo pipeline, which require your review.""",
+    )
+
+
+def test_get_connection_catalog_task_error(org_without_workspace: Org):
+    """tests get_connection_catalog_task"""
+    task_key = "test-task-key"
+    with patch(
+        "ddpui.ddpairbyte.airbytehelpers.fetch_and_update_org_schema_changes"
+    ) as fetch_and_update_org_schema_changes_mock:
+        fetch_and_update_org_schema_changes_mock.return_value = None, "error"
+        get_connection_catalog_task(
+            task_key, org_without_workspace.id, "fake-connection-id"
+        )
+    result = SingleTaskProgress.fetch(task_key)
+    assert result == [
+        {"message": "started", "status": TaskProgressStatus.RUNNING, "result": None},
+        {
+            "message": "error",
+            "status": TaskProgressStatus.FAILED,
+            "result": None,
+        },
+    ]
+
+
+def test_get_connection_catalog_task_success(org_without_workspace: Org):
+    """tests get_connection_catalog_task"""
+    task_key = "test-task-key"
+    with patch(
+        "ddpui.ddpairbyte.airbytehelpers.fetch_and_update_org_schema_changes"
+    ) as fetch_and_update_org_schema_changes_mock:
+        fetch_and_update_org_schema_changes_mock.return_value = {
+            "name": 'connection_catalog["name"]',
+            "connectionId": 'connection_catalog["connectionId"]',
+            "catalogId": 'connection_catalog["catalogId"]',
+            "syncCatalog": 'connection_catalog["syncCatalog"]',
+            "schemaChange": 'connection_catalog["schemaChange"]',
+            "catalogDiff": 'connection_catalog["catalogDiff"]',
+        }, None
+        get_connection_catalog_task(
+            task_key, org_without_workspace.id, "fake-connection-id"
+        )
+    result = SingleTaskProgress.fetch(task_key)
+    assert result == [
+        {"message": "started", "status": TaskProgressStatus.RUNNING, "result": None},
+        {
+            "message": "fetched catalog data",
+            "status": TaskProgressStatus.COMPLETED,
+            "result": {
+                "name": 'connection_catalog["name"]',
+                "connectionId": 'connection_catalog["connectionId"]',
+                "catalogId": 'connection_catalog["catalogId"]',
+                "syncCatalog": 'connection_catalog["syncCatalog"]',
+                "schemaChange": 'connection_catalog["schemaChange"]',
+                "catalogDiff": 'connection_catalog["catalogDiff"]',
+            },
+        },
+    ]
