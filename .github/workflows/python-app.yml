@@ -59,11 +59,7 @@ jobs:
           CLIENTDBT_ROOT: /tmp
         run: |
           coverage run -m pytest --durations=20 \
-          ddpui/tests/utils/test_helpers.py \
-          ddpui/tests/helper/test_airbyte_unit_schemas.py \
-          ddpui/tests/helper/test_auth.py \
-          ddpui/tests/helper/test_dev_secretsmanager.py \
-          ddpui/tests/helper/test_secretsmanager.py 
+          ddpui/tests/api_tests/test_airbyte_api.py 
           coverage report --fail-under=70
           coverage xml
       - name: Check coverage percentage
