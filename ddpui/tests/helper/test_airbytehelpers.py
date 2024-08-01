@@ -2,7 +2,6 @@ from unittest.mock import patch, Mock
 import pytest
 from ddpui.ddpairbyte.airbytehelpers import (
     add_custom_airbyte_connector,
-    get_connection_catalog,
     update_connection_schema,
     upgrade_custom_sources,
     setup_airbyte_workspace_v1,
@@ -704,56 +703,6 @@ def test_delete_source(
     ).exists()
 
     mock_delete_source.assert_called_once()
-
-
-@patch(
-    "ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection_catalog",
-    mock_get_connection_catalog=Mock(),
-)
-def test_get_connection_catalog(
-    mock_get_connection_catalog: Mock,
-):
-    """test get_connection_catalog"""
-    org = Org.objects.create(name="org", slug="org")
-
-    mock_get_connection_catalog.return_value = {
-        "name": "Test Connection",
-        "connectionId": "connection_id",
-        "catalogId": "catalog_id",
-        "syncCatalog": True,
-        "schemaChange": False,
-        "catalogDiff": [],
-    }
-
-    result, error = get_connection_catalog(org, "connection_id")
-
-    assert error is None
-    assert result == {
-        "name": "Test Connection",
-        "connectionId": "connection_id",
-        "catalogId": "catalog_id",
-        "syncCatalog": True,
-        "schemaChange": False,
-        "catalogDiff": [],
-    }
-
-
-@patch(
-    "ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection_catalog",
-    mock_get_connection_catalog=Mock(),
-)
-def test_get_connection_catalog_fail(
-    mock_get_connection_catalog: Mock,
-):
-    """Test for failing get_connection_catalog"""
-    org_save = Mock()
-    org = Mock(save=org_save)
-    mock_get_connection_catalog.side_effect = Exception("error")
-
-    res, error = get_connection_catalog(org, "connection_name")
-
-    assert res is None
-    assert error == "Error getting catalog for connection connection_name: error"
 
 
 @patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection")

@@ -810,34 +810,44 @@ def delete_source(org: Org, source_id: str):
     return None, None
 
 
-def get_connection_catalog(org: Org, connection_id: str):
+def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
     """
-    Get the catalog diff of a connection.
+    Fetches the schema change catalog from airbyte and updates OrgSchemaChnage in our db
     """
     try:
-        connection = airbyte_service.get_connection_catalog(connection_id)
-        schema_change = connection.get("schemaChange")
+        logger.info(
+            f"Fetching schema change (catalog) for connection {org.slug}|{connection_id}"
+        )
+        connection_catalog = airbyte_service.get_connection_catalog(
+            connection_id, timemout=60
+        )
+    except Exception as err:
+        return (
+            None,
+            f"Something went wrong fetching schema change (catalog) for connection {connection_id}: {err}",
+        )
 
-        if not schema_change or schema_change not in ["breaking", "non_breaking"]:
-            OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
-        else:
+    # update schema change type in our db
+    try:
+        change_type = connection_catalog.get("schemaChange")
+        logger.info(f"Schema change detected for org {org.slug}: {change_type}")
+
+        if change_type not in ["breaking", "non_breaking", "no_change"]:
+            raise ValueError("Invalid schema change type")
+
+        if change_type in ["breaking", "non_breaking"]:
             OrgSchemaChange.objects.update_or_create(
                 connection_id=connection_id,
-                defaults={"change_type": schema_change, "org": org},
+                defaults={"change_type": change_type, "org": org},
             )
 
-        res = {
-            "name": connection["name"],
-            "connectionId": connection["connectionId"],
-            "catalogId": connection["catalogId"],
-            "syncCatalog": connection["syncCatalog"],
-            "schemaChange": schema_change,
-            "catalogDiff": connection["catalogDiff"],
-        }
-        return res, None
-    except Exception as e:
-        logger.error(f"Error getting catalog for connection {connection_id}: {e}")
-        return None, f"Error getting catalog for connection {connection_id}: {e}"
+    except Exception as err:
+        return (
+            None,
+            f"Something went wrong updating OrgSchemaChange {connection_id}: {err}",
+        )
+
+    return connection_catalog, None
 
 
 def update_connection_schema(

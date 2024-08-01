@@ -944,13 +944,14 @@ def get_logs_for_job(job_id: int, attempt_number: int = 0) -> list:
     return res
 
 
-def get_connection_catalog(connection_id: str) -> dict:
-    """get the catalog for a connection"""
+def get_connection_catalog(connection_id: str, **kwargs) -> dict:
+    """get the catalog for a connection to check/refresh for schema changes"""
     if not isinstance(connection_id, str):
         raise HttpError(400, "connection_id must be a string")
     res = abreq(
         "web_backend/connections/get",
         {"connectionId": connection_id, "withRefreshedCatalog": True},
+        **kwargs,
     )
     return res
 
