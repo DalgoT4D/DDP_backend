@@ -9,7 +9,6 @@ from celery.schedules import crontab
 from django.utils.text import slugify
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, PIPELINE_MANAGER_ROLE
 from ddpui.celery import app
-from ddpui.ddpairbyte.airbyte_service import abreq
 from ddpui.models.notifications import Notification
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.utils.discord import send_discord_notification
@@ -398,59 +397,58 @@ def run_dbt_commands(self, orguser_id: int, task_id: str):
             lock.delete()
 
 
+def detect_schema_changes_for_org(org: Org):
+    """detect schema changes for all connections of this org"""
+    org_tasks = OrgTask.objects.filter(org=org, task__slug=TASK_AIRBYTESYNC)
+
+    # remove invalid schema changes whose connections are no longer in our db
+    org_conn_ids = [org_task.connection_id for org_task in org_tasks]
+    for schema_change in OrgSchemaChange.objects.filter(org=org).exclude(
+        connection_id__in=org_conn_ids
+    ):
+        schema_change.delete()
+
+    # check for schema changes
+    for org_task in org_tasks:
+        connection_catalog, err = airbytehelpers.fetch_and_update_org_schema_changes(
+            org, org_task.connection_id
+        )
+
+        if err:
+            logger.error(err)
+            continue
+
+        change_type = connection_catalog.get("schemaChange")
+
+        logger.info(
+            "Found schema changes for connection %s of type %s",
+            org_task.connection_id,
+            change_type,
+        )
+
+        # notify users
+        if change_type in ["breaking", "non_breaking"]:
+            try:
+                org_users = OrgUser.objects.filter(
+                    org=org,
+                    new_role__slug__in=[
+                        ACCOUNT_MANAGER_ROLE,
+                        PIPELINE_MANAGER_ROLE,
+                    ],
+                )
+                message = """This email is to let you know that schema changes have been detected in your Dalgo pipeline, which require your review."""
+                for orguser in org_users:
+                    logger.info(f"sending notification email to {orguser.user.email}")
+                    send_schema_changes_email(org.name, orguser.user.email, message)
+            except Exception as err:
+                logger.error(err)
+
+
 @app.task()
 def schema_change_detection():
     """detects schema changes for all the orgs and sends an email to admins if there is a change"""
-    orgs = Org.objects.all()
-
-    for org in orgs:
-        org_tasks = OrgTask.objects.filter(org=org, task__slug=TASK_AIRBYTESYNC)
-
-        # remove invalid schema changes whose connections are no longer in our db
-        org_conn_ids = [org_task.connection_id for org_task in org_tasks]
-        for schema_change in OrgSchemaChange.objects.filter(org=org).exclude(
-            connection_id__in=org_conn_ids
-        ):
-            schema_change.delete()
-
-        # check for schema changes
-        for org_task in org_tasks:
-            connection_catalog, err = (
-                airbytehelpers.fetch_and_update_org_schema_changes(
-                    org, org_task.connection_id
-                )
-            )
-
-            if err:
-                logger.error(err)
-                continue
-
-            change_type = connection_catalog.get("schemaChange")
-
-            logger.info(
-                "Found schema changes for connection %s of type %s",
-                org_task.connection_id,
-                change_type,
-            )
-
-            # notify users
-            if change_type in ["breaking", "non_breaking"]:
-                try:
-                    org_users = OrgUser.objects.filter(
-                        org=org,
-                        new_role__slug__in=[
-                            ACCOUNT_MANAGER_ROLE,
-                            PIPELINE_MANAGER_ROLE,
-                        ],
-                    )
-                    message = """This email is to let you know that schema changes have been detected in your Dalgo pipeline, which require your review."""
-                    for orguser in org_users:
-                        logger.info(
-                            f"sending notification email to {orguser.user.email}"
-                        )
-                        send_schema_changes_email(org.name, orguser.user.email, message)
-                except Exception as err:
-                    logger.error(err)
+    for org in Org.objects.all():
+        detect_schema_changes_for_org(org)
 
 
 @app.task(bind=False)
