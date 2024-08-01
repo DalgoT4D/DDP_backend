@@ -194,8 +194,7 @@ def create_or_update_dbt_model_in_project(
         merge_config, wclient, Path(orgdbt_model.orgdbt.project_dir) / "dbtrepo"
     )
 
-    if is_create:
-        return model_sql_path, output_cols
+    return model_sql_path, output_cols
 
 
 def create_dbt_model_in_project(
@@ -203,9 +202,7 @@ def create_dbt_model_in_project(
     orgdbt_model: OrgDbtModel,
     payload: CompleteDbtModelPayload,
 ):
-    """
-    Wrapper function to create a dbt model in the project.
-    """
+    """Wrapper function to create a dbt model in the project."""
     return create_or_update_dbt_model_in_project(
         org_warehouse, orgdbt_model, payload, is_create=True
     )
@@ -215,9 +212,7 @@ def update_dbt_model_in_project(
     org_warehouse: OrgWarehouse,
     orgdbt_model: OrgDbtModel,
 ):
-    """
-    Wrapper function to update a dbt model in the project.
-    """
+    """Wrapper function to update a dbt model in the project."""
     create_or_update_dbt_model_in_project(org_warehouse, orgdbt_model, is_create=False)
 
 
@@ -415,7 +410,4 @@ def warehouse_datatypes(org_warehouse: OrgWarehouse):
 def json_columnspec(warehouse: OrgWarehouse, source_schema, input_name, json_column):
     """Get json keys of a table in warehouse"""
     wclient = _get_wclient(warehouse)
-    json_columnspec = wclient.get_json_columnspec(
-        source_schema, input_name, json_column
-    )
-    return json_columnspec
+    return wclient.get_json_columnspec(source_schema, input_name, json_column)
