@@ -9,6 +9,12 @@ jobs:
         runs-on: ubuntu-latest
 
         steps: 
+            - name: Create known_hosts file
+              run: |
+                mkdir -p ~/.ssh
+                touch ~/.ssh/known_hosts
+            - name: Add remote host key to known_hosts
+              run: ssh-keyscan ${{ secrets.SERVERIP }} >> ~/.ssh/known_hosts
             - name: Deploy to EC2
               run: |
                 eval `ssh-agent -s`
