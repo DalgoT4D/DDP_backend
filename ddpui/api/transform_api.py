@@ -333,6 +333,10 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
     target_model.output_cols = dbt_operation.output_cols
     target_model.save()
 
+    # update the dbt model if it is already created on disk
+    if target_model.name is not None:
+        dbtautomation_service.update_dbt_model_in_project(org_warehouse, target_model)
+
     logger.info("updated output cols for the target model")
 
     return from_orgdbtoperation(dbt_operation, chain_length=current_operations_chained)
