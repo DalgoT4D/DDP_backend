@@ -59,6 +59,10 @@ jobs:
           CLIENTDBT_ROOT: /tmp
         run: |
           coverage run -m pytest --durations=20 \
+          ddpui/tests/services/test_prefect_service.py \
+          ddpui/tests/services/test_dbt_service.py \
+          ddpui/tests/utils/test_deleteorg.py \
+          ddpui/tests/utils/test_deploymentblocks.py \
           ddpui/tests/services/test_airbyte_service.py
           coverage report --fail-under=70
           coverage xml
