@@ -2,7 +2,7 @@ name: DDP backend deployment
 
 on:
   push:
-    branches: [main]
+    branches: [main, bug/deploy]
 
 jobs:
     build:
@@ -11,6 +11,7 @@ jobs:
         steps: 
             - name: Deploy to EC2
               run: |
+                ssh-keyscan ${{ secrets.SERVERIP }} >> ~/.ssh/known_hosts
                 eval `ssh-agent -s`
                 ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
                 ssh ${{ secrets.SERVER }} "source ~/.nvm/nvm.sh; cd /home/ddp/DDP_backend; git pull; /home/ddp/.yarn/bin/pm2 restart django-celery-worker django-backend"
