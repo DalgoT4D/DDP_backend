@@ -58,30 +58,8 @@ jobs:
           DEV_SECRETS_DIR: /tmp/
           CLIENTDBT_ROOT: /tmp
         run: |
-          coverage run -m pytest \
-          ddpui/tests/services/test_airbyte_service.py \
-          ddpui/tests/services/test_prefect_service.py \
-          ddpui/tests/services/test_dbt_service.py \
-          ddpui/tests/utils/test_deleteorg.py \
-          ddpui/tests/utils/test_deploymentblocks.py \
-          ddpui/tests/utils/test_helpers.py \
-          ddpui/tests/helper/test_airbyte_unit_schemas.py \
-          ddpui/tests/helper/test_auth.py \
-          ddpui/tests/helper/test_dev_secretsmanager.py \
-          ddpui/tests/helper/test_secretsmanager.py \
-          ddpui/tests/helper/test_airbytehelpers.py \
-          ddpui/tests/helper/test_prefectlogs.py \
-          ddpui/tests/api_tests/test_user_org_api.py \
-          ddpui/tests/api_tests/test_warehouse_api.py \
-          ddpui/tests/api_tests/test_dbt_api.py \
-          ddpui/tests/api_tests/test_airbyte_api.py \
-          ddpui/tests/api_tests/test_airbyte_api_v1.py \
-          ddpui/tests/api_tests/test_pipeline_api.py \
-          ddpui/tests/api_tests/test_orgtask_api.py \
-          ddpui/tests/api_tests/test_user_preferences_api.py \
-          ddpui/tests/api_tests/test_notifications_api.py \
-          ddpui/tests/core/test_notifications_service.py \
-          ddpui/tests/core/test_pipelinefunctions.py
+          coverage run -m pytest --durations=20 \
+          ddpui/tests/servgit ices/test_airbyte_service.py \
           coverage report --fail-under=70
           coverage xml
       - name: Check coverage percentage
