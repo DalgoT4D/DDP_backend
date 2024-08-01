@@ -69,7 +69,7 @@ jobs:
           DEV_SECRETS_DIR: /tmp/
           CLIENTDBT_ROOT: /tmp
         run: |
-          coverage run -m pytest --durations=20
+          coverage run -m pytest --timeout=10 --durations=20
           coverage report --fail-under=70
           coverage xml
       - name: Check coverage percentage
