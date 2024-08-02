@@ -382,7 +382,7 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
         request.headers = {
             "X-Notification-Key": os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY")
         }
-        os.environ["PREFECT_RETRY_CRASHED_FLOW_RUNS"] = True
+        os.environ["PREFECT_RETRY_CRASHED_FLOW_RUNS"] = "True"
         response = post_notification_v1(request)
         assert response["status"] == "ok"
         assert (
