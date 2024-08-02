@@ -14,6 +14,7 @@ class PrefectFlowRun(models.Model):
     total_run_time = models.FloatField(null=False, blank=False)
     status = models.CharField(max_length=20, null=False, blank=False)
     state_name = models.CharField(max_length=20, null=False, blank=False)
+    retries = models.SmallIntegerField(default=0)
 
     def __str__(self) -> str:
         """string representation"""
