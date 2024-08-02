@@ -370,7 +370,9 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
         "ddpui.ddpprefect.prefect_service.get_flow_run"
     ) as mock_get_flow_run, patch(
         "ddpui.api.webhook_api.email_flowrun_logs_to_orgusers"
-    ) as mock_email_flowrun_logs_to_orgusers:
+    ) as mock_email_flowrun_logs_to_orgusers, patch(
+        "ddpui.ddpprefect.prefect_service.retry_flow_run"
+    ) as mock_retry_flow_run:
         flow_run["status"] = FLOW_RUN_CRASHED_STATE_TYPE
         flow_run["state_name"] = FLOW_RUN_CRASHED_STATE_NAME
         mock_get_flow_run.return_value = flow_run
@@ -384,6 +386,7 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
         }
         os.environ["PREFECT_RETRY_CRASHED_FLOW_RUNS"] = "True"
         response = post_notification_v1(request)
+        mock_retry_flow_run.assert_called_with(flow_run["id"], 5)
         assert response["status"] == "ok"
         assert (
             PrefectFlowRun.objects.filter(
