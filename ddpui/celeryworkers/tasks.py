@@ -487,7 +487,7 @@ def get_connection_catalog_task(task_key, org_id, connection_id):
                 "catalogId": connection_catalog["catalogId"],
                 "syncCatalog": connection_catalog["syncCatalog"],
                 "schemaChange": connection_catalog["schemaChange"],
-                "catalogDiff": connection_catalog["catalogDiff"],
+                "catalogDiff": connection_catalog.get("catalogDiff"),
             },
         }
     )
