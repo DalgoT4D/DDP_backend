@@ -13,6 +13,7 @@ from ddpui.utils.webhook_helpers import (
     get_flowrun_id_and_state,
     get_org_from_flow_run,
     email_flowrun_logs_to_orgusers,
+    email_orgusers_ses_whitelisted,
     FLOW_RUN,
 )
 from ddpui.utils.constants import SYSTEM_USER_EMAIL
@@ -96,7 +97,17 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
     #     create_or_update_flowrun(flow_run, deployment_id)
 
     if state in [FLOW_RUN_FAILED_STATE_NAME, FLOW_RUN_CRASHED_STATE_NAME]:
-        email_logs_to_org_users(flow_run)
+        org = get_org_from_flow_run(flow_run)
+        if org:
+            email_flowrun_logs_to_orgusers(org, flow_run["id"])
+            email_orgusers_ses_whitelisted(
+                org, "There is a problem with the pipeline; we are working on a fix"
+            )
+
+    if state in [FLOW_RUN_COMPLETED_STATE_NAME]:
+        org = get_org_from_flow_run(flow_run)
+        if org:
+            email_orgusers_ses_whitelisted(org, "Your pipeline completed successfully")
 
     return {"status": "ok"}
 
@@ -137,13 +148,6 @@ def lock_tasks_for_pending_deployment(deployment_id):
         logger.info("failed to lock blocks for deployment %s, ignoring", deployment_id)
 
     return locks
-
-
-def email_logs_to_org_users(flow_run):
-    """email flow run logs to users"""
-    org = get_org_from_flow_run(flow_run)
-    if org:
-        email_flowrun_logs_to_orgusers(org, flow_run["id"])
 
 
 # setting up the notification and customizing the message format

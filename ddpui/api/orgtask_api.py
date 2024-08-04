@@ -12,6 +12,7 @@ from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from django.forms.models import model_to_dict
+from django.db.models import Prefetch
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service
@@ -290,7 +291,11 @@ def get_prefect_transformation_tasks(request):
             task__type__in=["git", "dbt"],
         )
         .order_by("-generated_by")
-        .all()
+        .select_related("task")
+        .prefetch_related(
+            Prefetch("tasklock", queryset=TaskLock.objects.all()),
+            Prefetch("orgtaskdataflows", queryset=DataflowOrgTask.objects.all()),
+        )
     ):
         # git pull               : "git" + " " + "pull"
         # dbt run --full-refresh : "dbt" + " " + "run --full-refresh"
@@ -312,7 +317,7 @@ def get_prefect_transformation_tasks(request):
 
         # fetch the manual deploymentId for the dbt run task
         if org_task.task.slug == TASK_DBTRUN:
-            dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
+            dataflow_orgtask = org_task.orgtaskdataflows.first()
             org_tasks[-1]["deploymentId"] = (
                 dataflow_orgtask.dataflow.deployment_id if dataflow_orgtask else None
             )

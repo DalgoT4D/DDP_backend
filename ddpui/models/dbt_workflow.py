@@ -52,7 +52,9 @@ class OrgDbtModel(models.Model):
 class OrgDbtOperation(models.Model):
     """Model to store dbt operations for a model. Basically steps to create/reach a OrgDbtModel"""
 
-    dbtmodel = models.ForeignKey(OrgDbtModel, on_delete=models.CASCADE)
+    dbtmodel = models.ForeignKey(
+        OrgDbtModel, on_delete=models.CASCADE, related_name="operations"
+    )
     uuid = models.UUIDField(editable=False, unique=True)
     seq = models.IntegerField(default=0)
     output_cols = models.JSONField(default=list)
