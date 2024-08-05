@@ -29,17 +29,19 @@ class MockClass:
 def test_warehouse_factory():
     """Tests supported/unsupported warehouses"""
 
-    with patch.object(PostgresClient, "__new__") as MockPostgresClient:
-        MockPostgresClient.return_value = MockClass()
+    with patch(
+        "ddpui.datainsights.warehouse.postgres.PostgresClient.__init__",
+        return_value=None,
+    ) as MockPostgresClient:
         wobj = WarehouseFactory.connect({"some_creds_dict": {}}, WarehouseType.POSTGRES)
-        MockPostgresClient.assert_called_once()
-        assert isinstance(wobj, MockClass)
+        assert isinstance(wobj, PostgresClient)
 
-    with patch.object(BigqueryClient, "__new__") as MockBigqueryClient:
-        MockBigqueryClient.return_value = MockClass()
+    with patch(
+        "ddpui.datainsights.warehouse.bigquery.BigqueryClient.__init__",
+        return_value=None,
+    ) as MockBigqueryClient:
         wobj = WarehouseFactory.connect({}, WarehouseType.BIGQUERY)
-        MockBigqueryClient.assert_called_once()
-        assert isinstance(wobj, MockClass)
+        assert isinstance(wobj, BigqueryClient)
 
     with pytest.raises(ValueError):
         WarehouseFactory.connect({}, "some-no-supported-warehouse-type")
