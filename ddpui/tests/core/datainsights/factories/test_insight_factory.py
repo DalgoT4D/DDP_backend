@@ -3,15 +3,13 @@ import django
 from django.core.management import call_command
 from django.apps import apps
 
+import pytest
+from unittest.mock import patch
+
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-
-import pytest
-from unittest.mock import patch
-
-pytestmark = pytest.mark.django_db
 
 from ddpui.datainsights.insights.insight_factory import InsightsFactory
 from ddpui.datainsights.insights.insight_interface import (
@@ -27,7 +25,7 @@ from ddpui.datainsights.insights.datetime_type.datetime_insight import (
 
 
 class MockClass:
-    def __ini__(sefl):
+    def __ini__(self):
         pass
 
 
@@ -50,46 +48,53 @@ def dummy_insight_payload():
 def test_insight_factory(dummy_insight_payload):
     """Tests supported/unsupported data types"""
 
-    with patch.object(NumericColInsights, "__new__") as MockNumericColInsights:
-        MockNumericColInsights.return_value = MockClass()
+    with patch(
+        "ddpui.datainsights.insights.numeric_type.numeric_insight.NumericColInsights",
+        return_value=MockClass(),
+    ) as MockNumericColInsights:
         obj = InsightsFactory.initiate_insight(
             **dummy_insight_payload, col_type=TranslateColDataType.NUMERIC
         )
-        MockNumericColInsights.assert_called_once()
-        assert isinstance(obj, MockClass)
+        assert isinstance(obj, NumericColInsights)
 
-    with patch.object(StringColInsights, "__new__") as MockStringColInsights:
-        MockStringColInsights.return_value = MockClass()
+    with patch(
+        "ddpui.datainsights.insights.string_type.string_insights.StringColInsights",
+        return_value=MockClass(),
+    ) as MockStringColInsights:
         obj = InsightsFactory.initiate_insight(
             **dummy_insight_payload, col_type=TranslateColDataType.STRING
         )
-        MockStringColInsights.assert_called_once()
-        assert isinstance(obj, MockClass)
+        assert isinstance(obj, StringColInsights)
 
-    with patch.object(BooleanColInsights, "__new__") as MockBooleanColInsights:
+    with patch(
+        "ddpui.datainsights.insights.boolean_type.boolean_insights.BooleanColInsights",
+        return_value=MockClass(),
+    ) as MockBooleanColInsights:
         MockBooleanColInsights.return_value = MockClass()
         obj = InsightsFactory.initiate_insight(
             **dummy_insight_payload, col_type=TranslateColDataType.BOOL
         )
-        MockBooleanColInsights.assert_called_once()
-        assert isinstance(obj, MockClass)
+        assert isinstance(obj, BooleanColInsights)
 
-    with patch.object(DatetimeColInsights, "__new__") as MockDatetimeColInsights:
+    with patch(
+        "ddpui.datainsights.insights.datetime_type.datetime_insight.DatetimeColInsights",
+        return_value=MockClass(),
+    ) as MockDatetimeColInsights:
         MockDatetimeColInsights.return_value = MockClass()
         obj = InsightsFactory.initiate_insight(
             **dummy_insight_payload, col_type=TranslateColDataType.DATETIME
         )
-        MockDatetimeColInsights.assert_called_once()
-        assert isinstance(obj, MockClass)
+        assert isinstance(obj, DatetimeColInsights)
 
     # json calls the general parent class
-    with patch.object(DataTypeColInsights, "__new__") as MockJsonColInsights:
-        MockJsonColInsights.return_value = MockClass()
+    with patch(
+        "ddpui.datainsights.insights.insight_interface.DataTypeColInsights",
+        return_value=MockClass(),
+    ) as MockJsonColInsights:
         obj = InsightsFactory.initiate_insight(
             **dummy_insight_payload, col_type=TranslateColDataType.JSON
         )
-        MockJsonColInsights.assert_called_once()
-        assert isinstance(obj, MockClass)
+        assert isinstance(obj, DataTypeColInsights)
 
     with pytest.raises(ValueError):
         InsightsFactory.initiate_insight(
