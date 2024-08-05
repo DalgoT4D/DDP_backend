@@ -207,9 +207,9 @@ def get_warehouse_table_columns_spec(request, schema_name: str, table_name: str)
 
     credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
 
-    wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
-
     try:
+        wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
+
         cols = wclient.get_table_columns(schema_name, table_name)
         return cols
     except sqlalchemy.exc.NoSuchTableError:
