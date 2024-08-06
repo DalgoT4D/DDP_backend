@@ -451,18 +451,27 @@ def get_source_schema_catalog(
     # and we need to check its status later?
     if "catalog" not in res and "jobInfo" in res:
         # special handling for errors we know
-        if (
-            res["jobInfo"]["failureReason"]["externalMessage"]
-            == "Something went wrong in the connector. See the logs for more details."
-        ):
+        if "failureReason" in res["jobInfo"]:
+            if (
+                res["jobInfo"]["failureReason"]["externalMessage"]
+                == "Something went wrong in the connector. See the logs for more details."
+            ):
+                raise HttpError(
+                    400,
+                    res["jobInfo"]["failureReason"]["stacktrace"],
+                )
             raise HttpError(
                 400,
-                res["jobInfo"]["failureReason"]["stacktrace"],
+                res["jobInfo"]["failureReason"]["externalMessage"],
             )
-        raise HttpError(
-            400,
-            res["jobInfo"]["failureReason"]["externalMessage"],
-        )
+        else:
+            # for errors unknown to airbyte we might not have "failureReason"
+            message = "Failed to discover schema"
+            error = message + f" for source: {source_id}"
+            if "logs" in res["jobInfo"]:
+                error += "\n".join(res["jobInfo"]["logs"]["logLines"])
+            logger.error(error)
+            raise HttpError(400, message)
     if "catalog" not in res and "jobInfo" not in res:
         raise HttpError(400, res["message"])
     return res
