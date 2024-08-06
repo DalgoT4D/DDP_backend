@@ -19,7 +19,7 @@ from ddpui.ddpprefect import (
 )
 from ddpui.models.org import OrgDbt, OrgPrefectBlockv1, OrgWarehouse, TransformType
 from ddpui.models.org_user import Org
-from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, OrgDataFlowv1
+from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask
 from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.utils import secretsmanager
 from ddpui.utils.timezone import as_ist
@@ -250,16 +250,6 @@ def refresh_elementary_report(org: Org):
         logger.info("edr already running for org %s", org.slug)
         ttl = SingleTaskProgress.get_ttl(task_str)
     return None, {"task_id": task_str, "ttl": ttl}
-
-
-def refresh_elementary_report_via_prefect(org: Org) -> dict:
-    """refreshes the elementary report for the current date using the prefect deployment"""
-    odf = OrgDataFlowv1.objects.filter(
-        org=org, name__startswith=f"pipeline-{org.slug}-generate-edr"
-    ).first()
-    if odf:
-        return prefect_service.create_deployment_flow_run(odf.deployment_id)
-    return {"error": "pipeline not found"}
 
 
 def fetch_elementary_report(org: Org):

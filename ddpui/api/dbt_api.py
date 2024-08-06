@@ -14,6 +14,7 @@ from ddpui.celeryworkers.tasks import (
     run_dbt_commands,
     setup_dbtworkspace,
 )
+from ddpui.models.tasks import OrgDataFlowv1
 from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.ddpdbt import dbt_service
@@ -292,3 +293,34 @@ def post_refresh_elementary_report(request):
         raise HttpError(400, error)
 
     return result
+
+
+@dbtapi.post("/v1/refresh-elementary-report/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_dbt_workspace"])
+def post_refresh_elementary_report_via_prefect(request):
+    """prepare the dbt docs single html via prefect deployment"""
+
+    orguser: OrgUser = request.orguser
+    org: Org = orguser.org
+    odf = OrgDataFlowv1.objects.filter(
+        org=org, name__startswith=f"pipeline-{org.slug}-generate-edr"
+    ).first()
+
+    if odf is None:
+        return {"error": "pipeline not found"}
+
+    locks = prefect_service.lock_tasks_for_deployment(odf.deployment_id, orguser)
+    try:
+        res = prefect_service.create_deployment_flow_run(odf.deployment_id)
+        for tasklock in locks:
+            tasklock.flow_run_id = res["flow_run_id"]
+            tasklock.save()
+
+    except Exception as error:
+        for task_lock in locks:
+            logger.info("deleting TaskLock %s", task_lock.orgtask.task.slug)
+            task_lock.delete()
+        logger.exception(error)
+        raise HttpError(400, "failed to start a run") from error
+
+    return res
