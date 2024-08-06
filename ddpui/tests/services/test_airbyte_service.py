@@ -736,6 +736,28 @@ def test_get_source_schema_catalog_success():
         assert isinstance(result, dict)
 
 
+def test_get_source_schema_catalog_with_invalid_workspace_id():
+    workspace_id = 123
+    source_id = "my_source_id"
+    with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
+        mock_post.return_value.status_code = 500
+        mock_post.return_value.json.return_value = {"error": "Invalid request data"}
+        with pytest.raises(HttpError) as excinfo:
+            get_source_schema_catalog(workspace_id, source_id)
+        assert str(excinfo.value) == "workspace_id must be a string"
+
+
+def test_get_source_schema_catalog_with_invalid_source_id():
+    workspace_id = "my_workspace_id"
+    source_id = 123
+    with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
+        mock_post.return_value.status_code = 500
+        mock_post.return_value.json.return_value = {"error": "Invalid request data"}
+        with pytest.raises(HttpError) as excinfo:
+            get_source_schema_catalog(workspace_id, source_id)
+        assert str(excinfo.value) == "source_id must be a string"
+
+
 def test_get_source_schema_catalog_failure_1():
     workspace_id = "my_workspace_id"
     source_id = "my_source_id"
@@ -773,26 +795,23 @@ def test_get_source_schema_catalog_failure_2():
         assert str(excinfo.value) == "external-message"
 
 
-def test_get_source_schema_catalog_with_invalid_workspace_id():
-    workspace_id = 123
+def test_get_source_schema_catalog_failure_3():
+    workspace_id = "my_workspace_id"
     source_id = "my_source_id"
     with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
-        mock_post.return_value.status_code = 500
-        mock_post.return_value.json.return_value = {"error": "Invalid request data"}
+        mock_response = Mock(spec=requests.Response)
+        mock_response.status_code = 500
+        mock_response.headers = {"Content-Type": "application/json"}
+        mock_response.json.return_value = {
+            "error": "failed to get source schema catalogs",
+            "message": "error-message",
+            "jobInfo": {},
+        }
+        mock_post.return_value = mock_response
         with pytest.raises(HttpError) as excinfo:
             get_source_schema_catalog(workspace_id, source_id)
-        assert str(excinfo.value) == "workspace_id must be a string"
-
-
-def test_get_source_schema_catalog_with_invalid_source_id():
-    workspace_id = "my_workspace_id"
-    source_id = 123
-    with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
-        mock_post.return_value.status_code = 500
-        mock_post.return_value.json.return_value = {"error": "Invalid request data"}
-        with pytest.raises(HttpError) as excinfo:
-            get_source_schema_catalog(workspace_id, source_id)
-        assert str(excinfo.value) == "source_id must be a string"
+        assert excinfo.value.status_code == 400
+        assert str(excinfo.value) == "Failed to discover schema"
 
 
 def test_get_destination_definitions_success():
