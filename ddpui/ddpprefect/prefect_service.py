@@ -622,3 +622,9 @@ def lock_tasks_for_deployment(deployment_id: str, orguser: OrgUser):
             400, "Someone else is trying to run this pipeline... try again"
         ) from error
     return locks
+
+
+def retry_flow_run(flow_run_id: str, minutes: int = 5):
+    """retry a flow run in prefect; after x minutes"""
+    res = prefect_post(f"flow_runs/{flow_run_id}/retry", {"minutes": minutes})
+    return res

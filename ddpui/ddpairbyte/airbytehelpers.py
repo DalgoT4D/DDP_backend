@@ -6,7 +6,8 @@ import json
 from django.utils.text import slugify
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Prefetch
+from django.db.models import Prefetch, F, Window
+from django.db.models.functions import RowNumber
 
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import AirbyteConnectionSchemaUpdate, AirbyteWorkspace
@@ -342,22 +343,11 @@ def get_connections(org: Org):
             continue
         connection = connection[0]
 
-        last_runs = []
+        look_up_last_run_deployment_ids = []
         for df_orgtask in DataflowOrgTask.objects.filter(
             orgtask=org_task,
         ):
-            run = prefect_service.get_flow_runs_by_deployment_id_v1(
-                df_orgtask.dataflow.deployment_id, limit=1, offset=0
-            )
-
-            if len(run) > 0:
-                last_runs.append(run[0])
-
-        last_runs.sort(
-            key=lambda run: (
-                run["startTime"] if run["startTime"] else run["expectedStartTime"]
-            )
-        )
+            look_up_last_run_deployment_ids.append(df_orgtask.dataflow.deployment_id)
 
         reset_dataflow: OrgDataFlowv1 = sync_dataflow.reset_conn_dataflow
 
@@ -390,13 +380,46 @@ def get_connections(org: Org):
                 "destination": connection["destination"],
                 "status": connection["status"],
                 "deploymentId": sync_dataflow.deployment_id,
-                "lastRun": last_runs[-1] if len(last_runs) > 0 else None,
+                "lastRun": None,  # updated below
                 "lock": lock,  # this will have the status of the flow run
                 "resetConnDeploymentId": (
                     reset_dataflow.deployment_id if reset_dataflow else None
                 ),
+                "look_up_last_run_deployment_ids": look_up_last_run_deployment_ids,
             }
         )
+
+    # fetch all last runs in one go
+    all_last_run_deployment_ids = []
+    for conn in res:
+        all_last_run_deployment_ids.extend(conn["look_up_last_run_deployment_ids"])
+
+    flow_runs_with_row_number = PrefectFlowRun.objects.filter(
+        deployment_id__in=all_last_run_deployment_ids
+    ).annotate(
+        row_number=Window(
+            expression=RowNumber(),
+            partition_by=[F("deployment_id")],
+            order_by=F("start_time").desc(),
+        )
+    )
+    last_flow_run_per_deployment = flow_runs_with_row_number.filter(row_number=1)
+
+    # attach last run for each conn based on latest(look_up_last_run_deployment_ids)
+    for conn in res:
+        last_runs = []
+        for run in last_flow_run_per_deployment:
+            if run.deployment_id in conn["look_up_last_run_deployment_ids"]:
+                last_runs.append(run.to_json())
+
+        last_runs.sort(
+            key=lambda run: (
+                run["startTime"] if run["startTime"] else run["expectedStartTime"]
+            )
+        )
+
+        conn["lastRun"] = last_runs[-1] if len(last_runs) > 0 else None
+        del conn["look_up_last_run_deployment_ids"]
 
     return res, None
 
@@ -787,34 +810,44 @@ def delete_source(org: Org, source_id: str):
     return None, None
 
 
-def get_connection_catalog(org: Org, connection_id: str):
+def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
     """
-    Get the catalog diff of a connection.
+    Fetches the schema change catalog from airbyte and updates OrgSchemaChnage in our db
     """
     try:
-        connection = airbyte_service.get_connection_catalog(connection_id)
-        schema_change = connection.get("schemaChange")
+        logger.info(
+            f"Fetching schema change (catalog) for connection {org.slug}|{connection_id}"
+        )
+        connection_catalog = airbyte_service.get_connection_catalog(
+            connection_id, timemout=60
+        )
+    except Exception as err:
+        return (
+            None,
+            f"Something went wrong fetching schema change (catalog) for connection {connection_id}: {err}",
+        )
 
-        if not schema_change or schema_change not in ["breaking", "non_breaking"]:
-            OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
-        else:
+    # update schema change type in our db
+    try:
+        change_type = connection_catalog.get("schemaChange")
+        logger.info(f"Schema change detected for org {org.slug}: {change_type}")
+
+        if change_type not in ["breaking", "non_breaking", "no_change"]:
+            raise ValueError("Invalid schema change type")
+
+        if change_type in ["breaking", "non_breaking"]:
             OrgSchemaChange.objects.update_or_create(
                 connection_id=connection_id,
-                defaults={"change_type": schema_change, "org": org},
+                defaults={"change_type": change_type, "org": org},
             )
 
-        res = {
-            "name": connection["name"],
-            "connectionId": connection["connectionId"],
-            "catalogId": connection["catalogId"],
-            "syncCatalog": connection["syncCatalog"],
-            "schemaChange": schema_change,
-            "catalogDiff": connection["catalogDiff"],
-        }
-        return res, None
-    except Exception as e:
-        logger.error(f"Error getting catalog for connection {connection_id}: {e}")
-        return None, f"Error getting catalog for connection {connection_id}: {e}"
+    except Exception as err:
+        return (
+            None,
+            f"Something went wrong updating OrgSchemaChange {connection_id}: {err}",
+        )
+
+    return connection_catalog, None
 
 
 def update_connection_schema(

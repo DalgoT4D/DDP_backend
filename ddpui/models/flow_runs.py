@@ -6,7 +6,7 @@ from django.db import models
 class PrefectFlowRun(models.Model):
     """Result of a prefect flow run"""
 
-    deployment_id = models.CharField(max_length=36, null=False, blank=False)
+    deployment_id = models.CharField(max_length=36, null=True)
     flow_run_id = models.CharField(max_length=36, null=False, blank=False)
     name = models.CharField(max_length=255, null=False, blank=False)
     start_time = models.DateTimeField(null=False, blank=False)
@@ -14,6 +14,7 @@ class PrefectFlowRun(models.Model):
     total_run_time = models.FloatField(null=False, blank=False)
     status = models.CharField(max_length=20, null=False, blank=False)
     state_name = models.CharField(max_length=20, null=False, blank=False)
+    retries = models.SmallIntegerField(default=0)
 
     def __str__(self) -> str:
         """string representation"""

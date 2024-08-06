@@ -3,6 +3,7 @@ import json
 from ninja import NinjaAPI
 
 from ninja.errors import HttpError
+from django.db import models
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpprefect import prefect_service
 from ddpui.models.tasks import TaskLock
@@ -32,6 +33,8 @@ webhookapi = NinjaAPI(urls_namespace="webhook")
 
 
 logger = CustomLogger("ddpui")
+
+MAX_RETRIES_FOR_CRASHED_FLOW_RUNS = 1
 
 
 @webhookapi.post("/v1/notification/")
@@ -92,11 +95,42 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
 
     # # this might be triggered multiple times and we dont want to load our db for the same update again and again
     # # we also dont care so much about this state yet
-    # # also this state doesn't have deployment_id for some reason
     # elif state == FLOW_RUN_RUNNING_STATE_NAME:  # non-terminal states
     #     create_or_update_flowrun(flow_run, deployment_id)
 
-    if state in [FLOW_RUN_FAILED_STATE_NAME, FLOW_RUN_CRASHED_STATE_NAME]:
+    send_failure_notifications = (
+        True
+        if state
+        in [
+            FLOW_RUN_FAILED_STATE_NAME,
+            FLOW_RUN_CRASHED_STATE_NAME,
+        ]
+        else False
+    )
+
+    # retry flow run
+    if state == FLOW_RUN_CRASHED_STATE_NAME:
+        prefect_flow_run = PrefectFlowRun.objects.filter(
+            flow_run_id=flow_run_id
+        ).first()
+        if (
+            os.getenv("PREFECT_RETRY_CRASHED_FLOW_RUNS") in ["True", "true", True]
+            and prefect_flow_run
+            and prefect_flow_run.retries < MAX_RETRIES_FOR_CRASHED_FLOW_RUNS
+        ):
+            # dont send notification right now, retry first
+            try:
+                prefect_service.retry_flow_run(flow_run_id, 5)
+                prefect_flow_run.retries += 1
+                prefect_flow_run.save()
+                send_failure_notifications = False
+            except Exception as err:
+                logger.error(
+                    f"Something went wrong retrying the flow run {flow_run_id} that just crashed - {str(err)}"
+                )
+
+    # notifications
+    if send_failure_notifications:
         org = get_org_from_flow_run(flow_run)
         if org:
             email_flowrun_logs_to_orgusers(org, flow_run["id"])
