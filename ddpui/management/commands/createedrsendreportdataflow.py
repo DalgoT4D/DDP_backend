@@ -83,7 +83,7 @@ class Command(BaseCommand):
             print(
                 f"creating `{options['schedule']}` OrgDataFlowv1 named {dataflow['deployment']['name']} with deployment_id {dataflow['deployment']['id']}"
             )
-            OrgDataFlowv1.objects.create(
+            data_flow = OrgDataFlowv1.objects.create(
                 org=org,
                 name=dataflow["deployment"]["name"],
                 deployment_name=dataflow["deployment"]["name"],
@@ -91,3 +91,5 @@ class Command(BaseCommand):
                 dataflow_type="manual",  # we dont want it to show in flows/pipelines page
                 cron=options["cron"] if options["schedule"] == "orchestrate" else None,
             )
+
+            DataflowOrgTask.objects.create(dataflow=data_flow, orgtask=org_task)
