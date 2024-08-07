@@ -228,20 +228,22 @@ def get_prefect_dataflows_v1(request):
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
 
-    org_data_flows = OrgDataFlowv1.objects.filter(
+    all_org_data_flows = OrgDataFlowv1.objects.filter(
         org=orguser.org, dataflow_type="orchestrate"
-    ).prefetch_related(
-        Prefetch(
-            "datafloworgtasks",
-            queryset=DataflowOrgTask.objects.all()
-            .select_related("orgtask")
-            .prefetch_related(
-                Prefetch("orgtask__tasklock", queryset=TaskLock.objects.all()),
-            ),
-        )
     )
 
-    deployment_ids = [flow.deployment_id for flow in org_data_flows]
+    dataflow_ids = all_org_data_flows.values_list("id", flat=True)
+    all_dataflow_orgtasks = DataflowOrgTask.objects.filter(
+        dataflow_id__in=dataflow_ids
+    ).select_related("orgtask")
+
+    all_org_task_ids = all_dataflow_orgtasks.values_list("orgtask_id", flat=True)
+    all_org_task_locks = TaskLock.objects.filter(orgtask_id__in=all_org_task_ids)
+
+    deployment_ids = [flow.deployment_id for flow in all_org_data_flows]
+    all_last_runs = prefect_service.get_flow_runs_by_deployment_id_v1(
+        deployment_ids=deployment_ids, limit=1, offset=0
+    )
 
     # dictionary to hold {"id": status}
     is_deployment_active = {}
@@ -258,25 +260,35 @@ def get_prefect_dataflows_v1(request):
 
     res = []
 
-    for flow in org_data_flows:
+    for flow in all_org_data_flows:
+
+        dataflow_orgtasks = [
+            dfot for dfot in all_dataflow_orgtasks if dfot.dataflow_id == flow.id
+        ]
+
+        org_tasks: list[OrgTask] = [
+            dataflow_orgtask.orgtask for dataflow_orgtask in dataflow_orgtasks
+        ]
+        orgtask_ids = [org_task.id for org_task in org_tasks]
 
         lock = None
-        for dataflow_orgtask in flow.datafloworgtasks.all():
-            orgtask = dataflow_orgtask.orgtask
-            if hasattr(orgtask, "tasklock"):
-                lock = orgtask.tasklock
-                break
+        all_locks = [
+            lock for lock in all_org_task_locks if lock.orgtask_id in orgtask_ids
+        ]
+        if len(all_locks) > 0:
+            lock = all_locks[0]
 
-        last_runs = prefect_service.get_flow_runs_by_deployment_id_v1(
-            flow.deployment_id, limit=1, offset=0
-        )
+        runs = [
+            run for run in all_last_runs if run["deployment_id"] == flow.deployment_id
+        ]
+
         res.append(
             {
                 "name": flow.name,
                 "deploymentId": flow.deployment_id,
                 "cron": flow.cron,
                 "deploymentName": flow.deployment_name,
-                "lastRun": last_runs[0] if last_runs and len(last_runs) > 0 else None,
+                "lastRun": runs[0] if runs and len(runs) > 0 else None,
                 "status": (
                     is_deployment_active[flow.deployment_id]
                     if flow.deployment_id in is_deployment_active
@@ -705,7 +717,7 @@ def get_prefect_flow_runs_log_history_v1(
     # pylint: disable=unused-argument
     """Fetch all flow runs for the deployment and the logs for each flow run"""
     flow_runs = prefect_service.get_flow_runs_by_deployment_id_v1(
-        deployment_id, limit=limit, offset=offset
+        deployment_id=deployment_id, limit=limit, offset=offset
     )
 
     if fetchlogs:
