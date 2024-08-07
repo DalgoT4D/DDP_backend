@@ -526,18 +526,13 @@ def create_elementary_report(task_key: str, org_id: int, bucket_file_path: str):
     os.environ["PATH"] += ":" + str(Path(os.getenv("DBT_VENV")) / "venv/bin")
     cmd = [
         str(edr_binary),
-        "send-report",
+        org_task.get_task_parameters(),
         "--aws-access-key-id",
         aws_access_key_id,
         "--aws-secret-access-key",
         aws_secret_access_key,
         "--s3-bucket-name",
         s3_bucket_name,
-        # "--bucket-file-path",
-        # bucket_file_path,
-        # "--profiles-dir",
-        # str(profiles_dir),
-        org_task.get_task_parameters(),
     ]
     taskprogress.add(
         {
