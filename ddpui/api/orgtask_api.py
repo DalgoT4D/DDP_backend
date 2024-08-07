@@ -54,6 +54,7 @@ from ddpui.utils.constants import (
     TRANSFORM_TASKS_SEQ,
     TASK_GENERATE_EDR,
 )
+from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.core.pipelinefunctions import (
     setup_dbt_core_task_config,
     setup_git_pull_shell_task_config,
@@ -275,6 +276,15 @@ def post_system_transformation_tasks(request):
         raise HttpError(400, error)
 
     return {"success": 1}
+
+
+@orgtaskapi.get("elementary-lock/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_orgtasks"])
+def get_elemetary_task_lock(request):
+    """Check if the elementary report generation task is underway"""
+    org = request.orguser.org
+    org_task = get_edr_send_report_task(org)
+    return fetch_orgtask_lock(org_task)
 
 
 @orgtaskapi.get("transform/", auth=auth.CustomAuthMiddleware())
