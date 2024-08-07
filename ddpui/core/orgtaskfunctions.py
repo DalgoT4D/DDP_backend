@@ -69,7 +69,7 @@ def fetch_elementary_profile_target(orgdbt: OrgDbt) -> str:
             config = yaml.safe_load(file)
         elementary_config = config.get("elementary", {})
         outputs = elementary_config.get("outputs", {})
-        targets = outputs.keys()
+        targets = list(outputs.keys())
         if len(targets) > 0:
             logger.info(
                 f"elementary profiles {str(targets)} found for orgdbt {orgdbt.id}. setting to the first one - {targets[0]}"
@@ -98,7 +98,7 @@ def get_edr_send_report_task(org: Org, orgdbt: OrgDbt, **kwargs) -> OrgTask | No
                 "options": {
                     "profiles-dir": "elementary_profiles",
                     "bucket-file-path": f"reports/{org.slug}.TODAYS_DATE.html",
-                    "profiles-target": fetch_elementary_profile_target(orgdbt),
+                    "profile-target": fetch_elementary_profile_target(orgdbt),
                 }
             },
         )
