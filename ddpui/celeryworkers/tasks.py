@@ -521,10 +521,7 @@ def create_elementary_report(task_key: str, org_id: int, bucket_file_path: str):
         cli_options["profiles-dir"] = str(profiles_dir)
 
     if "bucket-file-path" in cli_options:
-        todays_date = datetime.today().strftime("%Y-%m-%d")
-        cli_options["bucket-file-path"] = cli_options["bucket-file-path"].replace(
-            "TODAYS_DATE", todays_date
-        )
+        cli_options["bucket-file-path"] = bucket_file_path
 
     os.environ["PATH"] += ":" + str(Path(os.getenv("DBT_VENV")) / "venv/bin")
     cmd = [
