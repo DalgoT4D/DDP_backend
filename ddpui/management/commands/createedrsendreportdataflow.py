@@ -40,7 +40,7 @@ class Command(BaseCommand):
             print(f"OrgDbt for {org.slug} not found")
             return
 
-        org_task = get_edr_send_report_task(org)
+        org_task = get_edr_send_report_task(org, org_dbt)
         if org_task is None:
             print("creating OrgTask for edr-send-report")
             org_task = get_edr_send_report_task(org, org_dbt, create=True)
@@ -88,7 +88,7 @@ class Command(BaseCommand):
             print(
                 f"creating `{options['schedule']}` OrgDataFlowv1 named {dataflow['deployment']['name']} with deployment_id {dataflow['deployment']['id']}"
             )
-            OrgDataFlowv1.objects.create(
+            dataflow = OrgDataFlowv1.objects.create(
                 org=org,
                 name=dataflow["deployment"]["name"],
                 deployment_name=dataflow["deployment"]["name"],
@@ -96,3 +96,5 @@ class Command(BaseCommand):
                 dataflow_type="manual",  # we dont want it to show in flows/pipelines page
                 cron=options["cron"] if options["schedule"] == "orchestrate" else None,
             )
+
+            DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=org_task)
