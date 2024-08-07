@@ -88,7 +88,7 @@ class Command(BaseCommand):
             print(
                 f"creating `{options['schedule']}` OrgDataFlowv1 named {dataflow['deployment']['name']} with deployment_id {dataflow['deployment']['id']}"
             )
-            dataflow = OrgDataFlowv1.objects.create(
+            data_flow = OrgDataFlowv1.objects.create(
                 org=org,
                 name=dataflow["deployment"]["name"],
                 deployment_name=dataflow["deployment"]["name"],
@@ -97,4 +97,4 @@ class Command(BaseCommand):
                 cron=options["cron"] if options["schedule"] == "orchestrate" else None,
             )
 
-            DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=org_task)
+            DataflowOrgTask.objects.create(dataflow=data_flow, orgtask=org_task)

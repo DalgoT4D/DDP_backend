@@ -11,8 +11,7 @@ from ddpui import auth
 
 # models
 from ddpui.models.org import OrgDataFlowv1
-from ddpui.models.tasks import DataflowOrgTask, TaskLock
-from ddpui.models.flow_runs import PrefectFlowRun
+from ddpui.models.tasks import DataflowOrgTask, TaskLock, OrgTask
 from ddpui.auth import has_permission
 from ddpui.ddpprefect import prefect_service
 
@@ -57,15 +56,19 @@ def get_dashboard_v1(request):
 
     org_data_flows = OrgDataFlowv1.objects.filter(
         org=orguser.org, dataflow_type="orchestrate"
-    ).prefetch_related(
-        Prefetch(
-            "datafloworgtasks",
-            queryset=DataflowOrgTask.objects.all()
-            .select_related("orgtask")
-            .prefetch_related(
-                Prefetch("orgtask__tasklock", queryset=TaskLock.objects.all()),
-            ),
-        )
+    )
+
+    dataflow_ids = org_data_flows.values_list("id", flat=True)
+    all_dataflow_orgtasks = DataflowOrgTask.objects.filter(
+        dataflow_id__in=dataflow_ids
+    ).select_related("orgtask")
+
+    all_org_task_ids = all_dataflow_orgtasks.values_list("orgtask_id", flat=True)
+    all_org_task_locks = TaskLock.objects.filter(orgtask_id__in=all_org_task_ids)
+
+    deployment_ids = [flow.deployment_id for flow in org_data_flows]
+    all_runs = prefect_service.get_flow_runs_by_deployment_id_v1(
+        deployment_ids=deployment_ids, limit=50, offset=0
     )
 
     res = []
@@ -74,12 +77,21 @@ def get_dashboard_v1(request):
     for flow in org_data_flows:
         # if there is one there will typically be several - a sync,
         # a git-run, a git-test... we return the userinfo only for the first one
+        dataflow_orgtasks = [
+            dfot for dfot in all_dataflow_orgtasks if dfot.dataflow_id == flow.id
+        ]
+
+        org_tasks: list[OrgTask] = [
+            dataflow_orgtask.orgtask for dataflow_orgtask in dataflow_orgtasks
+        ]
+        orgtask_ids = [org_task.id for org_task in org_tasks]
+
         lock = None
-        for dataflow_orgtask in flow.datafloworgtasks.all():
-            orgtask = dataflow_orgtask.orgtask
-            if hasattr(orgtask, "tasklock"):
-                lock = orgtask.tasklock
-                break
+        all_locks = [
+            lock for lock in all_org_task_locks if lock.orgtask_id in orgtask_ids
+        ]
+        if len(all_locks) > 0:
+            lock = all_locks[0]
 
         res.append(
             {
@@ -87,9 +99,11 @@ def get_dashboard_v1(request):
                 "deploymentId": flow.deployment_id,
                 "cron": flow.cron,
                 "deploymentName": flow.deployment_name,
-                "runs": prefect_service.get_flow_runs_by_deployment_id_v1(
-                    flow.deployment_id, limit=50, offset=0
-                ),
+                "runs": [
+                    run
+                    for run in all_runs
+                    if run["deployment_id"] == flow.deployment_id
+                ],
                 "lock": (
                     {
                         "lockedBy": lock.locked_by.user.email,
