@@ -3,7 +3,7 @@
 from pathlib import Path
 from django.core.management.base import BaseCommand
 
-from ddpui.models.org import Org, OrgDataFlowv1
+from ddpui.models.org import Org, OrgDataFlowv1, OrgDbt
 from ddpui.models.tasks import DataflowOrgTask
 from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.core.pipelinefunctions import setup_edr_send_report_task_config
@@ -35,10 +35,15 @@ class Command(BaseCommand):
             print(f"Org with slug {options['org']} does not exist")
             return
 
-        org_task = get_edr_send_report_task(org)
+        org_dbt = OrgDbt.objects.filter(org=org).first()
+        if not org_dbt:
+            print(f"OrgDbt for {org.slug} not found")
+            return
+
+        org_task = get_edr_send_report_task(org, org_dbt)
         if org_task is None:
             print("creating OrgTask for edr-send-report")
-            org_task = get_edr_send_report_task(org, create=True)
+            org_task = get_edr_send_report_task(org, org_dbt, create=True)
 
         dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
 
