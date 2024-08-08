@@ -54,6 +54,7 @@ from ddpui.utils.constants import (
     TASK_GITPULL,
     TRANSFORM_TASKS_SEQ,
     TASK_GENERATE_EDR,
+    TASK_SEED,
 )
 from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.core.pipelinefunctions import (
@@ -132,7 +133,7 @@ def post_orgtask(request, payload: CreateOrgTaskPayload):
     )
 
     dataflow = None
-    if task.slug == TASK_DBTRUN:
+    if task.slug in [TASK_DBTRUN, TASK_SEED]:
         dbt_project_params, error = gather_dbt_project_params(orguser.org)
         if error:
             raise HttpError(400, error)
