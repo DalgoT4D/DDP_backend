@@ -86,18 +86,16 @@ def get_edr_send_report_task(org: Org, orgdbt: OrgDbt, **kwargs) -> OrgTask | No
         raise ValueError("TASK_GENERATE_EDR not found")
 
     if kwargs.get("overwrite") or kwargs.get("create"):
-        parameters = {
-            "options": {
-                "profiles-dir": "elementary_profiles",
-                "bucket-file-path": f"reports/{org.slug}.TODAYS_DATE.html",
-                "profile-target": fetch_elementary_profile_target(orgdbt),
-            }
+        options = {
+            "profiles-dir": "elementary_profiles",
+            "bucket-file-path": f"reports/{org.slug}.TODAYS_DATE.html",
+            "profile-target": fetch_elementary_profile_target(orgdbt),
         }
 
     org_task = OrgTask.objects.filter(task__slug=TASK_GENERATE_EDR, org=org).first()
     if org_task:
         if kwargs.get("overwrite"):
-            org_task.parameters = parameters
+            org_task.parameters["options"] = options
             org_task.save()
         return org_task
 
@@ -106,7 +104,7 @@ def get_edr_send_report_task(org: Org, orgdbt: OrgDbt, **kwargs) -> OrgTask | No
             org=org,
             task=task,
             uuid=uuid.uuid4(),
-            parameters=parameters,
+            parameters={"options": options},
         )
     return org_task
 
