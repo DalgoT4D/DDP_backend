@@ -399,9 +399,13 @@ def check_source_connection(workspace_id: str, data: AirbyteSourceCreate) -> dic
         },
         timeout=60,
     )
+
     if "jobInfo" not in res or res.get("status") == "failed":
-        logger.error("Failed to check source connection: %s", res)
-        raise HttpError(500, "Failed to connect - please check your crendentials")
+        failure_reason = res.get("jobInfo", {}).get("failureReason", {})
+        external_message = failure_reason.get("externalMessage", "Please check your credentials")
+        internal_message = failure_reason.get("internalMessage", "No internal message provided")
+        logger.error("Failed to check source connection: %s", internal_message)
+        raise HttpError(500, external_message)
     return res
 
 
@@ -419,8 +423,11 @@ def check_source_connection_for_update(
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        logger.error("Failed to check source connection: %s", res)
-        raise HttpError(500, "Failed to connect - please check your crendentials")
+        failure_reason = res.get("jobInfo", {}).get("failureReason", {})
+        external_message = failure_reason.get("externalMessage", "Please check your credentials")
+        internal_message = failure_reason.get("internalMessage", "No internal message provided")
+        logger.error("Failed to check source connection: %s", internal_message)
+        raise HttpError(500, external_message)
     # {
     #   'status': 'succeeded',
     #   'jobInfo': {
@@ -645,8 +652,11 @@ def check_destination_connection(
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        logger.error("Failed to check destination connection: %s", res)
-        raise HttpError(500, "Failed to connect - please check your crendentials")
+        failure_reason = res.get("jobInfo", {}).get("failureReason", {})
+        external_message = failure_reason.get("externalMessage", "Please check your credentials")
+        internal_message = failure_reason.get("internalMessage", "No internal message provided")
+        logger.error("Failed to check source connection: %s", internal_message)
+        raise HttpError(500, external_message)
     return res
 
 
@@ -667,8 +677,11 @@ def check_destination_connection_for_update(
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        logger.error("Failed to check destination connection: %s", res)
-        raise HttpError(500, "Failed to connect - please check your crendentials")
+        failure_reason = res.get("jobInfo", {}).get("failureReason", {})
+        external_message = failure_reason.get("externalMessage", "Please check your credentials")
+        internal_message = failure_reason.get("internalMessage", "No internal message provided")
+        logger.error("Failed to check source connection: %s", internal_message)
+        raise HttpError(500, external_message)
     return res
 
 
