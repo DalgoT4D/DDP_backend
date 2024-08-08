@@ -40,23 +40,14 @@ class Command(BaseCommand):
                 print(f"OrgDbt for {org.slug} not found")
                 return
 
-            org_task: OrgTask = get_edr_send_report_task(org, orgdbt=org_dbt)
+            org_task = get_edr_send_report_task(org, orgdbt=org_dbt, overwrite=True)
             if org_task is None:
                 print(f"edr orgtask not found {org.slug}; skipping to the next org")
                 continue
-
-            edr_target = fetch_elementary_profile_target(org_dbt)
-
-            cli_options = org_task.options() or {}
-            cli_options["profile-target"] = edr_target
-
-            # update the org_task
-            org_task.parameters = {
-                "options": cli_options,
-                **({"flags": org_task.flags() if org_task.flags() else {}}),
-            }
-            org_task.save()
-            print(f"Updated the edr org_task {org.slug} with the new elementary target")
+            else:
+                print(
+                    f"Updated the edr org_task {org.slug} with the new elementary target"
+                )
 
             dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
 
