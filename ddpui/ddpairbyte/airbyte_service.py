@@ -400,8 +400,8 @@ def check_source_connection(workspace_id: str, data: AirbyteSourceCreate) -> dic
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get("message", "Something went wrong, please check your credentials");
-        logger.error("Failed to check the source connection: %s", res);
+        failure_reason = res.get("message", "Something went wrong, please check your credentials")
+        logger.error("Failed to check the source connection: %s", res)
         raise HttpError(500, failure_reason)
     return res
 
@@ -420,8 +420,8 @@ def check_source_connection_for_update(
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get("message", "Something went wrong, please check your credentials");
-        logger.error("Failed to check the source connection: %s", res);
+        failure_reason = res.get("message", "Something went wrong, please check your credentials")
+        logger.error("Failed to check the source connection: %s", res)
         raise HttpError(500, failure_reason)
     # {
     #   'status': 'succeeded',
@@ -647,8 +647,8 @@ def check_destination_connection(
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get("message", "Something went wrong, please check your credentials");
-        logger.error("Failed to check the destination connection: %s", res);
+        failure_reason = res.get("message", "Something went wrong, please check your credentials")
+        logger.error("Failed to check the destination connection: %s", res)
         raise HttpError(500, failure_reason)
     return res
 
@@ -670,8 +670,8 @@ def check_destination_connection_for_update(
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get("message", "Something went wrong, please check your credentials");
-        logger.error("Failed to check the destination connection: %s", res);
+        failure_reason = res.get("message", "Something went wrong, please check your credentials")
+        logger.error("Failed to check the destination connection: %s", res)
         raise HttpError(500, failure_reason)
     return res
 
