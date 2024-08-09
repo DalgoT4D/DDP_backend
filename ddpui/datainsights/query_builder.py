@@ -83,7 +83,7 @@ class AggQueryBuilder:
         if self.select_from is None:
             raise ValueError("Table to select from is not provided")
 
-        stmt: Select = select(self.column_clauses)
+        stmt: Select = select(*self.column_clauses)
         stmt = stmt.select_from(self.select_from)
 
         if len(self.where_clauses) > 0:
@@ -121,5 +121,7 @@ class AggQueryBuilder:
         self.order_by_clauses: list[ColumnClause] = []
         self.limit_records: int = None
         self.offset_records: int = 0
+        self.where_clauses: list = []
+        self.having_clauses: list = []
 
         return self
