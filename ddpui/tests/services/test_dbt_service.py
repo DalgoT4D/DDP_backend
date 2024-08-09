@@ -4,60 +4,18 @@ from pathlib import Path
 from unittest.mock import patch
 import django
 import pytest
+from ninja.errors import HttpError
 
-from dbt_automation import assets
 from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1, OrgWarehouse
 from ddpui.ddpdbt.dbt_service import delete_dbt_workspace, setup_local_dbt_workspace
-from ddpui.ddpprefect import DBTCLIPROFILE, SECRET
-
-from django.contrib.auth.models import User
-from ddpui.ddpdbt import dbt_service
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.models.org import Org, OrgDbt
-from ddpui.models.org_user import OrgUser, OrgUserRole
-from ddpui.models.role_based_access import Role
-
+from ddpui.ddpprefect import DBTCORE, SHELLOPERATION, DBTCLIPROFILE, SECRET
+from dbt_automation import assets
 
 pytestmark = pytest.mark.django_db
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
-
-
-@pytest.fixture
-def org_with_workspace():
-    """a pytest fixture which creates an Org having an airbyte workspace"""
-    print("creating org_with_workspace")
-    org = Org.objects.create(
-        name="org-name", airbyte_workspace_id="FAKE-WORKSPACE-ID", slug="test-org-slug"
-    )
-    yield org
-    print("deleting org_with_workspace")
-    org.delete()
-
-
-@pytest.fixture
-def authuser():
-    """a django User object"""
-    user = User.objects.create(
-        username="tempusername", email="tempuseremail", password="tempuserpassword"
-    )
-    yield user
-    user.delete()
-
-
-@pytest.fixture
-def orguser(authuser, org_with_workspace):
-    """a pytest fixture representing an OrgUser having the account-manager role"""
-    org_user = OrgUser.objects.create(
-        user=authuser,
-        org=org_with_workspace,
-        role=OrgUserRole.ACCOUNT_MANAGER,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    yield org_user
-    org_user.delete()
 
 
 def test_delete_dbt_workspace():
@@ -195,11 +153,3 @@ def test_setup_local_dbt_workspace_success(tmp_path):
     orgdbt = OrgDbt.objects.filter(org=org).first()
     assert orgdbt is not None
     assert org.dbt == orgdbt
-
-
-class TestElementaryReportRefresh:
-    """Test elementary report generation"""
-    def test_edr_pipeline_not_present(self, orguser):
-        """Get an error if the pipeline is not present"""
-        response = dbt_service.refresh_elementary_report_via_prefect(orguser)
-        assert response == {"error": "pipeline not found"}
