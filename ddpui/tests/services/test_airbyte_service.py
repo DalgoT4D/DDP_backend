@@ -649,7 +649,6 @@ def test_check_source_connection_success():
         assert result == expected_response_src
         assert isinstance(result, dict)
 
-
 def test_check_source_connection_failure():
     workspace_id = "my_workspace_id"
     data = AirbyteSourceCreate(
@@ -658,14 +657,23 @@ def test_check_source_connection_failure():
         config={"key": "value"},
     )
     expected_response_srcdef = {"connectionSpecification": {"properties": {}}}
+    failed_response = {
+        "status": "failed",
+        "jobInfo": {
+            "succeeded": False,
+        },
+        "message": "Credentials are invalid"
+    }
+    
     with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq_:
-        mock_abreq_.side_effect = [expected_response_srcdef, {}]
+        mock_abreq_.side_effect = [expected_response_srcdef, failed_response]
+        
         with pytest.raises(HttpError) as excinfo:
             check_source_connection(workspace_id, data)
-            assert (
-                str(excinfo.value)
-                == "Failed to connect - please check your crendentials"
-            )
+        
+        assert str(excinfo.value) == "Credentials are invalid"
+
+
 
 
 def test_check_source_connection_with_invalid_workspace_id():
@@ -1149,14 +1157,23 @@ def test_check_destination_connection_failure_1():
         mock_response = Mock(spec=requests.Response)
         mock_response.status_code = 200
         mock_response.headers = {"Content-Type": "application/json"}
-        mock_response.json.return_value = {"wrong-key": "theConnectionSpecification"}
+        mock_response.json.return_value = {
+            "status": "failed",
+            "message": "Credentials are invalid",
+            "jobInfo": {
+                "succeeded": False,
+            }
+        }
         mock_post.return_value = mock_response
+
         with pytest.raises(HttpError) as excinfo:
             check_destination_connection("workspace_id", payload)
 
-        assert (
-            str(excinfo.value) == "Failed to connect - please check your crendentials"
-        )
+        assert str(excinfo.value) == "Credentials are invalid"
+
+
+
+
 
 
 def test_check_destination_connection_failure_2():
@@ -1167,14 +1184,21 @@ def test_check_destination_connection_failure_2():
         mock_response = Mock(spec=requests.Response)
         mock_response.status_code = 200
         mock_response.headers = {"Content-Type": "application/json"}
-        mock_response.json.return_value = {"jobInfo": {}, "status": "failed"}
+        mock_response.json.return_value = {
+            "status": "failed",
+            "message": "Credentials are invalid",
+            "jobInfo": {
+                "succeeded": False,
+            }
+        }
         mock_post.return_value = mock_response
+
         with pytest.raises(HttpError) as excinfo:
             check_destination_connection("workspace_id", payload)
 
-        assert (
-            str(excinfo.value) == "Failed to connect - please check your crendentials"
-        )
+        assert str(excinfo.value) == "Credentials are invalid"
+
+
 
 
 def test_check_destination_connection_for_update_success():
@@ -1203,14 +1227,21 @@ def test_check_destination_connection_for_update_failure_1():
         mock_response = Mock(spec=requests.Response)
         mock_response.status_code = 200
         mock_response.headers = {"Content-Type": "application/json"}
-        mock_response.json.return_value = {"wrong-key": "theConnectionSpecification"}
+        mock_response.json.return_value = {
+            "status": "failed",
+            "message": "Credentials are invalid",
+            "jobInfo": {
+                "succeeded": False,
+            }
+        }
         mock_post.return_value = mock_response
+
         with pytest.raises(HttpError) as excinfo:
             check_destination_connection_for_update("destination_id", payload)
 
-        assert (
-            str(excinfo.value) == "Failed to connect - please check your crendentials"
-        )
+        assert str(excinfo.value) == "Credentials are invalid"
+
+
 
 
 def test_check_destination_connection_for_update_failure_2():
@@ -1219,14 +1250,23 @@ def test_check_destination_connection_for_update_failure_2():
         mock_response = Mock(spec=requests.Response)
         mock_response.status_code = 200
         mock_response.headers = {"Content-Type": "application/json"}
-        mock_response.json.return_value = {"jobInfo": {}, "status": "failed"}
+        mock_response.json.return_value = {
+            "status": "failed",
+            "message": "Credentials are invalid",
+            "jobInfo": {
+                "succeeded": False,
+            }
+        }
         mock_post.return_value = mock_response
+
         with pytest.raises(HttpError) as excinfo:
             check_destination_connection_for_update("destination_id", payload)
 
-        assert (
-            str(excinfo.value) == "Failed to connect - please check your crendentials"
-        )
+        assert str(excinfo.value) == "Credentials are invalid"
+
+
+
+
 
 
 def test_get_connections_bad_workspace_id():
