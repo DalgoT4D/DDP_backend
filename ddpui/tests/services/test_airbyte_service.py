@@ -649,7 +649,6 @@ def test_check_source_connection_success():
         assert result == expected_response_src
         assert isinstance(result, dict)
 
-
 def test_check_source_connection_failure():
     workspace_id = "my_workspace_id"
     data = AirbyteSourceCreate(
@@ -662,11 +661,8 @@ def test_check_source_connection_failure():
         "status": "failed",
         "jobInfo": {
             "succeeded": False,
-            "failureReason": {
-                "externalMessage": "Credentials are invalid",
-                "internalMessage": "Failed to authenticate user with provided credentials. Please check the username and password."
-            }
-        }
+        },
+        "message": "Credentials are invalid"
     }
     
     with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq_:
@@ -676,6 +672,7 @@ def test_check_source_connection_failure():
             check_source_connection(workspace_id, data)
         
         assert str(excinfo.value) == "Credentials are invalid"
+
 
 
 
@@ -1162,19 +1159,19 @@ def test_check_destination_connection_failure_1():
         mock_response.headers = {"Content-Type": "application/json"}
         mock_response.json.return_value = {
             "status": "failed",
+            "message": "Credentials are invalid",
             "jobInfo": {
                 "succeeded": False,
-                "failureReason": {
-                    "externalMessage": "Credentials are invalid",
-                    "internalMessage": "Failed to authenticate user with provided credentials. Please check the username and password."
-                }
             }
         }
         mock_post.return_value = mock_response
+
         with pytest.raises(HttpError) as excinfo:
             check_destination_connection("workspace_id", payload)
 
         assert str(excinfo.value) == "Credentials are invalid"
+
+
 
 
 
@@ -1189,19 +1186,18 @@ def test_check_destination_connection_failure_2():
         mock_response.headers = {"Content-Type": "application/json"}
         mock_response.json.return_value = {
             "status": "failed",
+            "message": "Credentials are invalid",
             "jobInfo": {
                 "succeeded": False,
-                "failureReason": {
-                    "externalMessage": "Credentials are invalid",
-                    "internalMessage": "Failed to authenticate user with provided credentials. Please check the username and password."
-                }
             }
         }
         mock_post.return_value = mock_response
+
         with pytest.raises(HttpError) as excinfo:
             check_destination_connection("workspace_id", payload)
 
         assert str(excinfo.value) == "Credentials are invalid"
+
 
 
 
@@ -1233,19 +1229,18 @@ def test_check_destination_connection_for_update_failure_1():
         mock_response.headers = {"Content-Type": "application/json"}
         mock_response.json.return_value = {
             "status": "failed",
+            "message": "Credentials are invalid",
             "jobInfo": {
                 "succeeded": False,
-                "failureReason": {
-                    "externalMessage": "Credentials are invalid",
-                    "internalMessage": "Failed to authenticate user with provided credentials. Please check the username and password."
-                }
             }
         }
         mock_post.return_value = mock_response
+
         with pytest.raises(HttpError) as excinfo:
             check_destination_connection_for_update("destination_id", payload)
 
         assert str(excinfo.value) == "Credentials are invalid"
+
 
 
 
@@ -1257,19 +1252,18 @@ def test_check_destination_connection_for_update_failure_2():
         mock_response.headers = {"Content-Type": "application/json"}
         mock_response.json.return_value = {
             "status": "failed",
+            "message": "Credentials are invalid",
             "jobInfo": {
                 "succeeded": False,
-                "failureReason": {
-                    "externalMessage": "Credentials are invalid",
-                    "internalMessage": "Failed to authenticate user with provided credentials. Please check the username and password."
-                }
             }
         }
         mock_post.return_value = mock_response
+
         with pytest.raises(HttpError) as excinfo:
             check_destination_connection_for_update("destination_id", payload)
 
         assert str(excinfo.value) == "Credentials are invalid"
+
 
 
 
