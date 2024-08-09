@@ -858,6 +858,7 @@ def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
         )
 
     # update schema change type in our db
+    # delete the schema change if type is "no_change" & if type is "non_breaking" but catalogDiff is empty list
     try:
         change_type = connection_catalog.get("schemaChange")
         logger.info(f"Schema change detected for org {org.slug}: {change_type}")
@@ -865,11 +866,19 @@ def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
         if change_type not in ["breaking", "non_breaking", "no_change"]:
             raise ValueError("Invalid schema change type")
 
-        if change_type in ["breaking", "non_breaking"]:
+        catalog_diff: dict = connection_catalog.get("catalogDiff")
+
+        if change_type == "breaking" or (
+            change_type == "non_breaking"
+            and catalog_diff
+            and len(catalog_diff.get("transforms", [])) > 0
+        ):
             OrgSchemaChange.objects.update_or_create(
                 connection_id=connection_id,
                 defaults={"change_type": change_type, "org": org},
             )
+        else:
+            OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
 
     except Exception as err:
         return (
