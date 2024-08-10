@@ -268,6 +268,38 @@ def delete_dbt_model_in_project(orgdbt_model: OrgDbtModel):
     return True
 
 
+def propagate_changes_to_downstream_operations(
+    target_model: OrgDbtModel, updated_operation: OrgDbtOperation, depth: int = 1
+):
+    """
+    - Propagate changes of an update in OrgDbtOperation downstream to all operations that build the target OrgDbtModel
+    - Propagating changes mean making sure the output of the updated operation i.e. output_cols are available as source_columns to next operations
+    - By default the depth is 1 i.e. it will only update the next operation
+    """
+
+    if depth == 0:
+        logger.info("Terminating propagation as depth is 0")
+        return
+
+    next_op = OrgDbtOperation.objects.filter(
+        dbtmodel=target_model, seq=updated_operation.seq + 1
+    ).first()
+
+    if not next_op:
+        logger.info("No downstream operations left to propagate changes")
+        return
+
+    config = next_op.config  # {"type": .. , "config": {}, "input_models": [...]}
+    op_config = config.get("config", {})
+    if "source_columns" in op_config:
+        op_config["source_columns"] = updated_operation.output_cols
+
+    next_op.config = config
+    next_op.save()
+
+    propagate_changes_to_downstream_operations(target_model, next_op, depth - 1)
+
+
 @app.task(bind=True)
 def sync_sources_for_warehouse(
     self, org_dbt_id: str, org_warehouse_id: str, orgslug: str

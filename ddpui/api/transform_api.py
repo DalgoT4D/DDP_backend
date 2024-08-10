@@ -301,12 +301,11 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
 
     target_model = dbt_operation.dbtmodel
 
-    current_operations_chained = OrgDbtOperation.objects.filter(
-        dbtmodel=target_model
-    ).count()
+    all_ops = OrgDbtOperation.objects.filter(dbtmodel=target_model).all()
+    operation_chained_before = sum(1 for op in all_ops if op.seq < dbt_operation.seq)
 
     final_config, all_input_models = validate_operation_config(
-        payload, target_model, is_multi_input_op, current_operations_chained, edit=True
+        payload, target_model, is_multi_input_op, operation_chained_before, edit=True
     )
 
     # create edges only with tables/models if not present
@@ -321,7 +320,6 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
     output_cols = dbtautomation_service.get_output_cols_for_operation(
         org_warehouse, payload.op_type, final_config["config"].copy()
     )
-    logger.info("updating operation")
 
     dbt_operation.config = final_config
     dbt_operation.output_cols = output_cols
@@ -333,13 +331,16 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
     target_model.output_cols = dbt_operation.output_cols
     target_model.save()
 
-    # update the dbt model if it is already created on disk
-    if target_model.name is not None:
-        dbtautomation_service.update_dbt_model_in_project(org_warehouse, target_model)
+    dbtautomation_service.update_dbt_model_in_project(org_warehouse, target_model)
+
+    # propogate the udpates down the chain
+    dbtautomation_service.propagate_changes_to_downstream_operations(
+        target_model, dbt_operation, depth=1
+    )
 
     logger.info("updated output cols for the target model")
 
-    return from_orgdbtoperation(dbt_operation, chain_length=current_operations_chained)
+    return from_orgdbtoperation(dbt_operation, chain_length=len(all_ops))
 
 
 @transformapi.get(
