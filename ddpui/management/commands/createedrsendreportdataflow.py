@@ -22,8 +22,15 @@ class Command(BaseCommand):
     help = "Create the dataflow for edr send report"
 
     def add_arguments(self, parser):
-        parser.add_argument("org", type=str, help="Org slug")
+        parser.add_argument(
+            "org", type=str, help='Org slug, provide "all" to fix links'
+        )
         parser.add_argument("--cron", type=str, default="0 0 * * *")
+        parser.add_argument(
+            "--fix-links",
+            action="store_true",
+            help="Create missing links between OrgTask and OrgDataFlowv1",
+        )
 
     def create_dataflow(self, org: Org, org_task: OrgTask, cron: str):
         """create the DataflowOrgTask for the orgtask"""
@@ -77,6 +84,35 @@ class Command(BaseCommand):
         return orgdataflow
 
     def handle(self, *args, **options):
+
+        if options["fix_links"]:
+            for org in Org.objects.exclude(dbt__isnull=True):
+                orgdbt = org.dbt
+
+                org_task = get_edr_send_report_task(org, orgdbt)
+                if org_task is None:
+                    print(f"no edr OrgTask found for {org.slug}, skipping")
+                    continue
+
+                if DataflowOrgTask.objects.filter(orgtask=org_task).exists():
+                    print(f"DataflowOrgTask already exists for {org.slug}, skipping")
+                    continue
+
+                deployment_name_prefix = (
+                    f"pipeline-{org_task.org.slug}-{org_task.task.slug}-"
+                )
+                dataflow = OrgDataFlowv1.objects.filter(
+                    org=org,
+                    deployment_name__startswith=deployment_name_prefix,
+                ).first()
+                if dataflow is None:
+                    print(f"no OrgDataFlowv1 found for {org.slug}, skipping")
+                    continue
+
+                DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=org_task)
+                print(f"created DataflowOrgTask for {org.slug}")
+
+            return
 
         org = Org.objects.filter(slug=options["org"]).first()
         if org is None:
