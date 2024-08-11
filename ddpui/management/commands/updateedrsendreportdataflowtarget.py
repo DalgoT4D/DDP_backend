@@ -38,7 +38,7 @@ class Command(BaseCommand):
             org_dbt = OrgDbt.objects.filter(org=org).first()
             if not org_dbt:
                 print(f"OrgDbt for {org.slug} not found")
-                return
+                continue
 
             org_task = get_edr_send_report_task(org, orgdbt=org_dbt, overwrite=True)
             if org_task is None:
@@ -63,7 +63,7 @@ class Command(BaseCommand):
                 dbt_project_params, error = gather_dbt_project_params(org)
                 if error:
                     print(error)
-                    return
+                    continue
 
                 dbt_env_dir = Path(org_dbt.dbt_venv)
 
