@@ -53,12 +53,13 @@ class Command(BaseCommand):
 
         # run through all current flows and update their attributes
         for flow_run in PrefectFlowRun.objects.order_by("-start_time").all():
+            print(f"Checking flow run {flow_run.flow_run_id}")
 
             # get the flow run from prefect
             try:
                 prefect_flow_run = prefect_service.get_flow_run(flow_run.flow_run_id)
             except HttpError as err:
-                if err.status_code == 404:
+                if 400 <= err.status_code < 500:
                     print(f"Flow run {flow_run.flow_run_id} not found in prefect")
                     flow_runs_to_delete.append(flow_run.flow_run_id)
                 else:
@@ -74,6 +75,7 @@ class Command(BaseCommand):
                 create_or_update_flowrun(prefect_flow_run, flow_run.deployment_id)
                 print(f"Updated flow run {flow_run.flow_run_id}")
 
+        print("\n")
         print(f"Updated flow runs in db: {diff_state_runs_updated}")
 
         flow_runs_in_non_terminal_state = PrefectFlowRun.objects.filter(
