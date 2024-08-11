@@ -147,8 +147,10 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
     return {"status": "ok"}
 
 
-def create_or_update_flowrun(flow_run, deployment_id, state_name: str):
+def create_or_update_flowrun(flow_run, deployment_id, state_name: str = None):
     """Create or update the flow run entry in database"""
+    state_name = state_name if state_name else flow_run["state_name"]
+    deployment_id = deployment_id if deployment_id else flow_run.get("deployment_id")
 
     PrefectFlowRun.objects.update_or_create(
         flow_run_id=flow_run["id"],
