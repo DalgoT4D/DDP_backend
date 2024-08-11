@@ -12,7 +12,6 @@ from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from django.forms.models import model_to_dict
-from django.db.models import Prefetch
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service
@@ -22,6 +21,7 @@ from ddpui.ddpprefect import (
     SECRET,
 )
 from ddpui.models.org import (
+    Org,
     OrgWarehouse,
     OrgPrefectBlockv1,
 )
@@ -284,7 +284,7 @@ def post_system_transformation_tasks(request):
 @has_permission(["can_view_orgtasks"])
 def get_elemetary_task_lock(request):
     """Check if the elementary report generation task is underway"""
-    org = request.orguser.org
+    org: Org = request.orguser.org
     org_task = get_edr_send_report_task(org)
     return fetch_orgtask_lock(org_task)
 

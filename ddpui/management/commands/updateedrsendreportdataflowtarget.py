@@ -35,12 +35,11 @@ class Command(BaseCommand):
         for org in orgs:
             print(f"running for {org.slug}")
 
-            org_dbt = OrgDbt.objects.filter(org=org).first()
-            if not org_dbt:
+            if not org.dbt:
                 print(f"OrgDbt for {org.slug} not found")
                 continue
 
-            org_task = get_edr_send_report_task(org, orgdbt=org_dbt, overwrite=True)
+            org_task = get_edr_send_report_task(org, overwrite=True)
             if org_task is None:
                 print(f"edr orgtask not found {org.slug}; skipping to the next org")
                 continue
@@ -65,7 +64,7 @@ class Command(BaseCommand):
                     print(error)
                     continue
 
-                dbt_env_dir = Path(org_dbt.dbt_venv)
+                dbt_env_dir = Path(org.dbt.dbt_venv)
 
                 task_config = setup_edr_send_report_task_config(
                     org_task, dbt_project_params.project_dir, dbt_env_dir

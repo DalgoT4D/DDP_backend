@@ -502,10 +502,9 @@ def create_elementary_report(task_key: str, org_id: int, bucket_file_path: str):
 
     edr_binary = Path(os.getenv("DBT_VENV")) / "venv/bin/edr"
     org = Org.objects.filter(id=org_id).first()
-    orgdbt = OrgDbt.objects.filter(org=org).first()
-    org_task = get_edr_send_report_task(org, orgdbt, create=True)
+    org_task = get_edr_send_report_task(org, create=True)
 
-    project_dir = Path(orgdbt.project_dir) / "dbtrepo"
+    project_dir = Path(org.dbt.project_dir) / "dbtrepo"
     # profiles_dir = project_dir / "elementary_profiles"
     aws_access_key_id = os.getenv("ELEMENTARY_AWS_ACCESS_KEY_ID")
     aws_secret_access_key = os.getenv("ELEMENTARY_AWS_SECRET_ACCESS_KEY")

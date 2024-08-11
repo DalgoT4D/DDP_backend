@@ -52,9 +52,10 @@ def test_get_edr_send_report_task(seed_master_tasks_db, tmpdir):
         default_schema="staging",
         transform_type="git",
     )
-    assert get_edr_send_report_task(org, orgdbt) is None
-    assert get_edr_send_report_task(org, orgdbt, create=False) is None
-    orgtask = get_edr_send_report_task(org, orgdbt, create=True)
+    org.dbt = orgdbt
+    assert get_edr_send_report_task(org) is None
+    assert get_edr_send_report_task(org, create=False) is None
+    orgtask = get_edr_send_report_task(org, create=True)
     assert orgtask is not None
     assert orgtask.org == org
     assert orgtask.task.slug == "generate-edr"
@@ -65,7 +66,7 @@ def test_get_edr_send_report_task(seed_master_tasks_db, tmpdir):
         == "reports/del.TODAYS_DATE.html"
     )
     assert orgtask.parameters["options"]["profile-target"] == "default"
-    assert get_edr_send_report_task(org, orgdbt) is not None
+    assert get_edr_send_report_task(org) is not None
 
 
 def test_fetch_elementary_profile_target(tmpdir):
