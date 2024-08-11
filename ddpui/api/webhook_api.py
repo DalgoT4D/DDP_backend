@@ -25,6 +25,7 @@ from ddpui.ddpprefect import (
     FLOW_RUN_COMPLETED_STATE_NAME,
     FLOW_RUN_RUNNING_STATE_NAME,
     FLOW_RUN_PENDING_STATE_NAME,
+    MAP_FLOW_RUN_STATE_NAME_TO_TYPE,
 )
 
 
@@ -83,7 +84,7 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
     ]:  # terminal states
         TaskLock.objects.filter(flow_run_id=flow_run["id"]).delete()
         logger.info("updating the flow run in db")
-        create_or_update_flowrun(flow_run, deployment_id)
+        create_or_update_flowrun(flow_run, deployment_id, state)
 
     elif state == FLOW_RUN_PENDING_STATE_NAME:  # non-terminal states
         # doesn't have start time yet
@@ -91,12 +92,12 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
         for tasklock in locks:
             tasklock.flow_run_id = flow_run.get("id")
             tasklock.save()
-        create_or_update_flowrun(flow_run, deployment_id)
+        create_or_update_flowrun(flow_run, deployment_id, state)
 
     # # this might be triggered multiple times and we dont want to load our db for the same update again and again
     # # we also dont care so much about this state yet
     # elif state == FLOW_RUN_RUNNING_STATE_NAME:  # non-terminal states
-    #     create_or_update_flowrun(flow_run, deployment_id)
+    #     create_or_update_flowrun(flow_run, deployment_id, state)
 
     send_failure_notifications = (
         True
@@ -146,13 +147,13 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
     return {"status": "ok"}
 
 
-def create_or_update_flowrun(flow_run, deployment_id):
+def create_or_update_flowrun(flow_run, deployment_id, state_name: str):
     """Create or update the flow run entry in database"""
 
     PrefectFlowRun.objects.update_or_create(
         flow_run_id=flow_run["id"],
         defaults={
-            "deployment_id": deployment_id,
+            **({"deployment_id": deployment_id} if deployment_id else {}),
             "name": flow_run["name"],
             "start_time": (
                 flow_run["start_time"]
@@ -161,8 +162,8 @@ def create_or_update_flowrun(flow_run, deployment_id):
             ),
             "expected_start_time": flow_run["expected_start_time"],
             "total_run_time": flow_run["total_run_time"],
-            "status": flow_run["status"],
-            "state_name": flow_run["state_name"],
+            "status": MAP_FLOW_RUN_STATE_NAME_TO_TYPE[state_name],
+            "state_name": state_name,
         },
     )
 
