@@ -79,7 +79,7 @@ def fetch_elementary_profile_target(orgdbt: OrgDbt) -> str:
     return elementary_target
 
 
-def get_edr_send_report_task(org: Org, orgdbt: OrgDbt, **kwargs) -> OrgTask | None:
+def get_edr_send_report_task(org: Org, **kwargs) -> OrgTask | None:
     """creates an OrgTask for edr send-report"""
     task = Task.objects.filter(slug=TASK_GENERATE_EDR).first()
     if task is None:
@@ -89,7 +89,7 @@ def get_edr_send_report_task(org: Org, orgdbt: OrgDbt, **kwargs) -> OrgTask | No
         options = {
             "profiles-dir": "elementary_profiles",
             "bucket-file-path": f"reports/{org.slug}.TODAYS_DATE.html",
-            "profile-target": fetch_elementary_profile_target(orgdbt),
+            "profile-target": fetch_elementary_profile_target(org.dbt),
         }
 
     org_task = OrgTask.objects.filter(task__slug=TASK_GENERATE_EDR, org=org).first()
