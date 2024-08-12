@@ -1,12 +1,10 @@
-""" Sync flow runs from prefect's db into ours; this is just one way. No new runs are added from prefect in our db """
+""" Sync flow runs from prefect's db into ours; this is just one-way. No new runs are added from prefect in our db """
 
-from pathlib import Path
-from django.core.management.base import BaseCommand
 from ninja.errors import HttpError
+from django.core.management.base import BaseCommand
 from django.db.models import Window
 from django.db.models.functions import RowNumber
 
-from ddpui.models.org import Org, OrgDataFlowv1, OrgDbt
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.ddpprefect import (
     prefect_service,
@@ -17,9 +15,9 @@ from ddpui.api.webhook_api import create_or_update_flowrun
 
 
 class Command(BaseCommand):
-    """Sync flow runs from prefect's db into ours; this is just one way. No new runs are added from prefect in our db"""
+    """Sync flow runs from prefect's db into ours; this is just one-way. No new runs are added from prefect in our db"""
 
-    help = "Sync flow runs from prefect's db into ours; this is just one way. No new runs are added from prefect in our db"
+    help = "Sync flow runs from prefect's db into ours; this is just one-way. No new runs are added from prefect in our db"
 
     def add_arguments(self, parser):
         parser.add_argument(
