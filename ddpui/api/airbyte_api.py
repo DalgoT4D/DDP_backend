@@ -674,6 +674,11 @@ def get_connection_catalog_v1(request, connection_id):
             ]:
                 return {"task_id": task_key, "message": "already running"}
 
+    taskprogress = SingleTaskProgress(
+        task_key, int(os.getenv("SCHEMA_REFRESH_TTL", "180"))
+    )
+
+    taskprogress.add({"message": "queued", "status": "queued", "result": None})
     # ignore the returned celery task id
     get_connection_catalog_task.delay(task_key, orguser.org.id, connection_id)
 
