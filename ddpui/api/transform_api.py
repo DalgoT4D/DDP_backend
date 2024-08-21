@@ -518,7 +518,6 @@ def get_dbt_project_DAG(request):
             and len(operation.config["input_models"]) > 0
         ):
             uuids.extend([model["uuid"] for model in operation.config["input_models"]])
-    print(uuids)
     op_src_nodes = OrgDbtModel.objects.filter(uuid__in=uuids).all()
 
     # push operation nodes and edges if any
@@ -538,7 +537,9 @@ def get_dbt_project_DAG(request):
                 src_uuids = [model["uuid"] for model in input_models]
                 # edge(s) between the node(s) and other sources involved that are tables (OrgDbtModel)
                 for op_src_node in [
-                    src_node for src_node in op_src_nodes if str(src_node.uuid) in src_uuids
+                    src_node
+                    for src_node in op_src_nodes
+                    if str(src_node.uuid) in src_uuids
                 ]:
                     model_nodes.append(op_src_node)
                     res_edges.append(

@@ -37,6 +37,7 @@ from ddpui.core.pipelinefunctions import (
     pipeline_with_orgtasks,
     fetch_pipeline_lock,
     fetch_pipeline_lock_v1,
+    lock_tasks_for_dataflow,
 )
 from ddpui.celeryworkers.tasks import summarize_logs
 from ddpui.core.dbtfunctions import gather_dbt_project_params
@@ -573,26 +574,40 @@ def post_run_prefect_org_deployment_task(
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
 
-    dataflow_orgtask = DataflowOrgTask.objects.filter(
-        dataflow__deployment_id=deployment_id
+    dataflow = OrgDataFlowv1.objects.filter(
+        org=orguser.org, deployment_id=deployment_id
     ).first()
 
-    if dataflow_orgtask is None:
+    dataflow_orgtasks = (
+        DataflowOrgTask.objects.filter(dataflow=dataflow)
+        .order_by("seq")
+        .select_related("orgtask")
+    )
+
+    if dataflow_orgtasks.count() == 0:
         raise HttpError(400, "no org task mapped to the deployment")
 
-    locks = prefect_service.lock_tasks_for_deployment(deployment_id, orguser)
+    # ordered
+    org_tasks: list[OrgTask] = [
+        dataflow_orgtask.orgtask for dataflow_orgtask in dataflow_orgtasks
+    ]
+
+    locks = lock_tasks_for_dataflow(
+        orguser=orguser, dataflow=dataflow, org_tasks=org_tasks
+    )
 
     try:
         # allow parameter passing only for manual dbt runs and if the there are parameters being passed
         flow_run_params = None
         if (
-            dataflow_orgtask.dataflow.dataflow_type == "manual"
-            and dataflow_orgtask.orgtask.task.slug == TASK_DBTRUN
+            len(org_tasks) == 1
+            and dataflow.dataflow_type == "manual"
+            and org_tasks[0].task.slug == TASK_DBTRUN
             and payload
             and (payload.flags or payload.options)
         ):
             logger.info("sending custom flow run params to the deployment run")
-            orgtask = dataflow_orgtask.orgtask
+            orgtask = org_tasks[0]
 
             # save orgtask params to memory and not db
             orgtask.parameters = dict(payload)
