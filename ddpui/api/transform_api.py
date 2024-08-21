@@ -491,21 +491,11 @@ def get_dbt_project_DAG(request):
     operation_nodes: list[OrgDbtOperation] = []
     res_edges = []  # will go directly in the res
 
-    edges = (
-        DbtEdge.objects.filter(Q(from_node__orgdbt=orgdbt) | Q(to_node__orgdbt=orgdbt))
-        .select_related("from_node", "to_node")
-        .prefetch_related(
-            Prefetch(
-                "from_node__operations",
-                queryset=OrgDbtOperation.objects.order_by("seq"),
-            ),
-            Prefetch(
-                "to_node__operations",
-                queryset=OrgDbtOperation.objects.order_by("seq"),
-            ),
-        )
-        .all()
-    )
+    edges = DbtEdge.objects.filter(
+        Q(from_node__orgdbt=orgdbt) | Q(to_node__orgdbt=orgdbt)
+    ).select_related("from_node", "to_node")
+    from_node_ids = edges.values_list("from_node_id", flat=True)
+    to_node_ids = edges.values_list("to_node_id", flat=True)
 
     seen_model_node_ids = set()
     for edge in edges:
@@ -516,12 +506,18 @@ def get_dbt_project_DAG(request):
             model_nodes.append(edge.to_node)
         seen_model_node_ids.add(edge.to_node.id)
 
+    all_operations = OrgDbtOperation.objects.filter(
+        dbtmodel_id__in=list(seen_model_node_ids)
+    ).all()
+
     # push operation nodes and edges if any
     for target_node in model_nodes:
         # src_node -> op1 -> op2 -> op3 -> op4
         # start building edges from the source
         prev_op = None
-        for operation in target_node.operations.order_by("seq").all():
+        operations = [op for op in all_operations if op.dbtmodel_id == target_node.id]
+        sorted_operations = sorted(operations, key=lambda op: op.seq)
+        for operation in sorted_operations:
             operation_nodes.append(operation)
             if (
                 "input_models" in operation.config
