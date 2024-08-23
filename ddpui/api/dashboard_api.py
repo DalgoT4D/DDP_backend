@@ -10,10 +10,9 @@ from django.db.models import Prefetch
 from ddpui import auth
 
 # models
-from ddpui.models.org import OrgDataFlowv1
-from ddpui.models.tasks import DataflowOrgTask, TaskLock, OrgTask
+
 from ddpui.auth import has_permission
-from ddpui.ddpprefect import prefect_service
+
 
 dashboardapi = NinjaAPI(urls_namespace="dashboard")
 
