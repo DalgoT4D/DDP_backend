@@ -22,7 +22,6 @@ from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
     AirbyteSourceUpdate,
     AirbyteWorkspace,
-    AirbyteWorkspaceCreate,
     AirbyteSourceUpdateCheckConnection,
     AirbyteDestinationUpdateCheckConnection,
     AirbyteConnectionUpdate,
@@ -440,13 +439,13 @@ def get_job_status(request, job_id):
     "/v1/workspace/", response=AirbyteWorkspace, auth=auth.CustomAuthMiddleware()
 )
 @has_permission(["can_create_org"])
-def post_airbyte_workspace_v1(request, payload: AirbyteWorkspaceCreate):
+def post_airbyte_workspace_v1(request):
     """Create an airbyte workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is not None:
         raise HttpError(400, "org already has a workspace")
 
-    workspace = airbytehelpers.setup_airbyte_workspace_v1(payload.name, orguser.org)
+    workspace = None
     # add custom sources to this workspace
     add_custom_connectors_to_workspace.delay(
         workspace.workspaceId, list(settings.AIRBYTE_CUSTOM_SOURCES.values())
