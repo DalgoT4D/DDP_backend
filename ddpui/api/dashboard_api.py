@@ -51,7 +51,6 @@ def ninja_default_error_handler(
 @has_permission(["can_view_dashboard"])
 def get_dashboard_v1(request):
     """Fetch all flows/pipelines created in an organization"""
-    
     # Removed: Data fetching and processing code
     # Placeholder response after removing detailed logic
     return {
