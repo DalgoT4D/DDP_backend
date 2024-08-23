@@ -99,15 +99,12 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
     # elif state == FLOW_RUN_RUNNING_STATE_NAME:  # non-terminal states
     #     create_or_update_flowrun(flow_run, deployment_id, state)
 
-    send_failure_notifications = (
-        True
-        if state
+    send_failure_notifications = state
         in [
             FLOW_RUN_FAILED_STATE_NAME,
             FLOW_RUN_CRASHED_STATE_NAME,
         ]
-        else False
-    )
+        
 
     # retry flow run
     if state == FLOW_RUN_CRASHED_STATE_NAME:
