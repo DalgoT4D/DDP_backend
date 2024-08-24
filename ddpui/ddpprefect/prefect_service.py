@@ -628,9 +628,7 @@ def create_deployment_flow_run(
     return res
 
 
-def lock_tasks_for_deployment(
-    deployment_id: str, orguser: OrgUser
-):
+def lock_tasks_for_deployment(deployment_id: str, orguser: OrgUser):
     """locks all orgtasks for a deployment"""
     dataflow_orgtasks = DataflowOrgTask.objects.filter(
         dataflow__deployment_id=deployment_id
@@ -652,34 +650,6 @@ def lock_tasks_for_deployment(
                     orgtask=df_orgtask.orgtask,
                     locked_by=orguser,
                     locking_dataflow=df_orgtask.dataflow,
-                )
-                locks.append(task_lock)
-    except Exception as error:
-        raise HttpError(
-            400, "Someone else is trying to run this pipeline... try again"
-        ) from error
-    return locks
-
-
-def lock_tasks_for_dataflow(orguser: OrgUser, dataflow: OrgDataFlowv1, org_tasks: list[OrgTask]):
-    """locks the orgtasks; if its any of the orgtasks are already locked, it will raise an error"""
-
-    orgtask_ids = [org_task.id for org_task in org_tasks]
-    lock = TaskLock.objects.filter(orgtask_id__in=orgtask_ids).first()
-    if lock:
-        logger.info(f"{lock.locked_by.user.email} is running this pipeline right now")
-        raise HttpError(
-            400, f"{lock.locked_by.user.email} is running this pipeline right now"
-        )
-
-    locks = []
-    try:
-        with transaction.atomic():
-            for org_task in org_tasks:
-                task_lock = TaskLock.objects.create(
-                    orgtask=org_task,
-                    locked_by=orguser,
-                    locking_dataflow=dataflow,
                 )
                 locks.append(task_lock)
     except Exception as error:
