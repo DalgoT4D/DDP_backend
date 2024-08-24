@@ -400,8 +400,9 @@ def check_source_connection(workspace_id: str, data: AirbyteSourceCreate) -> dic
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        logger.error("Failed to check source connection: %s", res)
-        raise HttpError(500, "Failed to connect - please check your crendentials")
+        failure_reason = res.get("message", "Something went wrong, please check your credentials")
+        logger.error("Failed to check the source connection: %s", res)
+        raise HttpError(500, failure_reason)
     return res
 
 
@@ -419,8 +420,9 @@ def check_source_connection_for_update(
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        logger.error("Failed to check source connection: %s", res)
-        raise HttpError(500, "Failed to connect - please check your crendentials")
+        failure_reason = res.get("message", "Something went wrong, please check your credentials")
+        logger.error("Failed to check the source connection: %s", res)
+        raise HttpError(500, failure_reason)
     # {
     #   'status': 'succeeded',
     #   'jobInfo': {
@@ -451,18 +453,27 @@ def get_source_schema_catalog(
     # and we need to check its status later?
     if "catalog" not in res and "jobInfo" in res:
         # special handling for errors we know
-        if (
-            res["jobInfo"]["failureReason"]["externalMessage"]
-            == "Something went wrong in the connector. See the logs for more details."
-        ):
+        if "failureReason" in res["jobInfo"]:
+            if (
+                res["jobInfo"]["failureReason"]["externalMessage"]
+                == "Something went wrong in the connector. See the logs for more details."
+            ):
+                raise HttpError(
+                    400,
+                    res["jobInfo"]["failureReason"]["stacktrace"],
+                )
             raise HttpError(
                 400,
-                res["jobInfo"]["failureReason"]["stacktrace"],
+                res["jobInfo"]["failureReason"]["externalMessage"],
             )
-        raise HttpError(
-            400,
-            res["jobInfo"]["failureReason"]["externalMessage"],
-        )
+        else:
+            # for errors unknown to airbyte we might not have "failureReason"
+            message = "Failed to discover schema"
+            error = message + f" for source: {source_id}"
+            if "logs" in res["jobInfo"]:
+                error += "\n".join(res["jobInfo"]["logs"]["logLines"])
+            logger.error(error)
+            raise HttpError(400, message)
     if "catalog" not in res and "jobInfo" not in res:
         raise HttpError(400, res["message"])
     return res
@@ -636,8 +647,9 @@ def check_destination_connection(
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        logger.error("Failed to check destination connection: %s", res)
-        raise HttpError(500, "Failed to connect - please check your crendentials")
+        failure_reason = res.get("message", "Something went wrong, please check your credentials")
+        logger.error("Failed to check the destination connection: %s", res)
+        raise HttpError(500, failure_reason)
     return res
 
 
@@ -658,8 +670,9 @@ def check_destination_connection_for_update(
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        logger.error("Failed to check destination connection: %s", res)
-        raise HttpError(500, "Failed to connect - please check your crendentials")
+        failure_reason = res.get("message", "Something went wrong, please check your credentials")
+        logger.error("Failed to check the destination connection: %s", res)
+        raise HttpError(500, failure_reason)
     return res
 
 
@@ -944,13 +957,14 @@ def get_logs_for_job(job_id: int, attempt_number: int = 0) -> list:
     return res
 
 
-def get_connection_catalog(connection_id: str) -> dict:
-    """get the catalog for a connection"""
+def get_connection_catalog(connection_id: str, **kwargs) -> dict:
+    """get the catalog for a connection to check/refresh for schema changes"""
     if not isinstance(connection_id, str):
         raise HttpError(400, "connection_id must be a string")
     res = abreq(
         "web_backend/connections/get",
         {"connectionId": connection_id, "withRefreshedCatalog": True},
+        **kwargs,
     )
     return res
 

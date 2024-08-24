@@ -663,9 +663,22 @@ def get_connection_catalog_v1(request, connection_id):
     task_key = (
         f"{TaskProgressHashPrefix.SCHEMA_CHANGE}-{orguser.org.slug}-{connection_id}"
     )
-    if SingleTaskProgress.fetch(task_key) is not None:
-        return {"task_id": task_key, "message": "already running"}
+    current_task_progress = SingleTaskProgress.fetch(task_key)
+    if current_task_progress is not None:
+        if (
+            "progress" in current_task_progress
+            and len(current_task_progress["progress"]) > 0
+        ):
+            if current_task_progress["progress"][-1]["status"] == [
+                TaskProgressStatus.RUNNING,
+            ]:
+                return {"task_id": task_key, "message": "already running"}
 
+    taskprogress = SingleTaskProgress(
+        task_key, int(os.getenv("SCHEMA_REFRESH_TTL", "180"))
+    )
+
+    taskprogress.add({"message": "queued", "status": "queued", "result": None})
     # ignore the returned celery task id
     get_connection_catalog_task.delay(task_key, orguser.org.id, connection_id)
 

@@ -20,6 +20,8 @@ def from_orgdbtoperation(
         "config": orgdbt_op.config,
         "type": OrgDbtNodeType.OPERATION_NODE,
         "target_model_id": orgdbt_op.dbtmodel.uuid,
+        "target_model_name": orgdbt_op.dbtmodel.name,
+        "target_model_schema": orgdbt_op.dbtmodel.schema,
         "seq": orgdbt_op.seq,
         "chain_length": chain_length,
     }

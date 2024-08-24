@@ -6,7 +6,9 @@ from datetime import datetime
 
 from dotenv import load_dotenv
 from django.db.models import Q
+from django.forms import model_to_dict
 from django.utils.text import slugify
+from django.db.models import Prefetch
 from ninja import NinjaAPI
 from ninja.errors import ValidationError, HttpError
 from ninja.responses import Response
@@ -299,12 +301,11 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
 
     target_model = dbt_operation.dbtmodel
 
-    current_operations_chained = OrgDbtOperation.objects.filter(
-        dbtmodel=target_model
-    ).count()
+    all_ops = OrgDbtOperation.objects.filter(dbtmodel=target_model).all()
+    operation_chained_before = sum(1 for op in all_ops if op.seq < dbt_operation.seq)
 
     final_config, all_input_models = validate_operation_config(
-        payload, target_model, is_multi_input_op, current_operations_chained, edit=True
+        payload, target_model, is_multi_input_op, operation_chained_before, edit=True
     )
 
     # create edges only with tables/models if not present
@@ -319,7 +320,6 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
     output_cols = dbtautomation_service.get_output_cols_for_operation(
         org_warehouse, payload.op_type, final_config["config"].copy()
     )
-    logger.info("updating operation")
 
     dbt_operation.config = final_config
     dbt_operation.output_cols = output_cols
@@ -331,9 +331,16 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
     target_model.output_cols = dbt_operation.output_cols
     target_model.save()
 
+    dbtautomation_service.update_dbt_model_in_project(org_warehouse, target_model)
+
+    # propogate the udpates down the chain
+    dbtautomation_service.propagate_changes_to_downstream_operations(
+        target_model, dbt_operation, depth=1
+    )
+
     logger.info("updated output cols for the target model")
 
-    return from_orgdbtoperation(dbt_operation, chain_length=current_operations_chained)
+    return from_orgdbtoperation(dbt_operation, chain_length=len(all_ops))
 
 
 @transformapi.get(
@@ -484,23 +491,38 @@ def get_dbt_project_DAG(request):
     operation_nodes: list[OrgDbtOperation] = []
     res_edges = []  # will go directly in the res
 
-    for edge in DbtEdge.objects.filter(
-        Q(from_node__orgdbt=orgdbt) | Q(to_node__orgdbt=orgdbt)
-    ).all():
+    edges = (
+        DbtEdge.objects.filter(Q(from_node__orgdbt=orgdbt) | Q(to_node__orgdbt=orgdbt))
+        .select_related("from_node", "to_node")
+        .prefetch_related(
+            Prefetch(
+                "from_node__operations",
+                queryset=OrgDbtOperation.objects.order_by("seq"),
+            ),
+            Prefetch(
+                "to_node__operations",
+                queryset=OrgDbtOperation.objects.order_by("seq"),
+            ),
+        )
+        .all()
+    )
 
-        model_nodes.append(edge.from_node)
-        model_nodes.append(edge.to_node)
+    seen_model_node_ids = set()
+    for edge in edges:
+        if edge.from_node.id not in seen_model_node_ids:
+            model_nodes.append(edge.from_node)
+        seen_model_node_ids.add(edge.from_node.id)
+        if edge.to_node.id not in seen_model_node_ids:
+            model_nodes.append(edge.to_node)
+        seen_model_node_ids.add(edge.to_node.id)
 
     # push operation nodes and edges if any
     for target_node in model_nodes:
         # src_node -> op1 -> op2 -> op3 -> op4
-        # start building edges fromt the source
+        # start building edges from the source
         prev_op = None
-        for operation in (
-            OrgDbtOperation.objects.filter(dbtmodel=target_node).order_by("seq").all()
-        ):
+        for operation in target_node.operations.order_by("seq").all():
             operation_nodes.append(operation)
-
             if (
                 "input_models" in operation.config
                 and len(operation.config["input_models"]) > 0

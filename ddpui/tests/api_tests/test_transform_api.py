@@ -915,3 +915,86 @@ def test_post_save_model_success_save_chained_model(orguser: OrgUser, tmp_path):
             / "intermediate"
             / "output_model.sql"
         ).exists()
+
+
+def test_get_dbt_project_DAG(orguser: OrgUser, tmp_path):
+    """
+    Checks if the correct no of nodes and edges are returned
+    """
+    os.environ["CANVAS_LOCK"] = "False"
+
+    warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir=str(Path(tmp_path) / orguser.org.slug),
+        dbt_venv=tmp_path,
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    mock_setup_dbt_workspace_ui_transform(orguser, tmp_path)
+    mock_setup_sync_sources(orgdbt, warehouse)
+
+    source = OrgDbtModel.objects.filter(orgdbt=orgdbt, type="source").first()
+    # push cast operation
+    payload = CreateDbtModelPayload(
+        target_model_uuid="",
+        source_columns=["State", "District_Name", "Iron", "Arsenic"],
+        op_type="castdatatypes",
+        config={
+            "columns": [
+                {"columnname": "Iron", "columntype": "INT"},
+                {"columnname": "Arsenic", "columntype": "INT"},
+            ]
+        },
+        input_uuid=str(source.uuid),
+    )
+    response1 = mock_create_dbt_model_operation(orguser, payload)
+    target_model = OrgDbtModel.objects.filter(uuid=response1["target_model_id"]).first()
+
+    # push arithmetic operation
+    payload.target_model_uuid = target_model.uuid
+    payload.op_type = "arithmetic"
+    payload.config = {
+        "operator": "add",
+        "operands": [
+            {"is_col": True, "value": "Iron"},
+            {"is_col": True, "value": "Arsenic"},
+        ],
+        "output_column_name": "IronPlusArsenic",
+    }
+    response2 = mock_create_dbt_model_operation(orguser, payload)
+
+    with patch(
+        "ddpui.core.dbtautomation_service._get_wclient",
+    ) as get_wclient_mock:
+        mock_instance = Mock()
+        mock_instance.name = "postgres"
+        get_wclient_mock.return_value = mock_instance
+
+        request = mock_request(orguser)
+        payload = CompleteDbtModelPayload(
+            name="output_model", display_name="Output", dest_schema="intermediate"
+        )
+        post_save_model(request, target_model.uuid, payload)
+
+        final_response = get_dbt_project_DAG(request)
+
+        assert final_response is not None
+        assert len(final_response["nodes"]) == 4
+        assert len(final_response["edges"]) == 3
+
+        delete_model(request, target_model.uuid)
+
+        final_response = get_dbt_project_DAG(request)
+
+        assert final_response is not None
+        assert len(final_response["nodes"]) == 3
+        assert len(final_response["edges"]) == 2
