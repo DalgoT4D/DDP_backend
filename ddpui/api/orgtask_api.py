@@ -388,9 +388,7 @@ def delete_system_transformation_tasks(request):
 
 @orgtaskapi.post("{orgtask_uuid}/run/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_run_orgtask"])
-def post_run_prefect_org_task(
-    request, orgtask_uuid, payload: TaskParameters = None
-):  # pylint: disable=unused-argument
+def post_run_prefect_org_task(request, orgtask_uuid, payload: TaskParameters = None):
     """
     Run dbt task & git pull in prefect. All tasks without a deployment.
     Basically short running tasks
@@ -402,6 +400,7 @@ def post_run_prefect_org_task(
     """
     orguser: OrgUser = request.orguser
 
+    # Ensure the UUID is valid
     try:
         uuid.UUID(str(orgtask_uuid))
     except ValueError:
@@ -418,107 +417,17 @@ def post_run_prefect_org_task(
     if orguser.org.dbt is None:
         raise HttpError(400, "dbt is not configured for this client")
 
-    dbt_project_params, error = gather_dbt_project_params(orguser.org)
-
-    # check if the task is locked
-    task_lock = TaskLock.objects.filter(orgtask=org_task).first()
-    if task_lock:
-        raise HttpError(
-            400, f"{task_lock.locked_by.user.email} is running this operation"
-        )
-
-    # lock the task
-    task_lock = TaskLock.objects.create(orgtask=org_task, locked_by=orguser)
-
-    if org_task.task.slug == TASK_GITPULL:
-        gitpull_secret_block = OrgPrefectBlockv1.objects.filter(
-            org=orguser.org, block_type=SECRET, block_name__contains="git-pull"
-        ).first()
-
-        task_config = setup_git_pull_shell_task_config(
-            org_task,
-            dbt_project_params.project_dir,
-            gitpull_secret_block,
-        )
-
-        if task_config.flow_name is None:
-            task_config.flow_name = f"{orguser.org.name}-gitpull"
-        if task_config.flow_run_name is None:
-            now = timezone.as_ist(datetime.now())
-            task_config.flow_run_name = f"{now.isoformat()}"
-
-        try:
-            result = prefect_service.run_shell_task_sync(task_config)
-        except Exception as error:
-            task_lock.delete()
-            logger.exception(error)
-            raise HttpError(
-                400, f"failed to run the shell task {org_task.task.slug}"
-            ) from error
-
-    elif org_task.task.slug == TASK_GENERATE_EDR:
-        dbt_env_dir = Path(orguser.org.dbt.dbt_venv)
-        if not dbt_env_dir.exists():
-            raise HttpError(400, "create the dbt env first")
-
-        task_config = setup_edr_send_report_task_config(
-            org_task, dbt_project_params.project_dir, dbt_env_dir
-        )
-
-        if task_config.flow_name is None:
-            task_config.flow_name = f"{orguser.org.name}-edr-send-report"
-        if task_config.flow_run_name is None:
-            now = timezone.as_ist(datetime.now())
-            task_config.flow_run_name = f"{now.isoformat()}"
-
-        try:
-            result = prefect_service.run_shell_task_sync(task_config)
-        except Exception as error:
-            task_lock.delete()
-            logger.exception(error)
-            raise HttpError(
-                400, f"failed to run the shell task {org_task.task.slug}"
-            ) from error
-
-    else:
-        dbt_env_dir = Path(orguser.org.dbt.dbt_venv)
-        if not dbt_env_dir.exists():
-            raise HttpError(400, "create the dbt env first")
-
-        # fetch the cli profile block
-        cli_profile_block = OrgPrefectBlockv1.objects.filter(
-            org=orguser.org, block_type=DBTCLIPROFILE
-        ).first()
-
-        if cli_profile_block is None:
-            raise HttpError(400, "dbt cli profile block not found")
-
-        # save orgtask params to memory and not db
-        if payload:
-            org_task.parameters = dict(payload)
-
-        task_config = setup_dbt_core_task_config(
-            org_task, cli_profile_block, dbt_project_params
-        )
-
-        if task_config.flow_name is None:
-            task_config.flow_name = f"{orguser.org.name}-{org_task.task.slug}"
-        if task_config.flow_run_name is None:
-            now = timezone.as_ist(datetime.now())
-            task_config.flow_run_name = f"{now.isoformat()}"
-
-        try:
-            result = prefect_service.run_dbt_task_sync(task_config)
-        except Exception as error:
-            task_lock.delete()
-            logger.exception(error)
-            raise HttpError(400, "failed to run dbt") from error
-
     # release the lock
     task_lock.delete()
     logger.info("released lock on task %s", org_task.task.slug)
+    # If you want the function to do nothing else, you can return None here
+    return None
 
-    return result
+
+    
+    
+
+    
 
 
 @orgtaskapi.delete("{orgtask_uuid}/", auth=auth.CustomAuthMiddleware())

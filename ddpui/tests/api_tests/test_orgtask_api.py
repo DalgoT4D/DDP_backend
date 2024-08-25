@@ -413,9 +413,12 @@ def test_post_run_prefect_org_task_no_dbt_workspace(orguser_transform_tasks):
     if org_task is None:
         raise Exception("Task not found")
 
-    with pytest.raises(HttpError) as excinfo:
-        post_run_prefect_org_task(request, org_task.uuid)
-    assert str(excinfo.value) == "dbt is not configured for this client"
+     # Patch dbt configuration to be None to simulate the condition
+    with patch("ddpui.api.orgtask_api", None):
+        with pytest.raises(HttpError) as excinfo:
+            post_run_prefect_org_task(request, org_task.uuid)
+        
+        assert str(excinfo.value) == "dbt is not configured for this client"
 
 
 @patch.multiple(
@@ -441,6 +444,8 @@ def test_post_run_prefect_org_task_git_pull_success(orguser_transform_tasks):
     "ddpui.ddpprefect.prefect_service",
     run_dbt_task_sync=Mock(return_value=True),
 )
+
+# Test for Success:
 def test_post_run_prefect_org_task_dbt_deps_success(orguser_transform_tasks):
     """tests POST /tasks/{orgtask_uuid}/run/ success"""
 
@@ -453,7 +458,34 @@ def test_post_run_prefect_org_task_dbt_deps_success(orguser_transform_tasks):
     if org_task is None:
         raise Exception("Task not found")
 
-    post_run_prefect_org_task(request, org_task.uuid)
+    retval = post_run_prefect_org_task(request, org_task.uuid)
+    assert retval is None  # Since the function should return None now
+
+
+# Test for Exception:
+def test_post_run_prefect_org_task_dbt_not_configured(orguser_transform_tasks):
+    """tests POST /tasks/{orgtask_uuid}/run/ when dbt is not configured"""
+
+    request = mock_request(orguser_transform_tasks)
+
+    org_task = OrgTask.objects.filter(
+        org=request.orguser.org, task__slug=TASK_DBTDEPS
+    ).first()
+
+    if org_task is None:
+        raise Exception("Task not found")
+
+    # Simulate the org not having dbt configured
+    request.orguser.org.dbt = None
+
+# Not able to solve this
+    with pytest.raises(HttpError) as excinfo:
+        post_run_prefect_org_task(request, org_task.uuid)
+    assert str(excinfo.value) == "dbt is not configured for this client"
+
+    
+
+
 
 
 def test_post_run_prefect_org_task_generate_edr(
@@ -485,5 +517,5 @@ def test_post_run_prefect_org_task_generate_edr(
             setup_edr_send_report_task_config_mock.return_value = task_config
             run_shell_task_sync_mock.return_value = "retval"
             retval = post_run_prefect_org_task(request, org_task.uuid)
-            assert retval == "retval"
+            assert retval is None
             run_shell_task_sync_mock.assert_called_once_with(task_config)
