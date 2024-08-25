@@ -417,9 +417,7 @@ def post_run_prefect_org_task(request, orgtask_uuid, payload: TaskParameters = N
     if orguser.org.dbt is None:
         raise HttpError(400, "dbt is not configured for this client")
 
-    # release the lock
-    task_lock.delete()
-    logger.info("released lock on task %s", org_task.task.slug)
+
     # If you want the function to do nothing else, you can return None here
     return None
 
