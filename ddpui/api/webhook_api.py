@@ -76,28 +76,7 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
     flow_run = prefect_service.get_flow_run(flow_run_id)
     deployment_id = flow_run.get("deployment_id")
 
-    if deployment_id and state in [
-        FLOW_RUN_CANCELLED_STATE_NAME,
-        FLOW_RUN_COMPLETED_STATE_NAME,
-        FLOW_RUN_FAILED_STATE_NAME,
-        FLOW_RUN_CRASHED_STATE_NAME,
-    ]:  # terminal states
-        TaskLock.objects.filter(flow_run_id=flow_run["id"]).delete()
-        logger.info("updating the flow run in db")
-        create_or_update_flowrun(flow_run, deployment_id, state)
-
-    elif state == FLOW_RUN_PENDING_STATE_NAME:  # non-terminal states
-        # doesn't have start time yet
-        locks: list[TaskLock] = lock_tasks_for_pending_deployment(deployment_id)
-        for tasklock in locks:
-            tasklock.flow_run_id = flow_run.get("id")
-            tasklock.save()
-        create_or_update_flowrun(flow_run, deployment_id, state)
-
-    # # this might be triggered multiple times and we dont want to load our db for the same update again and again
-    # # we also dont care so much about this state yet
-    # elif state == FLOW_RUN_RUNNING_STATE_NAME:  # non-terminal states
-    #     create_or_update_flowrun(flow_run, deployment_id, state)
+    logger.info("flow+run : %s", flow_run)
 
     send_failure_notifications = (
         True
@@ -109,26 +88,51 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
         else False
     )
 
-    # retry flow run
-    if state == FLOW_RUN_CRASHED_STATE_NAME:
-        prefect_flow_run = PrefectFlowRun.objects.filter(
-            flow_run_id=flow_run_id
-        ).first()
-        if (
-            os.getenv("PREFECT_RETRY_CRASHED_FLOW_RUNS") in ["True", "true", True]
-            and prefect_flow_run
-            and prefect_flow_run.retries < MAX_RETRIES_FOR_CRASHED_FLOW_RUNS
-        ):
-            # dont send notification right now, retry first
-            try:
-                prefect_service.retry_flow_run(flow_run_id, 5)
-                prefect_flow_run.retries += 1
-                prefect_flow_run.save()
-                send_failure_notifications = False
-            except Exception as err:
-                logger.error(
-                    f"Something went wrong retrying the flow run {flow_run_id} that just crashed - {str(err)}"
-                )
+    # dont really care about the subflows inside our main flows which might have not deployment_id
+    if deployment_id:
+        if state in [
+            FLOW_RUN_CANCELLED_STATE_NAME,
+            FLOW_RUN_COMPLETED_STATE_NAME,
+            FLOW_RUN_FAILED_STATE_NAME,
+            FLOW_RUN_CRASHED_STATE_NAME,
+        ]:  # terminal states
+            TaskLock.objects.filter(flow_run_id=flow_run["id"]).delete()
+            logger.info("updating the flow run in db")
+            create_or_update_flowrun(flow_run, deployment_id, state)
+
+            # retry flow run if infra went down
+            if state == FLOW_RUN_CRASHED_STATE_NAME:
+                prefect_flow_run = PrefectFlowRun.objects.filter(
+                    flow_run_id=flow_run_id
+                ).first()
+                if (
+                    os.getenv("PREFECT_RETRY_CRASHED_FLOW_RUNS")
+                    in ["True", "true", True]
+                    and prefect_flow_run
+                    and prefect_flow_run.retries < MAX_RETRIES_FOR_CRASHED_FLOW_RUNS
+                ):
+                    # dont send notification right now, retry first
+                    try:
+                        prefect_service.retry_flow_run(flow_run_id, 5)
+                        prefect_flow_run.retries += 1
+                        prefect_flow_run.save()
+                        send_failure_notifications = False
+                    except Exception as err:
+                        logger.error(
+                            f"Something went wrong retrying the flow run {flow_run_id} that just crashed - {str(err)}"
+                        )
+
+        elif state == FLOW_RUN_PENDING_STATE_NAME:  # non-terminal states
+            locks = lock_tasks_for_pending_deployment(deployment_id)
+            for tasklock in locks:
+                logger.info("uppdating flow run id on locks")
+                tasklock.flow_run_id = flow_run.get("id")
+                tasklock.save()
+
+            create_or_update_flowrun(flow_run, deployment_id, state)
+
+        elif state == FLOW_RUN_RUNNING_STATE_NAME:  # non-terminal states
+            create_or_update_flowrun(flow_run, deployment_id, state)
 
     # notifications
     if send_failure_notifications:
@@ -147,7 +151,7 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
     return {"status": "ok"}
 
 
-def create_or_update_flowrun(flow_run, deployment_id, state_name: str = None):
+def create_or_update_flowrun(flow_run, deployment_id, state_name=""):
     """Create or update the flow run entry in database"""
     state_name = state_name if state_name else flow_run["state_name"]
     deployment_id = deployment_id if deployment_id else flow_run.get("deployment_id")
