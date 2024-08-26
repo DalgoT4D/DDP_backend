@@ -1,5 +1,4 @@
 import os
-import uuid
 
 from ninja import NinjaAPI
 from ninja.errors import HttpError
@@ -7,7 +6,6 @@ from ninja.errors import HttpError
 from ninja.errors import ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
-from django.db.models import Prefetch
 
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
@@ -20,7 +18,7 @@ from ddpui.ddpprefect import (
 from ddpui.models.org import OrgDataFlowv1, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import DataflowOrgTask, OrgTask
-from ddpui.models.llm import LlmSession, LogsSummarizationType
+from ddpui.models.llm import LogsSummarizationType
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
     PrefectFlowRunSchema,
@@ -35,7 +33,6 @@ from ddpui.utils.helpers import generate_hash_id
 from ddpui.core.pipelinefunctions import (
     setup_dbt_core_task_config,
     pipeline_with_orgtasks,
-    fetch_pipeline_lock,
     fetch_pipeline_lock_v1,
     lock_tasks_for_dataflow,
 )

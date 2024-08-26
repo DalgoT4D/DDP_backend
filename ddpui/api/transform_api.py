@@ -6,9 +6,7 @@ from datetime import datetime
 
 from dotenv import load_dotenv
 from django.db.models import Q
-from django.forms import model_to_dict
 from django.utils.text import slugify
-from django.db.models import Prefetch
 from ninja import NinjaAPI
 from ninja.errors import ValidationError, HttpError
 from ninja.responses import Response
@@ -494,8 +492,6 @@ def get_dbt_project_DAG(request):
     edges = DbtEdge.objects.filter(
         Q(from_node__orgdbt=orgdbt) | Q(to_node__orgdbt=orgdbt)
     ).select_related("from_node", "to_node")
-    from_node_ids = edges.values_list("from_node_id", flat=True)
-    to_node_ids = edges.values_list("to_node_id", flat=True)
 
     seen_model_node_ids = set()
     for edge in edges:
@@ -525,7 +521,7 @@ def get_dbt_project_DAG(request):
         # src_node -> op1 -> op2 -> op3 -> op4
         # start building edges from the source
         prev_op = None
-        operations = [op for op in all_operations if op.dbtmodel_id == target_node.id]
+        operations = [op for op in all_operations if op.dbtmodel.id == target_node.id]
         sorted_operations = sorted(operations, key=lambda op: op.seq)
         for operation in sorted_operations:
             operation_nodes.append(operation)
