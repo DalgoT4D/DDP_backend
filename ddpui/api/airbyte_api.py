@@ -728,7 +728,7 @@ def update_connection_schema(
     if org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    airbytehelpers.schedule_update_connection_schema(org, connection_id, payload)
+    airbytehelpers.schedule_update_connection_schema(orguser, connection_id, payload)
 
     return {"success": 1}
 

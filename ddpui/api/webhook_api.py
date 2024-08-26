@@ -182,7 +182,7 @@ def lock_tasks_for_pending_deployment(deployment_id):
     try:
         locks = prefect_service.lock_tasks_for_deployment(deployment_id, system_user)
     except HttpError:
-        logger.info("failed to lock blocks for deployment %s, ignoring", deployment_id)
+        logger.info("failed to lock tasks for deployment %s, ignoring", deployment_id)
 
     return locks
 

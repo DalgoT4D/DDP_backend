@@ -19,7 +19,7 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowUpdateSchema3,
 )
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.models.tasks import DataflowOrgTask, TaskLock
+from ddpui.models.tasks import DataflowOrgTask, TaskLock, OrgTask
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.ddpprefect import (
@@ -628,13 +628,21 @@ def create_deployment_flow_run(
     return res
 
 
-def lock_tasks_for_deployment(deployment_id: str, orguser: OrgUser):
+def lock_tasks_for_deployment(
+    deployment_id: str, orguser: OrgUser, org_tasks: list[OrgTask] = []
+):
     """locks all orgtasks for a deployment"""
-    dataflow_orgtasks = DataflowOrgTask.objects.filter(
-        dataflow__deployment_id=deployment_id
-    ).all()
+    orgtask_ids = []
 
-    orgtask_ids = [df_orgtask.orgtask.id for df_orgtask in dataflow_orgtasks]
+    # if we have the orgtasks availabel dont do the extra query
+    if len(org_tasks) > 0:
+        orgtask_ids = [org_task.id for org_task in org_tasks]
+    else:
+        dataflow_orgtasks = DataflowOrgTask.objects.filter(
+            dataflow__deployment_id=deployment_id
+        ).all()
+
+        orgtask_ids = [df_orgtask.orgtask.id for df_orgtask in dataflow_orgtasks]
     lock = TaskLock.objects.filter(orgtask_id__in=orgtask_ids).first()
     if lock:
         logger.info(f"{lock.locked_by.user.email} is running this pipeline right now")

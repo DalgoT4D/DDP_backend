@@ -14,6 +14,7 @@ from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import AirbyteConnectionSchemaUpdate, AirbyteWorkspace
 from ddpui.ddpprefect import prefect_service
 from ddpui.models.org import Org, OrgPrefectBlockv1, OrgSchemaChange
+from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpairbyte.schema import (
@@ -935,20 +936,20 @@ def get_schema_changes(org: Org):
 
 
 def schedule_update_connection_schema(
-    org: Org,
+    orguser: OrgUser,
     connection_id: str,
     payload: AirbyteConnectionSchemaUpdateSchedule,
 ):
     """Submits a flow run that will execute the schema update flow"""
     server_block = OrgPrefectBlockv1.objects.filter(
-        org=org,
+        org=orguser.org,
         block_type=AIRBYTESERVER,
     ).first()
     if server_block is None:
         raise HttpError(400, "airbyte server block not found")
 
     org_task = OrgTask.objects.filter(
-        org=org,
+        org=orguser.org,
         connection_id=connection_id,
         task__slug=TASK_AIRBYTESYNC,
     ).first()
@@ -962,11 +963,15 @@ def schedule_update_connection_schema(
     if not dataflow_orgtask:
         raise HttpError(400, "no dataflow mapped")
 
+    prefect_service.lock_tasks_for_deployment(
+        dataflow_orgtask.dataflow.deployment_id, orguser, [org_task]
+    )
+
     prefect_service.create_deployment_flow_run(
         dataflow_orgtask.dataflow.deployment_id,
         {
             "config": {
-                "org_slug": org.slug,
+                "org_slug": orguser.org.slug,
                 "tasks": [
                     setup_airbyte_update_schema_task_config(
                         org_task, server_block, payload.catalogDiff
