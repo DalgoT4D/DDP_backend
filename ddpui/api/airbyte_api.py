@@ -17,6 +17,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteConnectionCreateResponse,
     AirbyteGetConnectionsResponse,
     AirbyteConnectionSchemaUpdate,
+    AirbyteConnectionSchemaUpdateSchedule,
     AirbyteDestinationCreate,
     AirbyteDestinationUpdate,
     AirbyteSourceCreate,
@@ -38,7 +39,11 @@ from ddpui.celeryworkers.tasks import (
     add_custom_connectors_to_workspace,
     summarize_logs,
 )
-from ddpui.models.tasks import TaskProgressHashPrefix, TaskProgressStatus
+from ddpui.models.tasks import (
+    TaskProgressHashPrefix,
+    TaskProgressStatus,
+    OrgDataFlowv1,
+)
 from ddpui.utils.singletaskprogress import SingleTaskProgress
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
@@ -702,6 +707,30 @@ def update_connection_schema(
     if error:
         raise HttpError(400, error)
     return res
+
+
+@airbyteapi.post(
+    "/v1/connections/{connection_id}/schema_update/schedule",
+    auth=auth.CustomAuthMiddleware(),
+)
+@has_permission(["can_edit_connection"])
+def update_connection_schema(
+    request, connection_id, payload: AirbyteConnectionSchemaUpdateSchedule
+):
+    """
+    schedule a schema change flow for a connection. this would include
+    1. updating the connection with the correct catalog
+    2. resetting affecting streams
+    3. syncing the connection again
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    if org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    airbytehelpers.schedule_update_connection_schema(org, connection_id, payload)
+
+    return {"success": 1}
 
 
 @airbyteapi.get(

@@ -3,6 +3,7 @@ functions which work with airbyte and with the dalgo database
 """
 
 import json
+from ninja.errors import HttpError
 from django.utils.text import slugify
 from django.conf import settings
 from django.db import transaction
@@ -19,6 +20,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteConnectionCreate,
     AirbyteConnectionUpdate,
     AirbyteDestinationUpdate,
+    AirbyteConnectionSchemaUpdateSchedule,
 )
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
@@ -32,7 +34,10 @@ from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTERESET
 from ddpui.utils.helpers import generate_hash_id, update_dict_but_not_stars
 from ddpui.utils import secretsmanager
 from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
-from ddpui.core.pipelinefunctions import setup_airbyte_sync_task_config
+from ddpui.core.pipelinefunctions import (
+    setup_airbyte_sync_task_config,
+    setup_airbyte_update_schema_task_config,
+)
 from ddpui.core.orgtaskfunctions import fetch_orgtask_lock, fetch_orgtask_lock_v1
 from ddpui.models.tasks import TaskLock
 
@@ -927,3 +932,46 @@ def get_schema_changes(org: Org):
 
     schema_changes = list(org_schema_change.values())
     return schema_changes, None
+
+
+def schedule_update_connection_schema(
+    org: Org,
+    connection_id: str,
+    payload: AirbyteConnectionSchemaUpdateSchedule,
+):
+    """Submits a flow run that will execute the schema update flow"""
+    server_block = OrgPrefectBlockv1.objects.filter(
+        org=org,
+        block_type=AIRBYTESERVER,
+    ).first()
+    if server_block is None:
+        raise HttpError(400, "airbyte server block not found")
+
+    org_task = OrgTask.objects.filter(
+        org=org,
+        connection_id=connection_id,
+        task__slug=TASK_AIRBYTESYNC,
+    ).first()
+    if not org_task:
+        raise HttpError(400, "Orgtask not found")
+
+    dataflow_orgtask = DataflowOrgTask.objects.filter(
+        orgtask=org_task, dataflow__dataflow_type="manual"
+    ).first()
+
+    if not dataflow_orgtask:
+        raise HttpError(400, "no dataflow mapped")
+
+    prefect_service.create_deployment_flow_run(
+        dataflow_orgtask.dataflow.deployment_id,
+        {
+            "config": {
+                "org_slug": org.slug,
+                "tasks": [
+                    setup_airbyte_update_schema_task_config(
+                        org_task, server_block, payload.catalogDiff
+                    ).to_json()
+                ],
+            }
+        },
+    )
