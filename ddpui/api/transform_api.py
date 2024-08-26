@@ -331,7 +331,8 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
     target_model.output_cols = dbt_operation.output_cols
     target_model.save()
 
-    dbtautomation_service.update_dbt_model_in_project(org_warehouse, target_model)
+    if (not target_model.under_construction):
+        dbtautomation_service.update_dbt_model_in_project(org_warehouse, target_model)
 
     # propogate the udpates down the chain
     dbtautomation_service.propagate_changes_to_downstream_operations(
