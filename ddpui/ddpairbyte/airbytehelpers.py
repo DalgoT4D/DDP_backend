@@ -963,20 +963,35 @@ def schedule_update_connection_schema(
     if not dataflow_orgtask:
         raise HttpError(400, "no dataflow mapped")
 
-    prefect_service.lock_tasks_for_deployment(
-        dataflow_orgtask.dataflow.deployment_id, orguser, [org_task]
+    locks: list[TaskLock] = prefect_service.lock_tasks_for_deployment(
+        dataflow_orgtask.dataflow.deployment_id,
+        orguser,
+        dataflow_orgtasks=[dataflow_orgtask],
     )
 
-    prefect_service.create_deployment_flow_run(
-        dataflow_orgtask.dataflow.deployment_id,
-        {
-            "config": {
-                "org_slug": orguser.org.slug,
-                "tasks": [
-                    setup_airbyte_update_schema_task_config(
-                        org_task, server_block, payload.catalogDiff
-                    ).to_json()
-                ],
-            }
-        },
-    )
+    try:
+        res = prefect_service.create_deployment_flow_run(
+            dataflow_orgtask.dataflow.deployment_id,
+            {
+                "config": {
+                    "org_slug": orguser.org.slug,
+                    "tasks": [
+                        setup_airbyte_update_schema_task_config(
+                            org_task, server_block, payload.catalogDiff
+                        ).to_json()
+                    ],
+                }
+            },
+        )
+        for tasklock in locks:
+            tasklock.flow_run_id = res["flow_run_id"]
+            tasklock.save()
+
+    except Exception as error:
+        for task_lock in locks:
+            logger.info("deleting TaskLock %s", task_lock.orgtask.task.slug)
+            task_lock.delete()
+        logger.exception(error)
+        raise HttpError(400, "failed to start the schema update flow run") from error
+
+    return res
