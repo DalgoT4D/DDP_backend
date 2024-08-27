@@ -57,8 +57,6 @@ class Task(models.Model):
     is_system = models.BooleanField(
         default=True
     )  # to mark the tasks created by platform by default
-    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
-    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
         """string representation"""
