@@ -5,8 +5,12 @@ do not raise http errors here
 
 from pathlib import Path
 from typing import Union
+from django.db import transaction
+from ninja.errors import HttpError
+
 from ddpui.models.tasks import OrgTask, DataflowOrgTask, TaskLock, TaskLockStatus
 from ddpui.models.org import Org, OrgPrefectBlockv1, OrgDataFlowv1
+from ddpui.models.org_user import OrgUser
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpprefect.schema import (
     PrefectDbtTaskSetup,
@@ -256,3 +260,33 @@ def fetch_pipeline_lock_v1(dataflow: OrgDataFlowv1, lock: Union[TaskLock, None])
         }
 
     return None
+
+
+def lock_tasks_for_dataflow(
+    orguser: OrgUser, dataflow: OrgDataFlowv1, org_tasks: list[OrgTask]
+):
+    """locks the orgtasks; if its any of the orgtasks are already locked, it will raise an error"""
+
+    orgtask_ids = [org_task.id for org_task in org_tasks]
+    lock = TaskLock.objects.filter(orgtask_id__in=orgtask_ids).first()
+    if lock:
+        logger.info(f"{lock.locked_by.user.email} is running this pipeline right now")
+        raise HttpError(
+            400, f"{lock.locked_by.user.email} is running this pipeline right now"
+        )
+
+    locks = []
+    try:
+        with transaction.atomic():
+            for org_task in org_tasks:
+                task_lock = TaskLock.objects.create(
+                    orgtask=org_task,
+                    locked_by=orguser,
+                    locking_dataflow=dataflow,
+                )
+                locks.append(task_lock)
+    except Exception as error:
+        raise HttpError(
+            400, "Someone else is trying to run this pipeline... try again"
+        ) from error
+    return locks
