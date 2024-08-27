@@ -4,6 +4,7 @@ All models related to ai/llm feature of Dalgo will go here
 
 from enum import Enum
 from django.db import models
+from django.utils import timezone
 import uuid
 
 from ddpui.models.org import Org
@@ -36,6 +37,8 @@ class AssistantPrompt(models.Model):
     type = models.CharField(
         null=False, choices=LlmAssistantType.choices(), max_length=100
     )
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
 
 
 class LlmSession(models.Model):
@@ -55,5 +58,5 @@ class LlmSession(models.Model):
         null=True
     )  # one request might have multiple summaries; we store all of them as a json
     response_meta = models.JSONField(null=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)

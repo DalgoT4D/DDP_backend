@@ -4,6 +4,7 @@ All the models related to UI for transformation will go here
 
 from enum import Enum
 from django.db import models
+from django.utils import timezone
 
 from ddpui.models.org import OrgDbt
 
@@ -44,6 +45,8 @@ class OrgDbtModel(models.Model):
     source_name = models.CharField(max_length=300, null=True)
     output_cols = models.JSONField(default=list)
     under_construction = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
         return f"DbtModel[{self.type} | {self.schema}.{self.name} | {self.orgdbt.project_dir} | under_construction: {self.under_construction}]"
@@ -59,6 +62,8 @@ class OrgDbtOperation(models.Model):
     seq = models.IntegerField(default=0)
     output_cols = models.JSONField(default=list)
     config = models.JSONField(null=True)
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
         return (
@@ -75,6 +80,8 @@ class DbtEdge(models.Model):
     to_node = models.ForeignKey(
         OrgDbtModel, on_delete=models.CASCADE, related_name="to_node", default=None
     )
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
         return f"DbtEdge[{self.from_node.schema}.{self.from_node.name} -> {self.to_node.schema}.{self.to_node.name}]"

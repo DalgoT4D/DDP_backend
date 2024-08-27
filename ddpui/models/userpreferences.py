@@ -1,5 +1,6 @@
 from django.db import models
 from ddpui.models.org_user import OrgUser
+from django.utils import timezone
 
 
 class UserPreferences(models.Model):
@@ -11,3 +12,5 @@ class UserPreferences(models.Model):
     enable_discord_notifications = models.BooleanField(default=False)
     enable_email_notifications = models.BooleanField(default=False)
     discord_webhook = models.URLField(blank=True, null=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(default=timezone.now)

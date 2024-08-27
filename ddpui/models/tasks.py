@@ -8,6 +8,7 @@ from django.db import models
 from ddpui.models.org import Org
 from ddpui.models.org import OrgDataFlowv1
 from ddpui.models.org_user import OrgUser
+from django.utils import timezone
 
 
 class TaskProgressStatus(str, Enum):
@@ -56,6 +57,8 @@ class Task(models.Model):
     is_system = models.BooleanField(
         default=True
     )  # to mark the tasks created by platform by default
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
         """string representation"""
@@ -82,6 +85,8 @@ class OrgTask(models.Model):
     generated_by = models.CharField(
         choices=OrgTaskGeneratedBy.choices(), max_length=50, default="system"
     )
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
         return f"OrgTask[{self.org.name}|{self.task.type}|{self.task.label}]"
@@ -120,6 +125,8 @@ class DataflowOrgTask(models.Model):
         OrgTask, on_delete=models.CASCADE, related_name="orgtaskdataflows"
     )
     seq = models.IntegerField(default=1)
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
 
 
 class TaskLockStatus(str, Enum):
@@ -144,3 +151,4 @@ class TaskLock(models.Model):
         OrgDataFlowv1, on_delete=models.CASCADE, null=True
     )
     celery_task_id = models.TextField(max_length=36, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
