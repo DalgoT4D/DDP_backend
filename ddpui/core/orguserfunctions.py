@@ -10,6 +10,7 @@ from uuid import uuid4
 from django.contrib.auth.models import User
 from django.db import transaction
 from django.utils.text import slugify
+from django.utils import timezone as django_timezone
 
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, GUEST_ROLE
 from ddpui.models.org import Org
@@ -56,7 +57,7 @@ def lookup_user(email: str):
             userattributes.save()
             # to be removed soon
             OrgUser.objects.filter(user=user, email_verified=False).update(
-                email_verified=True
+                email_verified=True, updated_at=django_timezone.now()
             )
 
     return {
@@ -639,8 +640,12 @@ def verify_email(payload: VerifyEmailSchema):
         return None, "could not look up request from this token"
 
     # verify email for all the orgusers
-    OrgUser.objects.filter(user_id=orguser.user.id).update(email_verified=True)
-    UserAttributes.objects.filter(user=orguser.user).update(email_verified=True)
+    OrgUser.objects.filter(user_id=orguser.user.id).update(
+        email_verified=True, updated_at=django_timezone.now()
+    )
+    UserAttributes.objects.filter(user=orguser.user).update(
+        email_verified=True, updated_at=django_timezone.now()
+    )
 
     if orguser.org.is_demo:
         try:
