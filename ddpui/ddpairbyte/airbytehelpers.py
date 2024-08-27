@@ -285,22 +285,24 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
 def get_connections(org: Org):
     """return connections with last run details"""
 
-    sync_dataflows = (
-        OrgDataFlowv1.objects.filter(
-            org=org, dataflow_type="manual", reset_conn_dataflow_id__isnull=False
-        )
-        .select_related("reset_conn_dataflow")
-        .prefetch_related(
-            Prefetch(
-                "datafloworgtasks",
-                queryset=DataflowOrgTask.objects.all()
-                .select_related("orgtask")
-                .prefetch_related(
-                    Prefetch("orgtask__tasklock", queryset=TaskLock.objects.all()),
-                ),
-            )
-        )
-    )
+    sync_dataflows = OrgDataFlowv1.objects.filter(
+        org=org, dataflow_type="manual", reset_conn_dataflow_id__isnull=False
+    ).select_related("reset_conn_dataflow")
+
+    dataflow_ids = sync_dataflows.values_list("id", flat=True)
+    reset_dataflow_ids = sync_dataflows.values_list("reset_conn_dataflow_id", flat=True)
+    all_dataflow_orgtasks = DataflowOrgTask.objects.filter(
+        dataflow_id__in=list(dataflow_ids) + list(reset_dataflow_ids)
+    ).select_related("orgtask")
+
+    org_task_ids = all_dataflow_orgtasks.values_list("orgtask_id", flat=True)
+    all_org_task_locks = TaskLock.objects.filter(orgtask_id__in=org_task_ids)
+
+    # for the above of orgtask_ids, we fetch all the dataflows of each orgtasks
+    # this will be used to find the last run of each dataflow
+    all_orgtask_dataflows = DataflowOrgTask.objects.filter(
+        orgtask_id__in=org_task_ids
+    ).select_related("dataflow")
 
     warehouse = OrgWarehouse.objects.filter(org=org).first()
 
@@ -311,9 +313,21 @@ def get_connections(org: Org):
     res = []
 
     for sync_dataflow in sync_dataflows:
+
+        sync_dataflow_orgtasks = [
+            dfot
+            for dfot in all_dataflow_orgtasks
+            if dfot.dataflow_id == sync_dataflow.id
+        ]
+
+        reset_dataflow_orgtasks = [
+            dfot
+            for dfot in all_dataflow_orgtasks
+            if dfot.dataflow_id == sync_dataflow.reset_conn_dataflow.id
+        ]
+
         org_tasks: list[OrgTask] = [
-            dataflow_orgtask.orgtask
-            for dataflow_orgtask in sync_dataflow.datafloworgtasks.all()
+            dataflow_orgtask.orgtask for dataflow_orgtask in sync_dataflow_orgtasks
         ]
 
         if len(org_tasks) == 0:
@@ -330,6 +344,16 @@ def get_connections(org: Org):
 
         org_task: OrgTask = org_tasks[0]
 
+        reset_org_task: OrgTask = None
+        if len(reset_dataflow_orgtasks) > 0:
+            rst_orgtasks = [
+                dfot.orgtask
+                for dfot in reset_dataflow_orgtasks
+                if dfot.dataflow_id == sync_dataflow.reset_conn_dataflow.id
+            ]
+            if len(rst_orgtasks) > 0:
+                reset_org_task = rst_orgtasks[0]
+
         # find the airbyte connection
         connection = [
             conn
@@ -344,9 +368,12 @@ def get_connections(org: Org):
         connection = connection[0]
 
         look_up_last_run_deployment_ids = []
-        for df_orgtask in DataflowOrgTask.objects.filter(
-            orgtask=org_task,
-        ):
+
+        for df_orgtask in [
+            df_orgtask
+            for df_orgtask in all_orgtask_dataflows
+            if df_orgtask.orgtask_id == org_task.id
+        ]:
             look_up_last_run_deployment_ids.append(df_orgtask.dataflow.deployment_id)
 
         reset_dataflow: OrgDataFlowv1 = sync_dataflow.reset_conn_dataflow
@@ -354,22 +381,25 @@ def get_connections(org: Org):
         lock = None
 
         sync_lock = None
-        for dataflow_orgtask in sync_dataflow.datafloworgtasks.all():
-            orgtask = dataflow_orgtask.orgtask
-            if hasattr(orgtask, "tasklock"):
-                sync_lock = orgtask.tasklock
-                break
+        for lock in [
+            org_task_locks
+            for org_task_locks in all_org_task_locks
+            if org_task_locks.orgtask_id == org_task.id
+        ]:
+            sync_lock = lock
+            break
 
         if sync_lock:
             lock = fetch_orgtask_lock_v1(org_task, sync_lock)
 
-        if not lock and reset_dataflow:
-            for dataflow_orgtask in reset_dataflow.datafloworgtasks.all():
-                orgtask = dataflow_orgtask.orgtask
-                if hasattr(orgtask, "tasklock"):
-                    reset_lock = orgtask.tasklock
-                    lock = fetch_orgtask_lock_v1(org_task, reset_lock)
-                    break
+        if not lock and reset_org_task:
+            for lock in [
+                org_task_locks
+                for org_task_locks in all_org_task_locks
+                if org_task_locks.orgtask_id == reset_org_task.id
+            ]:
+                lock = fetch_orgtask_lock_v1(reset_org_task, lock)
+                break
 
         connection["destination"]["name"] = warehouse.name
         res.append(
@@ -828,6 +858,7 @@ def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
         )
 
     # update schema change type in our db
+    # delete the schema change if type is "no_change" & if type is "non_breaking" but catalogDiff is empty list
     try:
         change_type = connection_catalog.get("schemaChange")
         logger.info(f"Schema change detected for org {org.slug}: {change_type}")
@@ -835,11 +866,19 @@ def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
         if change_type not in ["breaking", "non_breaking", "no_change"]:
             raise ValueError("Invalid schema change type")
 
-        if change_type in ["breaking", "non_breaking"]:
+        catalog_diff: dict = connection_catalog.get("catalogDiff")
+
+        if change_type == "breaking" or (
+            change_type == "non_breaking"
+            and catalog_diff
+            and len(catalog_diff.get("transforms", [])) > 0
+        ):
             OrgSchemaChange.objects.update_or_create(
                 connection_id=connection_id,
                 defaults={"change_type": change_type, "org": org},
             )
+        else:
+            OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
 
     except Exception as err:
         return (

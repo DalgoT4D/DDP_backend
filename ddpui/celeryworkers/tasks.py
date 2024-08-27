@@ -15,6 +15,7 @@ from ddpui.utils.discord import send_discord_notification
 from ddpui.utils.sendgrid import send_email_notification, send_schema_changes_email
 from ddpui.utils.timezone import UTC, as_utc
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.models.org import (
     Org,
     OrgDbt,
@@ -487,7 +488,7 @@ def get_connection_catalog_task(task_key, org_id, connection_id):
                 "catalogId": connection_catalog["catalogId"],
                 "syncCatalog": connection_catalog["syncCatalog"],
                 "schemaChange": connection_catalog["schemaChange"],
-                "catalogDiff": connection_catalog["catalogDiff"],
+                "catalogDiff": connection_catalog.get("catalogDiff"),
             },
         }
     )
@@ -501,27 +502,36 @@ def create_elementary_report(task_key: str, org_id: int, bucket_file_path: str):
 
     edr_binary = Path(os.getenv("DBT_VENV")) / "venv/bin/edr"
     org = Org.objects.filter(id=org_id).first()
-    orgdbt = OrgDbt.objects.filter(org=org).first()
-    project_dir = Path(orgdbt.project_dir) / "dbtrepo"
-    profiles_dir = project_dir / "elementary_profiles"
+    org_task = get_edr_send_report_task(org, create=True)
+
+    project_dir = Path(org.dbt.project_dir) / "dbtrepo"
+    # profiles_dir = project_dir / "elementary_profiles"
     aws_access_key_id = os.getenv("ELEMENTARY_AWS_ACCESS_KEY_ID")
     aws_secret_access_key = os.getenv("ELEMENTARY_AWS_SECRET_ACCESS_KEY")
     s3_bucket_name = os.getenv("ELEMENTARY_S3_BUCKET")
 
+    # cli args based on the edr org task
+    cli_params = org_task.parameters
+    cli_options = cli_params.get("options", {})
+
+    # its a relative path ({"profiles-dir": "elementary_profiles", ...}) since deployment run via shell task in prefect that have a "working_dir"
+    if "profiles-dir" in cli_options:
+        profiles_dir = project_dir / cli_options["profiles-dir"]
+        cli_options["profiles-dir"] = str(profiles_dir)
+
+    if "bucket-file-path" in cli_options:
+        cli_options["bucket-file-path"] = bucket_file_path
+
     os.environ["PATH"] += ":" + str(Path(os.getenv("DBT_VENV")) / "venv/bin")
     cmd = [
         str(edr_binary),
-        "send-report",
+        org_task.get_task_parameters(),
         "--aws-access-key-id",
         aws_access_key_id,
         "--aws-secret-access-key",
         aws_secret_access_key,
         "--s3-bucket-name",
         s3_bucket_name,
-        "--bucket-file-path",
-        bucket_file_path,
-        "--profiles-dir",
-        str(profiles_dir),
     ]
     taskprogress.add(
         {

@@ -2,6 +2,7 @@ from datetime import datetime
 import uuid
 from enum import IntEnum
 from django.utils.text import slugify
+from django.utils import timezone
 
 
 from django.db import models
@@ -26,6 +27,8 @@ class UserAttributes(models.Model):
     can_create_orgs = models.BooleanField(default=False)
     is_consultant = models.BooleanField(default=False)
     is_platform_admin = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"""
@@ -69,6 +72,8 @@ class OrgUser(models.Model):
     )
     new_role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True)
     email_verified = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return self.user.email  # pylint: disable=no-member
@@ -139,6 +144,8 @@ class Invitation(models.Model):
     invited_on = models.DateTimeField()
     invite_code = models.CharField(max_length=36)
     invited_new_role = models.ForeignKey(Role, on_delete=models.CASCADE, null=True)
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
 
 
 class NewInvitationSchema(Schema):

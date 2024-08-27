@@ -4,6 +4,9 @@ import requests
 from ninja.errors import HttpError
 from dotenv import load_dotenv
 from django.db import transaction
+from django.db.models import Window
+from django.db.models.functions import RowNumber
+
 from ddpui.ddpprefect.schema import (
     PrefectDbtCoreSetup,
     PrefectShellSetup,
@@ -16,7 +19,7 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowUpdateSchema3,
 )
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.models.tasks import DataflowOrgTask, TaskLock
+from ddpui.models.tasks import DataflowOrgTask, TaskLock, OrgTask, OrgDataFlowv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.ddpprefect import (
@@ -495,13 +498,45 @@ def get_flow_runs_by_deployment_id(deployment_id: str, limit=None):  # pragma: n
     return result[:50]
 
 
-def get_flow_runs_by_deployment_id_v1(deployment_id: str, limit=10, offset=0):
+def get_flow_runs_by_deployment_id_v1(
+    deployment_id: str = "", deployment_ids: list[str] = [], limit=10, offset=0
+):
     """
     Fetch flow runs of a deployment that are FAILED/COMPLETED/CRASHED
     sorted by start time of each run
+
+    If list of deployment ids is passed it will group by and
+    fetch runs by the limit and offset in each group
+
+    Everything is sorted by start time of each run
+    Giving the most recent runs first
     """
     result = []
-    # sorted by start-time
+
+    if deployment_ids and len(deployment_ids) > 0:
+        flow_runs_with_row_number = PrefectFlowRun.objects.filter(
+            status__in=[
+                FLOW_RUN_COMPLETED_STATE_TYPE,
+                FLOW_RUN_FAILED_STATE_TYPE,
+                FLOW_RUN_CRASHED_STATE_TYPE,
+            ],
+            deployment_id__in=deployment_ids,
+        ).annotate(
+            row_number=Window(
+                expression=RowNumber(),
+                partition_by="deployment_id",
+                order_by="-start_time",
+            )
+        )
+        limited_flow_runs = flow_runs_with_row_number.filter(
+            row_number__gt=offset,
+            row_number__lte=offset + limit,
+        )
+
+        result = [flow_run.to_json() for flow_run in limited_flow_runs]
+
+        return result
+
     for prefect_flow_run in PrefectFlowRun.objects.filter(
         deployment_id=deployment_id,
         status__in=[
@@ -622,3 +657,9 @@ def lock_tasks_for_deployment(deployment_id: str, orguser: OrgUser):
             400, "Someone else is trying to run this pipeline... try again"
         ) from error
     return locks
+
+
+def retry_flow_run(flow_run_id: str, minutes: int = 5):
+    """retry a flow run in prefect; after x minutes"""
+    res = prefect_post(f"flow_runs/{flow_run_id}/retry", {"minutes": minutes})
+    return res

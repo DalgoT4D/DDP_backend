@@ -9,7 +9,7 @@ from pathlib import Path
 import requests
 import boto3
 import boto3.exceptions
-
+from ninja.errors import HttpError
 from django.utils.text import slugify
 from dbt_automation import assets
 from ddpui.ddpprefect import (
@@ -17,6 +17,8 @@ from ddpui.ddpprefect import (
     DBTCLIPROFILE,
     SECRET,
 )
+from ddpui.models.org_user import OrgUser
+from ddpui.models.tasks import OrgDataFlowv1
 from ddpui.models.org import OrgDbt, OrgPrefectBlockv1, OrgWarehouse, TransformType
 from ddpui.models.org_user import Org
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask
@@ -305,3 +307,31 @@ def fetch_elementary_report(org: Org):
             s3response["LastModified"]
         ).isoformat(),  # e.g. 2024-06-07T06:14:08+05:30
     }
+
+
+def refresh_elementary_report_via_prefect(orguser: OrgUser) -> dict:
+    """refreshes the elementary report for the current date using the prefect deployment"""
+    org: Org = orguser.org
+    odf = OrgDataFlowv1.objects.filter(
+        org=org, name__startswith=f"pipeline-{org.slug}-generate-edr"
+    ).first()
+
+    if odf is None:
+        return {"error": "pipeline not found"}
+
+    locks = prefect_service.lock_tasks_for_deployment(odf.deployment_id, orguser)
+
+    try:
+        res = prefect_service.create_deployment_flow_run(odf.deployment_id)
+        for tasklock in locks:
+            tasklock.flow_run_id = res["flow_run_id"]
+            tasklock.save()
+
+    except Exception as error:
+        for task_lock in locks:
+            logger.info("deleting TaskLock %s", task_lock.orgtask.task.slug)
+            task_lock.delete()
+        logger.exception(error)
+        raise HttpError(400, "failed to start a run") from error
+
+    return res

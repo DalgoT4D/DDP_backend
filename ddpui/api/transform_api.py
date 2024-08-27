@@ -6,9 +6,7 @@ from datetime import datetime
 
 from dotenv import load_dotenv
 from django.db.models import Q
-from django.forms import model_to_dict
 from django.utils.text import slugify
-from django.db.models import Prefetch
 from ninja import NinjaAPI
 from ninja.errors import ValidationError, HttpError
 from ninja.responses import Response
@@ -301,12 +299,11 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
 
     target_model = dbt_operation.dbtmodel
 
-    current_operations_chained = OrgDbtOperation.objects.filter(
-        dbtmodel=target_model
-    ).count()
+    all_ops = OrgDbtOperation.objects.filter(dbtmodel=target_model).all()
+    operation_chained_before = sum(1 for op in all_ops if op.seq < dbt_operation.seq)
 
     final_config, all_input_models = validate_operation_config(
-        payload, target_model, is_multi_input_op, current_operations_chained, edit=True
+        payload, target_model, is_multi_input_op, operation_chained_before, edit=True
     )
 
     # create edges only with tables/models if not present
@@ -321,7 +318,6 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
     output_cols = dbtautomation_service.get_output_cols_for_operation(
         org_warehouse, payload.op_type, final_config["config"].copy()
     )
-    logger.info("updating operation")
 
     dbt_operation.config = final_config
     dbt_operation.output_cols = output_cols
@@ -333,13 +329,17 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
     target_model.output_cols = dbt_operation.output_cols
     target_model.save()
 
-    # update the dbt model if it is already created on disk
-    if target_model.name is not None:
+    if (not target_model.under_construction):
         dbtautomation_service.update_dbt_model_in_project(org_warehouse, target_model)
+
+    # propogate the udpates down the chain
+    dbtautomation_service.propagate_changes_to_downstream_operations(
+        target_model, dbt_operation, depth=1
+    )
 
     logger.info("updated output cols for the target model")
 
-    return from_orgdbtoperation(dbt_operation, chain_length=current_operations_chained)
+    return from_orgdbtoperation(dbt_operation, chain_length=len(all_ops))
 
 
 @transformapi.get(
@@ -490,21 +490,9 @@ def get_dbt_project_DAG(request):
     operation_nodes: list[OrgDbtOperation] = []
     res_edges = []  # will go directly in the res
 
-    edges = (
-        DbtEdge.objects.filter(Q(from_node__orgdbt=orgdbt) | Q(to_node__orgdbt=orgdbt))
-        .select_related("from_node", "to_node")
-        .prefetch_related(
-            Prefetch(
-                "from_node__operations",
-                queryset=OrgDbtOperation.objects.order_by("seq"),
-            ),
-            Prefetch(
-                "to_node__operations",
-                queryset=OrgDbtOperation.objects.order_by("seq"),
-            ),
-        )
-        .all()
-    )
+    edges = DbtEdge.objects.filter(
+        Q(from_node__orgdbt=orgdbt) | Q(to_node__orgdbt=orgdbt)
+    ).select_related("from_node", "to_node")
 
     seen_model_node_ids = set()
     for edge in edges:
@@ -515,22 +503,41 @@ def get_dbt_project_DAG(request):
             model_nodes.append(edge.to_node)
         seen_model_node_ids.add(edge.to_node.id)
 
+    all_operations = OrgDbtOperation.objects.filter(
+        dbtmodel_id__in=list(seen_model_node_ids)
+    ).all()
+
+    # fetch all the source nodes that can be in the operation.config["input_models"]
+    uuids = []
+    for operation in all_operations:
+        if (
+            "input_models" in operation.config
+            and len(operation.config["input_models"]) > 0
+        ):
+            uuids.extend([model["uuid"] for model in operation.config["input_models"]])
+    op_src_nodes = OrgDbtModel.objects.filter(uuid__in=uuids).all()
+
     # push operation nodes and edges if any
     for target_node in model_nodes:
         # src_node -> op1 -> op2 -> op3 -> op4
         # start building edges from the source
         prev_op = None
-        for operation in target_node.operations.order_by("seq").all():
+        operations = [op for op in all_operations if op.dbtmodel.id == target_node.id]
+        sorted_operations = sorted(operations, key=lambda op: op.seq)
+        for operation in sorted_operations:
             operation_nodes.append(operation)
             if (
                 "input_models" in operation.config
                 and len(operation.config["input_models"]) > 0
             ):
                 input_models = operation.config["input_models"]
+                src_uuids = [model["uuid"] for model in input_models]
                 # edge(s) between the node(s) and other sources involved that are tables (OrgDbtModel)
-                for op_src_node in OrgDbtModel.objects.filter(
-                    uuid__in=[model["uuid"] for model in input_models]
-                ).all():
+                for op_src_node in [
+                    src_node
+                    for src_node in op_src_nodes
+                    if str(src_node.uuid) in src_uuids
+                ]:
                     model_nodes.append(op_src_node)
                     res_edges.append(
                         {

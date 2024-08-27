@@ -3,6 +3,7 @@ import json
 from ninja import NinjaAPI
 
 from ninja.errors import HttpError
+from django.db import models
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpprefect import prefect_service
 from ddpui.models.tasks import TaskLock
@@ -24,6 +25,7 @@ from ddpui.ddpprefect import (
     FLOW_RUN_COMPLETED_STATE_NAME,
     FLOW_RUN_RUNNING_STATE_NAME,
     FLOW_RUN_PENDING_STATE_NAME,
+    MAP_FLOW_RUN_STATE_NAME_TO_TYPE,
 )
 
 
@@ -32,6 +34,8 @@ webhookapi = NinjaAPI(urls_namespace="webhook")
 
 
 logger = CustomLogger("ddpui")
+
+MAX_RETRIES_FOR_CRASHED_FLOW_RUNS = 1
 
 
 @webhookapi.post("/v1/notification/")
@@ -80,7 +84,7 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
     ]:  # terminal states
         TaskLock.objects.filter(flow_run_id=flow_run["id"]).delete()
         logger.info("updating the flow run in db")
-        create_or_update_flowrun(flow_run, deployment_id)
+        create_or_update_flowrun(flow_run, deployment_id, state)
 
     elif state == FLOW_RUN_PENDING_STATE_NAME:  # non-terminal states
         # doesn't have start time yet
@@ -88,15 +92,46 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
         for tasklock in locks:
             tasklock.flow_run_id = flow_run.get("id")
             tasklock.save()
-        create_or_update_flowrun(flow_run, deployment_id)
+        create_or_update_flowrun(flow_run, deployment_id, state)
 
     # # this might be triggered multiple times and we dont want to load our db for the same update again and again
     # # we also dont care so much about this state yet
-    # # also this state doesn't have deployment_id for some reason
     # elif state == FLOW_RUN_RUNNING_STATE_NAME:  # non-terminal states
-    #     create_or_update_flowrun(flow_run, deployment_id)
+    #     create_or_update_flowrun(flow_run, deployment_id, state)
 
-    if state in [FLOW_RUN_FAILED_STATE_NAME, FLOW_RUN_CRASHED_STATE_NAME]:
+    send_failure_notifications = (
+        True
+        if state
+        in [
+            FLOW_RUN_FAILED_STATE_NAME,
+            FLOW_RUN_CRASHED_STATE_NAME,
+        ]
+        else False
+    )
+
+    # retry flow run
+    if state == FLOW_RUN_CRASHED_STATE_NAME:
+        prefect_flow_run = PrefectFlowRun.objects.filter(
+            flow_run_id=flow_run_id
+        ).first()
+        if (
+            os.getenv("PREFECT_RETRY_CRASHED_FLOW_RUNS") in ["True", "true", True]
+            and prefect_flow_run
+            and prefect_flow_run.retries < MAX_RETRIES_FOR_CRASHED_FLOW_RUNS
+        ):
+            # dont send notification right now, retry first
+            try:
+                prefect_service.retry_flow_run(flow_run_id, 5)
+                prefect_flow_run.retries += 1
+                prefect_flow_run.save()
+                send_failure_notifications = False
+            except Exception as err:
+                logger.error(
+                    f"Something went wrong retrying the flow run {flow_run_id} that just crashed - {str(err)}"
+                )
+
+    # notifications
+    if send_failure_notifications:
         org = get_org_from_flow_run(flow_run)
         if org:
             email_flowrun_logs_to_orgusers(org, flow_run["id"])
@@ -112,13 +147,15 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
     return {"status": "ok"}
 
 
-def create_or_update_flowrun(flow_run, deployment_id):
+def create_or_update_flowrun(flow_run, deployment_id, state_name: str = None):
     """Create or update the flow run entry in database"""
+    state_name = state_name if state_name else flow_run["state_name"]
+    deployment_id = deployment_id if deployment_id else flow_run.get("deployment_id")
 
     PrefectFlowRun.objects.update_or_create(
         flow_run_id=flow_run["id"],
         defaults={
-            "deployment_id": deployment_id,
+            **({"deployment_id": deployment_id} if deployment_id else {}),
             "name": flow_run["name"],
             "start_time": (
                 flow_run["start_time"]
@@ -127,8 +164,8 @@ def create_or_update_flowrun(flow_run, deployment_id):
             ),
             "expected_start_time": flow_run["expected_start_time"],
             "total_run_time": flow_run["total_run_time"],
-            "status": flow_run["status"],
-            "state_name": flow_run["state_name"],
+            "status": MAP_FLOW_RUN_STATE_NAME_TO_TYPE[state_name],
+            "state_name": state_name,
         },
     )
 
