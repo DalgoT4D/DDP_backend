@@ -1045,6 +1045,13 @@ def test_update_schema_changes_connection_with_no_workspace(orguser):
 def test_update_schema_changes_connection_success(orguser_workspace):
     """Tests update_connection_schema when updating schema changes is successful"""
     request = mock_request(orguser_workspace)
+    
+    OrgPrefectBlockv1.objects.create(
+        org=org_with_workspace,
+        block_type=ddpprefect.AIRBYTESERVER,
+        block_id="fake-serverblock-id",
+        block_name="fake ab server block",
+    )
 
     connection_id = "connection_123"
     payload = AirbyteConnectionSchemaUpdate(
