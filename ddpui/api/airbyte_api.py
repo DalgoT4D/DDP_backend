@@ -714,7 +714,7 @@ def update_connection_schema(
     auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_edit_connection"])
-def update_connection_schema(
+def schedule_update_connection_schema(
     request, connection_id, payload: AirbyteConnectionSchemaUpdateSchedule
 ):
     """
