@@ -16,6 +16,7 @@ from ddpui.ddpprefect.schema import (
     PrefectDbtTaskSetup,
     PrefectShellTaskSetup,
     PrefectAirbyteSyncTaskSetup,
+    PrefectAirbyteRefreshSchemaTaskSetup,
 )
 from ddpui.ddpprefect import (
     AIRBYTECONNECTION,
@@ -33,6 +34,7 @@ from ddpui.utils.constants import (
     TASK_AIRBYTESYNC,
     TASK_GENERATE_EDR,
     TASK_AIRBYTERESET,
+    UPDATE_SCHEMA,
 )
 from ddpui.ddpdbt.schema import DbtProjectParams
 
@@ -53,6 +55,25 @@ def setup_airbyte_sync_task_config(
         connection_id=org_task.connection_id,
         timeout=AIRBYTE_SYNC_TIMEOUT,
         orgtask_uuid=str(org_task.uuid),
+    )
+
+
+def setup_airbyte_update_schema_task_config(
+    org_task: OrgTask,
+    server_block: OrgPrefectBlockv1,
+    catalog_diff: dict,
+    seq: int = 1,
+):
+    """constructs the prefect payload for an airbyte refresh schema task config"""
+    return PrefectAirbyteRefreshSchemaTaskSetup(
+        seq=seq,
+        slug=UPDATE_SCHEMA,
+        type=AIRBYTECONNECTION,
+        airbyte_server_block=server_block.block_name,
+        connection_id=org_task.connection_id,
+        timeout=AIRBYTE_SYNC_TIMEOUT,
+        orgtask_uuid=str(org_task.uuid),
+        catalog_diff=catalog_diff,
     )
 
 

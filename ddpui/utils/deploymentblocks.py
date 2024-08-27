@@ -39,11 +39,9 @@ def trigger_reset_and_sync_workflow(org: Org, connection_id: str):
         logger.error("Reset OrgTask not found")
         return None, "reset OrgTask not found"
 
-    reset_dataflow = sync_dataflow_orgtask.dataflow.reset_conn_dataflow
-    reset_deployment_id = reset_dataflow.deployment_id
     sync_deployment_id = sync_dataflow_orgtask.dataflow.deployment_id
 
-    if not reset_deployment_id or not sync_deployment_id:
+    if not sync_deployment_id:
         logger.error("Deployment ID not found")
         return None, "deployment ID not found"
 
@@ -55,7 +53,8 @@ def trigger_reset_and_sync_workflow(org: Org, connection_id: str):
         logger.error("Airbyte server block not found")
         return None, "airbyte server block not found"
 
-    reset_sync_params = {
+    # full reset + sync; run via the manual sync deployment
+    params = {
         "config": {
             "tasks": [
                 setup_airbyte_sync_task_config(
@@ -70,9 +69,7 @@ def trigger_reset_and_sync_workflow(org: Org, connection_id: str):
     }
 
     try:
-        prefect_service.create_deployment_flow_run(
-            reset_deployment_id, reset_sync_params
-        )
+        prefect_service.create_deployment_flow_run(sync_deployment_id, params)
         logger.info("Successfully triggered Prefect flow run for reset")
     except Exception as error:
         logger.error("Failed to trigger Prefect flow run for reset: %s", error)

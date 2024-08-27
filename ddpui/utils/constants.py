@@ -9,6 +9,7 @@ TASK_AIRBYTESYNC = "airbyte-sync"
 TASK_AIRBYTERESET = "airbyte-reset"
 TASK_SEED = "dbt-seed"
 TASK_GENERATE_EDR = "generate-edr"
+UPDATE_SCHEMA = "update-schema"
 
 # Dbt transformation sequence task slugs; we can always take this from the user/frontend also
 TRANSFORM_TASKS_SEQ = {
