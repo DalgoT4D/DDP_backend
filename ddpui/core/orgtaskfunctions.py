@@ -5,8 +5,8 @@ do not raise http errors here
 
 import uuid
 from typing import Union
-import yaml
 from pathlib import Path
+import yaml
 from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask, TaskLock, TaskLockStatus
 from ddpui.models.org import (
     Org,
@@ -23,7 +23,7 @@ from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpprefect import prefect_service
 from ddpui.core.pipelinefunctions import setup_dbt_core_task_config
-from ddpui.utils.constants import TASK_DBTRUN, TASK_GENERATE_EDR, TRANSFORM_TASKS_SEQ
+from ddpui.utils.constants import TASK_DBTRUN, TASK_GENERATE_EDR
 from ddpui.utils.helpers import generate_hash_id
 
 logger = CustomLogger("ddpui")
@@ -53,7 +53,7 @@ def create_default_transform_tasks(
 
 
 def fetch_elementary_profile_target(orgdbt: OrgDbt) -> str:
-    # fetch the target from the elementary profiles yaml file
+    """fetch the target from the elementary profiles yaml file"""
     elementary_target = "default"
 
     # parse the yaml file
