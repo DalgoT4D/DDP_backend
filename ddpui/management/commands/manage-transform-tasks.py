@@ -1,7 +1,6 @@
 from dotenv import load_dotenv
 from django.core.management.base import BaseCommand
 
-from django.contrib.auth.models import User
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.tasks import OrgTask, Task, OrgTaskGeneratedBy, DataflowOrgTask
 from ddpui.models.org import Org, OrgDataFlowv1
@@ -76,7 +75,7 @@ class Command(BaseCommand):
             config = params.get("config", {})
             tasks = config.get("tasks", [])
 
-            if len(tasks) > 0:
+            if len([task for task in tasks if task["slug"] == TASK_DOCSGENERATE]) > 0:
                 updated_task_list = [
                     task for task in tasks if task["slug"] != TASK_DOCSGENERATE
                 ]
