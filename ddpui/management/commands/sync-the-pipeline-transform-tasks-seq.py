@@ -1,13 +1,10 @@
 from dotenv import load_dotenv
 from django.core.management.base import BaseCommand
 
-from django.contrib.auth.models import User
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.models.tasks import OrgTask, Task, OrgTaskGeneratedBy, DataflowOrgTask
-from ddpui.models.org import Org, OrgDataFlowv1
-from ddpui.utils.constants import TASK_DBTSEED, TASK_DOCSGENERATE, TRANSFORM_TASKS_SEQ
+from ddpui.models.org import OrgDataFlowv1
+from ddpui.utils.constants import TRANSFORM_TASKS_SEQ
 from ddpui.ddpprefect import prefect_service
-from ddpui.ddpprefect.schema import PrefectDataFlowUpdateSchema3
 from ddpui.core.pipelinefunctions import fix_transform_tasks_seq_dataflow
 
 logger = CustomLogger("ddpui")
