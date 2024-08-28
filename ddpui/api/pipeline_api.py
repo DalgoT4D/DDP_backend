@@ -720,6 +720,10 @@ def get_prefect_flow_runs_log_history_v1(
         deployment_id=deployment_id, limit=limit, offset=offset
     )
 
+    for flow_run in flow_runs:
+        graph_dict = prefect_service.get_flow_run_graphs(flow_run["id"])
+        flow_run["runs"] = graph_dict
+
     return flow_runs
 
 
