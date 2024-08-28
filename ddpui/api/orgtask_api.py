@@ -350,7 +350,7 @@ def get_prefect_transformation_tasks(request):
             else None
         )
 
-    return res
+    return sorted(res, key=lambda x: x["seq"])
 
 
 @orgtaskapi.delete("transform/", auth=auth.CustomAuthMiddleware())

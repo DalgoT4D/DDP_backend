@@ -16,11 +16,11 @@ TRANSFORM_TASKS_SEQ = {
     TASK_GITPULL: 1,
     TASK_DBTCLEAN: 2,
     TASK_DBTDEPS: 3,
-    TASK_DBTRUN: 4,
-    TASK_DBTTEST: 5,
-    TASK_DOCSGENERATE: 6,
-    TASK_DBTSEED: 0,
-    TASK_GENERATE_EDR: 7,
+    TASK_DBTSEED: 4,
+    TASK_DBTRUN: 5,
+    TASK_DBTTEST: 6,
+    TASK_DOCSGENERATE: 7,
+    TASK_GENERATE_EDR: 8,
 }
 # when a new pipeline is created; these are the transform tasks being pushed by default
 DEFAULT_TRANSFORM_TASKS_IN_PIPELINE = [

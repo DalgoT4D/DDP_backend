@@ -6,6 +6,7 @@ do not raise http errors here
 from pathlib import Path
 from typing import Union
 from django.db import transaction
+from functools import cmp_to_key
 from ninja.errors import HttpError
 
 from ddpui.models.tasks import OrgTask, DataflowOrgTask, TaskLock, TaskLockStatus
@@ -17,6 +18,7 @@ from ddpui.ddpprefect.schema import (
     PrefectShellTaskSetup,
     PrefectAirbyteSyncTaskSetup,
     PrefectAirbyteRefreshSchemaTaskSetup,
+    PrefectDataFlowUpdateSchema3,
 )
 from ddpui.ddpprefect import (
     AIRBYTECONNECTION,
@@ -35,6 +37,7 @@ from ddpui.utils.constants import (
     TASK_GENERATE_EDR,
     TASK_AIRBYTERESET,
     UPDATE_SCHEMA,
+    TRANSFORM_TASKS_SEQ,
 )
 from ddpui.ddpdbt.schema import DbtProjectParams
 
@@ -290,3 +293,83 @@ def lock_tasks_for_dataflow(
             400, "Someone else is trying to run this pipeline... try again"
         ) from error
     return locks
+
+
+def fix_transform_tasks_seq_dataflow(deployment_id: str):
+    def task_config_comparator(task1, task2):
+        if TRANSFORM_TASKS_SEQ[task1["slug"]] > TRANSFORM_TASKS_SEQ[task2["slug"]]:
+            return 1
+        elif TRANSFORM_TASKS_SEQ[task1["slug"]] < TRANSFORM_TASKS_SEQ[task2["slug"]]:
+            return -1
+        else:
+            return 0
+
+    def dataflow_orgtask_comparator(dfot1: DataflowOrgTask, dfot2: DataflowOrgTask):
+        if (
+            TRANSFORM_TASKS_SEQ[dfot1.orgtask.task.slug]
+            > TRANSFORM_TASKS_SEQ[dfot2.orgtask.task.slug]
+        ):
+            return 1
+        elif (
+            TRANSFORM_TASKS_SEQ[dfot1.orgtask.task.slug]
+            < TRANSFORM_TASKS_SEQ[dfot2.orgtask.task.slug]
+        ):
+            return -1
+        else:
+            return 0
+
+    try:
+        deployment = prefect_service.get_deployment(deployment_id)
+    except Exception as e:
+        logger.error(f"Error getting deployment for {deployment_id}: {str(e)}")
+        return
+
+    params = deployment.get("parameters", {})
+    config = params.get("config", {})
+    tasks = config.get("tasks", [])
+    transform_tasks = [task for task in tasks if task["slug"] in TRANSFORM_TASKS_SEQ]
+    other_tasks = [task for task in tasks if task["slug"] not in TRANSFORM_TASKS_SEQ]
+
+    updated_transform_tasks = sorted(
+        transform_tasks, key=cmp_to_key(task_config_comparator)
+    )
+    for i, task in enumerate(updated_transform_tasks):
+        task["seq"] = i + len(other_tasks)
+
+    tasks = other_tasks + updated_transform_tasks
+    try:
+        prefect_service.update_dataflow_v1(
+            deployment_id,
+            PrefectDataFlowUpdateSchema3(deployment_params={"config": config}),
+        )
+        logger.info(f"Update the seq for deployment {deployment_id}")
+    except Exception as err:
+        logger.error(
+            f"Error while updating deployment params for deployment_id {deployment_id}: {err}"
+        )
+
+    # update the seq in datafloworgtask mapping
+    dataflow_orgtasks = DataflowOrgTask.objects.filter(
+        dataflow__deployment_id=deployment_id,
+    ).all()
+
+    transform_dfots = [
+        dfot
+        for dfot in dataflow_orgtasks
+        if dfot.orgtask.task.slug in TRANSFORM_TASKS_SEQ
+    ]
+    other_dfots = [
+        dfot
+        for dfot in dataflow_orgtasks
+        if dfot.orgtask.task.slug not in TRANSFORM_TASKS_SEQ
+    ]
+
+    sorted_transform_dataflow_orgtasks = sorted(
+        transform_dfots, key=cmp_to_key(dataflow_orgtask_comparator)
+    )
+
+    for i, dfot in enumerate(sorted_transform_dataflow_orgtasks):
+        dfot.seq = i + len(other_dfots)
+        dfot.save()
+
+    logger.info("Updated the seq for datafloworgtasks for the transform tasks")
