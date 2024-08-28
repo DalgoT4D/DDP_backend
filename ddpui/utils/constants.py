@@ -7,7 +7,7 @@ TASK_GITPULL = "git-pull"
 TASK_DOCSGENERATE = "dbt-docs-generate"
 TASK_AIRBYTESYNC = "airbyte-sync"
 TASK_AIRBYTERESET = "airbyte-reset"
-TASK_SEED = "dbt-seed"
+TASK_DBTSEED = "dbt-seed"
 TASK_GENERATE_EDR = "generate-edr"
 UPDATE_SCHEMA = "update-schema"
 
@@ -19,9 +19,22 @@ TRANSFORM_TASKS_SEQ = {
     TASK_DBTRUN: 4,
     TASK_DBTTEST: 5,
     TASK_DOCSGENERATE: 6,
-    TASK_SEED: 0,
+    TASK_DBTSEED: 0,
     TASK_GENERATE_EDR: 7,
 }
+# when a new pipeline is created; these are the transform tasks being pushed by default
+DEFAULT_TRANSFORM_TASKS_IN_PIPELINE = [
+    TASK_GITPULL,
+    TASK_DBTCLEAN,
+    TASK_DBTDEPS,
+    TASK_DBTRUN,
+    TASK_DBTTEST,
+]
+
+# These are tasks to be run via deployment
+# Adding a new task here will work for any new orgtask created
+# But for the current ones a script would need to be run to set them with a deployment
+LONG_RUNNING_TASKS = [TASK_DBTRUN, TASK_DBTSEED, TASK_DBTTEST]
 
 # airbyte sync timeout in deployment params
 AIRBYTE_SYNC_TIMEOUT = 15

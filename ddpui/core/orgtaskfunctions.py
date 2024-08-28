@@ -23,7 +23,10 @@ from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpprefect import prefect_service
 from ddpui.core.pipelinefunctions import setup_dbt_core_task_config
-from ddpui.utils.constants import TASK_DBTRUN, TASK_GENERATE_EDR
+from ddpui.utils.constants import (
+    TASK_DBTRUN,
+    TASK_GENERATE_EDR,
+)
 from ddpui.utils.helpers import generate_hash_id
 
 logger = CustomLogger("ddpui")
