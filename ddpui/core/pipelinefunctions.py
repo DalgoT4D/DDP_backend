@@ -296,7 +296,7 @@ def lock_tasks_for_dataflow(
 
 
 def fix_transform_tasks_seq_dataflow(deployment_id: str):
-    """"""
+    """corrects the order of the transform tasks in a prefect deployment config"""
 
     def task_config_comparator(task1, task2):
         if TRANSFORM_TASKS_SEQ[task1["slug"]] > TRANSFORM_TASKS_SEQ[task2["slug"]]:
