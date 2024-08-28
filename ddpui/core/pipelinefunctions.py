@@ -5,8 +5,8 @@ do not raise http errors here
 
 from pathlib import Path
 from typing import Union
-from django.db import transaction
 from functools import cmp_to_key
+from django.db import transaction
 from ninja.errors import HttpError
 
 from ddpui.models.tasks import OrgTask, DataflowOrgTask, TaskLock, TaskLockStatus
@@ -296,6 +296,8 @@ def lock_tasks_for_dataflow(
 
 
 def fix_transform_tasks_seq_dataflow(deployment_id: str):
+    """"""
+
     def task_config_comparator(task1, task2):
         if TRANSFORM_TASKS_SEQ[task1["slug"]] > TRANSFORM_TASKS_SEQ[task2["slug"]]:
             return 1
