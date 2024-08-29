@@ -643,12 +643,5 @@ def post_organization_accept_tnc(request):
 @has_permission(["can_view_flags"])
 def get_organization_feature_flags(request):
     """get"""
-    orguser: OrgUser = request.orguser
-    org_slug = orguser.org.slug
+    return {"allowLogsSummary": True}
 
-    flags = {"allowLogsSummary": False}
-
-    if flag_enabled("LOG_SUMMARY", request_org_slug=org_slug):
-        flags["allowLogsSummary"] = True
-
-    return flags
