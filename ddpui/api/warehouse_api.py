@@ -193,10 +193,10 @@ def get_json_column_spec(
     "/v1/table_data/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware()
 )
 @has_permission(["can_view_warehouse_data"])
-def get_table_data_v1(request, schema_name: str, table_name: str):
+def get_warehouse_table_columns_spec(request, schema_name: str, table_name: str):
     """
-    Get the json column spec of a table in a warehouse
-    This fetches table data using the sqlalchemy engine
+    Get the json column(s) spec of a table in a warehouse
+    This fetches table data using the sqlalchemy engine client
     """
     orguser = request.orguser
     org = orguser.org
@@ -207,9 +207,9 @@ def get_table_data_v1(request, schema_name: str, table_name: str):
 
     credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
 
-    wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
-
     try:
+        wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
+
         cols = wclient.get_table_columns(schema_name, table_name)
         return cols
     except sqlalchemy.exc.NoSuchTableError:
