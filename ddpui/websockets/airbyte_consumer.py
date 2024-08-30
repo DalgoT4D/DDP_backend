@@ -3,6 +3,7 @@ import json
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.websockets.schemas import WebsocketResponse, WebsocketResponseStatus
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers
+from ddpui.models.org import OrgType
 from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
     AirbyteSourceUpdateCheckConnection,
@@ -29,7 +30,7 @@ class SourceCheckConnectionConsumer(BaseConsumer):
         else:
             payload = AirbyteSourceCreate(**payload)
 
-        if self.orguser.org.is_demo:
+        if self.orguser.org.type == OrgType.DEMO:
             logger.info("Demo account user")
             source_def = airbyte_service.get_source_definition(
                 self.orguser.org.airbyte_workspace_id, payload.sourceDefId

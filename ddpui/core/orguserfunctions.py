@@ -13,7 +13,7 @@ from django.utils.text import slugify
 from django.utils import timezone as django_timezone
 
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, GUEST_ROLE
-from ddpui.models.org import Org
+from ddpui.models.org import Org, OrgType
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
     DeleteOrgUserPayload,
@@ -89,7 +89,7 @@ def signup_orguser(payload: OrgUserCreate):
     is_demo = True if (signupcode == os.getenv("DEMO_SIGNUPCODE")) else False
     demo_org = None  # common demo org
     if is_demo:
-        demo_org = Org.objects.filter(is_demo=True).first()
+        demo_org = Org.objects.filter(type=OrgType.DEMO).first()
         if demo_org is None:
             return None, "demo org has not been setup"
 
@@ -647,7 +647,7 @@ def verify_email(payload: VerifyEmailSchema):
         email_verified=True, updated_at=django_timezone.now()
     )
 
-    if orguser.org.is_demo:
+    if orguser.org.type == OrgType.DEMO:
         try:
             sendgrid.send_demo_account_post_verify_email(orguser.user.email)
         except Exception:

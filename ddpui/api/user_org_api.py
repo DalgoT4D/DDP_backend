@@ -40,7 +40,7 @@ from ddpui.models.role_based_access import Role, RolePermission
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.deleteorg import delete_warehouse_v1
 from ddpui.utils.orguserhelpers import from_orguser
-from ddpui.models.org import OrgWarehouse, Org
+from ddpui.models.org import OrgWarehouse, Org, OrgType
 from ddpui.models.orgtnc import OrgTnC
 
 user_org_api = NinjaAPI(urls_namespace="userorg")
@@ -132,7 +132,9 @@ def get_current_user_v2(request):
                     {"slug": rolep.permission.slug, "name": rolep.permission.name}
                     for rolep in curr_orguser.new_role.rolepermissions.all()
                 ],
-                is_demo=curr_orguser.org.is_demo if curr_orguser.org else False,
+                is_demo=(
+                    curr_orguser.org.type == OrgType.DEMO if curr_orguser.org else False
+                ),
             )
         )
 
@@ -221,7 +223,9 @@ def get_organization_users(request):
                     {"slug": rolep.permission.slug, "name": rolep.permission.name}
                     for rolep in curr_orguser.new_role.rolepermissions.all()
                 ],
-                is_demo=curr_orguser.org.is_demo if curr_orguser.org else False,
+                is_demo=(
+                    curr_orguser.org.type == OrgType.DEMO if curr_orguser.org else False
+                ),
             )
         )
 
@@ -620,7 +624,7 @@ def delete_organization_warehouses_v1(request):
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
 
-    if orguser.org.is_demo:
+    if orguser.org.type == OrgType.DEMO:
         raise HttpError(403, "insufficient permissions")
 
     delete_warehouse_v1(orguser.org)
@@ -644,4 +648,3 @@ def post_organization_accept_tnc(request):
 def get_organization_feature_flags(request):
     """get"""
     return {"allowLogsSummary": True}
-

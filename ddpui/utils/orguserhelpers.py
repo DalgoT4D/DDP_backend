@@ -4,7 +4,7 @@ from django.utils.text import slugify
 
 from ddpui.models.org_user import Invitation, InvitationSchema
 from ddpui.models.org_user import OrgUser, OrgUserResponse, OrgUserRole
-from ddpui.models.org import OrgWarehouse
+from ddpui.models.org import OrgWarehouse, OrgType
 from ddpui.models.orgtnc import OrgTnC
 from ddpui.models.role_based_access import RolePermission
 
@@ -32,7 +32,7 @@ def from_orguser(orguser: OrgUser):
         new_role_slug=orguser_new_role,
         permissions=permissions,
         wtype=warehouse.wtype if warehouse else None,
-        is_demo=orguser.org.is_demo if orguser.org else False,
+        is_demo=orguser.org.type == OrgType.DEMO if orguser.org else False,
     )
     if orguser.org:
         response.org.tnc_accepted = OrgTnC.objects.filter(org=orguser.org).exists()
