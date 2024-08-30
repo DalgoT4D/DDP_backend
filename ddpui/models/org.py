@@ -4,6 +4,19 @@ from django.utils import timezone
 from ninja import Schema
 
 
+class OrgType(str, Enum):
+    """an enum representing the type of organization"""
+
+    DEMO = "demo"
+    POC = "poc"
+    CLIENT = "client"
+
+    @classmethod
+    def choices(cls):
+        """django model definition needs an iterable for `choices`"""
+        return [(key.value, key.name) for key in cls]
+
+
 class OrgVizLoginType(str, Enum):
     """an enum for roles assignable to org-users"""
 
@@ -59,14 +72,15 @@ class Org(models.Model):
     viz_login_type = models.CharField(
         choices=OrgVizLoginType.choices(), max_length=50, null=True
     )
-    is_demo = models.BooleanField(default=False)
+    type = models.CharField(
+        choices=OrgType.choices(), max_length=50, default=OrgType.CLIENT
+    )
     ses_whitelisted_email = models.TextField(max_length=100, null=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
-        demostr = "demo=" + ("yes" if self.is_demo else "no")
-        return f"Org[{self.slug}|{self.name}|{self.airbyte_workspace_id}|{demostr}]"
+        return f"Org[{self.slug}|{self.name}|{self.airbyte_workspace_id}|{self.type}]"
 
 
 class OrgSchema(Schema):

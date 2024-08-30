@@ -31,6 +31,7 @@ from ddpui.ddpairbyte.schema import (
 from ddpui.auth import has_permission
 
 from ddpui.models.org_user import OrgUser
+from ddpui.models.org import OrgType
 from ddpui.models.llm import LogsSummarizationType, LlmSession
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
@@ -93,7 +94,7 @@ def get_airbyte_source_definitions(request):
 
     # filter source definitions for demo account
     allowed_sources = os.getenv("DEMO_AIRBYTE_SOURCE_TYPES")
-    if orguser.org.is_demo is True and allowed_sources:
+    if orguser.org.type == OrgType.DEMO and allowed_sources:
         res["sourceDefinitions"] = [
             source_def
             for source_def in res["sourceDefinitions"]
@@ -132,7 +133,7 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    if orguser.org.is_demo:
+    if orguser.org.type == OrgType.DEMO:
         logger.info("Demo account user")
         source_def = airbyte_service.get_source_definition(
             orguser.org.airbyte_workspace_id, payload.sourceDefId
@@ -167,7 +168,7 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    if orguser.org.is_demo:
+    if orguser.org.type == OrgType.DEMO:
         logger.info("Demo account user")
         source = airbyte_service.get_source(orguser.org.airbyte_workspace_id, source_id)
 
@@ -196,7 +197,7 @@ def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    if orguser.org.is_demo:
+    if orguser.org.type == OrgType.DEMO:
         logger.info("Demo account user")
         source_def = airbyte_service.get_source_definition(
             orguser.org.airbyte_workspace_id, payload.sourceDefId
@@ -233,7 +234,7 @@ def post_airbyte_check_source_for_update(
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    if orguser.org.is_demo:
+    if orguser.org.type == OrgType.DEMO:
         logger.info("Demo account user")
         source = airbyte_service.get_source(orguser.org.airbyte_workspace_id, source_id)
 
