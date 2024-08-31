@@ -3,7 +3,6 @@ import json
 from ninja import NinjaAPI
 
 from ninja.errors import HttpError
-from django.db import models
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpprefect import prefect_service
 from ddpui.models.tasks import TaskLock
@@ -186,7 +185,7 @@ def lock_tasks_for_pending_deployment(deployment_id):
     try:
         locks = prefect_service.lock_tasks_for_deployment(deployment_id, system_user)
     except HttpError:
-        logger.info("failed to lock tasks for deployment %s, ignoring", deployment_id)
+        logger.info("unable to lock tasks for deployment %s, ignoring", deployment_id)
 
     return locks
 
