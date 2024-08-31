@@ -13,7 +13,7 @@ from ddpui.models.notifications import Notification
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.utils.discord import send_discord_notification
 from ddpui.utils.sendgrid import send_email_notification, send_schema_changes_email
-from ddpui.utils.timezone import UTC, as_utc
+from ddpui.utils import timezone
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.models.org import (
@@ -883,7 +883,7 @@ def schedule_notification_task(self, notification_id, recipient_id):
     recipient = OrgUser.objects.get(user_id=recipient_id)
     user_preference, created = UserPreferences.objects.get_or_create(orguser=recipient)
 
-    notification.sent_time = as_utc(datetime.utcnow())
+    notification.sent_time = timezone.as_utc(datetime.now())
     notification.save()
 
     if user_preference.enable_email_notifications:
