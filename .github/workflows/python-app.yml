@@ -57,7 +57,8 @@ jobs:
           DBUSER: ddp
           DBPASSWORD: ${{ secrets.DBPASSWORD }}
         run: |
-          python manage.py migrate 
+          /home/ddp/DDP_backend/venv/bin/python manage.py migrate
+          /home/ddp/DDP_backend/venv/bin/python manage.py loaddata seed/*.json
 
       - name: Create known_hosts file
         run: |
