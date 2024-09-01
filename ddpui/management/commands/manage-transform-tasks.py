@@ -108,6 +108,7 @@ class Command(BaseCommand):
             DataflowOrgTask.objects.filter(
                 orgtask__task__slug=TASK_DOCSGENERATE,
                 dataflow__dataflow_type="orchestrate",
+                dataflow__org=org,
             ).count()
             == 0
         ), "Some mappings still exist for dbt-docs-generate task"
