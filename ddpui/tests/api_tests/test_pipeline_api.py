@@ -930,7 +930,7 @@ def test_post_deployment_set_schedule_success(orguser_transform_tasks):
 
 @patch.multiple(
     "ddpui.ddpprefect.prefect_service",
-    create_deployment_flow_run=Mock(return_value=True),
+    create_deployment_flow_run=Mock(return_value={"flow_run_id": "fake-flow-run-id"}),
     lock_tasks_for_deployment=Mock(return_value=[]),
 )
 def test_post_run_prefect_org_deployment_task_success(orguser_transform_tasks):
@@ -951,4 +951,4 @@ def test_post_run_prefect_org_deployment_task_success(orguser_transform_tasks):
         request, dataflow_orgtask.dataflow.deployment_id
     )
 
-    assert TaskLock.objects.filter(orgtask=org_task).count() == 0
+    assert TaskLock.objects.filter(orgtask=org_task).count() == 1

@@ -1,6 +1,20 @@
 from enum import Enum
 from django.db import models
+from django.utils import timezone
 from ninja import Schema
+
+
+class OrgType(str, Enum):
+    """an enum representing the type of organization"""
+
+    DEMO = "demo"
+    POC = "poc"
+    CLIENT = "client"
+
+    @classmethod
+    def choices(cls):
+        """django model definition needs an iterable for `choices`"""
+        return [(key.value, key.name) for key in cls]
 
 
 class OrgVizLoginType(str, Enum):
@@ -36,6 +50,8 @@ class OrgDbt(models.Model):
     target_type = models.CharField(max_length=10)
     default_schema = models.CharField(max_length=50)
     transform_type = models.CharField(max_length=10, null=True)
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
         return f"OrgDbt[{self.gitrepo_url}|{self.target_type}|{self.default_schema}|{self.transform_type}]"
@@ -56,12 +72,15 @@ class Org(models.Model):
     viz_login_type = models.CharField(
         choices=OrgVizLoginType.choices(), max_length=50, null=True
     )
-    is_demo = models.BooleanField(default=False)
+    type = models.CharField(
+        choices=OrgType.choices(), max_length=50, default=OrgType.CLIENT
+    )
     ses_whitelisted_email = models.TextField(max_length=100, null=True)
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
-        demostr = "demo=" + ("yes" if self.is_demo else "no")
-        return f"Org[{self.slug}|{self.name}|{self.airbyte_workspace_id}|{demostr}]"
+        return f"Org[{self.slug}|{self.name}|{self.airbyte_workspace_id}|{self.type}]"
 
 
 class OrgSchema(Schema):
@@ -93,6 +112,8 @@ class OrgWarehouse(models.Model):
         max_length=10, null=True
     )
     bq_location = models.CharField(max_length=100, null=True)
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
         return (
@@ -122,6 +143,8 @@ class OrgPrefectBlockv1(models.Model):
     block_name = models.CharField(
         max_length=100, unique=True
     )  # use blockname to distinguish between different dbt commands
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
         return f"OrgPrefectBlockv1[{self.org.name}|{self.block_type}|{self.block_name}]"
@@ -149,6 +172,8 @@ class OrgDataFlowv1(models.Model):
     reset_conn_dataflow = models.ForeignKey(
         "self", on_delete=models.SET_NULL, null=True
     )
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
         return f"OrgDataFlowv1[{self.name}|{self.deployment_name}|{self.deployment_id}|{self.cron}]"
@@ -160,3 +185,5 @@ class OrgSchemaChange(models.Model):
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     connection_id = models.CharField(max_length=36, unique=True, null=True)
     change_type = models.CharField(max_length=36, null=True)
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)

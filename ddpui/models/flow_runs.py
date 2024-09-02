@@ -1,6 +1,7 @@
 """store results of prefect's flow-runs so we don't need to query prefect's api every time we want to display the dashboard"""
 
 from django.db import models
+from django.utils import timezone
 
 
 class PrefectFlowRun(models.Model):
@@ -15,6 +16,8 @@ class PrefectFlowRun(models.Model):
     status = models.CharField(max_length=20, null=False, blank=False)
     state_name = models.CharField(max_length=20, null=False, blank=False)
     retries = models.SmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
         """string representation"""

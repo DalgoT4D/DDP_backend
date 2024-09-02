@@ -64,6 +64,34 @@ class PrefectDbtCoreSetup(Schema):
     commands: list
 
 
+class PrefectAirbyteRefreshSchemaTaskSetup(Schema):
+    slug: str
+    airbyte_server_block: str
+    connection_id: str
+    timeout: int
+    type: str
+    orgtask_uuid: str
+    flow_name: str = None
+    flow_run_name: str = None
+    seq: int = 0
+    catalog_diff: dict
+
+    def to_json(self):
+        """JSON serialization"""
+        return {
+            "slug": self.slug,
+            "airbyte_server_block": self.airbyte_server_block,
+            "connection_id": self.connection_id,
+            "timeout": self.timeout,
+            "type": self.type,
+            "orgtask_uuid": self.orgtask_uuid,
+            "flow_name": self.flow_name,
+            "flow_run_name": self.flow_run_name,
+            "seq": self.seq,
+            "catalog_diff": self.catalog_diff,
+        }
+
+
 class PrefectAirbyteSyncTaskSetup(Schema):
     """
     task config payload in prefect for a airbyte sync task

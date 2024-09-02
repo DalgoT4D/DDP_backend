@@ -50,11 +50,11 @@ from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
 from ddpui.utils.helpers import map_airbyte_keys_to_postgres_keys
 from ddpui.utils.constants import (
-    TASK_DBTRUN,
     TASK_GITPULL,
     TRANSFORM_TASKS_SEQ,
     TASK_GENERATE_EDR,
-    TASK_SEED,
+    LONG_RUNNING_TASKS,
+    DEFAULT_TRANSFORM_TASKS_IN_PIPELINE,
 )
 from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.core.pipelinefunctions import (
@@ -133,7 +133,7 @@ def post_orgtask(request, payload: CreateOrgTaskPayload):
     )
 
     dataflow = None
-    if task.slug in [TASK_DBTRUN, TASK_SEED]:
+    if task.slug in LONG_RUNNING_TASKS:
         dbt_project_params, error = gather_dbt_project_params(orguser.org)
         if error:
             raise HttpError(400, error)
@@ -165,13 +165,12 @@ def post_system_transformation_tasks(request):
     """
     - Create a git pull url secret block
     - Create a dbt cli profile block
-    - Create dbt tasks
+    - Create all the system transform tasks
         - git pull
         - dbt deps
         - dbt clean
         - dbt run
         - dbt test
-        - dbt docs generate
     """
     orguser: OrgUser = request.orguser
     if orguser.org.dbt is None:
@@ -336,6 +335,8 @@ def get_prefect_transformation_tasks(request):
                 "command": command,
                 "generated_by": org_task.generated_by,
                 "seq": TRANSFORM_TASKS_SEQ[org_task.task.slug],
+                "pipeline_default": org_task.task.slug
+                in DEFAULT_TRANSFORM_TASKS_IN_PIPELINE,
             }
         )
 
@@ -349,7 +350,7 @@ def get_prefect_transformation_tasks(request):
             else None
         )
 
-    return res
+    return sorted(res, key=lambda x: x["seq"])
 
 
 @orgtaskapi.delete("transform/", auth=auth.CustomAuthMiddleware())

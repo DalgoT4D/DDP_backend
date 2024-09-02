@@ -24,6 +24,13 @@ from ddpui.models.org_user import Org
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask
 from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.utils import secretsmanager
+from ddpui.utils.constants import (
+    TASK_DOCSGENERATE,
+    TASK_DBTTEST,
+    TASK_DBTRUN,
+    TASK_DBTSEED,
+    TASK_DBTDEPS,
+)
 from ddpui.utils.timezone import as_ist
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.singletaskprogress import SingleTaskProgress
@@ -102,10 +109,11 @@ def task_config_params(task: Task):
 
     # dbt task config parameters
     TASK_CONIF_PARAM = {
-        "dbt-deps": {"flags": ["upgrade"], "options": ["add-package"]},
-        "dbt-run": {"flags": ["full-refresh"], "options": ["select", "exclude"]},
-        "dbt-test": {"flags": [], "options": ["select", "exclude"]},
-        "dbt-seed": {"flags": [], "options": ["select"]},
+        TASK_DBTDEPS: {"flags": ["upgrade"], "options": ["add-package"]},
+        TASK_DBTRUN: {"flags": ["full-refresh"], "options": ["select", "exclude"]},
+        TASK_DBTTEST: {"flags": [], "options": ["select", "exclude"]},
+        TASK_DBTSEED: {"flags": [], "options": ["select"]},
+        TASK_DOCSGENERATE: {"flags": [], "options": []},
     }
 
     return TASK_CONIF_PARAM[task.slug] if task.slug in TASK_CONIF_PARAM else None

@@ -5,8 +5,8 @@ do not raise http errors here
 
 import uuid
 from typing import Union
-import yaml
 from pathlib import Path
+import yaml
 from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask, TaskLock, TaskLockStatus
 from ddpui.models.org import (
     Org,
@@ -53,7 +53,7 @@ def create_default_transform_tasks(
 
 
 def fetch_elementary_profile_target(orgdbt: OrgDbt) -> str:
-    # fetch the target from the elementary profiles yaml file
+    """fetch the target from the elementary profiles yaml file"""
     elementary_target = "default"
 
     # parse the yaml file
