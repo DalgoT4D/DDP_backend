@@ -766,12 +766,12 @@ def summarize_logs(
                 return
             task = dbt_tasks[0]
             task['logs'] = []
-            limit = 0
+            offset = 0
             while(True):
-                new_logs_set = get_flow_run_logs(flow_run_id, task_id, limit, offset=FLOW_RUN_LOGS_OFFSET_LIMIT)
+                new_logs_set = get_flow_run_logs(flow_run_id, task_id, limit=FLOW_RUN_LOGS_OFFSET_LIMIT, offset)
                 task['logs']+=new_logs_set['logs']
                 if len(new_logs_set['logs']) == FLOW_RUN_LOGS_OFFSET_LIMIT:
-                    limit+=1
+                    offset+=1
                 else:
                     break
             logs_text = "\n".join([log["message"] for log in task["logs"]])
