@@ -58,7 +58,7 @@ from ddpui.utils.constants import (
     TASK_DBTCLEAN,
     TASK_DBTDEPS,
     TASK_AIRBYTESYNC,
-    FLOW_RUN_LOGS_OFFSET_LIMIT
+    FLOW_RUN_LOGS_OFFSET_LIMIT,
 )
 from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.core import llm_service
@@ -765,13 +765,15 @@ def summarize_logs(
                 )
                 return
             task = dbt_tasks[0]
-            task['logs'] = []
+            task["logs"] = []
             offset = 0
-            while(True):
-                new_logs_set = get_flow_run_logs(flow_run_id, task_id, limit=FLOW_RUN_LOGS_OFFSET_LIMIT, offset)
-                task['logs']+=new_logs_set['logs']
-                if len(new_logs_set['logs']) == FLOW_RUN_LOGS_OFFSET_LIMIT:
-                    offset+=FLOW_RUN_LOGS_OFFSET_LIMIT
+            while True:
+                new_logs_set = get_flow_run_logs(
+                    flow_run_id, task_id, FLOW_RUN_LOGS_OFFSET_LIMIT, offset
+                )
+                task["logs"] += new_logs_set["logs"]
+                if len(new_logs_set["logs"]) == FLOW_RUN_LOGS_OFFSET_LIMIT:
+                    offset += FLOW_RUN_LOGS_OFFSET_LIMIT
                 else:
                     break
             logs_text = "\n".join([log["message"] for log in task["logs"]])
