@@ -610,7 +610,7 @@ def get_flow_run_logs_v2(flow_run_id: str) -> dict:  # pragma: no cover
     )
     return res
 
-def get_flow_run_graphs(flow_run_id: str) -> dict:  # pragma: no cover
+def get_flow_run_graphs(flow_run_id: str) -> dict:
     """retreive the tasks from a flow-run from prefect"""
     res = prefect_get(
         f"flow_runs/graph/{flow_run_id}",
