@@ -771,7 +771,7 @@ def summarize_logs(
                 new_logs_set = get_flow_run_logs(flow_run_id, task_id, limit=FLOW_RUN_LOGS_OFFSET_LIMIT, offset)
                 task['logs']+=new_logs_set['logs']
                 if len(new_logs_set['logs']) == FLOW_RUN_LOGS_OFFSET_LIMIT:
-                    offset+=1
+                    offset+=FLOW_RUN_LOGS_OFFSET_LIMIT
                 else:
                     break
             logs_text = "\n".join([log["message"] for log in task["logs"]])
