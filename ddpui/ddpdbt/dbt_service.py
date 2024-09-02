@@ -9,7 +9,7 @@ from pathlib import Path
 import requests
 import boto3
 import boto3.exceptions
-
+from ninja.errors import HttpError
 from django.utils.text import slugify
 from dbt_automation import assets
 from ddpui.ddpprefect import (
@@ -17,11 +17,20 @@ from ddpui.ddpprefect import (
     DBTCLIPROFILE,
     SECRET,
 )
+from ddpui.models.org_user import OrgUser
+from ddpui.models.tasks import OrgDataFlowv1
 from ddpui.models.org import OrgDbt, OrgPrefectBlockv1, OrgWarehouse, TransformType
 from ddpui.models.org_user import Org
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask
 from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.utils import secretsmanager
+from ddpui.utils.constants import (
+    TASK_DOCSGENERATE,
+    TASK_DBTTEST,
+    TASK_DBTRUN,
+    TASK_DBTSEED,
+    TASK_DBTDEPS,
+)
 from ddpui.utils.timezone import as_ist
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.singletaskprogress import SingleTaskProgress
@@ -100,10 +109,11 @@ def task_config_params(task: Task):
 
     # dbt task config parameters
     TASK_CONIF_PARAM = {
-        "dbt-deps": {"flags": ["upgrade"], "options": ["add-package"]},
-        "dbt-run": {"flags": ["full-refresh"], "options": ["select", "exclude"]},
-        "dbt-test": {"flags": [], "options": ["select", "exclude"]},
-        "dbt-seed": {"flags": [], "options": ["select"]},
+        TASK_DBTDEPS: {"flags": ["upgrade"], "options": ["add-package"]},
+        TASK_DBTRUN: {"flags": ["full-refresh"], "options": ["select", "exclude"]},
+        TASK_DBTTEST: {"flags": [], "options": ["select", "exclude"]},
+        TASK_DBTSEED: {"flags": [], "options": ["select"]},
+        TASK_DOCSGENERATE: {"flags": [], "options": []},
     }
 
     return TASK_CONIF_PARAM[task.slug] if task.slug in TASK_CONIF_PARAM else None
@@ -305,3 +315,31 @@ def fetch_elementary_report(org: Org):
             s3response["LastModified"]
         ).isoformat(),  # e.g. 2024-06-07T06:14:08+05:30
     }
+
+
+def refresh_elementary_report_via_prefect(orguser: OrgUser) -> dict:
+    """refreshes the elementary report for the current date using the prefect deployment"""
+    org: Org = orguser.org
+    odf = OrgDataFlowv1.objects.filter(
+        org=org, name__startswith=f"pipeline-{org.slug}-generate-edr"
+    ).first()
+
+    if odf is None:
+        return {"error": "pipeline not found"}
+
+    locks = prefect_service.lock_tasks_for_deployment(odf.deployment_id, orguser)
+
+    try:
+        res = prefect_service.create_deployment_flow_run(odf.deployment_id)
+        for tasklock in locks:
+            tasklock.flow_run_id = res["flow_run_id"]
+            tasklock.save()
+
+    except Exception as error:
+        for task_lock in locks:
+            logger.info("deleting TaskLock %s", task_lock.orgtask.task.slug)
+            task_lock.delete()
+        logger.exception(error)
+        raise HttpError(400, "failed to start a run") from error
+
+    return res

@@ -90,20 +90,26 @@ Logs:
 def email_orgusers(org: Org, email_body: str):
     """sends a notificationemail to all OrgUsers"""
     tag = " [STAGING]" if not PRODUCTION else ""
-    subject = f"Prefect notification{tag}"
-    if org.ses_whitelisted_email:
-        logger.info(f"sending email to {org.ses_whitelisted_email}")
-        send_text_message(
-            org.ses_whitelisted_email,
-            subject,
-            "There is a problem with the pipeline; we are working on a fix",
-        )
+    subject = f"Dalgo notification{tag}"
     for orguser in OrgUser.objects.filter(
         org=org,
         new_role__slug=SUPER_ADMIN_ROLE,
     ).all():
         logger.info(f"sending prefect-notification email to {orguser.user.email}")
         send_text_message(orguser.user.email, subject, email_body)
+
+
+def email_orgusers_ses_whitelisted(org: Org, email_body: str):
+    """sends a notificationemail to all OrgUsers"""
+    if org.ses_whitelisted_email:
+        tag = " [STAGING]" if not PRODUCTION else ""
+        subject = f"Dalgo notification{tag}"
+        logger.info(f"sending email to {org.ses_whitelisted_email}")
+        send_text_message(
+            org.ses_whitelisted_email,
+            subject,
+            email_body,
+        )
 
 
 def email_flowrun_logs_to_orgusers(org: Org, flow_run_id: str):

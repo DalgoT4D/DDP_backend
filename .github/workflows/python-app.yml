@@ -9,6 +9,17 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: ddp
+          POSTGRES_PASSWORD: ${{ secrets.DBPASSWORD }}
+          POSTGRES_DB: ${{ secrets.DBNAME }}
+        ports:
+          - 5432:5432
+        options: --health-cmd "pg_isready -U ddp" --health-interval 10s --health-timeout 5s --health-retries 5
+          
     strategy:
       matrix:
         python-version: ["3.10"]
@@ -42,46 +53,23 @@ jobs:
         run: |
           eval `ssh-agent -s`
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh -L 8080:localhost:8080 -L 5433:${{ secrets.DBHOST }}:5432 ${{ secrets.SERVER }} -f -N
+          ssh -L 8080:localhost:8080 -L 8001:localhost:8001  ${{ secrets.SERVER }} -f -N
       - name: Test with pytest
         env:
           AIRBYTE_SERVER_HOST: localhost
-          AIRBYTE_SERVER_PORT: 8000
+          AIRBYTE_SERVER_PORT: 8001
           AIRBYTE_SERVER_APIVER: v1
           AIRBYTE_API_TOKEN: ${{ secrets.AIRBYTE_API_TOKEN }}
           DBHOST: localhost
-          DBPORT: 5433
+          DBPORT: 5432
           DBNAME: ${{ secrets.DBNAME }}
-          DBUSER: ${{ secrets.DBUSER }}
+          DBUSER: ddp
           DBPASSWORD: ${{ secrets.DBPASSWORD }}
           PREFECT_PROXY_API_URL: http://localhost:8080
           DEV_SECRETS_DIR: /tmp/
           CLIENTDBT_ROOT: /tmp
         run: |
-          coverage run -m pytest \
-          ddpui/tests/services/test_airbyte_service.py \
-          ddpui/tests/services/test_prefect_service.py \
-          ddpui/tests/services/test_dbt_service.py \
-          ddpui/tests/utils/test_deleteorg.py \
-          ddpui/tests/utils/test_deploymentblocks.py \
-          ddpui/tests/utils/test_helpers.py \
-          ddpui/tests/helper/test_airbyte_unit_schemas.py \
-          ddpui/tests/helper/test_auth.py \
-          ddpui/tests/helper/test_dev_secretsmanager.py \
-          ddpui/tests/helper/test_secretsmanager.py \
-          ddpui/tests/helper/test_airbytehelpers.py \
-          ddpui/tests/helper/test_prefectlogs.py \
-          ddpui/tests/api_tests/test_user_org_api.py \
-          ddpui/tests/api_tests/test_warehouse_api.py \
-          ddpui/tests/api_tests/test_dbt_api.py \
-          ddpui/tests/api_tests/test_airbyte_api.py \
-          ddpui/tests/api_tests/test_airbyte_api_v1.py \
-          ddpui/tests/api_tests/test_pipeline_api.py \
-          ddpui/tests/api_tests/test_orgtask_api.py \
-          ddpui/tests/api_tests/test_user_preferences_api.py \
-          ddpui/tests/api_tests/test_notifications_api.py \
-          ddpui/tests/core/test_pipelinefunctions.py
-          ddpui/tests/core/test_notifications_service.py \
+          coverage run -m pytest --durations=20
           coverage report --fail-under=70
           coverage xml
       - name: Check coverage percentage
@@ -96,8 +84,4 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
-      - name: Deploy to EC2
-        run: |
-          eval `ssh-agent -s`
-          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh ${{ secrets.SERVER }} "source ~/.nvm/nvm.sh; cd /home/ddp/DDP_backend; git pull; pm2 restart django-celery-worker django-backend"
+      

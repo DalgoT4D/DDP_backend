@@ -84,7 +84,7 @@
             "slug": "dbt-seed",
             "label": "DBT seed",
             "command": "seed",
-            "is_system": false
+            "is_system": true
         }
     },
     {

@@ -21,6 +21,7 @@ from ddpui.ddpprefect import (
     SECRET,
 )
 from ddpui.models.org import (
+    Org,
     OrgWarehouse,
     OrgPrefectBlockv1,
 )
@@ -42,17 +43,20 @@ from ddpui.core.orgtaskfunctions import (
     create_prefect_deployment_for_dbtcore_task,
     delete_orgtask,
     fetch_orgtask_lock,
+    fetch_orgtask_lock_v1,
 )
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
 from ddpui.utils.helpers import map_airbyte_keys_to_postgres_keys
 from ddpui.utils.constants import (
-    TASK_DBTRUN,
     TASK_GITPULL,
     TRANSFORM_TASKS_SEQ,
     TASK_GENERATE_EDR,
+    LONG_RUNNING_TASKS,
+    DEFAULT_TRANSFORM_TASKS_IN_PIPELINE,
 )
+from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.core.pipelinefunctions import (
     setup_dbt_core_task_config,
     setup_git_pull_shell_task_config,
@@ -129,7 +133,7 @@ def post_orgtask(request, payload: CreateOrgTaskPayload):
     )
 
     dataflow = None
-    if task.slug == TASK_DBTRUN:
+    if task.slug in LONG_RUNNING_TASKS:
         dbt_project_params, error = gather_dbt_project_params(orguser.org)
         if error:
             raise HttpError(400, error)
@@ -161,13 +165,12 @@ def post_system_transformation_tasks(request):
     """
     - Create a git pull url secret block
     - Create a dbt cli profile block
-    - Create dbt tasks
+    - Create all the system transform tasks
         - git pull
         - dbt deps
         - dbt clean
         - dbt run
         - dbt test
-        - dbt docs generate
     """
     orguser: OrgUser = request.orguser
     if orguser.org.dbt is None:
@@ -276,48 +279,78 @@ def post_system_transformation_tasks(request):
     return {"success": 1}
 
 
+@orgtaskapi.get("elementary-lock/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_orgtasks"])
+def get_elemetary_task_lock(request):
+    """Check if the elementary report generation task is underway"""
+    org: Org = request.orguser.org
+    org_task = get_edr_send_report_task(org)
+    return fetch_orgtask_lock(org_task)
+
+
 @orgtaskapi.get("transform/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_orgtasks"])
 def get_prefect_transformation_tasks(request):
     """Fetch all dbt tasks for an org; client or system"""
     orguser: OrgUser = request.orguser
 
-    org_tasks = []
-
-    for org_task in (
+    org_tasks = (
         OrgTask.objects.filter(
             org=orguser.org,
             task__type__in=["git", "dbt"],
         )
         .order_by("-generated_by")
-        .all()
-    ):
+        .select_related("task")
+    )
+
+    all_org_task_ids = org_tasks.values_list("id", flat=True)
+    all_org_task_locks = TaskLock.objects.filter(orgtask_id__in=all_org_task_ids)
+
+    all_dataflow_orgtasks = DataflowOrgTask.objects.filter(
+        orgtask_id__in=all_org_task_ids, dataflow__dataflow_type="manual"
+    ).select_related("dataflow")
+
+    res = []
+
+    for org_task in org_tasks:
         # git pull               : "git" + " " + "pull"
         # dbt run --full-refresh : "dbt" + " " + "run --full-refresh"
         command = org_task.task.type + " " + org_task.get_task_parameters()
 
-        org_tasks.append(
+        lock = None
+        all_locks = [
+            lock for lock in all_org_task_locks if lock.orgtask_id == org_task.id
+        ]
+        if len(all_locks) > 0:
+            lock = all_locks[0]
+
+        res.append(
             {
                 "label": org_task.task.label,
                 "slug": org_task.task.slug,
                 "id": org_task.id,
                 "uuid": org_task.uuid,
                 "deploymentId": None,
-                "lock": fetch_orgtask_lock(org_task),
+                "lock": fetch_orgtask_lock_v1(org_task, lock),
                 "command": command,
                 "generated_by": org_task.generated_by,
                 "seq": TRANSFORM_TASKS_SEQ[org_task.task.slug],
+                "pipeline_default": org_task.task.slug
+                in DEFAULT_TRANSFORM_TASKS_IN_PIPELINE,
             }
         )
 
-        # fetch the manual deploymentId for the dbt run task
-        if org_task.task.slug == TASK_DBTRUN:
-            dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
-            org_tasks[-1]["deploymentId"] = (
-                dataflow_orgtask.dataflow.deployment_id if dataflow_orgtask else None
-            )
+        # fetch the manual deploymentId for the long running dbt tasks
+        dataflow_orgtasks = [
+            dfot for dfot in all_dataflow_orgtasks if dfot.orgtask_id == org_task.id
+        ]
+        res[-1]["deploymentId"] = (
+            dataflow_orgtasks[0].dataflow.deployment_id
+            if len(dataflow_orgtasks) > 0
+            else None
+        )
 
-    return org_tasks
+    return sorted(res, key=lambda x: x["seq"])
 
 
 @orgtaskapi.delete("transform/", auth=auth.CustomAuthMiddleware())

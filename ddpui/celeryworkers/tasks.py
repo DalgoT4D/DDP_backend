@@ -9,13 +9,13 @@ from celery.schedules import crontab
 from django.utils.text import slugify
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, PIPELINE_MANAGER_ROLE
 from ddpui.celery import app
-from ddpui.ddpairbyte.airbyte_service import abreq
 from ddpui.models.notifications import Notification
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.utils.discord import send_discord_notification
 from ddpui.utils.sendgrid import send_email_notification, send_schema_changes_email
 from ddpui.utils.timezone import UTC, as_utc
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.models.org import (
     Org,
     OrgDbt,
@@ -210,7 +210,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
 
 
 @app.task(bind=True)
-def run_dbt_commands(self, orguser_id: int):
+def run_dbt_commands(self, orguser_id: int, task_id: str):
     """run a dbt command via celery instead of via prefect"""
     try:
 
@@ -220,7 +220,7 @@ def run_dbt_commands(self, orguser_id: int):
         logger.info("found org %s", org.name)
 
         taskprogress = TaskProgress(
-            self.request.id, f"{TaskProgressHashPrefix.RUNDBTCMDS}-{org.slug}"
+            task_id, f"{TaskProgressHashPrefix.RUNDBTCMDS}-{org.slug}"
         )
 
         taskprogress.add(
@@ -240,7 +240,7 @@ def run_dbt_commands(self, orguser_id: int):
         ).all()
         for org_task in org_tasks:
             task_lock = TaskLock.objects.create(
-                orgtask=org_task, locked_by=orguser, celery_task_id=self.request.id
+                orgtask=org_task, locked_by=orguser, celery_task_id=task_id
             )
             task_locks.append(task_lock)
 
@@ -399,52 +399,58 @@ def run_dbt_commands(self, orguser_id: int):
             lock.delete()
 
 
+def detect_schema_changes_for_org(org: Org):
+    """detect schema changes for all connections of this org"""
+    org_tasks = OrgTask.objects.filter(org=org, task__slug=TASK_AIRBYTESYNC)
+
+    # remove invalid schema changes whose connections are no longer in our db
+    org_conn_ids = [org_task.connection_id for org_task in org_tasks]
+    for schema_change in OrgSchemaChange.objects.filter(org=org).exclude(
+        connection_id__in=org_conn_ids
+    ):
+        schema_change.delete()
+
+    # check for schema changes
+    for org_task in org_tasks:
+        connection_catalog, err = airbytehelpers.fetch_and_update_org_schema_changes(
+            org, org_task.connection_id
+        )
+
+        if err:
+            logger.error(err)
+            continue
+
+        change_type = connection_catalog.get("schemaChange")
+
+        logger.info(
+            "Found schema changes for connection %s of type %s",
+            org_task.connection_id,
+            change_type,
+        )
+
+        # notify users
+        if change_type in ["breaking", "non_breaking"]:
+            try:
+                org_users = OrgUser.objects.filter(
+                    org=org,
+                    new_role__slug__in=[
+                        ACCOUNT_MANAGER_ROLE,
+                        PIPELINE_MANAGER_ROLE,
+                    ],
+                )
+                message = """This email is to let you know that schema changes have been detected in your Dalgo pipeline, which require your review."""
+                for orguser in org_users:
+                    logger.info(f"sending notification email to {orguser.user.email}")
+                    send_schema_changes_email(org.name, orguser.user.email, message)
+            except Exception as err:
+                logger.error(err)
+
+
 @app.task()
 def schema_change_detection():
     """detects schema changes for all the orgs and sends an email to admins if there is a change"""
-    orgs = Org.objects.all()
-    schema_changes = {}
-
-    for org in orgs:
-        org_conn = OrgTask.objects.filter(org=org, task__slug=TASK_AIRBYTESYNC)
-        for org_task in org_conn:
-            try:
-                response = abreq(
-                    "web_backend/connections/get",
-                    {
-                        "withRefreshedCatalog": True,
-                        "connectionId": org_task.connection_id,
-                    },
-                    timeout=60,
-                )
-
-                change_type = response.get("schemaChange")
-                logger.info(f"Schema change detected for org {org.name}: {change_type}")
-
-                if change_type in ["breaking", "non_breaking"]:
-                    schema_change, created = OrgSchemaChange.objects.get_or_create(
-                        connection_id=org_task.connection_id,
-                        defaults={"change_type": change_type, "org": org},
-                    )
-                    if not created:
-                        # If the record already exists, update the change_type
-                        schema_change.change_type = change_type
-                        schema_change.save()
-                    if org not in schema_changes:
-                        schema_changes[org] = {"breaking": 0, "non_breaking": 0}
-                    schema_changes[org][change_type] += 1
-            except Exception as e:
-                logger.error(f"Error checking connection for org {org.name}: {e}")
-                continue
-
-    for org in schema_changes:
-        org_users = OrgUser.objects.filter(
-            org=org, new_role__slug__in=[ACCOUNT_MANAGER_ROLE, PIPELINE_MANAGER_ROLE]
-        )
-        message = """This email is to let you know that schema changes have been detected in your Dalgo pipeline, which require your review."""
-        for orguser in org_users:
-            logger.info(f"sending notification email to {orguser.user.email}")
-            send_schema_changes_email(org.name, orguser.user.email, message)
+    for org in Org.objects.all():
+        detect_schema_changes_for_org(org)
 
 
 @app.task(bind=False)
@@ -455,28 +461,39 @@ def get_connection_catalog_task(task_key, org_id, connection_id):
         task_key, int(os.getenv("SCHEMA_REFRESH_TTL", "180"))
     )
     taskprogress.add(
-        {
-            "message": "started",
-            "status": "running",
-        }
+        {"message": "started", "status": TaskProgressStatus.RUNNING, "result": None}
     )
 
-    res, error = airbytehelpers.get_connection_catalog(org, connection_id)
-    if error:
-        logger.error(
-            "unable to fetch schema catalog for %s %s", org.slug, connection_id
-        )
+    connection_catalog, err = airbytehelpers.fetch_and_update_org_schema_changes(
+        org, connection_id
+    )
+
+    if err:
+        logger.error(err)
         taskprogress.add(
             {
-                "message": "unable to fetch catalog response",
-                "status": "failed",
+                "message": err,
+                "status": TaskProgressStatus.FAILED,
+                "result": None,
             }
         )
+        return
 
     taskprogress.add(
-        {"message": "fetched catalog data", "status": "completed", "result": res}
+        {
+            "message": "fetched catalog data",
+            "status": TaskProgressStatus.COMPLETED,
+            "result": {
+                "name": connection_catalog["name"],
+                "connectionId": connection_catalog["connectionId"],
+                "catalogId": connection_catalog["catalogId"],
+                "syncCatalog": connection_catalog["syncCatalog"],
+                "schemaChange": connection_catalog["schemaChange"],
+                "catalogDiff": connection_catalog.get("catalogDiff"),
+            },
+        }
     )
-    return res
+    return connection_catalog
 
 
 @app.task(bind=False)
@@ -486,27 +503,36 @@ def create_elementary_report(task_key: str, org_id: int, bucket_file_path: str):
 
     edr_binary = Path(os.getenv("DBT_VENV")) / "venv/bin/edr"
     org = Org.objects.filter(id=org_id).first()
-    orgdbt = OrgDbt.objects.filter(org=org).first()
-    project_dir = Path(orgdbt.project_dir) / "dbtrepo"
-    profiles_dir = project_dir / "elementary_profiles"
+    org_task = get_edr_send_report_task(org, create=True)
+
+    project_dir = Path(org.dbt.project_dir) / "dbtrepo"
+    # profiles_dir = project_dir / "elementary_profiles"
     aws_access_key_id = os.getenv("ELEMENTARY_AWS_ACCESS_KEY_ID")
     aws_secret_access_key = os.getenv("ELEMENTARY_AWS_SECRET_ACCESS_KEY")
     s3_bucket_name = os.getenv("ELEMENTARY_S3_BUCKET")
 
+    # cli args based on the edr org task
+    cli_params = org_task.parameters
+    cli_options = cli_params.get("options", {})
+
+    # its a relative path ({"profiles-dir": "elementary_profiles", ...}) since deployment run via shell task in prefect that have a "working_dir"
+    if "profiles-dir" in cli_options:
+        profiles_dir = project_dir / cli_options["profiles-dir"]
+        cli_options["profiles-dir"] = str(profiles_dir)
+
+    if "bucket-file-path" in cli_options:
+        cli_options["bucket-file-path"] = bucket_file_path
+
     os.environ["PATH"] += ":" + str(Path(os.getenv("DBT_VENV")) / "venv/bin")
     cmd = [
         str(edr_binary),
-        "send-report",
+        org_task.get_task_parameters(),
         "--aws-access-key-id",
         aws_access_key_id,
         "--aws-secret-access-key",
         aws_secret_access_key,
         "--s3-bucket-name",
         s3_bucket_name,
-        "--bucket-file-path",
-        bucket_file_path,
-        "--profiles-dir",
-        str(profiles_dir),
     ]
     taskprogress.add(
         {

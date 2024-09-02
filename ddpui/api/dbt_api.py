@@ -14,10 +14,12 @@ from ddpui.celeryworkers.tasks import (
     run_dbt_commands,
     setup_dbtworkspace,
 )
+from ddpui.models.tasks import TaskProgressHashPrefix
+from ddpui.utils.taskprogress import TaskProgress
 from ddpui.ddpdbt import dbt_service
 from ddpui.ddpprefect import DBTCLIPROFILE, prefect_service
 from ddpui.ddpprefect.schema import OrgDbtGitHub, OrgDbtSchema, OrgDbtTarget
-from ddpui.models.org import OrgPrefectBlockv1
+from ddpui.models.org import OrgPrefectBlockv1, Org
 from ddpui.models.org_user import OrgUser, OrgUserResponse
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.dbtdocs import create_single_html
@@ -252,11 +254,20 @@ def get_transform_type(request):
 def post_run_dbt_commands(request):
     """Run dbt commands via celery"""
     orguser: OrgUser = request.orguser
+    org: Org = orguser.org
+
+    task_id = str(uuid4())
+
+    taskprogress = TaskProgress(
+        task_id, f"{TaskProgressHashPrefix.RUNDBTCMDS}-{org.slug}"
+    )
+
+    taskprogress.add({"message": "Added dbt commands in queue", "status": "queued"})
 
     # executes clean, deps, run
-    task = run_dbt_commands.delay(orguser.id)
+    run_dbt_commands.delay(orguser.id, task_id)
 
-    return {"task_id": task.id}
+    return {"task_id": task_id}
 
 
 @dbtapi.post("/fetch-elementary-report/", auth=auth.CustomAuthMiddleware())
@@ -281,3 +292,11 @@ def post_refresh_elementary_report(request):
         raise HttpError(400, error)
 
     return result
+
+
+@dbtapi.post("/v1/refresh-elementary-report/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_dbt_workspace"])
+def post_refresh_elementary_report_via_prefect(request):
+    """prepare the dbt docs single html via prefect deployment"""
+    orguser: OrgUser = request.orguser
+    return dbt_service.refresh_elementary_report_via_prefect(orguser)

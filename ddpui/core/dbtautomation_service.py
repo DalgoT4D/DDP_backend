@@ -79,7 +79,7 @@ OPERATIONS_DICT = {
     "pivot": pivot,
     "unpivot": unpivot,
     "generic": generic_function,
-    "rawsql": generic_sql_function
+    "rawsql": generic_sql_function,
 }
 
 OPERATIONS_DICT_SQL = {
@@ -101,7 +101,7 @@ OPERATIONS_DICT_SQL = {
     "pivot": pivot_dbt_sql,
     "unpivot": unpivot_dbt_sql,
     "generic": generic_function_dbt_sql,
-    "rawsql": raw_generic_dbt_sql
+    "rawsql": raw_generic_dbt_sql,
 }
 
 
@@ -135,13 +135,14 @@ def _get_merge_operation_config(
     }
 
 
-def create_dbt_model_in_project(
+def create_or_update_dbt_model_in_project(
     org_warehouse: OrgWarehouse,
     orgdbt_model: OrgDbtModel,
-    payload: CompleteDbtModelPayload,
+    payload: CompleteDbtModelPayload = None,
+    is_create: bool = True,
 ):
     """
-    Create a dbt model in the project for an operation
+    Create or update a dbt model in the project for an operation
     Read through all the operations mapped to the target_model
     Fetch the source from the first operation
     Create the merge op config
@@ -168,24 +169,51 @@ def create_dbt_model_in_project(
             merge_input.append(
                 {
                     "input_type": source_model.type,
-                    "input_name": source_model.name if source_model.type == 'model' else source_model.display_name,
+                    "input_name": (
+                        source_model.name
+                        if source_model.type == "model"
+                        else source_model.display_name
+                    ),
                     "source_name": source_model.source_name,
                 }
             )
+
+    output_name = payload.name if is_create else orgdbt_model.name
+    dest_schema = payload.dest_schema if is_create else orgdbt_model.schema
 
     merge_config = _get_merge_operation_config(
         operations,
         input=merge_input[
             0
         ],  # just send the first input; for multi input operations rest will be inside the operations and their config - under "other_inputs".
-        output_name=payload.name,
-        dest_schema=payload.dest_schema,
+        output_name=output_name,
+        dest_schema=dest_schema,
     )
+
     model_sql_path, output_cols = merge_operations(
         merge_config, wclient, Path(orgdbt_model.orgdbt.project_dir) / "dbtrepo"
     )
 
     return model_sql_path, output_cols
+
+
+def create_dbt_model_in_project(
+    org_warehouse: OrgWarehouse,
+    orgdbt_model: OrgDbtModel,
+    payload: CompleteDbtModelPayload,
+):
+    """Wrapper function to create a dbt model in the project."""
+    return create_or_update_dbt_model_in_project(
+        org_warehouse, orgdbt_model, payload, is_create=True
+    )
+
+
+def update_dbt_model_in_project(
+    org_warehouse: OrgWarehouse,
+    orgdbt_model: OrgDbtModel,
+):
+    """Wrapper function to update a dbt model in the project."""
+    create_or_update_dbt_model_in_project(org_warehouse, orgdbt_model, is_create=False)
 
 
 def sync_sources_in_schema(
@@ -238,6 +266,38 @@ def delete_dbt_model_in_project(orgdbt_model: OrgDbtModel):
     dbt_project = dbtProject(Path(orgdbt_model.orgdbt.project_dir) / "dbtrepo")
     dbt_project.delete_model(orgdbt_model.sql_path)
     return True
+
+
+def propagate_changes_to_downstream_operations(
+    target_model: OrgDbtModel, updated_operation: OrgDbtOperation, depth: int = 1
+):
+    """
+    - Propagate changes of an update in OrgDbtOperation downstream to all operations that build the target OrgDbtModel
+    - Propagating changes mean making sure the output of the updated operation i.e. output_cols are available as source_columns to next operations
+    - By default the depth is 1 i.e. it will only update the next operation
+    """
+
+    if depth == 0:
+        logger.info("Terminating propagation as depth is 0")
+        return
+
+    next_op = OrgDbtOperation.objects.filter(
+        dbtmodel=target_model, seq=updated_operation.seq + 1
+    ).first()
+
+    if not next_op:
+        logger.info("No downstream operations left to propagate changes")
+        return
+
+    config = next_op.config  # {"type": .. , "config": {}, "input_models": [...]}
+    op_config = config.get("config", {})
+    if "source_columns" in op_config:
+        op_config["source_columns"] = updated_operation.output_cols
+
+    next_op.config = config
+    next_op.save()
+
+    propagate_changes_to_downstream_operations(target_model, next_op, depth - 1)
 
 
 @app.task(bind=True)
@@ -382,7 +442,4 @@ def warehouse_datatypes(org_warehouse: OrgWarehouse):
 def json_columnspec(warehouse: OrgWarehouse, source_schema, input_name, json_column):
     """Get json keys of a table in warehouse"""
     wclient = _get_wclient(warehouse)
-    json_columnspec = wclient.get_json_columnspec(
-        source_schema, input_name, json_column
-    )
-    return json_columnspec
+    return wclient.get_json_columnspec(source_schema, input_name, json_column)

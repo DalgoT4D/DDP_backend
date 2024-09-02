@@ -85,7 +85,7 @@ def test_trigger_reset_and_sync_workflow_3(synctask, resettask):
 
     result, error = trigger_reset_and_sync_workflow(org, connection_id)
     assert result is None
-    assert error == "deployment ID not found"
+    assert error == "airbyte server block not found"
 
 
 def test_trigger_reset_and_sync_workflow_4(synctask, resettask):

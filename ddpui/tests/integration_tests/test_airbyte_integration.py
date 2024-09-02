@@ -11,6 +11,7 @@ from ddpui.tests.helper.test_airbyte_unit_schemas import *
 from ddpui.ddpairbyte.airbyte_service import *
 
 
+@pytest.mark.skip(reason="Skipping this test as airbyte integraion needs to be done")
 class TestDeleteSource:
     def test_create_workspace(self):  # skipcq: PYL-R0201
         """creates a workspace, checks airbyte response"""
@@ -63,6 +64,7 @@ class TestDeleteSource:
             raise ValueError(f"Response validation failed: {e.errors()}")
 
 
+@pytest.mark.skip(reason="Skipping this test as airbyte integraion needs to be done")
 class TestWorkspace:
     """class which holds all the workspace tests"""
 
@@ -123,6 +125,7 @@ def test_workspace_id():
     return test_workspace.workspace_id
 
 
+@pytest.mark.skip(reason="Skipping this test as airbyte integraion needs to be done")
 class TestAirbyteSource:
     """class which holds all the source tests"""
 
@@ -275,6 +278,7 @@ def test_source_id(test_workspace_id):
     return test_source.source_id
 
 
+@pytest.mark.skip(reason="Skipping this test as airbyte integraion needs to be done")
 class TestAirbyteDestination:
     destination_config = {
         "host": os.getenv("TESTING_AIRBYTE_DEST_CONFIG_DBHOST"),
@@ -395,6 +399,7 @@ def test_destination_id(test_workspace_id):
     return test_destination.destination_id
 
 
+@pytest.mark.skip(reason="Skipping this test as airbyte integraion needs to be done")
 class TestConnection:
     def test_a_create_connection(
         self,

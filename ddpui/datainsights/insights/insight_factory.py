@@ -23,6 +23,9 @@ class InsightsFactory:
         filter_: dict,
         wtype: str,
     ) -> DataTypeColInsights:
+        if col_type not in TranslateColDataType:
+            raise ValueError(f"Invalid col type")
+
         if col_type == TranslateColDataType.NUMERIC:
             return NumericColInsights(columns, db_table, db_schema, filter_, wtype)
         elif col_type == TranslateColDataType.DATETIME:

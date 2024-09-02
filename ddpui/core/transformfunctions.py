@@ -20,7 +20,7 @@ def validate_operation_config(
     payload: Union[CreateDbtModelPayload, EditDbtOperationPayload],
     target_model: OrgDbtModel,
     is_multi_input_op: bool,
-    current_operations_chained: int = 0,
+    operation_chained_before: int = 0,
     edit: bool = False,
 ):
     """
@@ -31,19 +31,15 @@ def validate_operation_config(
     return [final_config, all_input_models]
     """
 
-    if edit:
-        current_operations_chained -= 1
+    # if edit:
+    #     current_operations_chained -= 1
 
     primary_input_model: OrgDbtModel = None  # the first input model
     other_input_models: list[OrgDbtModel] = []
     seq: list[int] = []
     other_input_columns: list[list[str]] = []
 
-    logger.info(
-        f"Operations chained for the target model {target_model.uuid} : {current_operations_chained}"
-    )
-
-    if current_operations_chained == 0:
+    if operation_chained_before == 0:
         if not payload.input_uuid:
             raise HttpError(422, "input is required")
 
@@ -71,7 +67,10 @@ def validate_operation_config(
         [primary_input_model] if primary_input_model else []
     ) + other_input_models
 
-    logger.info("passed all validation; moving to create operation")
+    logger.info(
+        "passed all validation; moving to %s operation",
+        {"update" if edit else "create"},
+    )
 
     # source columns or selected columns
     # there will be atleast one input

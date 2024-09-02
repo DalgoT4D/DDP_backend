@@ -123,3 +123,10 @@ class AirbyteConnectionSchemaUpdate(Schema):
     syncCatalog: dict
     connectionId: str
     sourceCatalogId: str
+
+
+class AirbyteConnectionSchemaUpdateSchedule(Schema):
+    """Docstring"""
+
+    catalogDiff: dict
+    cron: str = None

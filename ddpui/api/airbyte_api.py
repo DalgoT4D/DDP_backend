@@ -17,6 +17,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteConnectionCreateResponse,
     AirbyteGetConnectionsResponse,
     AirbyteConnectionSchemaUpdate,
+    AirbyteConnectionSchemaUpdateSchedule,
     AirbyteDestinationCreate,
     AirbyteDestinationUpdate,
     AirbyteSourceCreate,
@@ -30,6 +31,7 @@ from ddpui.ddpairbyte.schema import (
 from ddpui.auth import has_permission
 
 from ddpui.models.org_user import OrgUser
+from ddpui.models.org import OrgType
 from ddpui.models.llm import LogsSummarizationType, LlmSession
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
@@ -38,7 +40,11 @@ from ddpui.celeryworkers.tasks import (
     add_custom_connectors_to_workspace,
     summarize_logs,
 )
-from ddpui.models.tasks import TaskProgressHashPrefix, TaskProgressStatus
+from ddpui.models.tasks import (
+    TaskProgressHashPrefix,
+    TaskProgressStatus,
+    OrgDataFlowv1,
+)
 from ddpui.utils.singletaskprogress import SingleTaskProgress
 
 airbyteapi = NinjaAPI(urls_namespace="airbyte")
@@ -88,7 +94,7 @@ def get_airbyte_source_definitions(request):
 
     # filter source definitions for demo account
     allowed_sources = os.getenv("DEMO_AIRBYTE_SOURCE_TYPES")
-    if orguser.org.is_demo is True and allowed_sources:
+    if orguser.org.type == OrgType.DEMO and allowed_sources:
         res["sourceDefinitions"] = [
             source_def
             for source_def in res["sourceDefinitions"]
@@ -127,7 +133,7 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    if orguser.org.is_demo:
+    if orguser.org.type == OrgType.DEMO:
         logger.info("Demo account user")
         source_def = airbyte_service.get_source_definition(
             orguser.org.airbyte_workspace_id, payload.sourceDefId
@@ -162,7 +168,7 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    if orguser.org.is_demo:
+    if orguser.org.type == OrgType.DEMO:
         logger.info("Demo account user")
         source = airbyte_service.get_source(orguser.org.airbyte_workspace_id, source_id)
 
@@ -191,7 +197,7 @@ def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    if orguser.org.is_demo:
+    if orguser.org.type == OrgType.DEMO:
         logger.info("Demo account user")
         source_def = airbyte_service.get_source_definition(
             orguser.org.airbyte_workspace_id, payload.sourceDefId
@@ -228,7 +234,7 @@ def post_airbyte_check_source_for_update(
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    if orguser.org.is_demo:
+    if orguser.org.type == OrgType.DEMO:
         logger.info("Demo account user")
         source = airbyte_service.get_source(orguser.org.airbyte_workspace_id, source_id)
 
@@ -663,9 +669,22 @@ def get_connection_catalog_v1(request, connection_id):
     task_key = (
         f"{TaskProgressHashPrefix.SCHEMA_CHANGE}-{orguser.org.slug}-{connection_id}"
     )
-    if SingleTaskProgress.fetch(task_key) is not None:
-        return {"task_id": task_key, "message": "already running"}
+    current_task_progress = SingleTaskProgress.fetch(task_key)
+    if current_task_progress is not None:
+        if (
+            "progress" in current_task_progress
+            and len(current_task_progress["progress"]) > 0
+        ):
+            if current_task_progress["progress"][-1]["status"] == [
+                TaskProgressStatus.RUNNING,
+            ]:
+                return {"task_id": task_key, "message": "already running"}
 
+    taskprogress = SingleTaskProgress(
+        task_key, int(os.getenv("SCHEMA_REFRESH_TTL", "180"))
+    )
+
+    taskprogress.add({"message": "queued", "status": "queued", "result": None})
     # ignore the returned celery task id
     get_connection_catalog_task.delay(task_key, orguser.org.id, connection_id)
 
@@ -689,6 +708,30 @@ def update_connection_schema(
     if error:
         raise HttpError(400, error)
     return res
+
+
+@airbyteapi.post(
+    "/v1/connections/{connection_id}/schema_update/schedule",
+    auth=auth.CustomAuthMiddleware(),
+)
+@has_permission(["can_edit_connection"])
+def schedule_update_connection_schema(
+    request, connection_id, payload: AirbyteConnectionSchemaUpdateSchedule
+):
+    """
+    schedule a schema change flow for a connection. this would include
+    1. updating the connection with the correct catalog
+    2. resetting affecting streams
+    3. syncing the connection again
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    if org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    airbytehelpers.schedule_update_connection_schema(orguser, connection_id, payload)
+
+    return {"success": 1}
 
 
 @airbyteapi.get(

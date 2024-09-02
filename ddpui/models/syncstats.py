@@ -9,6 +9,7 @@ class SyncStats(models.Model):
 
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     connection_id = models.CharField(max_length=36)
+    job_id = models.IntegerField(null=True)
     attempt = models.IntegerField(default=0)
     status = models.TextField()
     sync_type = models.CharField(

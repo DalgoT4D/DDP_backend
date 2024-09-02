@@ -40,7 +40,7 @@ from ddpui.models.role_based_access import Role, RolePermission
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.deleteorg import delete_warehouse_v1
 from ddpui.utils.orguserhelpers import from_orguser
-from ddpui.models.org import OrgWarehouse, Org
+from ddpui.models.org import OrgWarehouse, Org, OrgType
 from ddpui.models.orgtnc import OrgTnC
 
 user_org_api = NinjaAPI(urls_namespace="userorg")
@@ -132,7 +132,9 @@ def get_current_user_v2(request):
                     {"slug": rolep.permission.slug, "name": rolep.permission.name}
                     for rolep in curr_orguser.new_role.rolepermissions.all()
                 ],
-                is_demo=org.is_demo if org else False,
+                is_demo=(
+                    curr_orguser.org.type == OrgType.DEMO if curr_orguser.org else False
+                ),
             )
         )
 
@@ -178,13 +180,56 @@ def get_organization_users(request):
     orguser: OrgUser = request.orguser
     if orguser.org is None:
         raise HttpError(400, "no associated org")
-    query = OrgUser.objects.filter(org=orguser.org)
-    orgusers = []
-    for orguser in query:
-        userattributes = UserAttributes.objects.filter(user=orguser.user).first()
-        if not (userattributes and userattributes.is_platform_admin):
-            orgusers.append(from_orguser(orguser))
-    return orgusers
+    org: Org = orguser.org
+    # warehouse
+    warehouse = OrgWarehouse.objects.filter(org=org).first()
+
+    res = []
+    for curr_orguser in OrgUser.objects.filter(org=org).prefetch_related(
+        Prefetch(
+            "new_role",
+            queryset=Role.objects.prefetch_related(
+                Prefetch(
+                    "rolepermissions",
+                    queryset=RolePermission.objects.filter(
+                        role_id=F("role__id")
+                    ).select_related("permission"),
+                )
+            ),
+        ),
+        Prefetch(
+            "org",
+            queryset=Org.objects.prefetch_related(
+                "orgtncs",  # Assuming 'orgtnc' is a related name from Org to its related model
+            ),
+        ),
+        Prefetch(
+            "user",
+            queryset=User.objects.all(),
+        ),
+    ):
+        if curr_orguser.org.orgtncs.exists():
+            curr_orguser.org.tnc_accepted = curr_orguser.org.orgtncs.exists()
+        res.append(
+            OrgUserResponse(
+                email=curr_orguser.user.email,
+                org=curr_orguser.org,
+                active=curr_orguser.user.is_active,
+                role=curr_orguser.role,
+                role_slug=slugify(OrgUserRole(curr_orguser.role).name),
+                new_role_slug=curr_orguser.new_role.slug,
+                wtype=warehouse.wtype if warehouse else None,
+                permissions=[
+                    {"slug": rolep.permission.slug, "name": rolep.permission.name}
+                    for rolep in curr_orguser.new_role.rolepermissions.all()
+                ],
+                is_demo=(
+                    curr_orguser.org.type == OrgType.DEMO if curr_orguser.org else False
+                ),
+            )
+        )
+
+    return res
 
 
 @user_org_api.post("/organizations/users/delete", auth=auth.CustomAuthMiddleware())
@@ -579,7 +624,7 @@ def delete_organization_warehouses_v1(request):
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
 
-    if orguser.org.is_demo:
+    if orguser.org.type == OrgType.DEMO:
         raise HttpError(403, "insufficient permissions")
 
     delete_warehouse_v1(orguser.org)
@@ -602,12 +647,4 @@ def post_organization_accept_tnc(request):
 @has_permission(["can_view_flags"])
 def get_organization_feature_flags(request):
     """get"""
-    orguser: OrgUser = request.orguser
-    org_slug = orguser.org.slug
-
-    flags = {"allowLogsSummary": False}
-
-    if flag_enabled("LOG_SUMMARY", request_org_slug=org_slug):
-        flags["allowLogsSummary"] = True
-
-    return flags
+    return {"allowLogsSummary": True}
