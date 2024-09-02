@@ -333,7 +333,6 @@ def update_dbt_cli_profile_block(
     target: str = None,
     credentials: dict = None,
     bqlocation: str = None,
-    new_block_name: str = None,
 ):
     """Update the dbt cli profile for an org"""
     response = prefect_put(
@@ -348,7 +347,6 @@ def update_dbt_cli_profile_block(
             },
             "credentials": credentials,
             "bqlocation": bqlocation,
-            "new_block_name": new_block_name,
         },
     )
     return response

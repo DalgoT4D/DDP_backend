@@ -3,6 +3,8 @@ functions which work with airbyte and with the dalgo database
 """
 
 import json
+import os
+import yaml
 from ninja.errors import HttpError
 from django.utils.text import slugify
 from django.conf import settings
@@ -13,7 +15,7 @@ from django.db.models.functions import RowNumber
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import AirbyteConnectionSchemaUpdate, AirbyteWorkspace
 from ddpui.ddpprefect import prefect_service
-from ddpui.models.org import Org, OrgPrefectBlockv1, OrgSchemaChange
+from ddpui.models.org import Org, OrgPrefectBlockv1, OrgSchemaChange, OrgWarehouseSchema
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.custom_logger import CustomLogger
@@ -29,10 +31,15 @@ from ddpui.ddpprefect.schema import (
 )
 from ddpui.ddpprefect import AIRBYTESERVER
 from ddpui.ddpprefect import DBTCLIPROFILE
+from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.models.org import OrgDataFlowv1, OrgWarehouse
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask
 from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTERESET
-from ddpui.utils.helpers import generate_hash_id, update_dict_but_not_stars
+from ddpui.utils.helpers import (
+    generate_hash_id,
+    update_dict_but_not_stars,
+    map_airbyte_keys_to_postgres_keys,
+)
 from ddpui.utils import secretsmanager
 from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
 from ddpui.core.pipelinefunctions import (
@@ -41,6 +48,7 @@ from ddpui.core.pipelinefunctions import (
 )
 from ddpui.core.orgtaskfunctions import fetch_orgtask_lock, fetch_orgtask_lock_v1
 from ddpui.models.tasks import TaskLock
+from ddpui.core.dbtfunctions import gather_dbt_project_params
 
 logger = CustomLogger("airbyte")
 
@@ -762,27 +770,210 @@ def update_destination(
 
     secretsmanager.update_warehouse_credentials(warehouse, dbt_credentials)
 
+    create_or_update_org_cli_block(org, warehouse, payload.config)
+
+    return destination, None
+
+
+def create_warehouse(org: Org, payload: OrgWarehouseSchema):
+    """creates a warehouse for an org"""
+
+    if payload.wtype not in ["postgres", "bigquery", "snowflake"]:
+        return None, "unrecognized warehouse type " + payload.wtype
+
+    destination = airbyte_service.create_destination(
+        org.airbyte_workspace_id,
+        f"{payload.wtype}-warehouse",
+        payload.destinationDefId,
+        payload.airbyteConfig,
+    )
+    logger.info("created destination having id " + destination["destinationId"])
+
+    # prepare the dbt credentials from airbyteConfig
+    dbt_credentials = None
+    if payload.wtype == "postgres":
+        # host, database, port, username, password
+        # jdbc_url_params
+        # ssl: true | false
+        # ssl_mode:
+        #   mode: disable | allow | prefer | require | verify-ca | verify-full
+        #   ca_certificate: string if mode is require, verify-ca, or verify-full
+        #   client_key_password: string if mode is verify-full
+        # tunnel_method:
+        #   tunnel_method = NO_TUNNEL | SSH_KEY_AUTH | SSH_PASSWORD_AUTH
+        #   tunnel_host: string if SSH_KEY_AUTH | SSH_PASSWORD_AUTH
+        #   tunnel_port: int if SSH_KEY_AUTH | SSH_PASSWORD_AUTH
+        #   tunnel_user: string if SSH_KEY_AUTH | SSH_PASSWORD_AUTH
+        #   ssh_key: string if SSH_KEY_AUTH
+        #   tunnel_user_password: string if SSH_PASSWORD_AUTH
+        dbt_credentials = payload.airbyteConfig
+    elif payload.wtype == "bigquery":
+        credentials_json = json.loads(payload.airbyteConfig["credentials_json"])
+        dbt_credentials = credentials_json
+    elif payload.wtype == "snowflake":
+        dbt_credentials = payload.airbyteConfig
+
+    destination_definition = airbyte_service.get_destination_definition(
+        org.airbyte_workspace_id, payload.destinationDefId
+    )
+
+    warehouse = OrgWarehouse(
+        org=org,
+        name=payload.name,
+        wtype=payload.wtype,
+        credentials="",
+        airbyte_destination_id=destination["destinationId"],
+        airbyte_docker_repository=destination_definition["dockerRepository"],
+        airbyte_docker_image_tag=destination_definition["dockerImageTag"],
+    )
+    credentials_lookupkey = secretsmanager.save_warehouse_credentials(
+        warehouse, dbt_credentials
+    )
+    warehouse.credentials = credentials_lookupkey
+    if "dataset_location" in destination["connectionConfiguration"]:
+        warehouse.bq_location = destination["connectionConfiguration"][
+            "dataset_location"
+        ]
+    warehouse.save()
+
+    create_or_update_org_cli_block(org, warehouse, payload.airbyteConfig)
+
+    return None, None
+
+
+def create_or_update_org_cli_block(
+    org: Org, warehouse: OrgWarehouse, airbyte_creds: dict
+):
+    """
+    Create/update the block in db and also in prefect
+    """
+    dbt_creds = map_airbyte_keys_to_postgres_keys(airbyte_creds)
+
+    bqlocation = None
+    if warehouse.wtype == "bigquery":
+        bqlocation = (
+            airbyte_creds["dataset_location"]
+            if "dataset_location" in airbyte_creds
+            else None
+        )
+    profile_name = None
+    target = None
+    dbt_project_params = None
+    try:
+        dbt_project_params, error = gather_dbt_project_params(org)
+        if error:
+            raise HttpError(400, error)
+        dbt_project_filename = str(dbt_project_params.dbt_repo_dir / "dbt_project.yml")
+        if not os.path.exists(dbt_project_filename):
+            raise HttpError(400, dbt_project_filename + " is missing")
+
+        with open(dbt_project_filename, "r", encoding="utf-8") as dbt_project_file:
+            dbt_project = yaml.safe_load(dbt_project_file)
+            if "profile" not in dbt_project:
+                raise HttpError(400, "could not find 'profile:' in dbt_project.yml")
+
+        profile_name = dbt_project["profile"]
+        target = dbt_project_params.target
+    except Exception as err:
+        logger.error(
+            "Failed to fetch the dbt profile - looks like transformation has not been setup. Using 'default' as profile name and continuing"
+        )
+        logger.error(err)
+
+    # set defaults to target and profile
+    # cant create a cli profile without these two
+    # idea is these should be updated when we setup transformation or update the warehouse
+    if not profile_name:
+        profile_name = "default"
+
+    if not target:
+        target = "default"
+
+    logger.info(
+        "Found org=%s profile_name=%s target=%s", org.slug, profile_name, target
+    )
     cli_profile_block = OrgPrefectBlockv1.objects.filter(
         org=org, block_type=DBTCLIPROFILE
     ).first()
-
     if cli_profile_block:
-        logger.info(f"Updating the cli profile block : {cli_profile_block.block_name}")
-        prefect_service.update_dbt_cli_profile_block(
-            block_name=cli_profile_block.block_name,
-            wtype=warehouse.wtype,
-            credentials=dbt_credentials,
-            bqlocation=(
-                payload.config["dataset_location"]
-                if "dataset_location" in payload.config
-                else None
-            ),
+        logger.info(
+            f"Updating the cli profile block : {cli_profile_block.block_name} for org={org.slug} with profile={profile_name} target={target}"
         )
+        try:
+            cli_block_response = prefect_service.update_dbt_cli_profile_block(
+                block_name=cli_profile_block.block_name,
+                wtype=warehouse.wtype,
+                credentials=dbt_creds,
+                bqlocation=bqlocation,
+                profilename=profile_name,
+                target=target,
+            )
+            cli_profile_block.block_id = cli_block_response["block_id"]
+            cli_profile_block.block_name = cli_block_response["block_name"]
+            cli_profile_block.save()
+        except Exception as error:
+            logger.error(
+                "Failed to update the cli profile block %s , err=%s",
+                cli_profile_block.block_name,
+                str(error),
+            )
+            return (None, None), "Failed to update the cli profile block"
         logger.info(
             f"Successfully updated the cli profile block : {cli_profile_block.block_name}"
         )
+    else:
+        logger.info(
+            "Creating a new cli profile block for %s with profile=%s & target=%s ",
+            org.slug,
+            profile_name,
+            target,
+        )
+        new_block_name = f"{org.slug}-{profile_name}"
 
-    return destination, None
+        try:
+            cli_block_response = prefect_service.create_dbt_cli_profile_block(
+                block_name=new_block_name,
+                profilename=profile_name,
+                target=target,
+                wtype=warehouse.wtype,
+                bqlocation=bqlocation,
+                credentials=dbt_creds,
+            )
+        except Exception as error:
+            logger.error(
+                "Failed to create a new cli profile block %s , err=%s",
+                new_block_name,
+                str(error),
+            )
+            return (None, None), "Failed to update the cli profile block"
+
+        # save the cli profile block in django db
+        cli_profile_block = OrgPrefectBlockv1.objects.create(
+            org=org,
+            block_type=DBTCLIPROFILE,
+            block_id=cli_block_response["block_id"],
+            block_name=cli_block_response["block_name"],
+        )
+
+    return (cli_profile_block, dbt_project_params), None
+
+
+def get_warehouses(org: Org):
+    """return list of warehouses for an Org"""
+    warehouses = [
+        {
+            "wtype": warehouse.wtype,
+            # "credentials": warehouse.credentials,
+            "name": warehouse.name,
+            "airbyte_destination": airbyte_service.get_destination(
+                org.airbyte_workspace_id, warehouse.airbyte_destination_id
+            ),
+            "airbyte_docker_repository": warehouse.airbyte_docker_repository,
+            "airbyte_docker_image_tag": warehouse.airbyte_docker_image_tag,
+        }
+        for warehouse in OrgWarehouse.objects.filter(org=org)
+    ]
+    return warehouses, None
 
 
 def get_demo_whitelisted_source_config(type: str):
