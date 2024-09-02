@@ -61,6 +61,7 @@ from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.core import llm_service
 
 logger = CustomLogger("ddpui")
+UTC = timezone.UTC
 
 
 @app.task(bind=True)
