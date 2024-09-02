@@ -4,13 +4,15 @@ import os, json
 from django.apps import apps
 from django.contrib.auth.models import User
 from unittest.mock import Mock, patch
+from ninja.errors import HttpError
 
 from ddpui.models.org import Org, OrgPrefectBlockv1, OrgDataFlowv1
-from ddpui.models.tasks import Task, OrgTask, TaskLock, TaskLockStatus
+from ddpui.models.tasks import Task, OrgTask, TaskLock, TaskLockStatus, DataflowOrgTask
 from ddpui.ddpprefect import AIRBYTESERVER
 from ddpui.models.org_user import OrgUser, OrgUserRole, Role
-from ddpui.core.pipelinefunctions import fetch_pipeline_lock_v1
+from ddpui.core.pipelinefunctions import fetch_pipeline_lock_v1, lock_tasks_for_dataflow
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_DBTRUN
 
 pytestmark = pytest.mark.django_db
 
@@ -254,3 +256,32 @@ def test_fetch_pipeline_lock_v1_locking_dataflow_not_equal(
             "status": TaskLockStatus.LOCKED,
         }
         assert result["flowRunId"] == "some_flow_run_id"
+
+
+def test_lock_tasks_for_dataflow(test_dataflow: OrgDataFlowv1, orguser: OrgUser):
+    """test lock_tasks_for_dataflow function"""
+
+    # create orgtasks for the dataflow
+    orgtask1 = OrgTask.objects.create(
+        task=Task.objects.filter(slug=TASK_AIRBYTESYNC).first(),
+        org=test_dataflow.org,
+        connection_id="some-conn-id",
+    )
+    orgtask2 = OrgTask.objects.create(
+        task=Task.objects.filter(slug=TASK_DBTRUN).first(),
+        org=test_dataflow.org,
+    )
+
+    # create mapping
+    for orgtask in [orgtask1, orgtask2]:
+        DataflowOrgTask.objects.create(orgtask=orgtask, dataflow=test_dataflow)
+
+    lock_tasks_for_dataflow(orguser, test_dataflow, [orgtask1, orgtask2])
+
+    assert TaskLock.objects.filter(orgtask__in=[orgtask1, orgtask2]).count() == 2
+
+    with pytest.raises(HttpError) as exc:
+        lock_tasks_for_dataflow(orguser, test_dataflow, [orgtask1, orgtask2])
+
+    assert exc.value.status_code == 400
+    assert str(exc.value) == f"{orguser.user.email} is running this pipeline right now"

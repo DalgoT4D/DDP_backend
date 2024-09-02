@@ -19,7 +19,7 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowUpdateSchema3,
 )
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.models.tasks import DataflowOrgTask, TaskLock
+from ddpui.models.tasks import DataflowOrgTask, TaskLock, OrgTask, OrgDataFlowv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.ddpprefect import (
@@ -628,11 +628,19 @@ def create_deployment_flow_run(
     return res
 
 
-def lock_tasks_for_deployment(deployment_id: str, orguser: OrgUser):
+def lock_tasks_for_deployment(
+    deployment_id: str,
+    orguser: OrgUser,
+    dataflow_orgtasks: list[DataflowOrgTask] = [],
+):
     """locks all orgtasks for a deployment"""
-    dataflow_orgtasks = DataflowOrgTask.objects.filter(
-        dataflow__deployment_id=deployment_id
-    ).all()
+    orgtask_ids = []
+
+    # if we have the orgtasks available dont do the extra query
+    if len(dataflow_orgtasks) == 0:
+        dataflow_orgtasks = DataflowOrgTask.objects.filter(
+            dataflow__deployment_id=deployment_id
+        ).all()
 
     orgtask_ids = [df_orgtask.orgtask.id for df_orgtask in dataflow_orgtasks]
     lock = TaskLock.objects.filter(orgtask_id__in=orgtask_ids).first()
@@ -654,7 +662,7 @@ def lock_tasks_for_deployment(deployment_id: str, orguser: OrgUser):
                 locks.append(task_lock)
     except Exception as error:
         raise HttpError(
-            400, "Someone else is trying to run this pipeline... try again"
+            400, "Someone else is trying to run this pipeline. Try again"
         ) from error
     return locks
 
