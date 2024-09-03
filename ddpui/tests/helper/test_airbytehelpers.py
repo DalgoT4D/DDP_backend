@@ -434,7 +434,12 @@ def test_get_sync_history_for_connection_success(
     "ddpui.utils.secretsmanager.update_warehouse_credentials",
     mock_update_warehouse_credentials=Mock(),
 )
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
+    mock_create_or_update_org_cli_block=Mock(),
+)
 def test_update_destination_name(
+    mock_create_or_update_org_cli_block: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
     mock_update_destination: Mock,
@@ -448,6 +453,7 @@ def test_update_destination_name(
     }
     mock_retrieve_warehouse_credentials.return_value = None
     mock_update_warehouse_credentials.return_value = None
+    mock_create_or_update_org_cli_block.return_value = ((None, None), None)
 
     payload = AirbyteDestinationUpdate(
         name="new-name", destinationDefId="destinationDefId", config={}
@@ -459,6 +465,7 @@ def test_update_destination_name(
     warehouse.refresh_from_db()
 
     assert warehouse.name == "new-name"
+    mock_create_or_update_org_cli_block.assert_called_once()
 
 
 @patch(
@@ -473,7 +480,12 @@ def test_update_destination_name(
     "ddpui.utils.secretsmanager.update_warehouse_credentials",
     mock_update_warehouse_credentials=Mock(),
 )
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
+    mock_create_or_update_org_cli_block=Mock(),
+)
 def test_update_destination_postgres_config(
+    mock_create_or_update_org_cli_block: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
     mock_update_destination: Mock,
@@ -504,6 +516,7 @@ def test_update_destination_postgres_config(
             "port": "123",
         },
     )
+    mock_create_or_update_org_cli_block.assert_called_once()
 
 
 @patch(
@@ -518,7 +531,12 @@ def test_update_destination_postgres_config(
     "ddpui.utils.secretsmanager.update_warehouse_credentials",
     mock_update_warehouse_credentials=Mock(),
 )
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
+    mock_create_or_update_org_cli_block=Mock(),
+)
 def test_update_destination_bigquery_config(
+    mock_create_or_update_org_cli_block: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
     mock_update_destination: Mock,
@@ -548,6 +566,7 @@ def test_update_destination_bigquery_config(
             "key": "value",
         },
     )
+    mock_create_or_update_org_cli_block.assert_called_once()
 
 
 @patch(
@@ -562,7 +581,12 @@ def test_update_destination_bigquery_config(
     "ddpui.utils.secretsmanager.update_warehouse_credentials",
     mock_update_warehouse_credentials=Mock(),
 )
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
+    mock_create_or_update_org_cli_block=Mock(),
+)
 def test_update_destination_snowflake_config(
+    mock_create_or_update_org_cli_block: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
     mock_update_destination: Mock,
@@ -592,6 +616,7 @@ def test_update_destination_snowflake_config(
         warehouse,
         {"credentials": {"password": "newpassword"}},
     )
+    mock_create_or_update_org_cli_block.assert_called_once()
 
 
 @patch(
@@ -607,11 +632,11 @@ def test_update_destination_snowflake_config(
     mock_update_warehouse_credentials=Mock(),
 )
 @patch(
-    "ddpui.ddpprefect.prefect_service.update_dbt_cli_profile_block",
-    mock_update_dbt_cli_profile_block=Mock(),
+    "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
+    mock_create_or_update_org_cli_block=Mock(),
 )
 def test_update_destination_cliprofile(
-    mock_update_dbt_cli_profile_block: Mock,
+    mock_create_or_update_org_cli_block: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
     mock_update_destination: Mock,
@@ -645,11 +670,8 @@ def test_update_destination_cliprofile(
     assert error is None
     assert response == {"destinationId": "DESTINATION_ID"}
 
-    mock_update_dbt_cli_profile_block.assert_called_once_with(
-        block_name="cliblockname",
-        wtype=warehouse.wtype,
-        credentials={"credentials": {"password": "newpassword"}},
-        bqlocation="LOCATIUON",
+    mock_create_or_update_org_cli_block.assert_called_once_with(
+        org, warehouse, payload.config
     )
 
 
