@@ -6,7 +6,7 @@ from ddpui.models.tasks import OrgTask, DataflowOrgTask
 from ddpui.models.org import OrgPrefectBlockv1
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect import prefect_service
-from ddpui.ddpprefect import AIRBYTESERVER
+from ddpui.ddpprefect import AIRBYTESERVER, DBTCLIPROFILE
 from ddpui.ddpdbt import dbt_service
 from ddpui.utils import secretsmanager
 from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTERESET
@@ -132,6 +132,16 @@ def delete_warehouse_v1(org: Org, dry_run: bool = False):  # skipcq: PYL-R0201
         if not dry_run:
             secretsmanager.delete_warehouse_credentials(warehouse)
             warehouse.delete()
+
+    logger.info(
+        "================ Remove cli profile block from django and prefect ==========="
+    )
+    # delete the cli profile block
+    for cli_profile_block in OrgPrefectBlockv1.objects.filter(
+        org=org, block_type=DBTCLIPROFILE
+    ).all():
+        prefect_service.delete_dbt_cli_profile_block(cli_profile_block.block_id)
+        cli_profile_block.delete()
 
 
 def delete_orgtasks(org: Org, dry_run: bool = False):

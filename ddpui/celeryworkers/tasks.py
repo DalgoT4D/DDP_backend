@@ -46,6 +46,8 @@ from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.singletaskprogress import SingleTaskProgress
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 from ddpui.ddpprefect.prefect_service import (
+    get_flow_run_graphs,
+    get_flow_run_logs,
     update_dbt_core_block_schema,
     get_dbt_cli_profile_block,
     prefect_get,
@@ -56,6 +58,7 @@ from ddpui.utils.constants import (
     TASK_DBTCLEAN,
     TASK_DBTDEPS,
     TASK_AIRBYTESYNC,
+    FLOW_RUN_LOGS_OFFSET_LIMIT,
 )
 from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
@@ -751,8 +754,8 @@ def summarize_logs(
     log_file_name = ""
     try:
         if type == LogsSummarizationType.DEPLOYMENT:
-            all_task_logs = get_flow_run_logs_v2(flow_run_id)
-            dbt_tasks = [task for task in all_task_logs if task["id"] == task_id]
+            all_task = get_flow_run_graphs(flow_run_id)
+            dbt_tasks = [task for task in all_task if task["id"] == task_id]
             if len(dbt_tasks) == 0:
                 taskprogress.add(
                     {
@@ -763,6 +766,21 @@ def summarize_logs(
                 )
                 return
             task = dbt_tasks[0]
+            task["logs"] = []
+            offset = 0
+            while True:
+                new_logs_set = get_flow_run_logs(
+                    flow_run_id, task_id, FLOW_RUN_LOGS_OFFSET_LIMIT, offset
+                )
+                task["logs"] += new_logs_set["logs"]["logs"]
+                if len(new_logs_set["logs"]) == FLOW_RUN_LOGS_OFFSET_LIMIT:
+                    offset += FLOW_RUN_LOGS_OFFSET_LIMIT
+                elif len(new_logs_set["logs"]) < FLOW_RUN_LOGS_OFFSET_LIMIT:
+                    break
+                else:
+                    logger.info("Something weird happening in fetching logs")
+                    break
+
             logs_text = "\n".join([log["message"] for log in task["logs"]])
             log_file_name = f"{flow_run_id}_{task_id}"
         elif type == LogsSummarizationType.AIRBYTE_SYNC:

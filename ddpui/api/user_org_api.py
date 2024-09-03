@@ -42,6 +42,7 @@ from ddpui.utils.deleteorg import delete_warehouse_v1
 from ddpui.utils.orguserhelpers import from_orguser
 from ddpui.models.org import OrgWarehouse, Org, OrgType
 from ddpui.models.orgtnc import OrgTnC
+from ddpui.ddpairbyte import airbytehelpers
 
 user_org_api = NinjaAPI(urls_namespace="userorg")
 # http://127.0.0.1:8000/api/docs
@@ -406,7 +407,7 @@ def post_modify_orguser_role(request, payload: OrgUserUpdateNewRole):
 def post_organization_warehouse(request, payload: OrgWarehouseSchema):
     """registers a data warehouse for the org"""
     orguser: OrgUser = request.orguser
-    _, error = orgfunctions.create_warehouse(orguser.org, payload)
+    _, error = airbytehelpers.create_warehouse(orguser.org, payload)
     if error:
         raise HttpError(400, error)
 
@@ -418,7 +419,7 @@ def post_organization_warehouse(request, payload: OrgWarehouseSchema):
 def get_organizations_warehouses(request):
     """returns all warehouses associated with this org"""
     orguser: OrgUser = request.orguser
-    result, error = orgfunctions.get_warehouses(orguser.org)
+    result, error = airbytehelpers.get_warehouses(orguser.org)
     if error:
         raise HttpError(400, error)
     return {"warehouses": result}

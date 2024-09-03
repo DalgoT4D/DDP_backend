@@ -678,6 +678,10 @@ def test_post_organization_warehouse_unknownwtype(orguser):
     "ddpui.utils.secretsmanager",
     save_warehouse_credentials=Mock(return_value="credentials_lookupkey"),
 )
+@patch.multiple(
+    "ddpui.ddpairbyte.airbytehelpers",
+    create_or_update_org_cli_block=Mock(return_value=((None, None), None)),
+)
 def test_post_organization_warehouse_bigquery(orguser):
     """success test, warehouse creation"""
     request = mock_request(orguser)
