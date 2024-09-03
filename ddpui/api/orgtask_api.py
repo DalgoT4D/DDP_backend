@@ -14,7 +14,7 @@ from pydantic.error_wrappers import ValidationError as PydanticValidationError
 from django.forms.models import model_to_dict
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
-from ddpui.ddpairbyte import airbyte_service
+from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 
 from ddpui.ddpprefect import (
     DBTCLIPROFILE,
@@ -185,14 +185,6 @@ def post_system_transformation_tasks(request):
         orguser.org.dbt.dbt_venv = os.getenv("DBT_VENV")
         orguser.org.dbt.save()
 
-    dbt_project_params, error = gather_dbt_project_params(orguser.org)
-    if error:
-        raise HttpError(400, error)
-    dbt_project_filename = str(dbt_project_params.dbt_repo_dir / "dbt_project.yml")
-
-    if not os.path.exists(dbt_project_filename):
-        raise HttpError(400, dbt_project_filename + " is missing")
-
     # create a secret block to save the github endpoint url along with token
     try:
         gitrepo_access_token = secretsmanager.retrieve_github_token(orguser.org.dbt)
@@ -222,52 +214,14 @@ def post_system_transformation_tasks(request):
         logger.exception(error)
         raise HttpError(400, str(error)) from error
 
-    with open(dbt_project_filename, "r", encoding="utf-8") as dbt_project_file:
-        dbt_project = yaml.safe_load(dbt_project_file)
-        if "profile" not in dbt_project:
-            raise HttpError(400, "could not find 'profile:' in dbt_project.yml")
-
-    profile_name = dbt_project["profile"]
-    # target = orguser.org.dbt.default_schema
-    logger.info("profile_name=%s target=%s", profile_name, dbt_project_params.target)
-
-    # get the dataset location if warehouse type is bigquery
-    bqlocation = None
-    if warehouse.wtype == "bigquery":
-        destination = airbyte_service.get_destination(
-            orguser.org.airbyte_workspace_id, warehouse.airbyte_destination_id
-        )
-        if destination.get("connectionConfiguration"):
-            bqlocation = destination["connectionConfiguration"]["dataset_location"]
-
-    # map airbyte keys to postgres keys
-    if warehouse.wtype == "postgres":
-        credentials = map_airbyte_keys_to_postgres_keys(credentials)
-
     # create a dbt cli profile block
-    try:
-        cli_block_name = f"{orguser.org.slug}-{profile_name}"
-
-        cli_block_response = prefect_service.create_dbt_cli_profile_block(
-            cli_block_name,
-            profile_name,
-            dbt_project_params.target,
-            warehouse.wtype,
-            bqlocation,
-            credentials,
+    (cli_profile_block, dbt_project_params), error = (
+        airbytehelpers.create_or_update_org_cli_block(
+            orguser.org, warehouse, credentials
         )
-
-        # save the cli profile block in django db
-        cli_profile_block = OrgPrefectBlockv1.objects.create(
-            org=orguser.org,
-            block_type=DBTCLIPROFILE,
-            block_id=cli_block_response["block_id"],
-            block_name=cli_block_response["block_name"],
-        )
-
-    except Exception as error:
-        logger.exception(error)
-        raise HttpError(400, str(error)) from error
+    )
+    if error:
+        raise HttpError(400, error)
 
     # create org tasks for the transformation page
     _, error = create_default_transform_tasks(
