@@ -900,7 +900,7 @@ def create_or_update_org_cli_block(
             f"Updating the cli profile block : {cli_profile_block.block_name} for org={org.slug} with profile={profile_name} target={target}"
         )
         try:
-            cli_block_response = prefect_service.update_dbt_cli_profile_block(
+            prefect_service.update_dbt_cli_profile_block(
                 block_name=cli_profile_block.block_name,
                 wtype=warehouse.wtype,
                 credentials=dbt_creds,
@@ -908,9 +908,6 @@ def create_or_update_org_cli_block(
                 profilename=profile_name,
                 target=target,
             )
-            cli_profile_block.block_id = cli_block_response["block_id"]
-            cli_profile_block.block_name = cli_block_response["block_name"]
-            cli_profile_block.save()
         except Exception as error:
             logger.error(
                 "Failed to update the cli profile block %s , err=%s",
