@@ -888,7 +888,7 @@ def summarize_warehouse_results(
     """
     This function will summarize the results of a warehouse query
     1. Fetch the results of the query
-    2. Upload the results as a file to llm service
+    2. Upload the results as a file to llm service as text file
     3. Query the llm service with the user prompt
     """
 
