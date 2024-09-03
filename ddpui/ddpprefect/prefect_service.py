@@ -592,11 +592,13 @@ def get_deployment(deployment_id) -> dict:
     return res
 
 
-def get_flow_run_logs(flow_run_id: str, offset: int) -> dict:  # pragma: no cover
+def get_flow_run_logs(
+    flow_run_id: str, task_run_id: str, limit: int, offset: int
+) -> dict:  # pragma: no cover
     """retreive the logs from a flow-run from prefect"""
     res = prefect_get(
         f"flow_runs/logs/{flow_run_id}",
-        params={"offset": offset},
+        params={"offset": offset, "limit": limit, "task_run_id": task_run_id},
     )
     return {"logs": res}
 
@@ -605,6 +607,13 @@ def get_flow_run_logs_v2(flow_run_id: str) -> dict:  # pragma: no cover
     """retreive the logs from a flow-run from prefect"""
     res = prefect_get(
         f"flow_runs/v1/logs/{flow_run_id}",
+    )
+    return res
+
+def get_flow_run_graphs(flow_run_id: str) -> dict:
+    """retreive the tasks from a flow-run from prefect"""
+    res = prefect_get(
+        f"flow_runs/graph/{flow_run_id}",
     )
     return res
 

@@ -44,3 +44,6 @@ AIRBYTE_SYNC_TIMEOUT = 15
 SYSTEM_USER_EMAIL = "System User"
 
 # prefect flow run states
+
+# offset limit for fetching logs
+FLOW_RUN_LOGS_OFFSET_LIMIT = 200
