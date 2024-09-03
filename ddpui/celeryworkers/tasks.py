@@ -772,10 +772,14 @@ def summarize_logs(
                     flow_run_id, task_id, FLOW_RUN_LOGS_OFFSET_LIMIT, offset
                 )
                 task["logs"] += new_logs_set["logs"]
-                if len(new_logs_set["logs"]) <= FLOW_RUN_LOGS_OFFSET_LIMIT:
+                if len(new_logs_set["logs"]) == FLOW_RUN_LOGS_OFFSET_LIMIT:
                     offset += FLOW_RUN_LOGS_OFFSET_LIMIT
-                else:
+                elif len(new_logs_set["logs"]) < FLOW_RUN_LOGS_OFFSET_LIMIT:
                     break
+                else:
+                    logger.info("Something weird happening in fetching logs")
+                    break
+
             logs_text = "\n".join([log["message"] for log in task["logs"]])
             log_file_name = f"{flow_run_id}_{task_id}"
         elif type == LogsSummarizationType.AIRBYTE_SYNC:
