@@ -53,11 +53,17 @@ class LlmSession(models.Model):
     assistant_prompt = models.TextField(null=True)
     user_prompts = models.JSONField(default=list, null=True)
     session_id = models.CharField(max_length=200, null=True)
+    session_type = models.CharField(
+        default=LlmAssistantType.LOG_SUMMARIZATION,
+        choices=LlmAssistantType.choices(),
+        max_length=100,
+    )
     session_name = models.CharField(max_length=500, null=True)
     session_status = models.CharField(max_length=200, null=True)
     response = models.JSONField(
         null=True
     )  # one request might have multiple summaries; we store all of them as a json
     response_meta = models.JSONField(null=True)
+    request_meta = models.JSONField(null=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)

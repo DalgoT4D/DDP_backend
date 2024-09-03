@@ -918,6 +918,7 @@ def summarize_warehouse_results(
         org=org,
         session_status=TaskProgressStatus.RUNNING,
         session_name=session_name,
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
     )
 
     credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)

@@ -31,6 +31,7 @@ from ddpui.models.llm import LogsSummarizationType, LlmSession
 from ddpui.datainsights.warehouse import warehouse_factory
 from ddpui.utils import secretsmanager
 from ddpui.utils.helpers import convert_to_standard_types
+from ddpui.utils.constants import LIMIT_ROWS_TO_SEND_TO_LLM
 
 warehouseapi = NinjaAPI(urls_namespace="warehouse")
 logger = CustomLogger("ddpui")
@@ -319,8 +320,6 @@ def post_warehouse_prompt(request, payload: AskWarehouseRequest):
     """
     Ask the warehouse a question/prompt on a result set and get a response from llm service
     """
-    LIMIT_ROWS_TO_SEND_TO_LLM = 1000
-
     stmts = sqlparse.parse(payload.sql)
 
     if len(stmts) > 1:
