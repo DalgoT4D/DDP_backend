@@ -771,7 +771,7 @@ def summarize_logs(
                 new_logs_set = get_flow_run_logs(
                     flow_run_id, task_id, FLOW_RUN_LOGS_OFFSET_LIMIT, offset
                 )
-                task["logs"] += new_logs_set["logs"]
+                task["logs"] += new_logs_set["logs"]["logs"]
                 if len(new_logs_set["logs"]) == FLOW_RUN_LOGS_OFFSET_LIMIT:
                     offset += FLOW_RUN_LOGS_OFFSET_LIMIT
                 elif len(new_logs_set["logs"]) < FLOW_RUN_LOGS_OFFSET_LIMIT:
