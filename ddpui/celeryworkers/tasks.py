@@ -893,7 +893,7 @@ def summarize_warehouse_results(
     """
 
     taskprogress = SingleTaskProgress(self.request.id, 60 * 10)
-    taskprogress.add({"message": "Started", "status": "running", "result": []})
+    taskprogress.add({"message": "Started", "status": "running", "result": {}})
 
     org_warehouse = OrgWarehouse.objects.filter(id=org_warehouse_id).first()
 
@@ -1017,7 +1017,10 @@ def summarize_warehouse_results(
             {
                 "message": f"Generated summary response",
                 "status": TaskProgressStatus.COMPLETED,
-                "result": {"response": llm_session.response, "session_id": llm_session.session_id},
+                "result": {
+                    "response": llm_session.response,
+                    "session_id": llm_session.session_id,
+                },
             }
         )
 
