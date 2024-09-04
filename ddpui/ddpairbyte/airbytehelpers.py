@@ -743,8 +743,7 @@ def update_destination(
         warehouse.name = payload.name
         warehouse.save()
 
-    dbt_credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
-
+    dbt_credentials = {}
     if warehouse.wtype == "postgres":
         dbt_credentials = update_dict_but_not_stars(payload.config)
         # i've forgotten why we have this here, airbyte sends "database" - RC
@@ -768,9 +767,16 @@ def update_destination(
     else:
         return None, "unknown warehouse type " + warehouse.wtype
 
+    curr_credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
+
+    # copy over the value of keys that are missing from in dbt_credentials (these are probably that have all '*****')
+    for key, value in curr_credentials.items():
+        if key not in dbt_credentials:
+            dbt_credentials[key] = value
+
     secretsmanager.update_warehouse_credentials(warehouse, dbt_credentials)
 
-    create_or_update_org_cli_block(org, warehouse, payload.config)
+    create_or_update_org_cli_block(org, warehouse, dbt_credentials)
 
     return destination, None
 
