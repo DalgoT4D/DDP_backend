@@ -753,16 +753,7 @@ def update_destination(
     elif warehouse.wtype == "bigquery":
         dbt_credentials = json.loads(payload.config["credentials_json"])
     elif warehouse.wtype == "snowflake":
-        if (
-            "credentials" in payload.config
-            and "password" in payload.config["credentials"]
-            and isinstance(payload.config["credentials"]["password"], str)
-            and len(payload.config["credentials"]["password"]) > 0
-            and list(set(payload.config["credentials"]["password"])) != "*"
-        ):
-            dbt_credentials["credentials"]["password"] = payload.config["credentials"][
-                "password"
-            ]
+        dbt_credentials = update_dict_but_not_stars(payload.config)
 
     else:
         return None, "unknown warehouse type " + warehouse.wtype
