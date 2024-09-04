@@ -455,7 +455,7 @@ def test_update_destination_name(
     mock_update_destination.return_value = {
         "destinationId": "DESTINATION_ID",
     }
-    mock_retrieve_warehouse_credentials.return_value = None
+    mock_retrieve_warehouse_credentials.return_value = {}
     mock_update_warehouse_credentials.return_value = None
     mock_create_or_update_org_cli_block.return_value = ((None, None), None)
 
