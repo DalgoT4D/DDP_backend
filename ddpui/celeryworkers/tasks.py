@@ -359,10 +359,11 @@ def run_dbt_commands(self, orguser_id: int, task_id: str, dbt_run_params: dict =
         # dbt run
         try:
             cmd = f"{dbt_binary} run"
-            for flag in dbt_run_params.get("flags", []):
-                cmd += " --" + flag
-            for optname, optval in dbt_run_params.get("options", {}):
-                cmd += f" --{optname} {optval}"
+            if dbt_run_params is not None:
+                for flag in dbt_run_params.get("flags") or []:
+                    cmd += " --" + flag
+                for optname, optval in (dbt_run_params.get("options") or {}).items():
+                    cmd += f" --{optname} {optval}"
 
             taskprogress.add({"message": "starting dbt run", "status": "running"})
             process: CompletedProcess = runcmd_with_output(
