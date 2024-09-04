@@ -16,6 +16,7 @@ from ddpui.models.role_based_access import Role
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.auth import has_permission
 from ddpui.ddpdbt import dbt_service
+from ddpui.models.llm import UserPrompt
 
 dataapi = NinjaAPI(urls_namespace="master_data")
 # http://127.0.0.1:8000/api/docs
@@ -87,3 +88,9 @@ def get_roles(request):
     roles = Role.objects.filter(level__lte=orguser.new_role.level).all()
 
     return [{"uuid": role.uuid, "slug": role.slug, "name": role.name} for role in roles]
+
+
+@dataapi.get("/user_prompts/", auth=auth.CustomAuthMiddleware())
+def get_roles(request):
+    """Fetch master list of roles"""
+    return list(map(model_to_dict, UserPrompt.objects.all()))
