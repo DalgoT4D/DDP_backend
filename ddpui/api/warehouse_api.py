@@ -26,8 +26,14 @@ from ddpui.celeryworkers.tasks import summarize_warehouse_results
 from ddpui.schemas.warehouse_api_schemas import (
     RequestorColumnSchema,
     AskWarehouseRequest,
+    SaveLlmSessionRequest,
 )
-from ddpui.models.llm import LogsSummarizationType, LlmSession
+from ddpui.models.llm import (
+    LogsSummarizationType,
+    LlmSession,
+    LlmSessionStatus,
+    LlmAssistantType,
+)
 from ddpui.datainsights.warehouse import warehouse_factory
 from ddpui.utils import secretsmanager
 from ddpui.utils.helpers import convert_to_standard_types
@@ -319,6 +325,7 @@ def get_download_warehouse_data(request, schema_name: str, table_name: str):
 def post_warehouse_prompt(request, payload: AskWarehouseRequest):
     """
     Ask the warehouse a question/prompt on a result set and get a response from llm service
+    Be default a new session will be saved
     """
     stmts = sqlparse.parse(payload.sql)
 
@@ -372,11 +379,80 @@ def post_warehouse_prompt(request, payload: AskWarehouseRequest):
                 "orguser_id": orguser.id,
                 "org_warehouse_id": org_warehouse.id,
                 "sql": payload.sql,
-                "session_name": payload.session_name,
                 "user_prompt": payload.user_prompt,
             },
         )
-        return {"task_id": task.id}
+        return {"request_uuid": task.id}
     except Exception as error:
         logger.exception(error)
         raise HttpError(400, "failed to summarize warehouse results") from error
+
+
+@warehouseapi.post("/ask/{new_session_id}/save", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse_data"])
+def post_warehouse_prompt(request, new_session_id: str, payload: SaveLlmSessionRequest):
+    """Saving the llm session generated from warehouse prompt. Saving here means attaching it to a name"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    new_session = LlmSession.objects.filter(
+        session_id=new_session_id,
+        org=org,
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+    ).first()
+
+    if not new_session:
+        raise HttpError(404, "Session not found")
+
+    if payload.overwrite and not payload.old_session_id:
+        raise HttpError(400, "session to overwrite is required")
+
+    # delete the old session if overwrite is true
+    if payload.overwrite:
+        old_session = LlmSession.objects.filter(
+            session_id=payload.old_session_id,
+            org=org,
+            session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+        ).first()
+        if old_session:
+            old_session.delete()
+            logger.info(
+                f"Deleted the old session llm analysis {payload.old_session_id}"
+            )
+
+    if new_session.session_status == LlmSessionStatus.RUNNING:
+        raise HttpError(400, "Session is still in progress")
+
+    new_session.session_name = payload.session_name
+    new_session.save()
+
+    return {"success": 1}
+
+
+@warehouseapi.get("/ask/sessions", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse_data"])
+def get_warehouse_llm_analysis_sessions(request, limit: int = 10, offset: int = 0):
+    """
+    Get all saved sessions with a session_name for the user
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    sessions = LlmSession.objects.filter(
+        org=org,
+        session_name__isnull=False,  # fetch only saved sessions
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+    ).order_by("-updated_at")[offset : offset + limit]
+
+    return [
+        {
+            "session_id": session.session_id,
+            "session_name": session.session_name,
+            "session_status": session.session_status,
+            "request_uuid": session.request_uuid,
+            "request_meta": session.request_meta,
+            "assistant_prompt": session.assistant_prompt,
+            "response": session.response,
+        }
+        for session in sessions
+    ]

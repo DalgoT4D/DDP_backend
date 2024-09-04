@@ -19,5 +19,14 @@ class AskWarehouseRequest(Schema):
     """
 
     sql: str
-    session_name: str
     user_prompt: str
+
+
+class SaveLlmSessionRequest(Schema):
+    """
+    Payload to save the llm analysis session for future reference
+    """
+
+    session_name: str
+    overwrite: bool = False
+    old_session_id: str = None  # if overwrite is True, then this is required

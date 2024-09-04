@@ -39,7 +39,7 @@ from ddpui.models.llm import (
     LlmAssistantType,
     LlmSession,
     LogsSummarizationType,
-    LlmSessionStatus
+    LlmSessionStatus,
 )
 from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
@@ -883,7 +883,6 @@ def summarize_warehouse_results(
     orguser_id: int,
     org_warehouse_id: int,
     sql: str,
-    session_name: str,
     user_prompt: str,
 ):
     """
@@ -918,13 +917,24 @@ def summarize_warehouse_results(
         orguser=orguser,
         org=org,
         session_status=LlmSessionStatus.RUNNING,
-        session_name=session_name,
         session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+        request_meta={"sql": sql}
     )
 
     credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
 
-    wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
+    try:
+        wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
+    except Exception as err:
+        logger.error("Failed to connect to the warehouse - %s", err)
+        taskprogress.add(
+            {
+                "message": "Failed to connect to the warehouse",
+                "status": TaskProgressStatus.FAILED,
+                "result": None,
+            }
+        )
+        return 
 
     # fetch the results of the query
     logger.info(f"Submitting query to warehouse for execution \n '''{sql}'''")
