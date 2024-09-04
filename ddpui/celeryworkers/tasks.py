@@ -903,7 +903,7 @@ def summarize_warehouse_results(
             {
                 "message": "Warehouse not found",
                 "status": TaskProgressStatus.FAILED,
-                "results": [],
+                "results": {},
             }
         )
         return
@@ -918,7 +918,7 @@ def summarize_warehouse_results(
         org=org,
         session_status=LlmSessionStatus.RUNNING,
         session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
-        request_meta={"sql": sql}
+        request_meta={"sql": sql},
     )
 
     credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
@@ -934,7 +934,7 @@ def summarize_warehouse_results(
                 "result": None,
             }
         )
-        return 
+        return
 
     # fetch the results of the query
     logger.info(f"Submitting query to warehouse for execution \n '''{sql}'''")
@@ -1017,7 +1017,7 @@ def summarize_warehouse_results(
             {
                 "message": f"Generated summary response",
                 "status": TaskProgressStatus.COMPLETED,
-                "result": llm_session.response,
+                "result": {"response": llm_session.response, "session_id": llm_session.session_id},
             }
         )
 
