@@ -45,8 +45,6 @@ class AssistantPrompt(models.Model):
     type = models.CharField(
         null=False, choices=LlmAssistantType.choices(), max_length=100
     )
-    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
-    updated_at = models.DateTimeField(auto_now=True)
 
 
 class LlmSession(models.Model):
