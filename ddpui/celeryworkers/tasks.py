@@ -39,6 +39,7 @@ from ddpui.models.llm import (
     LlmAssistantType,
     LlmSession,
     LogsSummarizationType,
+    LlmSessionStatus
 )
 from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
@@ -746,7 +747,7 @@ def summarize_logs(
         flow_run_id=flow_run_id,
         task_id=task_id,
         airbyte_job_id=job_id,
-        session_status=TaskProgressStatus.RUNNING,
+        session_status=LlmSessionStatus.RUNNING,
     )
 
     # logs
@@ -798,7 +799,7 @@ def summarize_logs(
                 "result": None,
             }
         )
-        llm_session.session_status = TaskProgressStatus.FAILED
+        llm_session.session_status = LlmSessionStatus.FAILED
         llm_session.save()
         return
 
@@ -852,7 +853,7 @@ def summarize_logs(
             for prompt, response in zip(user_prompts, result["result"])
         ]
         llm_session.session_id = result["session_id"]
-        llm_session.session_status = TaskProgressStatus.COMPLETED
+        llm_session.session_status = LlmSessionStatus.COMPLETED
         llm_session.save()
 
         logger.info("Completed log summarization")
@@ -872,7 +873,7 @@ def summarize_logs(
                 "result": None,
             }
         )
-        llm_session.session_status = TaskProgressStatus.FAILED
+        llm_session.session_status = LlmSessionStatus.FAILED
         llm_session.save()
 
 
@@ -916,7 +917,7 @@ def summarize_warehouse_results(
         request_uuid=self.request.id,
         orguser=orguser,
         org=org,
-        session_status=TaskProgressStatus.RUNNING,
+        session_status=LlmSessionStatus.RUNNING,
         session_name=session_name,
         session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
     )
@@ -939,7 +940,7 @@ def summarize_warehouse_results(
                 "result": None,
             }
         )
-        llm_session.session_status = TaskProgressStatus.FAILED
+        llm_session.session_status = LlmSessionStatus.FAILED
         llm_session.save()
         return
 
@@ -951,7 +952,7 @@ def summarize_warehouse_results(
                 "result": None,
             }
         )
-        llm_session.session_status = TaskProgressStatus.FAILED
+        llm_session.session_status = LlmSessionStatus.FAILED
         llm_session.save()
         return
 
@@ -998,7 +999,7 @@ def summarize_warehouse_results(
             for prompt, response in zip(user_prompts, result["result"])
         ]
         llm_session.session_id = result["session_id"]
-        llm_session.session_status = TaskProgressStatus.COMPLETED
+        llm_session.session_status = LlmSessionStatus.COMPLETED
         llm_session.save()
 
         logger.info("Completed summarization")
@@ -1019,7 +1020,7 @@ def summarize_warehouse_results(
                 "result": None,
             }
         )
-        llm_session.session_status = TaskProgressStatus.FAILED
+        llm_session.session_status = LlmSessionStatus.FAILED
         llm_session.save()
         return
 

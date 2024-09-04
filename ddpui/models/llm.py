@@ -11,6 +11,14 @@ from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 
 
+class LlmSessionStatus(str, Enum):
+    """all possible statuses of a task progress"""
+
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class LogsSummarizationType(str, Enum):
     """enum for log summarization types"""
 
