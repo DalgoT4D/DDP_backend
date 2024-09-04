@@ -26,6 +26,7 @@ from ddpui.utils.dbtdocs import create_single_html
 from ddpui.utils.helpers import runcmd
 from ddpui.utils.orguserhelpers import from_orguser
 from ddpui.utils.redis_client import RedisClient
+from ddpui.schemas.org_task_schema import TaskParameters
 
 dbtapi = NinjaAPI(urls_namespace="dbt")
 logger = CustomLogger("ddpui")
@@ -251,7 +252,7 @@ def get_transform_type(request):
 
 @dbtapi.post("/run_dbt_via_celery/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_dbt_workspace"])
-def post_run_dbt_commands(request):
+def post_run_dbt_commands(request, payload: TaskParameters = None):
     """Run dbt commands via celery"""
     orguser: OrgUser = request.orguser
     org: Org = orguser.org
@@ -265,7 +266,7 @@ def post_run_dbt_commands(request):
     taskprogress.add({"message": "Added dbt commands in queue", "status": "queued"})
 
     # executes clean, deps, run
-    run_dbt_commands.delay(orguser.id, task_id)
+    run_dbt_commands.delay(orguser.id, task_id, payload.dict())
 
     return {"task_id": task_id}
 
