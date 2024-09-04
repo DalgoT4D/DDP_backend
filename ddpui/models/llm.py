@@ -84,3 +84,4 @@ class UserPrompt(models.Model):
         choices=LlmAssistantType.choices(),
         max_length=100,
     )
+    label = models.CharField(max_length=200, null=True)
