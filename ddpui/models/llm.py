@@ -75,3 +75,14 @@ class LlmSession(models.Model):
     request_meta = models.JSONField(null=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class UserPrompt(models.Model):
+    """System defined user prompts for various assistant/services"""
+
+    prompt = models.TextField(null=False)
+    type = models.CharField(
+        default=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+        choices=LlmAssistantType.choices(),
+        max_length=100,
+    )
