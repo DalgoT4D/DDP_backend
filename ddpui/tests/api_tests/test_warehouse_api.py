@@ -383,3 +383,44 @@ def test_llm_data_analysis_save_new_session(orguser):
         LlmSession.objects.filter(session_name="save session with this name").count()
         == 1
     )
+
+
+def test_llm_data_analysis_save_and_overwrite_session(orguser):
+    """
+    Test the save & overwrite session for llm data analysis
+    """
+    request = mock_request(orguser)
+    old_session_id = "some-random-uuid"
+    old_session = LlmSession.objects.create(
+        session_id=old_session_id,
+        org=orguser.org,
+        orguser=orguser,
+        response=[{"prompt": "some prompt", "response": "some response"}],
+        session_status=LlmSessionStatus.COMPLETED,
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+        session_name="old session name; to be overwritten",
+    )
+
+    # new ghost session pushed by llm service and celery
+    new_session_id = "new-session-id"
+    new_session = LlmSession.objects.create(
+        session_id=new_session_id,
+        org=orguser.org,
+        orguser=orguser,
+        response=[{"prompt": "some prompt", "response": "some response"}],
+        session_status=LlmSessionStatus.COMPLETED,
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+    )
+    payload = SaveLlmSessionRequest(
+        session_name="new session name", overwrite=True, old_session_id=old_session_id
+    )
+
+    post_save_warehouse_prompt_session(request, new_session.session_id, payload)
+
+    assert LlmSession.objects.filter(session_id=old_session_id).count() == 0
+    assert (
+        LlmSession.objects.filter(
+            session_id=new_session_id, session_name=payload.session_name
+        ).count()
+        == 1
+    )
