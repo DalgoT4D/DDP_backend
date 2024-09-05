@@ -23,12 +23,15 @@ from ddpui.api.warehouse_api import (
     get_download_warehouse_data,
     get_warehouse_table_columns_spec,
     post_warehouse_prompt,
+    post_save_warehouse_prompt_session,
 )
 from ddpui.schemas.warehouse_api_schemas import (
     RequestorColumnSchema,
     AskWarehouseRequest,
+    SaveLlmSessionRequest,
 )
 from ddpui.utils.constants import LIMIT_ROWS_TO_SEND_TO_LLM
+from ddpui.models.llm import LlmSession, LlmSessionStatus, LlmAssistantType
 
 
 pytestmark = pytest.mark.django_db
@@ -307,7 +310,7 @@ def test_llm_data_analysis_limit_records_sent_to_llm(orguser):
     """
     Make sure the defined limit for no of records is going to the llms for analysis
     """
-    warehouse = OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
 
     payload = AskWarehouseRequest(
         sql=f"select * from some_table limit {LIMIT_ROWS_TO_SEND_TO_LLM + 2000}",
@@ -346,3 +349,37 @@ def test_llm_data_analysis_limit_records_sent_to_llm(orguser):
             call_kwargs.get("kwargs", {}).get("sql", None)
             == f"{sql} LIMIT {LIMIT_ROWS_TO_SEND_TO_LLM}"
         )
+
+
+def test_llm_data_analysis_save_new_session(orguser):
+    """
+    Test the creation of new session for llm data analysis
+    """
+    request = mock_request(orguser)
+    # session pushed by llm service and the long running generation process
+    session_id = "some-random-uuid"
+    session = LlmSession.objects.create(
+        session_id=session_id,
+        org=orguser.org,
+        orguser=orguser,
+        response=[{"prompt": "some prompt", "response": "some response"}],
+        session_status=LlmSessionStatus.COMPLETED,
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+    )
+
+    # session not found
+    payload = SaveLlmSessionRequest(
+        session_name="save session with this name", overwrite=False, old_session_id=None
+    )
+    with pytest.raises(HttpError) as exc:
+        post_save_warehouse_prompt_session(request, "some-fake-id", payload)
+
+    assert exc.value.status_code == 404
+    assert str(exc.value) == "Session not found"
+
+    # save the session
+    post_save_warehouse_prompt_session(request, session_id, payload)
+    assert (
+        LlmSession.objects.filter(session_name="save session with this name").count()
+        == 1
+    )
