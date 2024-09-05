@@ -359,8 +359,6 @@ def post_warehouse_prompt(request, payload: AskWarehouseRequest):
                 limit = int(token.value)
                 break
 
-    limit = min(limit, LIMIT_ROWS_TO_SEND_TO_LLM)
-
     if limit_found and limit > LIMIT_ROWS_TO_SEND_TO_LLM:
         raise HttpError(
             400,
@@ -369,7 +367,7 @@ def post_warehouse_prompt(request, payload: AskWarehouseRequest):
 
     if not limit_found:
         logger.info(f"Setting LIMIT {LIMIT_ROWS_TO_SEND_TO_LLM} to the query")
-        payload.sql = f"{payload.sql} LIMIT {limit}"
+        payload.sql = f"{payload.sql} LIMIT {LIMIT_ROWS_TO_SEND_TO_LLM}"
 
     try:
 
@@ -393,7 +391,9 @@ def post_warehouse_prompt(request, payload: AskWarehouseRequest):
 
 @warehouseapi.post("/ask/{new_session_id}/save", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
-def post_warehouse_prompt(request, new_session_id: str, payload: SaveLlmSessionRequest):
+def post_save_warehouse_prompt_session(
+    request, new_session_id: str, payload: SaveLlmSessionRequest
+):
     """Saving the llm session generated from warehouse prompt. Saving here means attaching it to a name"""
     orguser: OrgUser = request.orguser
     org = orguser.org
