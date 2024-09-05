@@ -438,11 +438,15 @@ def get_warehouse_llm_analysis_sessions(request, limit: int = 10, offset: int = 
     orguser: OrgUser = request.orguser
     org = orguser.org
 
-    sessions = LlmSession.objects.filter(
-        org=org,
-        session_name__isnull=False,  # fetch only saved sessions
-        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
-    ).order_by("-updated_at")[offset : offset + limit]
+    sessions = (
+        LlmSession.objects.filter(
+            org=org,
+            session_name__isnull=False,  # fetch only saved sessions
+            session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+        )
+        .select_related("orguser__user")
+        .order_by("-updated_at")[offset : offset + limit]
+    )
 
     return [
         {
@@ -453,6 +457,11 @@ def get_warehouse_llm_analysis_sessions(request, limit: int = 10, offset: int = 
             "request_meta": session.request_meta,
             "assistant_prompt": session.assistant_prompt,
             "response": session.response,
+            "created_at": session.created_at,
+            "updated_at": session.updated_at,
+            "created_by": {
+                "email": session.orguser.user.email,
+            },
         }
         for session in sessions
     ]
