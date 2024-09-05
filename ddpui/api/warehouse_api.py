@@ -434,7 +434,11 @@ def post_warehouse_prompt(request, new_session_id: str, payload: SaveLlmSessionR
 
 @warehouseapi.get("/ask/sessions", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
-def get_warehouse_llm_analysis_sessions(request, limit: int = 10, offset: int = 0):
+def get_warehouse_llm_analysis_sessions(
+    request,
+    limit: int = 10,
+    offset: int = 0,
+):
     """
     Get all saved sessions with a session_name for the user
     """
@@ -451,20 +455,32 @@ def get_warehouse_llm_analysis_sessions(request, limit: int = 10, offset: int = 
         .order_by("-updated_at")[offset : offset + limit]
     )
 
-    return [
-        {
-            "session_id": session.session_id,
-            "session_name": session.session_name,
-            "session_status": session.session_status,
-            "request_uuid": session.request_uuid,
-            "request_meta": session.request_meta,
-            "assistant_prompt": session.assistant_prompt,
-            "response": session.response,
-            "created_at": session.created_at,
-            "updated_at": session.updated_at,
-            "created_by": {
-                "email": session.orguser.user.email,
-            },
-        }
-        for session in sessions
-    ]
+    # can be optimized
+    total_count = LlmSession.objects.filter(
+        org=org,
+        session_name__isnull=False,  # fetch only saved sessions
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+    ).count()
+
+    return {
+        "limit": limit,
+        "offset": offset,
+        "total_rows": total_count,
+        "rows": [
+            {
+                "session_id": session.session_id,
+                "session_name": session.session_name,
+                "session_status": session.session_status,
+                "request_uuid": session.request_uuid,
+                "request_meta": session.request_meta,
+                "assistant_prompt": session.assistant_prompt,
+                "response": session.response,
+                "created_at": session.created_at,
+                "updated_at": session.updated_at,
+                "created_by": {
+                    "email": session.orguser.user.email,
+                },
+            }
+            for session in sessions
+        ],
+    }
