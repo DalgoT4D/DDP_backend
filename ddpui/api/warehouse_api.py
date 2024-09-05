@@ -17,6 +17,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.taskprogress import TaskProgress
+from ddpui.utils.singletaskprogress import SingleTaskProgress
 from ddpui.auth import has_permission
 
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
@@ -29,12 +30,10 @@ from ddpui.schemas.warehouse_api_schemas import (
     SaveLlmSessionRequest,
 )
 from ddpui.models.llm import (
-    LogsSummarizationType,
     LlmSession,
     LlmSessionStatus,
     LlmAssistantType,
 )
-from ddpui.datainsights.warehouse import warehouse_factory
 from ddpui.utils import secretsmanager
 from ddpui.utils.helpers import convert_to_standard_types
 from ddpui.utils.constants import LIMIT_ROWS_TO_SEND_TO_LLM
@@ -382,6 +381,10 @@ def post_warehouse_prompt(request, payload: AskWarehouseRequest):
                 "user_prompt": payload.user_prompt,
             },
         )
+
+        # set progress in redis to poll on
+        SingleTaskProgress(task.id, 60 * 10)
+
         return {"request_uuid": task.id}
     except Exception as error:
         logger.exception(error)
