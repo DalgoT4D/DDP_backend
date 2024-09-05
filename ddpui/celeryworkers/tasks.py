@@ -213,7 +213,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
 
 
 @app.task(bind=True)
-def run_dbt_commands(self, orguser_id: int, task_id: str):
+def run_dbt_commands(self, orguser_id: int, task_id: str, dbt_run_params: dict = None):
     """run a dbt command via celery instead of via prefect"""
     try:
 
@@ -358,9 +358,16 @@ def run_dbt_commands(self, orguser_id: int, task_id: str):
 
         # dbt run
         try:
+            cmd = f"{dbt_binary} run"
+            if dbt_run_params is not None:
+                for flag in dbt_run_params.get("flags") or []:
+                    cmd += " --" + flag
+                for optname, optval in (dbt_run_params.get("options") or {}).items():
+                    cmd += f" --{optname} {optval}"
+
             taskprogress.add({"message": "starting dbt run", "status": "running"})
             process: CompletedProcess = runcmd_with_output(
-                f"{dbt_binary} run --profiles-dir=profiles", project_dir
+                f"{cmd} --profiles-dir=profiles", project_dir
             )
             command_output = process.stdout.decode("utf-8").split("\n")
             taskprogress.add(
