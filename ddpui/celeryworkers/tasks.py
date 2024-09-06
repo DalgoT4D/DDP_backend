@@ -1002,6 +1002,10 @@ def summarize_warehouse_results(
             session_id=session_id,
         )
 
+        # close the session
+        logger.info("Closing the session")
+        llm_service.close_file_search_session(result["session_id"])
+
         llm_session.user_prompts = user_prompts
         llm_session.assistant_prompt = assistant_prompt.prompt
         llm_session.response = [
