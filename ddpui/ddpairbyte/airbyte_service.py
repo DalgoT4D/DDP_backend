@@ -150,7 +150,10 @@ def create_workspace(name: str) -> dict:
     if not isinstance(name, str):
         raise HttpError(400, "Name must be a string")
 
-    res = abreq("workspaces/create", {"name": name})
+    res = abreq(
+        "workspaces/create",
+        {"name": name, "organizationId": "00000000-0000-0000-0000-000000000000"},
+    )
     if "workspaceId" not in res:
         logger.info("Workspace not created: %s", name)
         raise HttpError(400, "workspace not created")
@@ -400,7 +403,9 @@ def check_source_connection(workspace_id: str, data: AirbyteSourceCreate) -> dic
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get("message", "Something went wrong, please check your credentials")
+        failure_reason = res.get(
+            "message", "Something went wrong, please check your credentials"
+        )
         logger.error("Failed to check the source connection: %s", res)
         raise HttpError(500, failure_reason)
     return res
@@ -420,7 +425,9 @@ def check_source_connection_for_update(
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get("message", "Something went wrong, please check your credentials")
+        failure_reason = res.get(
+            "message", "Something went wrong, please check your credentials"
+        )
         logger.error("Failed to check the source connection: %s", res)
         raise HttpError(500, failure_reason)
     # {
@@ -647,7 +654,9 @@ def check_destination_connection(
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get("message", "Something went wrong, please check your credentials")
+        failure_reason = res.get(
+            "message", "Something went wrong, please check your credentials"
+        )
         logger.error("Failed to check the destination connection: %s", res)
         raise HttpError(500, failure_reason)
     return res
@@ -670,7 +679,9 @@ def check_destination_connection_for_update(
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get("message", "Something went wrong, please check your credentials")
+        failure_reason = res.get(
+            "message", "Something went wrong, please check your credentials"
+        )
         logger.error("Failed to check the destination connection: %s", res)
         raise HttpError(500, failure_reason)
     return res
