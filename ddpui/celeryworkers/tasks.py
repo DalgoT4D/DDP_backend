@@ -829,9 +829,7 @@ def summarize_logs(
         logger.info(f"Uploading logs for {type} to llm service")
 
         # upload logs for the task & start the session
-        fpath, session_id = llm_service.upload_text_as_file(
-            logs_text, f"logs"
-        )
+        fpath, session_id = llm_service.upload_text_as_file(logs_text, f"logs")
         logger.info("Uploaded file successfully to LLM service at " + str(fpath))
         logger.info("Session ID: " + session_id)
 
@@ -1034,6 +1032,8 @@ def summarize_warehouse_results(
                 "result": None,
             }
         )
+        llm_session.user_prompts = user_prompts
+        llm_session.assistant_prompt = assistant_prompt.prompt
         llm_session.session_status = LlmSessionStatus.FAILED
         llm_session.save()
         return
