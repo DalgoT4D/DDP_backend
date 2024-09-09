@@ -989,6 +989,9 @@ def summarize_warehouse_results(
                 "Assistant/System prompt not found for warehouse summarization"
             )
 
+        llm_session.user_prompts = user_prompts
+        llm_session.assistant_prompt = assistant_prompt.prompt
+
         # start a file search session in the llm service
         logger.info("Querying the uploaded file: total queries 2")
         result = llm_service.file_search_query_and_poll(
@@ -1032,8 +1035,6 @@ def summarize_warehouse_results(
                 "result": None,
             }
         )
-        llm_session.user_prompts = user_prompts
-        llm_session.assistant_prompt = assistant_prompt.prompt
         llm_session.session_status = LlmSessionStatus.FAILED
         llm_session.save()
         return
