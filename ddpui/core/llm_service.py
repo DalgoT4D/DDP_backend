@@ -59,6 +59,27 @@ def upload_text_as_file(file_text: str, file_name: str) -> str:
     return (response["file_path"], response["session_id"])
 
 
+def upload_json_as_file(json_string: str, file_name: str) -> str:
+    """
+    returns the relative file_path
+    """
+
+    files = {
+        "file": (
+            f"{file_name}.json",
+            BytesIO(json_string.encode("utf-8")),
+            "application/json",
+        )
+    }
+    response = dalgo_post(
+        f"{LLM_SERVICE_API_URL}/api/file/upload",
+        files=files,
+        headers=headers,
+    )
+
+    return (response["file_path"], response["session_id"])
+
+
 def file_search_query_and_poll(
     assistant_prompt: str,
     queries: list[str],

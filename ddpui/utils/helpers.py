@@ -164,11 +164,24 @@ def convert_to_standard_types(obj):
 
 def convert_sqlalchemy_rows_to_csv_string(rows: list[dict]):
     """converts a list of sqlalchemy rows to a csv string"""
-    output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=rows[0].keys())
-    writer.writeheader()
-    for item in rows:
-        writer.writerow(item)
-    csv_string = output.getvalue()
-    output.close()
-    return csv_string
+    # output = io.StringIO()
+    # writer = csv.DictWriter(output, fieldnames=rows[0].keys(), delimiter="|")
+    # writer.writeheader()
+    # for item in rows:
+    #     writer.writerow(item)
+    # csv_string = output.getvalue()
+    # output.close()
+    # return csv_string
+
+    csv_lines = []
+    for i, row in enumerate(rows):
+        csv_lines.append(f"=========== Cells values for row {i+1} ========")
+        for key, value in row.items():
+            csv_lines.append(f"{key}: {value}")
+
+    return "\n".join(csv_lines)
+
+
+def convert_sqlalchemy_rows_to_json_string(rows: list[dict]):
+    """converts a list of sqlalchemy rows to a csv string"""
+    return json.dumps(convert_to_standard_types(rows), indent=4)

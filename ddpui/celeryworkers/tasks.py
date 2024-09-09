@@ -64,7 +64,10 @@ from ddpui.utils.constants import (
 from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.core import llm_service
-from ddpui.utils.helpers import convert_sqlalchemy_rows_to_csv_string
+from ddpui.utils.helpers import (
+    convert_sqlalchemy_rows_to_csv_string,
+    convert_sqlalchemy_rows_to_json_string,
+)
 
 logger = CustomLogger("ddpui")
 UTC = timezone.UTC
@@ -968,12 +971,10 @@ def summarize_warehouse_results(
         return
 
     try:
-        # prepare the text data to be uploaded
-        csv_lines = convert_sqlalchemy_rows_to_csv_string(rows)
 
         # upload the results as a file to llm service
         fpath, session_id = llm_service.upload_text_as_file(
-            "".join(csv_lines), "warehouse_results"
+            convert_sqlalchemy_rows_to_csv_string(rows), "warehouse_results"
         )
         logger.info("Uploaded file successfully to LLM service at " + str(fpath))
         logger.info("Session ID: " + session_id)

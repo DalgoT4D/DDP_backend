@@ -50,4 +50,4 @@ FLOW_RUN_LOGS_OFFSET_LIMIT = 200
 
 
 # LLM data analysis ; row limit fetched and sent to llm service
-LIMIT_ROWS_TO_SEND_TO_LLM = 1000
+LIMIT_ROWS_TO_SEND_TO_LLM = 500
