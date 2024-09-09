@@ -934,6 +934,8 @@ def summarize_warehouse_results(
                 "result": None,
             }
         )
+        llm_session.session_status = LlmSessionStatus.FAILED
+        llm_session.save()
         return
 
     # fetch the results of the query
