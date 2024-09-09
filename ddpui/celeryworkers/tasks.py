@@ -830,7 +830,7 @@ def summarize_logs(
 
         # upload logs for the task & start the session
         fpath, session_id = llm_service.upload_text_as_file(
-            logs_text, f"{log_file_name}_logs"
+            logs_text, f"logs"
         )
         logger.info("Uploaded file successfully to LLM service at " + str(fpath))
         logger.info("Session ID: " + session_id)
