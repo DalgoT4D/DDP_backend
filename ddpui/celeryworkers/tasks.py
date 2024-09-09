@@ -64,6 +64,7 @@ from ddpui.utils.constants import (
 from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.core import llm_service
+from ddpui.utils.helpers import convert_sqlalchemy_rows_to_csv_string
 
 logger = CustomLogger("ddpui")
 UTC = timezone.UTC
@@ -970,13 +971,7 @@ def summarize_warehouse_results(
 
     try:
         # prepare the text data to be uploaded
-        headers = rows[0].keys()
-        csv_lines = [",".join(headers) + "\n"]  # Add header row
-        for item in rows:
-            row = [
-                str(item[header]) for header in headers
-            ]  # Extract values in header order
-            csv_lines.append(" ".join(row) + "\n")
+        csv_lines = convert_sqlalchemy_rows_to_csv_string(rows)
 
         # upload the results as a file to llm service
         fpath, session_id = llm_service.upload_text_as_file(

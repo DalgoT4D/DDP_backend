@@ -7,6 +7,8 @@ import hashlib
 import json
 from decimal import Decimal
 from datetime import datetime, date
+import csv
+import io
 
 
 def runcmd(cmd: str, cwd: str):
@@ -158,3 +160,14 @@ def convert_to_standard_types(obj):
     if isinstance(obj, tuple):
         return tuple(convert_to_standard_types(element) for element in obj)
     return obj
+
+
+def convert_sqlalchemy_rows_to_csv_string(rows: list[dict]):
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=rows[0].keys())
+    writer.writeheader()
+    for item in rows:
+        writer.writerow(item)
+    csv_string = output.getvalue()
+    output.close()
+    return csv_string
