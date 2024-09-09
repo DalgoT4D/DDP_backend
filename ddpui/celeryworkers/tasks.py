@@ -1000,6 +1000,8 @@ def summarize_warehouse_results(
             session_id=session_id,
         )
 
+        llm_session.session_id = result["session_id"]
+
         # close the session
         logger.info("Closing the session")
         llm_service.close_file_search_session(result["session_id"])
@@ -1010,7 +1012,6 @@ def summarize_warehouse_results(
             {"prompt": prompt, "response": response}
             for prompt, response in zip(user_prompts, result["result"])
         ]
-        llm_session.session_id = result["session_id"]
         llm_session.session_status = LlmSessionStatus.COMPLETED
         llm_session.save()
 
