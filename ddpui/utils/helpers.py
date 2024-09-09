@@ -163,6 +163,7 @@ def convert_to_standard_types(obj):
 
 
 def convert_sqlalchemy_rows_to_csv_string(rows: list[dict]):
+    """converts a list of sqlalchemy rows to a csv string"""
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=rows[0].keys())
     writer.writeheader()
