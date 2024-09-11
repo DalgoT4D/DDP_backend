@@ -1,0 +1,11 @@
+[
+    {
+        "model": "ddpui.UserPrompt",
+        "pk": 1,
+        "fields": {
+            "type": "long_text_summarization",
+            "prompt": "Summarize the results of the query",
+            "label": "Summarize"
+        }
+    }
+]

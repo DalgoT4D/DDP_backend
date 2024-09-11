@@ -39,6 +39,7 @@ from ddpui.models.llm import (
     LlmAssistantType,
     LlmSession,
     LogsSummarizationType,
+    LlmSessionStatus,
 )
 from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
@@ -61,7 +62,12 @@ from ddpui.utils.constants import (
     FLOW_RUN_LOGS_OFFSET_LIMIT,
 )
 from ddpui.ddpprefect import DBTCLIPROFILE
+from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.core import llm_service
+from ddpui.utils.helpers import (
+    convert_sqlalchemy_rows_to_csv_string,
+    convert_sqlalchemy_rows_to_json_string,
+)
 
 logger = CustomLogger("ddpui")
 UTC = timezone.UTC
@@ -752,7 +758,7 @@ def summarize_logs(
         flow_run_id=flow_run_id,
         task_id=task_id,
         airbyte_job_id=job_id,
-        session_status=TaskProgressStatus.RUNNING,
+        session_status=LlmSessionStatus.RUNNING,
     )
 
     # logs
@@ -804,7 +810,7 @@ def summarize_logs(
                 "result": None,
             }
         )
-        llm_session.session_status = TaskProgressStatus.FAILED
+        llm_session.session_status = LlmSessionStatus.FAILED
         llm_session.save()
         return
 
@@ -833,9 +839,7 @@ def summarize_logs(
         logger.info(f"Uploading logs for {type} to llm service")
 
         # upload logs for the task & start the session
-        fpath, session_id = llm_service.upload_text_as_file(
-            logs_text, f"{log_file_name}_logs"
-        )
+        fpath, session_id = llm_service.upload_text_as_file(logs_text, f"logs")
         logger.info("Uploaded file successfully to LLM service at " + str(fpath))
         logger.info("Session ID: " + session_id)
 
@@ -858,7 +862,7 @@ def summarize_logs(
             for prompt, response in zip(user_prompts, result["result"])
         ]
         llm_session.session_id = result["session_id"]
-        llm_session.session_status = TaskProgressStatus.COMPLETED
+        llm_session.session_status = LlmSessionStatus.COMPLETED
         llm_session.save()
 
         logger.info("Completed log summarization")
@@ -878,8 +882,171 @@ def summarize_logs(
                 "result": None,
             }
         )
-        llm_session.session_status = TaskProgressStatus.FAILED
+        llm_session.session_status = LlmSessionStatus.FAILED
         llm_session.save()
+
+
+@app.task(bind=True)
+def summarize_warehouse_results(
+    self,
+    orguser_id: int,
+    org_warehouse_id: int,
+    sql: str,
+    user_prompt: str,
+):
+    """
+    This function will summarize the results of a warehouse query
+    1. Fetch the results of the query
+    2. Upload the results as a file to llm service as text file
+    3. Query the llm service with the user prompt
+    """
+
+    taskprogress = SingleTaskProgress(self.request.id, 60 * 10)
+    taskprogress.add({"message": "Started", "status": "running", "result": {}})
+
+    org_warehouse = OrgWarehouse.objects.filter(id=org_warehouse_id).first()
+
+    if not org_warehouse:
+        logger.error("Warehouse not found")
+        taskprogress.add(
+            {
+                "message": "Warehouse not found",
+                "status": TaskProgressStatus.FAILED,
+                "results": {},
+            }
+        )
+        return
+
+    orguser = OrgUser.objects.filter(id=orguser_id).first()
+    org = orguser.org
+
+    # create a partial session
+    llm_session = LlmSession.objects.create(
+        request_uuid=self.request.id,
+        orguser=orguser,
+        org=org,
+        session_status=LlmSessionStatus.RUNNING,
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+        request_meta={"sql": sql},
+    )
+
+    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+
+    try:
+        wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
+    except Exception as err:
+        logger.error("Failed to connect to the warehouse - %s", err)
+        taskprogress.add(
+            {
+                "message": "Failed to connect to the warehouse",
+                "status": TaskProgressStatus.FAILED,
+                "result": None,
+            }
+        )
+        llm_session.session_status = LlmSessionStatus.FAILED
+        llm_session.save()
+        return
+
+    # fetch the results of the query
+    logger.info(f"Submitting query to warehouse for execution \n '''{sql}'''")
+    rows = []
+    try:
+        rows = wclient.execute(sql)
+    except Exception as err:
+        logger.error(err)
+        taskprogress.add(
+            {
+                "message": str(err),
+                "status": TaskProgressStatus.FAILED,
+                "result": None,
+            }
+        )
+        llm_session.session_status = LlmSessionStatus.FAILED
+        llm_session.save()
+        return
+
+    if len(rows) == 0:
+        taskprogress.add(
+            {
+                "message": "No results found for the query",
+                "status": TaskProgressStatus.FAILED,
+                "result": None,
+            }
+        )
+        llm_session.session_status = LlmSessionStatus.FAILED
+        llm_session.save()
+        return
+
+    try:
+
+        # upload the results as a file to llm service
+        fpath, session_id = llm_service.upload_text_as_file(
+            convert_sqlalchemy_rows_to_csv_string(rows), "warehouse_results"
+        )
+        logger.info("Uploaded file successfully to LLM service at " + str(fpath))
+        logger.info("Session ID: " + session_id)
+
+        # query the llm service with two prompts
+        user_prompts = [user_prompt]
+
+        assistant_prompt = AssistantPrompt.objects.filter(
+            type=LlmAssistantType.LONG_TEXT_SUMMARIZATION
+        ).first()
+        if not assistant_prompt:
+            raise Exception(
+                "Assistant/System prompt not found for warehouse summarization"
+            )
+
+        llm_session.user_prompts = user_prompts
+        llm_session.assistant_prompt = assistant_prompt.prompt
+
+        # start a file search session in the llm service
+        logger.info("Querying the uploaded file: total queries 2")
+        result = llm_service.file_search_query_and_poll(
+            assistant_prompt=assistant_prompt.prompt,
+            queries=user_prompts,
+            session_id=session_id,
+        )
+
+        llm_session.session_id = result["session_id"]
+
+        # close the session
+        logger.info("Closing the session")
+        llm_service.close_file_search_session(result["session_id"])
+
+        llm_session.user_prompts = user_prompts
+        llm_session.assistant_prompt = assistant_prompt.prompt
+        llm_session.response = [
+            {"prompt": prompt, "response": response}
+            for prompt, response in zip(user_prompts, result["result"])
+        ]
+        llm_session.session_status = LlmSessionStatus.COMPLETED
+        llm_session.save()
+
+        logger.info("Completed summarization")
+        taskprogress.add(
+            {
+                "message": f"Generated summary response",
+                "status": TaskProgressStatus.COMPLETED,
+                "result": {
+                    "response": llm_session.response,
+                    "session_id": llm_session.session_id,
+                },
+            }
+        )
+
+    except Exception as err:
+        logger.error(err)
+        taskprogress.add(
+            {
+                "message": str(err),
+                "status": TaskProgressStatus.FAILED,
+                "result": None,
+            }
+        )
+        llm_session.session_status = LlmSessionStatus.FAILED
+        llm_session.save()
+        return
 
 
 @app.on_after_finalize.connect
