@@ -322,7 +322,7 @@ def test_llm_data_analysis_limit_records_sent_to_llm(orguser):
         post_warehouse_prompt(request, payload)
 
     assert exc.value.status_code == 400
-    assert str(exc.value) == "Please make sure the limit in query is less than 1000"
+    assert str(exc.value) == f"Please make sure the limit in query is less than {LIMIT_ROWS_TO_SEND_TO_LLM}"
 
     # if the limit is not set default limit will be used
     payload = AskWarehouseRequest(
