@@ -16,10 +16,10 @@ from ddpui.core.notifications_service import (
     create_notification,
     get_notification_history,
     get_notification_recipients,
-    get_user_notifications,
+    fetch_user_notifications,
     mark_notification_as_read_or_unread,
     delete_scheduled_notification,
-    get_unread_notifications_count
+    get_unread_notifications_count,
 )
 from ddpui.schemas.notifications_api_schemas import SentToEnum
 from ddpui.tests.api_tests.test_user_org_api import mock_request, seed_db
@@ -248,7 +248,7 @@ def test_get_notification_recipients_not_exist():
 
 
 def test_get_user_notifications(orguser):
-    error, result = get_user_notifications(orguser, 1, 10)
+    error, result = fetch_user_notifications(orguser, 1, 10)
     assert error is None
     assert result["success"] is True
     assert len(result["res"]) >= 0
