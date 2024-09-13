@@ -73,6 +73,7 @@ class LlmSession(models.Model):
     request_meta = models.JSONField(null=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
+    feedback = models.TextField(null=True)
 
 
 class UserPrompt(models.Model):

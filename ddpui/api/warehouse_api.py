@@ -28,6 +28,7 @@ from ddpui.schemas.warehouse_api_schemas import (
     RequestorColumnSchema,
     AskWarehouseRequest,
     SaveLlmSessionRequest,
+    LlmSessionFeedbackRequest,
 )
 from ddpui.models.llm import (
     LlmSession,
@@ -428,6 +429,30 @@ def post_save_warehouse_prompt_session(
 
     new_session.session_name = payload.session_name
     new_session.save()
+
+    return {"success": 1}
+
+
+@warehouseapi.post("/ask/{session_id}/feedback", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse_data"])
+def post_feedback_llm_session(
+    request, session_id: str, payload: LlmSessionFeedbackRequest
+):
+    """Feedback"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    session = LlmSession.objects.filter(
+        session_id=session_id,
+        org=org,
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+    ).first()
+
+    if not session:
+        raise HttpError(404, "Session not found")
+
+    session.feedback = payload.feedback
+    session.save()
 
     return {"success": 1}
 
