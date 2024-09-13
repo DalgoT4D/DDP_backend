@@ -102,7 +102,7 @@ def get_notification_recipients(request, notification_id: int):
     return result
 
 
-@notificationsapi.get("/", auth=auth.CustomAuthMiddleware())
+@notificationsapi.get("/", auth=auth.CustomAuthMiddleware(), deprecated=True)
 def get_user_notifications(request, page: int = 1, limit: int = 10):
     """
     Returns all the notifications for a particular user.
@@ -136,7 +136,7 @@ def get_user_notifications_v1(
     return result
 
 
-@notificationsapi.put("/", auth=auth.CustomAuthMiddleware())
+@notificationsapi.put("/", auth=auth.CustomAuthMiddleware(), deprecated=True)
 def mark_as_read(request, payload: UpdateReadStatusSchema):
     """
     Handles the task of updating the read_status
