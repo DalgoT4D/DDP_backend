@@ -157,13 +157,18 @@ def create_notification(
 
 # get notification history
 def get_notification_history(
-    page: int, limit: int
+    page: int, limit: int, read_status: Optional[int] = None
 ) -> Tuple[Optional[None], Dict[str, Any]]:
     """returns history of sent notifications"""
-    notifications = Notification.objects.all().order_by("-timestamp")
+    notifications = Notification.objects
+
+    if read_status:
+        notifications = notifications.filter(read_status=(read_status == 1))
+
+    notifications = notifications.all().order_by("-timestamp")
 
     paginator = Paginator(notifications, limit)
-    paginated_notifications: Notification = paginator.get_page(page)
+    paginated_notifications: list[Notification] = paginator.get_page(page)
 
     notification_history = [
         {
@@ -214,7 +219,7 @@ def get_notification_recipients(
 
 
 # get notification data
-def get_user_notifications(
+def fetch_user_notifications(
     orguser: OrgUser, page: int, limit: int
 ) -> Tuple[Optional[None], Dict[str, Any]]:
     """returns all notifications for a specific user"""
@@ -222,6 +227,50 @@ def get_user_notifications(
     notifications = (
         NotificationRecipient.objects.filter(
             recipient=orguser, notification__sent_time__isnull=False
+        )
+        .select_related("notification")
+        .order_by("-notification__timestamp")
+    )
+
+    paginator = Paginator(notifications, limit)
+    paginated_notifications = paginator.get_page(page)
+
+    user_notifications = []
+
+    for recipient in paginated_notifications:
+        notification = recipient.notification
+        user_notifications.append(
+            {
+                "id": notification.id,
+                "author": notification.author,
+                "message": notification.message,
+                "timestamp": notification.timestamp,
+                "urgent": notification.urgent,
+                "scheduled_time": notification.scheduled_time,
+                "sent_time": notification.sent_time,
+                "read_status": recipient.read_status,
+            }
+        )
+
+    return None, {
+        "success": True,
+        "res": user_notifications,
+        "page": paginated_notifications.number,
+        "total_pages": paginated_notifications.paginator.num_pages,
+        "total_notifications": paginated_notifications.paginator.count,
+    }
+
+
+def fetch_user_notifications_v1(
+    orguser: OrgUser, page: int, limit: int, read_status: int = None
+) -> Tuple[Optional[None], Dict[str, Any]]:
+    """returns all notifications for a specific user"""
+
+    notifications = (
+        NotificationRecipient.objects.filter(
+            recipient=orguser,
+            notification__sent_time__isnull=False,
+            **({"read_status": read_status == 1} if read_status is not None else {}),
         )
         .select_related("notification")
         .order_by("-notification__timestamp")
@@ -270,6 +319,20 @@ def mark_notification_as_read_or_unread(
         return None, {"success": True, "message": "Notification updated successfully"}
     except NotificationRecipient.DoesNotExist:
         return "Notification not found for the given user", None
+
+
+def mark_notifications_as_read_or_unread(
+    orguser_id: int, notification_ids: int, read_status: bool
+) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """bulk update  of the read status of a recipient for notifications"""
+    try:
+        NotificationRecipient.objects.filter(
+            recipient__id=orguser_id,
+            notification__id__in=notification_ids,
+        ).update(read_status=read_status)
+        return None, {"success": True, "message": "Notifications updated successfully"}
+    except NotificationRecipient.DoesNotExist:
+        return "Something went wrong updating the notifications", None
 
 
 # delete notification

@@ -37,3 +37,10 @@ class UpdateReadStatusSchema(Schema):
 
     notification_id: int
     read_status: bool
+
+
+class UpdateReadStatusSchemav1(Schema):
+    """Schema for updating the read status of a notification."""
+
+    notification_ids: list[int]
+    read_status: bool
