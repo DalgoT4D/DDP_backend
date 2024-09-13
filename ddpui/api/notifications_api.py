@@ -153,7 +153,7 @@ def mark_as_read(request, payload: UpdateReadStatusSchema):
 
 
 @notificationsapi.put("/v1", auth=auth.CustomAuthMiddleware())
-def mark_as_read(request, payload: UpdateReadStatusSchemav1):
+def mark_as_read_v1(request, payload: UpdateReadStatusSchemav1):
     """
     Bulk update of read status of notifications
     """
