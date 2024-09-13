@@ -93,12 +93,12 @@ def get_roles(request):
 
 
 @dataapi.get("/user_prompts/", auth=auth.CustomAuthMiddleware())
-def get_roles(request):
+def get_user_prompts(request):
     """Fetch master list of roles"""
     return list(map(model_to_dict, UserPrompt.objects.all()))
 
 
 @dataapi.get("/llm_data_analysis_query_limit/", auth=auth.CustomAuthMiddleware())
-def get_roles(request):
+def get_row_limit(request):
     """Fetch master list of roles"""
     return LIMIT_ROWS_TO_SEND_TO_LLM
