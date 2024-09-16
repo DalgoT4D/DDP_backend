@@ -590,9 +590,9 @@ def test_get_deployment(mock_get: Mock):
 @patch("ddpui.ddpprefect.prefect_service.prefect_get")
 def test_get_flow_run_logs(mock_get: Mock):
     mock_get.return_value = "the-logs"
-    response = get_flow_run_logs("flowrunid", 3)
+    response = get_flow_run_logs("flowrunid","taskrunid", 10, 3)
     assert response == {"logs": "the-logs"}
-    mock_get.assert_called_once_with("flow_runs/logs/flowrunid", params={"offset": 3})
+    mock_get.assert_called_once_with("flow_runs/logs/flowrunid", params={"offset": 3, "limit": 10, "task_run_id": "taskrunid"})
 
 
 @patch("ddpui.ddpprefect.prefect_service.prefect_get")

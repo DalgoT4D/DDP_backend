@@ -1,4 +1,7 @@
 from unittest.mock import patch, Mock
+import os
+import yaml
+from pathlib import Path
 import pytest
 from ddpui.ddpairbyte.airbytehelpers import (
     add_custom_airbyte_connector,
@@ -10,12 +13,13 @@ from ddpui.ddpairbyte.airbytehelpers import (
     update_destination,
     delete_source,
     get_sync_job_history_for_connection,
+    create_or_update_org_cli_block,
 )
 from ddpui.ddpairbyte.schema import (
     AirbyteConnectionSchemaUpdate,
     AirbyteDestinationUpdate,
 )
-from ddpui.models.org import Org, OrgPrefectBlockv1, OrgWarehouse
+from ddpui.models.org import Org, OrgPrefectBlockv1, OrgWarehouse, OrgDbt, TransformType
 from ddpui.models.tasks import Task, OrgTask, OrgDataFlowv1, DataflowOrgTask
 from ddpui.ddpprefect import DBTCLIPROFILE
 
@@ -434,7 +438,12 @@ def test_get_sync_history_for_connection_success(
     "ddpui.utils.secretsmanager.update_warehouse_credentials",
     mock_update_warehouse_credentials=Mock(),
 )
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
+    mock_create_or_update_org_cli_block=Mock(),
+)
 def test_update_destination_name(
+    mock_create_or_update_org_cli_block: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
     mock_update_destination: Mock,
@@ -446,8 +455,9 @@ def test_update_destination_name(
     mock_update_destination.return_value = {
         "destinationId": "DESTINATION_ID",
     }
-    mock_retrieve_warehouse_credentials.return_value = None
+    mock_retrieve_warehouse_credentials.return_value = {}
     mock_update_warehouse_credentials.return_value = None
+    mock_create_or_update_org_cli_block.return_value = ((None, None), None)
 
     payload = AirbyteDestinationUpdate(
         name="new-name", destinationDefId="destinationDefId", config={}
@@ -459,6 +469,7 @@ def test_update_destination_name(
     warehouse.refresh_from_db()
 
     assert warehouse.name == "new-name"
+    mock_create_or_update_org_cli_block.assert_called_once()
 
 
 @patch(
@@ -473,7 +484,12 @@ def test_update_destination_name(
     "ddpui.utils.secretsmanager.update_warehouse_credentials",
     mock_update_warehouse_credentials=Mock(),
 )
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
+    mock_create_or_update_org_cli_block=Mock(),
+)
 def test_update_destination_postgres_config(
+    mock_create_or_update_org_cli_block: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
     mock_update_destination: Mock,
@@ -504,6 +520,7 @@ def test_update_destination_postgres_config(
             "port": "123",
         },
     )
+    mock_create_or_update_org_cli_block.assert_called_once()
 
 
 @patch(
@@ -518,7 +535,12 @@ def test_update_destination_postgres_config(
     "ddpui.utils.secretsmanager.update_warehouse_credentials",
     mock_update_warehouse_credentials=Mock(),
 )
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
+    mock_create_or_update_org_cli_block=Mock(),
+)
 def test_update_destination_bigquery_config(
+    mock_create_or_update_org_cli_block: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
     mock_update_destination: Mock,
@@ -548,6 +570,7 @@ def test_update_destination_bigquery_config(
             "key": "value",
         },
     )
+    mock_create_or_update_org_cli_block.assert_called_once()
 
 
 @patch(
@@ -562,7 +585,12 @@ def test_update_destination_bigquery_config(
     "ddpui.utils.secretsmanager.update_warehouse_credentials",
     mock_update_warehouse_credentials=Mock(),
 )
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
+    mock_create_or_update_org_cli_block=Mock(),
+)
 def test_update_destination_snowflake_config(
+    mock_create_or_update_org_cli_block: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
     mock_update_destination: Mock,
@@ -592,6 +620,7 @@ def test_update_destination_snowflake_config(
         warehouse,
         {"credentials": {"password": "newpassword"}},
     )
+    mock_create_or_update_org_cli_block.assert_called_once()
 
 
 @patch(
@@ -607,11 +636,11 @@ def test_update_destination_snowflake_config(
     mock_update_warehouse_credentials=Mock(),
 )
 @patch(
-    "ddpui.ddpprefect.prefect_service.update_dbt_cli_profile_block",
-    mock_update_dbt_cli_profile_block=Mock(),
+    "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
+    mock_create_or_update_org_cli_block=Mock(),
 )
 def test_update_destination_cliprofile(
-    mock_update_dbt_cli_profile_block: Mock,
+    mock_create_or_update_org_cli_block: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
     mock_update_destination: Mock,
@@ -645,11 +674,8 @@ def test_update_destination_cliprofile(
     assert error is None
     assert response == {"destinationId": "DESTINATION_ID"}
 
-    mock_update_dbt_cli_profile_block.assert_called_once_with(
-        block_name="cliblockname",
-        wtype=warehouse.wtype,
-        credentials={"credentials": {"password": "newpassword"}},
-        bqlocation="LOCATIUON",
+    mock_create_or_update_org_cli_block.assert_called_once_with(
+        org, warehouse, payload.config
     )
 
 
@@ -764,4 +790,101 @@ def test_update_schema_changes_connection(
     # Assert the mock functions were called with the expected arguments
     mock_get_connection.assert_called_once_with(
         org.airbyte_workspace_id, "test-connection-id"
+    )
+
+
+@patch(
+    "ddpui.ddpprefect.prefect_service.create_dbt_cli_profile_block",
+    mock_create_dbt_cli_profile_block=Mock(),
+)
+def test_create_or_update_org_cli_block_create_case(
+    mock_create_dbt_cli_profile_block: Mock,
+):
+    """test create_or_update_org_cli_block when its created for the first time"""
+    org = Org.objects.create(name="org", slug="org")
+    warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", name="name")
+
+    mock_create_dbt_cli_profile_block.return_value = {
+        "block_id": "some_id",
+        "block_name": "some_name",
+    }
+
+    dummy_creds = {
+        "username": "username",
+        "password": "password",
+        "host": "host",
+        "port": "port",
+        "database": "database",
+    }
+
+    create_or_update_org_cli_block(org, warehouse, dummy_creds)
+
+    org_cli_block = OrgPrefectBlockv1.objects.filter(
+        org=org, block_type=DBTCLIPROFILE
+    ).first()
+    assert org_cli_block is not None
+    assert org_cli_block.block_id == "some_id"
+    assert org_cli_block.block_name == "some_name"
+
+
+@patch(
+    "ddpui.ddpprefect.prefect_service.update_dbt_cli_profile_block",
+    mock_update_dbt_cli_profile_block=Mock(),
+)
+def test_create_or_update_org_cli_block_update_case(
+    mock_update_dbt_cli_profile_block: Mock, tmp_path
+):
+    """test create_or_update_org_cli_block when the block is updated"""
+    org = Org.objects.create(name="org", slug="org")
+    warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", name="name")
+
+    mock_update_dbt_cli_profile_block.return_value = {
+        "block_id": "some_id",
+        "block_name": "some_name",
+    }
+
+    dummy_creds = {
+        "username": "username",
+        "password": "password",
+        "host": "host",
+        "port": "port",
+        "database": "database",
+    }
+    cli_profile_block = OrgPrefectBlockv1.objects.create(
+        org=org,
+        block_type=DBTCLIPROFILE,
+        block_id="some_id",
+        block_name="some_name",
+    )
+    project_name = "dbtrepo"
+
+    os.environ["CLIENTDBT_ROOT"] = str(tmp_path)
+    project_dir = Path(tmp_path) / org.slug
+    project_dir.mkdir(parents=True, exist_ok=True)
+    dbtrepo_dir = project_dir / project_name
+    dbtrepo_dir.mkdir(parents=True, exist_ok=True)
+    dbt = OrgDbt.objects.create(
+        project_dir=str(project_dir),
+        dbt_venv=str(tmp_path),
+        target_type="postgres",
+        default_schema="default",
+        transform_type=TransformType.GIT,
+    )
+    org.dbt = dbt
+    org.save()
+
+    # create dbt_project.yml file
+    yml_obj = {"profile": "dummy"}
+    with open(str(dbtrepo_dir / "dbt_project.yml"), "w", encoding="utf-8") as output:
+        yaml.safe_dump(yml_obj, output)
+
+    create_or_update_org_cli_block(org, warehouse, dummy_creds)
+
+    mock_update_dbt_cli_profile_block.assert_called_once_with(
+        block_name=cli_profile_block.block_name,
+        wtype=warehouse.wtype,
+        credentials=dummy_creds,
+        bqlocation=None,
+        profilename=yml_obj["profile"],
+        target="default",
     )

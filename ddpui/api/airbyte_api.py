@@ -32,7 +32,7 @@ from ddpui.auth import has_permission
 
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgType
-from ddpui.models.llm import LogsSummarizationType, LlmSession
+from ddpui.models.llm import LogsSummarizationType, LlmSession, LlmSessionStatus
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.celeryworkers.tasks import (
@@ -770,7 +770,7 @@ def get_flow_runs_logsummary_v1(
             .order_by("-created_at")
             .first()
         )
-        if llm_session and llm_session.session_status == TaskProgressStatus.RUNNING:
+        if llm_session and llm_session.session_status == LlmSessionStatus.RUNNING:
             return {"task_id": llm_session.request_uuid}
 
         task = summarize_logs.apply_async(

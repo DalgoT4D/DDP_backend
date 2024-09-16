@@ -45,9 +45,9 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
     ):
         raise HttpError(400, "unauthorized")
     notification = json.loads(request.body)
-    logger.info(notification)
+    # logger.info(notification)
     message = notification["body"]
-    logger.info(message)
+    # logger.info(message)
 
     message_object = None
     try:

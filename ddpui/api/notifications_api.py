@@ -7,6 +7,7 @@ from ddpui.core import notifications_service
 from ddpui.schemas.notifications_api_schemas import (
     CreateNotificationPayloadSchema,
     UpdateReadStatusSchema,
+    UpdateReadStatusSchemav1,
 )
 from ddpui.models.org_user import OrgUser
 
@@ -73,12 +74,16 @@ def create_notification(request, payload: CreateNotificationPayloadSchema):
 
 
 @notificationsapi.get("/history")
-def get_notification_history(request, page: int = 1, limit: int = 10):
+def get_notification_history(
+    request, page: int = 1, limit: int = 10, read_status: int = None
+):
     """
     Returns all the notifications including the
     past and the future scheduled notifications
     """
-    error, result = notifications_service.get_notification_history(page, limit)
+    error, result = notifications_service.get_notification_history(
+        page, limit, read_status=None
+    )
     if error is not None:
         raise HttpError(400, error)
 
@@ -97,7 +102,7 @@ def get_notification_recipients(request, notification_id: int):
     return result
 
 
-@notificationsapi.get("/", auth=auth.CustomAuthMiddleware())
+@notificationsapi.get("/", auth=auth.CustomAuthMiddleware(), deprecated=True)
 def get_user_notifications(request, page: int = 1, limit: int = 10):
     """
     Returns all the notifications for a particular user.
@@ -105,14 +110,33 @@ def get_user_notifications(request, page: int = 1, limit: int = 10):
     which are already sent
     """
     orguser = request.orguser
-    error, result = notifications_service.get_user_notifications(orguser, page, limit)
+    error, result = notifications_service.fetch_user_notifications(orguser, page, limit)
     if error is not None:
         raise HttpError(400, error)
 
     return result
 
 
-@notificationsapi.put("/", auth=auth.CustomAuthMiddleware())
+@notificationsapi.get("/v1", auth=auth.CustomAuthMiddleware())
+def get_user_notifications_v1(
+    request, page: int = 1, limit: int = 10, read_status: int = None
+):
+    """
+    Returns all the notifications for a particular user.
+    It returns only the past notifications,i.e,notifications
+    which are already sent
+    """
+    orguser = request.orguser
+    error, result = notifications_service.fetch_user_notifications_v1(
+        orguser, page, limit, read_status
+    )
+    if error is not None:
+        raise HttpError(400, error)
+
+    return result
+
+
+@notificationsapi.put("/", auth=auth.CustomAuthMiddleware(), deprecated=True)
 def mark_as_read(request, payload: UpdateReadStatusSchema):
     """
     Handles the task of updating the read_status
@@ -121,6 +145,21 @@ def mark_as_read(request, payload: UpdateReadStatusSchema):
     orguser: OrgUser = request.orguser
     error, result = notifications_service.mark_notification_as_read_or_unread(
         orguser.id, payload.notification_id, payload.read_status
+    )
+    if error is not None:
+        raise HttpError(400, error)
+
+    return result
+
+
+@notificationsapi.put("/v1", auth=auth.CustomAuthMiddleware())
+def mark_as_read_v1(request, payload: UpdateReadStatusSchemav1):
+    """
+    Bulk update of read status of notifications
+    """
+    orguser: OrgUser = request.orguser
+    error, result = notifications_service.mark_notifications_as_read_or_unread(
+        orguser.id, payload.notification_ids, payload.read_status
     )
     if error is not None:
         raise HttpError(400, error)

@@ -2,9 +2,11 @@ import pytest
 from unittest.mock import Mock, patch
 from ninja.errors import HttpError
 import sqlalchemy
+from unittest.mock import _Call
 
 from ddpui.models.org import OrgWarehouse, Org
 from ddpui.models.role_based_access import Role, RolePermission, Permission
+from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.tests.api_tests.test_user_org_api import (
     seed_db,
     orguser,
@@ -20,8 +22,16 @@ from ddpui.api.warehouse_api import (
     post_data_insights,
     get_download_warehouse_data,
     get_warehouse_table_columns_spec,
+    post_warehouse_prompt,
+    post_save_warehouse_prompt_session,
 )
-from ddpui.schemas.warehouse_api_schemas import RequestorColumnSchema
+from ddpui.schemas.warehouse_api_schemas import (
+    RequestorColumnSchema,
+    AskWarehouseRequest,
+    SaveLlmSessionRequest,
+)
+from ddpui.utils.constants import LIMIT_ROWS_TO_SEND_TO_LLM
+from ddpui.models.llm import LlmSession, LlmSessionStatus, LlmAssistantType
 
 
 pytestmark = pytest.mark.django_db
@@ -256,3 +266,161 @@ def test_get_warehouse_table_columns_spec_table_success(orguser):
             {"name": "col1", "data_type": "int"},
             {"name": "col2", "data_type": "varchar"},
         ]
+
+
+def test_llm_data_analysis_invalid_sqls(orguser):
+    """
+    Test cases for llm data analysis with invalid sql
+    """
+    # only select queries allowed
+    payload = AskWarehouseRequest(
+        sql="update some_table set col1 = null where 1 = 1",
+        user_prompt="Summarize the output",
+    )
+    with pytest.raises(HttpError) as exc:
+        request = mock_request(orguser)
+        post_warehouse_prompt(request, payload)
+    assert exc.value.status_code == 400
+    assert str(exc.value) == "Only SELECT queries are allowed"
+
+    # only 1 sql
+    payload = AskWarehouseRequest(
+        sql="select * from some_table; select * from some_other_table",
+        user_prompt="Summarize the output",
+    )
+    with pytest.raises(HttpError) as exc:
+        request = mock_request(orguser)
+        post_warehouse_prompt(request, payload)
+    assert exc.value.status_code == 400
+    assert str(exc.value) == "Only one query is allowed"
+
+    # no sql
+    payload = AskWarehouseRequest(
+        sql="",
+        user_prompt="Summarize the output",
+    )
+    with pytest.raises(HttpError) as exc:
+        request = mock_request(orguser)
+        post_warehouse_prompt(request, payload)
+    assert exc.value.status_code == 400
+    assert str(exc.value) == "No query provided"
+
+
+def test_llm_data_analysis_limit_records_sent_to_llm(orguser):
+    """
+    Make sure the defined limit for no of records is going to the llms for analysis
+    """
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    payload = AskWarehouseRequest(
+        sql=f"select * from some_table limit {LIMIT_ROWS_TO_SEND_TO_LLM + 2000}",
+        user_prompt="Summarize the output",
+    )
+
+    with pytest.raises(HttpError) as exc:
+        request = mock_request(orguser)
+        post_warehouse_prompt(request, payload)
+
+    assert exc.value.status_code == 400
+    assert str(exc.value) == f"Please make sure the limit in query is less than {LIMIT_ROWS_TO_SEND_TO_LLM}"
+
+    # if the limit is not set default limit will be used
+    payload = AskWarehouseRequest(
+        sql="select * from some_table",
+        user_prompt="Summarize the output",
+    )
+
+    sql = "select * from some_table"
+    payload = AskWarehouseRequest(
+        sql=sql,
+        user_prompt="Summarize the output",
+    )
+    with patch(
+        "ddpui.celeryworkers.tasks.summarize_warehouse_results.apply_async",
+        return_value=Mock(id="task-id"),
+    ) as mock_apply_async:
+        request = mock_request(orguser)
+        post_warehouse_prompt(request, payload)
+
+        call: _Call = mock_apply_async.call_args
+        _, call_kwargs = list(call)
+
+        assert (
+            call_kwargs.get("kwargs", {}).get("sql", None)
+            == f"{sql} LIMIT {LIMIT_ROWS_TO_SEND_TO_LLM}"
+        )
+
+
+def test_llm_data_analysis_save_new_session(orguser):
+    """
+    Test the creation of new session for llm data analysis
+    """
+    request = mock_request(orguser)
+    # session pushed by llm service and the long running generation process
+    session_id = "some-random-uuid"
+    session = LlmSession.objects.create(
+        session_id=session_id,
+        org=orguser.org,
+        orguser=orguser,
+        response=[{"prompt": "some prompt", "response": "some response"}],
+        session_status=LlmSessionStatus.COMPLETED,
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+    )
+
+    # session not found
+    payload = SaveLlmSessionRequest(
+        session_name="save session with this name", overwrite=False, old_session_id=None
+    )
+    with pytest.raises(HttpError) as exc:
+        post_save_warehouse_prompt_session(request, "some-fake-id", payload)
+
+    assert exc.value.status_code == 404
+    assert str(exc.value) == "Session not found"
+
+    # save the session
+    post_save_warehouse_prompt_session(request, session_id, payload)
+    assert (
+        LlmSession.objects.filter(session_name="save session with this name").count()
+        == 1
+    )
+
+
+def test_llm_data_analysis_save_and_overwrite_session(orguser):
+    """
+    Test the save & overwrite session for llm data analysis
+    """
+    request = mock_request(orguser)
+    old_session_id = "some-random-uuid"
+    old_session = LlmSession.objects.create(
+        session_id=old_session_id,
+        org=orguser.org,
+        orguser=orguser,
+        response=[{"prompt": "some prompt", "response": "some response"}],
+        session_status=LlmSessionStatus.COMPLETED,
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+        session_name="old session name; to be overwritten",
+    )
+
+    # new ghost session pushed by llm service and celery
+    new_session_id = "new-session-id"
+    new_session = LlmSession.objects.create(
+        session_id=new_session_id,
+        org=orguser.org,
+        orguser=orguser,
+        response=[{"prompt": "some prompt", "response": "some response"}],
+        session_status=LlmSessionStatus.COMPLETED,
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+    )
+    payload = SaveLlmSessionRequest(
+        session_name="new session name", overwrite=True, old_session_id=old_session_id
+    )
+
+    post_save_warehouse_prompt_session(request, new_session.session_id, payload)
+
+    assert LlmSession.objects.filter(session_id=old_session_id).count() == 0
+    assert (
+        LlmSession.objects.filter(
+            session_id=new_session_id, session_name=payload.session_name
+        ).count()
+        == 1
+    )

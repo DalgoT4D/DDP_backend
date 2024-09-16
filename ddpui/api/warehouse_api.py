@@ -1,4 +1,6 @@
 import json
+import sqlparse
+from sqlparse.tokens import Keyword, Number, Token
 import uuid
 import sqlalchemy
 from ninja import NinjaAPI
@@ -11,18 +13,31 @@ from django.http import StreamingHttpResponse
 from ddpui import auth
 from ddpui.core import dbtautomation_service
 from ddpui.models.org import OrgWarehouse
+from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.taskprogress import TaskProgress
+from ddpui.utils.singletaskprogress import SingleTaskProgress
 from ddpui.auth import has_permission
 
-from ddpui.datainsights.insights.insight_factory import InsightsFactory
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.datainsights.generate_result import GenerateResult, poll_for_column_insights
+from ddpui.celeryworkers.tasks import summarize_warehouse_results
 
-from ddpui.schemas.warehouse_api_schemas import RequestorColumnSchema
+from ddpui.schemas.warehouse_api_schemas import (
+    RequestorColumnSchema,
+    AskWarehouseRequest,
+    SaveLlmSessionRequest,
+    LlmSessionFeedbackRequest,
+)
+from ddpui.models.llm import (
+    LlmSession,
+    LlmSessionStatus,
+    LlmAssistantType,
+)
 from ddpui.utils import secretsmanager
 from ddpui.utils.helpers import convert_to_standard_types
+from ddpui.utils.constants import LIMIT_ROWS_TO_SEND_TO_LLM
 
 warehouseapi = NinjaAPI(urls_namespace="warehouse")
 logger = CustomLogger("ddpui")
@@ -303,3 +318,194 @@ def get_download_warehouse_data(request, schema_name: str, table_name: str):
     )
 
     return response
+
+
+@warehouseapi.post("/ask/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse_data"])
+def post_warehouse_prompt(request, payload: AskWarehouseRequest):
+    """
+    Ask the warehouse a question/prompt on a result set and get a response from llm service
+    Be default a new session will be saved
+    """
+    stmts = sqlparse.parse(payload.sql)
+
+    if len(stmts) > 1:
+        raise HttpError(400, "Only one query is allowed")
+
+    if len(stmts) == 0:
+        raise HttpError(400, "No query provided")
+
+    if not stmts[0].get_type() == "SELECT":
+        raise HttpError(400, "Only SELECT queries are allowed")
+
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    # limit the records going to llm
+    limit = float("inf")
+    limit_found = False
+    for stmt in stmts:
+        for token in stmt.tokens:
+            if (
+                not limit_found
+                and token.ttype is Keyword
+                and token.value.upper() == "LIMIT"
+            ):
+                limit_found = True
+            if limit_found and token.ttype is Token.Literal.Number.Integer:
+                limit = int(token.value)
+                break
+
+    if limit_found and limit > LIMIT_ROWS_TO_SEND_TO_LLM:
+        raise HttpError(
+            400,
+            f"Please make sure the limit in query is less than {LIMIT_ROWS_TO_SEND_TO_LLM}",
+        )
+
+    if not limit_found:
+        logger.info(f"Setting LIMIT {LIMIT_ROWS_TO_SEND_TO_LLM} to the query")
+        payload.sql = f"{payload.sql} LIMIT {LIMIT_ROWS_TO_SEND_TO_LLM}"
+
+    try:
+
+        task = summarize_warehouse_results.apply_async(
+            kwargs={
+                "orguser_id": orguser.id,
+                "org_warehouse_id": org_warehouse.id,
+                "sql": payload.sql,
+                "user_prompt": payload.user_prompt,
+            },
+        )
+
+        # set progress in redis to poll on
+        SingleTaskProgress(task.id, 60 * 10)
+
+        return {"request_uuid": task.id}
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to summarize warehouse results") from error
+
+
+@warehouseapi.post("/ask/{new_session_id}/save", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse_data"])
+def post_save_warehouse_prompt_session(
+    request, new_session_id: str, payload: SaveLlmSessionRequest
+):
+    """Saving the llm session generated from warehouse prompt. Saving here means attaching it to a name"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    new_session = LlmSession.objects.filter(
+        session_id=new_session_id,
+        org=org,
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+    ).first()
+
+    if not new_session:
+        raise HttpError(404, "Session not found")
+
+    if payload.overwrite and not payload.old_session_id:
+        raise HttpError(400, "session to overwrite is required")
+
+    # delete the old session if overwrite is true
+    if payload.overwrite:
+        old_session = LlmSession.objects.filter(
+            session_id=payload.old_session_id,
+            org=org,
+            session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+        ).first()
+        if old_session:
+            old_session.delete()
+            logger.info(
+                f"Deleted the old session llm analysis {payload.old_session_id}"
+            )
+
+    if new_session.session_status == LlmSessionStatus.RUNNING:
+        raise HttpError(400, "Session is still in progress")
+
+    new_session.session_name = payload.session_name
+    new_session.save()
+
+    return {"success": 1}
+
+
+@warehouseapi.post("/ask/{session_id}/feedback", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse_data"])
+def post_feedback_llm_session(
+    request, session_id: str, payload: LlmSessionFeedbackRequest
+):
+    """Feedback"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    session = LlmSession.objects.filter(
+        session_id=session_id,
+        org=org,
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+    ).first()
+
+    if not session:
+        raise HttpError(404, "Session not found")
+
+    session.feedback = payload.feedback
+    session.save()
+
+    return {"success": 1}
+
+
+@warehouseapi.get("/ask/sessions", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse_data"])
+def get_warehouse_llm_analysis_sessions(
+    request,
+    limit: int = 10,
+    offset: int = 0,
+):
+    """
+    Get all saved sessions with a session_name for the user
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    sessions = (
+        LlmSession.objects.filter(
+            org=org,
+            session_name__isnull=False,  # fetch only saved sessions
+            session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+        )
+        .select_related("orguser__user")
+        .order_by("-updated_at")[offset : offset + limit]
+    )
+
+    # can be optimized
+    total_count = LlmSession.objects.filter(
+        org=org,
+        session_name__isnull=False,  # fetch only saved sessions
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+    ).count()
+
+    return {
+        "limit": limit,
+        "offset": offset,
+        "total_rows": total_count,
+        "rows": [
+            {
+                "session_id": session.session_id,
+                "session_name": session.session_name,
+                "session_status": session.session_status,
+                "request_uuid": session.request_uuid,
+                "request_meta": session.request_meta,
+                "assistant_prompt": session.assistant_prompt,
+                "response": session.response,
+                "created_at": session.created_at,
+                "updated_at": session.updated_at,
+                "created_by": {
+                    "email": session.orguser.user.email,
+                },
+            }
+            for session in sessions
+        ],
+    }
