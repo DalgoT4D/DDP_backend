@@ -53,6 +53,7 @@ from ddpui.ddpprefect.prefect_service import (
     get_dbt_cli_profile_block,
     prefect_get,
     get_flow_run_logs_v2,
+    recurse_flow_run_logs,
 )
 from ddpui.utils.constants import (
     TASK_DBTRUN,
@@ -778,29 +779,14 @@ def summarize_logs(
                 )
                 return
             task = dbt_tasks[0]
-            task["logs"] = []
-            offset = 0
-            while True:
-                new_logs_set = get_flow_run_logs(
-                    flow_run_id, task_id, FLOW_RUN_LOGS_OFFSET_LIMIT, offset
-                )
-                task["logs"] += new_logs_set["logs"]["logs"]
-                if len(new_logs_set["logs"]) == FLOW_RUN_LOGS_OFFSET_LIMIT:
-                    offset += FLOW_RUN_LOGS_OFFSET_LIMIT
-                elif len(new_logs_set["logs"]) < FLOW_RUN_LOGS_OFFSET_LIMIT:
-                    break
-                else:
-                    logger.info("Something weird happening in fetching logs")
-                    break
+            task["logs"] = recurse_flow_run_logs(flow_run_id, task_id)
 
             logs_text = "\n".join([log["message"] for log in task["logs"]])
-            log_file_name = f"{flow_run_id}_{task_id}"
         elif type == LogsSummarizationType.AIRBYTE_SYNC:
             logs = airbyte_service.get_logs_for_job(
                 job_id=job_id, attempt_number=attempt_number
             )
             logs_text = "\n".join(logs["logs"]["logLines"])
-            log_file_name = f"{job_id}_{attempt_number}"
     except Exception as err:
         logger.error(err)
         taskprogress.add(

@@ -114,7 +114,7 @@ def email_orgusers_ses_whitelisted(org: Org, email_body: str):
 
 def email_flowrun_logs_to_orgusers(org: Org, flow_run_id: str):
     """retrieves logs for a flow-run and emails them to all users for the org"""
-    logs = prefect_service.get_flow_run_logs(flow_run_id, 0)
-    logmessages = [x["message"] for x in logs["logs"]["logs"]]
+    logs_arr = prefect_service.recurse_flow_run_logs(flow_run_id)
+    logmessages = [x["message"] for x in logs_arr]
     email_body = generate_notification_email(org.name, flow_run_id, logmessages)
     email_orgusers(org, email_body)

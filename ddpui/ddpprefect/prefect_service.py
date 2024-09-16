@@ -28,6 +28,9 @@ from ddpui.ddpprefect import (
     FLOW_RUN_CRASHED_STATE_TYPE,
     FLOW_RUN_FAILED_STATE_TYPE,
 )
+from ddpui.utils.constants import (
+    FLOW_RUN_LOGS_OFFSET_LIMIT,
+)
 
 load_dotenv()
 
@@ -608,6 +611,7 @@ def get_flow_run_logs_v2(flow_run_id: str) -> dict:  # pragma: no cover
     )
     return res
 
+
 def get_flow_run_graphs(flow_run_id: str) -> dict:
     """retreive the tasks from a flow-run from prefect"""
     res = prefect_get(
@@ -678,3 +682,26 @@ def retry_flow_run(flow_run_id: str, minutes: int = 5):
     """retry a flow run in prefect; after x minutes"""
     res = prefect_post(f"flow_runs/{flow_run_id}/retry", {"minutes": minutes})
     return res
+
+
+def recurse_flow_run_logs(
+    flow_run_id: str,
+    task_run_id: str = None,
+    limit: int = FLOW_RUN_LOGS_OFFSET_LIMIT,
+    offset: int = 0,
+):
+    """recursively fetch logs for a flow run"""
+    logs = []
+    while True:
+        new_logs_set = get_flow_run_logs(flow_run_id, task_run_id, limit, offset)
+        curr_logs = new_logs_set["logs"]["logs"]
+        logs.extend(curr_logs)
+        if len(curr_logs) == limit:
+            offset += limit
+        elif len(curr_logs) < limit:
+            break
+        else:
+            logger.info(f"Something weird happening in fetching logs for {flow_run_id}")
+            break
+
+    return logs

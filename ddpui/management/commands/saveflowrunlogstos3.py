@@ -29,14 +29,13 @@ class Command(BaseCommand):
             )
             for flow_run in flow_runs:
                 flow_run_id = flow_run["id"]
-                logs_dict = prefect_service.get_flow_run_logs(flow_run_id, 0)
-                if "logs" in logs_dict["logs"]:
-                    flow_run_logs = logs_dict["logs"]["logs"]
+                logs_arr = prefect_service.recurse_flow_run_logs(flow_run_id)
+                if len(logs_arr) > 0:
                     s3key = f"logs/prefect/{org}/{flow_run_id}.json"
                     s3.put_object(
                         Bucket="dalgo-t4dai",
                         Key=s3key,
-                        Body=json.dumps(flow_run_logs),
+                        Body=json.dumps(logs_arr),
                     )
                     print(f"Saved s3://dalgo-t4dai/{s3key}")
 
