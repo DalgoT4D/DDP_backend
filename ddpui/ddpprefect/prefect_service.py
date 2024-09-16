@@ -181,20 +181,6 @@ def delete_airbyte_connection_block(block_id) -> None:
 
 
 # ================================================================================================
-def create_shell_block(shell: PrefectShellSetup) -> str:
-    """Create a prefect shell block"""
-    response = prefect_post(
-        "blocks/shell/",
-        {
-            "blockName": shell.blockname,
-            "commands": shell.commands,
-            "env": shell.env,
-            "workingDir": shell.workingDir,
-        },
-    )
-    return response
-
-
 def delete_shell_block(block_id):
     """Delete a prefect shell block"""
     prefect_delete_a_block(block_id)
