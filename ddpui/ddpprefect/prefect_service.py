@@ -173,15 +173,6 @@ def delete_airbyte_server_block(block_id):
 
 
 # ================================================================================================
-def get_airbye_connection_blocks(block_names) -> dict:
-    """Filter out blocks by query params"""
-    response = prefect_post(
-        "blocks/airbyte/connection/filter",
-        {"block_names": block_names},
-    )
-    return response
-
-
 def update_airbyte_connection_block(blockname):
     """We don't update connection blocks"""
     raise Exception("not implemented")
@@ -190,18 +181,6 @@ def update_airbyte_connection_block(blockname):
 def delete_airbyte_connection_block(block_id) -> None:
     """Delete airbyte connection block in prefect"""
     prefect_delete_a_block(block_id)
-
-
-def post_prefect_blocks_bulk_delete(block_ids: list) -> dict:
-    """
-    Delete airbyte connection blocks in prefect
-    corresponding the connection ids array passed
-    """
-    response = prefect_post(
-        "blocks/bulk/delete/",
-        {"block_ids": block_ids},
-    )
-    return response
 
 
 # ================================================================================================
@@ -235,39 +214,6 @@ def get_dbtcore_block_id(blockname) -> str | None:
     """get the block_id for the dbtcore block having this name"""
     response = prefect_get(f"blocks/dbtcore/{blockname}")
     return response["block_id"]
-
-
-def create_dbt_core_block(
-    dbtcore: PrefectDbtCoreSetup,
-    profilename: str,
-    cli_profile_block_name: str,
-    target: str,
-    wtype: str,
-    credentials: dict,
-    bqlocation: str,
-) -> dict:
-    """Create a dbt core block in prefect"""
-    response = prefect_post(
-        "blocks/dbtcore/",
-        {
-            "blockName": dbtcore.block_name,
-            "profile": {
-                "name": profilename,
-                "target": target,
-                "target_configs_schema": target,
-            },
-            "cli_profile_block_name": cli_profile_block_name,
-            "wtype": wtype,
-            "credentials": credentials,
-            "bqlocation": bqlocation,
-            "commands": dbtcore.commands,
-            "env": dbtcore.env,
-            "working_dir": dbtcore.working_dir,
-            "profiles_dir": dbtcore.profiles_dir,
-            "project_dir": dbtcore.project_dir,
-        },
-    )
-    return response
 
 
 def delete_dbt_core_block(block_id):
@@ -387,26 +333,6 @@ def get_secret_block_by_name(blockname: str) -> dict:
 
 
 # ================================================================================================
-def run_airbyte_connection_sync(
-    run_flow: PrefectAirbyteSync,
-) -> dict:  # pragma: no cover
-    """initiates an airbyte connection sync"""
-    res = prefect_post(
-        "flows/airbyte/connection/sync/",
-        json=run_flow.to_json(),
-    )
-    return res
-
-
-def run_dbt_core_sync(run_flow: PrefectDbtCore) -> dict:  # pragma: no cover
-    """initiates a dbt job sync"""
-    res = prefect_post(
-        "flows/dbtcore/run/",
-        json=run_flow.to_json(),
-    )
-    return res
-
-
 def run_dbt_task_sync(task: PrefectDbtTaskSetup) -> dict:  # pragma: no cover
     """initiates a dbt job sync"""
     res = prefect_post(
