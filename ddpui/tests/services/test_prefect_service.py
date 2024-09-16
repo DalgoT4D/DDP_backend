@@ -1,6 +1,6 @@
 import os
 import django
-from unittest.mock import patch, Mock
+from unittest.mock import patch, Mock, call
 import pytest
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
@@ -47,6 +47,7 @@ from ddpui.ddpprefect.prefect_service import (
     get_flow_run,
     create_deployment_flow_run,
     create_dbt_cli_profile_block,
+    recurse_flow_run_logs,
 )
 
 PREFECT_PROXY_API_URL = os.getenv("PREFECT_PROXY_API_URL")
@@ -590,9 +591,12 @@ def test_get_deployment(mock_get: Mock):
 @patch("ddpui.ddpprefect.prefect_service.prefect_get")
 def test_get_flow_run_logs(mock_get: Mock):
     mock_get.return_value = "the-logs"
-    response = get_flow_run_logs("flowrunid","taskrunid", 10, 3)
+    response = get_flow_run_logs("flowrunid", "taskrunid", 10, 3)
     assert response == {"logs": "the-logs"}
-    mock_get.assert_called_once_with("flow_runs/logs/flowrunid", params={"offset": 3, "limit": 10, "task_run_id": "taskrunid"})
+    mock_get.assert_called_once_with(
+        "flow_runs/logs/flowrunid",
+        params={"offset": 3, "limit": 10, "task_run_id": "taskrunid"},
+    )
 
 
 @patch("ddpui.ddpprefect.prefect_service.prefect_get")
@@ -609,3 +613,45 @@ def test_create_deployment_flow_run(mock_post: Mock):
     response = create_deployment_flow_run("depid")
     assert response == "retval"
     mock_post.assert_called_once_with("deployments/depid/flow_run", {})
+
+
+def test_recurse_flow_run_logs():
+    """this function should fetch logs recursively"""
+    with patch("ddpui.ddpprefect.prefect_service.get_flow_run_logs") as mock_get_logs:
+        mock_get_logs.side_effect = [
+            {"logs": {"logs": ["log1", "log2", "log3"]}},
+            {
+                "logs": {
+                    "logs": ["log4", "log5", "log6"],
+                }
+            },
+            {
+                "logs": {
+                    "logs": [
+                        "log7",
+                        "log8",
+                    ]
+                }
+            },
+        ]
+
+        logs = recurse_flow_run_logs("flowrunid", None, limit=3)
+
+        assert logs == [
+            "log1",
+            "log2",
+            "log3",
+            "log4",
+            "log5",
+            "log6",
+            "log7",
+            "log8",
+        ]
+
+        # Check the arguments with which the function was called
+        expected_calls = [
+            call("flowrunid", None, 3, 0),
+            call("flowrunid", None, 3, 3),
+            call("flowrunid", None, 3, 6),
+        ]
+        mock_get_logs.assert_has_calls(expected_calls)

@@ -649,11 +649,13 @@ def post_run_prefect_org_deployment_task(
 @pipelineapi.get("flow_runs/{flow_run_id}/logs", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_pipeline"])
 def get_flow_runs_logs(
-    request, flow_run_id, task_run_id = '', limit: int = 0, offset: int = 0
+    request, flow_run_id, task_run_id="", limit: int = 0, offset: int = 0
 ):  # pylint: disable=unused-argument
     """return the logs from a flow-run"""
     try:
-        result = prefect_service.get_flow_run_logs(flow_run_id, task_run_id,limit,offset)
+        result = prefect_service.get_flow_run_logs(
+            flow_run_id, task_run_id, limit, offset
+        )
     except Exception as error:
         logger.exception(error)
         raise HttpError(400, "failed to retrieve logs") from error
@@ -711,10 +713,7 @@ def get_prefect_flow_runs_log_history(
 
     if fetchlogs:
         for flow_run in flow_runs:
-            logs_dict = prefect_service.get_flow_run_logs(flow_run["id"], 0)
-            flow_run["logs"] = (
-                logs_dict["logs"]["logs"] if "logs" in logs_dict["logs"] else []
-            )
+            flow_run["logs"] = prefect_service.recurse_flow_run_logs(flow_run["id"], None)
 
     return flow_runs
 
