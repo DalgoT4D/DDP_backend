@@ -221,18 +221,6 @@ def delete_dbt_core_block(block_id):
     prefect_delete_a_block(block_id)
 
 
-def update_dbt_core_block_credentials(wtype: str, block_name: str, credentials: dict):
-    """Update the credentials of a dbt core block in prefect"""
-    response = prefect_put(
-        f"blocks/dbtcore_edit/{wtype}/",
-        {
-            "blockName": block_name,
-            "credentials": credentials,
-        },
-    )
-    return response
-
-
 def update_dbt_core_block_schema(block_name: str, target_configs_schema: str):
     """Update the schema inside a dbt core block in prefect"""
     response = prefect_put(

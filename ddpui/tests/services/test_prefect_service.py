@@ -308,25 +308,6 @@ def test_delete_dbt_core_block(mock_delete: Mock):
 
 
 @patch("ddpui.ddpprefect.prefect_service.prefect_put")
-def test_update_dbt_core_block_credentials(mock_put: Mock):
-    mock_put.return_value = "retval"
-    response = update_dbt_core_block_credentials(
-        "wtype",
-        "block_name",
-        {"c1": "c2"},
-    )
-
-    assert response == "retval"
-    mock_put.assert_called_once_with(
-        "blocks/dbtcore_edit/wtype/",
-        {
-            "blockName": "block_name",
-            "credentials": {"c1": "c2"},
-        },
-    )
-
-
-@patch("ddpui.ddpprefect.prefect_service.prefect_put")
 def test_update_dbt_core_block_schema(mock_put: Mock):
     mock_put.return_value = "retval"
     response = update_dbt_core_block_schema("block_name", "target")
