@@ -204,12 +204,6 @@ def delete_shell_block(block_id):
 
 
 # ================================================================================================
-def get_dbtcore_block_id(blockname) -> str | None:
-    """get the block_id for the dbtcore block having this name"""
-    response = prefect_get(f"blocks/dbtcore/{blockname}")
-    return response["block_id"]
-
-
 def delete_dbt_core_block(block_id):
     """Delete a dbt core block in prefect"""
     prefect_delete_a_block(block_id)

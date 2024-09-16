@@ -279,14 +279,6 @@ def test_delete_airbyte_connection_block(mock_delete: Mock):
 
 
 # =============================================================================
-@patch("ddpui.ddpprefect.prefect_service.prefect_get")
-def test_get_dbtcore_block_id(mock_get: Mock):
-    mock_get.return_value = {"block_id": "theblockid"}
-    response = get_dbtcore_block_id("blockname")
-    assert response == "theblockid"
-    mock_get.assert_called_once_with("blocks/dbtcore/blockname")
-
-
 @patch("ddpui.ddpprefect.prefect_service.prefect_delete_a_block")
 def test_delete_dbt_core_block(mock_delete: Mock):
     delete_dbt_core_block("blockid")
