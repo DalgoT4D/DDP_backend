@@ -23,18 +23,13 @@ from ddpui.ddpprefect.prefect_service import (
     create_airbyte_server_block,
     delete_airbyte_server_block,
     delete_airbyte_connection_block,
-    get_shell_block_id,
     PrefectDbtCoreSetup,
-    create_dbt_core_block,
     delete_dbt_core_block,
     PrefectSecretBlockCreate,
     create_secret_block,
     delete_secret_block,
-    update_dbt_core_block_credentials,
     update_dbt_core_block_schema,
-    run_airbyte_connection_sync,
     PrefectAirbyteSync,
-    run_dbt_core_sync,
     PrefectDbtCore,
     get_flow_runs_by_deployment_id,
     set_deployment_schedule,
@@ -281,15 +276,6 @@ def test_update_airbyte_connection_block():
 def test_delete_airbyte_connection_block(mock_delete: Mock):
     delete_airbyte_connection_block("blockid")
     mock_delete.assert_called_once_with("blockid")
-
-
-# =============================================================================
-@patch("ddpui.ddpprefect.prefect_service.prefect_get")
-def test_get_shell_block_id(mock_get: Mock):
-    mock_get.return_value = {"block_id": "theblockid"}
-    response = get_shell_block_id("blockname")
-    assert response == "theblockid"
-    mock_get.assert_called_once_with("blocks/shell/blockname")
 
 
 # =============================================================================
