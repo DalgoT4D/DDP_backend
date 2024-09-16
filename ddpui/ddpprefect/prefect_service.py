@@ -8,18 +8,15 @@ from django.db.models import Window
 from django.db.models.functions import RowNumber
 
 from ddpui.ddpprefect.schema import (
-    PrefectDbtCoreSetup,
     PrefectShellSetup,
-    PrefectAirbyteSync,
     PrefectDataFlowCreateSchema3,
-    PrefectDbtCore,
     PrefectSecretBlockCreate,
     PrefectShellTaskSetup,
     PrefectDbtTaskSetup,
     PrefectDataFlowUpdateSchema3,
 )
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.models.tasks import DataflowOrgTask, TaskLock, OrgTask, OrgDataFlowv1
+from ddpui.models.tasks import DataflowOrgTask, TaskLock
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.ddpprefect import (
