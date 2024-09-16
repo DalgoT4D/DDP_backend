@@ -8,7 +8,6 @@ from django.db.models import Window
 from django.db.models.functions import RowNumber
 
 from ddpui.ddpprefect.schema import (
-    PrefectShellSetup,
     PrefectDataFlowCreateSchema3,
     PrefectSecretBlockCreate,
     PrefectShellTaskSetup,
@@ -493,6 +492,7 @@ def get_flow_run_logs_v2(flow_run_id: str) -> dict:  # pragma: no cover
     )
     return res
 
+
 def get_flow_run_graphs(flow_run_id: str) -> dict:
     """retreive the tasks from a flow-run from prefect"""
     res = prefect_get(
@@ -510,9 +510,7 @@ def get_flow_run(flow_run_id: str) -> dict:
 def create_deployment_flow_run(
     deployment_id: str, flow_run_params: dict = None
 ) -> dict:  # pragma: no cover
-    """
-    Proxy call to create a flow run for deployment.
-    """
+    """Proxy call to create a flow run for deployment."""
     res = prefect_post(
         f"deployments/{deployment_id}/flow_run",
         flow_run_params if flow_run_params else {},
