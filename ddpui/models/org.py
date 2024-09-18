@@ -179,6 +179,30 @@ class OrgDataFlowv1(models.Model):
         return f"OrgDataFlowv1[{self.name}|{self.deployment_name}|{self.deployment_id}|{self.cron}]"
 
 
+class ConnectionMeta(models.Model):
+    """A model to store details about the airbyte connection
+    like no of rows in staging table,
+    whether the reset is big enough for scheduling it later"""
+
+    connection_id = models.CharField(max_length=36, null=False)
+    schedule_large_jobs = models.BooleanField(default=True)
+
+
+class ConnectionJob(models.Model):
+    """
+    All the large jobs (reset or update schema) scheduled by the system are stored here
+    - ddpui.utils.constants.UPDATE_SCHEMA
+    - ddpui.utils.constants.TASK_AIRBYTERESET
+    """
+
+    connection_id = models.CharField(max_length=36, null=False)
+    job_type = models.CharField(max_length=36, null=False)
+    scheduled_at = models.DateTimeField(null=False)
+    flow_run_id = models.CharField(max_length=36, null=False)
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
 class OrgSchemaChange(models.Model):
     """This contains the deployment id of an organization to schedule flows/pipelines"""
 
@@ -187,3 +211,6 @@ class OrgSchemaChange(models.Model):
     change_type = models.CharField(max_length=36, null=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
+    schedule_job = models.ForeignKey(
+        ConnectionJob, null=True, on_delete=models.SET_NULL
+    )
