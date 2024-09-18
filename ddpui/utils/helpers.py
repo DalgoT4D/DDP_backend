@@ -1,4 +1,5 @@
 import shlex
+import calendar
 import subprocess
 import re
 import string
@@ -6,7 +7,8 @@ import secrets
 import hashlib
 import json
 from decimal import Decimal
-from datetime import datetime, date
+from datetime import datetime, date, time, timedelta
+import pytz
 import csv
 import io
 
@@ -185,3 +187,25 @@ def convert_sqlalchemy_rows_to_csv_string(rows: list[dict]):
 def convert_sqlalchemy_rows_to_json_string(rows: list[dict]):
     """converts a list of sqlalchemy rows to a csv string"""
     return json.dumps(convert_to_standard_types(rows), indent=4)
+
+
+def get_schedule_time_for_large_jobs(
+    time: time = time(10, 0), weekday: int = calendar.SUNDAY
+) -> datetime:
+    """By default scheduled time will be Sunday 10am UTC"""
+    now = datetime.now(pytz.utc)
+
+    # Calculate the number of days until weekday
+    days_until_sunday = (weekday - now.weekday() + 7) % 7
+
+    # If today is that weekday, we want to use some future time
+    if days_until_sunday == 0:
+        time = time(10, 0) + timedelta(hours=1)
+
+    # Calculate the next weekday datetime
+    next_slot = now + timedelta(days=days_until_sunday)
+
+    # set the time
+    next_slot = datetime.combine(next_slot, time, tzinfo=pytz.utc)
+
+    return next_slot

@@ -15,7 +15,14 @@ from django.db.models.functions import RowNumber
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import AirbyteConnectionSchemaUpdate, AirbyteWorkspace
 from ddpui.ddpprefect import prefect_service
-from ddpui.models.org import Org, OrgPrefectBlockv1, OrgSchemaChange, OrgWarehouseSchema
+from ddpui.models.org import (
+    Org,
+    OrgPrefectBlockv1,
+    OrgSchemaChange,
+    OrgWarehouseSchema,
+    ConnectionJob,
+    ConnectionMeta,
+)
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.custom_logger import CustomLogger
@@ -33,12 +40,17 @@ from ddpui.ddpprefect import AIRBYTESERVER
 from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.models.org import OrgDataFlowv1, OrgWarehouse
-from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask
-from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTERESET
+from ddpui.models.tasks import (
+    Task,
+    OrgTask,
+    DataflowOrgTask,
+)
+from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTERESET, UPDATE_SCHEMA
 from ddpui.utils.helpers import (
     generate_hash_id,
     update_dict_but_not_stars,
     map_airbyte_keys_to_postgres_keys,
+    get_schedule_time_for_large_jobs,
 )
 from ddpui.utils import secretsmanager
 from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
@@ -1155,7 +1167,17 @@ def schedule_update_connection_schema(
     )
 
     try:
-        res = prefect_service.create_deployment_flow_run(
+        # check if the connection is "large" for scheduling
+        connection_meta = ConnectionMeta.objects.filter(
+            connection_id=connection_id
+        ).first()
+        schedule_at = (
+            None
+            if connection_meta and connection_meta.schedule_large_jobs
+            else get_schedule_time_for_large_jobs()
+        )
+
+        res = prefect_service.schedule_deployment_flow_run(
             dataflow_orgtask.dataflow.deployment_id,
             {
                 "config": {
@@ -1167,10 +1189,37 @@ def schedule_update_connection_schema(
                     ],
                 }
             },
+            schedule_at,
         )
-        for tasklock in locks:
-            tasklock.flow_run_id = res["flow_run_id"]
-            tasklock.save()
+
+        if schedule_at:
+            job = ConnectionJob.objects.filter(
+                connection_id=connection_id, job_type=UPDATE_SCHEMA
+            ).first()
+
+            if job:
+                job.flow_run_id = res["flow_run_id"]
+                job.scheduled_at = schedule_at
+                job.save()
+            else:
+                job = ConnectionJob.objects.create(
+                    connection_id=connection_id,
+                    job_type=UPDATE_SCHEMA,
+                    flow_run_id=res["flow_run_id"],
+                    scheduled_at=schedule_at,
+                )
+
+            # update the schema change with the scheduled job
+            schema_change = OrgSchemaChange.objects.filter(
+                connection_id=connection_id
+            ).first()
+            if schema_change:
+                schema_change.schedule_job = job
+                schema_change.save()
+        else:
+            for tasklock in locks:
+                tasklock.flow_run_id = res["flow_run_id"]
+                tasklock.save()
 
     except Exception as error:
         for task_lock in locks:
