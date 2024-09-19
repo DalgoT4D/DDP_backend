@@ -1160,22 +1160,30 @@ def schedule_update_connection_schema(
     if not dataflow_orgtask:
         raise HttpError(400, "no dataflow mapped")
 
-    locks: list[TaskLock] = prefect_service.lock_tasks_for_deployment(
-        dataflow_orgtask.dataflow.deployment_id,
-        orguser,
-        dataflow_orgtasks=[dataflow_orgtask],
-    )
+    # check if the connection is "large" for scheduling
+    connection_meta = ConnectionMeta.objects.filter(connection_id=connection_id).first()
+    is_connection_large_enough = connection_meta and connection_meta.schedule_large_jobs
 
-    try:
-        # check if the connection is "large" for scheduling
-        connection_meta = ConnectionMeta.objects.filter(
-            connection_id=connection_id
-        ).first()
-        schedule_at = (
-            None
-            if connection_meta and connection_meta.schedule_large_jobs
-            else get_schedule_time_for_large_jobs()
+    locks: list[TaskLock] = []
+    schedule_at = None
+    job = None
+    if not is_connection_large_enough:
+        locks = prefect_service.lock_tasks_for_deployment(
+            dataflow_orgtask.dataflow.deployment_id,
+            orguser,
+            dataflow_orgtasks=[dataflow_orgtask],
         )
+    else:
+        schedule_at = get_schedule_time_for_large_jobs()
+        # if there is a flow run scheduled , delete it
+        try:
+            prefect_service.delete_flow_run(job.flow_run_id)
+        except Exception as err:
+            logger.exception(err)
+            raise HttpError(400, "failed to remove the previous flow run") from err
+
+    # create the new flow run; schedule now or schedule later for large connections
+    try:
 
         res = prefect_service.schedule_deployment_flow_run(
             dataflow_orgtask.dataflow.deployment_id,
@@ -1192,22 +1200,22 @@ def schedule_update_connection_schema(
             schedule_at,
         )
 
-        if schedule_at:
+        # save the new flow run scheduled to our db
+        if is_connection_large_enough:
             job = ConnectionJob.objects.filter(
-                connection_id=connection_id, job_type=UPDATE_SCHEMA
+                    connection_id=connection_id, job_type=UPDATE_SCHEMA
             ).first()
-
-            if job:
-                job.flow_run_id = res["flow_run_id"]
-                job.scheduled_at = schedule_at
-                job.save()
-            else:
+            if not job:
                 job = ConnectionJob.objects.create(
                     connection_id=connection_id,
                     job_type=UPDATE_SCHEMA,
                     flow_run_id=res["flow_run_id"],
                     scheduled_at=schedule_at,
                 )
+            else:
+                job.flow_run_id = res["flow_run_id"]
+                job.scheduled_at = schedule_at
+                job.save()
 
             # update the schema change with the scheduled job
             schema_change = OrgSchemaChange.objects.filter(
@@ -1216,10 +1224,10 @@ def schedule_update_connection_schema(
             if schema_change:
                 schema_change.schedule_job = job
                 schema_change.save()
-        else:
-            for tasklock in locks:
-                tasklock.flow_run_id = res["flow_run_id"]
-                tasklock.save()
+
+        for tasklock in locks:
+            tasklock.flow_run_id = res["flow_run_id"]
+            tasklock.save()
 
     except Exception as error:
         for task_lock in locks:

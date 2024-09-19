@@ -139,6 +139,29 @@ def prefect_delete_a_block(block_id: str, **kwargs) -> None:
         raise HttpError(res.status_code, res.text) from error
 
 
+def prefect_delete(endpoint: str, **kwargs) -> None:
+    """makes a DELETE request to the proxy"""
+    # we send headers and timeout separately from kwargs, just to be explicit about it
+    headers = kwargs.pop("headers", {})
+    headers["x-ddp-org"] = logger.get_slug()
+    timeout = kwargs.pop("timeout", http_timeout)
+
+    try:
+        res = requests.delete(
+            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}",
+            headers=headers,
+            timeout=timeout,
+            **kwargs,
+        )
+    except Exception as error:
+        raise HttpError(500, "connection error") from error
+    try:
+        res.raise_for_status()
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(res.status_code, res.text) from error
+
+
 # ================================================================================================
 def get_airbyte_server_block_id(blockname) -> str | None:
     """get the block_id for the server block having this name"""
@@ -618,6 +641,12 @@ def get_flow_run_graphs(flow_run_id: str) -> dict:
     res = prefect_get(
         f"flow_runs/graph/{flow_run_id}",
     )
+    return res
+
+
+def delete_flow_run(flow_run_id: str) -> dict:
+    """retreive the logs from a flow-run from prefect"""
+    res = prefect_delete(f"flow_runs/{flow_run_id}")
     return res
 
 
