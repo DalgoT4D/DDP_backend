@@ -1123,7 +1123,9 @@ def get_schema_changes(org: Org):
     """
     Get the schema changes of a connection in an org.
     """
-    org_schema_change = OrgSchemaChange.objects.filter(org=org)
+    org_schema_change = (
+        OrgSchemaChange.objects.filter(org=org).select_related("schedule_job").all()
+    )
 
     if org_schema_change is None:
         return None, "No schema change found"
@@ -1203,7 +1205,7 @@ def schedule_update_connection_schema(
         # save the new flow run scheduled to our db
         if is_connection_large_enough:
             job = ConnectionJob.objects.filter(
-                    connection_id=connection_id, job_type=UPDATE_SCHEMA
+                connection_id=connection_id, job_type=UPDATE_SCHEMA
             ).first()
             if not job:
                 job = ConnectionJob.objects.create(
