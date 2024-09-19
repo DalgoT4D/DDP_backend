@@ -547,14 +547,98 @@ def get_one_connection(org: Org, connection_id: str):
 
 
 def reset_connection(org: Org, connection_id: str):
-    """reset an airbyte connection"""
-    if not OrgTask.objects.filter(
+    """
+    reset the connection via the sync deployment
+    this will run a full reset + sync
+    """
+    org_server_block = OrgPrefectBlockv1.objects.filter(
+        org=org, block_type=AIRBYTESERVER
+    ).first()
+
+    if not org_server_block:
+        logger.error("Airbyte server block not found")
+        return None, "airbyte server block not found"
+
+    sync_org_task = OrgTask.objects.filter(
         org=org,
         connection_id=connection_id,
-    ).exists():
+        task__slug=TASK_AIRBYTESYNC,
+    ).first()
+    if not sync_org_task:
         return None, "connection not found"
 
-    airbyte_service.reset_connection(connection_id)
+    sync_dataflow_orgtask = DataflowOrgTask.objects.filter(
+        orgtask=sync_org_task, dataflow__dataflow_type="manual"
+    ).first()
+
+    if sync_dataflow_orgtask is None:
+        logger.error("Sync dataflow not found")
+        return None, "sync dataflow not found"
+
+    reset_org_task = OrgTask.objects.filter(
+        org=org, connection_id=connection_id, task__slug=TASK_AIRBYTERESET
+    ).first()
+
+    if not reset_org_task:
+        logger.error("Reset OrgTask not found")
+        return None, "reset OrgTask not found"
+
+    # full reset + sync; run via the manual sync deployment
+    params = {
+        "config": {
+            "tasks": [
+                setup_airbyte_sync_task_config(
+                    reset_org_task, org_server_block, seq=1
+                ).to_json(),
+                setup_airbyte_sync_task_config(
+                    sync_org_task, org_server_block, seq=2
+                ).to_json(),
+            ],
+            "org_slug": org.slug,
+        }
+    }
+
+    # check if the connection is "large" for scheduling
+    connection_meta = ConnectionMeta.objects.filter(connection_id=connection_id).first()
+    is_connection_large_enough = connection_meta and connection_meta.schedule_large_jobs
+
+    schedule_at = None
+    job: ConnectionJob = None
+    if is_connection_large_enough:
+        schedule_at = get_schedule_time_for_large_jobs()
+        # if there is a flow run scheduled , delete it
+        job = ConnectionJob.objects.filter(
+            connection_id=connection_id, job_type=TASK_AIRBYTERESET
+        ).first()
+        if job:
+            try:
+                prefect_service.delete_flow_run(job.flow_run_id)
+            except Exception as err:
+                logger.exception(err)
+                raise HttpError(400, "failed to remove the previous flow run") from err
+
+    try:
+        res = prefect_service.schedule_deployment_flow_run(
+            sync_dataflow_orgtask.dataflow.deployment_id, params, scheduled_time=None
+        )
+        # save the new flow run scheduled to our db
+        if is_connection_large_enough:
+            if not job:
+                job = ConnectionJob.objects.create(
+                    connection_id=connection_id,
+                    job_type=TASK_AIRBYTERESET,
+                    flow_run_id=res["flow_run_id"],
+                    scheduled_at=schedule_at,
+                )
+            else:
+                job.flow_run_id = res["flow_run_id"]
+                job.scheduled_at = schedule_at
+                job.save()
+
+        logger.info("Successfully triggered Prefect flow run for reset")
+    except Exception as error:
+        logger.error("Failed to trigger Prefect flow run for reset: %s", error)
+        return None, "failed to trigger Prefect flow run for reset"
 
     return None, None
 
@@ -1168,7 +1252,7 @@ def schedule_update_connection_schema(
 
     locks: list[TaskLock] = []
     schedule_at = None
-    job = None
+    job: ConnectionJob = None
     if not is_connection_large_enough:
         locks = prefect_service.lock_tasks_for_deployment(
             dataflow_orgtask.dataflow.deployment_id,
@@ -1178,11 +1262,15 @@ def schedule_update_connection_schema(
     else:
         schedule_at = get_schedule_time_for_large_jobs()
         # if there is a flow run scheduled , delete it
-        try:
-            prefect_service.delete_flow_run(job.flow_run_id)
-        except Exception as err:
-            logger.exception(err)
-            raise HttpError(400, "failed to remove the previous flow run") from err
+        job = ConnectionJob.objects.filter(
+            connection_id=connection_id, job_type=UPDATE_SCHEMA
+        ).first()
+        if job:
+            try:
+                prefect_service.delete_flow_run(job.flow_run_id)
+            except Exception as err:
+                logger.exception(err)
+                raise HttpError(400, "failed to remove the previous flow run") from err
 
     # create the new flow run; schedule now or schedule later for large connections
     try:
@@ -1204,9 +1292,6 @@ def schedule_update_connection_schema(
 
         # save the new flow run scheduled to our db
         if is_connection_large_enough:
-            job = ConnectionJob.objects.filter(
-                connection_id=connection_id, job_type=UPDATE_SCHEMA
-            ).first()
             if not job:
                 job = ConnectionJob.objects.create(
                     connection_id=connection_id,

@@ -679,8 +679,8 @@ def schedule_deployment_flow_run(
     res = prefect_post(
         f"deployments/{deployment_id}/flow_run/schedule",
         {
-            "params": flow_run_params,
-            "schedule_time": str(scheduled_time) if scheduled_time else None,
+            "runParams": flow_run_params,
+            "scheduleTime": str(scheduled_time) if scheduled_time else None,
         },
     )
     return res
