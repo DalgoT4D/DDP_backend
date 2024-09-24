@@ -418,6 +418,9 @@ def post_save_warehouse_prompt_session(
             org=org,
             session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
         ).first()
+        # since its overwriting the old session, we need to keep/persist the orguser (created_by)
+        new_session.orguser = old_session.orguser
+
         if old_session:
             old_session.delete()
             logger.info(
@@ -428,6 +431,7 @@ def post_save_warehouse_prompt_session(
         raise HttpError(400, "Session is still in progress")
 
     new_session.session_name = payload.session_name
+    new_session.updated_by = orguser
     new_session.save()
 
     return {"success": 1}
@@ -505,6 +509,13 @@ def get_warehouse_llm_analysis_sessions(
                 "created_by": {
                     "email": session.orguser.user.email,
                 },
+                "updated_by": (
+                    {
+                        "email": session.updated_by.user.email,
+                    }
+                    if session.updated_by
+                    else None
+                ),
             }
             for session in sessions
         ],
