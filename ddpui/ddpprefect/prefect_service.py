@@ -562,10 +562,10 @@ def schedule_deployment_flow_run(
         f"deployments/{deployment_id}/flow_run/schedule",
         {
             "runParams": flow_run_params,
-            "scheduleTime": str(scheduled_time) if scheduled_time else None,
+            "scheduledTime": str(scheduled_time) if scheduled_time else None,
         },
     )
-    return res
+    return res  
 
 
 def lock_tasks_for_deployment(

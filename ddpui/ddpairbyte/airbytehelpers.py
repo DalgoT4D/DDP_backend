@@ -11,6 +11,7 @@ from django.conf import settings
 from django.db import transaction
 from django.db.models import Prefetch, F, Window
 from django.db.models.functions import RowNumber
+from django.forms.models import model_to_dict
 
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import AirbyteConnectionSchemaUpdate, AirbyteWorkspace
@@ -600,7 +601,9 @@ def reset_connection(org: Org, connection_id: str):
 
     # check if the connection is "large" for scheduling
     connection_meta = ConnectionMeta.objects.filter(connection_id=connection_id).first()
-    is_connection_large_enough = connection_meta and connection_meta.schedule_large_jobs
+    is_connection_large_enough = (
+        True == connection_meta.schedule_large_jobs if connection_meta else False
+    )
 
     schedule_at = None
     job: ConnectionJob = None
@@ -619,7 +622,9 @@ def reset_connection(org: Org, connection_id: str):
 
     try:
         res = prefect_service.schedule_deployment_flow_run(
-            sync_dataflow_orgtask.dataflow.deployment_id, params, scheduled_time=None
+            sync_dataflow_orgtask.dataflow.deployment_id,
+            params,
+            scheduled_time=schedule_at,
         )
         # save the new flow run scheduled to our db
         if is_connection_large_enough:
@@ -1214,7 +1219,25 @@ def get_schema_changes(org: Org):
     if org_schema_change is None:
         return None, "No schema change found"
 
-    schema_changes = list(org_schema_change.values())
+    schema_changes = []
+    for change in org_schema_change:
+        schema_changes.append(
+            {
+                **model_to_dict(change, exclude=["org", "id"]),
+                **{
+                    "schedule_job": (
+                        {
+                            "scheduled_at": change.schedule_job.scheduled_at,
+                            "flow_run_id": change.schedule_job.flow_run_id,
+                            "job_type": change.schedule_job.job_type,
+                        }
+                        if change.schedule_job
+                        else None
+                    )
+                },
+            }
+        )
+
     return schema_changes, None
 
 
@@ -1250,6 +1273,8 @@ def schedule_update_connection_schema(
     connection_meta = ConnectionMeta.objects.filter(connection_id=connection_id).first()
     is_connection_large_enough = connection_meta and connection_meta.schedule_large_jobs
 
+    logger.info("connection is large enough: %s", is_connection_large_enough)
+
     locks: list[TaskLock] = []
     schedule_at = None
     job: ConnectionJob = None
@@ -1271,6 +1296,8 @@ def schedule_update_connection_schema(
             except Exception as err:
                 logger.exception(err)
                 raise HttpError(400, "failed to remove the previous flow run") from err
+
+    logger.info("schema change is being scheduled at %s", schedule_at)
 
     # create the new flow run; schedule now or schedule later for large connections
     try:
