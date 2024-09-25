@@ -136,6 +136,7 @@ def get_current_user_v2(request):
                 is_demo=(
                     curr_orguser.org.type == OrgType.DEMO if curr_orguser.org else False
                 ),
+                llm_optin=curr_orguser.llm_optin,
             )
         )
 
@@ -284,7 +285,6 @@ def put_organization_user_self(request, payload: OrgUserUpdate):
     response=OrgUserResponse,
     auth=auth.CustomAuthMiddleware(),
 )
-@has_permission(["can_edit_orguser"])
 def put_organization_user_self_v1(request, payload: OrgUserUpdatev1):
     """update the requestor's OrgUser"""
     orguser: OrgUser = request.orguser
