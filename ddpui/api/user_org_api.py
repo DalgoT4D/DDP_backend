@@ -87,7 +87,7 @@ def ninja_default_error_handler(
     "/currentuserv2", response=List[OrgUserResponse], auth=auth.CustomAuthMiddleware()
 )
 @has_permission(["can_view_orgusers"])
-def get_current_user_v2(request):
+def get_current_user_v2(request, org_slug: str = None):
     """return all the OrgUsers for the User making this request"""
     if request.orguser is None:
         raise HttpError(400, "requestor is not an OrgUser")
@@ -97,9 +97,13 @@ def get_current_user_v2(request):
 
     # warehouse
     warehouse = OrgWarehouse.objects.filter(org=org).first()
+    curr_orgusers = OrgUser.objects.filter(user=user)
+
+    if org_slug:
+        curr_orgusers = curr_orgusers.filter(org__slug=org_slug)
 
     res = []
-    for curr_orguser in OrgUser.objects.filter(user=user).prefetch_related(
+    for curr_orguser in curr_orgusers.prefetch_related(
         Prefetch(
             "new_role",
             queryset=Role.objects.prefetch_related(
