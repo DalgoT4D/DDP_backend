@@ -17,3 +17,9 @@ disable = [
   "logging-not-lazy",
   "logging-fstring-interpolation"
 ]
+
+[tool.coverage.run]
+omit = [
+    "ddpui/utils/sendgrid.py",
+    "ddpui/utils/dbtdocs.py"
+]
