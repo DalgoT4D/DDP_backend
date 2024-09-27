@@ -1,0 +1,19 @@
+[tool.black]
+line-length = 100
+target-version = ["py38", "py39", "py310", "py311"]
+include = 'ddpui\/.*\.pyi?$'
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE="ddpui.settings"
+
+[tool.pylint.messages_control]
+max-line-length = 100
+
+disable = [
+  "missing-module-docstring",
+  "broad-exception-raised",
+  "broad-exception-caught",
+  "too-few-public-methods",
+  "logging-not-lazy",
+  "logging-fstring-interpolation"
+]
