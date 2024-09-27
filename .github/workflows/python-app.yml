@@ -19,7 +19,7 @@ jobs:
         ports:
           - 5432:5432
         options: --health-cmd "pg_isready -U ddp" --health-interval 10s --health-timeout 5s --health-retries 5
-          
+
     strategy:
       matrix:
         python-version: ["3.10"]
@@ -27,33 +27,52 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
+      
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
+
       - name: Start Redis
         uses: supercharge/redis-github-action@1.5.0
         with:
           redis-version: ${{ matrix.redis-version }}
+          
       - name: Create logs directory
         run: mkdir -p ddpui/logs
+
+      - name: Create whitelist.py
+        run: cp ddpui/assets/whitelist.template.py ddpui/assets/whitelist.py
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-      - name: Create whitelist.py
-        run: cp ddpui/assets/whitelist.template.py ddpui/assets/whitelist.py
+
+      - name: Apply database migrations  
+        env:
+          DBHOST: localhost
+          DBPORT: 5432
+          DBNAME: ${{ secrets.DBNAME }}
+          DBUSER: ddp
+          DBPASSWORD: ${{ secrets.DBPASSWORD }}
+        run: |
+          python manage.py migrate
+
       - name: Create known_hosts file
         run: |
           mkdir -p ~/.ssh
           touch ~/.ssh/known_hosts
+
       - name: Add remote host key to known_hosts
         run: ssh-keyscan ${{ secrets.SERVERIP }} >> ~/.ssh/known_hosts
+
       - name: Set up port forwarding via SSH
         run: |
           eval `ssh-agent -s`
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh -L 8080:localhost:8080 -L 8001:localhost:8001  ${{ secrets.SERVER }} -f -N
+          ssh -L 8080:localhost:8080 -L 8001:localhost:8001 ${{ secrets.SERVER }} -f -N
+
       - name: Test with pytest
         env:
           AIRBYTE_SERVER_HOST: localhost
@@ -72,6 +91,7 @@ jobs:
           coverage run -m pytest --durations=20
           coverage report --fail-under=70
           coverage xml
+
       - name: Check coverage percentage
         run: |
           coverage_percentage=$(coverage report --show-missing | tail -n 1 | awk '{print $4}')
@@ -84,4 +104,3 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
-      
