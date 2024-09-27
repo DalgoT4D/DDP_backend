@@ -42,6 +42,7 @@ Django application for the DDP platform's management backend. Exposes API endpoi
 -   `Pylint` is the linting tool used to analyze the code as per Pep8 style.
 -   `Black` is used as the code formatter.
 
+
 ### Setting up your vscode env
 
 -   Recommended IDE is VsCode.
@@ -55,9 +56,10 @@ Django application for the DDP platform's management backend. Exposes API endpoi
 "editor.formatOnSave": true
 }`
 
-### Running pylint
+### Setup pre-commit and run hooks
 
--   In your virtual environment run `pylint ddpui/`
+-  Run "pre-commit install" after activating your virtual env
+- Run "pre-commit run --all-files" to run the formatter
 
 ### Running celery
 
