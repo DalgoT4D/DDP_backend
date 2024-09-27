@@ -107,9 +107,9 @@ class CustomAuthMiddleware(HttpBearer):
                 if orguser.org is None:
                     raise HttpError(400, "register an organization first")
 
-                permission_slugs = RolePermission.objects.filter(
-                    role=orguser.new_role
-                ).values_list("permission__slug", flat=True)
+                permission_slugs = RolePermission.objects.filter(role=orguser.new_role).values_list(
+                    "permission__slug", flat=True
+                )
 
                 request.permissions = list(permission_slugs) or []
                 request.orguser = orguser

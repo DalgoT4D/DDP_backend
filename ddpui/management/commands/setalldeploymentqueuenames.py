@@ -21,7 +21,6 @@ class Command(BaseCommand):
         if options["org"]:
             q_dataflows = q_dataflows.filter(org__slug=options["org"])
         for dataflow in q_dataflows:
-
             work_queue_name = None
 
             if (
@@ -42,8 +41,6 @@ class Command(BaseCommand):
                         )
                         print(res)
                     except HttpError as e:
-                        print(
-                            f"Error updating deployment {dataflow.deployment_id}: {e}"
-                        )
+                        print(f"Error updating deployment {dataflow.deployment_id}: {e}")
             else:
                 print(f"Could not determine work_queue_name for {dataflow.name}.")

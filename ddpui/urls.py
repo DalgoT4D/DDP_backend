@@ -56,9 +56,7 @@ urlpatterns = [
 # socket endpoints
 ws_urlpatterns = [
     path("wss/data_insights/", DataInsightsConsumer.as_asgi()),
-    path(
-        "wss/airbyte/source/check_connection", SourceCheckConnectionConsumer.as_asgi()
-    ),
+    path("wss/airbyte/source/check_connection", SourceCheckConnectionConsumer.as_asgi()),
     path(
         "wss/airbyte/destination/check_connection",
         DestinationCheckConnectionConsumer.as_asgi(),

@@ -65,13 +65,8 @@ class Command(BaseCommand):
 
     def import_warehouse(self, ngoClient: TestClient, org: Org, config: dict):
         """creates a warehouse for an org from the json"""
-        existing_destination = airbyte_service.get_destinations(
-            org.airbyte_workspace_id
-        )
-        if (
-            existing_destination.get("destinations")
-            and existing_destination["destinations"]
-        ):
+        existing_destination = airbyte_service.get_destinations(org.airbyte_workspace_id)
+        if existing_destination.get("destinations") and existing_destination["destinations"]:
             logger.info("Warehouse already exists")
             return None, "warehouse already exists"
 
@@ -92,9 +87,7 @@ class Command(BaseCommand):
         if response.get("success"):
             print(f"Warehouse created successfully")
         else:
-            print(
-                f"Error creating warehouse: {response.get('detail', 'Unknown error')}"
-            )
+            print(f"Error creating warehouse: {response.get('detail', 'Unknown error')}")
 
     def import_sources(self, ngoClient: TestClient, org: Org, config: dict):
         """Imports all sources for an org"""
@@ -147,13 +140,9 @@ class Command(BaseCommand):
             streams=streams,
         ).dict()
 
-        response = ngoClient.clientpost(
-            "airbyte/v1/connections/", json=payload, timeout=60
-        )
+        response = ngoClient.clientpost("airbyte/v1/connections/", json=payload, timeout=60)
 
         if "connectionId" in response:
-            print(
-                f"Connection with id {response['connectionId']} created successfully."
-            )
+            print(f"Connection with id {response['connectionId']} created successfully.")
         else:
             print(f"Error creating connection: {response}")

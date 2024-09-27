@@ -77,9 +77,7 @@ def seed_master_tasks():
 def test_get_message_type():
     """tests the get_message_type function"""
     assert (
-        get_message_type(
-            {"state": {"state_details": {"flow_run_id": "THEID"}}, "id": "THEID"}
-        )
+        get_message_type({"state": {"state_details": {"flow_run_id": "THEID"}}, "id": "THEID"})
         == FLOW_RUN
     )
     assert get_message_type({"state": {"state_details": {}}, "id": "THEID"}) is None
@@ -124,9 +122,7 @@ def test_email_orgusers():
     new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
     OrgUser.objects.create(org=org, new_role=new_role, user=user)
     UserAttributes.objects.create(user=user, is_platform_admin=True)
-    with patch(
-        "ddpui.utils.webhook_helpers.send_text_message"
-    ) as mock_send_text_message:
+    with patch("ddpui.utils.webhook_helpers.send_text_message") as mock_send_text_message:
         email_orgusers(org, "hello")
         tag = " [STAGING]" if not PRODUCTION else ""
         subject = f"Dalgo notification{tag}"
@@ -139,9 +135,7 @@ def test_email_orgusers_not_non_admins():
     user = User.objects.create(username="username", email="useremail")
     new_role = Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first()
     OrgUser.objects.create(org=org, new_role=new_role, user=user)
-    with patch(
-        "ddpui.utils.webhook_helpers.send_text_message"
-    ) as mock_send_text_message:
+    with patch("ddpui.utils.webhook_helpers.send_text_message") as mock_send_text_message:
         email_orgusers(org, "hello")
         mock_send_text_message.assert_not_called()
 
@@ -152,9 +146,7 @@ def test_email_orgusers_not_to_report_viewers():
     user = User.objects.create(username="username", email="useremail")
     new_role = Role.objects.filter(slug=GUEST_ROLE).first()
     OrgUser.objects.create(org=org, new_role=new_role, user=user)
-    with patch(
-        "ddpui.utils.webhook_helpers.send_text_message"
-    ) as mock_send_text_message:
+    with patch("ddpui.utils.webhook_helpers.send_text_message") as mock_send_text_message:
         email_orgusers(org, "hello")
         mock_send_text_message.assert_not_called()
 
@@ -162,9 +154,7 @@ def test_email_orgusers_not_to_report_viewers():
 def test_email_flowrun_logs_to_orgusers():
     """tests the email_flowrun_logs_to_orgusers function"""
     org = Org.objects.create(name="temp", slug="temp")
-    with patch(
-        "ddpui.ddpprefect.prefect_service.get_flow_run_logs"
-    ) as mock_get_flow_run_logs:
+    with patch("ddpui.ddpprefect.prefect_service.get_flow_run_logs") as mock_get_flow_run_logs:
         mock_get_flow_run_logs.return_value = {
             "logs": {
                 "logs": [
@@ -204,9 +194,7 @@ def test_post_notification_v1():
     Flow run test-flow-run-name with id test-run-id entered state Failed
     """
     request.body = json.dumps({"body": body})
-    request.headers = {
-        "X-Notification-Key": os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY")
-    }
+    request.headers = {"X-Notification-Key": os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY")}
     blockid = str(uuid4())
     org = Org.objects.create(name="temp", slug="temp")
     flow_run = {
@@ -223,9 +211,7 @@ def test_post_notification_v1():
         "status": FLOW_RUN_FAILED_STATE_TYPE,
         "state_name": FLOW_RUN_FAILED_STATE_NAME,
     }
-    with patch(
-        "ddpui.ddpprefect.prefect_service.get_flow_run"
-    ) as mock_get_flow_run, patch(
+    with patch("ddpui.ddpprefect.prefect_service.get_flow_run") as mock_get_flow_run, patch(
         "ddpui.api.webhook_api.email_flowrun_logs_to_orgusers"
     ) as mock_email_flowrun_logs_to_orgusers, patch(
         "ddpui.api.webhook_api.email_orgusers_ses_whitelisted"
@@ -289,9 +275,7 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
         Flow run test-flow-run-name with id test-run-id entered state {FLOW_RUN_PENDING_STATE_NAME}
         """
         request.body = json.dumps({"body": body})
-        request.headers = {
-            "X-Notification-Key": os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY")
-        }
+        request.headers = {"X-Notification-Key": os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY")}
         response = post_notification_v1(request)
         assert response["status"] == "ok"
         assert (
@@ -302,9 +286,7 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
         )
         # the dataflow & its orgtasks should be locked
         assert (
-            TaskLock.objects.filter(
-                locking_dataflow=dataflow, flow_run_id=flow_run["id"]
-            ).count()
+            TaskLock.objects.filter(locking_dataflow=dataflow, flow_run_id=flow_run["id"]).count()
             == 2
         )
 
@@ -318,24 +300,18 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
         Flow run test-flow-run-name with id test-run-id entered state {FLOW_RUN_RUNNING_STATE_NAME}
         """
         request.body = json.dumps({"body": body})
-        request.headers = {
-            "X-Notification-Key": os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY")
-        }
+        request.headers = {"X-Notification-Key": os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY")}
         response = post_notification_v1(request)
         assert response["status"] == "ok"
         assert PrefectFlowRun.objects.filter(flow_run_id=flow_run["id"]).count() == 1
         # the dataflow & its orgtasks should still be locked
         assert (
-            TaskLock.objects.filter(
-                locking_dataflow=dataflow, flow_run_id=flow_run["id"]
-            ).count()
+            TaskLock.objects.filter(locking_dataflow=dataflow, flow_run_id=flow_run["id"]).count()
             == 2
         )
 
     # Failed (any terminal state); third message from prefect; deployment has failed
-    with patch(
-        "ddpui.ddpprefect.prefect_service.get_flow_run"
-    ) as mock_get_flow_run, patch(
+    with patch("ddpui.ddpprefect.prefect_service.get_flow_run") as mock_get_flow_run, patch(
         "ddpui.api.webhook_api.email_flowrun_logs_to_orgusers"
     ) as mock_email_flowrun_logs_to_orgusers:
         flow_run["status"] = FLOW_RUN_FAILED_STATE_TYPE
@@ -346,9 +322,7 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
         Flow run test-flow-run-name with id test-run-id entered state {FLOW_RUN_FAILED_STATE_NAME}
         """
         request.body = json.dumps({"body": body})
-        request.headers = {
-            "X-Notification-Key": os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY")
-        }
+        request.headers = {"X-Notification-Key": os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY")}
         response = post_notification_v1(request)
         assert response["status"] == "ok"
         assert (
@@ -358,17 +332,13 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
             == 1
         )
         assert (
-            TaskLock.objects.filter(
-                locking_dataflow=dataflow, flow_run_id=flow_run["id"]
-            ).count()
+            TaskLock.objects.filter(locking_dataflow=dataflow, flow_run_id=flow_run["id"]).count()
             == 0
         )
         mock_email_flowrun_logs_to_orgusers.assert_called_once()
 
     # Failed (crashed); with retry logic
-    with patch(
-        "ddpui.ddpprefect.prefect_service.get_flow_run"
-    ) as mock_get_flow_run, patch(
+    with patch("ddpui.ddpprefect.prefect_service.get_flow_run") as mock_get_flow_run, patch(
         "ddpui.api.webhook_api.email_flowrun_logs_to_orgusers"
     ) as mock_email_flowrun_logs_to_orgusers, patch(
         "ddpui.ddpprefect.prefect_service.retry_flow_run"
@@ -381,9 +351,7 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
         Flow run test-flow-run-name with id test-run-id entered state {FLOW_RUN_CRASHED_STATE_NAME}
         """
         request.body = json.dumps({"body": body})
-        request.headers = {
-            "X-Notification-Key": os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY")
-        }
+        request.headers = {"X-Notification-Key": os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY")}
         os.environ["PREFECT_RETRY_CRASHED_FLOW_RUNS"] = "True"
         response = post_notification_v1(request)
         mock_retry_flow_run.assert_called_with(flow_run["id"], 5)
@@ -418,9 +386,7 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
         Flow run test-flow-run-name with id test-run-id entered state {FLOW_RUN_COMPLETED_STATE_NAME}
         """
         request.body = json.dumps({"body": body})
-        request.headers = {
-            "X-Notification-Key": os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY")
-        }
+        request.headers = {"X-Notification-Key": os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY")}
         response = post_notification_v1(request)
         assert response["status"] == "ok"
         assert (
@@ -430,8 +396,6 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
             == 1
         )
         assert (
-            TaskLock.objects.filter(
-                locking_dataflow=dataflow, flow_run_id=flow_run["id"]
-            ).count()
+            TaskLock.objects.filter(locking_dataflow=dataflow, flow_run_id=flow_run["id"]).count()
             == 0
         )

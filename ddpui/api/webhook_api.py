@@ -40,9 +40,7 @@ MAX_RETRIES_FOR_CRASHED_FLOW_RUNS = 1
 @webhookapi.post("/v1/notification/")
 def post_notification_v1(request):  # pylint: disable=unused-argument
     """webhook endpoint for notifications"""
-    if request.headers.get("X-Notification-Key") != os.getenv(
-        "PREFECT_NOTIFICATIONS_WEBHOOK_KEY"
-    ):
+    if request.headers.get("X-Notification-Key") != os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY"):
         raise HttpError(400, "unauthorized")
     notification = json.loads(request.body)
     # logger.info(notification)
@@ -101,12 +99,9 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
 
             # retry flow run if infra went down
             if state == FLOW_RUN_CRASHED_STATE_NAME:
-                prefect_flow_run = PrefectFlowRun.objects.filter(
-                    flow_run_id=flow_run_id
-                ).first()
+                prefect_flow_run = PrefectFlowRun.objects.filter(flow_run_id=flow_run_id).first()
                 if (
-                    os.getenv("PREFECT_RETRY_CRASHED_FLOW_RUNS")
-                    in ["True", "true", True]
+                    os.getenv("PREFECT_RETRY_CRASHED_FLOW_RUNS") in ["True", "true", True]
                     and prefect_flow_run
                     and prefect_flow_run.retries < MAX_RETRIES_FOR_CRASHED_FLOW_RUNS
                 ):

@@ -40,9 +40,7 @@ def test_get_dashboard_v1():
     )
     request = mock_request(orguser)
 
-    task = Task.objects.create(
-        type="dbt", slug="dbt-clean", label="DBT clean", command="clean"
-    )
+    task = Task.objects.create(type="dbt", slug="dbt-clean", label="DBT clean", command="clean")
     orgtask = OrgTask.objects.create(org=org, task=task)
     odf = OrgDataFlowv1.objects.create(
         org=org,

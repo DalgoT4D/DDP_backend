@@ -11,7 +11,6 @@ logger = CustomLogger("ddpui")
 
 
 class BaseConsumer(WebsocketConsumer):
-
     def authenticate_user(self, token: str, orgslug: str):
         self.orguser = None
         self.user = None

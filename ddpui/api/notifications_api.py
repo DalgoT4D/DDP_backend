@@ -74,16 +74,12 @@ def create_notification(request, payload: CreateNotificationPayloadSchema):
 
 
 @notificationsapi.get("/history")
-def get_notification_history(
-    request, page: int = 1, limit: int = 10, read_status: int = None
-):
+def get_notification_history(request, page: int = 1, limit: int = 10, read_status: int = None):
     """
     Returns all the notifications including the
     past and the future scheduled notifications
     """
-    error, result = notifications_service.get_notification_history(
-        page, limit, read_status=None
-    )
+    error, result = notifications_service.get_notification_history(page, limit, read_status=None)
     if error is not None:
         raise HttpError(400, error)
 
@@ -118,9 +114,7 @@ def get_user_notifications(request, page: int = 1, limit: int = 10):
 
 
 @notificationsapi.get("/v1", auth=auth.CustomAuthMiddleware())
-def get_user_notifications_v1(
-    request, page: int = 1, limit: int = 10, read_status: int = None
-):
+def get_user_notifications_v1(request, page: int = 1, limit: int = 10, read_status: int = None):
     """
     Returns all the notifications for a particular user.
     It returns only the past notifications,i.e,notifications

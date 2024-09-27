@@ -22,7 +22,5 @@ class DatetimeColInsights(DataTypeColInsights):
     ):
         super().__init__(columns, db_table, db_schema, filter_, wtype)
         self.insights: list[ColInsight] = [
-            DistributionChart(
-                self.columns, self.db_table, self.db_schema, self.filter, self.wtype
-            ),
+            DistributionChart(self.columns, self.db_table, self.db_schema, self.filter, self.wtype),
         ]

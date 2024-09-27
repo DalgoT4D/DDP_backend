@@ -223,15 +223,12 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
 def run_dbt_commands(self, orguser_id: int, task_id: str, dbt_run_params: dict = None):
     """run a dbt command via celery instead of via prefect"""
     try:
-
         orguser: OrgUser = OrgUser.objects.filter(id=orguser_id).first()
 
         org: Org = orguser.org
         logger.info("found org %s", org.name)
 
-        taskprogress = TaskProgress(
-            task_id, f"{TaskProgressHashPrefix.RUNDBTCMDS}-{org.slug}"
-        )
+        taskprogress = TaskProgress(task_id, f"{TaskProgressHashPrefix.RUNDBTCMDS}-{org.slug}")
 
         taskprogress.add(
             {
@@ -279,9 +276,7 @@ def run_dbt_commands(self, orguser_id: int, task_id: str, dbt_run_params: dict =
             return
 
         profile = get_dbt_cli_profile_block(dbt_cli_profile.block_name)["profile"]
-        profile_dirname = (
-            Path(os.getenv("CLIENTDBT_ROOT")) / org.slug / "dbtrepo" / "profiles"
-        )
+        profile_dirname = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug / "dbtrepo" / "profiles"
         os.makedirs(profile_dirname, exist_ok=True)
         profile_filename = profile_dirname / "profiles.yml"
         logger.info("writing dbt profile to " + str(profile_filename))
@@ -474,16 +469,10 @@ def schema_change_detection():
 def get_connection_catalog_task(task_key, org_id, connection_id):
     """Fetch a connection in the user organization workspace as a Celery task"""
     org = Org.objects.get(id=org_id)
-    taskprogress = SingleTaskProgress(
-        task_key, int(os.getenv("SCHEMA_REFRESH_TTL", "180"))
-    )
-    taskprogress.add(
-        {"message": "started", "status": TaskProgressStatus.RUNNING, "result": None}
-    )
+    taskprogress = SingleTaskProgress(task_key, int(os.getenv("SCHEMA_REFRESH_TTL", "180")))
+    taskprogress.add({"message": "started", "status": TaskProgressStatus.RUNNING, "result": None})
 
-    connection_catalog, err = airbytehelpers.fetch_and_update_org_schema_changes(
-        org, connection_id
-    )
+    connection_catalog, err = airbytehelpers.fetch_and_update_org_schema_changes(org, connection_id)
 
     if err:
         logger.error(err)
@@ -599,9 +588,7 @@ def delete_old_canvaslocks():
 
 
 @app.task(bind=False)
-def sync_flow_runs_of_deployments(
-    deployment_ids: list[str] = None, look_back_hours: int = 24
-):
+def sync_flow_runs_of_deployments(deployment_ids: list[str] = None, look_back_hours: int = 24):
     """
     This function will sync (create) latest flow runs of deployment(s) if missing from our db
     """
@@ -783,9 +770,7 @@ def summarize_logs(
 
             logs_text = "\n".join([log["message"] for log in task["logs"]])
         elif type == LogsSummarizationType.AIRBYTE_SYNC:
-            logs = airbyte_service.get_logs_for_job(
-                job_id=job_id, attempt_number=attempt_number
-            )
+            logs = airbyte_service.get_logs_for_job(job_id=job_id, attempt_number=attempt_number)
             logs_text = "\n".join(logs["logs"]["logLines"])
     except Exception as err:
         logger.error(err)
@@ -964,7 +949,6 @@ def summarize_warehouse_results(
         return
 
     try:
-
         # upload the results as a file to llm service
         fpath, session_id = llm_service.upload_text_as_file(
             convert_sqlalchemy_rows_to_csv_string(rows), "warehouse_results"
@@ -979,9 +963,7 @@ def summarize_warehouse_results(
             type=LlmAssistantType.LONG_TEXT_SUMMARIZATION
         ).first()
         if not assistant_prompt:
-            raise Exception(
-                "Assistant/System prompt not found for warehouse summarization"
-            )
+            raise Exception("Assistant/System prompt not found for warehouse summarization")
 
         llm_session.user_prompts = user_prompts
         llm_session.assistant_prompt = assistant_prompt.prompt
@@ -1043,12 +1025,8 @@ def setup_periodic_tasks(sender, **kwargs):
         schema_change_detection.s(),
         name="schema change detection",
     )
-    sender.add_periodic_task(
-        60 * 1.0, delete_old_tasklocks.s(), name="remove old tasklocks"
-    )
-    sender.add_periodic_task(
-        60 * 1.0, delete_old_canvaslocks.s(), name="remove old canvaslocks"
-    )
+    sender.add_periodic_task(60 * 1.0, delete_old_tasklocks.s(), name="remove old tasklocks")
+    sender.add_periodic_task(60 * 1.0, delete_old_canvaslocks.s(), name="remove old canvaslocks")
     sender.add_periodic_task(
         crontab(minute=0, hour="*/6"),
         sync_flow_runs_of_deployments.s(),
@@ -1067,16 +1045,12 @@ def schedule_notification_task(self, notification_id, recipient_id):
 
     if user_preference.enable_email_notifications:
         try:
-            send_email_notification(
-                user_preference.orguser.user.email, notification.message
-            )
+            send_email_notification(user_preference.orguser.user.email, notification.message)
         except Exception as e:
             raise Exception(f"Error sending discord notification: {str(e)}")
 
     if user_preference.enable_discord_notifications and user_preference.discord_webhook:
         try:
-            send_discord_notification(
-                user_preference.discord_webhook, notification.message
-            )
+            send_discord_notification(user_preference.discord_webhook, notification.message)
         except Exception as e:
             raise Exception(f"Error sending discord notification: {str(e)}")

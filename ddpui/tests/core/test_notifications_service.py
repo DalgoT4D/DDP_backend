@@ -140,9 +140,7 @@ def test_get_recipients_all_users_no_user_found():
 
 def test_get_recipients_all_org_users(orguser):
     """test success get all users of an org as recipients"""
-    error, recipients = get_recipients(
-        SentToEnum.ALL_ORG_USERS, "test-org-slug", None, False
-    )
+    error, recipients = get_recipients(SentToEnum.ALL_ORG_USERS, "test-org-slug", None, False)
     assert error is None
     assert len(recipients) > 0
 
@@ -156,9 +154,7 @@ def test_get_recipients_no_org_slug():
 
 def test_get_recipients_single_user(orguser):
     """test success get single user as recipient"""
-    error, recipients = get_recipients(
-        SentToEnum.SINGLE_USER, None, "tempuseremail", False
-    )
+    error, recipients = get_recipients(SentToEnum.SINGLE_USER, None, "tempuseremail", False)
     assert error is None
     assert len(recipients) == 1
 
@@ -172,9 +168,7 @@ def test_get_recipients_single_user_no_email(orguser):
 
 def test_get_recipients_invalid_user_email():
     """test failure get single user as recipient when user email is invalid"""
-    error, recipients = get_recipients(
-        SentToEnum.SINGLE_USER, None, "invalid@example.com", False
-    )
+    error, recipients = get_recipients(SentToEnum.SINGLE_USER, None, "invalid@example.com", False)
     assert error is not None
     assert recipients is None
 
@@ -255,9 +249,7 @@ def test_get_user_notifications(orguser):
 
 
 def test_mark_notification_as_read(orguser, unsent_notification):
-    error, result = mark_notification_as_read_or_unread(
-        orguser.id, unsent_notification.id, True
-    )
+    error, result = mark_notification_as_read_or_unread(orguser.id, unsent_notification.id, True)
     assert error is None
     assert result["success"] is True
 

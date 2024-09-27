@@ -22,7 +22,5 @@ class BooleanColInsights(DataTypeColInsights):
     ):
         super().__init__(columns, db_table, db_schema, filter_, wtype)
         self.insights: list[ColInsight] = [
-            DataStats(
-                self.columns, self.db_table, self.db_schema, self.filter, self.wtype
-            ),
+            DataStats(self.columns, self.db_table, self.db_schema, self.filter, self.wtype),
         ]

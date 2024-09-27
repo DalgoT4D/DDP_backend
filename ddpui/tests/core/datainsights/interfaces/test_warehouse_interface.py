@@ -21,7 +21,6 @@ class UnimplementedMethodWarehouse(Warehouse):
 
 
 class DummyWarehouse(Warehouse):
-
     def __init__(self):
         pass
 

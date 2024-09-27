@@ -77,9 +77,7 @@ def update_user_preferences(request, payload: UpdateUserPreferencesSchema):
     user_preferences, created = UserPreferences.objects.get_or_create(orguser=orguser)
 
     if payload.enable_discord_notifications is not None:
-        user_preferences.enable_discord_notifications = (
-            payload.enable_discord_notifications
-        )
+        user_preferences.enable_discord_notifications = payload.enable_discord_notifications
     if payload.enable_email_notifications is not None:
         user_preferences.enable_email_notifications = payload.enable_email_notifications
     if payload.discord_webhook is not None:

@@ -41,9 +41,7 @@ def pydantic_validation_error_handler(
 
 
 @supersetapi.exception_handler(Exception)
-def ninja_default_error_handler(
-    request, exc: Exception
-):  # pylint: disable=unused-argument
+def ninja_default_error_handler(request, exc: Exception):  # pylint: disable=unused-argument
     """Handle any other exception raised in the apis"""
     logger.exception(exc)
     return Response({"detail": "something went wrong"}, status=500)
@@ -78,9 +76,7 @@ def post_fetch_embed_token(request, dashboard_uuid):  # pylint: disable=unused-a
         )
 
     # {username: "", password: "", first_name: "", last_name: ""} # skipcq: PY-W0069
-    credentials = secretsmanager.retrieve_superset_usage_dashboard_credentials(
-        superset_creds
-    )
+    credentials = secretsmanager.retrieve_superset_usage_dashboard_credentials(superset_creds)
     if credentials is None:
         raise HttpError(400, "superset usage credentials are missing")
 

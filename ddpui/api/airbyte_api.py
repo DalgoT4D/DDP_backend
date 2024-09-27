@@ -74,9 +74,7 @@ def pydantic_validation_error_handler(
 
 
 @airbyteapi.exception_handler(Exception)
-def ninja_default_error_handler(
-    request, exc: Exception
-):  # pylint: disable=unused-argument
+def ninja_default_error_handler(request, exc: Exception):  # pylint: disable=unused-argument
     """Handle any other exception raised in the apis"""
     logger.exception(exc)
     return Response({"detail": "something went wrong"}, status=500)
@@ -212,9 +210,7 @@ def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
         payload.config = whitelisted_config
         logger.info("whitelisted the source config")
 
-    response = airbyte_service.check_source_connection(
-        orguser.org.airbyte_workspace_id, payload
-    )
+    response = airbyte_service.check_source_connection(orguser.org.airbyte_workspace_id, payload)
     return {
         "status": "succeeded" if response["jobInfo"]["succeeded"] else "failed",
         "logs": response["jobInfo"]["logs"]["logLines"],
@@ -289,9 +285,7 @@ def get_airbyte_source_schema_catalog(request, source_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    res = airbyte_service.get_source_schema_catalog(
-        orguser.org.airbyte_workspace_id, source_id
-    )
+    res = airbyte_service.get_source_schema_catalog(orguser.org.airbyte_workspace_id, source_id)
     logger.debug(res)
     return res
 
@@ -309,11 +303,7 @@ def get_airbyte_destination_definitions(request):
     ]
     allowed_destinations = os.getenv("AIRBYTE_DESTINATION_TYPES")
     if allowed_destinations:
-        res = [
-            destdef
-            for destdef in res
-            if destdef["name"] in allowed_destinations.split(",")
-        ]
+        res = [destdef for destdef in res if destdef["name"] in allowed_destinations.split(",")]
     logger.debug(res)
     return res
 
@@ -387,9 +377,7 @@ def post_airbyte_check_destination_for_update(
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    response = airbyte_service.check_destination_connection_for_update(
-        destination_id, payload
-    )
+    response = airbyte_service.check_destination_connection_for_update(destination_id, payload)
     return {
         "status": "succeeded" if response["jobInfo"]["succeeded"] else "failed",
         "logs": response["jobInfo"]["logs"]["logLines"],
@@ -404,9 +392,7 @@ def get_airbyte_destinations(request):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    res = airbyte_service.get_destinations(orguser.org.airbyte_workspace_id)[
-        "destinations"
-    ]
+    res = airbyte_service.get_destinations(orguser.org.airbyte_workspace_id)["destinations"]
     logger.debug(res)
     return res
 
@@ -419,9 +405,7 @@ def get_airbyte_destination(request, destination_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    res = airbyte_service.get_destination(
-        orguser.org.airbyte_workspace_id, destination_id
-    )
+    res = airbyte_service.get_destination(orguser.org.airbyte_workspace_id, destination_id)
     logger.debug(res)
     return res
 
@@ -442,9 +426,7 @@ def get_job_status(request, job_id):
 # new apis to go away from the block architecture
 
 
-@airbyteapi.post(
-    "/v1/workspace/", response=AirbyteWorkspace, auth=auth.CustomAuthMiddleware()
-)
+@airbyteapi.post("/v1/workspace/", response=AirbyteWorkspace, auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_org"])
 def post_airbyte_workspace_v1(request, payload: AirbyteWorkspaceCreate):
     """Create an airbyte workspace"""
@@ -524,9 +506,7 @@ def get_airbyte_connection_v1(request, connection_id):
     return res
 
 
-@airbyteapi.post(
-    "/v1/connections/{connection_id}/reset", auth=auth.CustomAuthMiddleware()
-)
+@airbyteapi.post("/v1/connections/{connection_id}/reset", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_reset_connection"])
 def post_airbyte_connection_reset_v1(request, connection_id):
     """Reset the data for connection at destination"""
@@ -541,9 +521,7 @@ def post_airbyte_connection_reset_v1(request, connection_id):
     return {"success": 1}
 
 
-@airbyteapi.put(
-    "/v1/connections/{connection_id}/update", auth=auth.CustomAuthMiddleware()
-)
+@airbyteapi.put("/v1/connections/{connection_id}/update", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_connection"])
 def put_airbyte_connection_v1(
     request, connection_id, payload: AirbyteConnectionUpdate
@@ -579,9 +557,7 @@ def delete_airbyte_connection_v1(request, connection_id):
     return {"success": 1}
 
 
-@airbyteapi.get(
-    "/v1/connections/{connection_id}/jobs", auth=auth.CustomAuthMiddleware()
-)
+@airbyteapi.get("/v1/connections/{connection_id}/jobs", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_connection"])
 def get_latest_job_for_connection(request, connection_id):
     """get the job info from airbyte for a connection"""
@@ -596,13 +572,9 @@ def get_latest_job_for_connection(request, connection_id):
     return job_info
 
 
-@airbyteapi.get(
-    "/v1/connections/{connection_id}/sync/history", auth=auth.CustomAuthMiddleware()
-)
+@airbyteapi.get("/v1/connections/{connection_id}/sync/history", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_connection"])
-def get_sync_history_for_connection(
-    request, connection_id, limit: int = 10, offset: int = 0
-):
+def get_sync_history_for_connection(request, connection_id, limit: int = 10, offset: int = 0):
     """get the job info from airbyte for a connection"""
     orguser: OrgUser = request.orguser
     org = orguser.org
@@ -619,9 +591,7 @@ def get_sync_history_for_connection(
 
 @airbyteapi.put("/v1/destinations/{destination_id}/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_warehouse"])
-def put_airbyte_destination_v1(
-    request, destination_id: str, payload: AirbyteDestinationUpdate
-):
+def put_airbyte_destination_v1(request, destination_id: str, payload: AirbyteDestinationUpdate):
     """Update an airbyte destination in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org is None:
@@ -629,9 +599,7 @@ def put_airbyte_destination_v1(
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    destination, error = airbytehelpers.update_destination(
-        orguser.org, destination_id, payload
-    )
+    destination, error = airbytehelpers.update_destination(orguser.org, destination_id, payload)
     if error:
         raise HttpError(400, error)
 
@@ -666,23 +634,16 @@ def get_connection_catalog_v1(request, connection_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    task_key = (
-        f"{TaskProgressHashPrefix.SCHEMA_CHANGE}-{orguser.org.slug}-{connection_id}"
-    )
+    task_key = f"{TaskProgressHashPrefix.SCHEMA_CHANGE}-{orguser.org.slug}-{connection_id}"
     current_task_progress = SingleTaskProgress.fetch(task_key)
     if current_task_progress is not None:
-        if (
-            "progress" in current_task_progress
-            and len(current_task_progress["progress"]) > 0
-        ):
+        if "progress" in current_task_progress and len(current_task_progress["progress"]) > 0:
             if current_task_progress["progress"][-1]["status"] == [
                 TaskProgressStatus.RUNNING,
             ]:
                 return {"task_id": task_key, "message": "already running"}
 
-    taskprogress = SingleTaskProgress(
-        task_key, int(os.getenv("SCHEMA_REFRESH_TTL", "180"))
-    )
+    taskprogress = SingleTaskProgress(task_key, int(os.getenv("SCHEMA_REFRESH_TTL", "180")))
 
     taskprogress.add({"message": "queued", "status": "queued", "result": None})
     # ignore the returned celery task id
@@ -691,13 +652,9 @@ def get_connection_catalog_v1(request, connection_id):
     return {"task_id": task_key}
 
 
-@airbyteapi.put(
-    "/v1/connections/{connection_id}/schema_update", auth=auth.CustomAuthMiddleware()
-)
+@airbyteapi.put("/v1/connections/{connection_id}/schema_update", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_connection"])
-def update_connection_schema(
-    request, connection_id, payload: AirbyteConnectionSchemaUpdate
-):
+def update_connection_schema(request, connection_id, payload: AirbyteConnectionSchemaUpdate):
     """update schema change in a connection"""
     orguser: OrgUser = request.orguser
     org = orguser.org
@@ -752,9 +709,7 @@ def get_schema_changes_for_connection(request):
     return res
 
 
-@airbyteapi.get(
-    "/v1/connections/{connection_id}/logsummary", auth=auth.CustomAuthMiddleware()
-)
+@airbyteapi.get("/v1/connections/{connection_id}/logsummary", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_pipeline"])
 def get_flow_runs_logsummary_v1(
     request, connection_id: str, job_id: int, attempt_number: int, regenerate: int = 0

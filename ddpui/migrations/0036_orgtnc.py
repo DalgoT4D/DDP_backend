@@ -25,9 +25,7 @@ class Migration(migrations.Migration):
                 ("tnc_accepted_on", models.DateField()),
                 (
                     "org",
-                    models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE, to="ddpui.org"
-                    ),
+                    models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to="ddpui.org"),
                 ),
                 (
                     "tnc_accepted_by",

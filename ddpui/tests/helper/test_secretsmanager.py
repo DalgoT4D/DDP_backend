@@ -45,13 +45,9 @@ def test_generate_superset_credentials_name():
 def test_save_github_token(mock_getclient: Mock):
     createsecret_mock = Mock(return_value={"Name": "secretname"})
     mock_getclient.return_value = Mock(create_secret=createsecret_mock)
-    org = Mock(
-        slug="orgslug", dbt=Mock(gitrepo_access_token_secret="oldval", save=Mock())
-    )
+    org = Mock(slug="orgslug", dbt=Mock(gitrepo_access_token_secret="oldval", save=Mock()))
     save_github_token(org, "newtoken")
-    createsecret_mock.assert_called_once_with(
-        Name="secretname", SecretString="newtoken"
-    )
+    createsecret_mock.assert_called_once_with(Name="secretname", SecretString="newtoken")
     assert org.dbt.gitrepo_access_token_secret == "secretname"
 
 

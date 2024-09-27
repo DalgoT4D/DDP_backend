@@ -99,9 +99,7 @@ def test_create_notification_success(mock_create_notification, mock_get_recipien
 
 @patch("ddpui.core.notifications_service.get_recipients")
 @patch("ddpui.core.notifications_service.create_notification")
-def test_create_notification_no_recipients(
-    mock_create_notification, mock_get_recipients
-):
+def test_create_notification_no_recipients(mock_create_notification, mock_get_recipients):
     """
     tests the failure of api endpoint for create notification
     when no recipients were found
@@ -154,9 +152,7 @@ def test_create_notification_no_org_slug(mock_create_notification, mock_get_reci
     )
     with pytest.raises(HttpError) as excinfo:
         create_notification(MagicMock(), create_notification_payload)
-    assert "org_slug is required to sent notification to all org users." in str(
-        excinfo.value
-    )
+    assert "org_slug is required to sent notification to all org users." in str(excinfo.value)
     mock_get_recipients.assert_called_once_with(
         payload["sent_to"],
         payload["org_slug"],
@@ -168,9 +164,7 @@ def test_create_notification_no_org_slug(mock_create_notification, mock_get_reci
 
 @patch("ddpui.core.notifications_service.get_recipients")
 @patch("ddpui.core.notifications_service.create_notification")
-def test_create_notification_no_user_email(
-    mock_create_notification, mock_get_recipients
-):
+def test_create_notification_no_user_email(mock_create_notification, mock_get_recipients):
     """
     tests the failure of api endpoint for create notification
     when no email is passed for single user
@@ -192,9 +186,7 @@ def test_create_notification_no_user_email(
     )
     with pytest.raises(HttpError) as excinfo:
         create_notification(MagicMock(), create_notification_payload)
-    assert "user email is required to sent notification to a user." in str(
-        excinfo.value
-    )
+    assert "user email is required to sent notification to a user." in str(excinfo.value)
     mock_get_recipients.assert_called_once_with(
         payload["sent_to"],
         payload["org_slug"],
@@ -206,9 +198,7 @@ def test_create_notification_no_user_email(
 
 @patch("ddpui.core.notifications_service.get_recipients")
 @patch("ddpui.core.notifications_service.create_notification")
-def test_create_notification_user_does_not_exist(
-    mock_create_notification, mock_get_recipients
-):
+def test_create_notification_user_does_not_exist(mock_create_notification, mock_get_recipients):
     """
     tests the failure of api endpoint for create notification
     when user does not exists with provided email
@@ -342,10 +332,7 @@ def test_delete_notification_success():
         )
         response = delete_notification(MagicMock(), notification_id=1)
         assert response["success"] is True
-        assert (
-            response["message"]
-            is "Notification with id: 1 has been successfully deleted"
-        )
+        assert response["message"] is "Notification with id: 1 has been successfully deleted"
         mock_delete_notification.assert_called_once_with(1)
 
 
@@ -378,9 +365,7 @@ def test_delete_already_sent_notification():
         )
         with pytest.raises(HttpError) as excinfo:
             delete_notification(MagicMock(), notification_id=1)
-        assert "Notification has already been sent and cannot be deleted." in str(
-            excinfo.value
-        )
+        assert "Notification has already been sent and cannot be deleted." in str(excinfo.value)
         mock_delete_notification.assert_called_once_with(1)
 
 

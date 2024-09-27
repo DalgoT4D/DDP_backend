@@ -70,9 +70,7 @@ def test_setup_local_dbt_workspace_warehouse_not_created():
     """a failure test; creating local dbt workspace without org warehouse"""
     org = Org.objects.create(name="temp", slug="temp")
 
-    result, error = setup_local_dbt_workspace(
-        org, project_name="dbtrepo", default_schema="default"
-    )
+    result, error = setup_local_dbt_workspace(org, project_name="dbtrepo", default_schema="default")
     assert result is None
     assert error == "Please set up your warehouse first"
 

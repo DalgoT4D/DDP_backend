@@ -20,8 +20,6 @@ class NotificationRecipient(models.Model):
     notification = models.ForeignKey(
         Notification, on_delete=models.CASCADE, related_name="notifications_received"
     )
-    recipient = models.ForeignKey(
-        OrgUser, on_delete=models.CASCADE, related_name="recipients"
-    )
+    recipient = models.ForeignKey(OrgUser, on_delete=models.CASCADE, related_name="recipients")
     read_status = models.BooleanField(default=False)
     task_id = models.TextField()

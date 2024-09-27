@@ -153,9 +153,7 @@ def post_orgtask(request, payload: CreateOrgTaskPayload):
     return {
         **model_to_dict(orgtask, fields=["parameters"]),
         "task_slug": orgtask.task.slug,
-        "dataflow": (
-            {**model_to_dict(dataflow, exclude=["id", "org"])} if dataflow else None
-        ),
+        "dataflow": ({**model_to_dict(dataflow, exclude=["id", "org"])} if dataflow else None),
     }
 
 
@@ -215,18 +213,14 @@ def post_system_transformation_tasks(request):
         raise HttpError(400, str(error)) from error
 
     # create a dbt cli profile block
-    (cli_profile_block, dbt_project_params), error = (
-        airbytehelpers.create_or_update_org_cli_block(
-            orguser.org, warehouse, credentials
-        )
+    (cli_profile_block, dbt_project_params), error = airbytehelpers.create_or_update_org_cli_block(
+        orguser.org, warehouse, credentials
     )
     if error:
         raise HttpError(400, error)
 
     # create org tasks for the transformation page
-    _, error = create_default_transform_tasks(
-        orguser.org, cli_profile_block, dbt_project_params
-    )
+    _, error = create_default_transform_tasks(orguser.org, cli_profile_block, dbt_project_params)
     if error:
         raise HttpError(400, error)
 
@@ -272,9 +266,7 @@ def get_prefect_transformation_tasks(request):
         command = org_task.task.type + " " + org_task.get_task_parameters()
 
         lock = None
-        all_locks = [
-            lock for lock in all_org_task_locks if lock.orgtask_id == org_task.id
-        ]
+        all_locks = [lock for lock in all_org_task_locks if lock.orgtask_id == org_task.id]
         if len(all_locks) > 0:
             lock = all_locks[0]
 
@@ -289,8 +281,7 @@ def get_prefect_transformation_tasks(request):
                 "command": command,
                 "generated_by": org_task.generated_by,
                 "seq": TRANSFORM_TASKS_SEQ[org_task.task.slug],
-                "pipeline_default": org_task.task.slug
-                in DEFAULT_TRANSFORM_TASKS_IN_PIPELINE,
+                "pipeline_default": org_task.task.slug in DEFAULT_TRANSFORM_TASKS_IN_PIPELINE,
             }
         )
 
@@ -299,9 +290,7 @@ def get_prefect_transformation_tasks(request):
             dfot for dfot in all_dataflow_orgtasks if dfot.orgtask_id == org_task.id
         ]
         res[-1]["deploymentId"] = (
-            dataflow_orgtasks[0].dataflow.deployment_id
-            if len(dataflow_orgtasks) > 0
-            else None
+            dataflow_orgtasks[0].dataflow.deployment_id if len(dataflow_orgtasks) > 0 else None
         )
 
     return sorted(res, key=lambda x: x["seq"])
@@ -378,9 +367,7 @@ def post_run_prefect_org_task(
     # check if the task is locked
     task_lock = TaskLock.objects.filter(orgtask=org_task).first()
     if task_lock:
-        raise HttpError(
-            400, f"{task_lock.locked_by.user.email} is running this operation"
-        )
+        raise HttpError(400, f"{task_lock.locked_by.user.email} is running this operation")
 
     # lock the task
     task_lock = TaskLock.objects.create(orgtask=org_task, locked_by=orguser)
@@ -407,9 +394,7 @@ def post_run_prefect_org_task(
         except Exception as error:
             task_lock.delete()
             logger.exception(error)
-            raise HttpError(
-                400, f"failed to run the shell task {org_task.task.slug}"
-            ) from error
+            raise HttpError(400, f"failed to run the shell task {org_task.task.slug}") from error
 
     elif org_task.task.slug == TASK_GENERATE_EDR:
         dbt_env_dir = Path(orguser.org.dbt.dbt_venv)
@@ -431,9 +416,7 @@ def post_run_prefect_org_task(
         except Exception as error:
             task_lock.delete()
             logger.exception(error)
-            raise HttpError(
-                400, f"failed to run the shell task {org_task.task.slug}"
-            ) from error
+            raise HttpError(400, f"failed to run the shell task {org_task.task.slug}") from error
 
     else:
         dbt_env_dir = Path(orguser.org.dbt.dbt_venv)
@@ -452,9 +435,7 @@ def post_run_prefect_org_task(
         if payload:
             org_task.parameters = dict(payload)
 
-        task_config = setup_dbt_core_task_config(
-            org_task, cli_profile_block, dbt_project_params
-        )
+        task_config = setup_dbt_core_task_config(org_task, cli_profile_block, dbt_project_params)
 
         if task_config.flow_name is None:
             task_config.flow_name = f"{orguser.org.name}-{org_task.task.slug}"

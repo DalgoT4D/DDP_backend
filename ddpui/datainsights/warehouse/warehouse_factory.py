@@ -5,7 +5,6 @@ from ddpui.datainsights.warehouse.warehouse_interface import WarehouseType
 
 
 class WarehouseFactory:
-
     @classmethod
     def connect(cls, creds: dict, wtype: str) -> Warehouse:
         if wtype == WarehouseType.POSTGRES:

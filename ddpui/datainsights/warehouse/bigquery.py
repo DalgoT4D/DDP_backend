@@ -14,7 +14,6 @@ _type_map["JSON"] = types.JSON
 
 
 class BigqueryClient(Warehouse):
-
     def __init__(self, creds: dict):
         """
         Establish connection to the postgres database using sqlalchemy engine
@@ -41,9 +40,7 @@ class BigqueryClient(Warehouse):
     def get_table_columns(self, db_schema: str, db_table: str) -> dict:
         """Fetch columns of a table; also send the translated col data type"""
         res = []
-        for column in self.inspect_obj.get_columns(
-            table_name=db_table, schema=db_schema
-        ):
+        for column in self.inspect_obj.get_columns(table_name=db_table, schema=db_schema):
             res.append(
                 {
                     "name": column["name"],

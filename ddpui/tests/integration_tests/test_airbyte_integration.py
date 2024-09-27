@@ -20,9 +20,7 @@ class TestDeleteSource:
         try:
             CreateWorkspaceTestPayload(**payload)
         except ValidationError as error:
-            raise ValueError(
-                f"Field do not match in the payload: {error.errors()}"
-            ) from error
+            raise ValueError(f"Field do not match in the payload: {error.errors()}") from error
 
         try:
             res = create_workspace(**payload)
@@ -77,9 +75,7 @@ class TestWorkspace:
         try:
             CreateWorkspaceTestPayload(**payload)
         except ValidationError as error:
-            raise ValueError(
-                f"Field do not match in the payload: {error.errors()}"
-            ) from error
+            raise ValueError(f"Field do not match in the payload: {error.errors()}") from error
 
         try:
             res = create_workspace(**payload)
@@ -109,9 +105,7 @@ class TestWorkspace:
         new_name = "test"
 
         try:
-            res = set_workspace_name(
-                workspace_id=TestWorkspace.workspace_id, name=new_name
-            )
+            res = set_workspace_name(workspace_id=TestWorkspace.workspace_id, name=new_name)
             SetWorkspaceTestResponse(**res)
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
@@ -143,9 +137,7 @@ class TestAirbyteSource:
         ]
         for source_definition in source_definitions:
             if source_definition["name"] == "File (CSV, JSON, Excel, Feather, Parquet)":
-                TestAirbyteSource.source_definition_id = source_definition[
-                    "sourceDefinitionId"
-                ]
+                TestAirbyteSource.source_definition_id = source_definition["sourceDefinitionId"]
                 break
 
         try:
@@ -172,9 +164,7 @@ class TestAirbyteSource:
         try:
             CreateSourceTestPayload(**payload)
         except ValidationError as error:
-            raise ValueError(
-                f"Field do not match in payload: {error.errors()}"
-            ) from error
+            raise ValueError(f"Field do not match in payload: {error.errors()}") from error
         try:
             res = create_source(**payload)
             CreateSourceTestResponse(**res)
@@ -199,9 +189,7 @@ class TestAirbyteSource:
     def test_get_definitions(self, test_workspace_id):  # skipcq: PYL-R0201
         """tests retrieval of source definitions"""
         try:
-            res = get_source_definitions(workspace_id=test_workspace_id)[
-                "sourceDefinitions"
-            ]
+            res = get_source_definitions(workspace_id=test_workspace_id)["sourceDefinitions"]
             GetSourceDefinitionsTestResponse(__root__=res)
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
@@ -209,16 +197,12 @@ class TestAirbyteSource:
     def test_get_source_schema_catalog(self, test_workspace_id):  # skipcq: PYL-R0201
         """fetches the schema catalog for a source"""
         try:
-            res = get_source_schema_catalog(
-                test_workspace_id, TestAirbyteSource.source_id
-            )
+            res = get_source_schema_catalog(test_workspace_id, TestAirbyteSource.source_id)
             GetSourceSchemaCatalogTestResponse(catalog=res)
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
 
-    def test_fail_to_get_source_schema_catalog(
-        self, test_workspace_id
-    ):  # skipcq: PYL-R0201
+    def test_fail_to_get_source_schema_catalog(self, test_workspace_id):  # skipcq: PYL-R0201
         """fetches the schema catalog for a source"""
         try:
             get_source_schema_catalog(test_workspace_id, "not-a-source-id")
@@ -260,9 +244,7 @@ class TestAirbyteSource:
         try:
             UpdateSourceTestPayload(**payload)
         except ValidationError as error:
-            raise ValueError(
-                f"Field do not match in payload: {error.errors()}"
-            ) from error
+            raise ValueError(f"Field do not match in payload: {error.errors()}") from error
 
         try:
             res = update_source(**payload)
@@ -290,14 +272,12 @@ class TestAirbyteDestination:
     }
 
     def test_a_create_destination(self, test_workspace_id):  # skipcq: PYL-R0201
-        destination_definitions = get_destination_definitions(
-            workspace_id=test_workspace_id
-        )["destinationDefinitions"]
+        destination_definitions = get_destination_definitions(workspace_id=test_workspace_id)[
+            "destinationDefinitions"
+        ]
         for destination_definition in destination_definitions:
             if destination_definition["name"] == "Postgres":
-                destination_definition_id = destination_definition[
-                    "destinationDefinitionId"
-                ]
+                destination_definition_id = destination_definition["destinationDefinitionId"]
                 break
 
         TestAirbyteDestination.destination_definition_id = destination_definition_id
@@ -310,17 +290,13 @@ class TestAirbyteDestination:
         try:
             CreateDestinationTestPayload(**payload)
         except ValidationError as error:
-            raise ValueError(
-                f"Field do not match in payload: {error.errors()}"
-            ) from error
+            raise ValueError(f"Field do not match in payload: {error.errors()}") from error
 
         try:
             res = create_destination(**payload)
             CreateDestinationTestResponse(**res)
             TestAirbyteDestination.destination_id = res["destinationId"]
-            TestAirbyteDestination.destination_definition_id = res[
-                "destinationDefinitionId"
-            ]
+            TestAirbyteDestination.destination_definition_id = res["destinationDefinitionId"]
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
 
@@ -351,17 +327,13 @@ class TestAirbyteDestination:
         try:
             UpdateDestinationTestPayload(**payload)
         except ValidationError as error:
-            raise ValueError(
-                f"Field do not match in payload: {error.errors()}"
-            ) from error
+            raise ValueError(f"Field do not match in payload: {error.errors()}") from error
 
         try:
             res = update_destination(**payload)
             UpdateDestinationTestResponse(**res)
         except ValidationError as error:
-            raise ValueError(
-                f"Field do not match in resposne: {error.errors()}"
-            ) from error
+            raise ValueError(f"Field do not match in resposne: {error.errors()}") from error
 
     def test_check_destination_connection(self, test_workspace_id):  # skipcq: PYL-R0201
         workspace_id = test_workspace_id

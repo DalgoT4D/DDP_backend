@@ -44,17 +44,13 @@ class Command(BaseCommand):
                 print(f"edr orgtask not found {org.slug}; skipping to the next org")
                 continue
             else:
-                print(
-                    f"Updated the edr org_task {org.slug} with the new elementary target"
-                )
+                print(f"Updated the edr org_task {org.slug} with the new elementary target")
 
             dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
 
             dataflow = dataflow_orgtask.dataflow if dataflow_orgtask else None
             if dataflow is None:
-                print(
-                    f"No generate edr dataflow found for {org.slug}; skipping to the next org"
-                )
+                print(f"No generate edr dataflow found for {org.slug}; skipping to the next org")
                 continue
 
             # update the deployment in prefect with the profile-target

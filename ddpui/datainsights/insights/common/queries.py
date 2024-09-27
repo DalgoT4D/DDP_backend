@@ -35,14 +35,11 @@ class BaseDataStats(ColInsight):
         )
 
     def generate_sql(self):
-
         query = self.builder
 
         for col in self.columns:
             col_clause = column(col.name)
-            query = query.add_column(
-                func.count().label(f"count_{col.name}")
-            ).add_column(
+            query = query.add_column(func.count().label(f"count_{col.name}")).add_column(
                 func.sum(
                     case(
                         [(col_clause.is_(None), 1)],
@@ -52,13 +49,8 @@ class BaseDataStats(ColInsight):
             )
 
             # distinct count
-            if (
-                col.translated_type == TranslateColDataType.JSON
-                and self.wtype == "bigquery"
-            ):
-                query = query.add_column(
-                    literal(None).label(f"countDistinct__{col.name}")
-                )
+            if col.translated_type == TranslateColDataType.JSON and self.wtype == "bigquery":
+                query = query.add_column(literal(None).label(f"countDistinct__{col.name}"))
             else:
                 query = query.add_column(
                     func.count(distinct(col_clause)).label(f"countDistinct__{col.name}")
@@ -135,12 +127,8 @@ class BaseDataStats(ColInsight):
                     "count": result[0][f"count_{col.name}"],
                     "countNull": result[0][f"countNull_{col.name}"],
                     "countDistinct": result[0][f"countDistinct__{col.name}"],
-                    "maxVal": convert_to_standard_types(
-                        result[0][f"maxVal_{col.name}"]
-                    ),
-                    "minVal": convert_to_standard_types(
-                        result[0][f"minVal_{col.name}"]
-                    ),
+                    "maxVal": convert_to_standard_types(result[0][f"maxVal_{col.name}"]),
+                    "minVal": convert_to_standard_types(result[0][f"minVal_{col.name}"]),
                 }
 
         return res
