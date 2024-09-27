@@ -1219,6 +1219,15 @@ def get_schema_changes(org: Org):
     if org_schema_change is None:
         return None, "No schema change found"
 
+    large_connections = (
+        ConnectionMeta.objects.filter(
+            connection_id__in=[change.connection_id for change in org_schema_change],
+            schedule_large_jobs=True,
+        )
+        .all()
+        .values_list("connection_id", flat=True)
+    )
+
     schema_changes = []
     for change in org_schema_change:
         schema_changes.append(
@@ -1230,13 +1239,40 @@ def get_schema_changes(org: Org):
                             "scheduled_at": change.schedule_job.scheduled_at,
                             "flow_run_id": change.schedule_job.flow_run_id,
                             "job_type": change.schedule_job.job_type,
+                            "status": None,
+                            "state_name": None,
                         }
                         if change.schedule_job
                         else None
-                    )
+                    ),
+                    "is_connection_large": change.connection_id in large_connections,
+                    "next_job_at": get_schedule_time_for_large_jobs(),
+                    "run": None,
                 },
             }
         )
+
+    # check if the flow runs have been executed or not
+    # if the flow run have been executed attach the run object and remove the schedule_job reference
+    logger.info(schema_changes)
+    all_flow_run_ids = [
+        change["schedule_job"]["flow_run_id"]
+        for change in schema_changes
+        if change["schedule_job"] and "flow_run_id" in change["schedule_job"]
+    ]
+
+    runs = PrefectFlowRun.objects.filter(flow_run_id__in=all_flow_run_ids).all()
+
+    for change in schema_changes:
+        if change["schedule_job"] and "flow_run_id" in change["schedule_job"]:
+            curr_run: list[PrefectFlowRun] = [
+                run
+                for run in runs
+                if run.flow_run_id == change["schedule_job"]["flow_run_id"]
+            ]
+            change["schedule_job"]["run"] = (
+                curr_run[0].to_json() if len(curr_run) >= 1 else None
+            )
 
     return schema_changes, None
 

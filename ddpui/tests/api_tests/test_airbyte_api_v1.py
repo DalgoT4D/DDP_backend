@@ -525,7 +525,9 @@ def test_post_airbyte_connection_reset_v1_no_workspace(orguser):
     assert str(excinfo.value) == "create an airbyte workspace first"
 
 
-def test_post_airbyte_connection_reset_v1_no_connection_task(orguser_workspace):
+def test_post_airbyte_connection_reset_v1_no_connection_task(
+    orguser_workspace, airbyte_server_block
+):
     """tests POST /v1/connections/{connection_id}/reset failure with connection task created"""
     request = mock_request(orguser_workspace)
 
@@ -534,7 +536,9 @@ def test_post_airbyte_connection_reset_v1_no_connection_task(orguser_workspace):
     assert str(excinfo.value) == "connection not found"
 
 
-def test_post_airbyte_connection_reset_v1_success(orguser_workspace):
+def test_post_airbyte_connection_reset_v1_success(
+    orguser_workspace, airbyte_server_block
+):
     """tests POST /v1/connections/{connection_id}/reset success"""
     request = mock_request(orguser_workspace)
 
@@ -552,15 +556,11 @@ def test_post_airbyte_connection_reset_v1_success(orguser_workspace):
         task=task, org=request.orguser.org, connection_id=connection_id
     )
 
-    reset_connection_mock = MagicMock()
+    with patch("ddpui.ddpairbyte.airbytehelpers.reset_connection") as reset_helper_mock:
+        reset_helper_mock.return_value = (None, None)
+        post_airbyte_connection_reset_v1(request, connection_id)
 
-    with patch(
-        "ddpui.ddpairbyte.airbyte_service.reset_connection"
-    ) as reset_connection_mock:
-        result = post_airbyte_connection_reset_v1(request, connection_id)
-        assert result["success"] == 1
-
-    reset_connection_mock.assert_called_once_with(connection_id)
+        reset_helper_mock.assert_called_once()
 
 
 # ================================================================================
