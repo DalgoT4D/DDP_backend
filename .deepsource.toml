@@ -9,5 +9,5 @@ name = "python"
 
   [analyzers.meta]
   runtime_version = "3.x.x"
-  max_line_length = 100
+  max_line_length = 200
   cyclomatic_complexity_threshold = "high"
