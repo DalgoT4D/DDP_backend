@@ -28,9 +28,7 @@ class Command(BaseCommand):
             type=str,
             help="Email address of the single user if sent_to is 'single_user'",
         )
-        parser.add_argument(
-            "--org_slug", type=str, help="Org slug if sent_to is 'all_org_users'"
-        )
+        parser.add_argument("--org_slug", type=str, help="Org slug if sent_to is 'all_org_users'")
         parser.add_argument(
             "--manager_or_above",
             action="store_true",

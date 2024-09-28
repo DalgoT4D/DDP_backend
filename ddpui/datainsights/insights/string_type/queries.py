@@ -19,7 +19,6 @@ from ddpui.utils.helpers import hash_dict
 
 
 class DistributionChart(ColInsight):
-
     def query_id(self) -> str:
         """
         This will be dictate whether a query is unique or not
@@ -126,7 +125,6 @@ class DistributionChart(ColInsight):
 
 
 class StringLengthStats(ColInsight):
-
     def query_id(self) -> str:
         """
         This will be dictate whether a query is unique or not
@@ -185,9 +183,7 @@ class StringLengthStats(ColInsight):
                 select(
                     [
                         func.round(
-                            cast(
-                                func.avg(median_subquery.c[f"{col.name}_len"]), NUMERIC
-                            ),
+                            cast(func.avg(median_subquery.c[f"{col.name}_len"]), NUMERIC),
                             2,
                         ),
                     ]
@@ -202,15 +198,10 @@ class StringLengthStats(ColInsight):
                 )
                 .label("median")
             )
-            .add_column(
-                select([mode_subquery.c[f"{col.name}_len"]]).limit(1).label("mode")
-            )
+            .add_column(select([mode_subquery.c[f"{col.name}_len"]]).limit(1).label("mode"))
             .add_column(
                 select([func.array_agg(mode_subquery.c[f"{col.name}_len"])])
-                .where(
-                    mode_subquery.c["count"]
-                    == select([mode_subquery.c["count"]]).limit(1)
-                )
+                .where(mode_subquery.c["count"] == select([mode_subquery.c["count"]]).limit(1))
                 .label("other_modes")
             )
         )
@@ -259,9 +250,7 @@ class StringLengthStats(ColInsight):
                 }
             }
 
-        return {
-            self.columns[0].name: {"mean": 0, "median": 0, "mode": 0, "other_modes": []}
-        }
+        return {self.columns[0].name: {"mean": 0, "median": 0, "mode": 0, "other_modes": []}}
 
     def validate_query_results(self, parsed_results):
         """
@@ -272,10 +261,7 @@ class StringLengthStats(ColInsight):
         if (
             parsed_results
             and isinstance(parsed_results, dict)
-            and all(
-                key in parsed_results
-                for key in ["mean", "median", "mode", "other_modes"]
-            )
+            and all(key in parsed_results for key in ["mean", "median", "mode", "other_modes"])
         ):
             validate = True
 

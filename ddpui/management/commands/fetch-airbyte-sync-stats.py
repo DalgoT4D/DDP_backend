@@ -78,12 +78,8 @@ class Command(BaseCommand):
                     #     "streamStats": [],
                     # }
 
-                    start_time = datetime.fromtimestamp(
-                        attempt["createdAt"]
-                    ).astimezone(pytz.UTC)
-                    end_time = datetime.fromtimestamp(attempt["endedAt"]).astimezone(
-                        pytz.UTC
-                    )
+                    start_time = datetime.fromtimestamp(attempt["createdAt"]).astimezone(pytz.UTC)
+                    end_time = datetime.fromtimestamp(attempt["endedAt"]).astimezone(pytz.UTC)
                     duration = (end_time - start_time).total_seconds()
 
                     if not SyncStats.objects.filter(
@@ -101,11 +97,7 @@ class Command(BaseCommand):
                             sync_type=sync_type,
                             sync_time=start_time,
                             sync_duration_s=duration,
-                            sync_records=attempt.get("totalStats", {}).get(
-                                "recordsEmitted", 0
-                            ),
-                            sync_data_volume_b=attempt.get("totalStats", {}).get(
-                                "bytesEmitted", 0
-                            ),
+                            sync_records=attempt.get("totalStats", {}).get("recordsEmitted", 0),
+                            sync_data_volume_b=attempt.get("totalStats", {}).get("bytesEmitted", 0),
                         )
                         print(ss.to_json())

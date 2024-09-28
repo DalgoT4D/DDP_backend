@@ -32,7 +32,6 @@ class DataStats(ColInsight):
         )
 
     def generate_sql(self):
-
         if len(self.columns) < 1:
             raise ValueError("No column specified")
 

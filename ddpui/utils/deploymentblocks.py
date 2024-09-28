@@ -45,9 +45,7 @@ def trigger_reset_and_sync_workflow(org: Org, connection_id: str):
         logger.error("Deployment ID not found")
         return None, "deployment ID not found"
 
-    org_server_block = OrgPrefectBlockv1.objects.filter(
-        org=org, block_type=AIRBYTESERVER
-    ).first()
+    org_server_block = OrgPrefectBlockv1.objects.filter(org=org, block_type=AIRBYTESERVER).first()
 
     if not org_server_block:
         logger.error("Airbyte server block not found")
@@ -57,12 +55,8 @@ def trigger_reset_and_sync_workflow(org: Org, connection_id: str):
     params = {
         "config": {
             "tasks": [
-                setup_airbyte_sync_task_config(
-                    reset_org_task, org_server_block, seq=1
-                ).to_json(),
-                setup_airbyte_sync_task_config(
-                    sync_org_task, org_server_block, seq=2
-                ).to_json(),
+                setup_airbyte_sync_task_config(reset_org_task, org_server_block, seq=1).to_json(),
+                setup_airbyte_sync_task_config(sync_org_task, org_server_block, seq=2).to_json(),
             ],
             "org_slug": org.slug,
         }

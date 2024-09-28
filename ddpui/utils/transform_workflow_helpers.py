@@ -10,9 +10,7 @@ from ddpui.models.dbt_workflow import (
 )
 
 
-def from_orgdbtoperation(
-    orgdbt_op: OrgDbtOperation, chain_length: int = None, **kwargs
-):
+def from_orgdbtoperation(orgdbt_op: OrgDbtOperation, chain_length: int = None, **kwargs):
     """Helper to turn an OrgDbtOperation into a dict"""
     dbtop = {
         "id": orgdbt_op.uuid,
@@ -27,9 +25,7 @@ def from_orgdbtoperation(
     }
 
     if not dbtop["chain_length"]:
-        dbtop["chain_length"] = OrgDbtOperation.objects.filter(
-            dbtmodel=orgdbt_op.dbtmodel
-        ).count()
+        dbtop["chain_length"] = OrgDbtOperation.objects.filter(dbtmodel=orgdbt_op.dbtmodel).count()
 
     dbtop["is_last_in_chain"] = dbtop["seq"] == dbtop["chain_length"]
 

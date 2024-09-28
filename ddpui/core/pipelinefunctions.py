@@ -160,13 +160,9 @@ def pipeline_with_orgtasks(
     for org_task in org_tasks:
         task_config = None
         if org_task.task.slug == TASK_AIRBYTERESET:
-            task_config = setup_airbyte_sync_task_config(
-                org_task, server_block
-            ).to_json()
+            task_config = setup_airbyte_sync_task_config(org_task, server_block).to_json()
         elif org_task.task.slug == TASK_AIRBYTESYNC:
-            task_config = setup_airbyte_sync_task_config(
-                org_task, server_block
-            ).to_json()
+            task_config = setup_airbyte_sync_task_config(org_task, server_block).to_json()
         elif org_task.task.slug == TASK_GITPULL:
             gitpull_secret_block = OrgPrefectBlockv1.objects.filter(
                 org=org, block_type=SECRET, block_name__contains="git-pull"
@@ -221,11 +217,7 @@ def fetch_pipeline_lock(dataflow: OrgDataFlowv1):
             "lockedBy": lock.locked_by.user.email,
             "lockedAt": lock.locked_at,
             "flowRunId": lock.flow_run_id,
-            "status": (
-                lock_status
-                if lock.locking_dataflow == dataflow
-                else TaskLockStatus.LOCKED
-            ),
+            "status": (lock_status if lock.locking_dataflow == dataflow else TaskLockStatus.LOCKED),
         }
 
     return None
@@ -238,9 +230,7 @@ def fetch_pipeline_lock_v1(dataflow: OrgDataFlowv1, lock: Union[TaskLock, None])
     if lock:
         lock_status = TaskLockStatus.QUEUED
         if lock.flow_run_id:
-            flow_run = prefect_service.get_flow_run(
-                lock.flow_run_id
-            )  # can taken from db now
+            flow_run = prefect_service.get_flow_run(lock.flow_run_id)  # can taken from db now
             if flow_run and flow_run["state_type"] in [
                 FLOW_RUN_SCHEDULED_STATE_TYPE,
                 FLOW_RUN_PENDING_STATE_TYPE,
@@ -255,28 +245,20 @@ def fetch_pipeline_lock_v1(dataflow: OrgDataFlowv1, lock: Union[TaskLock, None])
             "lockedBy": lock.locked_by.user.email,
             "lockedAt": lock.locked_at,
             "flowRunId": lock.flow_run_id,
-            "status": (
-                lock_status
-                if lock.locking_dataflow == dataflow
-                else TaskLockStatus.LOCKED
-            ),
+            "status": (lock_status if lock.locking_dataflow == dataflow else TaskLockStatus.LOCKED),
         }
 
     return None
 
 
-def lock_tasks_for_dataflow(
-    orguser: OrgUser, dataflow: OrgDataFlowv1, org_tasks: list[OrgTask]
-):
+def lock_tasks_for_dataflow(orguser: OrgUser, dataflow: OrgDataFlowv1, org_tasks: list[OrgTask]):
     """locks the orgtasks; if its any of the orgtasks are already locked, it will raise an error"""
 
     orgtask_ids = [org_task.id for org_task in org_tasks]
     lock = TaskLock.objects.filter(orgtask_id__in=orgtask_ids).first()
     if lock:
         logger.info(f"{lock.locked_by.user.email} is running this pipeline right now")
-        raise HttpError(
-            400, f"{lock.locked_by.user.email} is running this pipeline right now"
-        )
+        raise HttpError(400, f"{lock.locked_by.user.email} is running this pipeline right now")
 
     locks = []
     try:
@@ -289,9 +271,7 @@ def lock_tasks_for_dataflow(
                 )
                 locks.append(task_lock)
     except Exception as error:
-        raise HttpError(
-            400, "Someone else is trying to run this pipeline... try again"
-        ) from error
+        raise HttpError(400, "Someone else is trying to run this pipeline... try again") from error
     return locks
 
 
@@ -332,9 +312,7 @@ def fix_transform_tasks_seq_dataflow(deployment_id: str):
     transform_tasks = [task for task in tasks if task["slug"] in TRANSFORM_TASKS_SEQ]
     other_tasks = [task for task in tasks if task["slug"] not in TRANSFORM_TASKS_SEQ]
 
-    updated_transform_tasks = sorted(
-        transform_tasks, key=cmp_to_key(task_config_comparator)
-    )
+    updated_transform_tasks = sorted(transform_tasks, key=cmp_to_key(task_config_comparator))
     for i, task in enumerate(updated_transform_tasks):
         task["seq"] = i + len(other_tasks)
 
@@ -356,14 +334,10 @@ def fix_transform_tasks_seq_dataflow(deployment_id: str):
     ).all()
 
     transform_dfots = [
-        dfot
-        for dfot in dataflow_orgtasks
-        if dfot.orgtask.task.slug in TRANSFORM_TASKS_SEQ
+        dfot for dfot in dataflow_orgtasks if dfot.orgtask.task.slug in TRANSFORM_TASKS_SEQ
     ]
     other_dfots = [
-        dfot
-        for dfot in dataflow_orgtasks
-        if dfot.orgtask.task.slug not in TRANSFORM_TASKS_SEQ
+        dfot for dfot in dataflow_orgtasks if dfot.orgtask.task.slug not in TRANSFORM_TASKS_SEQ
     ]
 
     sorted_transform_dataflow_orgtasks = sorted(

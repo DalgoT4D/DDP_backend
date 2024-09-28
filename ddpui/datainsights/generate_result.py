@@ -23,7 +23,6 @@ logger = CustomLogger("ddpui")
 
 
 class DataInsightsConsumer(WebsocketConsumer):
-
     def connect(self):
         logger.info("Trying to establish connection")
         self.accept()
@@ -78,9 +77,7 @@ class DataInsightsConsumer(WebsocketConsumer):
 
         else:
             self.send(
-                json.dumps(
-                    {"status": "failed", "message": "task id not provided", "body": {}}
-                )
+                json.dumps({"status": "failed", "message": "task id not provided", "body": {}})
             )
 
 
@@ -97,9 +94,7 @@ def poll_for_column_insights(
     Wait for results
     Return results if all queries are completed; else return a status of error
     """
-    requestor_col: RequestorColumnSchema = RequestorColumnSchema.parse_obj(
-        requestor_col
-    )
+    requestor_col: RequestorColumnSchema = RequestorColumnSchema.parse_obj(requestor_col)
 
     taskprogress = TaskProgress(task_id, TaskProgressHashPrefix.DATAINSIGHTS, 10 * 60)
     taskprogress.add(
@@ -124,7 +119,6 @@ def poll_for_column_insights(
         return
 
     try:
-
         # if the lock is not acquire, then acquire a lock and run the queries for this column
         credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
 
@@ -239,9 +233,7 @@ class GenerateResult:
     def get_org_lock(cls, org: Org) -> Lock:
         """Return a persistent redis lock to access shared results"""
         if org.slug not in cls.org_locks:
-            cls.org_locks[org.slug] = Lock(
-                RedisClient.get_instance(), org.slug, timeout=15
-            )
+            cls.org_locks[org.slug] = Lock(RedisClient.get_instance(), org.slug, timeout=15)
         return cls.org_locks[org.slug]
 
     @classmethod
@@ -249,9 +241,7 @@ class GenerateResult:
         return f"{org.slug}-{query.db_schema}-{query.db_table}-queries"
 
     @classmethod
-    def build_insights_hash_to_store_results(
-        cls, org: Org, db_schema: str, db_table: str
-    ) -> str:
+    def build_insights_hash_to_store_results(cls, org: Org, db_schema: str, db_table: str) -> str:
         return f"{org.slug}-{db_schema}-{db_table}-insights"
 
     @classmethod
@@ -281,9 +271,7 @@ class GenerateResult:
                 )
                 try:
                     stmt = query.generate_sql()
-                    stmt = stmt.compile(
-                        bind=wclient.engine, compile_kwargs={"literal_binds": True}
-                    )
+                    stmt = stmt.compile(bind=wclient.engine, compile_kwargs={"literal_binds": True})
                     logger.info(stmt)
                     results = wclient.execute(stmt)
 
@@ -341,9 +329,7 @@ class GenerateResult:
             return False
 
     @classmethod
-    def acquire_query_lock(
-        cls, org: Org, query: ColInsight, force_acquire: bool = False
-    ) -> bool:
+    def acquire_query_lock(cls, org: Org, query: ColInsight, force_acquire: bool = False) -> bool:
         """
         Acquire lock to run the query: return True
         Poll till you get the lock
@@ -380,9 +366,7 @@ class GenerateResult:
         return run_query
 
     @classmethod
-    def release_query_lock(
-        cls, org: Org, query: ColInsight, force_expire: bool = False
-    ) -> None:
+    def release_query_lock(cls, org: Org, query: ColInsight, force_expire: bool = False) -> None:
         """
         Release the lock for the query; means updating the status in the query lock to RESULT_STATUS_COMPLETED
         remove the hash if query has reached its expiry or if force_expire = True
@@ -442,9 +426,7 @@ class GenerateResult:
             final_result = cls.merge_results(current_results, parsed_results)
 
             # save results to redis
-            hash = cls.build_insights_hash_to_store_results(
-                org, query.db_schema, query.db_table
-            )
+            hash = cls.build_insights_hash_to_store_results(org, query.db_schema, query.db_table)
             key = f"{query.db_schema}-{query.db_table}"
 
             redis.hset(hash, key, json.dumps(final_result))
@@ -507,7 +489,6 @@ class GenerateResult:
                 wclient.get_wtype(),
             )
             for common_query in base_insights.insights:
-
                 execute_queries.append(common_query)
 
         column_configs = [

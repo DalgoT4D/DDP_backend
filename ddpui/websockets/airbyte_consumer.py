@@ -16,11 +16,8 @@ logger = CustomLogger("ddpui")
 
 
 class SourceCheckConnectionConsumer(BaseConsumer):
-
     def websocket_receive(self, message):
-        logger.info(
-            "Recieved the message from client, inside check connection for source consumer"
-        )
+        logger.info("Recieved the message from client, inside check connection for source consumer")
         payload = json.loads(message["text"])
         source_id = payload.get("sourceId", None)
         if "sourceId" in payload:
@@ -36,8 +33,8 @@ class SourceCheckConnectionConsumer(BaseConsumer):
                 self.orguser.org.airbyte_workspace_id, payload.sourceDefId
             )
             # replace the payload config with the correct whitelisted source config
-            whitelisted_config, error = (
-                airbytehelpers.get_demo_whitelisted_source_config(source_def["name"])
+            whitelisted_config, error = airbytehelpers.get_demo_whitelisted_source_config(
+                source_def["name"]
             )
             if error:
                 self.respond(
@@ -54,9 +51,7 @@ class SourceCheckConnectionConsumer(BaseConsumer):
 
         try:
             if source_id:
-                response = airbyte_service.check_source_connection_for_update(
-                    source_id, payload
-                )
+                response = airbyte_service.check_source_connection_for_update(source_id, payload)
             else:
                 response = airbyte_service.check_source_connection(
                     self.orguser.org.airbyte_workspace_id, payload
@@ -73,9 +68,7 @@ class SourceCheckConnectionConsumer(BaseConsumer):
         self.respond(
             WebsocketResponse(
                 data={
-                    "status": (
-                        "succeeded" if response["jobInfo"]["succeeded"] else "failed"
-                    ),
+                    "status": ("succeeded" if response["jobInfo"]["succeeded"] else "failed"),
                     "logs": response["jobInfo"]["logs"]["logLines"],
                 },
                 message="Source connection check completed",
@@ -85,7 +78,6 @@ class SourceCheckConnectionConsumer(BaseConsumer):
 
 
 class DestinationCheckConnectionConsumer(BaseConsumer):
-
     def websocket_receive(self, message):
         logger.info(
             "Recieved the message from client, inside check connection for destination consumer"
@@ -120,9 +112,7 @@ class DestinationCheckConnectionConsumer(BaseConsumer):
         self.respond(
             WebsocketResponse(
                 data={
-                    "status": (
-                        "succeeded" if response["jobInfo"]["succeeded"] else "failed"
-                    ),
+                    "status": ("succeeded" if response["jobInfo"]["succeeded"] else "failed"),
                     "logs": response["jobInfo"]["logs"]["logLines"],
                 },
                 message="Destination connection check completed",

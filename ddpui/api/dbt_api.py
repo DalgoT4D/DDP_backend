@@ -73,9 +73,7 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
         org.dbt = None
         org.save()
 
-    repo_exists = dbt_service.check_repo_exists(
-        payload.gitrepoUrl, payload.gitrepoAccessToken
-    )
+    repo_exists = dbt_service.check_repo_exists(payload.gitrepoUrl, payload.gitrepoAccessToken)
 
     if not repo_exists:
         raise HttpError(400, "Github repository does not exist")
@@ -94,9 +92,7 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
     if org.dbt is None:
         raise HttpError(400, "Create a dbt workspace first")
 
-    repo_exists = dbt_service.check_repo_exists(
-        payload.gitrepoUrl, payload.gitrepoAccessToken
-    )
+    repo_exists = dbt_service.check_repo_exists(payload.gitrepoUrl, payload.gitrepoAccessToken)
 
     if not repo_exists:
         raise HttpError(400, "Github repository does not exist")
@@ -118,9 +114,7 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
     return {"task_id": task.id}
 
 
-@dbtapi.delete(
-    "/workspace/", response=OrgUserResponse, auth=auth.CustomAuthMiddleware()
-)
+@dbtapi.delete("/workspace/", response=OrgUserResponse, auth=auth.CustomAuthMiddleware())
 @has_permission(["can_delete_dbt_workspace"])
 def dbt_delete(request):
     """Delete the dbt workspace and project repo created"""
@@ -163,9 +157,7 @@ def post_dbt_git_pull(request):
     try:
         runcmd("git pull", project_dir / "dbtrepo")
     except Exception as error:
-        raise HttpError(
-            500, f"git pull failed in {str(project_dir / 'dbtrepo')}"
-        ) from error
+        raise HttpError(500, f"git pull failed in {str(project_dir / 'dbtrepo')}") from error
 
     return {"success": True}
 
@@ -221,9 +213,7 @@ def put_dbt_schema_v1(request, payload: OrgDbtTarget):
     ).first()
 
     if cli_profile_block:
-        logger.info(
-            f"Updating the cli profile block's schema : {cli_profile_block.block_name}"
-        )
+        logger.info(f"Updating the cli profile block's schema : {cli_profile_block.block_name}")
         prefect_service.update_dbt_cli_profile_block(
             block_name=cli_profile_block.block_name,
             target=payload.target_configs_schema,
@@ -259,9 +249,7 @@ def post_run_dbt_commands(request, payload: TaskParameters = None):
 
     task_id = str(uuid4())
 
-    taskprogress = TaskProgress(
-        task_id, f"{TaskProgressHashPrefix.RUNDBTCMDS}-{org.slug}"
-    )
+    taskprogress = TaskProgress(task_id, f"{TaskProgressHashPrefix.RUNDBTCMDS}-{org.slug}")
 
     taskprogress.add({"message": "Added dbt commands in queue", "status": "queued"})
 

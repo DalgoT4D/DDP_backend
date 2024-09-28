@@ -72,9 +72,7 @@ def org_without_workspace():
 @pytest.fixture
 def org_with_workspace():
     """a pytest fixture which creates an Org having an airbyte workspace"""
-    org = Org.objects.create(
-        airbyte_workspace_id="FAKE-WORKSPACE-ID", slug="test-org-slug"
-    )
+    org = Org.objects.create(airbyte_workspace_id="FAKE-WORKSPACE-ID", slug="test-org-slug")
     yield org
     org.delete()
 
@@ -182,9 +180,7 @@ def test_post_airbyte_source_without_workspace(orguser):
     """tests GET /source_definitions"""
     request = mock_request(orguser)
 
-    fake_payload = AirbyteSourceCreate(
-        name="temp-name", sourceDefId="fake-id", config={}
-    )
+    fake_payload = AirbyteSourceCreate(name="temp-name", sourceDefId="fake-id", config={})
     with pytest.raises(HttpError) as excinfo:
         post_airbyte_source(request, fake_payload)
 
@@ -199,9 +195,7 @@ def test_post_airbyte_source_success(orguser_workspace):
     """tests GET /source_definitions"""
     request = mock_request(orguser_workspace)
 
-    fake_payload = AirbyteSourceCreate(
-        name="temp-name", sourceDefId="fake-id", config={}
-    )
+    fake_payload = AirbyteSourceCreate(name="temp-name", sourceDefId="fake-id", config={})
     source = post_airbyte_source(request, fake_payload)
 
     assert source["sourceId"] == "fake-source-id"
@@ -212,9 +206,7 @@ def test_put_airbyte_source_without_workspace(orguser):
     """tests GET /source_definitions"""
     request = mock_request(orguser)
 
-    fake_payload = AirbyteSourceUpdate(
-        name="temp-name", sourceDefId="fake-id", config={}
-    )
+    fake_payload = AirbyteSourceUpdate(name="temp-name", sourceDefId="fake-id", config={})
     with pytest.raises(HttpError) as excinfo:
         put_airbyte_source(request, "fake-source-id", fake_payload)
 
@@ -229,9 +221,7 @@ def test_put_airbyte_source_success(orguser_workspace):
     """tests GET /source_definitions"""
     request = mock_request(orguser_workspace)
 
-    fake_payload = AirbyteSourceUpdate(
-        name="temp-name", sourceDefId="fake-id", config={}
-    )
+    fake_payload = AirbyteSourceUpdate(name="temp-name", sourceDefId="fake-id", config={})
     source = put_airbyte_source(request, "fake-source-id", fake_payload)
 
     assert source["sourceId"] == "fake-source-id"
@@ -242,9 +232,7 @@ def test_post_airbyte_check_source_with_workspace(orguser):
     """tests GET /source_definitions"""
     request = mock_request(orguser)
 
-    fake_payload = AirbyteSourceUpdate(
-        name="temp-name", sourceDefId="fake-id", config={}
-    )
+    fake_payload = AirbyteSourceUpdate(name="temp-name", sourceDefId="fake-id", config={})
     with pytest.raises(HttpError) as excinfo:
         post_airbyte_check_source(request, fake_payload)
 
@@ -261,9 +249,7 @@ def test_post_airbyte_check_source_failure(orguser_workspace):
     """tests GET /source_definitions"""
     request = mock_request(orguser_workspace)
 
-    fake_payload = AirbyteSourceUpdate(
-        name="temp-name", sourceDefId="fake-id", config={}
-    )
+    fake_payload = AirbyteSourceUpdate(name="temp-name", sourceDefId="fake-id", config={})
     result = post_airbyte_check_source(request, fake_payload)
 
     assert result["status"] == "failed"
@@ -280,9 +266,7 @@ def test_post_airbyte_check_source_success(orguser_workspace):
     """tests GET /source_definitions"""
     request = mock_request(orguser_workspace)
 
-    fake_payload = AirbyteSourceUpdate(
-        name="temp-name", sourceDefId="fake-id", config={}
-    )
+    fake_payload = AirbyteSourceUpdate(name="temp-name", sourceDefId="fake-id", config={})
     result = post_airbyte_check_source(request, fake_payload)
 
     assert result["status"] == "succeeded"
@@ -316,9 +300,7 @@ def test_post_airbyte_check_source_for_update_failure(orguser_workspace):
     fake_payload = AirbyteSourceUpdateCheckConnection(
         name="temp-name", sourceDefId="fake-id", config={}
     )
-    result = post_airbyte_check_source_for_update(
-        request, "fake-source-id", fake_payload
-    )
+    result = post_airbyte_check_source_for_update(request, "fake-source-id", fake_payload)
 
     assert result["status"] == "failed"
     assert len(result["logs"]) == 1
@@ -337,9 +319,7 @@ def test_post_airbyte_check_source_for_update_success(orguser_workspace):
     fake_payload = AirbyteSourceUpdateCheckConnection(
         name="temp-name", sourceDefId="fake-id", config={}
     )
-    result = post_airbyte_check_source_for_update(
-        request, "fake-source-id", fake_payload
-    )
+    result = post_airbyte_check_source_for_update(request, "fake-source-id", fake_payload)
 
     assert result["status"] == "succeeded"
     assert len(result["logs"]) == 2
@@ -473,9 +453,7 @@ def test_get_airbyte_destination_definition_specifications_success(orguser_works
     request = mock_request(orguser_workspace)
 
     os.environ["AIRBYTE_DESTINATION_TYPES"] = "dest1,dest2"
-    result = get_airbyte_destination_definition_specifications(
-        request, "fake-dest-def-id"
-    )
+    result = get_airbyte_destination_definition_specifications(request, "fake-dest-def-id")
 
     assert result["fake-key"] == "fake-val"
 
@@ -554,9 +532,7 @@ def test_post_airbyte_check_destination_success(orguser_workspace):
 @patch.multiple(
     "ddpui.ddpairbyte.airbyte_service",
     check_destination_connection=Mock(
-        return_value={
-            "jobInfo": {"succeeded": False, "logs": {"logLines": [1, 2, 3, 4]}}
-        }
+        return_value={"jobInfo": {"succeeded": False, "logs": {"logLines": [1, 2, 3, 4]}}}
     ),
 )
 def test_post_airbyte_check_destination_failure(orguser_workspace):
@@ -614,9 +590,7 @@ def test_post_airbyte_check_destination_for_update_success(orguser_workspace):
 @patch.multiple(
     "ddpui.ddpairbyte.airbyte_service",
     check_destination_connection_for_update=Mock(
-        return_value={
-            "jobInfo": {"succeeded": False, "logs": {"logLines": [1, 2, 3, 4]}}
-        }
+        return_value={"jobInfo": {"succeeded": False, "logs": {"logLines": [1, 2, 3, 4]}}}
     ),
 )
 def test_post_airbyte_check_destination_for_update_failure(orguser_workspace):

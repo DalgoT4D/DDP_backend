@@ -42,9 +42,7 @@ class AssistantPrompt(models.Model):
     """System prompts for various assistant/services"""
 
     prompt = models.TextField(null=False)
-    type = models.CharField(
-        null=False, choices=LlmAssistantType.choices(), max_length=100
-    )
+    type = models.CharField(null=False, choices=LlmAssistantType.choices(), max_length=100)
 
 
 class LlmSession(models.Model):

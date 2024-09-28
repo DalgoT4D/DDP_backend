@@ -161,9 +161,9 @@ def mock_request(orguser: OrgUser = None):
     mock_request.orguser = orguser
     mock_request.permissions = []
     if orguser and orguser.new_role:
-        permission_slugs = RolePermission.objects.filter(
-            role=orguser.new_role
-        ).values_list("permission__slug", flat=True)
+        permission_slugs = RolePermission.objects.filter(role=orguser.new_role).values_list(
+            "permission__slug", flat=True
+        )
         mock_request.permissions = list(permission_slugs)
 
     return mock_request
@@ -176,9 +176,7 @@ def test_seed_data(seed_db):
     assert Permission.objects.count() > 5
 
 
-def test_get_current_userv2_has_user(
-    authuser, org_with_workspace, org_without_workspace
-):
+def test_get_current_userv2_has_user(authuser, org_with_workspace, org_without_workspace):
     """tests /worksspace/detatch/"""
     orguser1 = OrgUser.objects.create(
         user=authuser,
@@ -449,13 +447,9 @@ def test_delete_organization_users_success(orguser):
     payload = DeleteOrgUserPayload(email="useremail")
     user = User.objects.create(email=payload.email, username=payload.email)
     OrgUser.objects.create(org=orguser.org, user=user)
-    assert (
-        OrgUser.objects.filter(org=orguser.org, user__email=payload.email).count() == 1
-    )
+    assert OrgUser.objects.filter(org=orguser.org, user__email=payload.email).count() == 1
     delete_organization_users(request, payload)
-    assert (
-        OrgUser.objects.filter(org=orguser.org, user__email=payload.email).count() == 0
-    )
+    assert OrgUser.objects.filter(org=orguser.org, user__email=payload.email).count() == 0
     user.delete()
 
 
@@ -470,13 +464,9 @@ def test_delete_organization_users_success_v1(orguser):
         user=user,
         new_role=Role.objects.filter(slug=GUEST_ROLE).first(),
     )
-    assert (
-        OrgUser.objects.filter(org=orguser.org, user__email=payload.email).count() == 1
-    )
+    assert OrgUser.objects.filter(org=orguser.org, user__email=payload.email).count() == 1
     delete_organization_users_v1(request, payload)
-    assert (
-        OrgUser.objects.filter(org=orguser.org, user__email=payload.email).count() == 0
-    )
+    assert OrgUser.objects.filter(org=orguser.org, user__email=payload.email).count() == 0
     user.delete()
 
 
@@ -598,10 +588,7 @@ def test_post_transfer_ownership_no_such_user(authuser, org_with_workspace):
     payload = OrgUserNewOwner(new_owner_email="new-email")
     with pytest.raises(HttpError) as excinfo:
         post_transfer_ownership(request, payload)
-    assert (
-        str(excinfo.value)
-        == "could not find user having this email address in this org"
-    )
+    assert str(excinfo.value) == "could not find user having this email address in this org"
 
 
 def test_post_transfer_ownership_not_pipeline_mgr(authuser, org_with_workspace):
@@ -754,15 +741,9 @@ def test_get_organizations_warehouses(orguser):
     assert "warehouses" in response
     assert len(response["warehouses"]) == 2
     assert response["warehouses"][0]["wtype"] == "postgres"
-    assert (
-        response["warehouses"][0]["airbyte_destination"]["destination_id"]
-        == "destination_id_1"
-    )
+    assert response["warehouses"][0]["airbyte_destination"]["destination_id"] == "destination_id_1"
     assert response["warehouses"][1]["wtype"] == "postgres"
-    assert (
-        response["warehouses"][1]["airbyte_destination"]["destination_id"]
-        == "destination_id_2"
-    )
+    assert response["warehouses"][1]["airbyte_destination"]["destination_id"] == "destination_id_2"
     warehouse1.delete()
     warehouse2.delete()
 
@@ -773,9 +754,7 @@ def test_post_organization_user_invite_no_org(orguser):
     """failing test, no org"""
     orguser.org = None
     request = mock_request(orguser)
-    payload = InvitationSchema(
-        invited_email="some-email", invited_role_slug="report_viewer"
-    )
+    payload = InvitationSchema(invited_email="some-email", invited_role_slug="report_viewer")
     with pytest.raises(HttpError) as excinfo:
         post_organization_user_invite(request, payload)
     assert str(excinfo.value) == "create an organization first"
@@ -799,9 +778,7 @@ def test_post_organization_user_invite_v1_no_org(orguser):
 def test_post_organization_user_invite_nosuchrole(orguser):
     """failing test, no such role"""
     request = mock_request(orguser)
-    payload = InvitationSchema(
-        invited_email="some-email", invited_role_slug="hot_stepper"
-    )
+    payload = InvitationSchema(invited_email="some-email", invited_role_slug="hot_stepper")
     with pytest.raises(HttpError) as excinfo:
         post_organization_user_invite(request, payload)
     assert str(excinfo.value) == "Invalid role"
@@ -811,9 +788,7 @@ def test_post_organization_user_invite_nosuchrole(orguser):
 def test_post_organization_user_invite_v1_nosuchrole(orguser):
     """failing test, no such role"""
     request = mock_request(orguser)
-    payload = NewInvitationSchema(
-        invited_email="some-email", invited_role_uuid=uuid.uuid4()
-    )
+    payload = NewInvitationSchema(invited_email="some-email", invited_role_uuid=uuid.uuid4())
     with pytest.raises(HttpError) as excinfo:
         post_organization_user_invite_v1(request, payload)
     assert str(excinfo.value) == "Invalid role"
@@ -824,9 +799,7 @@ def test_post_organization_user_invite_insufficientrole(orguser):
     """failing test, no such role"""
     orguser.role = 1
     request = mock_request(orguser)
-    payload = InvitationSchema(
-        invited_email="some-email", invited_role_slug="pipeline_manager"
-    )
+    payload = InvitationSchema(invited_email="some-email", invited_role_slug="pipeline_manager")
     with pytest.raises(HttpError) as excinfo:
         post_organization_user_invite(request, payload)
     assert str(excinfo.value) == "Insufficient permissions for this operation"
@@ -859,16 +832,12 @@ def test_post_organization_user_invite(mock_sendgrid, orguser):
     request = mock_request(orguser)
 
     assert (
-        Invitation.objects.filter(
-            invited_email=payload.invited_email, invited_by=orguser
-        ).count()
+        Invitation.objects.filter(invited_email=payload.invited_email, invited_by=orguser).count()
         == 0
     )
     response = post_organization_user_invite(request, payload)
     assert (
-        Invitation.objects.filter(
-            invited_email=payload.invited_email, invited_by=orguser
-        ).count()
+        Invitation.objects.filter(invited_email=payload.invited_email, invited_by=orguser).count()
         == 1
     )
 
@@ -891,9 +860,7 @@ def test_post_organization_user_invite_v1(mock_sendgrid, orguser):
     request = mock_request(orguser)
 
     assert (
-        Invitation.objects.filter(
-            invited_email=payload.invited_email, invited_by=orguser
-        ).count()
+        Invitation.objects.filter(invited_email=payload.invited_email, invited_by=orguser).count()
         == 0
     )
     post_organization_user_invite_v1(request, payload)
@@ -936,16 +903,12 @@ def test_post_organization_user_invite_multiple_open_invites(mock_sendgrid, orgu
     request = mock_request(orguser)
 
     assert (
-        Invitation.objects.filter(
-            invited_email=payload.invited_email, invited_by=orguser
-        ).count()
+        Invitation.objects.filter(invited_email=payload.invited_email, invited_by=orguser).count()
         == 0
     )
     response = post_organization_user_invite(request, payload)
     assert (
-        Invitation.objects.filter(
-            invited_email=payload.invited_email, invited_by=orguser
-        ).count()
+        Invitation.objects.filter(invited_email=payload.invited_email, invited_by=orguser).count()
         == 1
     )
 
@@ -980,9 +943,7 @@ def test_post_organization_user_invite_v1_multiple_open_invites(mock_sendgrid, o
     request = mock_request(orguser)
 
     assert (
-        Invitation.objects.filter(
-            invited_email=payload.invited_email, invited_by=orguser
-        ).count()
+        Invitation.objects.filter(invited_email=payload.invited_email, invited_by=orguser).count()
         == 0
     )
     post_organization_user_invite_v1(request, payload)
@@ -1036,9 +997,7 @@ def test_post_organization_user_invite_lowercase_email(mock_sendgrid, orguser: O
 
 
 @patch("ddpui.utils.sendgrid.send_invite_user_email", mock_sendgrid=Mock())
-def test_post_organization_user_invite_v1_lowercase_email(
-    mock_sendgrid, orguser: OrgUser
-):
+def test_post_organization_user_invite_v1_lowercase_email(mock_sendgrid, orguser: OrgUser):
     """success test, inviting a new user"""
     payload = NewInvitationSchema(
         invited_email="INVITED_EMAIL",
@@ -1109,19 +1068,14 @@ def test_post_organization_user_invite_v1_user_exists(mock_sendgrid, orguser: Or
     mock_sendgrid.assert_called_once()
 
     assert OrgUser.objects.filter(user=user, new_role=guest_role).count() == 1
-    assert (
-        OrgUser.objects.filter(user=user, org=orguser.org, new_role=guest_role).count()
-        == 1
-    )
+    assert OrgUser.objects.filter(user=user, org=orguser.org, new_role=guest_role).count() == 1
 
 
 # ================================================================================
 def test_post_organization_user_accept_invite_fail(orguser):
     """failing test, invalid invite code"""
     request = mock_request(orguser)
-    payload = AcceptInvitationSchema(
-        invite_code="invalid-invite_code", password="password"
-    )
+    payload = AcceptInvitationSchema(invite_code="invalid-invite_code", password="password")
 
     with pytest.raises(HttpError) as excinfo:
         post_organization_user_accept_invite(request, payload)
@@ -1132,9 +1086,7 @@ def test_post_organization_user_accept_invite_fail(orguser):
 def test_post_organization_user_accept_invite_v1_fail(orguser):
     """failing test, invalid invite code"""
     request = mock_request(orguser)
-    payload = AcceptInvitationSchema(
-        invite_code="invalid-invite_code", password="password"
-    )
+    payload = AcceptInvitationSchema(invite_code="invalid-invite_code", password="password")
 
     with pytest.raises(HttpError) as excinfo:
         post_organization_user_accept_invite_v1(request, payload)
@@ -1193,10 +1145,7 @@ def test_post_organization_user_accept_invite_v1(orguser):
     )
     response = post_organization_user_accept_invite_v1(request, payload)
     assert response.email == "invited_email"
-    assert (
-        OrgUser.objects.filter(user__email="invited_email", new_role=guest_role).count()
-        == 1
-    )
+    assert OrgUser.objects.filter(user__email="invited_email", new_role=guest_role).count() == 1
     assert UserAttributes.objects.filter(user__email="invited_email").exists()
 
 
@@ -1250,10 +1199,7 @@ def test_post_organization_user_accept_invite_v1_lowercase_email(orguser):
     )
     response = post_organization_user_accept_invite_v1(request, payload)
     assert response.email == "invited_email"
-    assert (
-        OrgUser.objects.filter(user__email="invited_email", new_role=guest_role).count()
-        == 1
-    )
+    assert OrgUser.objects.filter(user__email="invited_email", new_role=guest_role).count() == 1
 
 
 def test_post_organization_user_accept_invite_firstaccount_fail(orguser):
@@ -1330,16 +1276,10 @@ def test_post_organization_user_accept_invite_secondaccount(orguser):
         == 2
     )
     assert (
-        OrgUser.objects.filter(
-            user__email="invited_email", org__slug=orguser.org.slug
-        ).count()
-        == 1
+        OrgUser.objects.filter(user__email="invited_email", org__slug=orguser.org.slug).count() == 1
     )
     assert (
-        OrgUser.objects.filter(
-            user__email="invited_email", org__slug=anotherorg.slug
-        ).count()
-        == 1
+        OrgUser.objects.filter(user__email="invited_email", org__slug=anotherorg.slug).count() == 1
     )
     assert User.objects.filter(email="invited_email").count() == 1
 
@@ -1373,10 +1313,7 @@ def test_post_organization_user_accept_invite_v1_secondaccount(orguser):
     )
     response = post_organization_user_accept_invite_v1(request, payload)
     assert response.email == "invited_email"
-    assert (
-        OrgUser.objects.filter(user__email="invited_email", new_role=guest_role).count()
-        == 2
-    )
+    assert OrgUser.objects.filter(user__email="invited_email", new_role=guest_role).count() == 2
     assert (
         OrgUser.objects.filter(
             user__email="invited_email", org__slug=orguser.org.slug, new_role=guest_role
@@ -1502,9 +1439,7 @@ def test_get_invitations(orguser):
     assert response[0]["invited_email"] == "invited-email"
     assert response[0]["invited_role_slug"] == "report_viewer"
     assert response[0]["invited_role"] == 1
-    assert response[0]["invited_on"] == datetime(
-        2023, 1, 1, 4, 30, 0, tzinfo=timezone.pytz.utc
-    )
+    assert response[0]["invited_on"] == datetime(2023, 1, 1, 4, 30, 0, tzinfo=timezone.pytz.utc)
 
 
 def test_get_invitations_v1(orguser):
@@ -1521,9 +1456,7 @@ def test_get_invitations_v1(orguser):
     response = get_invitations_v1(request)
     assert len(response) == 1
     assert response[0]["invited_email"] == "invited-email"
-    assert response[0]["invited_on"] == datetime(
-        2023, 1, 1, 4, 30, 0, tzinfo=timezone.pytz.utc
-    )
+    assert response[0]["invited_on"] == datetime(2023, 1, 1, 4, 30, 0, tzinfo=timezone.pytz.utc)
     assert response[0]["invited_role"] == {
         "uuid": guest_role.uuid,
         "name": guest_role.name,
@@ -1586,9 +1519,7 @@ def test_delete_invitation(orguser):
     assert not Invitation.objects.filter(id=invitation.id).exists()
 
 
-def test_post_organization_accept_tnc_no_org(
-    orguser: OrgUser, org_without_workspace: Org
-):
+def test_post_organization_accept_tnc_no_org(orguser: OrgUser, org_without_workspace: Org):
     """tests post_organization_accept_tnc"""
     orguser.org = None
 
@@ -1599,9 +1530,7 @@ def test_post_organization_accept_tnc_no_org(
     assert str(excinfo.value) == "create an organization first"
 
 
-def test_post_organization_accept_tnc_cannot(
-    orguser: OrgUser, org_without_workspace: Org
-):
+def test_post_organization_accept_tnc_cannot(orguser: OrgUser, org_without_workspace: Org):
     """tests post_organization_accept_tnc"""
     orguser.org = org_without_workspace
     orguser.save()
@@ -1627,9 +1556,7 @@ def test_post_organization_accept_tnc_already_accepted(
     orguser.org = org_without_workspace
     orguser.save()
 
-    OrgTnC.objects.create(
-        org=orguser.org, tnc_accepted_by=orguser, tnc_accepted_on=datetime.now()
-    )
+    OrgTnC.objects.create(org=orguser.org, tnc_accepted_by=orguser, tnc_accepted_on=datetime.now())
 
     request = mock_request(orguser)
 

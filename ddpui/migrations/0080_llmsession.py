@@ -37,9 +37,7 @@ class Migration(migrations.Migration):
                 ("updated_at", models.DateTimeField(auto_now=True)),
                 (
                     "org",
-                    models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE, to="ddpui.org"
-                    ),
+                    models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to="ddpui.org"),
                 ),
                 (
                     "orguser",

@@ -46,9 +46,7 @@ def delete_dbt_workspace(org: Org):
 
     # remove transform tasks
     org_tasks_delete = []
-    for org_task in OrgTask.objects.filter(
-        org=org, task__type__in=["dbt", "git"]
-    ).all():
+    for org_task in OrgTask.objects.filter(org=org, task__type__in=["dbt", "git"]).all():
         if (
             DataflowOrgTask.objects.filter(
                 orgtask=org_task, dataflow__dataflow_type="orchestrate"
@@ -65,9 +63,7 @@ def delete_dbt_workspace(org: Org):
         org_task.delete()
 
     logger.info("deleting dbt cli profile")
-    for dbt_cli_block in OrgPrefectBlockv1.objects.filter(
-        org=org, block_type=DBTCLIPROFILE
-    ).all():
+    for dbt_cli_block in OrgPrefectBlockv1.objects.filter(org=org, block_type=DBTCLIPROFILE).all():
         try:
             prefect_service.delete_dbt_cli_profile_block(dbt_cli_block.block_id)
         except Exception:  # pylint:disable=broad-exception-caught
@@ -76,9 +72,7 @@ def delete_dbt_workspace(org: Org):
 
     logger.info("deleting git secret block")
     # remove git token uri block
-    for secret_block in OrgPrefectBlockv1.objects.filter(
-        org=org, block_type=SECRET
-    ).all():
+    for secret_block in OrgPrefectBlockv1.objects.filter(org=org, block_type=SECRET).all():
         try:
             prefect_service.delete_secret_block(secret_block.block_id)
         except Exception:  # pylint:disable=broad-exception-caught
@@ -308,9 +302,7 @@ def fetch_elementary_report(org: Org):
 
     return None, {
         "token": token.hex,
-        "created_on_utc": s3response[
-            "LastModified"
-        ].isoformat(),  # e.g. 2024-06-07T00:44:08+00:00
+        "created_on_utc": s3response["LastModified"].isoformat(),  # e.g. 2024-06-07T00:44:08+00:00
         "created_on_ist": as_ist(
             s3response["LastModified"]
         ).isoformat(),  # e.g. 2024-06-07T06:14:08+05:30

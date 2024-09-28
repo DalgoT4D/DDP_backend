@@ -66,9 +66,7 @@ def pydantic_validation_error_handler(
 
 
 @warehouseapi.exception_handler(Exception)
-def ninja_default_error_handler(
-    request, exc: Exception
-):  # pylint: disable=unused-argument
+def ninja_default_error_handler(request, exc: Exception):  # pylint: disable=unused-argument
     """Handle any other exception raised in the apis"""
     logger.exception(exc)
     return Response({"detail": "something went wrong"}, status=500)
@@ -125,9 +123,7 @@ def get_schema(request):
     return get_warehouse_data(request, "schemas")
 
 
-@warehouseapi.get(
-    "/table_columns/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware()
-)
+@warehouseapi.get("/table_columns/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def get_table_columns(request, schema_name: str, table_name: str):
     """Fetches column names for a specific table from a warehouse"""
@@ -136,9 +132,7 @@ def get_table_columns(request, schema_name: str, table_name: str):
     )
 
 
-@warehouseapi.get(
-    "/table_data/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware()
-)
+@warehouseapi.get("/table_data/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def get_table_data(
     request,
@@ -162,9 +156,7 @@ def get_table_data(
     )
 
 
-@warehouseapi.get(
-    "/table_count/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware()
-)
+@warehouseapi.get("/table_count/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def get_table_count(request, schema_name: str, table_name: str):
     """Fetches the total number of rows for a specified table."""
@@ -177,16 +169,12 @@ def get_table_count(request, schema_name: str, table_name: str):
         return {"total_rows": total_rows}
     except Exception as e:
         logger.error(f"Failed to fetch total rows for {schema_name}.{table_name}: {e}")
-        raise HttpError(
-            500, f"Failed to fetch total rows for {schema_name}.{table_name}"
-        )
+        raise HttpError(500, f"Failed to fetch total rows for {schema_name}.{table_name}")
 
 
 @warehouseapi.get("/dbt_project/json_columnspec/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
-def get_json_column_spec(
-    request, source_schema: str, input_name: str, json_column: str
-):
+def get_json_column_spec(request, source_schema: str, input_name: str, json_column: str):
     """Get the json column spec of a table in a warehouse"""
     orguser = request.orguser
     org = orguser.org
@@ -204,9 +192,7 @@ def get_json_column_spec(
     return json_columnspec
 
 
-@warehouseapi.get(
-    "/v1/table_data/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware()
-)
+@warehouseapi.get("/v1/table_data/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def get_warehouse_table_columns_spec(request, schema_name: str, table_name: str):
     """
@@ -249,7 +235,6 @@ def post_data_insights(request, payload: RequestorColumnSchema):
         raise HttpError(404, "Please set up your warehouse first")
 
     try:
-
         task_id = str(uuid.uuid4())
 
         taskprogress = TaskProgress(task_id, TaskProgressHashPrefix.DATAINSIGHTS)
@@ -269,9 +254,7 @@ def post_data_insights(request, payload: RequestorColumnSchema):
         raise HttpError(500, str(err))
 
 
-@warehouseapi.get(
-    "/download/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware()
-)
+@warehouseapi.get("/download/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def get_download_warehouse_data(request, schema_name: str, table_name: str):
     """Stream and download data from a table in the warehouse"""
@@ -313,9 +296,7 @@ def get_download_warehouse_data(request, schema_name: str, table_name: str):
         stream_warehouse_data(request, schema_name, table_name, page_size=30000),
         content_type="application/octet-stream",
     )
-    response["Content-Disposition"] = (
-        f"attachment; filename={schema_name}__{table_name}.csv"
-    )
+    response["Content-Disposition"] = f"attachment; filename={schema_name}__{table_name}.csv"
 
     return response
 
@@ -350,11 +331,7 @@ def post_warehouse_prompt(request, payload: AskWarehouseRequest):
     limit_found = False
     for stmt in stmts:
         for token in stmt.tokens:
-            if (
-                not limit_found
-                and token.ttype is Keyword
-                and token.value.upper() == "LIMIT"
-            ):
+            if not limit_found and token.ttype is Keyword and token.value.upper() == "LIMIT":
                 limit_found = True
             if limit_found and token.ttype is Token.Literal.Number.Integer:
                 limit = int(token.value)
@@ -371,7 +348,6 @@ def post_warehouse_prompt(request, payload: AskWarehouseRequest):
         payload.sql = f"{payload.sql} LIMIT {LIMIT_ROWS_TO_SEND_TO_LLM}"
 
     try:
-
         task = summarize_warehouse_results.apply_async(
             kwargs={
                 "orguser_id": orguser.id,
@@ -423,9 +399,7 @@ def post_save_warehouse_prompt_session(
 
         if old_session:
             old_session.delete()
-            logger.info(
-                f"Deleted the old session llm analysis {payload.old_session_id}"
-            )
+            logger.info(f"Deleted the old session llm analysis {payload.old_session_id}")
 
     if new_session.session_status == LlmSessionStatus.RUNNING:
         raise HttpError(400, "Session is still in progress")
@@ -439,9 +413,7 @@ def post_save_warehouse_prompt_session(
 
 @warehouseapi.post("/ask/{session_id}/feedback", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
-def post_feedback_llm_session(
-    request, session_id: str, payload: LlmSessionFeedbackRequest
-):
+def post_feedback_llm_session(request, session_id: str, payload: LlmSessionFeedbackRequest):
     """Feedback"""
     orguser: OrgUser = request.orguser
     org = orguser.org

@@ -61,10 +61,7 @@ def test_get_edr_send_report_task(seed_master_tasks_db, tmpdir):
     assert orgtask.task.slug == "generate-edr"
     assert orgtask.uuid is not None
     assert orgtask.parameters["options"]["profiles-dir"] == "elementary_profiles"
-    assert (
-        orgtask.parameters["options"]["bucket-file-path"]
-        == "reports/del.TODAYS_DATE.html"
-    )
+    assert orgtask.parameters["options"]["bucket-file-path"] == "reports/del.TODAYS_DATE.html"
     assert orgtask.parameters["options"]["profile-target"] == "default"
     assert get_edr_send_report_task(org) is not None
 

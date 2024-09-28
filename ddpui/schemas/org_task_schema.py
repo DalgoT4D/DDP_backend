@@ -19,5 +19,4 @@ class CreateOrgTaskPayload(Schema):
 
 
 class DbtProjectSchema(Schema):
-
     default_schema: str

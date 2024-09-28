@@ -67,18 +67,14 @@ def org_user_accountmanager(user: User, org: Org):
 
 @pytest.fixture
 def org_user_pipelinemanager(user: User, org: Org):
-    temp_org_user = OrgUser.objects.create(
-        user=user, org=org, role=OrgUserRole.PIPELINE_MANAGER
-    )
+    temp_org_user = OrgUser.objects.create(user=user, org=org, role=OrgUserRole.PIPELINE_MANAGER)
     yield temp_org_user
     temp_org_user.delete()
 
 
 @pytest.fixture
 def org_user_reportviewer(user: User, org: Org):
-    temp_org_user = OrgUser.objects.create(
-        user=user, org=org, role=OrgUserRole.REPORT_VIEWER
-    )
+    temp_org_user = OrgUser.objects.create(user=user, org=org, role=OrgUserRole.REPORT_VIEWER)
     yield temp_org_user
     temp_org_user.delete()
 
@@ -169,9 +165,7 @@ def test_authenticate_org_user_success(org_user_accountmanager: OrgUser):
     allowed_roles = [org_user_accountmanager.role]
     require_org = True
 
-    response = authenticate_org_user(
-        request, test_token.key, allowed_roles, require_org
-    )
+    response = authenticate_org_user(request, test_token.key, allowed_roles, require_org)
     assert response == request
     assert response.orguser == org_user_accountmanager
 
@@ -183,9 +177,7 @@ def anotherorg():
     temp_org.delete()
 
 
-def test_authenticate_org_user_select_org_success(
-    user: User, org: Org, anotherorg: Org
-):
+def test_authenticate_org_user_select_org_success(user: User, org: Org, anotherorg: Org):
     orguser1 = create_accountmanager(user, org)
     orguser2 = create_accountmanager(user, anotherorg)
 
@@ -195,16 +187,12 @@ def test_authenticate_org_user_select_org_success(
     require_org = True
 
     request.headers = {"x-dalgo-org": org.slug}
-    response = authenticate_org_user(
-        request, test_token.key, allowed_roles, require_org
-    )
+    response = authenticate_org_user(request, test_token.key, allowed_roles, require_org)
     assert response == request
     assert response.orguser == orguser1
 
     request.headers = {"x-dalgo-org": anotherorg.slug}
-    response = authenticate_org_user(
-        request, test_token.key, allowed_roles, require_org
-    )
+    response = authenticate_org_user(request, test_token.key, allowed_roles, require_org)
     assert response == request
     assert response.orguser == orguser2
 

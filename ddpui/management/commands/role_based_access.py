@@ -16,6 +16,4 @@ class Command(BaseCommand):
         role = Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first()
         if role:
             OrgUser.objects.filter(new_role__isnull=True).update(new_role=role)
-            Invitation.objects.filter(invited_new_role__isnull=True).update(
-                invited_new_role=role
-            )
+            Invitation.objects.filter(invited_new_role__isnull=True).update(invited_new_role=role)

@@ -9,7 +9,11 @@ REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 
 # Here we use redis as both Celery message broker(delivering task messages) and backend(for task status storage)
-app = Celery('ddpui', backend=f'redis://{REDIS_HOST}:{REDIS_PORT}', broker=f'redis://{REDIS_HOST}:{REDIS_PORT}')
+app = Celery(
+    "ddpui",
+    backend=f"redis://{REDIS_HOST}:{REDIS_PORT}",
+    broker=f"redis://{REDIS_HOST}:{REDIS_PORT}",
+)
 
 # Using a string here means the worker doesn't have to serialize
 # the configuration object to child processes.

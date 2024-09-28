@@ -23,9 +23,7 @@ class TestAirbyteServer:
     @staticmethod
     def test_fetch_serverblock():
         """fetches the id of the block we just created, verifies that it is what we saved"""
-        block_id = prefect_service.get_airbyte_server_block_id(
-            TestAirbyteServer.BLOCK_NAME
-        )
+        block_id = prefect_service.get_airbyte_server_block_id(TestAirbyteServer.BLOCK_NAME)
         assert block_id == TestAirbyteServer.block_id
 
     @staticmethod
@@ -45,15 +43,11 @@ class TestAirbyteConnection:
         TestAirbyteConnection.airbyte_connection_id = str(uuid4())
         TestAirbyteConnection.connection_block_name = "test-conn-" + str(uuid4())
         TestAirbyteConnection.connection_block_id = None
-        TestAirbyteConnection.server_block_id = (
-            prefect_service.create_airbyte_server_block(
-                TestAirbyteConnection.server_block_name
-            )[0]
-        )
+        TestAirbyteConnection.server_block_id = prefect_service.create_airbyte_server_block(
+            TestAirbyteConnection.server_block_name
+        )[0]
 
     @staticmethod
     def test_end():
         """cleans up"""
-        prefect_service.delete_airbyte_server_block(
-            TestAirbyteConnection.server_block_id
-        )
+        prefect_service.delete_airbyte_server_block(TestAirbyteConnection.server_block_id)

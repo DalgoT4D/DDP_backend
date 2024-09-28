@@ -33,7 +33,5 @@ class Command(BaseCommand):
             logger.info("created auth user")
         orguser = OrgUser.objects.filter(user=user).first()
         if orguser is None:
-            OrgUser.objects.create(
-                user=user, org=None, role=OrgUserRole.ACCOUNT_MANAGER
-            )
+            OrgUser.objects.create(user=user, org=None, role=OrgUserRole.ACCOUNT_MANAGER)
             logger.info("created system orguser")

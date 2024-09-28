@@ -69,12 +69,8 @@ class Org(models.Model):
         OrgDbt, on_delete=models.SET_NULL, null=True
     )
     viz_url = models.CharField(max_length=100, null=True)
-    viz_login_type = models.CharField(
-        choices=OrgVizLoginType.choices(), max_length=50, null=True
-    )
-    type = models.CharField(
-        choices=OrgType.choices(), max_length=50, default=OrgType.CLIENT
-    )
+    viz_login_type = models.CharField(choices=OrgVizLoginType.choices(), max_length=50, null=True)
+    type = models.CharField(choices=OrgType.choices(), max_length=50, default=OrgType.CLIENT)
     ses_whitelisted_email = models.TextField(max_length=100, null=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -116,9 +112,7 @@ class OrgWarehouse(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
-        return (
-            f"OrgWarehouse[{self.org.slug}|{self.wtype}|{self.airbyte_destination_id}]"
-        )
+        return f"OrgWarehouse[{self.org.slug}|{self.wtype}|{self.airbyte_destination_id}]"
 
 
 class OrgWarehouseSchema(Schema):
@@ -155,9 +149,7 @@ class OrgDataFlowv1(models.Model):
 
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     name = models.CharField(max_length=100)
-    deployment_name = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
-        max_length=100, null=True
-    )
+    deployment_name = models.CharField(max_length=100, null=True)  # skipcq: PTC-W0901, PTC-W0906
     deployment_id = models.CharField(  # skipcq: PTC-W0901, PTC-W0906
         max_length=36, unique=True, null=True
     )
@@ -169,9 +161,7 @@ class OrgDataFlowv1(models.Model):
         default="orchestrate",
     )  # skipcq: PTC-W0901, PTC-W0906
 
-    reset_conn_dataflow = models.ForeignKey(
-        "self", on_delete=models.SET_NULL, null=True
-    )
+    reset_conn_dataflow = models.ForeignKey("self", on_delete=models.SET_NULL, null=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 

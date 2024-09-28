@@ -18,9 +18,7 @@ class Command(BaseCommand):
             help="Org slug: use 'all' to run for all orgs at once",
             required=True,
         )
-        parser.add_argument(
-            "--workpool", type=str, help="Worker pool name", required=True
-        )
+        parser.add_argument("--workpool", type=str, help="Worker pool name", required=True)
 
     def handle(self, *args, **options):
         """Docstring"""
@@ -32,16 +30,12 @@ class Command(BaseCommand):
 
         for org in orgs:
             print("=" * 40 + org.slug + "=" * 40)
-            print(
-                f"Moving all deployments of this org {org.slug} from agents to workers"
-            )
+            print(f"Moving all deployments of this org {org.slug} from agents to workers")
 
             for dataflow in OrgDataFlowv1.objects.filter(org=org).all():
                 work_queue_name = DDP_WORK_QUEUE
 
-                if dataflow.name.find("airbyte-sync") != -1 or dataflow.name.find(
-                    "airbyte-reset"
-                ):
+                if dataflow.name.find("airbyte-sync") != -1 or dataflow.name.find("airbyte-reset"):
                     work_queue_name = DDP_WORK_QUEUE
                 elif dataflow.name.find("dbt-run") != -1:
                     work_queue_name = MANUL_DBT_WORK_QUEUE

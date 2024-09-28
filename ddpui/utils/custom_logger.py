@@ -44,9 +44,7 @@ class CustomLogger:
         """call logger.exception with the caller_name and the orgname"""
         slug = self.get_slug()
         caller_name = inspect.stack()[1].function
-        self.logger.exception(
-            *args, extra={"caller_name": caller_name, "orgname": slug}
-        )
+        self.logger.exception(*args, extra={"caller_name": caller_name, "orgname": slug})
 
     def warning(self, *args):
         """call logger.warning with the caller_name and the orgname"""

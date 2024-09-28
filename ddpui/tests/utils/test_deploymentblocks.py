@@ -44,12 +44,8 @@ def test_trigger_reset_and_sync_workflow_2(synctask):
     """tests trigger_reset_and_sync_workflow"""
     org = Org.objects.create(name="name", slug="slug")
     connection_id = "fake-connection-id"
-    sync_orgtask = OrgTask.objects.create(
-        org=org, connection_id=connection_id, task=synctask
-    )
-    dataflow = OrgDataFlowv1.objects.create(
-        org=org, name="dataflow-name", dataflow_type="manual"
-    )
+    sync_orgtask = OrgTask.objects.create(org=org, connection_id=connection_id, task=synctask)
+    dataflow = OrgDataFlowv1.objects.create(org=org, name="dataflow-name", dataflow_type="manual")
     DataflowOrgTask.objects.create(
         orgtask=sync_orgtask,
         dataflow=dataflow,
@@ -63,9 +59,7 @@ def test_trigger_reset_and_sync_workflow_3(synctask, resettask):
     """tests trigger_reset_and_sync_workflow"""
     org = Org.objects.create(name="name", slug="slug")
     connection_id = "fake-connection-id"
-    sync_orgtask = OrgTask.objects.create(
-        org=org, connection_id=connection_id, task=synctask
-    )
+    sync_orgtask = OrgTask.objects.create(org=org, connection_id=connection_id, task=synctask)
     syncdataflow = OrgDataFlowv1.objects.create(
         org=org,
         name="dataflow-sync",
@@ -92,9 +86,7 @@ def test_trigger_reset_and_sync_workflow_4(synctask, resettask):
     """tests trigger_reset_and_sync_workflow"""
     org = Org.objects.create(name="name", slug="slug")
     connection_id = "fake-connection-id"
-    sync_orgtask = OrgTask.objects.create(
-        org=org, connection_id=connection_id, task=synctask
-    )
+    sync_orgtask = OrgTask.objects.create(org=org, connection_id=connection_id, task=synctask)
     syncdataflow = OrgDataFlowv1.objects.create(
         org=org,
         name="dataflow-sync",
@@ -124,9 +116,7 @@ def test_trigger_reset_and_sync_workflow_5(synctask, resettask):
     """tests trigger_reset_and_sync_workflow"""
     org = Org.objects.create(name="name", slug="slug")
     connection_id = "fake-connection-id"
-    sync_orgtask = OrgTask.objects.create(
-        org=org, connection_id=connection_id, task=synctask
-    )
+    sync_orgtask = OrgTask.objects.create(org=org, connection_id=connection_id, task=synctask)
     syncdataflow = OrgDataFlowv1.objects.create(
         org=org,
         name="dataflow-sync",
@@ -157,7 +147,6 @@ def test_trigger_reset_and_sync_workflow_5(synctask, resettask):
     with patch(
         "ddpui.ddpprefect.prefect_service.create_deployment_flow_run"
     ) as mock_create_deployment_flow_run:
-
         mock_create_deployment_flow_run.side_effect = 1
         result, error = trigger_reset_and_sync_workflow(org, connection_id)
         assert result is None

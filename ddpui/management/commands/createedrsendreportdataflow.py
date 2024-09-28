@@ -22,9 +22,7 @@ class Command(BaseCommand):
     help = "Create the dataflow for edr send report"
 
     def add_arguments(self, parser):
-        parser.add_argument(
-            "org", type=str, help='Org slug, provide "all" to fix links'
-        )
+        parser.add_argument("org", type=str, help='Org slug, provide "all" to fix links')
         parser.add_argument("--cron", type=str, default="0 0 * * *")
         parser.add_argument(
             "--fix-links",
@@ -50,9 +48,7 @@ class Command(BaseCommand):
         print(task_config.to_json())
 
         hash_code = generate_hash_id(8)
-        deployment_name = (
-            f"pipeline-{org_task.org.slug}-{org_task.task.slug}-{hash_code}"
-        )
+        deployment_name = f"pipeline-{org_task.org.slug}-{org_task.task.slug}-{hash_code}"
         print(f"creating deployment {deployment_name}")
 
         dataflow = prefect_service.create_dataflow_v1(
@@ -84,10 +80,8 @@ class Command(BaseCommand):
         return orgdataflow
 
     def handle(self, *args, **options):
-
         if options["fix_links"]:
             for org in Org.objects.exclude(dbt__isnull=True):
-
                 org_task = get_edr_send_report_task(org)
                 if org_task is None:
                     print(f"no edr OrgTask found for {org.slug}, skipping")
@@ -97,9 +91,7 @@ class Command(BaseCommand):
                     print(f"DataflowOrgTask already exists for {org.slug}, skipping")
                     continue
 
-                deployment_name_prefix = (
-                    f"pipeline-{org_task.org.slug}-{org_task.task.slug}-"
-                )
+                deployment_name_prefix = f"pipeline-{org_task.org.slug}-{org_task.task.slug}-"
                 dataflow = OrgDataFlowv1.objects.filter(
                     org=org,
                     deployment_name__startswith=deployment_name_prefix,

@@ -19,9 +19,7 @@ class Command(BaseCommand):
             action="store_true",
             help="Without this flag, just print the changes that would be made",
         )
-        parser.add_argument(
-            "--stop-at-one", action="store_true", help="Stop at one deployment"
-        )
+        parser.add_argument("--stop-at-one", action="store_true", help="Stop at one deployment")
 
     def handle(self, *args, **options):
         # Your code to remove the --target parameter from dbt commands goes here

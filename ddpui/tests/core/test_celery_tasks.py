@@ -38,9 +38,7 @@ pytestmark = pytest.mark.django_db
 
 def test_post_dbt_workspace_failed_warehouse_not_present(orguser):
     """a failure test case when trying to setup dbt workspace without the warehouse"""
-    dbtprofile = DbtProfile(
-        name="fake-name", target_configs_schema="target_configs_schema"
-    )
+    dbtprofile = DbtProfile(name="fake-name", target_configs_schema="target_configs_schema")
     payload = OrgDbtSchema(
         profile=dbtprofile,
         gitrepoUrl="gitrepoUrl",
@@ -51,10 +49,7 @@ def test_post_dbt_workspace_failed_warehouse_not_present(orguser):
     ) as add_progress_mock:
         with pytest.raises(Exception) as exc:
             setup_dbtworkspace(orguser.org.id, payload.dict())
-        assert (
-            exc.value.args[0]
-            == f"need to set up a warehouse first for org {orguser.org.name}"
-        )
+        assert exc.value.args[0] == f"need to set up a warehouse first for org {orguser.org.name}"
         add_progress_mock.assert_has_calls(
             [
                 call({"message": "started", "status": "running"}),
@@ -75,9 +70,7 @@ def test_post_dbt_workspace_failed_gitclone(orguser, tmp_path):
         wtype="postgres",
         airbyte_destination_id="airbyte_destination_id",
     )
-    dbtprofile = DbtProfile(
-        name="fake-name", target_configs_schema="target_configs_schema"
-    )
+    dbtprofile = DbtProfile(name="fake-name", target_configs_schema="target_configs_schema")
     payload = OrgDbtSchema(
         profile=dbtprofile,
         gitrepoUrl="gitrepoUrl",
@@ -91,9 +84,7 @@ def test_post_dbt_workspace_failed_gitclone(orguser, tmp_path):
         with pytest.raises(Exception) as exc:
             setup_dbtworkspace(orguser.org.id, payload.dict())
         assert exc.value.args[0] == f"Failed to clone git repo"
-        add_progress_mock.assert_has_calls(
-            [call({"message": "started", "status": "running"})]
-        )
+        add_progress_mock.assert_has_calls([call({"message": "started", "status": "running"})])
         gitclone_method_mock.assert_called_once()
 
 
@@ -104,9 +95,7 @@ def test_post_dbt_workspace_success(orguser, tmp_path):
         wtype="postgres",
         airbyte_destination_id="airbyte_destination_id",
     )
-    dbtprofile = DbtProfile(
-        name="fake-name", target_configs_schema="target_configs_schema"
-    )
+    dbtprofile = DbtProfile(name="fake-name", target_configs_schema="target_configs_schema")
     payload = OrgDbtSchema(
         profile=dbtprofile,
         gitrepoUrl="gitrepoUrl",
@@ -120,9 +109,7 @@ def test_post_dbt_workspace_success(orguser, tmp_path):
         assert OrgDbt.objects.filter(org=orguser.org).count() == 0
         setup_dbtworkspace(orguser.org.id, payload.dict())
 
-        add_progress_mock.assert_has_calls(
-            [call({"message": "started", "status": "running"})]
-        )
+        add_progress_mock.assert_has_calls([call({"message": "started", "status": "running"})])
         gitclone_method_mock.assert_called_once()
         assert OrgDbt.objects.filter(org=orguser.org).count() == 1
         add_progress_mock.assert_has_calls(
@@ -235,6 +222,7 @@ def test_sync_sources_failed_to_fetch_schemas(orguser: OrgUser, tmp_path):
         )
         get_wclient_mock.assert_called_once_with(warehouse)
 
+
 @pytest.mark.skip(reason="Skipping this test as celery integration needs to be done on CI")
 def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
     """
@@ -288,9 +276,9 @@ def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
         sync_sources_for_warehouse(orgdbt.id, warehouse.id, orguser.org.slug)
         for schema in SCHEMAS_TABLES:
             assert set(
-                OrgDbtModel.objects.filter(
-                    type="source", orgdbt=orgdbt, schema=schema
-                ).values_list("name", flat=True)
+                OrgDbtModel.objects.filter(type="source", orgdbt=orgdbt, schema=schema).values_list(
+                    "name", flat=True
+                )
             ) == set(SCHEMAS_TABLES[schema])
 
         add_progress_mock.assert_has_calls(
@@ -333,9 +321,9 @@ def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
         sync_sources_for_warehouse(orgdbt.id, warehouse.id, orguser.org.slug)
         for schema in SCHEMAS_TABLES:
             assert set(
-                OrgDbtModel.objects.filter(
-                    type="source", orgdbt=orgdbt, schema=schema
-                ).values_list("name", flat=True)
+                OrgDbtModel.objects.filter(type="source", orgdbt=orgdbt, schema=schema).values_list(
+                    "name", flat=True
+                )
             ) == set(SCHEMAS_TABLES[schema])
 
         # add a new table in the warehouse
@@ -343,9 +331,9 @@ def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
         sync_sources_for_warehouse(orgdbt.id, warehouse.id, orguser.org.slug)
         for schema in SCHEMAS_TABLES:
             assert set(
-                OrgDbtModel.objects.filter(
-                    type="source", orgdbt=orgdbt, schema=schema
-                ).values_list("name", flat=True)
+                OrgDbtModel.objects.filter(type="source", orgdbt=orgdbt, schema=schema).values_list(
+                    "name", flat=True
+                )
             ) == set(SCHEMAS_TABLES[schema])
 
 
@@ -361,9 +349,7 @@ def test_detect_schema_changes_for_org_ensure_orphan_connections_are_deleted(
     synctask = OrgTask.objects.create(
         org=org_without_workspace, task=synctask, connection_id="some-connection-id"
     )
-    OrgSchemaChange.objects.create(
-        org=org_without_workspace, connection_id="fake-connection-id"
-    )
+    OrgSchemaChange.objects.create(org=org_without_workspace, connection_id="fake-connection-id")
     assert OrgSchemaChange.objects.filter(org=org_without_workspace).count() == 1
     with patch(
         "ddpui.ddpairbyte.airbytehelpers.fetch_and_update_org_schema_changes"
@@ -385,18 +371,14 @@ def test_detect_schema_changes_for_org_send_schema_changes_email(
     synctask = OrgTask.objects.create(
         org=org_without_workspace, task=synctask, connection_id="some-connection-id"
     )
-    OrgSchemaChange.objects.create(
-        org=org_without_workspace, connection_id="fake-connection-id"
-    )
+    OrgSchemaChange.objects.create(org=org_without_workspace, connection_id="fake-connection-id")
     assert OrgSchemaChange.objects.filter(org=org_without_workspace).count() == 1
     with patch(
         "ddpui.ddpairbyte.airbytehelpers.fetch_and_update_org_schema_changes"
     ) as fetch_and_update_org_schema_changes_mock, patch(
         "ddpui.celeryworkers.tasks.send_schema_changes_email"
     ) as send_schema_changes_email_mock:
-        fetch_and_update_org_schema_changes_mock.return_value = {
-            "schemaChange": "breaking"
-        }, None
+        fetch_and_update_org_schema_changes_mock.return_value = {"schemaChange": "breaking"}, None
         orguser.org = org_without_workspace
         role = Role.objects.filter(slug="account-manager").first()
         if role is None:
@@ -419,9 +401,7 @@ def test_get_connection_catalog_task_error(org_without_workspace: Org):
         "ddpui.ddpairbyte.airbytehelpers.fetch_and_update_org_schema_changes"
     ) as fetch_and_update_org_schema_changes_mock:
         fetch_and_update_org_schema_changes_mock.return_value = None, "error"
-        get_connection_catalog_task(
-            task_key, org_without_workspace.id, "fake-connection-id"
-        )
+        get_connection_catalog_task(task_key, org_without_workspace.id, "fake-connection-id")
     result = SingleTaskProgress.fetch(task_key)
     assert result == [
         {"message": "started", "status": TaskProgressStatus.RUNNING, "result": None},
@@ -447,9 +427,7 @@ def test_get_connection_catalog_task_success(org_without_workspace: Org):
             "schemaChange": 'connection_catalog["schemaChange"]',
             "catalogDiff": 'connection_catalog["catalogDiff"]',
         }, None
-        get_connection_catalog_task(
-            task_key, org_without_workspace.id, "fake-connection-id"
-        )
+        get_connection_catalog_task(task_key, org_without_workspace.id, "fake-connection-id")
     result = SingleTaskProgress.fetch(task_key)
     assert result == [
         {"message": "started", "status": TaskProgressStatus.RUNNING, "result": None},

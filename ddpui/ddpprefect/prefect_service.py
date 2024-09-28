@@ -350,9 +350,9 @@ def get_flow_runs_by_deployment_id(deployment_id: str, limit=None):  # pragma: n
     """
     result = []
     # sorted by start-time ASC
-    for prefect_flow_run in PrefectFlowRun.objects.filter(
-        deployment_id=deployment_id
-    ).order_by("start_time"):
+    for prefect_flow_run in PrefectFlowRun.objects.filter(deployment_id=deployment_id).order_by(
+        "start_time"
+    ):
         result.append(prefect_flow_run.to_json())
 
     params = {"deployment_id": deployment_id, "limit": limit}
@@ -539,9 +539,7 @@ def lock_tasks_for_deployment(
     lock = TaskLock.objects.filter(orgtask_id__in=orgtask_ids).first()
     if lock:
         logger.info(f"{lock.locked_by.user.email} is running this pipeline right now")
-        raise HttpError(
-            400, f"{lock.locked_by.user.email} is running this pipeline right now"
-        )
+        raise HttpError(400, f"{lock.locked_by.user.email} is running this pipeline right now")
 
     locks = []
     try:
@@ -554,9 +552,7 @@ def lock_tasks_for_deployment(
                 )
                 locks.append(task_lock)
     except Exception as error:
-        raise HttpError(
-            400, "Someone else is trying to run this pipeline. Try again"
-        ) from error
+        raise HttpError(400, "Someone else is trying to run this pipeline. Try again") from error
     return locks
 
 

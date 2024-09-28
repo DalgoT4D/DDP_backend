@@ -109,9 +109,9 @@ def get_current_user_v2(request, org_slug: str = None):
             queryset=Role.objects.prefetch_related(
                 Prefetch(
                     "rolepermissions",
-                    queryset=RolePermission.objects.filter(
-                        role_id=F("role__id")
-                    ).select_related("permission"),
+                    queryset=RolePermission.objects.filter(role_id=F("role__id")).select_related(
+                        "permission"
+                    ),
                 )
             ),
         ),
@@ -137,9 +137,7 @@ def get_current_user_v2(request, org_slug: str = None):
                     {"slug": rolep.permission.slug, "name": rolep.permission.name}
                     for rolep in curr_orguser.new_role.rolepermissions.all()
                 ],
-                is_demo=(
-                    curr_orguser.org.type == OrgType.DEMO if curr_orguser.org else False
-                ),
+                is_demo=(curr_orguser.org.type == OrgType.DEMO if curr_orguser.org else False),
                 llm_optin=curr_orguser.llm_optin,
             )
         )
@@ -148,9 +146,7 @@ def get_current_user_v2(request, org_slug: str = None):
 
 
 @user_org_api.post("/organizations/users/", response=OrgUserResponse)
-def post_organization_user(
-    request, payload: OrgUserCreate
-):  # pylint: disable=unused-argument
+def post_organization_user(request, payload: OrgUserCreate):  # pylint: disable=unused-argument
     """this is the "signup" action
     creates a new OrgUser having specified email + password.
     no Org is created or attached at this time
@@ -197,9 +193,9 @@ def get_organization_users(request):
             queryset=Role.objects.prefetch_related(
                 Prefetch(
                     "rolepermissions",
-                    queryset=RolePermission.objects.filter(
-                        role_id=F("role__id")
-                    ).select_related("permission"),
+                    queryset=RolePermission.objects.filter(role_id=F("role__id")).select_related(
+                        "permission"
+                    ),
                 )
             ),
         ),
@@ -229,9 +225,7 @@ def get_organization_users(request):
                     {"slug": rolep.permission.slug, "name": rolep.permission.name}
                     for rolep in curr_orguser.new_role.rolepermissions.all()
                 ],
-                is_demo=(
-                    curr_orguser.org.type == OrgType.DEMO if curr_orguser.org else False
-                ),
+                is_demo=(curr_orguser.org.type == OrgType.DEMO if curr_orguser.org else False),
             )
         )
 
@@ -319,9 +313,7 @@ def put_organization_user(request, payload: OrgUserUpdate):
         user__email=payload.toupdate_email, org=request.orguser.org
     ).first()
     if orguser is None:
-        raise HttpError(
-            400, "could not find user having this email address in this org"
-        )
+        raise HttpError(400, "could not find user having this email address in this org")
 
     return orguserfunctions.update_orguser(orguser, payload)
 
@@ -340,9 +332,7 @@ def put_organization_user_v1(request, payload: OrgUserUpdatev1):
         user__email=payload.toupdate_email, org=request.orguser.org
     ).first()
     if orguser is None:
-        raise HttpError(
-            400, "could not find user having this email address in this org"
-        )
+        raise HttpError(400, "could not find user having this email address in this org")
 
     # one can only update the role of user less than or equal to their role
     if payload.role_uuid and orguser.new_role.level > requestor_orguser.new_role.level:
@@ -432,9 +422,7 @@ def get_organizations_warehouses(request):
 @user_org_api.post(
     "/users/forgot_password/",
 )
-def post_forgot_password(
-    request, payload: ForgotPasswordSchema
-):  # pylint: disable=unused-argument
+def post_forgot_password(request, payload: ForgotPasswordSchema):  # pylint: disable=unused-argument
     """step 1 of the forgot-password flow"""
     _, error = orguserfunctions.request_reset_password(payload.email)
     if error:
@@ -443,9 +431,7 @@ def post_forgot_password(
 
 
 @user_org_api.post("/users/reset_password/")
-def post_reset_password(
-    request, payload: ResetPasswordSchema
-):  # pylint: disable=unused-argument
+def post_reset_password(request, payload: ResetPasswordSchema):  # pylint: disable=unused-argument
     """step 2 of the forgot-password flow"""
     _, error = orguserfunctions.confirm_reset_password(payload)
     if error:
@@ -457,18 +443,14 @@ def post_reset_password(
 @has_permission(["can_resend_email_verification"])
 def get_verify_email_resend(request):  # pylint: disable=unused-argument
     """this api is hit when the user is logged in but the email is still not verified"""
-    _, error = orguserfunctions.resend_verification_email(
-        request.orguser, request.user.email
-    )
+    _, error = orguserfunctions.resend_verification_email(request.orguser, request.user.email)
     if error:
         raise HttpError(400, error)
     return {"success": 1}
 
 
 @user_org_api.post("/users/verify_email/")
-def post_verify_email(
-    request, payload: VerifyEmailSchema
-):  # pylint: disable=unused-argument
+def post_verify_email(request, payload: VerifyEmailSchema):  # pylint: disable=unused-argument
     """step 2 of the verify-email flow"""
     _, error = orguserfunctions.verify_email(payload)
     if error:
@@ -557,9 +539,7 @@ def get_invitations_v1(request):
     return retval
 
 
-@user_org_api.post(
-    "/users/invitations/resend/{invitation_id}", auth=auth.CustomAuthMiddleware()
-)
+@user_org_api.post("/users/invitations/resend/{invitation_id}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_invitation"])
 def post_resend_invitation(request, invitation_id):
     """Get all invitations sent by the current user"""
@@ -574,9 +554,7 @@ def post_resend_invitation(request, invitation_id):
     return {"success": 1}
 
 
-@user_org_api.delete(
-    "/users/invitations/delete/{invitation_id}", auth=auth.CustomAuthMiddleware()
-)
+@user_org_api.delete("/users/invitations/delete/{invitation_id}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_delete_invitation"])
 def delete_invitation(request, invitation_id):
     """Get all invitations sent by the current user"""
@@ -596,9 +574,7 @@ def delete_invitation(request, invitation_id):
 # new apis to go away from the block architecture
 
 
-@user_org_api.post(
-    "/v1/organizations/", response=OrgSchema, auth=auth.CustomAuthMiddleware()
-)
+@user_org_api.post("/v1/organizations/", response=OrgSchema, auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_org"])
 def post_organization_v1(request, payload: OrgSchema):
     """creates a new org & new orguser (if required) and attaches it to the requestor"""
@@ -616,9 +592,7 @@ def post_organization_v1(request, payload: OrgSchema):
     orguserfunctions.ensure_orguser_for_org(orguser, org)
 
     logger.info(f"{orguser.user.email} created new org {org.name}")
-    return OrgSchema(
-        name=org.name, airbyte_workspace_id=org.airbyte_workspace_id, slug=org.slug
-    )
+    return OrgSchema(name=org.name, airbyte_workspace_id=org.airbyte_workspace_id, slug=org.slug)
 
 
 @user_org_api.delete("/v1/organizations/warehouses/", auth=auth.CustomAuthMiddleware())
