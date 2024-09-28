@@ -20,6 +20,11 @@ disable = [
 
 [tool.coverage.run]
 omit = [
-    "ddpui/utils/sendgrid.py",
-    "ddpui/utils/dbtdocs.py"
+  "ddpui/utils/sendgrid.py",
+  "ddpui/utils/dbtdocs.py",
+  "/tests/*",
+  "*/__init__.py",
+  "*/celery.py"
+  "*/schema.py",
+  "*/settings.py" 
 ]
