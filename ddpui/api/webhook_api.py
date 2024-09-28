@@ -71,15 +71,10 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
 
     logger.info("flow+run : %s", flow_run)
 
-    send_failure_notifications = (
-        True
-        if state
-        in [
-            FLOW_RUN_FAILED_STATE_NAME,
-            FLOW_RUN_CRASHED_STATE_NAME,
-        ]
-        else False
-    )
+    send_failure_notifications = state in [
+        FLOW_RUN_FAILED_STATE_NAME,
+        FLOW_RUN_CRASHED_STATE_NAME,
+    ]
 
     # dont really care about the subflows inside our main flows which might have not deployment_id
     if deployment_id:
