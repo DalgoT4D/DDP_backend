@@ -3,6 +3,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from ninja import Router
+from ninja.errors import HttpError
 
 from ddpui import auth
 from ddpui.auth import has_permission
