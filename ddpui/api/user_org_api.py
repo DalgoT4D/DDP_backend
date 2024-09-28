@@ -2,12 +2,9 @@ import json
 from typing import List
 
 from dotenv import load_dotenv
-from ninja import NinjaAPI, Router
-from ninja.errors import HttpError, ValidationError
-from ninja.responses import Response
-from pydantic.error_wrappers import ValidationError as PydanticValidationError
+from ninja import Router
+from ninja.errors import HttpError
 from rest_framework.authtoken import views
-from flags.state import flag_enabled
 from django.utils.text import slugify
 from django.db.models import Prefetch
 from django.contrib.auth.models import User
@@ -39,9 +36,7 @@ from ddpui.models.org_user import (
 from ddpui.models.role_based_access import Role, RolePermission
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.deleteorg import delete_warehouse_v1
-from ddpui.utils.orguserhelpers import from_orguser
 from ddpui.models.org import OrgWarehouse, Org, OrgType
-from ddpui.models.orgtnc import OrgTnC
 from ddpui.ddpairbyte import airbytehelpers
 
 user_org_router = Router()

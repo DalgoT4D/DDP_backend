@@ -2,19 +2,14 @@ import uuid
 import os
 from pathlib import Path
 from datetime import datetime
-import yaml
 
-from ninja import NinjaAPI, Router
+from ninja import Router
 from ninja.errors import HttpError
-from ninja.errors import ValidationError
-
-from ninja.responses import Response
-from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from django.forms.models import model_to_dict
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
-from ddpui.ddpairbyte import airbyte_service, airbytehelpers
+from ddpui.ddpairbyte import airbytehelpers
 
 from ddpui.ddpprefect import (
     DBTCLIPROFILE,

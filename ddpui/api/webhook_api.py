@@ -1,6 +1,6 @@
 import os
 import json
-from ninja import NinjaAPI, Router
+from ninja import Router
 
 from ninja.errors import HttpError
 from ddpui.utils.custom_logger import CustomLogger

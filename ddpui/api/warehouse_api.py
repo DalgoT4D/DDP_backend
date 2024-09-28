@@ -3,10 +3,8 @@ import sqlparse
 from sqlparse.tokens import Keyword, Number, Token
 import uuid
 import sqlalchemy
-from ninja import NinjaAPI, Router
-from ninja.errors import HttpError, ValidationError
-from ninja.responses import Response
-from pydantic.error_wrappers import ValidationError as PydanticValidationError
+from ninja import Router
+from ninja.errors import HttpError
 import sqlalchemy.exc
 
 from django.http import StreamingHttpResponse

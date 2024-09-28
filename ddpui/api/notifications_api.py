@@ -1,7 +1,5 @@
-from ninja import NinjaAPI, Router
-from ninja.errors import ValidationError, HttpError
-from ninja.responses import Response
-from pydantic.error_wrappers import ValidationError as PydanticValidationError
+from ninja import Router
+from ninja.errors import HttpError
 from ddpui import auth
 from ddpui.core import notifications_service
 from ddpui.schemas.notifications_api_schemas import (

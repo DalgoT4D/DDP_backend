@@ -3,14 +3,13 @@ import uuid
 import shutil
 from pathlib import Path
 from datetime import datetime
-
 from dotenv import load_dotenv
+
+from ninja import Router
+from ninja.errors import HttpError
+
 from django.db.models import Q
 from django.utils.text import slugify
-from ninja import NinjaAPI, Router
-from ninja.errors import ValidationError, HttpError
-from ninja.responses import Response
-from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from ddpui import auth
 from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace

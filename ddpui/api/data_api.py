@@ -1,13 +1,8 @@
 """All the master data api can be found here"""
 
-from ninja import NinjaAPI, Router
+from ninja import Router
 from ninja.errors import HttpError
 from django.forms.models import model_to_dict
-
-from ninja.errors import ValidationError
-from ninja.responses import Response
-from pydantic.error_wrappers import ValidationError as PydanticValidationError
-
 
 from ddpui import auth
 from ddpui.models.tasks import Task
