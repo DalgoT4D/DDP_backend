@@ -8,7 +8,7 @@ DJANGO_SETTINGS_MODULE="ddpui.settings"
 
 [tool.pylint.messages_control]
 max-line-length = 100
-
+fail-under = 6.5
 disable = [
   "missing-module-docstring",
   "broad-exception-raised",
