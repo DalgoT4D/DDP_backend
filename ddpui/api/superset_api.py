@@ -1,7 +1,7 @@
 import os
 import requests
 
-from ninja import NinjaAPI
+from ninja import NinjaAPI, Router
 from ninja.errors import HttpError, ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
@@ -13,41 +13,11 @@ from ddpui import auth
 from ddpui.utils import secretsmanager
 from ddpui.auth import has_permission
 
-supersetapi = NinjaAPI(urls_namespace="superset")
-
+superset_router = Router()
 logger = CustomLogger("ddpui")
 
 
-@supersetapi.exception_handler(ValidationError)
-def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
-    """
-    Handle any ninja validation errors raised in the apis
-    These are raised during request payload validation
-    exc.errors is correct
-    """
-    return Response({"detail": exc.errors}, status=422)
-
-
-@supersetapi.exception_handler(PydanticValidationError)
-def pydantic_validation_error_handler(
-    request, exc: PydanticValidationError
-):  # pylint: disable=unused-argument
-    """
-    Handle any pydantic errors raised in the apis
-    These are raised during response payload validation
-    exc.errors() is correct
-    """
-    return Response({"detail": exc.errors()}, status=500)
-
-
-@supersetapi.exception_handler(Exception)
-def ninja_default_error_handler(request, exc: Exception):  # pylint: disable=unused-argument
-    """Handle any other exception raised in the apis"""
-    logger.exception(exc)
-    return Response({"detail": "something went wrong"}, status=500)
-
-
-@supersetapi.post(
+@superset_router.post(
     "embed_token/{dashboard_uuid}/",
     auth=auth.CustomAuthMiddleware(),
 )

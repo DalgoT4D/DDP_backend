@@ -29,12 +29,7 @@ Django application for the DDP platform's management backend. Exposes API endpoi
 
 ### Ninja api docs
 
--   [Dashboard](https://api.dalgo.in/api/dashboard/docs)
--   [Airbyte](https://api.dalgo.in/api/airbyte/docs)
--   [Flows](https://api.dalgo.in/api/prefect/docs)
--   [Dbt](https://api.dalgo.in/api/dbt/docs)
--   [Celery tasks](https://api.dalgo.in/api/tasks/docs)
--   [User & Org](https://api.dalgo.in/api/docs)
+- All api docs are at `http://localhost:8002/api/docs`
 
 ### Code style
 

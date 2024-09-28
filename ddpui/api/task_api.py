@@ -1,4 +1,4 @@
-from ninja import NinjaAPI
+from ninja import NinjaAPI, Router
 from ninja.errors import HttpError
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.singletaskprogress import SingleTaskProgress
@@ -6,10 +6,10 @@ from ddpui.utils.singletaskprogress import SingleTaskProgress
 from ddpui.auth import has_permission
 from ddpui import auth
 
-taskapi = NinjaAPI(urls_namespace="tasks")
+task_router = Router()
 
 
-@taskapi.get("/{task_id}", auth=auth.CustomAuthMiddleware())
+@task_router.get("/{task_id}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_task_progress"])
 def get_task(request, task_id, hashkey: str = "taskprogress"):  # pylint: disable=unused-argument
     """returns the progress for a celery task"""
@@ -19,7 +19,7 @@ def get_task(request, task_id, hashkey: str = "taskprogress"):  # pylint: disabl
     raise HttpError(400, "no such task id")
 
 
-@taskapi.get("/stp/{task_key}", auth=auth.CustomAuthMiddleware())
+@task_router.get("/stp/{task_key}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_task_progress"])
 def get_singletask(request, task_key):  # pylint: disable=unused-argument
     """returns the progress for a celery task"""

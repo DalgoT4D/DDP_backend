@@ -1,6 +1,6 @@
 import os
 import json
-from ninja import NinjaAPI
+from ninja import NinjaAPI, Router
 
 from ninja.errors import HttpError
 from ddpui.utils.custom_logger import CustomLogger
@@ -28,16 +28,12 @@ from ddpui.ddpprefect import (
 )
 
 
-webhookapi = NinjaAPI(urls_namespace="webhook")
-# http://127.0.0.1:8000/api/docs
-
-
+webhook_router = Router()
 logger = CustomLogger("ddpui")
-
 MAX_RETRIES_FOR_CRASHED_FLOW_RUNS = 1
 
 
-@webhookapi.post("/v1/notification/")
+@webhook_router.post("/v1/notification/")
 def post_notification_v1(request):  # pylint: disable=unused-argument
     """webhook endpoint for notifications"""
     if request.headers.get("X-Notification-Key") != os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY"):

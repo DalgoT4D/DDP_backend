@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
-from ninja import NinjaAPI
+from ninja import NinjaAPI, Router
 from ninja.errors import HttpError, ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
@@ -28,41 +28,11 @@ from ddpui.utils.orguserhelpers import from_orguser
 from ddpui.utils.redis_client import RedisClient
 from ddpui.schemas.org_task_schema import TaskParameters
 
-dbtapi = NinjaAPI(urls_namespace="dbt")
+dbt_router = Router()
 logger = CustomLogger("ddpui")
 
 
-@dbtapi.exception_handler(ValidationError)
-def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
-    """
-    Handle any ninja validation errors raised in the apis
-    These are raised during request payload validation
-    exc.errors is correct
-    """
-    return Response({"detail": exc.errors}, status=422)
-
-
-@dbtapi.exception_handler(PydanticValidationError)
-def pydantic_validation_error_handler(
-    request, exc: PydanticValidationError
-):  # pylint: disable=unused-argument
-    """
-    Handle any pydantic errors raised in the apis
-    These are raised during response payload validation
-    exc.errors() is correct
-    """
-    return Response({"detail": exc.errors()}, status=500)
-
-
-@dbtapi.exception_handler(Exception)
-def ninja_default_error_handler(
-    request, exc: Exception  # skipcq PYL-W0613
-):  # pylint: disable=unused-argument
-    """Handle any other exception raised in the apis"""
-    return Response({"detail": "something went wrong"}, status=500)
-
-
-@dbtapi.post("/workspace/", auth=auth.CustomAuthMiddleware())
+@dbt_router.post("/workspace/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_dbt_workspace"])
 def post_dbt_workspace(request, payload: OrgDbtSchema):
     """Setup the client git repo and install a virtual env inside it to run dbt"""
@@ -83,7 +53,7 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
     return {"task_id": task.id}
 
 
-@dbtapi.put("/github/", auth=auth.CustomAuthMiddleware())
+@dbt_router.put("/github/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_dbt_workspace"])
 def put_dbt_github(request, payload: OrgDbtGitHub):
     """Setup the client git repo and install a virtual env inside it to run dbt"""
@@ -114,7 +84,7 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
     return {"task_id": task.id}
 
 
-@dbtapi.delete("/workspace/", response=OrgUserResponse, auth=auth.CustomAuthMiddleware())
+@dbt_router.delete("/workspace/", response=OrgUserResponse, auth=auth.CustomAuthMiddleware())
 @has_permission(["can_delete_dbt_workspace"])
 def dbt_delete(request):
     """Delete the dbt workspace and project repo created"""
@@ -127,7 +97,7 @@ def dbt_delete(request):
     return from_orguser(orguser)
 
 
-@dbtapi.get("/dbt_workspace", auth=auth.CustomAuthMiddleware())
+@dbt_router.get("/dbt_workspace", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_dbt_workspace"])
 def get_dbt_workspace(request):
     """return details of the dbt workspace for this org"""
@@ -142,7 +112,7 @@ def get_dbt_workspace(request):
     }
 
 
-@dbtapi.post("/git_pull/", auth=auth.CustomAuthMiddleware())
+@dbt_router.post("/git_pull/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_run_orgtask"])
 def post_dbt_git_pull(request):
     """Pull the dbt repo from github for the organization"""
@@ -162,7 +132,7 @@ def post_dbt_git_pull(request):
     return {"success": True}
 
 
-@dbtapi.post("/makedocs/", auth=auth.CustomAuthMiddleware())
+@dbt_router.post("/makedocs/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_dbt_docs"])
 def post_dbt_makedocs(request):
     """prepare the dbt docs single html"""
@@ -195,7 +165,7 @@ def post_dbt_makedocs(request):
     return {"token": token.hex}
 
 
-@dbtapi.put("/v1/schema/", auth=auth.CustomAuthMiddleware())
+@dbt_router.put("/v1/schema/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_dbt_workspace"])
 def put_dbt_schema_v1(request, payload: OrgDbtTarget):
     """Update the target_configs.schema for the dbt cli profile block"""
@@ -225,7 +195,7 @@ def put_dbt_schema_v1(request, payload: OrgDbtTarget):
     return {"success": 1}
 
 
-@dbtapi.get("/dbt_transform/", auth=auth.CustomAuthMiddleware())
+@dbt_router.get("/dbt_transform/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_dbt_workspace"])
 def get_transform_type(request):
     """find the transform type"""
@@ -240,7 +210,7 @@ def get_transform_type(request):
     return {"transform_type": transform_type}
 
 
-@dbtapi.post("/run_dbt_via_celery/", auth=auth.CustomAuthMiddleware())
+@dbt_router.post("/run_dbt_via_celery/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_dbt_workspace"])
 def post_run_dbt_commands(request, payload: TaskParameters = None):
     """Run dbt commands via celery"""
@@ -259,7 +229,7 @@ def post_run_dbt_commands(request, payload: TaskParameters = None):
     return {"task_id": task_id}
 
 
-@dbtapi.post("/fetch-elementary-report/", auth=auth.CustomAuthMiddleware())
+@dbt_router.post("/fetch-elementary-report/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_dbt_workspace"])
 def post_fetch_elementary_report(request):
     """prepare the dbt docs single html"""
@@ -271,7 +241,7 @@ def post_fetch_elementary_report(request):
     return result
 
 
-@dbtapi.post("/refresh-elementary-report/", auth=auth.CustomAuthMiddleware())
+@dbt_router.post("/refresh-elementary-report/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_dbt_workspace"])
 def post_refresh_elementary_report(request):
     """prepare the dbt docs single html"""
@@ -283,7 +253,7 @@ def post_refresh_elementary_report(request):
     return result
 
 
-@dbtapi.post("/v1/refresh-elementary-report/", auth=auth.CustomAuthMiddleware())
+@dbt_router.post("/v1/refresh-elementary-report/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_dbt_workspace"])
 def post_refresh_elementary_report_via_prefect(request):
     """prepare the dbt docs single html via prefect deployment"""

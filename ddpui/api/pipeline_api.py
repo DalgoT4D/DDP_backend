@@ -1,6 +1,6 @@
 import os
 
-from ninja import NinjaAPI
+from ninja import NinjaAPI, Router
 from ninja.errors import HttpError
 
 from ninja.errors import ValidationError
@@ -41,45 +41,11 @@ from ddpui.core.dbtfunctions import gather_dbt_project_params
 from ddpui.auth import has_permission
 from ddpui.models.tasks import TaskLock
 
-pipelineapi = NinjaAPI(urls_namespace="pipeline")
-# http://127.0.0.1:8000/api/docs
-
-
+pipeline_router = Router()
 logger = CustomLogger("ddpui")
 
 
-@pipelineapi.exception_handler(ValidationError)
-def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
-    """
-    Handle any ninja validation errors raised in the apis
-    These are raised during request payload validation
-    exc.errors is correct
-    """
-    return Response({"detail": exc.errors}, status=422)
-
-
-@pipelineapi.exception_handler(PydanticValidationError)
-def pydantic_validation_error_handler(
-    request, exc: PydanticValidationError
-):  # pylint: disable=unused-argument
-    """
-    Handle any pydantic errors raised in the apis
-    These are raised during response payload validation
-    exc.errors() is correct
-    """
-    return Response({"detail": exc.errors()}, status=500)
-
-
-@pipelineapi.exception_handler(Exception)
-def ninja_default_error_handler(
-    request, exc: Exception  # skipcq PYL-W0613
-):  # pylint: disable=unused-argument
-    """Handle any other exception raised in the apis"""
-    logger.info(exc)
-    return Response({"detail": "something went wrong"}, status=500)
-
-
-@pipelineapi.post("v1/flows/", auth=auth.CustomAuthMiddleware())
+@pipeline_router.post("v1/flows/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_pipeline"])
 def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
     """Create a prefect deployment i.e. a ddp dataflow"""
@@ -215,7 +181,7 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
     }
 
 
-@pipelineapi.get("v1/flows/", auth=auth.CustomAuthMiddleware())
+@pipeline_router.get("v1/flows/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_pipelines"])
 def get_prefect_dataflows_v1(request):
     """Fetch all flows/pipelines created in an organization"""
@@ -284,7 +250,7 @@ def get_prefect_dataflows_v1(request):
     return res
 
 
-@pipelineapi.get("v1/flows/{deployment_id}", auth=auth.CustomAuthMiddleware())
+@pipeline_router.get("v1/flows/{deployment_id}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_pipeline"])
 def get_prefect_dataflow_v1(request, deployment_id):
     """Fetch details of prefect deployment"""
@@ -351,7 +317,7 @@ def get_prefect_dataflow_v1(request, deployment_id):
     }
 
 
-@pipelineapi.delete("v1/flows/{deployment_id}", auth=auth.CustomAuthMiddleware())
+@pipeline_router.delete("v1/flows/{deployment_id}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_delete_pipeline"])
 def delete_prefect_dataflow_v1(request, deployment_id):
     """Delete a prefect deployment along with its org data flow"""
@@ -375,7 +341,7 @@ def delete_prefect_dataflow_v1(request, deployment_id):
     return {"success": 1}
 
 
-@pipelineapi.put("v1/flows/{deployment_id}", auth=auth.CustomAuthMiddleware())
+@pipeline_router.put("v1/flows/{deployment_id}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_pipeline"])
 def put_prefect_dataflow_v1(request, deployment_id, payload: PrefectDataFlowUpdateSchema3):
     """Edit the data flow / prefect deployment"""
@@ -502,7 +468,9 @@ def put_prefect_dataflow_v1(request, deployment_id, payload: PrefectDataFlowUpda
     return {"success": 1}
 
 
-@pipelineapi.post("flows/{deployment_id}/set_schedule/{status}", auth=auth.CustomAuthMiddleware())
+@pipeline_router.post(
+    "flows/{deployment_id}/set_schedule/{status}", auth=auth.CustomAuthMiddleware()
+)
 @has_permission(["can_edit_pipeline"])
 def post_deployment_set_schedule(request, deployment_id, status):
     """Set deployment schedule to active / inactive"""
@@ -529,7 +497,7 @@ def post_deployment_set_schedule(request, deployment_id, status):
 ################################## runs and logs related ######################################
 
 
-@pipelineapi.post("v1/flows/{deployment_id}/flow_run/", auth=auth.CustomAuthMiddleware())
+@pipeline_router.post("v1/flows/{deployment_id}/flow_run/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_run_pipeline"])
 def post_run_prefect_org_deployment_task(request, deployment_id, payload: TaskParameters = None):
     """
@@ -611,7 +579,7 @@ def post_run_prefect_org_deployment_task(request, deployment_id, payload: TaskPa
     return res
 
 
-@pipelineapi.get("flow_runs/{flow_run_id}/logs", auth=auth.CustomAuthMiddleware())
+@pipeline_router.get("flow_runs/{flow_run_id}/logs", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_pipeline"])
 def get_flow_runs_logs(
     request, flow_run_id, task_run_id="", limit: int = 0, offset: int = 0
@@ -625,7 +593,7 @@ def get_flow_runs_logs(
     return result
 
 
-@pipelineapi.get("flow_runs/{flow_run_id}/logsummary", auth=auth.CustomAuthMiddleware())
+@pipeline_router.get("flow_runs/{flow_run_id}/logsummary", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_pipeline"])
 def get_flow_runs_logsummary(request, flow_run_id):  # pylint: disable=unused-argument
     """return the logs from a flow-run"""
@@ -644,7 +612,7 @@ def get_flow_runs_logsummary(request, flow_run_id):  # pylint: disable=unused-ar
     return result
 
 
-@pipelineapi.get(
+@pipeline_router.get(
     "flow_runs/{flow_run_id}",
     auth=auth.CustomAuthMiddleware(),
     response=PrefectFlowRunSchema,
@@ -661,7 +629,7 @@ def get_flow_run_by_id(request, flow_run_id):
     return flow_run
 
 
-@pipelineapi.get("flows/{deployment_id}/flow_runs/history", auth=auth.CustomAuthMiddleware())
+@pipeline_router.get("flows/{deployment_id}/flow_runs/history", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_pipeline"])
 def get_prefect_flow_runs_log_history(request, deployment_id, limit: int = 0, fetchlogs=True):
     # pylint: disable=unused-argument
@@ -675,7 +643,7 @@ def get_prefect_flow_runs_log_history(request, deployment_id, limit: int = 0, fe
     return flow_runs
 
 
-@pipelineapi.get("v1/flows/{deployment_id}/flow_runs/history", auth=auth.CustomAuthMiddleware())
+@pipeline_router.get("v1/flows/{deployment_id}/flow_runs/history", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_pipeline"])
 def get_prefect_flow_runs_log_history_v1(request, deployment_id, limit: int = 0, offset: int = 0):
     # pylint: disable=unused-argument
@@ -691,7 +659,7 @@ def get_prefect_flow_runs_log_history_v1(request, deployment_id, limit: int = 0,
     return flow_runs
 
 
-@pipelineapi.get("v1/flow_runs/{flow_run_id}/logsummary", auth=auth.CustomAuthMiddleware())
+@pipeline_router.get("v1/flow_runs/{flow_run_id}/logsummary", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_pipeline"])
 def get_flow_runs_logsummary_v1(
     request, flow_run_id, task_id, regenerate: int = 0, request_uuid: str = None
