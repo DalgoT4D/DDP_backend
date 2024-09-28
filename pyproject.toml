@@ -24,7 +24,7 @@ omit = [
   "ddpui/utils/dbtdocs.py",
   "/tests/*",
   "*/__init__.py",
-  "*/celery.py"
+  "*/celery.py",
   "*/schema.py",
   "*/settings.py" 
 ]
