@@ -22,7 +22,7 @@ disable = [
 omit = [
   "ddpui/utils/sendgrid.py",
   "ddpui/utils/dbtdocs.py",
-  "/tests/*",
+  "ddpui/tests/*",
   "*/__init__.py",
   "*/celery.py",
   "*/schema.py",
