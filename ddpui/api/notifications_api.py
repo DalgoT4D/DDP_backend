@@ -1,7 +1,5 @@
-from ninja import NinjaAPI
-from ninja.errors import ValidationError, HttpError
-from ninja.responses import Response
-from pydantic.error_wrappers import ValidationError as PydanticValidationError
+from ninja import Router
+from ninja.errors import HttpError
 from ddpui import auth
 from ddpui.core import notifications_service
 from ddpui.schemas.notifications_api_schemas import (
@@ -11,41 +9,10 @@ from ddpui.schemas.notifications_api_schemas import (
 )
 from ddpui.models.org_user import OrgUser
 
-
-notificationsapi = NinjaAPI(urls_namespace="notifications")
-
-
-@notificationsapi.exception_handler(ValidationError)
-def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
-    """
-    Handle any ninja validation errors raised in the apis
-    These are raised during request payload validation
-    exc.errors is correct
-    """
-    return Response({"detail": exc.errors}, status=422)
+notification_router = Router()
 
 
-@notificationsapi.exception_handler(PydanticValidationError)
-def pydantic_validation_error_handler(
-    request, exc: PydanticValidationError
-):  # pylint: disable=unused-argument
-    """
-    Handle any pydantic errors raised in the apis
-    These are raised during response payload validation
-    exc.errors() is correct
-    """
-    return Response({"detail": exc.errors()}, status=500)
-
-
-@notificationsapi.exception_handler(Exception)
-def ninja_default_error_handler(
-    request, exc: Exception  # skipcq PYL-W0613
-):  # pylint: disable=unused-argument
-    """Handle any other exception raised in the apis"""
-    return Response({"detail": "something went wrong"}, status=500)
-
-
-@notificationsapi.post("/")
+@notification_router.post("/")
 def create_notification(request, payload: CreateNotificationPayloadSchema):
     """Handle the task of creating a notification"""
 
@@ -73,7 +40,7 @@ def create_notification(request, payload: CreateNotificationPayloadSchema):
     return result
 
 
-@notificationsapi.get("/history")
+@notification_router.get("/history")
 def get_notification_history(request, page: int = 1, limit: int = 10, read_status: int = None):
     """
     Returns all the notifications including the
@@ -86,7 +53,7 @@ def get_notification_history(request, page: int = 1, limit: int = 10, read_statu
     return result
 
 
-@notificationsapi.get("/recipients")
+@notification_router.get("/recipients")
 def get_notification_recipients(request, notification_id: int):
     """
     Returns all the recipients for a notification
@@ -98,7 +65,7 @@ def get_notification_recipients(request, notification_id: int):
     return result
 
 
-@notificationsapi.get("/", auth=auth.CustomAuthMiddleware(), deprecated=True)
+@notification_router.get("/", auth=auth.CustomAuthMiddleware(), deprecated=True)
 def get_user_notifications(request, page: int = 1, limit: int = 10):
     """
     Returns all the notifications for a particular user.
@@ -113,7 +80,7 @@ def get_user_notifications(request, page: int = 1, limit: int = 10):
     return result
 
 
-@notificationsapi.get("/v1", auth=auth.CustomAuthMiddleware())
+@notification_router.get("/v1", auth=auth.CustomAuthMiddleware())
 def get_user_notifications_v1(request, page: int = 1, limit: int = 10, read_status: int = None):
     """
     Returns all the notifications for a particular user.
@@ -130,7 +97,7 @@ def get_user_notifications_v1(request, page: int = 1, limit: int = 10, read_stat
     return result
 
 
-@notificationsapi.put("/", auth=auth.CustomAuthMiddleware(), deprecated=True)
+@notification_router.put("/", auth=auth.CustomAuthMiddleware(), deprecated=True)
 def mark_as_read(request, payload: UpdateReadStatusSchema):
     """
     Handles the task of updating the read_status
@@ -146,7 +113,7 @@ def mark_as_read(request, payload: UpdateReadStatusSchema):
     return result
 
 
-@notificationsapi.put("/v1", auth=auth.CustomAuthMiddleware())
+@notification_router.put("/v1", auth=auth.CustomAuthMiddleware())
 def mark_as_read_v1(request, payload: UpdateReadStatusSchemav1):
     """
     Bulk update of read status of notifications
@@ -161,7 +128,7 @@ def mark_as_read_v1(request, payload: UpdateReadStatusSchemav1):
     return result
 
 
-@notificationsapi.delete("/")
+@notification_router.delete("/")
 def delete_notification(request, notification_id: int):
     """
     Used to delete past notifications,i.e, notifications
@@ -175,7 +142,7 @@ def delete_notification(request, notification_id: int):
     return result
 
 
-@notificationsapi.get("/unread_count", auth=auth.CustomAuthMiddleware())
+@notification_router.get("/unread_count", auth=auth.CustomAuthMiddleware())
 def get_unread_notifications_count(request):
     """Get count of unread notifications"""
     orguser: OrgUser = request.orguser
