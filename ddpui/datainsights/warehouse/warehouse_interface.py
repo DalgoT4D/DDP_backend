@@ -12,7 +12,6 @@ class WarehouseType(str, Enum):
 
 
 class Warehouse(ABC):
-
     @abstractmethod
     def execute(self, sql_statement: str):
         pass

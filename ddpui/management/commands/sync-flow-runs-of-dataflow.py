@@ -30,9 +30,7 @@ class Command(BaseCommand):
         if options["orgslug"]:
             query = query.filter(org__slug=options["orgslug"])
 
-        deployment_ids = [
-            flow.deployment_id for flow in query.all() if flow.deployment_id
-        ]
+        deployment_ids = [flow.deployment_id for flow in query.all() if flow.deployment_id]
         sync_flow_runs_of_deployments(
             deployment_ids=deployment_ids, look_back_hours=options["lookbackhours"]
         )

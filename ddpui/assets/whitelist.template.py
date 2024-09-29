@@ -9,9 +9,7 @@ DEMO_WHITELIST_SOURCES = [
             "spreadsheet_id": "https://docs.google.com/spreadsheets/d/18GqjB6nFBxZbAPnk6UOAvERE3iMfi4AkidjV6HkFKQk/edit#gid=0",
             "credentials": {
                 "auth_type": "Service",
-                "service_account_info": json.dumps(
-                    {"key": "big service account json dictionary"}
-                ),
+                "service_account_info": json.dumps({"key": "big service account json dictionary"}),
             },
         },
     },

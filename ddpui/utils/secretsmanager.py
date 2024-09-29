@@ -112,9 +112,7 @@ def save_github_token(org: Org, access_token: str):
         Name=secret_name,
         SecretString=access_token,
     )
-    logger.info(
-        "saved github access token in secrets manager under name=" + response["Name"]
-    )
+    logger.info("saved github access token in secrets manager under name=" + response["Name"])
     org.dbt.gitrepo_access_token_secret = secret_name
     org.dbt.save()
 
@@ -157,9 +155,7 @@ def save_warehouse_credentials(warehouse: OrgWarehouse, credentials: dict):
         Name=secret_name,
         SecretString=json.dumps(credentials),
     )
-    logger.info(
-        "saved warehouse credentials in secrets manager under name=" + response["Name"]
-    )
+    logger.info("saved warehouse credentials in secrets manager under name=" + response["Name"])
     return secret_name
 
 
@@ -170,21 +166,14 @@ def update_warehouse_credentials(warehouse: OrgWarehouse, credentials: dict):
         SecretId=warehouse.credentials,
         SecretString=json.dumps(credentials),
     )
-    logger.info(
-        "updated warehouse credentials in secrets manager under name="
-        + response["Name"]
-    )
+    logger.info("updated warehouse credentials in secrets manager under name=" + response["Name"])
 
 
 def retrieve_warehouse_credentials(warehouse: OrgWarehouse) -> dict | None:
     """decodes and returns the saved warehouse credentials for an org"""
     aws_sm = get_client()
     response = aws_sm.get_secret_value(SecretId=warehouse.credentials)
-    return (
-        json.loads(response["SecretString"])
-        if response and "SecretString" in response
-        else None
-    )
+    return json.loads(response["SecretString"]) if response and "SecretString" in response else None
 
 
 def delete_warehouse_credentials(warehouse: OrgWarehouse) -> None:
@@ -217,8 +206,4 @@ def retrieve_superset_usage_dashboard_credentials(
     """decodes and returns the saved superset usage dashboard credentials"""
     aws_sm = get_client()
     response = aws_sm.get_secret_value(SecretId=secret_id)
-    return (
-        json.loads(response["SecretString"])
-        if response and "SecretString" in response
-        else None
-    )
+    return json.loads(response["SecretString"]) if response and "SecretString" in response else None

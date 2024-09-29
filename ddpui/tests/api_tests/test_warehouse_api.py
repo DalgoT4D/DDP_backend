@@ -96,9 +96,7 @@ def test_get_table_columns_success(orguser):
 
 @patch.multiple(
     "ddpui.api.warehouse_api",
-    get_warehouse_data=Mock(
-        return_value=[{"column_1": "value_1"}, {"column2": "value2}"}]
-    ),
+    get_warehouse_data=Mock(return_value=[{"column_1": "value_1"}, {"column2": "value2}"}]),
 )
 def test_get_table_data_success(orguser):
     request = mock_request(orguser)
@@ -174,9 +172,7 @@ def test_download_warehouse_data_success(orguser):
     mock_page3 = []
     mock_db_pagination = [mock_page1, mock_page2, mock_page3]
 
-    with patch(
-        "ddpui.api.warehouse_api.get_warehouse_data", side_effect=mock_db_pagination
-    ):
+    with patch("ddpui.api.warehouse_api.get_warehouse_data", side_effect=mock_db_pagination):
         request = mock_request(orguser)
         response = get_download_warehouse_data(request, "test_schema", "test_table")
 
@@ -212,9 +208,7 @@ def test_get_warehouse_table_columns_spec_table_not_found_in_schema(orguser):
     ) as mock_retrieve_warehouse_credentials, patch(
         "ddpui.datainsights.warehouse.warehouse_factory.WarehouseFactory.connect"
     ) as mock_wclient:
-        mock_wclient.return_value.get_table_columns.side_effect = (
-            sqlalchemy.exc.NoSuchTableError()
-        )
+        mock_wclient.return_value.get_table_columns.side_effect = sqlalchemy.exc.NoSuchTableError()
         with pytest.raises(Exception) as exc:
             request = mock_request(orguser)
             get_warehouse_table_columns_spec(request, "test_schema", "test_table")
@@ -259,9 +253,7 @@ def test_get_warehouse_table_columns_spec_table_success(orguser):
             ]
         ]
         request = mock_request(orguser)
-        response = get_warehouse_table_columns_spec(
-            request, "test_schema", "test_table"
-        )
+        response = get_warehouse_table_columns_spec(request, "test_schema", "test_table")
         assert response == [
             {"name": "col1", "data_type": "int"},
             {"name": "col2", "data_type": "varchar"},
@@ -322,7 +314,10 @@ def test_llm_data_analysis_limit_records_sent_to_llm(orguser):
         post_warehouse_prompt(request, payload)
 
     assert exc.value.status_code == 400
-    assert str(exc.value) == f"Please make sure the limit in query is less than {LIMIT_ROWS_TO_SEND_TO_LLM}"
+    assert (
+        str(exc.value)
+        == f"Please make sure the limit in query is less than {LIMIT_ROWS_TO_SEND_TO_LLM}"
+    )
 
     # if the limit is not set default limit will be used
     payload = AskWarehouseRequest(
@@ -379,10 +374,7 @@ def test_llm_data_analysis_save_new_session(orguser):
 
     # save the session
     post_save_warehouse_prompt_session(request, session_id, payload)
-    assert (
-        LlmSession.objects.filter(session_name="save session with this name").count()
-        == 1
-    )
+    assert LlmSession.objects.filter(session_name="save session with this name").count() == 1
 
 
 def test_llm_data_analysis_save_and_overwrite_session(orguser):

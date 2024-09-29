@@ -26,9 +26,7 @@ from ddpui.ddpprefect import DBTCLIPROFILE
 pytestmark = pytest.mark.django_db
 
 
-@patch(
-    "ddpui.ddpairbyte.airbytehelpers.airbyte_service.create_custom_source_definition"
-)
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.create_custom_source_definition")
 def test_add_custom_airbyte_connector(mock_create_custom_source_definition: Mock):
     """very simple test"""
     add_custom_airbyte_connector("wsid", "cname", "cdr", "cdit", "cdurl")
@@ -178,9 +176,7 @@ def test_setup_airbyte_workspace_v1_create_server_block(
     setup_airbyte_workspace_v1("workspace_name", org)
     mock_get_airbyte_server_block_id.assert_called_once_with("org-airbyte-server")
     mock_create_airbyte_server_block.assert_called_once_with("org-airbyte-server")
-    assert (
-        OrgPrefectBlockv1.objects.filter(org=org, block_type=AIRBYTESERVER).count() == 1
-    )
+    assert OrgPrefectBlockv1.objects.filter(org=org, block_type=AIRBYTESERVER).count() == 1
     org.delete()
 
 
@@ -218,9 +214,7 @@ def test_setup_airbyte_workspace_v1_server_block_exists(
     response = setup_airbyte_workspace_v1("workspace_name", org)
     mock_get_airbyte_server_block_id.assert_called_once_with("org-airbyte-server")
     mock_create_airbyte_server_block.assert_not_called()
-    assert (
-        OrgPrefectBlockv1.objects.filter(org=org, block_type=AIRBYTESERVER).count() == 1
-    )
+    assert OrgPrefectBlockv1.objects.filter(org=org, block_type=AIRBYTESERVER).count() == 1
     assert response.name == "wsname"
     assert response.workspaceId == "wsid"
     assert response.initialSetupComplete is False
@@ -247,9 +241,7 @@ def test_get_job_info_for_connection_job_dne(
 ):
     """tests get_job_info_for_connection"""
     org = Org.objects.create(name="org", slug="org")
-    task = Task.objects.create(
-        type="airbyte", slug="airbyte-sync", label="AIRBYTE sync"
-    )
+    task = Task.objects.create(type="airbyte", slug="airbyte-sync", label="AIRBYTE sync")
     OrgTask.objects.create(org=org, task=task, connection_id="connection_id")
 
     mock_get_jobs_for_connection.return_value = {"jobs": []}
@@ -280,9 +272,7 @@ def test_get_job_info_for_connection(
 ):
     """tests get_job_info_for_connection"""
     org = Org.objects.create(name="org", slug="org")
-    task = Task.objects.create(
-        type="airbyte", slug="airbyte-sync", label="AIRBYTE sync"
-    )
+    task = Task.objects.create(type="airbyte", slug="airbyte-sync", label="AIRBYTE sync")
     OrgTask.objects.create(org=org, task=task, connection_id="connection_id")
 
     mock_get_jobs_for_connection.return_value = {
@@ -347,9 +337,7 @@ def test_get_sync_history_for_connection_no_jobs(
 ):
     """tests get_sync_job_history_for_connection for success"""
     org = Org.objects.create(name="org", slug="org")
-    task = Task.objects.create(
-        type="airbyte", slug="airbyte-sync", label="AIRBYTE sync"
-    )
+    task = Task.objects.create(type="airbyte", slug="airbyte-sync", label="AIRBYTE sync")
     OrgTask.objects.create(org=org, task=task, connection_id="connection_id")
 
     mock_get_jobs_for_connection.return_value = {
@@ -406,9 +394,7 @@ def test_get_sync_history_for_connection_success(
 ):
     """tests get_sync_job_history_for_connection for the case when the connection has no syncs created yet"""
     org = Org.objects.create(name="org", slug="org")
-    task = Task.objects.create(
-        type="airbyte", slug="airbyte-sync", label="AIRBYTE sync"
-    )
+    task = Task.objects.create(type="airbyte", slug="airbyte-sync", label="AIRBYTE sync")
     OrgTask.objects.create(org=org, task=task, connection_id="connection_id")
 
     mock_get_jobs_for_connection.return_value = {"jobs": [], "totalJobCount": 0}
@@ -602,9 +588,7 @@ def test_update_destination_snowflake_config(
     mock_update_destination.return_value = {
         "destinationId": "DESTINATION_ID",
     }
-    mock_retrieve_warehouse_credentials.return_value = {
-        "credentials": {"password": "*****"}
-    }
+    mock_retrieve_warehouse_credentials.return_value = {"credentials": {"password": "*****"}}
     mock_update_warehouse_credentials.return_value = None
 
     payload = AirbyteDestinationUpdate(
@@ -652,9 +636,7 @@ def test_update_destination_cliprofile(
     mock_update_destination.return_value = {
         "destinationId": "DESTINATION_ID",
     }
-    mock_retrieve_warehouse_credentials.return_value = {
-        "credentials": {"password": "*****"}
-    }
+    mock_retrieve_warehouse_credentials.return_value = {"credentials": {"password": "*****"}}
     mock_update_warehouse_credentials.return_value = None
 
     payload = AirbyteDestinationUpdate(
@@ -666,17 +648,13 @@ def test_update_destination_cliprofile(
         },
     )
 
-    OrgPrefectBlockv1.objects.create(
-        org=org, block_type=DBTCLIPROFILE, block_name="cliblockname"
-    )
+    OrgPrefectBlockv1.objects.create(org=org, block_type=DBTCLIPROFILE, block_name="cliblockname")
 
     response, error = update_destination(org, "destination_id", payload)
     assert error is None
     assert response == {"destinationId": "DESTINATION_ID"}
 
-    mock_create_or_update_org_cli_block.assert_called_once_with(
-        org, warehouse, payload.config
-    )
+    mock_create_or_update_org_cli_block.assert_called_once_with(org, warehouse, payload.config)
 
 
 @patch("ddpui.ddpairbyte.airbyte_service.get_connections", mock_get_connections=Mock())
@@ -700,9 +678,7 @@ def test_delete_source(
         ]
     }
 
-    task = Task.objects.create(
-        type="airbyte", slug="airbyte-sync", label="AIRBYTE sync"
-    )
+    task = Task.objects.create(type="airbyte", slug="airbyte-sync", label="AIRBYTE sync")
     orgtask = OrgTask.objects.create(org=org, task=task, connection_id="connection_id")
     OrgTask.objects.create(org=org, task=task, connection_id="connection_id2")
 
@@ -720,22 +696,16 @@ def test_delete_source(
     ).exists()
 
     # this one was deleted
-    assert not OrgTask.objects.filter(
-        org=org, task=task, connection_id="connection_id"
-    ).exists()
+    assert not OrgTask.objects.filter(org=org, task=task, connection_id="connection_id").exists()
     # but this one was not deleted
-    assert OrgTask.objects.filter(
-        org=org, task=task, connection_id="connection_id2"
-    ).exists()
+    assert OrgTask.objects.filter(org=org, task=task, connection_id="connection_id2").exists()
 
     mock_delete_source.assert_called_once()
 
 
 @patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection")
 @patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.update_schema_change")
-def test_update_schema_changes_connection(
-    mock_update_schema_change, mock_get_connection, db
-):
+def test_update_schema_changes_connection(mock_update_schema_change, mock_get_connection, db):
     """
     Test the update_connection_schema function.
     """
@@ -788,9 +758,7 @@ def test_update_schema_changes_connection(
     assert error is None
 
     # Assert the mock functions were called with the expected arguments
-    mock_get_connection.assert_called_once_with(
-        org.airbyte_workspace_id, "test-connection-id"
-    )
+    mock_get_connection.assert_called_once_with(org.airbyte_workspace_id, "test-connection-id")
 
 
 @patch(
@@ -819,9 +787,7 @@ def test_create_or_update_org_cli_block_create_case(
 
     create_or_update_org_cli_block(org, warehouse, dummy_creds)
 
-    org_cli_block = OrgPrefectBlockv1.objects.filter(
-        org=org, block_type=DBTCLIPROFILE
-    ).first()
+    org_cli_block = OrgPrefectBlockv1.objects.filter(org=org, block_type=DBTCLIPROFILE).first()
     assert org_cli_block is not None
     assert org_cli_block.block_id == "some_id"
     assert org_cli_block.block_name == "some_name"

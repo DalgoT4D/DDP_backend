@@ -83,15 +83,11 @@ def test_delete_warehouse_v1(org_with_workspace):
     """tests delete_warehouse_v1"""
     if not Task.objects.filter(slug=TASK_AIRBYTESYNC).exists():
         Task.objects.create(slug=TASK_AIRBYTESYNC, type="airbyte", label="fake-name")
-    if not OrgTask.objects.filter(
-        org=org_with_workspace, task__slug=TASK_AIRBYTESYNC
-    ).exists():
+    if not OrgTask.objects.filter(org=org_with_workspace, task__slug=TASK_AIRBYTESYNC).exists():
         task = Task.objects.filter(slug=TASK_AIRBYTESYNC).first()
         OrgTask.objects.create(org=org_with_workspace, task=task)
 
-    orgtask = OrgTask.objects.filter(
-        org=org_with_workspace, task__slug=TASK_AIRBYTESYNC
-    ).first()
+    orgtask = OrgTask.objects.filter(org=org_with_workspace, task__slug=TASK_AIRBYTESYNC).first()
     orgtask.connection_id = "fake-connection-id"
     orgtask.save()
 
@@ -115,9 +111,7 @@ def test_delete_warehouse_v1(org_with_workspace):
             bq_location="fake-bq-location",
         )
 
-    with patch(
-        "ddpui.ddpprefect.prefect_service.delete_deployment_by_id"
-    ) as mock_delete, patch(
+    with patch("ddpui.ddpprefect.prefect_service.delete_deployment_by_id") as mock_delete, patch(
         "ddpui.ddpairbyte.airbyte_service.delete_connection"
     ) as mock_delete_connection, patch(
         "ddpui.ddpairbyte.airbyte_service.get_connections"
@@ -128,7 +122,6 @@ def test_delete_warehouse_v1(org_with_workspace):
     ) as mock_delete_destination, patch(
         "ddpui.utils.secretsmanager.delete_warehouse_credentials"
     ) as mock_delete_warehouse_credentials:
-
         # == delete_warehouse_v1 ==
         mock_get_destinations.return_value = {
             "destinations": [
@@ -152,9 +145,7 @@ def test_delete_warehouse_v1(org_with_workspace):
         mock_delete_warehouse_credentials.assert_called_once()
 
     assert (
-        OrgTask.objects.filter(
-            org=org_with_workspace, connection_id="fake-connection-id"
-        ).count()
+        OrgTask.objects.filter(org=org_with_workspace, connection_id="fake-connection-id").count()
         == 0
     )
     assert OrgWarehouse.objects.filter(org=org_with_workspace).count() == 0
@@ -172,9 +163,7 @@ def test_delete_airbyte_workspace_v1(org_with_workspace):
     org_with_workspace.airbyte_workspace_id = str(uuid.uuid4())
     org_with_workspace.save()
 
-    with patch(
-        "ddpui.ddpairbyte.airbyte_service.get_sources"
-    ) as mock_get_sources, patch(
+    with patch("ddpui.ddpairbyte.airbyte_service.get_sources") as mock_get_sources, patch(
         "ddpui.ddpairbyte.airbyte_service.delete_source"
     ) as mock_delete_source, patch(
         "ddpui.ddpairbyte.airbyte_service.delete_workspace"
@@ -193,12 +182,8 @@ def test_delete_airbyte_workspace_v1(org_with_workspace):
         mock_delete_source.assert_called_once_with(
             org_with_workspace.airbyte_workspace_id, "fake-source-id"
         )
-        mock_delete_workspace.assert_called_once_with(
-            org_with_workspace.airbyte_workspace_id
-        )
-        mock_prefect_delete_a_block.assert_called_once_with(
-            "FAKE-AIRBYTESERVER-BLOCK-ID"
-        )
+        mock_delete_workspace.assert_called_once_with(org_with_workspace.airbyte_workspace_id)
+        mock_prefect_delete_a_block.assert_called_once_with("FAKE-AIRBYTESERVER-BLOCK-ID")
         assert (
             OrgPrefectBlockv1.objects.filter(
                 org=org_with_workspace, block_type=AIRBYTESERVER
@@ -212,10 +197,6 @@ def test_delete_orgusers(org_with_workspace):
     email = "fake-email"
     tempuser = User.objects.create(email=email, username="fake-username")
     OrgUser.objects.create(user=tempuser, org=org_with_workspace)
-    assert (
-        OrgUser.objects.filter(user__email=email, org=org_with_workspace).count() == 1
-    )
+    assert OrgUser.objects.filter(user__email=email, org=org_with_workspace).count() == 1
     delete_orgusers(org_with_workspace)
-    assert (
-        OrgUser.objects.filter(user__email=email, org=org_with_workspace).count() == 0
-    )
+    assert OrgUser.objects.filter(user__email=email, org=org_with_workspace).count() == 0

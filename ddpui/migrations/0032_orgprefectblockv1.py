@@ -27,9 +27,7 @@ class Migration(migrations.Migration):
                 ("block_name", models.CharField(max_length=100, unique=True)),
                 (
                     "org",
-                    models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE, to="ddpui.org"
-                    ),
+                    models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to="ddpui.org"),
                 ),
             ],
         ),

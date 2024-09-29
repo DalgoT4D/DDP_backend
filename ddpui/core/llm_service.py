@@ -25,21 +25,15 @@ def poll_llm_service_task(task_id: str, poll_interval: int = 5) -> dict:
     """
     # poll this task
     while True:
-        response = dalgo_get(
-            f"{LLM_SERVICE_API_URL}/api/task/{task_id}", headers=headers
-        )
+        response = dalgo_get(f"{LLM_SERVICE_API_URL}/api/task/{task_id}", headers=headers)
         if response["status"] in CELERY_TERMINAL_STATES:
             break
         logger.info(f"Polling : Task {task_id} is in state {response['status']}")
         time.sleep(poll_interval)
 
     if response["status"] in CELERY_ERROR_STATES:
-        logger.error(
-            f"Error occured while polling llm service job {str(response['error'])}"
-        )
-        raise Exception(
-            response["error"] if response["error"] else "error occured in llm service"
-        )
+        logger.error(f"Error occured while polling llm service job {str(response['error'])}")
+        raise Exception(response["error"] if response["error"] else "error occured in llm service")
 
     return response["result"]
 

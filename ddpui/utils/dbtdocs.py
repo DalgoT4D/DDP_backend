@@ -8,14 +8,10 @@ from pathlib import Path
 def create_single_html(orgslug: str) -> str:
     """put the manifest and catalog into the generated index and return"""
     dbttargetdir = Path(os.getenv("CLIENTDBT_ROOT")) / orgslug / "dbtrepo" / "target"
-    with open(
-        os.path.join(dbttargetdir, "index.html"), "r", encoding="utf-8"
-    ) as indexfile:
+    with open(os.path.join(dbttargetdir, "index.html"), "r", encoding="utf-8") as indexfile:
         content_index = indexfile.read()
 
-    with open(
-        os.path.join(dbttargetdir, "manifest.json"), "r", encoding="utf-8"
-    ) as manifestfile:
+    with open(os.path.join(dbttargetdir, "manifest.json"), "r", encoding="utf-8") as manifestfile:
         json_manifest = json.load(manifestfile)
 
     # In the static website there are 2 more projects inside the documentation: dbt and dbt_bigquery
@@ -37,9 +33,7 @@ def create_single_html(orgslug: str) -> str:
                 ):  # match with string that start with '*.<ignore_project>.'
                     del json_manifest[element_type][key]  # delete element
 
-    with open(
-        os.path.join(dbttargetdir, "catalog.json"), "r", encoding="utf-8"
-    ) as catalogfile:
+    with open(os.path.join(dbttargetdir, "catalog.json"), "r", encoding="utf-8") as catalogfile:
         json_catalog = json.load(catalogfile)
 
     # create single docs file in public folder

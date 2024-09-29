@@ -124,9 +124,7 @@ def parse_git_pull_log(line: str):
             "pattern": "already-up-to-date",
             "status": "success",
         }
-    pattern_2 = re.compile(
-        r"\d+ files changed, \d+ insertions\(+\), \d+ deletions\(-\)"
-    )
+    pattern_2 = re.compile(r"\d+ files changed, \d+ insertions\(+\), \d+ deletions\(-\)")
     if pattern_2.match(line):
         return {
             "pattern": "update-summary",
@@ -262,9 +260,7 @@ def parse_dbt_run_log(line: str):
             "pattern": "run-finished",
             "status": "success",
         }
-    pattern_5 = re.compile(
-        r"Done. PASS=(\d+) WARN=(\d+) ERROR=(\d+) SKIP=(\d+) TOTAL=(\d+)"
-    )
+    pattern_5 = re.compile(r"Done. PASS=(\d+) WARN=(\d+) ERROR=(\d+) SKIP=(\d+) TOTAL=(\d+)")
     if pattern_5.match(line):
         match = pattern_5.match(line)
         passed = int(match.groups()[0])
@@ -339,9 +335,7 @@ def parse_dbt_test_log(line: str):
         return {
             "pattern": "compiled-code-at",
         }
-    pattern_7 = re.compile(
-        r"Done. PASS=(\d+) WARN=(\d+) ERROR=(\d+) SKIP=(\d+) TOTAL=(\d+)"
-    )
+    pattern_7 = re.compile(r"Done. PASS=(\d+) WARN=(\d+) ERROR=(\d+) SKIP=(\d+) TOTAL=(\d+)")
     if pattern_7.match(line):
         match = pattern_7.match(line)
         passed = int(match.groups()[0])
@@ -453,9 +447,7 @@ def parse_prefect_logs(connection_info: dict, flow_run_id: str):
                         )
                         task_summary.update(match)
                 else:
-                    logger.warning(
-                        f"[{message['task_name']}] {message['state_name']} {line}"
-                    )
+                    logger.warning(f"[{message['task_name']}] {message['state_name']} {line}")
 
             # git pull
             elif message["task_name"] == "git pull":
@@ -542,9 +534,7 @@ def parse_prefect_logs(connection_info: dict, flow_run_id: str):
                     logger.warning(f"[{message['task_name']}] {line}")
 
             else:
-                logger.warning(
-                    f"[{message['task_name']}] [{message['state_name']}] {line}"
-                )
+                logger.warning(f"[{message['task_name']}] [{message['state_name']}] {line}")
 
     # get the last task
     if "status" in task_summary:

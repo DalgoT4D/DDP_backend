@@ -72,9 +72,7 @@ class Command(BaseCommand):
             params = deployment.get("parameters", {})
             config = params.get("config", {})
             tasks = config.get("tasks", [])
-            transform_tasks = [
-                task for task in tasks if task["slug"] in TRANSFORM_TASKS_SEQ
-            ]
+            transform_tasks = [task for task in tasks if task["slug"] in TRANSFORM_TASKS_SEQ]
 
             if len(transform_tasks) <= 1:
                 logger.info(

@@ -30,9 +30,7 @@ class Migration(migrations.Migration):
                             ("log_summarization", "LOG_SUMMARIZATION"),
                             ("long_text_summarization", "LONG_TEXT_SUMMARIZATION"),
                         ],
-                        default=ddpui.models.llm.LlmAssistantType[
-                            "LONG_TEXT_SUMMARIZATION"
-                        ],
+                        default=ddpui.models.llm.LlmAssistantType["LONG_TEXT_SUMMARIZATION"],
                         max_length=100,
                     ),
                 ),

@@ -65,9 +65,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "role",
-                    models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE, to="ddpui.role"
-                    ),
+                    models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to="ddpui.role"),
                 ),
             ],
         ),

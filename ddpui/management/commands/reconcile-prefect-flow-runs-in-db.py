@@ -80,9 +80,7 @@ class Command(BaseCommand):
             state_name__in=[FLOW_RUN_RUNNING_STATE_NAME, FLOW_RUN_PENDING_STATE_NAME]
         ).count()
 
-        print(
-            f"Total flow runs in non-terminal state: {flow_runs_in_non_terminal_state}"
-        )
+        print(f"Total flow runs in non-terminal state: {flow_runs_in_non_terminal_state}")
 
         print(f"Deleted duplicate flow runs: {duplicate_runs.count()}")
 

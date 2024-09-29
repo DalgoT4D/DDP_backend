@@ -57,9 +57,9 @@ class Command(BaseCommand):
 
     def dump_sources(self, org: Org):
         """dumps all sources for an org"""
-        source_definitions = airbyte_service.get_source_definitions(
-            org.airbyte_workspace_id
-        )["sourceDefinitions"]
+        source_definitions = airbyte_service.get_source_definitions(org.airbyte_workspace_id)[
+            "sourceDefinitions"
+        ]
         sources = airbyte_service.get_sources(org.airbyte_workspace_id)["sources"]
         for source in sources:
             for sdef in source_definitions:
@@ -70,9 +70,7 @@ class Command(BaseCommand):
 
     def dump_connections(self, org: Org):
         """dumps airbyte connection info"""
-        connections = airbyte_service.get_connections(org.airbyte_workspace_id)[
-            "connections"
-        ]
+        connections = airbyte_service.get_connections(org.airbyte_workspace_id)["connections"]
         formatted_connections = []
         for connection in connections:
             connection["destination"] = airbyte_service.get_destination(
@@ -95,9 +93,7 @@ class Command(BaseCommand):
 
             schema = None
             if connection["destination"]["destinationName"] == "BigQuery":
-                schema = connection["destination"]["connectionConfiguration"][
-                    "dataset_id"
-                ]
+                schema = connection["destination"]["connectionConfiguration"]["dataset_id"]
             elif connection["destination"]["destinationName"] == "Postgres":
                 schema = connection["destination"]["connectionConfiguration"]["schema"]
 
@@ -112,9 +108,7 @@ class Command(BaseCommand):
 
     def dump_dataflow(self, org: Org):
         """dumps dataflow info"""
-        dataflows = OrgDataFlowv1.objects.filter(org=org).exclude(
-            dataflow_type="manual"
-        )
+        dataflows = OrgDataFlowv1.objects.filter(org=org).exclude(dataflow_type="manual")
         if dataflows is None:
             logger.error(f"No dataflow found for {org.slug}")
             return None

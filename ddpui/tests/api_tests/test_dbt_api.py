@@ -85,9 +85,7 @@ def test_post_dbt_workspace(orguser):
     request.orguser.org.dbt = orgdbt
     request.orguser.org.save()
 
-    dbtprofile = DbtProfile(
-        name="fake-name", target_configs_schema="target_configs_schema"
-    )
+    dbtprofile = DbtProfile(name="fake-name", target_configs_schema="target_configs_schema")
     payload = OrgDbtSchema(
         profile=dbtprofile,
         gitrepoUrl="gitrepoUrl",
@@ -98,9 +96,7 @@ def test_post_dbt_workspace(orguser):
     with patch(
         "ddpui.celeryworkers.tasks.setup_dbtworkspace.delay", return_value=mocked_task
     ) as delay:
-        with patch(
-            "ddpui.api.dbt_api.dbt_service.check_repo_exists", return_value=True
-        ):
+        with patch("ddpui.api.dbt_api.dbt_service.check_repo_exists", return_value=True):
             post_dbt_workspace(request, payload)
             delay.assert_called_once_with(orguser.org.id, payload.dict())
             assert orguser.org.dbt is None
@@ -124,9 +120,7 @@ def test_put_dbt_github(orguser):
     with patch(
         "ddpui.celeryworkers.tasks.clone_github_repo.delay", return_value=mocked_task
     ) as delay:
-        with patch(
-            "ddpui.api.dbt_api.dbt_service.check_repo_exists", return_value=True
-        ):
+        with patch("ddpui.api.dbt_api.dbt_service.check_repo_exists", return_value=True):
             put_dbt_github(request, payload)
             delay.assert_called_once_with(
                 "org-slug",
@@ -136,10 +130,7 @@ def test_put_dbt_github(orguser):
                 None,
             )
             assert request.orguser.org.dbt.gitrepo_url == "new-url"
-            assert (
-                request.orguser.org.dbt.gitrepo_access_token_secret
-                == "new-access-token"
-            )
+            assert request.orguser.org.dbt.gitrepo_access_token_secret == "new-access-token"
 
 
 def test_dbt_delete_no_org(orguser):
@@ -206,9 +197,7 @@ def test_post_dbt_git_pull_no_env(orguser: OrgUser):
 
 
 @patch.multiple("os.path", exists=Mock(return_value=True))
-@patch.multiple(
-    "ddpui.api.dbt_api", runcmd=Mock(side_effect=Exception("runcmd failed"))
-)
+@patch.multiple("ddpui.api.dbt_api", runcmd=Mock(side_effect=Exception("runcmd failed")))
 def test_post_dbt_git_pull_gitpull_failed(orguser: OrgUser):
     """fail - dbt not configured"""
     orguser = orguser

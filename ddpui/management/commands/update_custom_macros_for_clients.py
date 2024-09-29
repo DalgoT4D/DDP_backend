@@ -36,9 +36,7 @@ class Command(BaseCommand):
 
                 for sql_file_path in glob.glob(os.path.join(assets_dir, "*.sql")):
                     # Get the target path in the project_dir/macros directory
-                    target_path = (
-                        Path(dbtrepo_dir) / "macros" / Path(sql_file_path).name
-                    )
+                    target_path = Path(dbtrepo_dir) / "macros" / Path(sql_file_path).name
 
                     # Update/create the .sql file to the target path
                     shutil.copy(sql_file_path, target_path)
@@ -48,6 +46,4 @@ class Command(BaseCommand):
 
                 logger.info(f"Updated the custom macros for orgdbt_id %s", org_dbt.id)
             else:
-                logger.info(
-                    "Dbt project folder for the orgdbt_id %s not found", org_dbt.id
-                )
+                logger.info("Dbt project folder for the orgdbt_id %s not found", org_dbt.id)

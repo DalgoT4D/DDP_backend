@@ -47,9 +47,7 @@ def test_fetch_from():
 
 def test_fetch_from_subquery():
     query_builder = AggQueryBuilder()
-    subquery = select(column("column1")).select_from(
-        table("test_table", schema="test_schema")
-    )
+    subquery = select(column("column1")).select_from(table("test_table", schema="test_schema"))
     assert isinstance(query_builder.fetch_from_subquery(subquery), AggQueryBuilder)
     assert query_builder.select_from == subquery
 

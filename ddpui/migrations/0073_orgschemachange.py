@@ -30,9 +30,7 @@ class Migration(migrations.Migration):
                 ("schema_change", models.CharField(max_length=36, null=True)),
                 (
                     "org",
-                    models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE, to="ddpui.org"
-                    ),
+                    models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to="ddpui.org"),
                 ),
             ],
         ),

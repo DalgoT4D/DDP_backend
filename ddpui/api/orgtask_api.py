@@ -2,19 +2,14 @@ import uuid
 import os
 from pathlib import Path
 from datetime import datetime
-import yaml
 
-from ninja import NinjaAPI
+from ninja import Router
 from ninja.errors import HttpError
-from ninja.errors import ValidationError
-
-from ninja.responses import Response
-from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from django.forms.models import model_to_dict
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
-from ddpui.ddpairbyte import airbyte_service, airbytehelpers
+from ddpui.ddpairbyte import airbytehelpers
 
 from ddpui.ddpprefect import (
     DBTCLIPROFILE,
@@ -64,46 +59,11 @@ from ddpui.core.pipelinefunctions import (
 )
 from ddpui.auth import has_permission
 
-orgtaskapi = NinjaAPI(urls_namespace="orgtask")
-# http://127.0.0.1:8000/api/docs
-
-
+orgtask_router = Router()
 logger = CustomLogger("ddpui")
 
 
-@orgtaskapi.exception_handler(ValidationError)
-def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
-    """
-    Handle any ninja validation errors raised in the apis
-    These are raised during request payload validation
-    exc.errors is correct
-    """
-    return Response({"detail": exc.errors}, status=422)
-
-
-@orgtaskapi.exception_handler(PydanticValidationError)
-def pydantic_validation_error_handler(
-    request, exc: PydanticValidationError
-):  # pylint: disable=unused-argument
-    """
-    Handle any pydantic errors raised in the apis
-    These are raised during response payload validation
-    exc.errors() is correct
-    """
-    print(exc)
-    return Response({"detail": exc.errors()}, status=500)
-
-
-@orgtaskapi.exception_handler(Exception)
-def ninja_default_error_handler(
-    request, exc: Exception  # skipcq PYL-W0613
-):  # pylint: disable=unused-argument
-    """Handle any other exception raised in the apis"""
-    logger.info(exc)
-    return Response({"detail": "something went wrong"}, status=500)
-
-
-@orgtaskapi.post("/", auth=auth.CustomAuthMiddleware())
+@orgtask_router.post("/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_orgtask"])
 def post_orgtask(request, payload: CreateOrgTaskPayload):
     """Create a custom client org task (dbt or git). If base task is dbt run create a deployment"""
@@ -153,13 +113,11 @@ def post_orgtask(request, payload: CreateOrgTaskPayload):
     return {
         **model_to_dict(orgtask, fields=["parameters"]),
         "task_slug": orgtask.task.slug,
-        "dataflow": (
-            {**model_to_dict(dataflow, exclude=["id", "org"])} if dataflow else None
-        ),
+        "dataflow": ({**model_to_dict(dataflow, exclude=["id", "org"])} if dataflow else None),
     }
 
 
-@orgtaskapi.post("transform/", auth=auth.CustomAuthMiddleware())
+@orgtask_router.post("transform/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_orgtask"])
 def post_system_transformation_tasks(request):
     """
@@ -215,25 +173,21 @@ def post_system_transformation_tasks(request):
         raise HttpError(400, str(error)) from error
 
     # create a dbt cli profile block
-    (cli_profile_block, dbt_project_params), error = (
-        airbytehelpers.create_or_update_org_cli_block(
-            orguser.org, warehouse, credentials
-        )
+    (cli_profile_block, dbt_project_params), error = airbytehelpers.create_or_update_org_cli_block(
+        orguser.org, warehouse, credentials
     )
     if error:
         raise HttpError(400, error)
 
     # create org tasks for the transformation page
-    _, error = create_default_transform_tasks(
-        orguser.org, cli_profile_block, dbt_project_params
-    )
+    _, error = create_default_transform_tasks(orguser.org, cli_profile_block, dbt_project_params)
     if error:
         raise HttpError(400, error)
 
     return {"success": 1}
 
 
-@orgtaskapi.get("elementary-lock/", auth=auth.CustomAuthMiddleware())
+@orgtask_router.get("elementary-lock/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_orgtasks"])
 def get_elemetary_task_lock(request):
     """Check if the elementary report generation task is underway"""
@@ -242,7 +196,7 @@ def get_elemetary_task_lock(request):
     return fetch_orgtask_lock(org_task)
 
 
-@orgtaskapi.get("transform/", auth=auth.CustomAuthMiddleware())
+@orgtask_router.get("transform/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_orgtasks"])
 def get_prefect_transformation_tasks(request):
     """Fetch all dbt tasks for an org; client or system"""
@@ -272,9 +226,7 @@ def get_prefect_transformation_tasks(request):
         command = org_task.task.type + " " + org_task.get_task_parameters()
 
         lock = None
-        all_locks = [
-            lock for lock in all_org_task_locks if lock.orgtask_id == org_task.id
-        ]
+        all_locks = [lock for lock in all_org_task_locks if lock.orgtask_id == org_task.id]
         if len(all_locks) > 0:
             lock = all_locks[0]
 
@@ -289,8 +241,7 @@ def get_prefect_transformation_tasks(request):
                 "command": command,
                 "generated_by": org_task.generated_by,
                 "seq": TRANSFORM_TASKS_SEQ[org_task.task.slug],
-                "pipeline_default": org_task.task.slug
-                in DEFAULT_TRANSFORM_TASKS_IN_PIPELINE,
+                "pipeline_default": org_task.task.slug in DEFAULT_TRANSFORM_TASKS_IN_PIPELINE,
             }
         )
 
@@ -299,15 +250,13 @@ def get_prefect_transformation_tasks(request):
             dfot for dfot in all_dataflow_orgtasks if dfot.orgtask_id == org_task.id
         ]
         res[-1]["deploymentId"] = (
-            dataflow_orgtasks[0].dataflow.deployment_id
-            if len(dataflow_orgtasks) > 0
-            else None
+            dataflow_orgtasks[0].dataflow.deployment_id if len(dataflow_orgtasks) > 0 else None
         )
 
     return sorted(res, key=lambda x: x["seq"])
 
 
-@orgtaskapi.delete("transform/", auth=auth.CustomAuthMiddleware())
+@orgtask_router.delete("transform/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_delete_orgtask"])
 def delete_system_transformation_tasks(request):
     """delete tasks and related objects for an org"""
@@ -341,7 +290,7 @@ def delete_system_transformation_tasks(request):
             continue
 
 
-@orgtaskapi.post("{orgtask_uuid}/run/", auth=auth.CustomAuthMiddleware())
+@orgtask_router.post("{orgtask_uuid}/run/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_run_orgtask"])
 def post_run_prefect_org_task(
     request, orgtask_uuid, payload: TaskParameters = None
@@ -378,9 +327,7 @@ def post_run_prefect_org_task(
     # check if the task is locked
     task_lock = TaskLock.objects.filter(orgtask=org_task).first()
     if task_lock:
-        raise HttpError(
-            400, f"{task_lock.locked_by.user.email} is running this operation"
-        )
+        raise HttpError(400, f"{task_lock.locked_by.user.email} is running this operation")
 
     # lock the task
     task_lock = TaskLock.objects.create(orgtask=org_task, locked_by=orguser)
@@ -407,9 +354,7 @@ def post_run_prefect_org_task(
         except Exception as error:
             task_lock.delete()
             logger.exception(error)
-            raise HttpError(
-                400, f"failed to run the shell task {org_task.task.slug}"
-            ) from error
+            raise HttpError(400, f"failed to run the shell task {org_task.task.slug}") from error
 
     elif org_task.task.slug == TASK_GENERATE_EDR:
         dbt_env_dir = Path(orguser.org.dbt.dbt_venv)
@@ -431,9 +376,7 @@ def post_run_prefect_org_task(
         except Exception as error:
             task_lock.delete()
             logger.exception(error)
-            raise HttpError(
-                400, f"failed to run the shell task {org_task.task.slug}"
-            ) from error
+            raise HttpError(400, f"failed to run the shell task {org_task.task.slug}") from error
 
     else:
         dbt_env_dir = Path(orguser.org.dbt.dbt_venv)
@@ -452,9 +395,7 @@ def post_run_prefect_org_task(
         if payload:
             org_task.parameters = dict(payload)
 
-        task_config = setup_dbt_core_task_config(
-            org_task, cli_profile_block, dbt_project_params
-        )
+        task_config = setup_dbt_core_task_config(org_task, cli_profile_block, dbt_project_params)
 
         if task_config.flow_name is None:
             task_config.flow_name = f"{orguser.org.name}-{org_task.task.slug}"
@@ -476,7 +417,7 @@ def post_run_prefect_org_task(
     return result
 
 
-@orgtaskapi.delete("{orgtask_uuid}/", auth=auth.CustomAuthMiddleware())
+@orgtask_router.delete("{orgtask_uuid}/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_delete_orgtask"])
 def post_delete_orgtask(request, orgtask_uuid):  # pylint: disable=unused-argument
     """Delete client generated orgtask"""

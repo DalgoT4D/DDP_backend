@@ -71,9 +71,7 @@ def org_without_workspace():
 def org_with_workspace():
     """a pytest fixture which creates an Org having an airbyte workspace"""
     print("creating org_with_workspace")
-    org = Org.objects.create(
-        airbyte_workspace_id="FAKE-WORKSPACE-ID", slug="test-org-slug"
-    )
+    org = Org.objects.create(airbyte_workspace_id="FAKE-WORKSPACE-ID", slug="test-org-slug")
     yield org
     print("deleting org_with_workspace")
     org.delete()
@@ -388,10 +386,7 @@ def test_post_airbyte_connection_v1_without_server_block(
     )
     with pytest.raises(Exception) as excinfo:
         post_airbyte_connection_v1(request, payload)
-    assert (
-        str(excinfo.value)
-        == "test-org-slug has no Airbyte Server block in OrgPrefectBlock"
-    )
+    assert str(excinfo.value) == "test-org-slug has no Airbyte Server block in OrgPrefectBlock"
 
 
 @pytest.fixture
@@ -536,9 +531,7 @@ def test_post_airbyte_connection_reset_v1_no_connection_task(
     assert str(excinfo.value) == "connection not found"
 
 
-def test_post_airbyte_connection_reset_v1_success(
-    orguser_workspace, airbyte_server_block
-):
+def test_post_airbyte_connection_reset_v1_success(orguser_workspace, airbyte_server_block):
     """tests POST /v1/connections/{connection_id}/reset success"""
     request = mock_request(orguser_workspace)
 
@@ -552,9 +545,7 @@ def test_post_airbyte_connection_reset_v1_success(
     }
     task = Task.objects.create(**airbyte_task_config)
 
-    OrgTask.objects.create(
-        task=task, org=request.orguser.org, connection_id=connection_id
-    )
+    OrgTask.objects.create(task=task, org=request.orguser.org, connection_id=connection_id)
 
     with patch("ddpui.ddpairbyte.airbytehelpers.reset_connection") as reset_helper_mock:
         reset_helper_mock.return_value = (None, None)
@@ -589,9 +580,7 @@ def test_put_airbyte_connection_v1_no_warehouse_destination(orguser_workspace):
     }
     task = Task.objects.create(**airbyte_task_config)
 
-    OrgTask.objects.create(
-        task=task, org=request.orguser.org, connection_id=connection_id
-    )
+    OrgTask.objects.create(task=task, org=request.orguser.org, connection_id=connection_id)
 
     OrgWarehouse.objects.create(org=request.orguser.org)
 
@@ -614,18 +603,14 @@ def test_put_airbyte_connection_v1_no_warehouse(orguser_workspace):
     }
     task = Task.objects.create(**airbyte_task_config)
 
-    OrgTask.objects.create(
-        task=task, org=request.orguser.org, connection_id=connection_id
-    )
+    OrgTask.objects.create(task=task, org=request.orguser.org, connection_id=connection_id)
 
     with pytest.raises(HttpError) as excinfo:
         put_airbyte_connection_v1(request, connection_id, payload)
     assert str(excinfo.value) == "need to set up a warehouse first"
 
 
-def test_put_airbyte_connection_v1_no_streams(
-    orguser_workspace, warehouse_with_destination
-):
+def test_put_airbyte_connection_v1_no_streams(orguser_workspace, warehouse_with_destination):
     """tests PUT /v1/connections/{connection_id}/update failure with no streams"""
     payload = AirbyteConnectionUpdate(name="connection-name-1", streams=[])
     connection_id = "connection_id"
@@ -639,9 +624,7 @@ def test_put_airbyte_connection_v1_no_streams(
     }
     task = Task.objects.create(**airbyte_task_config)
 
-    OrgTask.objects.create(
-        task=task, org=request.orguser.org, connection_id=connection_id
-    )
+    OrgTask.objects.create(task=task, org=request.orguser.org, connection_id=connection_id)
 
     with pytest.raises(HttpError) as excinfo:
         put_airbyte_connection_v1(request, connection_id, payload)
@@ -666,18 +649,14 @@ def test_put_airbyte_connection_v1(orguser_workspace):
     }
     task = Task.objects.create(**airbyte_task_config)
 
-    OrgTask.objects.create(
-        task=task, org=request.orguser.org, connection_id=connection_id
-    )
+    OrgTask.objects.create(task=task, org=request.orguser.org, connection_id=connection_id)
 
     warehouse = OrgWarehouse.objects.create(
         org=request.orguser.org, airbyte_destination_id="airbyte_destination_id"
     )
 
     update_connection_mock = MagicMock()
-    with patch(
-        "ddpui.ddpairbyte.airbyte_service.update_connection"
-    ) as update_connection_mock:
+    with patch("ddpui.ddpairbyte.airbyte_service.update_connection") as update_connection_mock:
         put_airbyte_connection_v1(request, connection_id, payload)
 
     connection = {
@@ -823,9 +802,7 @@ def test_get_latest_job_for_connection_with_workspace(orguser):
 
     connection_id = "connection_123"
 
-    with patch(
-        "ddpui.ddpairbyte.airbytehelpers.get_job_info_for_connection"
-    ) as get_job_info_mock:
+    with patch("ddpui.ddpairbyte.airbytehelpers.get_job_info_for_connection") as get_job_info_mock:
         job_info = {"status": "success", "details": "Job completed successfully"}
         get_job_info_mock.return_value = (job_info, None)
 
@@ -844,9 +821,7 @@ def test_get_latest_job_for_connection_with_error(orguser):
 
     connection_id = "connection_123"
 
-    with patch(
-        "ddpui.ddpairbyte.airbytehelpers.get_job_info_for_connection"
-    ) as get_job_info_mock:
+    with patch("ddpui.ddpairbyte.airbytehelpers.get_job_info_for_connection") as get_job_info_mock:
         error_message = "Failed to retrieve job information"
         get_job_info_mock.return_value = (None, error_message)
 
@@ -890,9 +865,7 @@ def test_get_sync_history_for_connection_with_workspace(orguser):
             request, connection_id, limit=1, offset=0
         )
 
-    get_job_info_mock.assert_called_once_with(
-        request.orguser.org, connection_id, limit=1, offset=0
-    )
+    get_job_info_mock.assert_called_once_with(request.orguser.org, connection_id, limit=1, offset=0)
 
     assert returned_job_info == job_info
 
@@ -914,9 +887,7 @@ def test_get_sync_history_for_connection_with_error(orguser):
         with pytest.raises(HttpError) as excinfo:
             get_sync_history_for_connection(request, connection_id, limit=1, offset=0)
 
-    get_job_info_mock.assert_called_once_with(
-        request.orguser.org, connection_id, limit=1, offset=0
-    )
+    get_job_info_mock.assert_called_once_with(request.orguser.org, connection_id, limit=1, offset=0)
 
     assert excinfo.value.status_code == 400
     assert str(excinfo.value) == error_message
@@ -965,9 +936,7 @@ def test_put_airbyte_destination_success(orguser_workspace):
         name="Updated Destination", destinationDefId="def_123", config={}
     )
 
-    with patch(
-        "ddpui.ddpairbyte.airbytehelpers.update_destination"
-    ) as update_destination_mock:
+    with patch("ddpui.ddpairbyte.airbytehelpers.update_destination") as update_destination_mock:
         updated_destination = {
             "destinationId": destination_id,
             "name": "Updated Destination",
@@ -976,9 +945,7 @@ def test_put_airbyte_destination_success(orguser_workspace):
 
         response = put_airbyte_destination_v1(request, destination_id, payload)
 
-    update_destination_mock.assert_called_once_with(
-        request.orguser.org, destination_id, payload
-    )
+    update_destination_mock.assert_called_once_with(request.orguser.org, destination_id, payload)
 
     assert response == {"destinationId": destination_id}
 

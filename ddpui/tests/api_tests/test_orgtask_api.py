@@ -84,9 +84,7 @@ def org_with_dbt_workspace(tmpdir_factory):
 
     # create dbt_project.yml file
     yml_obj = {"profile": "dummy"}
-    with open(
-        str(org_dir / "dbtrepo" / "dbt_project.yml"), "w", encoding="utf-8"
-    ) as output:
+    with open(str(org_dir / "dbtrepo" / "dbt_project.yml"), "w", encoding="utf-8") as output:
         yaml.safe_dump(yml_obj, output)
 
     dbt = OrgDbt.objects.create(
@@ -134,9 +132,7 @@ def org_with_transformation_tasks(tmpdir_factory, seed_master_tasks_db):
 
     # create dbt_project.yml file
     yml_obj = {"profile": "dummy"}
-    with open(
-        str(org_dir / "dbtrepo" / "dbt_project.yml"), "w", encoding="utf-8"
-    ) as output:
+    with open(str(org_dir / "dbtrepo" / "dbt_project.yml"), "w", encoding="utf-8") as output:
         yaml.safe_dump(yml_obj, output)
 
     dbt = OrgDbt.objects.create(
@@ -263,9 +259,7 @@ def test_post_system_transformation_tasks_warehouse_not_setup(orguser_dbt_worksp
         return_value={"block_id": "cli-blk-id", "block_name": "cli-blk-name"}
     ),
     create_dataflow_v1=Mock(
-        return_value={
-            "deployment": {"id": "test-deploy-id", "name": "test-deploy-name"}
-        }
+        return_value={"deployment": {"id": "test-deploy-id", "name": "test-deploy-name"}}
     ),
 )
 def test_post_system_transformation_tasks_success_postgres_warehouse(
@@ -301,16 +295,12 @@ def test_post_system_transformation_tasks_success_postgres_warehouse(
         return_value={"block_id": "cli-blk-id", "block_name": "cli-blk-name"}
     ),
     create_dataflow_v1=Mock(
-        return_value={
-            "deployment": {"id": "test-deploy-id", "name": "test-deploy-name"}
-        }
+        return_value={"deployment": {"id": "test-deploy-id", "name": "test-deploy-name"}}
     ),
 )
 @patch.multiple(
     "ddpui.ddpairbyte.airbyte_service",
-    get_destination=Mock(
-        return_value={"connectionConfiguration": {"dataset_location": "US"}}
-    ),
+    get_destination=Mock(return_value={"connectionConfiguration": {"dataset_location": "US"}}),
 )
 def test_post_system_transformation_tasks_success_bigquery_warehouse(
     orguser_dbt_workspace,
@@ -329,9 +319,7 @@ def test_get_prefect_transformation_tasks_success(orguser_transform_tasks):
 
     get_prefect_transformation_tasks(request)
 
-    assert (
-        OrgTask.objects.filter(org=request.orguser.org).count() == 7
-    )  # including git, dbt
+    assert OrgTask.objects.filter(org=request.orguser.org).count() == 7  # including git, dbt
 
 
 @patch.multiple(
@@ -346,20 +334,10 @@ def test_delete_system_transformation_tasks_success(orguser_transform_tasks):
 
     delete_system_transformation_tasks(request)
 
+    assert OrgTask.objects.filter(org=request.orguser.org, task__is_system=True).count() == 0
+    assert OrgPrefectBlockv1.objects.filter(org=request.orguser.org, block_type=SECRET).count() == 0
     assert (
-        OrgTask.objects.filter(org=request.orguser.org, task__is_system=True).count()
-        == 0
-    )
-    assert (
-        OrgPrefectBlockv1.objects.filter(
-            org=request.orguser.org, block_type=SECRET
-        ).count()
-        == 0
-    )
-    assert (
-        OrgPrefectBlockv1.objects.filter(
-            org=request.orguser.org, block_type=DBTCLIPROFILE
-        ).count()
+        OrgPrefectBlockv1.objects.filter(org=request.orguser.org, block_type=DBTCLIPROFILE).count()
         == 0
     )
 
@@ -389,9 +367,7 @@ def test_post_run_prefect_org_task_invalid_task_type(orguser_transform_tasks):
     }
     task = Task.objects.create(**airbyte_task_config)
 
-    org_task = OrgTask.objects.create(
-        task=task, org=request.orguser.org, uuid=uuid.uuid4()
-    )
+    org_task = OrgTask.objects.create(task=task, org=request.orguser.org, uuid=uuid.uuid4())
 
     if org_task is None:
         raise Exception("Task not found")
@@ -406,9 +382,7 @@ def test_post_run_prefect_org_task_no_dbt_workspace(orguser_transform_tasks):
     orguser_transform_tasks.org.dbt = None
     request = mock_request(orguser_transform_tasks)
 
-    org_task = OrgTask.objects.filter(
-        org=request.orguser.org, task__slug=TASK_DBTDEPS
-    ).first()
+    org_task = OrgTask.objects.filter(org=request.orguser.org, task__slug=TASK_DBTDEPS).first()
 
     if org_task is None:
         raise Exception("Task not found")
@@ -427,9 +401,7 @@ def test_post_run_prefect_org_task_git_pull_success(orguser_transform_tasks):
 
     request = mock_request(orguser_transform_tasks)
 
-    org_task = OrgTask.objects.filter(
-        org=request.orguser.org, task__slug=TASK_GITPULL
-    ).first()
+    org_task = OrgTask.objects.filter(org=request.orguser.org, task__slug=TASK_GITPULL).first()
 
     if org_task is None:
         raise Exception("Task not found")
@@ -446,9 +418,7 @@ def test_post_run_prefect_org_task_dbt_deps_success(orguser_transform_tasks):
 
     request = mock_request(orguser_transform_tasks)
 
-    org_task = OrgTask.objects.filter(
-        org=request.orguser.org, task__slug=TASK_DBTDEPS
-    ).first()
+    org_task = OrgTask.objects.filter(org=request.orguser.org, task__slug=TASK_DBTDEPS).first()
 
     if org_task is None:
         raise Exception("Task not found")
@@ -464,9 +434,7 @@ def test_post_run_prefect_org_task_generate_edr(
     request = mock_request(orguser_dbt_workspace)
     task = Task.objects.filter(slug=TASK_GENERATE_EDR).first()
 
-    org_task = OrgTask.objects.create(
-        org=request.orguser.org, task=task, uuid=uuid.uuid4()
-    )
+    org_task = OrgTask.objects.create(org=request.orguser.org, task=task, uuid=uuid.uuid4())
 
     with patch(
         "ddpui.api.orgtask_api.setup_edr_send_report_task_config"

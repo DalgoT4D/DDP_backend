@@ -109,8 +109,7 @@ def signup_orguser(payload: OrgUserCreate):
     )
     orguser.save()
     logger.info(
-        f"created user [account-manager] "
-        f"{orguser.user.email} having userid {orguser.user.id}"
+        f"created user [account-manager] " f"{orguser.user.email} having userid {orguser.user.id}"
     )
     redis = RedisClient.get_instance()
     token = uuid4()
@@ -255,9 +254,7 @@ def invite_user(orguser: OrgUser, payload: InvitationSchema):
         return None, "create an organization first"
 
     invited_email = payload.invited_email.lower().strip()
-    if OrgUser.objects.filter(
-        org=orguser.org, user__email__iexact=invited_email
-    ).exists():
+    if OrgUser.objects.filter(org=orguser.org, user__email__iexact=invited_email).exists():
         return None, "user already has an account"
 
     role_slugs = OrgUserRole.role_slugs()
@@ -280,9 +277,7 @@ def invite_user(orguser: OrgUser, payload: InvitationSchema):
         OrgUser.objects.create(
             user=existing_user, org=orguser.org, role=invited_role, new_role=new_role
         )
-        sendgrid.send_youve_been_added_email(
-            invited_email, orguser.user.email, orguser.org.name
-        )
+        sendgrid.send_youve_been_added_email(invited_email, orguser.user.email, orguser.org.name)
         return (
             InvitationSchema(
                 invited_email=invited_email,
@@ -341,9 +336,7 @@ def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema):
         return None, "create an organization first"
 
     invited_email = payload.invited_email.lower().strip()
-    if OrgUser.objects.filter(
-        org=orguser.org, user__email__iexact=invited_email
-    ).exists():
+    if OrgUser.objects.filter(org=orguser.org, user__email__iexact=invited_email).exists():
         return None, "user already has an account"
 
     invited_role = Role.objects.filter(uuid=payload.invited_role_uuid).first()
@@ -358,12 +351,8 @@ def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema):
 
     if existing_user:
         logger.info("user exists, creating new OrgUser")
-        OrgUser.objects.create(
-            user=existing_user, org=orguser.org, new_role=invited_role
-        )
-        sendgrid.send_youve_been_added_email(
-            invited_email, orguser.user.email, orguser.org.name
-        )
+        OrgUser.objects.create(user=existing_user, org=orguser.org, new_role=invited_role)
+        sendgrid.send_youve_been_added_email(invited_email, orguser.user.email, orguser.org.name)
         return (
             NewInvitationSchema(
                 invited_email=invited_email,
@@ -497,9 +486,7 @@ def get_invitations_from_orguser(orguser: OrgUser):
     if orguser.org is None:
         return None, "create an organization first"
 
-    invitations = (
-        Invitation.objects.filter(invited_by=orguser).order_by("-invited_on").all()
-    )
+    invitations = Invitation.objects.filter(invited_by=orguser).order_by("-invited_on").all()
     res = []
     for invitation in invitations:
         res.append(
@@ -520,9 +507,7 @@ def get_invitations_from_orguser_v1(orguser: OrgUser):
     if orguser.org is None:
         return None, "create an organization first"
 
-    invitations = (
-        Invitation.objects.filter(invited_by=orguser).order_by("-invited_on").all()
-    )
+    invitations = Invitation.objects.filter(invited_by=orguser).order_by("-invited_on").all()
     res = []
     for invitation in invitations:
         res.append(
@@ -689,8 +674,6 @@ def accept_tnc(orguser: OrgUser):
     if OrgTnC.objects.filter(org=orguser.org).exists():
         return None, "tnc already accepted"
 
-    OrgTnC.objects.create(
-        org=orguser.org, tnc_accepted_by=orguser, tnc_accepted_on=datetime.now()
-    )
+    OrgTnC.objects.create(org=orguser.org, tnc_accepted_by=orguser, tnc_accepted_on=datetime.now())
 
     return None, None

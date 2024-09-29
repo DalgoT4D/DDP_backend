@@ -37,9 +37,7 @@ class Migration(migrations.Migration):
                 ("sync_data_volume_b", models.IntegerField(default=0)),
                 (
                     "org",
-                    models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE, to="ddpui.org"
-                    ),
+                    models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to="ddpui.org"),
                 ),
             ],
         ),

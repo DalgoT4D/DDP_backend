@@ -39,9 +39,7 @@ class OrgDbtModel(models.Model):
     display_name = models.CharField(max_length=300, null=True)
     schema = models.CharField(max_length=300, null=True)
     sql_path = models.CharField(max_length=300, null=True)
-    type = models.CharField(
-        choices=OrgDbtModelType.choices(), max_length=50, default="model"
-    )
+    type = models.CharField(choices=OrgDbtModelType.choices(), max_length=50, default="model")
     source_name = models.CharField(max_length=300, null=True)
     output_cols = models.JSONField(default=list)
     under_construction = models.BooleanField(default=False)
@@ -55,9 +53,7 @@ class OrgDbtModel(models.Model):
 class OrgDbtOperation(models.Model):
     """Model to store dbt operations for a model. Basically steps to create/reach a OrgDbtModel"""
 
-    dbtmodel = models.ForeignKey(
-        OrgDbtModel, on_delete=models.CASCADE, related_name="operations"
-    )
+    dbtmodel = models.ForeignKey(OrgDbtModel, on_delete=models.CASCADE, related_name="operations")
     uuid = models.UUIDField(editable=False, unique=True)
     seq = models.IntegerField(default=0)
     output_cols = models.JSONField(default=list)
@@ -66,9 +62,7 @@ class OrgDbtOperation(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
-        return (
-            f"DbtOperation[{self.uuid} | {self.dbtmodel.schema}.{self.dbtmodel.name}]"
-        )
+        return f"DbtOperation[{self.uuid} | {self.dbtmodel.schema}.{self.dbtmodel.name}]"
 
 
 class DbtEdge(models.Model):

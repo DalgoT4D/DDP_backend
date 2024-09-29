@@ -17,7 +17,6 @@ from ddpui.utils.helpers import hash_dict
 
 
 class DataStats(ColInsight):
-
     def query_id(self) -> str:
         """
         This will be dictate whether a query is unique or not
@@ -47,9 +46,7 @@ class DataStats(ColInsight):
         median_subquery = (
             self.builder.add_column(numeric_col)
             .add_column(func.count().over().label("total_rows"))
-            .add_column(
-                func.row_number().over(order_by=numeric_col).label("row_number")
-            )
+            .add_column(func.row_number().over(order_by=numeric_col).label("row_number"))
             .where_clause(numeric_col.isnot(None))
             .fetch_from(self.db_table, self.db_schema)
             .subquery(alias="median_subquery")
@@ -95,10 +92,7 @@ class DataStats(ColInsight):
             .add_column(select([mode_subquery.c[f"{col.name}"]]).limit(1).label("mode"))
             .add_column(
                 select([func.array_agg(mode_subquery.c[f"{col.name}"])])
-                .where(
-                    mode_subquery.c["count"]
-                    == select([mode_subquery.c["count"]]).limit(1)
-                )
+                .where(mode_subquery.c["count"] == select([mode_subquery.c["count"]]).limit(1))
                 .label("other_modes")
             )
         )
@@ -126,9 +120,7 @@ class DataStats(ColInsight):
             return {
                 self.columns[0].name: {
                     "mean": float(result[0]["mean"]) if result[0]["mean"] else None,
-                    "median": (
-                        float(result[0]["median"]) if result[0]["median"] else None
-                    ),
+                    "median": (float(result[0]["median"]) if result[0]["median"] else None),
                     "mode": float(result[0]["mode"]) if result[0]["mode"] else None,
                     "other_modes": [
                         (float(other_mode) if other_mode else None)
@@ -137,9 +129,7 @@ class DataStats(ColInsight):
                 }
             }
 
-        return {
-            self.columns[0].name: {"mean": 0, "median": 0, "mode": 0, "other_modes": []}
-        }
+        return {self.columns[0].name: {"mean": 0, "median": 0, "mode": 0, "other_modes": []}}
 
     def validate_query_results(self, parsed_results):
         """
@@ -150,10 +140,7 @@ class DataStats(ColInsight):
         if (
             parsed_results
             and isinstance(parsed_results, dict)
-            and all(
-                key in parsed_results
-                for key in ["mean", "median", "mode", "other_modes"]
-            )
+            and all(key in parsed_results for key in ["mean", "median", "mode", "other_modes"])
         ):
             validate = True
 

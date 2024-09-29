@@ -12,6 +12,4 @@ class OrgTnC(models.Model):
     tnc_accepted_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE, null=False)
 
     def __str__(self) -> str:
-        return (
-            f"OrgTnC[{self.org.slug}|{self.tnc_accepted_on}|{self.orguser.user.email}]"
-        )
+        return f"OrgTnC[{self.org.slug}|{self.tnc_accepted_on}|{self.orguser.user.email}]"

@@ -46,7 +46,6 @@ def abreq(endpoint, req=None, **kwargs):
         org_user = request.orguser
         org_slug = org_user.org.slug
         if flag_enabled("AIRBYTE_PROFILE", request_org_slug=org_slug):
-
             org_server_block = OrgPrefectBlockv1.objects.filter(
                 org=org_user.org, block_type=AIRBYTESERVER
             ).first()
@@ -57,15 +56,11 @@ def abreq(endpoint, req=None, **kwargs):
             block_name = org_server_block.block_name
 
             try:
-                airbyte_server_block = prefect_service.get_airbyte_server_block(
-                    block_name
-                )
+                airbyte_server_block = prefect_service.get_airbyte_server_block(block_name)
             except Exception as exc:
                 raise Exception("could not connect to prefect-proxy") from exc
 
-            logger.info(
-                "Making request to Airbyte server through prefect block: %s", endpoint
-            )
+            logger.info("Making request to Airbyte server through prefect block: %s", endpoint)
             abhost = airbyte_server_block["host"]
             abport = airbyte_server_block["port"]
             abver = airbyte_server_block["version"]
@@ -179,7 +174,9 @@ def get_source_definition(workspace_id: str, sourcedef_id: str) -> dict:
         {"sourceDefinitionId": sourcedef_id, "workspaceId": workspace_id},
     )
     if "sourceDefinitionId" not in res:
-        error_message = f"Source definition : {sourcedef_id} not found for workspace: {workspace_id}"
+        error_message = (
+            f"Source definition : {sourcedef_id} not found for workspace: {workspace_id}"
+        )
         logger.error(error_message)
         raise HttpError(404, error_message)
 
@@ -222,13 +219,10 @@ def get_source_definition_specification(workspace_id: str, sourcedef_id: str) ->
         raise HttpError(404, error_message)
 
     if "properties" in res["connectionSpecification"] and (
-        "__injected_declarative_manifest"
-        in res["connectionSpecification"]["properties"]
+        "__injected_declarative_manifest" in res["connectionSpecification"]["properties"]
     ):
         # remove the injected manifest
-        del res["connectionSpecification"]["properties"][
-            "__injected_declarative_manifest"
-        ]
+        del res["connectionSpecification"]["properties"]["__injected_declarative_manifest"]
 
     return res
 
@@ -310,9 +304,7 @@ def delete_source(workspace_id: str, source_id: str) -> dict:
     return res
 
 
-def create_source(
-    workspace_id: str, name: str, sourcedef_id: str, config: dict
-) -> dict:
+def create_source(workspace_id: str, name: str, sourcedef_id: str, config: dict) -> dict:
     """Create source in an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
@@ -403,17 +395,13 @@ def check_source_connection(workspace_id: str, data: AirbyteSourceCreate) -> dic
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get(
-            "message", "Something went wrong, please check your credentials"
-        )
+        failure_reason = res.get("message", "Something went wrong, please check your credentials")
         logger.error("Failed to check the source connection: %s", res)
         raise HttpError(500, failure_reason)
     return res
 
 
-def check_source_connection_for_update(
-    source_id: str, data: AirbyteSourceUpdateCheckConnection
-):
+def check_source_connection_for_update(source_id: str, data: AirbyteSourceUpdateCheckConnection):
     """Test connection on a potential edit on source"""
     res = abreq(
         "sources/check_connection_for_update",
@@ -425,9 +413,7 @@ def check_source_connection_for_update(
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get(
-            "message", "Something went wrong, please check your credentials"
-        )
+        failure_reason = res.get("message", "Something went wrong, please check your credentials")
         logger.error("Failed to check the source connection: %s", res)
         raise HttpError(500, failure_reason)
     # {
@@ -491,13 +477,9 @@ def get_destination_definitions(workspace_id: str) -> dict:
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
 
-    res = abreq(
-        "destination_definitions/list_for_workspace", {"workspaceId": workspace_id}
-    )
+    res = abreq("destination_definitions/list_for_workspace", {"workspaceId": workspace_id})
     if "destinationDefinitions" not in res:
-        logger.error(
-            "Destination definitions not found for workspace: %s", workspace_id
-        )
+        logger.error("Destination definitions not found for workspace: %s", workspace_id)
         raise HttpError(404, "destination definitions not found")
     return res
 
@@ -519,9 +501,7 @@ def get_destination_definition(workspace_id: str, destinationdef_id: str) -> dic
     return res
 
 
-def get_destination_definition_specification(
-    workspace_id: str, destinationdef_id: str
-) -> dict:
+def get_destination_definition_specification(workspace_id: str, destinationdef_id: str) -> dict:
     """Fetch destination definition specification for a destination in a workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
@@ -533,9 +513,7 @@ def get_destination_definition_specification(
         {"destinationDefinitionId": destinationdef_id, "workspaceId": workspace_id},
     )
     if "connectionSpecification" not in res:
-        logger.error(
-            "Specification not found for destination definition: %s", destinationdef_id
-        )
+        logger.error("Specification not found for destination definition: %s", destinationdef_id)
         raise HttpError(404, "Failed to get destination definition specification")
     if res["connectionSpecification"]["title"] == "Postgres Destination Spec":
         res["connectionSpecification"]["properties"]["ssl_mode"][
@@ -581,9 +559,7 @@ def delete_destination(
     return res
 
 
-def create_destination(
-    workspace_id: str, name: str, destinationdef_id: str, config: dict
-) -> dict:
+def create_destination(workspace_id: str, name: str, destinationdef_id: str, config: dict) -> dict:
     """Create destination in an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
@@ -637,9 +613,7 @@ def update_destination(
     return res
 
 
-def check_destination_connection(
-    workspace_id: str, data: AirbyteDestinationCreate
-) -> dict:
+def check_destination_connection(workspace_id: str, data: AirbyteDestinationCreate) -> dict:
     """Test a potential destination's connection in an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
@@ -654,9 +628,7 @@ def check_destination_connection(
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get(
-            "message", "Something went wrong, please check your credentials"
-        )
+        failure_reason = res.get("message", "Something went wrong, please check your credentials")
         logger.error("Failed to check the destination connection: %s", res)
         raise HttpError(500, failure_reason)
     return res
@@ -679,9 +651,7 @@ def check_destination_connection_for_update(
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get(
-            "message", "Something went wrong, please check your credentials"
-        )
+        failure_reason = res.get("message", "Something went wrong, please check your credentials")
         logger.error("Failed to check the destination connection: %s", res)
         raise HttpError(500, failure_reason)
     return res
@@ -739,9 +709,7 @@ def create_connection(
         logger.error(error_message)
         raise HttpError(400, error_message)
 
-    sourceschemacatalog = get_source_schema_catalog(
-        workspace_id, connection_info.sourceId
-    )
+    sourceschemacatalog = get_source_schema_catalog(workspace_id, connection_info.sourceId)
     payload = {
         "sourceId": connection_info.sourceId,
         "destinationId": connection_info.destinationId,
@@ -769,10 +737,7 @@ def create_connection(
     selected_streams = {x["name"]: x for x in connection_info.streams}
     for schema_cat in sourceschemacatalog["catalog"]["streams"]:
         stream_name = schema_cat["stream"]["name"]
-        if (
-            stream_name in selected_streams
-            and selected_streams[stream_name]["selected"]
-        ):
+        if stream_name in selected_streams and selected_streams[stream_name]["selected"]:
             schema_cat["config"]["selected"] = True
             schema_cat["config"]["syncMode"] = selected_streams[stream_name]["syncMode"]
             schema_cat["config"]["destinationSyncMode"] = selected_streams[stream_name][
@@ -781,9 +746,7 @@ def create_connection(
             # update the cursorField when the mode is incremental
             # weirdhly the cursor field is an array of single element eg ["created_on"] or []
             if schema_cat["config"]["syncMode"] == "incremental":
-                schema_cat["config"]["cursorField"] = [
-                    selected_streams[stream_name]["cursorField"]
-                ]
+                schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
             else:
                 schema_cat["config"]["cursorField"] = []
 
@@ -809,9 +772,7 @@ def update_connection(
         logger.error(error_message)
         raise HttpError(400, error_message)
 
-    sourceschemacatalog = get_source_schema_catalog(
-        workspace_id, current_connection["sourceId"]
-    )
+    sourceschemacatalog = get_source_schema_catalog(workspace_id, current_connection["sourceId"])
 
     # update the name
     if connection_info.name:
@@ -828,10 +789,7 @@ def update_connection(
     selected_streams = {x["name"]: x for x in connection_info.streams}
     for schema_cat in sourceschemacatalog["catalog"]["streams"]:
         stream_name = schema_cat["stream"]["name"]
-        if (
-            stream_name in selected_streams
-            and selected_streams[stream_name]["selected"]
-        ):
+        if stream_name in selected_streams and selected_streams[stream_name]["selected"]:
             # set schema_cat['config']['syncMode']
             # from schema_cat['stream']['supportedSyncModes'] here
             schema_cat["config"]["selected"] = True
@@ -842,9 +800,7 @@ def update_connection(
             # update the cursorField when the mode is incremental
             # weirdhly the cursor field is an array of single element eg ["created_on"] or []
             if schema_cat["config"]["syncMode"] == "incremental":
-                schema_cat["config"]["cursorField"] = [
-                    selected_streams[stream_name]["cursorField"]
-                ]
+                schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
             else:
                 schema_cat["config"]["cursorField"] = []
             current_connection["syncCatalog"]["streams"].append(schema_cat)
@@ -899,9 +855,7 @@ def get_job_info(job_id: str) -> dict:
     return res
 
 
-def get_jobs_for_connection(
-    connection_id: str, limit: int = 1, offset: int = 0
-) -> int | None:
+def get_jobs_for_connection(connection_id: str, limit: int = 1, offset: int = 0) -> int | None:
     """
     returns most recent job for a connection
     possible configTypes are
@@ -987,9 +941,7 @@ def update_schema_change(
 ) -> dict:
     """Update the schema change for a connection."""
     if not isinstance(connection_info, schema.AirbyteConnectionSchemaUpdate):
-        raise HttpError(
-            400, "connection_info must be an instance of AirbyteConnectionSchemaUpdate"
-        )
+        raise HttpError(400, "connection_info must be an instance of AirbyteConnectionSchemaUpdate")
     if not isinstance(current_connection, dict):
         raise HttpError(400, "current_connection must be a dictionary")
 

@@ -27,9 +27,7 @@ class DistributionChart(ColInsight):
     Computes the frequency chart
     """
 
-    def __init__(
-        self, column_name: str, db_table: str, db_schema: str, filter_: dict, wtype: str
-    ):
+    def __init__(self, column_name: str, db_table: str, db_schema: str, filter_: dict, wtype: str):
         super().__init__(column_name, db_table, db_schema, filter_, wtype)
         if filter_:
             self.filter: BarChartFilter = BarChartFilter(**filter_)
@@ -73,9 +71,9 @@ class DistributionChart(ColInsight):
             orderby_cols = [("year", "desc")]
 
         if self.filter.range == "month":
-            query = query.add_column(
-                extract("year", datetime_col).label("year")
-            ).add_column(extract("month", datetime_col).label("month"))
+            query = query.add_column(extract("year", datetime_col).label("year")).add_column(
+                extract("month", datetime_col).label("month")
+            )
             groupby_cols = [
                 extract("year", datetime_col),
                 extract("month", datetime_col),
@@ -132,8 +130,7 @@ class DistributionChart(ColInsight):
                     {
                         "chartType": self.chart_type(),
                         "data": [
-                            {key: int(value) for key, value in record.items()}
-                            for record in result
+                            {key: int(value) for key, value in record.items()} for record in result
                         ],
                     }
                 ]

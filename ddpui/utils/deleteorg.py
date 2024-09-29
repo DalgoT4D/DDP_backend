@@ -68,24 +68,18 @@ def delete_warehouse_v1(org: Org, dry_run: bool = False):  # skipcq: PYL-R0201
             dataflow.delete()
             logger.info(f"Deleted deployment - {dataflow.deployment_id}")
 
-    logger.info(
-        "================ Remove OrgTasks:connections & reset connections ==========="
-    )
+    logger.info("================ Remove OrgTasks:connections & reset connections ===========")
     for org_task in OrgTask.objects.filter(
         org=org, task__slug__in=[TASK_AIRBYTESYNC, TASK_AIRBYTERESET]
     ).all():
         try:
             if org_task.connection_id:
-                logger.info(
-                    "will delete connection %s in Airbyte ", org_task.connection_id
-                )
+                logger.info("will delete connection %s in Airbyte ", org_task.connection_id)
                 if not dry_run:
                     airbyte_service.delete_connection(
                         org.airbyte_workspace_id, org_task.connection_id
                     )
-                    logger.info(
-                        f"deleted connection in Airbyte - {org_task.connection_id}"
-                    )
+                    logger.info(f"deleted connection in Airbyte - {org_task.connection_id}")
         except Exception:
             pass
 
@@ -96,33 +90,23 @@ def delete_warehouse_v1(org: Org, dry_run: bool = False):  # skipcq: PYL-R0201
         "================ Remove remaining airbyte connections & destinations (warehouse) ==========="
     )
     if is_valid_uuid(org.airbyte_workspace_id):
-        for connection in airbyte_service.get_connections(org.airbyte_workspace_id)[
-            "connections"
-        ]:
-            logger.info(
-                "will delete connection in Airbyte " + connection["connectionId"]
-            )
+        for connection in airbyte_service.get_connections(org.airbyte_workspace_id)["connections"]:
+            logger.info("will delete connection in Airbyte " + connection["connectionId"])
             if not dry_run:
                 airbyte_service.delete_connection(
                     org.airbyte_workspace_id, connection["connectionId"]
                 )
-                logger.info(
-                    f"deleted connection in Airbyte - {connection['connectionId']}"
-                )
+                logger.info(f"deleted connection in Airbyte - {connection['connectionId']}")
 
         for destination in airbyte_service.get_destinations(org.airbyte_workspace_id)[
             "destinations"
         ]:
-            logger.info(
-                "will delete destination in Airbyte " + destination["destinationId"]
-            )
+            logger.info("will delete destination in Airbyte " + destination["destinationId"])
             if not dry_run:
                 airbyte_service.delete_destination(
                     org.airbyte_workspace_id, destination["destinationId"]
                 )
-                logger.info(
-                    f"deleted destination in Airbyte - {destination['destinationId']}"
-                )
+                logger.info(f"deleted destination in Airbyte - {destination['destinationId']}")
 
     logger.info(
         "================ Remove django warehouse and the credentials in secrets manager ==========="
@@ -133,9 +117,7 @@ def delete_warehouse_v1(org: Org, dry_run: bool = False):  # skipcq: PYL-R0201
             secretsmanager.delete_warehouse_credentials(warehouse)
             warehouse.delete()
 
-    logger.info(
-        "================ Remove cli profile block from django and prefect ==========="
-    )
+    logger.info("================ Remove cli profile block from django and prefect ===========")
     # delete the cli profile block
     for cli_profile_block in OrgPrefectBlockv1.objects.filter(
         org=org, block_type=DBTCLIPROFILE
@@ -169,9 +151,7 @@ def delete_airbyte_workspace_v1(org: Org, dry_run: bool = False):  # skipcq: PYL
         for source in airbyte_service.get_sources(org.airbyte_workspace_id)["sources"]:
             logger.info("will delete source in Airbyte " + source["sourceId"])
             if not dry_run:
-                airbyte_service.delete_source(
-                    org.airbyte_workspace_id, source["sourceId"]
-                )
+                airbyte_service.delete_source(org.airbyte_workspace_id, source["sourceId"])
 
         if not dry_run:
             logger.info("will delete airbyte workspace %s", org.airbyte_workspace_id)
@@ -180,9 +160,7 @@ def delete_airbyte_workspace_v1(org: Org, dry_run: bool = False):  # skipcq: PYL
             except Exception:
                 pass
 
-    for block in OrgPrefectBlockv1.objects.filter(
-        org=org, block_type=AIRBYTESERVER
-    ).all():
+    for block in OrgPrefectBlockv1.objects.filter(org=org, block_type=AIRBYTESERVER).all():
         logger.info("will delete airbyte server block in prefect")
         if not dry_run:
             try:
@@ -203,9 +181,7 @@ def delete_orgusers(org: Org, dry_run: bool = False):  # skipcq: PYL-R0201
 
 def display_org(org: Org):
     """show org"""
-    account_admin = OrgUser.objects.filter(
-        org=org, role=OrgUserRole.ACCOUNT_MANAGER
-    ).first()
+    account_admin = OrgUser.objects.filter(org=org, role=OrgUserRole.ACCOUNT_MANAGER).first()
     logger.info(
         "OrgName: %-25s %-25s Airbyte workspace ID: %-40s Admin: %s",
         org.name,

@@ -3,14 +3,13 @@ import uuid
 import shutil
 from pathlib import Path
 from datetime import datetime
-
 from dotenv import load_dotenv
+
+from ninja import Router
+from ninja.errors import HttpError
+
 from django.db.models import Q
 from django.utils.text import slugify
-from ninja import NinjaAPI
-from ninja.errors import ValidationError, HttpError
-from ninja.responses import Response
-from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from ddpui import auth
 from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
@@ -40,53 +39,12 @@ from ddpui.utils.transform_workflow_helpers import (
     from_orgdbtmodel,
 )
 
-transformapi = NinjaAPI(urls_namespace="transform")
-
+transform_router = Router()
 load_dotenv()
-
 logger = CustomLogger("ddpui")
 
 
-@transformapi.exception_handler(ValidationError)
-def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
-    """
-    Handle any ninja validation errors raised in the apis
-    These are raised during request payload validation
-    exc.errors is correct
-    """
-    return Response({"detail": exc.errors}, status=422)
-
-
-@transformapi.exception_handler(PydanticValidationError)
-def pydantic_validation_error_handler(
-    request, exc: PydanticValidationError
-):  # pylint: disable=unused-argument
-    """
-    Handle any pydantic errors raised in the apis
-    These are raised during response payload validation
-    exc.errors() is correct
-    """
-    return Response({"detail": exc.errors()}, status=500)
-
-
-@transformapi.exception_handler(Exception)
-def ninja_default_error_handler(
-    request, exc: Exception
-):  # pylint: disable=unused-argument # skipcq PYL-W0613
-    """Handle any other exception raised in the apis"""
-    print(exc)
-    return Response({"detail": "something went wrong"}, status=500)
-
-
-@transformapi.exception_handler(ValueError)
-def handle_value_error(request, exc):
-    """
-    Handle ValueError exceptions.
-    """
-    return Response({"detail": str(exc)}, status=400)
-
-
-@transformapi.post("/dbt_project/", auth=auth.CustomAuthMiddleware())
+@transform_router.post("/dbt_project/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_dbt_workspace"])
 def create_dbt_project(request, payload: DbtProjectSchema):
     """
@@ -108,7 +66,7 @@ def create_dbt_project(request, payload: DbtProjectSchema):
     return {"message": f"Project {org.slug} created successfully"}
 
 
-@transformapi.delete("/dbt_project/{project_name}", auth=auth.CustomAuthMiddleware())
+@transform_router.delete("/dbt_project/{project_name}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_delete_dbt_workspace"])
 def delete_dbt_project(request, project_name: str):
     """
@@ -125,9 +83,7 @@ def delete_dbt_project(request, project_name: str):
     dbtrepo_dir: Path = project_dir / project_name
 
     if not dbtrepo_dir.exists():
-        raise HttpError(
-            422, f"Project {project_name} does not exist in organization {org.slug}"
-        )
+        raise HttpError(422, f"Project {project_name} does not exist in organization {org.slug}")
 
     if org.dbt:
         dbt = org.dbt
@@ -141,7 +97,7 @@ def delete_dbt_project(request, project_name: str):
     return {"message": f"Project {project_name} deleted successfully"}
 
 
-@transformapi.post("/dbt_project/sync_sources/", auth=auth.CustomAuthMiddleware())
+@transform_router.post("/dbt_project/sync_sources/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_sync_sources"])
 def sync_sources(request):
     """
@@ -158,9 +114,7 @@ def sync_sources(request):
     if not orgdbt:
         raise HttpError(404, "DBT workspace not set up")
 
-    task = sync_sources_for_warehouse.delay(
-        orgdbt.id, org_warehouse.id, org_warehouse.org.slug
-    )
+    task = sync_sources_for_warehouse.delay(orgdbt.id, org_warehouse.id, org_warehouse.org.slug)
 
     return {"task_id": task.id}
 
@@ -168,7 +122,7 @@ def sync_sources(request):
 ########################## Models & Sources #############################################
 
 
-@transformapi.post("/dbt_project/model/", auth=auth.CustomAuthMiddleware())
+@transform_router.post("/dbt_project/model/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_dbt_model"])
 def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     """
@@ -196,9 +150,7 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
 
     target_model = None
     if payload.target_model_uuid:
-        target_model = OrgDbtModel.objects.filter(
-            uuid=payload.target_model_uuid
-        ).first()
+        target_model = OrgDbtModel.objects.filter(uuid=payload.target_model_uuid).first()
 
     if not target_model:
         target_model = OrgDbtModel.objects.create(
@@ -211,9 +163,7 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     if not target_model.under_construction:
         raise HttpError(422, "model is locked")
 
-    current_operations_chained = OrgDbtOperation.objects.filter(
-        dbtmodel=target_model
-    ).count()
+    current_operations_chained = OrgDbtOperation.objects.filter(dbtmodel=target_model).count()
 
     final_config, all_input_models = validate_operation_config(
         payload, target_model, is_multi_input_op, current_operations_chained
@@ -252,7 +202,7 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     return from_orgdbtoperation(dbt_op, chain_length=dbt_op.seq)
 
 
-@transformapi.put(
+@transform_router.put(
     "/dbt_project/model/operations/{operation_uuid}/", auth=auth.CustomAuthMiddleware()
 )
 @has_permission(["can_edit_dbt_operation"])
@@ -329,7 +279,7 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
     target_model.output_cols = dbt_operation.output_cols
     target_model.save()
 
-    if (not target_model.under_construction):
+    if not target_model.under_construction:
         dbtautomation_service.update_dbt_model_in_project(org_warehouse, target_model)
 
     # propogate the udpates down the chain
@@ -342,7 +292,7 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
     return from_orgdbtoperation(dbt_operation, chain_length=len(all_ops))
 
 
-@transformapi.get(
+@transform_router.get(
     "/dbt_project/model/operations/{operation_uuid}/", auth=auth.CustomAuthMiddleware()
 )
 @has_permission(["can_view_dbt_operation"])
@@ -381,9 +331,7 @@ def get_operation(request, operation_uuid: str):
     else:
         config = dbt_operation.config
         if "input_models" in config and len(config["input_models"]) >= 1:
-            model = OrgDbtModel.objects.filter(
-                uuid=config["input_models"][0]["uuid"]
-            ).first()
+            model = OrgDbtModel.objects.filter(uuid=config["input_models"][0]["uuid"]).first()
             if model:
                 for col_data in get_warehouse_data(
                     request,
@@ -396,9 +344,7 @@ def get_operation(request, operation_uuid: str):
     return from_orgdbtoperation(dbt_operation, prev_source_columns=prev_source_columns)
 
 
-@transformapi.post(
-    "/dbt_project/model/{model_uuid}/save/", auth=auth.CustomAuthMiddleware()
-)
+@transform_router.post("/dbt_project/model/{model_uuid}/save/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_dbt_model"])
 def post_save_model(request, model_uuid: str, payload: CompleteDbtModelPayload):
     """Complete the model; create the dbt model on disk"""
@@ -437,7 +383,7 @@ def post_save_model(request, model_uuid: str, payload: CompleteDbtModelPayload):
     return from_orgdbtmodel(orgdbt_model)
 
 
-@transformapi.get("/dbt_project/sources_models/", auth=auth.CustomAuthMiddleware())
+@transform_router.get("/dbt_project/sources_models/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_dbt_models"])
 def get_input_sources_and_models(request, schema_name: str = None):
     """
@@ -468,7 +414,7 @@ def get_input_sources_and_models(request, schema_name: str = None):
     return res
 
 
-@transformapi.get("/dbt_project/graph/", auth=auth.CustomAuthMiddleware())
+@transform_router.get("/dbt_project/graph/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_dbt_workspace"])
 def get_dbt_project_DAG(request):
     """
@@ -503,17 +449,12 @@ def get_dbt_project_DAG(request):
             model_nodes.append(edge.to_node)
         seen_model_node_ids.add(edge.to_node.id)
 
-    all_operations = OrgDbtOperation.objects.filter(
-        dbtmodel_id__in=list(seen_model_node_ids)
-    ).all()
+    all_operations = OrgDbtOperation.objects.filter(dbtmodel_id__in=list(seen_model_node_ids)).all()
 
     # fetch all the source nodes that can be in the operation.config["input_models"]
     uuids = []
     for operation in all_operations:
-        if (
-            "input_models" in operation.config
-            and len(operation.config["input_models"]) > 0
-        ):
+        if "input_models" in operation.config and len(operation.config["input_models"]) > 0:
             uuids.extend([model["uuid"] for model in operation.config["input_models"]])
     op_src_nodes = OrgDbtModel.objects.filter(uuid__in=uuids).all()
 
@@ -526,17 +467,12 @@ def get_dbt_project_DAG(request):
         sorted_operations = sorted(operations, key=lambda op: op.seq)
         for operation in sorted_operations:
             operation_nodes.append(operation)
-            if (
-                "input_models" in operation.config
-                and len(operation.config["input_models"]) > 0
-            ):
+            if "input_models" in operation.config and len(operation.config["input_models"]) > 0:
                 input_models = operation.config["input_models"]
                 src_uuids = [model["uuid"] for model in input_models]
                 # edge(s) between the node(s) and other sources involved that are tables (OrgDbtModel)
                 for op_src_node in [
-                    src_node
-                    for src_node in op_src_nodes
-                    if str(src_node.uuid) in src_uuids
+                    src_node for src_node in op_src_nodes if str(src_node.uuid) in src_uuids
                 ]:
                     model_nodes.append(op_src_node)
                     res_edges.append(
@@ -580,20 +516,14 @@ def get_dbt_project_DAG(request):
     # set to remove duplicates
     seen = set()
     res = {}
-    res["nodes"] = [
-        nn for nn in res_nodes if not (nn["id"] in seen or seen.add(nn["id"]))
-    ]
+    res["nodes"] = [nn for nn in res_nodes if not (nn["id"] in seen or seen.add(nn["id"]))]
     seen = set()
-    res["edges"] = [
-        edg for edg in res_edges if not (edg["id"] in seen or seen.add(edg["id"]))
-    ]
+    res["edges"] = [edg for edg in res_edges if not (edg["id"] in seen or seen.add(edg["id"]))]
 
     return res
 
 
-@transformapi.delete(
-    "/dbt_project/model/{model_uuid}/", auth=auth.CustomAuthMiddleware()
-)
+@transform_router.delete("/dbt_project/model/{model_uuid}/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_delete_dbt_model"])
 def delete_model(request, model_uuid, canvas_lock_id: str = None):
     """
@@ -632,18 +562,13 @@ def delete_model(request, model_uuid, canvas_lock_id: str = None):
     else:
         # make sure this is not linked to any other model
         # delete if there are no edges coming or going out of this model
-        if (
-            DbtEdge.objects.filter(
-                Q(from_node=orgdbt_model) | Q(to_node=orgdbt_model)
-            ).count()
-            == 0
-        ):
+        if DbtEdge.objects.filter(Q(from_node=orgdbt_model) | Q(to_node=orgdbt_model)).count() == 0:
             orgdbt_model.delete()
 
     return {"success": 1}
 
 
-@transformapi.delete(
+@transform_router.delete(
     "/dbt_project/model/operations/{operation_uuid}/", auth=auth.CustomAuthMiddleware()
 )
 @has_permission(["can_delete_dbt_operation"])
@@ -682,7 +607,7 @@ def delete_operation(request, operation_uuid, canvas_lock_id: str = None):
     return {"success": 1}
 
 
-@transformapi.get("/dbt_project/data_type/", auth=auth.CustomAuthMiddleware())
+@transform_router.get("/dbt_project/data_type/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def get_warehouse_datatypes(request):
     """Get the datatypes of a table in a warehouse"""
@@ -697,7 +622,7 @@ def get_warehouse_datatypes(request):
     return data_types
 
 
-@transformapi.post(
+@transform_router.post(
     "/dbt_project/canvas/lock/",
     auth=auth.CustomAuthMiddleware(),
     response=LockCanvasResponseSchema,
@@ -747,7 +672,7 @@ def post_lock_canvas(request, payload: LockCanvasRequestSchema):
     )
 
 
-@transformapi.post(
+@transform_router.post(
     "/dbt_project/canvas/unlock/",
     auth=auth.CustomAuthMiddleware(),
 )

@@ -37,9 +37,7 @@ def create_default_transform_tasks(
         raise ValueError("dbt is not configured for this org")
 
     # if transform_type is "ui" then we don't set up git-pull
-    task_types = (
-        ["dbt", "git"] if org.dbt.transform_type == TransformType.GIT else ["dbt"]
-    )
+    task_types = ["dbt", "git"] if org.dbt.transform_type == TransformType.GIT else ["dbt"]
     for task in Task.objects.filter(type__in=task_types, is_system=True).all():
         org_task = OrgTask.objects.create(org=org, task=task, uuid=uuid.uuid4())
 
@@ -167,7 +165,6 @@ def delete_orgtask(org_task: OrgTask):
     for dataflow_orgtask in DataflowOrgTask.objects.filter(
         orgtask=org_task
     ).all():  # only long running task like TASK_DBTRUN, TASK_AIRBYTESYNC will have dataflow
-
         # delete the manual deployment for this
         dataflow = dataflow_orgtask.dataflow
         if dataflow:
@@ -221,9 +218,7 @@ def fetch_orgtask_lock_v1(org_task: OrgTask, lock: Union[TaskLock, None]):
     if lock:
         lock_status = TaskLockStatus.QUEUED
         if lock.flow_run_id:
-            flow_run = prefect_service.get_flow_run(
-                lock.flow_run_id
-            )  # can taken from db now
+            flow_run = prefect_service.get_flow_run(lock.flow_run_id)  # can taken from db now
             if flow_run and flow_run["state_type"] in ["SCHEDULED", "PENDING"]:
                 lock_status = TaskLockStatus.QUEUED
             elif flow_run and flow_run["state_type"] == "RUNNING":

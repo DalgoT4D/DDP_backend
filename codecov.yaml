@@ -1,3 +1,0 @@
-ignore:
-  - ddpui/utils/sendgrid.py
-  - ddpui/utils/dbtdocs.py

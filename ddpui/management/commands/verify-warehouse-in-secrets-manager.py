@@ -16,7 +16,6 @@ class Command(BaseCommand):
     """
 
     def handle(self, *args, **options):
-
         airbyte_service.logger.logger.setLevel(ERROR)
         secretsmanager.logger.logger.setLevel(ERROR)
 
@@ -37,10 +36,7 @@ class Command(BaseCommand):
                         )
             elif warehouse.wtype == "bigquery":
                 # the credentials_json is not available, and the dataset_id is not available
-                if (
-                    warehouse_secret["project_id"]
-                    != res["connectionConfiguration"]["project_id"]
-                ):
+                if warehouse_secret["project_id"] != res["connectionConfiguration"]["project_id"]:
                     print(
                         f'project_id mismatch: {warehouse_secret["project_id"]} vs {res["connectionConfiguration"]["project_id"]}'
                     )

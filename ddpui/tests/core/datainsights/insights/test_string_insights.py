@@ -126,10 +126,7 @@ def test_distribution_chart_query_parse_results(
     assert distribution_chart_query.columns[0].name in output
     assert "charts" in output[distribution_chart_query.columns[0].name]
     assert len(output[distribution_chart_query.columns[0].name]["charts"]) == 1
-    assert (
-        output[distribution_chart_query.columns[0].name]["charts"][0]["data"]
-        == mock_results
-    )
+    assert output[distribution_chart_query.columns[0].name]["charts"][0]["data"] == mock_results
 
 
 def test_distribution_chart_query_validate_results(
