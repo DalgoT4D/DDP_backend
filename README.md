@@ -29,18 +29,14 @@ Django application for the DDP platform's management backend. Exposes API endpoi
 
 ### Ninja api docs
 
--   [Dashboard](https://api.dalgo.in/api/dashboard/docs)
--   [Airbyte](https://api.dalgo.in/api/airbyte/docs)
--   [Flows](https://api.dalgo.in/api/prefect/docs)
--   [Dbt](https://api.dalgo.in/api/dbt/docs)
--   [Celery tasks](https://api.dalgo.in/api/tasks/docs)
--   [User & Org](https://api.dalgo.in/api/docs)
+- All api docs are at `http://localhost:8002/api/docs`
 
 ### Code style
 
 -   `Pep8` has been used to standardized variable names, classes, module names etc.
 -   `Pylint` is the linting tool used to analyze the code as per Pep8 style.
 -   `Black` is used as the code formatter.
+
 
 ### Setting up your vscode env
 
@@ -55,9 +51,10 @@ Django application for the DDP platform's management backend. Exposes API endpoi
 "editor.formatOnSave": true
 }`
 
-### Running pylint
+### Setup pre-commit and run hooks
 
--   In your virtual environment run `pylint ddpui/`
+-  Run "pre-commit install" after activating your virtual env
+- Run "pre-commit run --all-files" to run the formatter
 
 ### Running celery
 

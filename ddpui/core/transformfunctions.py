@@ -63,9 +63,7 @@ def validate_operation_config(
             other_input_columns.append(other_input.columns)
             other_input_models.append(model)
 
-    all_input_models = (
-        [primary_input_model] if primary_input_model else []
-    ) + other_input_models
+    all_input_models = ([primary_input_model] if primary_input_model else []) + other_input_models
 
     logger.info(
         "passed all validation; moving to %s operation",
@@ -119,14 +117,10 @@ def check_canvas_locked(requestor_orguser: OrgUser, lock_id: str):
     if os.getenv("CANVAS_LOCK") in [False, "False", "false"]:
         return True
 
-    canvas_lock = CanvasLock.objects.filter(
-        locked_by__org=requestor_orguser.org
-    ).first()
+    canvas_lock = CanvasLock.objects.filter(locked_by__org=requestor_orguser.org).first()
     if canvas_lock:
         if canvas_lock.locked_by != requestor_orguser:
-            raise HttpError(
-                403, f"canvas is locked by {canvas_lock.locked_by.user.email}"
-            )
+            raise HttpError(403, f"canvas is locked by {canvas_lock.locked_by.user.email}")
         elif str(canvas_lock.lock_id) != lock_id:
             raise HttpError(
                 403,

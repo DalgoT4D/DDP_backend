@@ -28,9 +28,7 @@ def get_recipients(
     # send to all users in an org
     elif sent_to == SentToEnum.ALL_ORG_USERS:
         if org_slug:
-            recipients = OrgUser.objects.filter(org__slug=org_slug).values_list(
-                "id", flat=True
-            )
+            recipients = OrgUser.objects.filter(org__slug=org_slug).values_list("id", flat=True)
         else:
             return "org_slug is required to sent notification to all org users.", None
 
@@ -48,9 +46,9 @@ def get_recipients(
 
     # role based filtering
     if manager_or_above and sent_to != SentToEnum.SINGLE_USER:
-        recipients = OrgUser.objects.filter(
-            new_role_id__lte=3, id__in=recipients
-        ).values_list("id", flat=True)
+        recipients = OrgUser.objects.filter(new_role_id__lte=3, id__in=recipients).values_list(
+            "id", flat=True
+        )
 
     if not recipients:
         return "No users found for the given information", None
@@ -83,23 +81,16 @@ def handle_recipient(
 
         if user_preference.enable_email_notifications:
             try:
-                send_email_notification(
-                    user_preference.orguser.user.email, notification.message
-                )
+                send_email_notification(user_preference.orguser.user.email, notification.message)
             except Exception as e:
                 return {
                     "recipient": notification_recipient.recipient.user.email,
                     "error": f"Error sending email notification: {str(e)}",
                 }
 
-        if (
-            user_preference.enable_discord_notifications
-            and user_preference.discord_webhook
-        ):
+        if user_preference.enable_discord_notifications and user_preference.discord_webhook:
             try:
-                send_discord_notification(
-                    user_preference.discord_webhook, notification.message
-                )
+                send_discord_notification(user_preference.discord_webhook, notification.message)
             except Exception as e:
                 return {
                     "recipient": notification_recipient.recipient.user.email,
@@ -200,9 +191,7 @@ def get_notification_recipients(
     try:
         notification = Notification.objects.get(id=notification_id)
 
-        recipients = NotificationRecipient.objects.filter(
-            notification=notification
-        ).distinct()
+        recipients = NotificationRecipient.objects.filter(notification=notification).distinct()
 
         recipient_list = [
             {
@@ -346,9 +335,7 @@ def delete_scheduled_notification(
         if notification.sent_time is not None:
             return "Notification has already been sent and cannot be deleted.", None
 
-        notification_recipients = NotificationRecipient.objects.filter(
-            notification=notification
-        )
+        notification_recipients = NotificationRecipient.objects.filter(notification=notification)
 
         # removing notification from celery queue
         for recipient in notification_recipients:

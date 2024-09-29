@@ -16,9 +16,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("org", type=str, help="Org slug")
-        parser.add_argument(
-            "--show", action="store_true", help="Show the current dbt cli profile"
-        )
+        parser.add_argument("--show", action="store_true", help="Show the current dbt cli profile")
         parser.add_argument("--remove", help="key to remove")
         parser.add_argument("--add", help="key to add")
         parser.add_argument("--value", help="value to add")

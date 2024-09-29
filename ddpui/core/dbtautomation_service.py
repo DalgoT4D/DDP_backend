@@ -153,14 +153,10 @@ def create_or_update_dbt_model_in_project(
 
     operations = []
     input_models = []
-    for operation in (
-        OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).order_by("seq").all()
-    ):
+    for operation in OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).order_by("seq").all():
         if operation.seq == 1:
             input_models = operation.config["input_models"]
-        operations.append(
-            {"type": operation.config["type"], "config": operation.config["config"]}
-        )
+        operations.append({"type": operation.config["type"], "config": operation.config["config"]})
 
     merge_input = []
     for model in input_models:
@@ -245,9 +241,7 @@ def get_table_columns(org_warehouse: OrgWarehouse, dbtmodel: OrgDbtModel):
     return wclient.get_table_columns(dbtmodel.schema, dbtmodel.name)
 
 
-def get_output_cols_for_operation(
-    org_warehouse: OrgWarehouse, op_type: str, config: dict
-):
+def get_output_cols_for_operation(org_warehouse: OrgWarehouse, op_type: str, config: dict):
     """
     Get the output columns from a merge operation;
     this only generates the sql and fetches the output col.
@@ -255,9 +249,7 @@ def get_output_cols_for_operation(
     """
     wclient = _get_wclient(org_warehouse)
     operations = [{"type": op_type, "config": config}]
-    _, output_cols = merge_operations_sql(
-        _get_merge_operation_config(operations), wclient
-    )
+    _, output_cols = merge_operations_sql(_get_merge_operation_config(operations), wclient)
     return output_cols
 
 
@@ -301,9 +293,7 @@ def propagate_changes_to_downstream_operations(
 
 
 @app.task(bind=True)
-def sync_sources_for_warehouse(
-    self, org_dbt_id: str, org_warehouse_id: str, orgslug: str
-):
+def sync_sources_for_warehouse(self, org_dbt_id: str, org_warehouse_id: str, orgslug: str):
     """
     Sync all tables in all schemas in the warehouse.
     Dbt source name will be the same as the schema name.
@@ -315,9 +305,7 @@ def sync_sources_for_warehouse(
     )
 
     org_dbt: OrgDbt = OrgDbt.objects.filter(id=org_dbt_id).first()
-    org_warehouse: OrgWarehouse = OrgWarehouse.objects.filter(
-        id=org_warehouse_id
-    ).first()
+    org_warehouse: OrgWarehouse = OrgWarehouse.objects.filter(id=org_warehouse_id).first()
 
     taskprogress.add(
         {
@@ -354,9 +342,7 @@ def sync_sources_for_warehouse(
             )
 
             if len(sync_tables) == 0:
-                logger.info(
-                    f"No new tables in schema '{schema}' to be synced as sources."
-                )
+                logger.info(f"No new tables in schema '{schema}' to be synced as sources.")
                 continue
 
             # in dbt automation, it will overwrite the sources (if name is same which it will be = "schema") and the file
@@ -408,10 +394,7 @@ def sync_sources_for_warehouse(
             )
             taskprogress.add(
                 {
-                    "message": "Added "
-                    + source["source_name"]
-                    + "."
-                    + source["input_name"],
+                    "message": "Added " + source["source_name"] + "." + source["input_name"],
                     "status": "running",
                 }
             )

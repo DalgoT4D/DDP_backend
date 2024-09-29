@@ -1,6 +1,6 @@
 import os
 import django
-from unittest.mock import patch, Mock
+from unittest.mock import patch, Mock, call
 import pytest
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
@@ -17,27 +17,16 @@ from ddpui.ddpprefect.prefect_service import (
     prefect_delete_a_block,
     HttpError,
     get_airbyte_server_block_id,
-    get_airbye_connection_blocks,
     update_airbyte_server_block,
     update_airbyte_connection_block,
-    get_dbtcore_block_id,
     create_airbyte_server_block,
     delete_airbyte_server_block,
     delete_airbyte_connection_block,
-    post_prefect_blocks_bulk_delete,
-    get_shell_block_id,
-    PrefectDbtCoreSetup,
-    create_dbt_core_block,
     delete_dbt_core_block,
     PrefectSecretBlockCreate,
     create_secret_block,
     delete_secret_block,
-    update_dbt_core_block_credentials,
     update_dbt_core_block_schema,
-    run_airbyte_connection_sync,
-    PrefectAirbyteSync,
-    run_dbt_core_sync,
-    PrefectDbtCore,
     get_flow_runs_by_deployment_id,
     set_deployment_schedule,
     get_filtered_deployments,
@@ -47,6 +36,7 @@ from ddpui.ddpprefect.prefect_service import (
     get_flow_run,
     create_deployment_flow_run,
     create_dbt_cli_profile_block,
+    recurse_flow_run_logs,
 )
 
 PREFECT_PROXY_API_URL = os.getenv("PREFECT_PROXY_API_URL")
@@ -273,17 +263,6 @@ def test_delete_airbyte_server_block(mock_delete: Mock):
 
 
 # =============================================================================
-@patch("ddpui.ddpprefect.prefect_service.prefect_post")
-def test_get_airbye_connection_blocks(mock_post: Mock):
-    mock_post.return_value = "blocks-blocks-blocks"
-    response = get_airbye_connection_blocks(["blockname1", "blockname2"])
-    assert response == "blocks-blocks-blocks"
-    mock_post.assert_called_once_with(
-        "blocks/airbyte/connection/filter",
-        {"block_names": ["blockname1", "blockname2"]},
-    )
-
-
 def test_update_airbyte_connection_block():
     with pytest.raises(Exception) as excinfo:
         update_airbyte_connection_block("blockname")
@@ -296,98 +275,11 @@ def test_delete_airbyte_connection_block(mock_delete: Mock):
     mock_delete.assert_called_once_with("blockid")
 
 
-@patch("ddpui.ddpprefect.prefect_service.prefect_post")
-def test_post_prefect_blocks_bulk_delete(mock_post: Mock):
-    mock_post.return_value = "retval"
-    response = post_prefect_blocks_bulk_delete([1, 2, 3])
-    assert response == "retval"
-    mock_post.assert_called_once_with("blocks/bulk/delete/", {"block_ids": [1, 2, 3]})
-
-
 # =============================================================================
-@patch("ddpui.ddpprefect.prefect_service.prefect_get")
-def test_get_shell_block_id(mock_get: Mock):
-    mock_get.return_value = {"block_id": "theblockid"}
-    response = get_shell_block_id("blockname")
-    assert response == "theblockid"
-    mock_get.assert_called_once_with("blocks/shell/blockname")
-
-
-# =============================================================================
-@patch("ddpui.ddpprefect.prefect_service.prefect_get")
-def test_get_dbtcore_block_id(mock_get: Mock):
-    mock_get.return_value = {"block_id": "theblockid"}
-    response = get_dbtcore_block_id("blockname")
-    assert response == "theblockid"
-    mock_get.assert_called_once_with("blocks/dbtcore/blockname")
-
-
-@patch("ddpui.ddpprefect.prefect_service.prefect_post")
-def test_create_dbt_core_block(mock_post: Mock):
-    mock_post.return_value = "retval"
-    dbtcore = PrefectDbtCoreSetup(
-        block_name="theblockname",
-        working_dir="/working/dir",
-        profiles_dir="/profiles/dir",
-        project_dir="/project/dir",
-        env={"ekey": "eval"},
-        commands=["c1", "c2"],
-    )
-    response = create_dbt_core_block(
-        dbtcore,
-        "profilename",
-        "cli_profile_block_name",
-        "target",
-        "wtype",
-        credentials={"c1": "c2"},
-        bqlocation=None,
-    )
-    assert response == "retval"
-    mock_post.assert_called_once_with(
-        "blocks/dbtcore/",
-        {
-            "blockName": dbtcore.block_name,
-            "profile": {
-                "name": "profilename",
-                "target": "target",
-                "target_configs_schema": "target",
-            },
-            "wtype": "wtype",
-            "credentials": {"c1": "c2"},
-            "cli_profile_block_name": "cli_profile_block_name",
-            "bqlocation": None,
-            "commands": dbtcore.commands,
-            "env": dbtcore.env,
-            "working_dir": dbtcore.working_dir,
-            "profiles_dir": dbtcore.profiles_dir,
-            "project_dir": dbtcore.project_dir,
-        },
-    )
-
-
 @patch("ddpui.ddpprefect.prefect_service.prefect_delete_a_block")
 def test_delete_dbt_core_block(mock_delete: Mock):
     delete_dbt_core_block("blockid")
     mock_delete.assert_called_once_with("blockid")
-
-
-@patch("ddpui.ddpprefect.prefect_service.prefect_put")
-def test_update_dbt_core_block_credentials(mock_put: Mock):
-    mock_put.return_value = "retval"
-    response = update_dbt_core_block_credentials(
-        "wtype",
-        "block_name",
-        {"c1": "c2"},
-    )
-
-    assert response == "retval"
-    mock_put.assert_called_once_with(
-        "blocks/dbtcore_edit/wtype/",
-        {
-            "blockName": "block_name",
-            "credentials": {"c1": "c2"},
-        },
-    )
 
 
 @patch("ddpui.ddpprefect.prefect_service.prefect_put")
@@ -454,42 +346,6 @@ def test_delete_secret_block(mock_delete: Mock):
 
 
 # =============================================================================
-@patch("ddpui.ddpprefect.prefect_service.prefect_post")
-def test_run_airbyte_connection_sync(mock_post: Mock):
-    run_flow = PrefectAirbyteSync(
-        blockName="block-name", flowName="flow-name", flowRunName="flow-run-name"
-    )
-    mock_post.return_value = "retval"
-    response = run_airbyte_connection_sync(run_flow)
-    assert response == "retval"
-    mock_post.assert_called_once_with(
-        "flows/airbyte/connection/sync/",
-        json={
-            "blockName": "block-name",
-            "flowName": "flow-name",
-            "flowRunName": "flow-run-name",
-        },
-    )
-
-
-@patch("ddpui.ddpprefect.prefect_service.prefect_post")
-def test_run_dbt_core_sync(mock_post: Mock):
-    run_flow = PrefectDbtCore(
-        blockName="block-name", flowName="flow-name", flowRunName="flow-run-name"
-    )
-    mock_post.return_value = "retval"
-    response = run_dbt_core_sync(run_flow)
-    assert response == "retval"
-    mock_post.assert_called_once_with(
-        "flows/dbtcore/run/",
-        json={
-            "blockName": "block-name",
-            "flowName": "flow-name",
-            "flowRunName": "flow-run-name",
-        },
-    )
-
-
 @patch("ddpui.ddpprefect.prefect_service.prefect_get")
 def test_get_flow_runs_by_deployment_id_limit(mock_get: Mock):
     mock_get.return_value = {"flow_runs": []}
@@ -590,9 +446,12 @@ def test_get_deployment(mock_get: Mock):
 @patch("ddpui.ddpprefect.prefect_service.prefect_get")
 def test_get_flow_run_logs(mock_get: Mock):
     mock_get.return_value = "the-logs"
-    response = get_flow_run_logs("flowrunid","taskrunid", 10, 3)
+    response = get_flow_run_logs("flowrunid", "taskrunid", 10, 3)
     assert response == {"logs": "the-logs"}
-    mock_get.assert_called_once_with("flow_runs/logs/flowrunid", params={"offset": 3, "limit": 10, "task_run_id": "taskrunid"})
+    mock_get.assert_called_once_with(
+        "flow_runs/logs/flowrunid",
+        params={"offset": 3, "limit": 10, "task_run_id": "taskrunid"},
+    )
 
 
 @patch("ddpui.ddpprefect.prefect_service.prefect_get")
@@ -609,3 +468,45 @@ def test_create_deployment_flow_run(mock_post: Mock):
     response = create_deployment_flow_run("depid")
     assert response == "retval"
     mock_post.assert_called_once_with("deployments/depid/flow_run", {})
+
+
+def test_recurse_flow_run_logs():
+    """this function should fetch logs recursively"""
+    with patch("ddpui.ddpprefect.prefect_service.get_flow_run_logs") as mock_get_logs:
+        mock_get_logs.side_effect = [
+            {"logs": {"logs": ["log1", "log2", "log3"]}},
+            {
+                "logs": {
+                    "logs": ["log4", "log5", "log6"],
+                }
+            },
+            {
+                "logs": {
+                    "logs": [
+                        "log7",
+                        "log8",
+                    ]
+                }
+            },
+        ]
+
+        logs = recurse_flow_run_logs("flowrunid", None, limit=3)
+
+        assert logs == [
+            "log1",
+            "log2",
+            "log3",
+            "log4",
+            "log5",
+            "log6",
+            "log7",
+            "log8",
+        ]
+
+        # Check the arguments with which the function was called
+        expected_calls = [
+            call("flowrunid", None, 3, 0),
+            call("flowrunid", None, 3, 3),
+            call("flowrunid", None, 3, 6),
+        ]
+        mock_get_logs.assert_has_calls(expected_calls)

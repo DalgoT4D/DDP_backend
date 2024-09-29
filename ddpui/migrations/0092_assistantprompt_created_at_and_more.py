@@ -13,9 +13,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="assistantprompt",
             name="created_at",
-            field=models.DateTimeField(
-                auto_created=True, default=django.utils.timezone.now
-            ),
+            field=models.DateTimeField(auto_created=True, default=django.utils.timezone.now),
         ),
         migrations.AddField(
             model_name="assistantprompt",
@@ -25,9 +23,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="canvaslock",
             name="created_at",
-            field=models.DateTimeField(
-                auto_created=True, default=django.utils.timezone.now
-            ),
+            field=models.DateTimeField(auto_created=True, default=django.utils.timezone.now),
         ),
         migrations.AddField(
             model_name="canvaslock",
@@ -37,9 +33,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="datafloworgtask",
             name="created_at",
-            field=models.DateTimeField(
-                auto_created=True, default=django.utils.timezone.now
-            ),
+            field=models.DateTimeField(auto_created=True, default=django.utils.timezone.now),
         ),
         migrations.AddField(
             model_name="datafloworgtask",
@@ -49,9 +43,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="dbtedge",
             name="created_at",
-            field=models.DateTimeField(
-                auto_created=True, default=django.utils.timezone.now
-            ),
+            field=models.DateTimeField(auto_created=True, default=django.utils.timezone.now),
         ),
         migrations.AddField(
             model_name="dbtedge",
@@ -61,9 +53,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="invitation",
             name="created_at",
-            field=models.DateTimeField(
-                auto_created=True, default=django.utils.timezone.now
-            ),
+            field=models.DateTimeField(auto_created=True, default=django.utils.timezone.now),
         ),
         migrations.AddField(
             model_name="invitation",
@@ -73,9 +63,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="org",
             name="created_at",
-            field=models.DateTimeField(
-                auto_created=True, default=django.utils.timezone.now
-            ),
+            field=models.DateTimeField(auto_created=True, default=django.utils.timezone.now),
         ),
         migrations.AddField(
             model_name="org",
@@ -85,9 +73,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="orgdataflowv1",
             name="created_at",
-            field=models.DateTimeField(
-                auto_created=True, default=django.utils.timezone.now
-            ),
+            field=models.DateTimeField(auto_created=True, default=django.utils.timezone.now),
         ),
         migrations.AddField(
             model_name="orgdataflowv1",
@@ -97,9 +83,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="orgdbt",
             name="created_at",
-            field=models.DateTimeField(
-                auto_created=True, default=django.utils.timezone.now
-            ),
+            field=models.DateTimeField(auto_created=True, default=django.utils.timezone.now),
         ),
         migrations.AddField(
             model_name="orgdbt",
@@ -109,9 +93,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="orgdbtmodel",
             name="created_at",
-            field=models.DateTimeField(
-                auto_created=True, default=django.utils.timezone.now
-            ),
+            field=models.DateTimeField(auto_created=True, default=django.utils.timezone.now),
         ),
         migrations.AddField(
             model_name="orgdbtmodel",
@@ -121,9 +103,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="orgdbtoperation",
             name="created_at",
-            field=models.DateTimeField(
-                auto_created=True, default=django.utils.timezone.now
-            ),
+            field=models.DateTimeField(auto_created=True, default=django.utils.timezone.now),
         ),
         migrations.AddField(
             model_name="orgdbtoperation",
@@ -133,9 +113,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="orgprefectblockv1",
             name="created_at",
-            field=models.DateTimeField(
-                auto_created=True, default=django.utils.timezone.now
-            ),
+            field=models.DateTimeField(auto_created=True, default=django.utils.timezone.now),
         ),
         migrations.AddField(
             model_name="orgprefectblockv1",
@@ -145,9 +123,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="orgschemachange",
             name="created_at",
-            field=models.DateTimeField(
-                auto_created=True, default=django.utils.timezone.now
-            ),
+            field=models.DateTimeField(auto_created=True, default=django.utils.timezone.now),
         ),
         migrations.AddField(
             model_name="orgschemachange",
@@ -157,9 +133,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="orgtask",
             name="created_at",
-            field=models.DateTimeField(
-                auto_created=True, default=django.utils.timezone.now
-            ),
+            field=models.DateTimeField(auto_created=True, default=django.utils.timezone.now),
         ),
         migrations.AddField(
             model_name="orgtask",
@@ -169,9 +143,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="orguser",
             name="created_at",
-            field=models.DateTimeField(
-                auto_created=True, default=django.utils.timezone.now
-            ),
+            field=models.DateTimeField(auto_created=True, default=django.utils.timezone.now),
         ),
         migrations.AddField(
             model_name="orguser",
@@ -181,9 +153,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="orgwarehouse",
             name="created_at",
-            field=models.DateTimeField(
-                auto_created=True, default=django.utils.timezone.now
-            ),
+            field=models.DateTimeField(auto_created=True, default=django.utils.timezone.now),
         ),
         migrations.AddField(
             model_name="orgwarehouse",
@@ -193,9 +163,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="prefectflowrun",
             name="created_at",
-            field=models.DateTimeField(
-                auto_created=True, default=django.utils.timezone.now
-            ),
+            field=models.DateTimeField(auto_created=True, default=django.utils.timezone.now),
         ),
         migrations.AddField(
             model_name="prefectflowrun",
@@ -210,9 +178,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="userattributes",
             name="created_at",
-            field=models.DateTimeField(
-                auto_created=True, default=django.utils.timezone.now
-            ),
+            field=models.DateTimeField(auto_created=True, default=django.utils.timezone.now),
         ),
         migrations.AddField(
             model_name="userattributes",
@@ -232,8 +198,6 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="llmsession",
             name="created_at",
-            field=models.DateTimeField(
-                auto_created=True, default=django.utils.timezone.now
-            ),
+            field=models.DateTimeField(auto_created=True, default=django.utils.timezone.now),
         ),
     ]

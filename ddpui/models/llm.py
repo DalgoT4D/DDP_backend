@@ -42,9 +42,7 @@ class AssistantPrompt(models.Model):
     """System prompts for various assistant/services"""
 
     prompt = models.TextField(null=False)
-    type = models.CharField(
-        null=False, choices=LlmAssistantType.choices(), max_length=100
-    )
+    type = models.CharField(null=False, choices=LlmAssistantType.choices(), max_length=100)
 
 
 class LlmSession(models.Model):
@@ -74,6 +72,9 @@ class LlmSession(models.Model):
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
     feedback = models.TextField(null=True)
+    updated_by = models.ForeignKey(
+        OrgUser, null=True, on_delete=models.SET_NULL, related_name="updated_by"
+    )
 
 
 class UserPrompt(models.Model):

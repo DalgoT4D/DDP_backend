@@ -24,19 +24,16 @@ class Command(BaseCommand):
     def fetch_prefect_logs_from_deployments(self, org: str, s3):
         """fetches logs for all deployments of an org and saves them to s3 bucket"""
         for dataflow in OrgDataFlowv1.objects.filter(org__slug=org):
-            flow_runs = prefect_service.get_flow_runs_by_deployment_id(
-                dataflow.deployment_id
-            )
+            flow_runs = prefect_service.get_flow_runs_by_deployment_id(dataflow.deployment_id)
             for flow_run in flow_runs:
                 flow_run_id = flow_run["id"]
-                logs_dict = prefect_service.get_flow_run_logs(flow_run_id, 0)
-                if "logs" in logs_dict["logs"]:
-                    flow_run_logs = logs_dict["logs"]["logs"]
+                logs_arr = prefect_service.recurse_flow_run_logs(flow_run_id)
+                if len(logs_arr) > 0:
                     s3key = f"logs/prefect/{org}/{flow_run_id}.json"
                     s3.put_object(
                         Bucket="dalgo-t4dai",
                         Key=s3key,
-                        Body=json.dumps(flow_run_logs),
+                        Body=json.dumps(logs_arr),
                     )
                     print(f"Saved s3://dalgo-t4dai/{s3key}")
 
@@ -53,9 +50,7 @@ class Command(BaseCommand):
         }
 
         for dataflow in OrgDataFlowv1.objects.filter(org__slug=org):
-            flow_runs = prefect_service.get_flow_runs_by_deployment_id(
-                dataflow.deployment_id, 100
-            )
+            flow_runs = prefect_service.get_flow_runs_by_deployment_id(dataflow.deployment_id, 100)
             for flow_run in flow_runs:
                 status = None
                 flow_run_id = flow_run["id"]
@@ -63,9 +58,7 @@ class Command(BaseCommand):
                 for task_logs in all_task_logs:
                     if "logs" in task_logs and len(task_logs["logs"]) > 0:
                         label = task_logs["label"]
-                        print(
-                            f"Found logs for flow_run_id : {flow_run_id} and for task : {label}"
-                        )
+                        print(f"Found logs for flow_run_id : {flow_run_id} and for task : {label}")
 
                         # check which slug is embedded in the label
                         # do string operation & get index of substring
@@ -138,9 +131,7 @@ class Command(BaseCommand):
                                 f"Found success logs for connection id : {connection_id} job_id : {job_id}"
                             )
                             status = self.SUCCESS_LOGS
-                            logs = airbyte_service.get_logs_for_job(
-                                job_id, attempt["id"]
-                            )
+                            logs = airbyte_service.get_logs_for_job(job_id, attempt["id"])
                             logs = logs["logs"]
                             break
                 elif jobinfo["status"] == "failed":
@@ -150,9 +141,7 @@ class Command(BaseCommand):
                                 f"Found failure logs for connection id : {connection_id} job_id : {job_id}"
                             )
                             status = self.FAILURE_LOGS
-                            logs = airbyte_service.get_logs_for_job(
-                                job_id, attempt["id"]
-                            )
+                            logs = airbyte_service.get_logs_for_job(job_id, attempt["id"])
                             logs = logs["logs"]
                             break
 

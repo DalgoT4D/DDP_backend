@@ -67,11 +67,10 @@ class OrgUser(models.Model):
 
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     org = models.ForeignKey(Org, on_delete=models.CASCADE, null=True)
-    role = models.IntegerField(
-        choices=OrgUserRole.choices(), default=OrgUserRole.REPORT_VIEWER
-    )
+    role = models.IntegerField(choices=OrgUserRole.choices(), default=OrgUserRole.REPORT_VIEWER)
     new_role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True)
     email_verified = models.BooleanField(default=False)
+    llm_optin = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -104,6 +103,7 @@ class OrgUserUpdatev1(Schema):
     role_uuid: uuid.UUID = None
     email: str = None
     active: bool = None
+    llm_optin: bool = False
 
 
 class OrgUserUpdateNewRole(Schema):
@@ -131,6 +131,7 @@ class OrgUserResponse(Schema):
     is_demo: bool = False
     new_role_slug: str | None
     permissions: list[dict]
+    llm_optin: bool = None
 
 
 class Invitation(models.Model):
@@ -171,9 +172,7 @@ class AcceptInvitationSchema(Schema):
     """Docstring"""
 
     invite_code: str
-    password: str = (
-        None  # the password is required only when the user has no platform account
-    )
+    password: str = None  # the password is required only when the user has no platform account
 
 
 class ForgotPasswordSchema(Schema):

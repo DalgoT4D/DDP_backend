@@ -41,17 +41,13 @@ class Command(BaseCommand):
     def show_v1_manual_dataflows(self, org: Org):
         """show the v1 dataflows"""
         print("v1 Manual Dataflows for " + org.slug + ":")
-        for dataflow in OrgDataFlowv1.objects.filter(org=org).filter(
-            dataflow_type="manual"
-        ):
+        for dataflow in OrgDataFlowv1.objects.filter(org=org).filter(dataflow_type="manual"):
             print(f"  {dataflow.deployment_name:50} ")
 
     def show_v1_orchestrated_dataflows(self, org: Org):
         """show the v1 dataflows"""
         print("v1 orchestrated Dataflows for " + org.slug + ":")
-        for dataflow in OrgDataFlowv1.objects.filter(org=org).filter(
-            dataflow_type="orchestrate"
-        ):
+        for dataflow in OrgDataFlowv1.objects.filter(org=org).filter(dataflow_type="orchestrate"):
             print(f"  {dataflow.deployment_name:50} ")
 
     def show_org_entities(self, org: Org):

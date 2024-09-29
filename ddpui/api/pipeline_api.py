@@ -1,11 +1,7 @@
 import os
 
-from ninja import NinjaAPI
+from ninja import Router
 from ninja.errors import HttpError
-
-from ninja.errors import ValidationError
-from ninja.responses import Response
-from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
@@ -41,45 +37,11 @@ from ddpui.core.dbtfunctions import gather_dbt_project_params
 from ddpui.auth import has_permission
 from ddpui.models.tasks import TaskLock
 
-pipelineapi = NinjaAPI(urls_namespace="pipeline")
-# http://127.0.0.1:8000/api/docs
-
-
+pipeline_router = Router()
 logger = CustomLogger("ddpui")
 
 
-@pipelineapi.exception_handler(ValidationError)
-def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
-    """
-    Handle any ninja validation errors raised in the apis
-    These are raised during request payload validation
-    exc.errors is correct
-    """
-    return Response({"detail": exc.errors}, status=422)
-
-
-@pipelineapi.exception_handler(PydanticValidationError)
-def pydantic_validation_error_handler(
-    request, exc: PydanticValidationError
-):  # pylint: disable=unused-argument
-    """
-    Handle any pydantic errors raised in the apis
-    These are raised during response payload validation
-    exc.errors() is correct
-    """
-    return Response({"detail": exc.errors()}, status=500)
-
-
-@pipelineapi.exception_handler(Exception)
-def ninja_default_error_handler(
-    request, exc: Exception  # skipcq PYL-W0613
-):  # pylint: disable=unused-argument
-    """Handle any other exception raised in the apis"""
-    logger.info(exc)
-    return Response({"detail": "something went wrong"}, status=500)
-
-
-@pipelineapi.post("v1/flows/", auth=auth.CustomAuthMiddleware())
+@pipeline_router.post("v1/flows/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_pipeline"])
 def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
     """Create a prefect deployment i.e. a ddp dataflow"""
@@ -187,9 +149,7 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
                 deployment_name=deployment_name,
                 flow_name=deployment_name,
                 orgslug=orguser.org.slug,
-                deployment_params={
-                    "config": {"tasks": tasks, "org_slug": orguser.org.slug}
-                },
+                deployment_params={"config": {"tasks": tasks, "org_slug": orguser.org.slug}},
                 cron=payload.cron,
             )
         )
@@ -217,7 +177,7 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
     }
 
 
-@pipelineapi.get("v1/flows/", auth=auth.CustomAuthMiddleware())
+@pipeline_router.get("v1/flows/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_pipelines"])
 def get_prefect_dataflows_v1(request):
     """Fetch all flows/pipelines created in an organization"""
@@ -226,9 +186,7 @@ def get_prefect_dataflows_v1(request):
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
 
-    all_org_data_flows = OrgDataFlowv1.objects.filter(
-        org=orguser.org, dataflow_type="orchestrate"
-    )
+    all_org_data_flows = OrgDataFlowv1.objects.filter(org=orguser.org, dataflow_type="orchestrate")
 
     dataflow_ids = all_org_data_flows.values_list("id", flat=True)
     all_dataflow_orgtasks = DataflowOrgTask.objects.filter(
@@ -247,22 +205,15 @@ def get_prefect_dataflows_v1(request):
     is_deployment_active = {}
 
     # setting active/inactive status based on if the schedule is set or not
-    for deployment in prefect_service.get_filtered_deployments(
-        orguser.org.slug, deployment_ids
-    ):
+    for deployment in prefect_service.get_filtered_deployments(orguser.org.slug, deployment_ids):
         is_deployment_active[deployment["deploymentId"]] = (
-            deployment["isScheduleActive"]
-            if "isScheduleActive" in deployment
-            else False
+            deployment["isScheduleActive"] if "isScheduleActive" in deployment else False
         )
 
     res = []
 
     for flow in all_org_data_flows:
-
-        dataflow_orgtasks = [
-            dfot for dfot in all_dataflow_orgtasks if dfot.dataflow_id == flow.id
-        ]
+        dataflow_orgtasks = [dfot for dfot in all_dataflow_orgtasks if dfot.dataflow_id == flow.id]
 
         org_tasks: list[OrgTask] = [
             dataflow_orgtask.orgtask for dataflow_orgtask in dataflow_orgtasks
@@ -270,15 +221,11 @@ def get_prefect_dataflows_v1(request):
         orgtask_ids = [org_task.id for org_task in org_tasks]
 
         lock = None
-        all_locks = [
-            lock for lock in all_org_task_locks if lock.orgtask_id in orgtask_ids
-        ]
+        all_locks = [lock for lock in all_org_task_locks if lock.orgtask_id in orgtask_ids]
         if len(all_locks) > 0:
             lock = all_locks[0]
 
-        runs = [
-            run for run in all_last_runs if run["deployment_id"] == flow.deployment_id
-        ]
+        runs = [run for run in all_last_runs if run["deployment_id"] == flow.deployment_id]
 
         res.append(
             {
@@ -299,7 +246,7 @@ def get_prefect_dataflows_v1(request):
     return res
 
 
-@pipelineapi.get("v1/flows/{deployment_id}", auth=auth.CustomAuthMiddleware())
+@pipeline_router.get("v1/flows/{deployment_id}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_pipeline"])
 def get_prefect_dataflow_v1(request, deployment_id):
     """Fetch details of prefect deployment"""
@@ -366,7 +313,7 @@ def get_prefect_dataflow_v1(request, deployment_id):
     }
 
 
-@pipelineapi.delete("v1/flows/{deployment_id}", auth=auth.CustomAuthMiddleware())
+@pipeline_router.delete("v1/flows/{deployment_id}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_delete_pipeline"])
 def delete_prefect_dataflow_v1(request, deployment_id):
     """Delete a prefect deployment along with its org data flow"""
@@ -390,11 +337,9 @@ def delete_prefect_dataflow_v1(request, deployment_id):
     return {"success": 1}
 
 
-@pipelineapi.put("v1/flows/{deployment_id}", auth=auth.CustomAuthMiddleware())
+@pipeline_router.put("v1/flows/{deployment_id}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_pipeline"])
-def put_prefect_dataflow_v1(
-    request, deployment_id, payload: PrefectDataFlowUpdateSchema3
-):
+def put_prefect_dataflow_v1(request, deployment_id, payload: PrefectDataFlowUpdateSchema3):
     """Edit the data flow / prefect deployment"""
     orguser: OrgUser = request.orguser
 
@@ -498,9 +443,7 @@ def put_prefect_dataflow_v1(
     map_org_tasks += dbt_git_orgtasks
 
     # update deployment
-    payload.deployment_params = {
-        "config": {"tasks": tasks, "org_slug": orguser.org.slug}
-    }
+    payload.deployment_params = {"config": {"tasks": tasks, "org_slug": orguser.org.slug}}
     try:
         prefect_service.update_dataflow_v1(deployment_id, payload)
     except Exception as error:
@@ -512,9 +455,7 @@ def put_prefect_dataflow_v1(
 
     # re-map orgtasks to dataflow
     for idx, org_task in enumerate(map_org_tasks):
-        DataflowOrgTask.objects.create(
-            dataflow=org_data_flow, orgtask=org_task, seq=idx
-        )
+        DataflowOrgTask.objects.create(dataflow=org_data_flow, orgtask=org_task, seq=idx)
 
     org_data_flow.cron = payload.cron if payload.cron else None
     org_data_flow.name = payload.name
@@ -523,7 +464,7 @@ def put_prefect_dataflow_v1(
     return {"success": 1}
 
 
-@pipelineapi.post(
+@pipeline_router.post(
     "flows/{deployment_id}/set_schedule/{status}", auth=auth.CustomAuthMiddleware()
 )
 @has_permission(["can_edit_pipeline"])
@@ -552,13 +493,9 @@ def post_deployment_set_schedule(request, deployment_id, status):
 ################################## runs and logs related ######################################
 
 
-@pipelineapi.post(
-    "v1/flows/{deployment_id}/flow_run/", auth=auth.CustomAuthMiddleware()
-)
+@pipeline_router.post("v1/flows/{deployment_id}/flow_run/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_run_pipeline"])
-def post_run_prefect_org_deployment_task(
-    request, deployment_id, payload: TaskParameters = None
-):
+def post_run_prefect_org_deployment_task(request, deployment_id, payload: TaskParameters = None):
     """
     Run deployment based task.
     Can run
@@ -571,27 +508,19 @@ def post_run_prefect_org_deployment_task(
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
 
-    dataflow = OrgDataFlowv1.objects.filter(
-        org=orguser.org, deployment_id=deployment_id
-    ).first()
+    dataflow = OrgDataFlowv1.objects.filter(org=orguser.org, deployment_id=deployment_id).first()
 
     dataflow_orgtasks = (
-        DataflowOrgTask.objects.filter(dataflow=dataflow)
-        .order_by("seq")
-        .select_related("orgtask")
+        DataflowOrgTask.objects.filter(dataflow=dataflow).order_by("seq").select_related("orgtask")
     )
 
     if dataflow_orgtasks.count() == 0:
         raise HttpError(400, "no org task mapped to the deployment")
 
     # ordered
-    org_tasks: list[OrgTask] = [
-        dataflow_orgtask.orgtask for dataflow_orgtask in dataflow_orgtasks
-    ]
+    org_tasks: list[OrgTask] = [dataflow_orgtask.orgtask for dataflow_orgtask in dataflow_orgtasks]
 
-    locks = lock_tasks_for_dataflow(
-        orguser=orguser, dataflow=dataflow, org_tasks=org_tasks
-    )
+    locks = lock_tasks_for_dataflow(orguser=orguser, dataflow=dataflow, org_tasks=org_tasks)
 
     try:
         # allow parameter passing only for manual dbt runs and if the there are parameters being passed
@@ -646,21 +575,21 @@ def post_run_prefect_org_deployment_task(
     return res
 
 
-@pipelineapi.get("flow_runs/{flow_run_id}/logs", auth=auth.CustomAuthMiddleware())
+@pipeline_router.get("flow_runs/{flow_run_id}/logs", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_pipeline"])
 def get_flow_runs_logs(
-    request, flow_run_id, task_run_id = '', limit: int = 0, offset: int = 0
+    request, flow_run_id, task_run_id="", limit: int = 0, offset: int = 0
 ):  # pylint: disable=unused-argument
     """return the logs from a flow-run"""
     try:
-        result = prefect_service.get_flow_run_logs(flow_run_id, task_run_id,limit,offset)
+        result = prefect_service.get_flow_run_logs(flow_run_id, task_run_id, limit, offset)
     except Exception as error:
         logger.exception(error)
         raise HttpError(400, "failed to retrieve logs") from error
     return result
 
 
-@pipelineapi.get("flow_runs/{flow_run_id}/logsummary", auth=auth.CustomAuthMiddleware())
+@pipeline_router.get("flow_runs/{flow_run_id}/logsummary", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_pipeline"])
 def get_flow_runs_logsummary(request, flow_run_id):  # pylint: disable=unused-argument
     """return the logs from a flow-run"""
@@ -679,7 +608,7 @@ def get_flow_runs_logsummary(request, flow_run_id):  # pylint: disable=unused-ar
     return result
 
 
-@pipelineapi.get(
+@pipeline_router.get(
     "flow_runs/{flow_run_id}",
     auth=auth.CustomAuthMiddleware(),
     response=PrefectFlowRunSchema,
@@ -696,36 +625,23 @@ def get_flow_run_by_id(request, flow_run_id):
     return flow_run
 
 
-@pipelineapi.get(
-    "flows/{deployment_id}/flow_runs/history", auth=auth.CustomAuthMiddleware()
-)
+@pipeline_router.get("flows/{deployment_id}/flow_runs/history", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_pipeline"])
-def get_prefect_flow_runs_log_history(
-    request, deployment_id, limit: int = 0, fetchlogs=True
-):
+def get_prefect_flow_runs_log_history(request, deployment_id, limit: int = 0, fetchlogs=True):
     # pylint: disable=unused-argument
     """Fetch all flow runs for the deployment and the logs for each flow run"""
-    flow_runs = prefect_service.get_flow_runs_by_deployment_id(
-        deployment_id, limit=limit
-    )
+    flow_runs = prefect_service.get_flow_runs_by_deployment_id(deployment_id, limit=limit)
 
     if fetchlogs:
         for flow_run in flow_runs:
-            logs_dict = prefect_service.get_flow_run_logs(flow_run["id"], 0)
-            flow_run["logs"] = (
-                logs_dict["logs"]["logs"] if "logs" in logs_dict["logs"] else []
-            )
+            flow_run["logs"] = prefect_service.recurse_flow_run_logs(flow_run["id"], None)
 
     return flow_runs
 
 
-@pipelineapi.get(
-    "v1/flows/{deployment_id}/flow_runs/history", auth=auth.CustomAuthMiddleware()
-)
+@pipeline_router.get("v1/flows/{deployment_id}/flow_runs/history", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_pipeline"])
-def get_prefect_flow_runs_log_history_v1(
-    request, deployment_id, limit: int = 0, offset: int = 0
-):
+def get_prefect_flow_runs_log_history_v1(request, deployment_id, limit: int = 0, offset: int = 0):
     # pylint: disable=unused-argument
     """Fetch all flow runs for the deployment and the logs for each flow run"""
     flow_runs = prefect_service.get_flow_runs_by_deployment_id_v1(
@@ -739,9 +655,7 @@ def get_prefect_flow_runs_log_history_v1(
     return flow_runs
 
 
-@pipelineapi.get(
-    "v1/flow_runs/{flow_run_id}/logsummary", auth=auth.CustomAuthMiddleware()
-)
+@pipeline_router.get("v1/flow_runs/{flow_run_id}/logsummary", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_pipeline"])
 def get_flow_runs_logsummary_v1(
     request, flow_run_id, task_id, regenerate: int = 0, request_uuid: str = None

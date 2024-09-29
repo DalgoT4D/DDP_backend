@@ -10,9 +10,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         """Docstring"""
-        parser.add_argument(
-            "--deployment-id", type=str, help="The deployment ID.", required=True
-        )
+        parser.add_argument("--deployment-id", type=str, help="The deployment ID.", required=True)
         parser.add_argument(
             "--work-queue-name",
             type=str,

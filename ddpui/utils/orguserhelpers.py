@@ -15,9 +15,7 @@ def from_orguser(orguser: OrgUser):
     orguser_new_role = orguser.new_role.slug if orguser.new_role else None
     permissions = []
     if orguser_new_role:
-        role_permissions = list(
-            RolePermission.objects.filter(role=orguser.new_role).all()
-        )
+        role_permissions = list(RolePermission.objects.filter(role=orguser.new_role).all())
         permissions = [
             {"slug": item.permission.slug, "name": item.permission.name}
             for item in role_permissions

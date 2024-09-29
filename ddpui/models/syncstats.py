@@ -12,9 +12,7 @@ class SyncStats(models.Model):
     job_id = models.IntegerField(null=True)
     attempt = models.IntegerField(default=0)
     status = models.TextField()
-    sync_type = models.CharField(
-        choices=[("manual", "manual"), ("orchestrate", "orchestrate")]
-    )
+    sync_type = models.CharField(choices=[("manual", "manual"), ("orchestrate", "orchestrate")])
     sync_time = models.DateTimeField()
     sync_duration_s = models.BigIntegerField(default=0)
     sync_records = models.BigIntegerField(default=0)

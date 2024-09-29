@@ -52,12 +52,8 @@ class Command(BaseCommand):
                 print(
                     f"Creating reset connection task for orgtask with connection_id {org_task.connection_id}"
                 )
-                sync_dataflow_orgtask = DataflowOrgTask.objects.filter(
-                    orgtask=org_task
-                ).first()
-                sync_dataflow = (
-                    sync_dataflow_orgtask.dataflow if sync_dataflow_orgtask else None
-                )
+                sync_dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
+                sync_dataflow = sync_dataflow_orgtask.dataflow if sync_dataflow_orgtask else None
 
                 if not sync_dataflow:
                     print(
@@ -81,9 +77,7 @@ class Command(BaseCommand):
                     task=reset_task,
                     generated_by=org_task.generated_by,
                 )
-                reset_dataflow = create_airbyte_deployment(
-                    org, reset_orgtask, server_block
-                )
+                reset_dataflow = create_airbyte_deployment(org, reset_orgtask, server_block)
 
                 # map sync dataflow to reset dataflow
                 sync_dataflow.reset_conn_dataflow = reset_dataflow

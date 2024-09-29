@@ -26,7 +26,7 @@ def get_dbt_docs(request, tokenhex: str):
         # but if we set it to an invalid value, it makes its way to the browser where
         # it is ignored
         response.headers["X-Frame-Options"] = "ignore"
-        response.headers["Content-Security-Policy"] = (
-            f"frame-src localhost:8002 {request.headers['Host']};"
-        )
+        response.headers[
+            "Content-Security-Policy"
+        ] = f"frame-src localhost:8002 {request.headers['Host']};"
         return response

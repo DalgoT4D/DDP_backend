@@ -3,10 +3,8 @@ import sqlparse
 from sqlparse.tokens import Keyword, Number, Token
 import uuid
 import sqlalchemy
-from ninja import NinjaAPI
-from ninja.errors import HttpError, ValidationError
-from ninja.responses import Response
-from pydantic.error_wrappers import ValidationError as PydanticValidationError
+from ninja import Router
+from ninja.errors import HttpError
 import sqlalchemy.exc
 
 from django.http import StreamingHttpResponse
@@ -39,39 +37,8 @@ from ddpui.utils import secretsmanager
 from ddpui.utils.helpers import convert_to_standard_types
 from ddpui.utils.constants import LIMIT_ROWS_TO_SEND_TO_LLM
 
-warehouseapi = NinjaAPI(urls_namespace="warehouse")
+warehouse_router = Router()
 logger = CustomLogger("ddpui")
-
-
-@warehouseapi.exception_handler(ValidationError)
-def ninja_validation_error_handler(request, exc):  # pylint: disable=unused-argument
-    """
-    Handle any ninja validation errors raised in the apis
-    These are raised during request payload validation
-    exc.errors is correct
-    """
-    return Response({"detail": exc.errors}, status=422)
-
-
-@warehouseapi.exception_handler(PydanticValidationError)
-def pydantic_validation_error_handler(
-    request, exc: PydanticValidationError
-):  # pylint: disable=unused-argument
-    """
-    Handle any pydantic errors raised in the apis
-    These are raised during response payload validation
-    exc.errors() is correct
-    """
-    return Response({"detail": exc.errors()}, status=500)
-
-
-@warehouseapi.exception_handler(Exception)
-def ninja_default_error_handler(
-    request, exc: Exception
-):  # pylint: disable=unused-argument
-    """Handle any other exception raised in the apis"""
-    logger.exception(exc)
-    return Response({"detail": "something went wrong"}, status=500)
 
 
 def get_warehouse_data(request, data_type: str, **kwargs):
@@ -111,23 +78,21 @@ def get_warehouse_data(request, data_type: str, **kwargs):
     return convert_to_standard_types(data)
 
 
-@warehouseapi.get("/tables/{schema_name}", auth=auth.CustomAuthMiddleware())
+@warehouse_router.get("/tables/{schema_name}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def get_table(request, schema_name: str):
     """Fetches table names from a warehouse"""
     return get_warehouse_data(request, "tables", schema_name=schema_name)
 
 
-@warehouseapi.get("/schemas", auth=auth.CustomAuthMiddleware())
+@warehouse_router.get("/schemas", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def get_schema(request):
     """Fetches schema names from a warehouse"""
     return get_warehouse_data(request, "schemas")
 
 
-@warehouseapi.get(
-    "/table_columns/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware()
-)
+@warehouse_router.get("/table_columns/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def get_table_columns(request, schema_name: str, table_name: str):
     """Fetches column names for a specific table from a warehouse"""
@@ -136,9 +101,7 @@ def get_table_columns(request, schema_name: str, table_name: str):
     )
 
 
-@warehouseapi.get(
-    "/table_data/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware()
-)
+@warehouse_router.get("/table_data/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def get_table_data(
     request,
@@ -162,9 +125,7 @@ def get_table_data(
     )
 
 
-@warehouseapi.get(
-    "/table_count/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware()
-)
+@warehouse_router.get("/table_count/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def get_table_count(request, schema_name: str, table_name: str):
     """Fetches the total number of rows for a specified table."""
@@ -177,16 +138,12 @@ def get_table_count(request, schema_name: str, table_name: str):
         return {"total_rows": total_rows}
     except Exception as e:
         logger.error(f"Failed to fetch total rows for {schema_name}.{table_name}: {e}")
-        raise HttpError(
-            500, f"Failed to fetch total rows for {schema_name}.{table_name}"
-        )
+        raise HttpError(500, f"Failed to fetch total rows for {schema_name}.{table_name}")
 
 
-@warehouseapi.get("/dbt_project/json_columnspec/", auth=auth.CustomAuthMiddleware())
+@warehouse_router.get("/dbt_project/json_columnspec/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
-def get_json_column_spec(
-    request, source_schema: str, input_name: str, json_column: str
-):
+def get_json_column_spec(request, source_schema: str, input_name: str, json_column: str):
     """Get the json column spec of a table in a warehouse"""
     orguser = request.orguser
     org = orguser.org
@@ -204,9 +161,7 @@ def get_json_column_spec(
     return json_columnspec
 
 
-@warehouseapi.get(
-    "/v1/table_data/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware()
-)
+@warehouse_router.get("/v1/table_data/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def get_warehouse_table_columns_spec(request, schema_name: str, table_name: str):
     """
@@ -234,7 +189,7 @@ def get_warehouse_table_columns_spec(request, schema_name: str, table_name: str)
         raise HttpError(500, str(err))
 
 
-@warehouseapi.post("/insights/metrics/", auth=auth.CustomAuthMiddleware())
+@warehouse_router.post("/insights/metrics/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def post_data_insights(request, payload: RequestorColumnSchema):
     """
@@ -249,7 +204,6 @@ def post_data_insights(request, payload: RequestorColumnSchema):
         raise HttpError(404, "Please set up your warehouse first")
 
     try:
-
         task_id = str(uuid.uuid4())
 
         taskprogress = TaskProgress(task_id, TaskProgressHashPrefix.DATAINSIGHTS)
@@ -269,9 +223,7 @@ def post_data_insights(request, payload: RequestorColumnSchema):
         raise HttpError(500, str(err))
 
 
-@warehouseapi.get(
-    "/download/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware()
-)
+@warehouse_router.get("/download/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def get_download_warehouse_data(request, schema_name: str, table_name: str):
     """Stream and download data from a table in the warehouse"""
@@ -313,14 +265,12 @@ def get_download_warehouse_data(request, schema_name: str, table_name: str):
         stream_warehouse_data(request, schema_name, table_name, page_size=30000),
         content_type="application/octet-stream",
     )
-    response["Content-Disposition"] = (
-        f"attachment; filename={schema_name}__{table_name}.csv"
-    )
+    response["Content-Disposition"] = f"attachment; filename={schema_name}__{table_name}.csv"
 
     return response
 
 
-@warehouseapi.post("/ask/", auth=auth.CustomAuthMiddleware())
+@warehouse_router.post("/ask/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def post_warehouse_prompt(request, payload: AskWarehouseRequest):
     """
@@ -350,11 +300,7 @@ def post_warehouse_prompt(request, payload: AskWarehouseRequest):
     limit_found = False
     for stmt in stmts:
         for token in stmt.tokens:
-            if (
-                not limit_found
-                and token.ttype is Keyword
-                and token.value.upper() == "LIMIT"
-            ):
+            if not limit_found and token.ttype is Keyword and token.value.upper() == "LIMIT":
                 limit_found = True
             if limit_found and token.ttype is Token.Literal.Number.Integer:
                 limit = int(token.value)
@@ -371,7 +317,6 @@ def post_warehouse_prompt(request, payload: AskWarehouseRequest):
         payload.sql = f"{payload.sql} LIMIT {LIMIT_ROWS_TO_SEND_TO_LLM}"
 
     try:
-
         task = summarize_warehouse_results.apply_async(
             kwargs={
                 "orguser_id": orguser.id,
@@ -390,7 +335,7 @@ def post_warehouse_prompt(request, payload: AskWarehouseRequest):
         raise HttpError(400, "failed to summarize warehouse results") from error
 
 
-@warehouseapi.post("/ask/{new_session_id}/save", auth=auth.CustomAuthMiddleware())
+@warehouse_router.post("/ask/{new_session_id}/save", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def post_save_warehouse_prompt_session(
     request, new_session_id: str, payload: SaveLlmSessionRequest
@@ -418,26 +363,26 @@ def post_save_warehouse_prompt_session(
             org=org,
             session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
         ).first()
+        # since its overwriting the old session, we need to keep/persist the orguser (created_by)
+        new_session.orguser = old_session.orguser
+
         if old_session:
             old_session.delete()
-            logger.info(
-                f"Deleted the old session llm analysis {payload.old_session_id}"
-            )
+            logger.info(f"Deleted the old session llm analysis {payload.old_session_id}")
 
     if new_session.session_status == LlmSessionStatus.RUNNING:
         raise HttpError(400, "Session is still in progress")
 
     new_session.session_name = payload.session_name
+    new_session.updated_by = orguser
     new_session.save()
 
     return {"success": 1}
 
 
-@warehouseapi.post("/ask/{session_id}/feedback", auth=auth.CustomAuthMiddleware())
+@warehouse_router.post("/ask/{session_id}/feedback", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
-def post_feedback_llm_session(
-    request, session_id: str, payload: LlmSessionFeedbackRequest
-):
+def post_feedback_llm_session(request, session_id: str, payload: LlmSessionFeedbackRequest):
     """Feedback"""
     orguser: OrgUser = request.orguser
     org = orguser.org
@@ -457,7 +402,7 @@ def post_feedback_llm_session(
     return {"success": 1}
 
 
-@warehouseapi.get("/ask/sessions", auth=auth.CustomAuthMiddleware())
+@warehouse_router.get("/ask/sessions", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def get_warehouse_llm_analysis_sessions(
     request,
@@ -505,6 +450,13 @@ def get_warehouse_llm_analysis_sessions(
                 "created_by": {
                     "email": session.orguser.user.email,
                 },
+                "updated_by": (
+                    {
+                        "email": session.updated_by.user.email,
+                    }
+                    if session.updated_by
+                    else None
+                ),
             }
             for session in sessions
         ],

@@ -98,6 +98,5 @@ def test_insight_factory(dummy_insight_payload):
 
     with pytest.raises(ValueError):
         InsightsFactory.initiate_insight(
-            **dummy_insight_payload,
-            col_type=TranslateColDataType("some-unsupported-type")
+            **dummy_insight_payload, col_type=TranslateColDataType("some-unsupported-type")
         )

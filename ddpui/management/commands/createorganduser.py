@@ -35,7 +35,6 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-
         # ensure the Role exists
         role = Role.objects.filter(slug=options["role"]).first()
         if not role:
@@ -46,9 +45,7 @@ class Command(BaseCommand):
 
         # fetch / create the Org
         if not Org.objects.filter(name=options["orgname"]).exists():
-            Org.objects.create(
-                name=options["orgname"], slug=slugify(options["orgname"])
-            )
+            Org.objects.create(name=options["orgname"], slug=slugify(options["orgname"]))
             print(f"Org {options['orgname']} created")
         else:
             print(f"Org {options['orgname']} already exists")
@@ -61,9 +58,7 @@ class Command(BaseCommand):
                 password = os.getenv("PASSWORD")
             if not password:
                 password = getpass.getpass("Enter the password for the OrgUser: ")
-                password_confirm = getpass.getpass(
-                    "Re-enter the password for the OrgUser: "
-                )
+                password_confirm = getpass.getpass("Re-enter the password for the OrgUser: ")
                 if password != password_confirm:
                     print("Passwords do not match")
                     sys.exit(1)
@@ -79,12 +74,8 @@ class Command(BaseCommand):
         user = User.objects.filter(email=options["email"]).first()
 
         if not OrgUser.objects.filter(org=org, user=user).exists():
-            OrgUser.objects.create(
-                org=org, user=user, role=3, new_role=role, email_verified=True
-            )
-            print(
-                f"OrgUser {user.email} created for Org {org.name} with role {role.name}"
-            )
+            OrgUser.objects.create(org=org, user=user, role=3, new_role=role, email_verified=True)
+            print(f"OrgUser {user.email} created for Org {org.name} with role {role.name}")
         else:
             print(f"OrgUser {user.email} already exists for Org {org.name}")
         orguser = OrgUser.objects.filter(org=org, user=user).first()

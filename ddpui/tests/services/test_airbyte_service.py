@@ -100,9 +100,7 @@ def mock_abreq(endpoint, data):
 
 def test_abreq_success():
     endpoint = "workspaces/list"
-    expected_response = {
-        "workspaces": [{"workspaceId": "1", "name": "Example Workspace"}]
-    }
+    expected_response = {"workspaces": [{"workspaceId": "1", "name": "Example Workspace"}]}
 
     with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
         mock_post.return_value.status_code = 200
@@ -649,6 +647,7 @@ def test_check_source_connection_success():
         assert result == expected_response_src
         assert isinstance(result, dict)
 
+
 def test_check_source_connection_failure():
     workspace_id = "my_workspace_id"
     data = AirbyteSourceCreate(
@@ -662,18 +661,16 @@ def test_check_source_connection_failure():
         "jobInfo": {
             "succeeded": False,
         },
-        "message": "Credentials are invalid"
+        "message": "Credentials are invalid",
     }
-    
+
     with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq_:
         mock_abreq_.side_effect = [expected_response_srcdef, failed_response]
-        
+
         with pytest.raises(HttpError) as excinfo:
             check_source_connection(workspace_id, data)
-        
+
         assert str(excinfo.value) == "Credentials are invalid"
-
-
 
 
 def test_check_source_connection_with_invalid_workspace_id():
@@ -827,9 +824,7 @@ def test_get_destination_definitions_success():
         mock_response = Mock(spec=requests.Response)
         mock_response.status_code = 200
         mock_response.headers = {"Content-Type": "application/json"}
-        mock_response.json.return_value = {
-            "destinationDefinitions": "theDestinationDefinitions"
-        }
+        mock_response.json.return_value = {"destinationDefinitions": "theDestinationDefinitions"}
         mock_post.return_value = mock_response
 
         response = get_destination_definitions("workspace-id")
@@ -862,9 +857,7 @@ def test_get_destination_definition():
         mock_response = Mock(spec=requests.Response)
         mock_response.status_code = 200
         mock_response.headers = {"Content-Type": "application/json"}
-        mock_response.json.return_value = {
-            "destinationDefinitionId": "theDestinationDefId"
-        }
+        mock_response.json.return_value = {"destinationDefinitionId": "theDestinationDefId"}
         mock_post.return_value = mock_response
 
         response = get_destination_definition("workspace-id", "destination_def_id")
@@ -884,9 +877,7 @@ def test_get_destination_definition_specification_success():
         }
         mock_post.return_value = mock_response
 
-        response = get_destination_definition_specification(
-            "workspace-id", "destinationdef_id"
-        )
+        response = get_destination_definition_specification("workspace-id", "destinationdef_id")
 
         assert response["connectionSpecification"] == {
             "title": "theTitle",
@@ -909,16 +900,12 @@ def test_get_destination_definition_specification_success_postgres():
         }
         mock_post.return_value = mock_response
 
-        response = get_destination_definition_specification(
-            "workspace-id", "destinationdef_id"
-        )
+        response = get_destination_definition_specification("workspace-id", "destinationdef_id")
 
         assert response["connectionSpecification"] == {
             "title": "Postgres Destination Spec",
             "properties": {
-                "ssl_mode": {
-                    "title": "SSL modes* (select 'disable' if you don't know)"
-                },
+                "ssl_mode": {"title": "SSL modes* (select 'disable' if you don't know)"},
                 "tunnel_method": {
                     "title": "SSH Tunnel Method* (select 'No Tunnel' if you don't know)"
                 },
@@ -946,13 +933,9 @@ def test_get_destination_definition_specification_failure():
         mock_response.json.return_value = {"wrong-key": "theConnectionSpecification"}
         mock_post.return_value = mock_response
         with pytest.raises(HttpError) as excinfo:
-            get_destination_definition_specification(
-                "workspace-id", "destinationdef_id"
-            )
+            get_destination_definition_specification("workspace-id", "destinationdef_id")
 
-        assert (
-            str(excinfo.value) == "Failed to get destination definition specification"
-        )
+        assert str(excinfo.value) == "Failed to get destination definition specification"
 
 
 def test_get_destinations_success():
@@ -1162,7 +1145,7 @@ def test_check_destination_connection_failure_1():
             "message": "Credentials are invalid",
             "jobInfo": {
                 "succeeded": False,
-            }
+            },
         }
         mock_post.return_value = mock_response
 
@@ -1170,10 +1153,6 @@ def test_check_destination_connection_failure_1():
             check_destination_connection("workspace_id", payload)
 
         assert str(excinfo.value) == "Credentials are invalid"
-
-
-
-
 
 
 def test_check_destination_connection_failure_2():
@@ -1189,7 +1168,7 @@ def test_check_destination_connection_failure_2():
             "message": "Credentials are invalid",
             "jobInfo": {
                 "succeeded": False,
-            }
+            },
         }
         mock_post.return_value = mock_response
 
@@ -1197,8 +1176,6 @@ def test_check_destination_connection_failure_2():
             check_destination_connection("workspace_id", payload)
 
         assert str(excinfo.value) == "Credentials are invalid"
-
-
 
 
 def test_check_destination_connection_for_update_success():
@@ -1232,7 +1209,7 @@ def test_check_destination_connection_for_update_failure_1():
             "message": "Credentials are invalid",
             "jobInfo": {
                 "succeeded": False,
-            }
+            },
         }
         mock_post.return_value = mock_response
 
@@ -1240,8 +1217,6 @@ def test_check_destination_connection_for_update_failure_1():
             check_destination_connection_for_update("destination_id", payload)
 
         assert str(excinfo.value) == "Credentials are invalid"
-
-
 
 
 def test_check_destination_connection_for_update_failure_2():
@@ -1255,7 +1230,7 @@ def test_check_destination_connection_for_update_failure_2():
             "message": "Credentials are invalid",
             "jobInfo": {
                 "succeeded": False,
-            }
+            },
         }
         mock_post.return_value = mock_response
 
@@ -1263,10 +1238,6 @@ def test_check_destination_connection_for_update_failure_2():
             check_destination_connection_for_update("destination_id", payload)
 
         assert str(excinfo.value) == "Credentials are invalid"
-
-
-
-
 
 
 def test_get_connections_bad_workspace_id():
@@ -1283,9 +1254,7 @@ def test_get_connections_no_connections():
         workspace_id = "workspace-id"
         with pytest.raises(HttpError) as excinfo:
             get_connections(workspace_id)
-        assert (
-            str(excinfo.value) == f"connections not found for workspace: {workspace_id}"
-        )
+        assert str(excinfo.value) == f"connections not found for workspace: {workspace_id}"
 
 
 def test_get_connections_success():
@@ -1338,10 +1307,7 @@ def test_update_connection_no_streams():
     workspace_id = "workspace-id"
     with pytest.raises(HttpError) as excinfo:
         update_connection(workspace_id, conninfo, {})
-    assert (
-        str(excinfo.value)
-        == f"must specify at least one stream workspace_id={workspace_id}"
-    )
+    assert str(excinfo.value) == f"must specify at least one stream workspace_id={workspace_id}"
 
 
 @patch.multiple(
@@ -1375,9 +1341,7 @@ def test_update_connection_failed_to_update():
         destinationSchema=None,
     )
     workspace_id = "workspace-id"
-    with patch(
-        "ddpui.ddpairbyte.airbyte_service.abreq", return_value={"no-connectionId": True}
-    ):
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq", return_value={"no-connectionId": True}):
         with pytest.raises(HttpError) as excinfo:
             update_connection(
                 workspace_id,
@@ -1436,9 +1400,7 @@ def test_reset_connection():
         return_value={"connectionId": "connection-id"},
     ) as mock_abreq_:
         reset_connection("connection-id")
-        mock_abreq_.assert_called_once_with(
-            "connections/reset", {"connectionId": "connection-id"}
-        )
+        mock_abreq_.assert_called_once_with("connections/reset", {"connectionId": "connection-id"})
 
 
 def test_delete_connection():
@@ -1447,9 +1409,7 @@ def test_delete_connection():
         return_value={"connectionId": "connection-id"},
     ) as mock_abreq_:
         delete_connection("wsid", "connection-id")
-        mock_abreq_.assert_called_once_with(
-            "connections/delete", {"connectionId": "connection-id"}
-        )
+        mock_abreq_.assert_called_once_with("connections/delete", {"connectionId": "connection-id"})
 
 
 def test_sync_connection():
@@ -1458,9 +1418,7 @@ def test_sync_connection():
         return_value={"connectionId": "connection-id"},
     ) as mock_abreq_:
         sync_connection("wsid", "connection-id")
-        mock_abreq_.assert_called_once_with(
-            "connections/sync", {"connectionId": "connection-id"}
-        )
+        mock_abreq_.assert_called_once_with("connections/sync", {"connectionId": "connection-id"})
 
 
 def test_get_job_info():
@@ -1529,9 +1487,7 @@ def test_get_logs_for_job():
         return_value={"connectionId": "connection-id"},
     ) as mock_abreq_:
         get_logs_for_job(1)
-        mock_abreq_.assert_called_once_with(
-            "attempt/get_for_job", {"jobId": 1, "attemptNumber": 0}
-        )
+        mock_abreq_.assert_called_once_with("attempt/get_for_job", {"jobId": 1, "attemptNumber": 0})
 
 
 def test_get_logs_for_job_1():
@@ -1540,9 +1496,7 @@ def test_get_logs_for_job_1():
         return_value={"connectionId": "connection-id"},
     ) as mock_abreq_:
         get_logs_for_job(1, 1)
-        mock_abreq_.assert_called_once_with(
-            "attempt/get_for_job", {"jobId": 1, "attemptNumber": 1}
-        )
+        mock_abreq_.assert_called_once_with("attempt/get_for_job", {"jobId": 1, "attemptNumber": 1})
 
 
 def test_get_logs_for_job_raise():
@@ -1609,9 +1563,7 @@ def test_update_schema_change_valid_input():
             result = update_schema_change(org, connection_info, current_connection)
 
             assert result["connectionId"] == "test-connection-id"
-            mock_abreq.assert_called_once_with(
-                "web_backend/connections/update", current_connection
-            )
+            mock_abreq.assert_called_once_with("web_backend/connections/update", current_connection)
 
 
 def test_update_schema_change_invalid_connection_info():
@@ -1622,8 +1574,7 @@ def test_update_schema_change_invalid_connection_info():
     with pytest.raises(HttpError) as excinfo:
         update_schema_change(org, connection_info, current_connection)
     assert (
-        str(excinfo.value)
-        == "connection_info must be an instance of AirbyteConnectionSchemaUpdate"
+        str(excinfo.value) == "connection_info must be an instance of AirbyteConnectionSchemaUpdate"
     )
 
 
@@ -1661,9 +1612,5 @@ def test_update_schema_change_missing_syncCatalog():
 
         assert result["connectionId"] == "test-connection-id"
         assert "syncCatalog" not in result
-        mock_abreq.assert_called_once_with(
-            "web_backend/connections/update", current_connection
-        )
-        mock_trigger_reset_and_sync_workflow.assert_called_once_with(
-            org, "test-connection-id"
-        )
+        mock_abreq.assert_called_once_with("web_backend/connections/update", current_connection)
+        mock_trigger_reset_and_sync_workflow.assert_called_once_with(org, "test-connection-id")

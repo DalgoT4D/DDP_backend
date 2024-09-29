@@ -109,14 +109,10 @@ def test_data_stats_query_parse_results(base_payload):
             f"countNull_{col['name']}": 20,
             f"countDistinct__{col['name']}": 10,
             f"maxVal_{col['name']}": (
-                datetime.now()
-                if col["translated_type"] == TranslateColDataType.DATETIME
-                else 20
+                datetime.now() if col["translated_type"] == TranslateColDataType.DATETIME else 20
             ),
             f"minVal_{col['name']}": (
-                datetime.now()
-                if col["translated_type"] == TranslateColDataType.DATETIME
-                else 20
+                datetime.now() if col["translated_type"] == TranslateColDataType.DATETIME else 20
             ),
         }
         for col in base_payload["columns"]
@@ -131,16 +127,9 @@ def test_data_stats_query_parse_results(base_payload):
         assert col.name in output
         assert output[col.name]["count"] == mock_results[0][f"count_{col.name}"]
         assert output[col.name]["countNull"] == mock_results[0][f"countNull_{col.name}"]
-        assert (
-            output[col.name]["countDistinct"]
-            == mock_results[0][f"countDistinct__{col.name}"]
-        )
-        assert str(output[col.name]["maxVal"]) == str(
-            mock_results[0][f"maxVal_{col.name}"]
-        )
-        assert str(output[col.name]["minVal"]) == str(
-            mock_results[0][f"minVal_{col.name}"]
-        )
+        assert output[col.name]["countDistinct"] == mock_results[0][f"countDistinct__{col.name}"]
+        assert str(output[col.name]["maxVal"]) == str(mock_results[0][f"maxVal_{col.name}"])
+        assert str(output[col.name]["minVal"]) == str(mock_results[0][f"minVal_{col.name}"])
 
 
 def test_data_stats_query_parse_results_failure(base_payload):
@@ -156,9 +145,7 @@ def test_data_stats_query_parse_results_failure(base_payload):
             f"countNull_{col['name']}": 20,
             f"countDistinct__{col['name']}": 10,
             f"maxVal_{col['name']}": (
-                datetime.now()
-                if col["translated_type"] == TranslateColDataType.DATETIME
-                else 20
+                datetime.now() if col["translated_type"] == TranslateColDataType.DATETIME else 20
             ),
         }
         for col in base_payload["columns"]
@@ -183,14 +170,10 @@ def test_data_stats_query_validate_results(base_payload):
             f"countNull_{col['name']}": 20,
             f"countDistinct__{col['name']}": 10,
             f"maxVal_{col['name']}": (
-                datetime.now()
-                if col["translated_type"] == TranslateColDataType.DATETIME
-                else 20
+                datetime.now() if col["translated_type"] == TranslateColDataType.DATETIME else 20
             ),
             f"minVal_{col['name']}": (
-                datetime.now()
-                if col["translated_type"] == TranslateColDataType.DATETIME
-                else 20
+                datetime.now() if col["translated_type"] == TranslateColDataType.DATETIME else 20
             ),
         }
         for col in base_payload["columns"]

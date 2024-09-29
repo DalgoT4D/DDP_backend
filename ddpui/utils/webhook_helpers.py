@@ -19,10 +19,7 @@ def get_message_type(message_object: dict) -> str | None:
     """identifies the message type if possible"""
     if message_object.get("state"):
         if message_object["state"].get("state_details"):
-            if (
-                message_object["state"]["state_details"].get("flow_run_id")
-                == message_object["id"]
-            ):
+            if message_object["state"]["state_details"].get("flow_run_id") == message_object["id"]:
                 return FLOW_RUN
 
     return None
@@ -57,9 +54,7 @@ def get_org_from_flow_run(flow_run: dict) -> Org | None:
         and "config" in flow_run["parameters"]
         and "org_slug" in flow_run["parameters"]["config"]
     ):
-        org = Org.objects.filter(
-            slug=flow_run["parameters"]["config"]["org_slug"]
-        ).first()
+        org = Org.objects.filter(slug=flow_run["parameters"]["config"]["org_slug"]).first()
 
         if org is not None:
             logger.info(f"found the org slug {org.slug} inside the webhook function")
@@ -70,9 +65,7 @@ def get_org_from_flow_run(flow_run: dict) -> Org | None:
     return None
 
 
-def generate_notification_email(
-    orgname: str, flow_run_id: str, logmessages: list
-) -> str:
+def generate_notification_email(orgname: str, flow_run_id: str, logmessages: list) -> str:
     """until we make a sendgrid template"""
     tag = " [STAGING]" if not PRODUCTION else ""
     email_body = f"""
@@ -114,7 +107,7 @@ def email_orgusers_ses_whitelisted(org: Org, email_body: str):
 
 def email_flowrun_logs_to_orgusers(org: Org, flow_run_id: str):
     """retrieves logs for a flow-run and emails them to all users for the org"""
-    logs = prefect_service.get_flow_run_logs(flow_run_id, 0)
-    logmessages = [x["message"] for x in logs["logs"]["logs"]]
+    logs_arr = prefect_service.recurse_flow_run_logs(flow_run_id)
+    logmessages = [x["message"] for x in logs_arr]
     email_body = generate_notification_email(org.name, flow_run_id, logmessages)
     email_orgusers(org, email_body)
