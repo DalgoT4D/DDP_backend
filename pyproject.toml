@@ -5,6 +5,9 @@ include = 'ddpui\/.*\.pyi?$'
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE="ddpui.settings"
+testpaths = [
+  "ddpui/tests"
+]
 
 [tool.pylint.messages_control]
 max-line-length = 100
@@ -19,6 +22,9 @@ disable = [
 ]
 
 [tool.coverage.run]
+source = [
+ "ddpui"
+]
 omit = [
   "ddpui/utils/sendgrid.py",
   "ddpui/utils/dbtdocs.py",
@@ -26,8 +32,7 @@ omit = [
   "ddpui/migrations/*",
   "ddpui/management/*",
   "ddpui/models/*",
-  "*/__init__.py",
-  "*/celery.py",
+  "ddpui/celery.py",
+  "ddpui/settings.py",
   "*/schema.py",
-  "*/settings.py" 
 ]
