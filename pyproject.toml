@@ -34,5 +34,10 @@ omit = [
   "ddpui/models/*",
   "ddpui/celery.py",
   "ddpui/settings.py",
+  "ddpui/asgi.py",
+  "ddpui/wsgi.py",
+  "ddpui/urls.py",
+  "ddpui/routes.py",
   "*/schema.py",
+  "ddpui/*/__init__.py",
 ]
