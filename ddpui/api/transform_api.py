@@ -373,7 +373,11 @@ def post_save_model(request, model_uuid: str, payload: CompleteDbtModelPayload):
         raise HttpError(422, "model with this name already exists")
 
     # when you are overwriting the existing model with same name but different schema; which again leads to duplicate models
-    if payload.name == orgdbt_model.name and payload.dest_schema != orgdbt_model.schema:
+    if (
+        payload.name == orgdbt_model.name
+        and payload.dest_schema != orgdbt_model.schema
+        and not orgdbt_model.under_construction
+    ):
         raise HttpError(422, "model with this name already exists in the schema")
 
     check_canvas_locked(orguser, payload.canvas_lock_id)
