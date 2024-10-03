@@ -568,18 +568,20 @@ def reset_connection(org: Org, connection_id: str):
     job: ConnectionJob = None
     if is_connection_large_enough:
         schedule_at = get_schedule_time_for_large_jobs()
-        # if there is a flow run scheduled , delete it
-        job = ConnectionJob.objects.filter(
-            connection_id=connection_id, job_type=TASK_AIRBYTERESET
-        ).first()
-        if job:
-            try:
-                prefect_service.delete_flow_run(job.flow_run_id)
-                job.flow_run_id = None
-                job.save()
-            except Exception as err:
-                logger.exception(err)
-                raise HttpError(400, "failed to remove the previous flow run") from err
+    # if there is a flow run scheduled , delete it
+    # if the connection is large enough, we will schedule a new flow run
+    # if the connection is not larged enough, we run it now
+    # either way we need to delete this job
+    job = ConnectionJob.objects.filter(
+        connection_id=connection_id, job_type=TASK_AIRBYTERESET
+    ).first()
+    if job:
+        try:
+            prefect_service.delete_flow_run(job.flow_run_id)
+            job.delete()
+        except Exception as err:
+            logger.exception(err)
+            raise HttpError(400, "failed to remove the previous flow run") from err
 
     try:
         res = prefect_service.schedule_deployment_flow_run(
@@ -1243,18 +1245,19 @@ def schedule_update_connection_schema(
         )
     else:
         schedule_at = get_schedule_time_for_large_jobs()
-        # if there is a flow run scheduled , delete it
-        job = ConnectionJob.objects.filter(
-            connection_id=connection_id, job_type=UPDATE_SCHEMA
-        ).first()
-        if job:
-            try:
-                prefect_service.delete_flow_run(job.flow_run_id)
-                job.flow_run_id = None
-                job.save()
-            except Exception as err:
-                logger.exception(err)
-                raise HttpError(400, "failed to remove the previous flow run") from err
+
+    # if there is a flow run scheduled , delete it
+    # if the connection is large enough, we will schedule a new flow run
+    # if the connection is not larged enough, we run it now
+    # either way we need to delete this job
+    job = ConnectionJob.objects.filter(connection_id=connection_id, job_type=UPDATE_SCHEMA).first()
+    if job:
+        try:
+            prefect_service.delete_flow_run(job.flow_run_id)
+            job.delete()
+        except Exception as err:
+            logger.exception(err)
+            raise HttpError(400, "failed to remove the previous flow run") from err
 
     logger.info("schema change is being scheduled at %s", schedule_at)
 
