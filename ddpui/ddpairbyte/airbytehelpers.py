@@ -837,7 +837,7 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
             dbt_creds["sslmode"] = mode
 
         if ca_certificate and dbt_project_params.org_project_dir:
-            file_path = os.path.join(dbt_project_params.project_dir, "sslrootcert.pem")
+            file_path = os.path.join(dbt_project_params.org_project_dir, "sslrootcert.pem")
             with open(file_path, "w") as file:
                 file.write(ca_certificate)
             dbt_creds["sslrootcert"] = file_path
