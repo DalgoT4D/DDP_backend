@@ -38,7 +38,7 @@ from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTERESET
 from ddpui.utils.helpers import (
     generate_hash_id,
     update_dict_but_not_stars,
-    map_airbyte_keys_to_postgres_keys,
+    map_airbyte_destination_spec_to_dbtcli_profile,
 )
 from ddpui.utils import secretsmanager
 from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
@@ -793,7 +793,6 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
     """
     Create/update the block in db and also in prefect
     """
-    dbt_creds = map_airbyte_keys_to_postgres_keys(airbyte_creds)
 
     bqlocation = None
     if warehouse.wtype == "bigquery":
@@ -823,6 +822,28 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
             "Failed to fetch the dbt profile - looks like transformation has not been setup. Using 'default' as profile name and continuing"
         )
         logger.error(err)
+
+    dbt_creds = map_airbyte_destination_spec_to_dbtcli_profile(airbyte_creds)
+
+    # handle dbt ssl params
+    if "ssl_mode" in dbt_creds:
+        ssl_data = dbt_creds["ssl_mode"]
+        mode = ssl_data["mode"] if "mode" in ssl_data else None
+        ca_certificate = ssl_data["ca_certificate"] if "ca_certificate" in ssl_data else None
+        client_key_password = (
+            ssl_data["client_key_password"] if "client_key_password" in ssl_data else None
+        )
+        if mode:
+            dbt_creds["sslmode"] = mode
+
+        if ca_certificate and dbt_project_params.org_project_dir:
+            file_path = os.path.join(dbt_project_params.project_dir, "sslrootcert.pem")
+            with open(file_path, "w") as file:
+                file.write(ca_certificate)
+            dbt_creds["sslrootcert"] = file_path
+
+    dbt_creds.pop("ssl_mode", None)
+    dbt_creds.pop("ssl", None)
 
     # set defaults to target and profile
     # cant create a cli profile without these two

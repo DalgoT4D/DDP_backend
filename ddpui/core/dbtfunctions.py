@@ -14,6 +14,7 @@ def gather_dbt_project_params(org: Org):
     dbtrepodir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug / "dbtrepo"
     project_dir = str(dbtrepodir)
     target = org.dbt.default_schema
+    org_project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
 
     return (
         DbtProjectParams(
