@@ -364,6 +364,22 @@ def post_save_model(request, model_uuid: str, payload: CompleteDbtModelPayload):
     if not orgdbt_model:
         raise HttpError(404, "model not found")
 
+    # prevent duplicate models
+    if (
+        OrgDbtModel.objects.filter(orgdbt=orgdbt, name=payload.name)
+        .exclude(uuid=orgdbt_model.uuid)
+        .exists()
+    ):
+        raise HttpError(422, "model with this name already exists")
+
+    # when you are overwriting the existing model with same name but different schema; which again leads to duplicate models
+    if (
+        payload.name == orgdbt_model.name
+        and payload.dest_schema != orgdbt_model.schema
+        and not orgdbt_model.under_construction
+    ):
+        raise HttpError(422, "model with this name already exists in the schema")
+
     check_canvas_locked(orguser, payload.canvas_lock_id)
 
     payload.name = slugify(payload.name)
