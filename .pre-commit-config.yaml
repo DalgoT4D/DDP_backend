@@ -12,4 +12,6 @@ repos:
   rev: v3.3.1
   hooks:
     - id: pylint
+      language: python
+      additional_dependencies: ['pylint==3.3.1']
 files: 'ddpui\/.*\.pyi?$'
