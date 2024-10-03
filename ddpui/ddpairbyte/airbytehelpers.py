@@ -32,13 +32,13 @@ from ddpui.ddpprefect.schema import (
 from ddpui.ddpprefect import AIRBYTESERVER
 from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.ddpdbt.schema import DbtProjectParams
+from ddpui.ddpdbt.dbt_service import map_airbyte_destination_spec_to_dbtcli_profile
 from ddpui.models.org import OrgDataFlowv1, OrgWarehouse
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask
 from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTERESET
 from ddpui.utils.helpers import (
     generate_hash_id,
     update_dict_but_not_stars,
-    map_airbyte_destination_spec_to_dbtcli_profile,
 )
 from ddpui.utils import secretsmanager
 from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
@@ -823,24 +823,7 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
         )
         logger.error(err)
 
-    dbt_creds = map_airbyte_destination_spec_to_dbtcli_profile(airbyte_creds)
-
-    # handle dbt ssl params
-    if "ssl_mode" in dbt_creds:
-        ssl_data = dbt_creds["ssl_mode"]
-        mode = ssl_data["mode"] if "mode" in ssl_data else None
-        ca_certificate = ssl_data["ca_certificate"] if "ca_certificate" in ssl_data else None
-        client_key_password = (
-            ssl_data["client_key_password"] if "client_key_password" in ssl_data else None
-        )
-        if mode:
-            dbt_creds["sslmode"] = mode
-
-        if ca_certificate and dbt_project_params.org_project_dir:
-            file_path = os.path.join(dbt_project_params.org_project_dir, "sslrootcert.pem")
-            with open(file_path, "w") as file:
-                file.write(ca_certificate)
-            dbt_creds["sslrootcert"] = file_path
+    dbt_creds = map_airbyte_destination_spec_to_dbtcli_profile(airbyte_creds, dbt_project_params)
 
     dbt_creds.pop("ssl_mode", None)
     dbt_creds.pop("ssl", None)
