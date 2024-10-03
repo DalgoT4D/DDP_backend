@@ -187,22 +187,25 @@ def convert_sqlalchemy_rows_to_json_string(rows: list[dict]):
 
 
 def get_schedule_time_for_large_jobs(
-    time: time = time(10, 0), weekday: int = calendar.SUNDAY
+    now: datetime = datetime.now(pytz.utc),
+    time_of_day: time = time(10, 0),
+    weekday: int = calendar.SUNDAY,
 ) -> datetime:
     """By default scheduled time will be Sunday 10am UTC"""
-    now = datetime.now(pytz.utc)
-
     # Calculate the number of days until weekday
     days_until_sunday = (weekday - now.weekday() + 7) % 7
 
-    # If today is that weekday, we want to use some future time
+    # If today is that weekday (param), we want to use some future time
+    extra_delta = timedelta(hours=0)
     if days_until_sunday == 0:
-        time = time(10, 0) + timedelta(hours=1)
+        extra_delta = timedelta(hours=1)
+        time_of_day = None  # since it will time at now + extra delta
 
     # Calculate the next weekday datetime
-    next_slot = now + timedelta(days=days_until_sunday)
+    next_slot = now + timedelta(days=days_until_sunday) + extra_delta
 
     # set the time
-    next_slot = datetime.combine(next_slot, time, tzinfo=pytz.utc)
+    if time_of_day:
+        next_slot = datetime.combine(next_slot, time_of_day, tzinfo=pytz.utc)
 
     return next_slot
