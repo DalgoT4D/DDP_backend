@@ -23,6 +23,7 @@ def gather_dbt_project_params(org: Org):
             dbt_repo_dir=dbtrepodir,
             target=target,
             project_dir=project_dir,
+            org_project_dir=org_project_dir,
         ),
         None,
     )
