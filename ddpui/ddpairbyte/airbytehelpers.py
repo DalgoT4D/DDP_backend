@@ -31,8 +31,7 @@ from ddpui.ddpprefect.schema import (
 )
 from ddpui.ddpprefect import AIRBYTESERVER
 from ddpui.ddpprefect import DBTCLIPROFILE
-from ddpui.ddpdbt.schema import DbtProjectParams
-from ddpui.ddpdbt.dbt_service import map_airbyte_destination_spec_to_dbtcli_profile
+from ddpui.core.dbtfunctions import map_airbyte_destination_spec_to_dbtcli_profile
 from ddpui.models.org import OrgDataFlowv1, OrgWarehouse
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask
 from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTERESET

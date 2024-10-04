@@ -23,7 +23,6 @@ from ddpui.models.org import OrgDbt, OrgPrefectBlockv1, OrgWarehouse, TransformT
 from ddpui.models.org_user import Org
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask
 from ddpui.models.dbt_workflow import OrgDbtModel
-from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.utils import secretsmanager
 from ddpui.utils.constants import (
     TASK_DOCSGENERATE,
@@ -336,44 +335,3 @@ def refresh_elementary_report_via_prefect(orguser: OrgUser) -> dict:
         raise HttpError(400, "failed to start a run") from error
 
     return res
-
-
-def map_airbyte_destination_spec_to_dbtcli_profile(
-    conn_info: dict, dbt_project_params: DbtProjectParams
-):
-    """called by `post_system_transformation_tasks` and `_get_wclient`"""
-    if "tunnel_method" in conn_info:
-        method = conn_info["tunnel_method"]
-
-        if method["tunnel_method"] in ["SSH_KEY_AUTH", "SSH_PASSWORD_AUTH"]:
-            conn_info["ssh_host"] = method["tunnel_host"]
-            conn_info["ssh_port"] = method["tunnel_port"]
-            conn_info["ssh_username"] = method["tunnel_user"]
-
-        if method["tunnel_method"] == "SSH_KEY_AUTH":
-            conn_info["ssh_pkey"] = method["ssh_key"]
-            conn_info["ssh_private_key_password"] = method.get("tunnel_private_key_password")
-
-        elif method["tunnel_method"] == "SSH_PASSWORD_AUTH":
-            conn_info["ssh_password"] = method.get("tunnel_user_password")
-
-    conn_info["user"] = conn_info["username"]
-
-    # handle dbt ssl params
-    if "ssl_mode" in conn_info:
-        ssl_data = conn_info["ssl_mode"]
-        mode = ssl_data["mode"] if "mode" in ssl_data else None
-        ca_certificate = ssl_data["ca_certificate"] if "ca_certificate" in ssl_data else None
-        client_key_password = (
-            ssl_data["client_key_password"] if "client_key_password" in ssl_data else None
-        )
-        if mode:
-            conn_info["sslmode"] = mode
-
-        if ca_certificate and dbt_project_params.org_project_dir:
-            file_path = os.path.join(dbt_project_params.org_project_dir, "sslrootcert.pem")
-            with open(file_path, "w") as file:
-                file.write(ca_certificate)
-            conn_info["sslrootcert"] = file_path
-
-    return conn_info
