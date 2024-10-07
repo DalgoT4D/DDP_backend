@@ -1,3 +1,6 @@
+from datetime import datetime, time
+import pytz
+
 from ddpui.utils.helpers import (
     remove_nested_attribute,
     isvalid_email,
@@ -6,6 +9,7 @@ from ddpui.utils.helpers import (
     map_airbyte_keys_to_postgres_keys,
     update_dict_but_not_stars,
     nice_bytes,
+    get_schedule_time_for_large_jobs,
 )
 
 
@@ -186,3 +190,48 @@ def test_nice_bytes():
     assert nice_bytes(1024) == "1.0 KB"
     assert nice_bytes(1024 * 1024) == "1.0 MB"
     assert nice_bytes(3 * 1024 * 1024) == "3.0 MB"
+
+
+def test_get_schedule_time_for_large_jobs_1():
+    """tests get_schedule_time_for_large_jobs"""
+    r1 = get_schedule_time_for_large_jobs(datetime(2024, 1, 1))
+    assert r1.year == 2024
+    assert r1.month == 1
+    assert r1.day == 7
+    assert r1.hour == 10
+    assert r1.minute == 0
+    assert r1.tzinfo == pytz.utc
+
+
+def test_get_schedule_time_for_large_jobs_2():
+    """tests get_schedule_time_for_large_jobs"""
+    r1 = get_schedule_time_for_large_jobs(datetime(2024, 1, 1, 13, 45))
+    assert r1.year == 2024
+    assert r1.month == 1
+    assert r1.day == 7
+    assert r1.hour == 10
+    assert r1.minute == 0
+    assert r1.tzinfo == pytz.utc
+
+
+def test_get_schedule_time_for_large_jobs_3():
+    """tests get_schedule_time_for_large_jobs"""
+    r1 = get_schedule_time_for_large_jobs(datetime(2024, 1, 1, 13, 45), time(12, 30))
+    assert r1.year == 2024
+    assert r1.month == 1
+    assert r1.day == 7
+    assert r1.hour == 12
+    assert r1.minute == 30
+
+    assert r1.tzinfo == pytz.utc
+
+
+def test_get_schedule_time_for_large_jobs_4():
+    """tests get_schedule_time_for_large_jobs"""
+    r1 = get_schedule_time_for_large_jobs(datetime(2024, 1, 7, 13, 45), time(12, 30))
+    assert r1.year == 2024
+    assert r1.month == 1
+    assert r1.day == 14
+    assert r1.hour == 12
+    assert r1.minute == 30
+    assert r1.tzinfo == pytz.utc
