@@ -39,7 +39,7 @@ from ddpui.ddpprefect.schema import (
 )
 from ddpui.ddpprefect import AIRBYTESERVER
 from ddpui.ddpprefect import DBTCLIPROFILE
-from ddpui.ddpdbt.schema import DbtProjectParams
+from ddpui.core.dbtfunctions import map_airbyte_destination_spec_to_dbtcli_profile
 from ddpui.models.org import OrgDataFlowv1, OrgWarehouse
 from ddpui.models.tasks import (
     Task,
@@ -892,7 +892,6 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
     """
     Create/update the block in db and also in prefect
     """
-    dbt_creds = map_airbyte_keys_to_postgres_keys(airbyte_creds)
 
     bqlocation = None
     if warehouse.wtype == "bigquery":
@@ -922,6 +921,11 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
             "Failed to fetch the dbt profile - looks like transformation has not been setup. Using 'default' as profile name and continuing"
         )
         logger.error(err)
+
+    dbt_creds = map_airbyte_destination_spec_to_dbtcli_profile(airbyte_creds, dbt_project_params)
+
+    dbt_creds.pop("ssl_mode", None)
+    dbt_creds.pop("ssl", None)
 
     # set defaults to target and profile
     # cant create a cli profile without these two
