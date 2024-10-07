@@ -193,7 +193,7 @@ def test_nice_bytes():
 
 
 def test_get_schedule_time_for_large_jobs_1():
-    """tests get_schedule_time_for_large_jobs"""
+    """schedule for 10am UTC on the following sunday"""
     r1 = get_schedule_time_for_large_jobs(datetime(2024, 1, 1))
     assert r1.year == 2024
     assert r1.month == 1
@@ -203,9 +203,20 @@ def test_get_schedule_time_for_large_jobs_1():
     assert r1.tzinfo == pytz.utc
 
 
+def test_get_schedule_time_for_large_jobs_1_1():
+    """schedule for 10am UTC on the following sunday"""
+    r1 = get_schedule_time_for_large_jobs(datetime(2024, 1, 3))
+    assert r1.year == 2024
+    assert r1.month == 1
+    assert r1.day == 7
+    assert r1.hour == 10
+    assert r1.minute == 0
+    assert r1.tzinfo == pytz.utc
+
+
 def test_get_schedule_time_for_large_jobs_2():
-    """tests get_schedule_time_for_large_jobs"""
-    r1 = get_schedule_time_for_large_jobs(datetime(2024, 1, 1, 13, 45))
+    """schedule for 10am UTC on the following sunday"""
+    r1 = get_schedule_time_for_large_jobs(datetime(2024, 1, 4, 13, 45))
     assert r1.year == 2024
     assert r1.month == 1
     assert r1.day == 7
@@ -215,8 +226,8 @@ def test_get_schedule_time_for_large_jobs_2():
 
 
 def test_get_schedule_time_for_large_jobs_3():
-    """tests get_schedule_time_for_large_jobs"""
-    r1 = get_schedule_time_for_large_jobs(datetime(2024, 1, 1, 13, 45), time(12, 30))
+    """schedule for specified time UTC on the following sunday"""
+    r1 = get_schedule_time_for_large_jobs(datetime(2024, 1, 5, 13, 45), time(12, 30))
     assert r1.year == 2024
     assert r1.month == 1
     assert r1.day == 7
@@ -227,11 +238,18 @@ def test_get_schedule_time_for_large_jobs_3():
 
 
 def test_get_schedule_time_for_large_jobs_4():
-    """tests get_schedule_time_for_large_jobs"""
+    """if called on a sunday, schedule for the same sunday but an hour ahead"""
     r1 = get_schedule_time_for_large_jobs(datetime(2024, 1, 7, 13, 45), time(12, 30))
     assert r1.year == 2024
     assert r1.month == 1
-    assert r1.day == 14
-    assert r1.hour == 12
+    assert r1.day == 7
+    assert r1.hour == 13
     assert r1.minute == 30
     assert r1.tzinfo == pytz.utc
+
+
+def test_get_schedule_time_for_large_jobs_5():
+    """make sure the scheduled time is in the future"""
+    now = datetime(2024, 1, 7, 13, 45)
+    r1 = get_schedule_time_for_large_jobs(now, time(12, 30))
+    assert r1 >= now
