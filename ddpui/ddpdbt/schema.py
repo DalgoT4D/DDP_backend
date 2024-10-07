@@ -13,3 +13,4 @@ class DbtProjectParams(Schema):
     project_dir: Union[str, Path]
     target: str
     dbt_repo_dir: Union[str, Path]
+    org_project_dir: Union[str, Path]
