@@ -579,6 +579,7 @@ def reset_connection(org: Org, connection_id: str):
         try:
             prefect_service.delete_flow_run(job.flow_run_id)
             job.delete()
+            job = None
         except Exception as err:
             logger.exception(err)
             raise HttpError(400, "failed to remove the previous flow run") from err
@@ -1259,6 +1260,7 @@ def schedule_update_connection_schema(
         try:
             prefect_service.delete_flow_run(job.flow_run_id)
             job.delete()
+            job = None
         except Exception as err:
             logger.exception(err)
             raise HttpError(400, "failed to remove the previous flow run") from err
