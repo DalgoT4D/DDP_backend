@@ -25,9 +25,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "created_at",
-                    models.DateTimeField(
-                        auto_created=True, default=django.utils.timezone.now
-                    ),
+                    models.DateTimeField(auto_created=True, default=django.utils.timezone.now),
                 ),
                 ("connection_id", models.CharField(max_length=36)),
                 ("job_type", models.CharField(max_length=36)),
