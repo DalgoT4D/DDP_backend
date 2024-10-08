@@ -199,7 +199,7 @@ def get_schedule_time_for_large_jobs(
     extra_delta = timedelta(hours=0)
     if days_until_sunday == 0:
         extra_delta = timedelta(hours=1)
-        time_of_day = None  # since it will time at now + extra delta
+        time_of_day = None  # ignore time_of_day on sundays; set it for now + extra delta instead
 
     # Calculate the next weekday datetime
     next_slot = curr + timedelta(days=days_until_sunday) + extra_delta
