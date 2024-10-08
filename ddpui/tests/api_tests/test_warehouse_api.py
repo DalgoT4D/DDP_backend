@@ -180,10 +180,10 @@ def test_download_warehouse_data_success(orguser):
         content = b"".join(response.streaming_content).decode("utf-8")
 
         # Assertions to verify the streaming response content
-        assert "col1,col2\n" in content  # Check header
-        assert "value1,value2\n" in content  # Check first row
-        assert "value3,value4\n" in content  # Check second row
-        assert "value5,value6\n" in content  # Check second row
+        assert "col1,col2\r\n" in content  # Check header
+        assert "value1,value2\r\n" in content  # Check first row
+        assert "value3,value4\r\n" in content  # Check second row
+        assert "value5,value6\r\n" in content  # Check second row
         assert content.count("\n") == 4
 
 
