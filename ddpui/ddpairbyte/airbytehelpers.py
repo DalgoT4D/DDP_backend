@@ -1106,7 +1106,20 @@ def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
                 defaults={"change_type": change_type, "org": org},
             )
         else:
-            OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+            schema_change = OrgSchemaChange.objects.filter(connection_id=connection_id).first()
+            # see if any jobs are scheduled for the schema change; delete them
+            if schema_change:
+                if schema_change.schedule_job:
+                    job = schema_change.schedule_job
+                    try:
+                        if job.flow_run_id:
+                            prefect_service.delete_flow_run(job.flow_run_id)
+                        job.delete()
+                        schema_change.delete()
+                    except Exception as err:
+                        logger.exception("Failed to delete the large schema change job - %s", err)
+                else:
+                    schema_change.delete()
 
     except Exception as err:
         return (
