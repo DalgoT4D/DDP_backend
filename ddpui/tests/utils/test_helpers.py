@@ -239,17 +239,19 @@ def test_get_schedule_time_for_large_jobs_3():
 
 def test_get_schedule_time_for_large_jobs_4():
     """if called on a sunday, schedule for the same sunday but an hour ahead"""
-    r1 = get_schedule_time_for_large_jobs(datetime(2024, 1, 7, 13, 45), time(12, 30))
-    assert r1.year == 2024
-    assert r1.month == 1
-    assert r1.day == 7
-    assert r1.hour == 13
-    assert r1.minute == 30
+    now = datetime(2024, 1, 7, 13, 45)
+    time_of_day = time(12, 30)
+    r1 = get_schedule_time_for_large_jobs(curr=now, time_of_day=time_of_day)
+    assert r1.year == now.year
+    assert r1.month == now.month
+    assert r1.day == now.day
+    assert r1.hour == now.hour + 1
+    assert r1.minute == now.minute
     assert r1.tzinfo == pytz.utc
 
 
 def test_get_schedule_time_for_large_jobs_5():
     """make sure the scheduled time is in the future"""
-    now = datetime(2024, 1, 7, 13, 45)
+    now = datetime(2024, 1, 7, 13, 45).astimezone(pytz.utc)
     r1 = get_schedule_time_for_large_jobs(now, time(12, 30))
     assert r1 >= now
