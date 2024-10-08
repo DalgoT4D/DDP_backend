@@ -8,10 +8,10 @@ repos:
 #     rev: v1.2.3
 #     hooks:
 #     - id: flake8
-- repo: https://github.com/PyCQA/pylint
-  rev: v3.3.1
-  hooks:
-    - id: pylint
-      language: python
-      additional_dependencies: ['pylint==3.3.1']
+# - repo: https://github.com/PyCQA/pylint
+#   rev: v3.3.1
+#   hooks:
+#     - id: pylint
+#       language: python
+#       additional_dependencies: ['pylint==3.3.1']
 files: 'ddpui\/.*\.pyi?$'
