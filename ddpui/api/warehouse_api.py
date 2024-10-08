@@ -1,4 +1,6 @@
 import json
+import csv
+from io import StringIO
 import sqlparse
 from sqlparse.tokens import Keyword, Number, Token
 import uuid
@@ -254,10 +256,18 @@ def get_download_warehouse_data(request, schema_name: str, table_name: str):
             if not data:
                 break
             if not header_written:
-                yield ",".join(data[0].keys()) + "\n"  # Write CSV header
+                output = StringIO()
+                writer = csv.DictWriter(output, fieldnames=data[0].keys())
+                writer.writeheader()
+                yield output.getvalue()
                 header_written = True
+            output = StringIO()
+            writer = csv.DictWriter(output, fieldnames=data[0].keys())
             for row in data:
-                yield ",".join(map(str, row.values())) + "\n"  # Write CSV row
+                writer.writerow(row)
+                yield output.getvalue()
+                output.seek(0)
+                output.truncate(0)
             page += 1
             logger.info(f"Streaming page {page} of {schema_name}.{table_name}")
 
