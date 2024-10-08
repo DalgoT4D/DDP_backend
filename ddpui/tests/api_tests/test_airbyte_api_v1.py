@@ -26,6 +26,7 @@ from ddpui.api.airbyte_api import (
     put_airbyte_destination_v1,
     update_connection_schema,
     get_sync_history_for_connection,
+    schedule_update_connection_schema,
 )
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.ddpairbyte.schema import (
@@ -1050,3 +1051,40 @@ def test_update_schema_changes_connection_success(orguser_workspace):
     assert "syncCatalog" in response
     assert "catalogId" in response
     assert "schemaChange" in response
+
+
+def test_schedule_update_connection_schema_workspace_not_found(orguser):
+    """Tests schedule_update_connection_schema when organization has no workspace"""
+    request = mock_request(orguser)
+
+    connection_id = "connection_123"
+    payload = {"schemaChange": "true"}
+
+    with pytest.raises(HttpError) as excinfo:
+        schedule_update_connection_schema(request, connection_id, payload)
+
+    assert excinfo.value.status_code == 400
+    assert str(excinfo.value) == "create an airbyte workspace first"
+
+
+def test_schedule_update_connection_schema_workspace_success(orguser):
+    """Tests schedule_update_connection_schema success"""
+
+    orguser.org.airbyte_workspace_id = "workspace_123"
+    request = mock_request(orguser)
+
+    connection_id = "connection_123"
+    payload = {"schemaChange": "true"}
+
+    with patch(
+        "ddpui.ddpairbyte.airbytehelpers.schedule_update_connection_schema"
+    ) as schedule_update_connection_schema_mock:
+        schedule_update_connection_schema_mock.return_value = (None, None)
+
+        response = schedule_update_connection_schema(request, connection_id, payload)
+
+    schedule_update_connection_schema_mock.assert_called_once_with(
+        request.orguser, connection_id, payload
+    )
+
+    assert response == {"success": 1}

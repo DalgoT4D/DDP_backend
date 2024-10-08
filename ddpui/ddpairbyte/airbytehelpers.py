@@ -1312,10 +1312,9 @@ def schedule_update_connection_schema(
                 job.save()
 
             # update the schema change with the scheduled job
-            schema_change = OrgSchemaChange.objects.filter(connection_id=connection_id).first()
-            if schema_change:
-                schema_change.schedule_job = job
-                schema_change.save()
+            OrgSchemaChange.objects.get_or_create(
+                org=orguser.org, connection_id=connection_id, defaults={"schedule_job": job}
+            )
 
         for tasklock in locks:
             tasklock.flow_run_id = res["flow_run_id"]
