@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, Mock, patch
 from django.core.management import call_command
 
 import django
+from flags.state import enable_flag
 import pytest
 from ninja.errors import HttpError
 
@@ -26,6 +27,7 @@ from ddpui.api.airbyte_api import (
     put_airbyte_destination_v1,
     update_connection_schema,
     get_sync_history_for_connection,
+    schedule_update_connection_schema,
 )
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.ddpairbyte.schema import (
@@ -520,16 +522,21 @@ def test_post_airbyte_connection_reset_v1_no_workspace(orguser):
     assert str(excinfo.value) == "create an airbyte workspace first"
 
 
-def test_post_airbyte_connection_reset_v1_no_connection_task(orguser_workspace):
+def test_post_airbyte_connection_reset_v1_no_connection_task(
+    orguser_workspace, airbyte_server_block
+):
     """tests POST /v1/connections/{connection_id}/reset failure with connection task created"""
     request = mock_request(orguser_workspace)
 
     with pytest.raises(HttpError) as excinfo:
         post_airbyte_connection_reset_v1(request, "connection_id")
-    assert str(excinfo.value) == "connection not found"
+    assert (
+        str(excinfo.value)
+        == "Reset job is disabled. Please contact the dalgo support team at support@dalgo.in"
+    )
 
 
-def test_post_airbyte_connection_reset_v1_success(orguser_workspace):
+def test_post_airbyte_connection_reset_v1_success(orguser_workspace, airbyte_server_block):
     """tests POST /v1/connections/{connection_id}/reset success"""
     request = mock_request(orguser_workspace)
 
@@ -545,13 +552,19 @@ def test_post_airbyte_connection_reset_v1_success(orguser_workspace):
 
     OrgTask.objects.create(task=task, org=request.orguser.org, connection_id=connection_id)
 
-    reset_connection_mock = MagicMock()
+    with pytest.raises(HttpError) as excinfo:
+        post_airbyte_connection_reset_v1(request, connection_id)
+    assert (
+        str(excinfo.value)
+        == "Reset job is disabled. Please contact the dalgo support team at support@dalgo.in"
+    )
 
-    with patch("ddpui.ddpairbyte.airbyte_service.reset_connection") as reset_connection_mock:
-        result = post_airbyte_connection_reset_v1(request, connection_id)
-        assert result["success"] == 1
+    enable_flag("AIRBYTE_RESET_JOB")
+    with patch("ddpui.ddpairbyte.airbytehelpers.reset_connection") as reset_helper_mock:
+        reset_helper_mock.return_value = (None, None)
+        post_airbyte_connection_reset_v1(request, connection_id)
 
-    reset_connection_mock.assert_called_once_with(connection_id)
+        reset_helper_mock.assert_called_once()
 
 
 # ================================================================================
@@ -1050,3 +1063,40 @@ def test_update_schema_changes_connection_success(orguser_workspace):
     assert "syncCatalog" in response
     assert "catalogId" in response
     assert "schemaChange" in response
+
+
+def test_schedule_update_connection_schema_workspace_not_found(orguser):
+    """Tests schedule_update_connection_schema when organization has no workspace"""
+    request = mock_request(orguser)
+
+    connection_id = "connection_123"
+    payload = {"schemaChange": "true"}
+
+    with pytest.raises(HttpError) as excinfo:
+        schedule_update_connection_schema(request, connection_id, payload)
+
+    assert excinfo.value.status_code == 400
+    assert str(excinfo.value) == "create an airbyte workspace first"
+
+
+def test_schedule_update_connection_schema_workspace_success(orguser):
+    """Tests schedule_update_connection_schema success"""
+
+    orguser.org.airbyte_workspace_id = "workspace_123"
+    request = mock_request(orguser)
+
+    connection_id = "connection_123"
+    payload = {"schemaChange": "true"}
+
+    with patch(
+        "ddpui.ddpairbyte.airbytehelpers.schedule_update_connection_schema"
+    ) as schedule_update_connection_schema_mock:
+        schedule_update_connection_schema_mock.return_value = (None, None)
+
+        response = schedule_update_connection_schema(request, connection_id, payload)
+
+    schedule_update_connection_schema_mock.assert_called_once_with(
+        request.orguser, connection_id, payload
+    )
+
+    assert response == {"success": 1}
