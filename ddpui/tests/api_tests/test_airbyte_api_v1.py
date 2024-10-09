@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, Mock, patch
 from django.core.management import call_command
 
 import django
+from flags.state import enable_flag
 import pytest
 from ninja.errors import HttpError
 
@@ -529,7 +530,10 @@ def test_post_airbyte_connection_reset_v1_no_connection_task(
 
     with pytest.raises(HttpError) as excinfo:
         post_airbyte_connection_reset_v1(request, "connection_id")
-    assert str(excinfo.value) == "connection not found"
+    assert (
+        str(excinfo.value)
+        == "Reset job is disabled. Please contact the dalgo support team at support@dalgo.in"
+    )
 
 
 def test_post_airbyte_connection_reset_v1_success(orguser_workspace, airbyte_server_block):
@@ -548,6 +552,14 @@ def test_post_airbyte_connection_reset_v1_success(orguser_workspace, airbyte_ser
 
     OrgTask.objects.create(task=task, org=request.orguser.org, connection_id=connection_id)
 
+    with pytest.raises(HttpError) as excinfo:
+        post_airbyte_connection_reset_v1(request, connection_id)
+    assert (
+        str(excinfo.value)
+        == "Reset job is disabled. Please contact the dalgo support team at support@dalgo.in"
+    )
+
+    enable_flag("AIRBYTE_RESET_JOB")
     with patch("ddpui.ddpairbyte.airbytehelpers.reset_connection") as reset_helper_mock:
         reset_helper_mock.return_value = (None, None)
         post_airbyte_connection_reset_v1(request, connection_id)
