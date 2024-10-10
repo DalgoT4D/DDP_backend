@@ -40,4 +40,5 @@ omit = [
   "ddpui/routes.py",
   "*/schema.py",
   "ddpui/*/__init__.py",
+  "ddpui/schemas/*"
 ]

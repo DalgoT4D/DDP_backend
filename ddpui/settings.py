@@ -95,7 +95,8 @@ INSTALLED_APPS = [
 # Feature flags
 # AIRBYTE_PROFILE: to get airbyte credentials through prefect block
 # LOG_SUMMARY: allow summarizing logs through open AI
-FLAGS = {"AIRBYTE_PROFILE": [], "LOG_SUMMARY": []}
+# AIRBYTE_RESET_JOB: to reset airbyte connection
+FLAGS = {"AIRBYTE_PROFILE": [], "LOG_SUMMARY": [], "AIRBYTE_RESET_JOB": []}
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
