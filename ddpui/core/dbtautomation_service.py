@@ -1,4 +1,4 @@
-import os, uuid
+import os, uuid, time
 from pathlib import Path
 
 from dbt_automation.operations.arithmetic import arithmetic, arithmetic_dbt_sql
@@ -293,14 +293,16 @@ def propagate_changes_to_downstream_operations(
 
 
 @app.task(bind=True)
-def sync_sources_for_warehouse(self, org_dbt_id: str, org_warehouse_id: str, orgslug: str):
+def sync_sources_for_warehouse(
+    self, org_dbt_id: str, org_warehouse_id: str, task_id: str, hashkey: str
+):
     """
     Sync all tables in all schemas in the warehouse.
     Dbt source name will be the same as the schema name.
     """
     taskprogress = TaskProgress(
-        task_id=self.request.id,
-        hashkey=f"{TaskProgressHashPrefix.SYNCSOURCES}-{orgslug}",
+        task_id=task_id,
+        hashkey=hashkey,
         expire_in_seconds=10 * 60,  # max 10 minutes
     )
 
