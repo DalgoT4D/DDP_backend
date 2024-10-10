@@ -26,8 +26,10 @@ from ddpui.schemas.dbt_workflow_schema import (
     LockCanvasRequestSchema,
     LockCanvasResponseSchema,
 )
+from ddpui.utils.taskprogress import TaskProgress
 from ddpui.core.transformfunctions import validate_operation_config, check_canvas_locked
 from ddpui.api.warehouse_api import get_warehouse_data
+from ddpui.models.tasks import TaskProgressHashPrefix
 
 from ddpui.core import dbtautomation_service
 from ddpui.core.dbtautomation_service import sync_sources_for_warehouse
@@ -114,9 +116,24 @@ def sync_sources(request):
     if not orgdbt:
         raise HttpError(404, "DBT workspace not set up")
 
-    task = sync_sources_for_warehouse.delay(orgdbt.id, org_warehouse.id, org_warehouse.org.slug)
+    task_id = str(uuid.uuid4())
+    hashkey = f"{TaskProgressHashPrefix.SYNCSOURCES.value}-{org.slug}"
 
-    return {"task_id": task.id}
+    taskprogress = TaskProgress(
+        task_id=task_id,
+        hashkey=hashkey,
+        expire_in_seconds=10 * 60,  # max 10 minutes)
+    )
+    taskprogress.add(
+        {
+            "message": "Started syncing sources",
+            "status": "runnning",
+        }
+    )
+
+    sync_sources_for_warehouse.delay(orgdbt.id, org_warehouse.id, task_id, hashkey)
+
+    return {"task_id": task_id, "hashkey": hashkey}
 
 
 ########################## Models & Sources #############################################
