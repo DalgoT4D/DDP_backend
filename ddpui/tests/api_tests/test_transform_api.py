@@ -23,7 +23,7 @@ from ddpui.auth import (
 )
 from ddpui.schemas.org_task_schema import DbtProjectSchema
 from ddpui.ddpprefect.schema import DbtProfile, OrgDbtSchema
-from ddpui.celeryworkers.tasks import setup_dbtworkspace
+from ddpui.celeryworkers.tasks import setup_dbtworkspace, TaskProgressHashPrefix
 from ddpui.tests.api_tests.test_user_org_api import (
     seed_db,
     orguser,
@@ -393,8 +393,14 @@ def test_sync_sources_success(orguser: OrgUser, tmp_path):
     ) as delay:
         result = sync_sources(request)
 
-        delay.assert_called_once_with(orgdbt.id, org_warehouse.id, orguser.org.slug)
-        assert result["task_id"] == "task-id"
+        args, kwargs = delay.call_args
+        assert len(args) == 4
+        assert args[0] == orgdbt.id
+        assert args[1] == org_warehouse.id
+        # args[2] is a random uuid
+        assert args[3] == f"{TaskProgressHashPrefix.SYNCSOURCES.value}-{orguser.org.slug}"
+        assert "task_id" in result
+        assert "hashkey" in result
 
 
 def test_post_construct_dbt_model_operation_failure_warehouse_not_setup(
