@@ -1000,6 +1000,11 @@ def test_schedule_update_connection_schema_test_for_large_connection(orguser):
         "ddpui.ddpprefect.prefect_service.delete_flow_run"
     ) as delete_flow_run_mock:
         schedule_flow_run_mock.return_value = {"flow_run_id": "schame-change-schedule-flow-run-id"}
+
+        OrgSchemaChange.objects.create(
+            connection_id=connection_id, org=orguser.org, change_type="non-breaking"
+        )
+
         schedule_update_connection_schema(orguser, connection_id, payload)
 
         lock_tasks_mock.assert_not_called()
