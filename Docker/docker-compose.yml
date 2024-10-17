@@ -13,7 +13,7 @@ services:
     command: backend
     restart: always
     ports:
-      - "7002:8002"
+      - "8002:8002"
     env_file:
       - .env
     networks:
