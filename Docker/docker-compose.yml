@@ -15,7 +15,7 @@ services:
     ports:
       - "8002:8002"
     env_file:
-      - .env
+      - .env.docker
     networks:
       - dalgo-network
   celery_beat:
@@ -25,7 +25,7 @@ services:
       - backend
       - redis_server
     env_file:
-      - .env
+      - .env.docker
     volumes:
       - celerybeat_volume:/data
     networks:
@@ -38,7 +38,7 @@ services:
       - backend
       - redis_server
     env_file:
-      - .env
+      - .env.docker
     volumes:
       - celerybeat_worker:/data
     networks:

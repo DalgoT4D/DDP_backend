@@ -191,7 +191,7 @@ Follow the steps below:
 
 ### Step 2: Create .env file
 
--  create `.env` from `.env.template` inside the Docker folder
+-  create `.env.docker` from `.env.template` inside the Docker folder
 
 ### Step 3: Create `whitelist.py` file
 
@@ -211,4 +211,4 @@ If using M1-based MacBook  run this before building image
 
 ### Step 5: Start Backend
 
--  `docker-compose -f Docker/docker-compose.dev.yml up`
+-  `docker compose -f Docker/docker-compose.yml up -d`
