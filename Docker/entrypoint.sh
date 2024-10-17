@@ -17,10 +17,7 @@ case "$1" in
 
         # Start server
         echo "Starting server"
-        python3 -m gunicorn -b 0.0.0.0:8002 ddpui.wsgi \
-            --capture-output \
-            --log-config /usr/src/backend/gunicorn-log.conf \
-            --timeout 120
+        uvicorn ddpui.asgi:application --workers 4 --host 0.0.0.0 --port 8002 --timeout-keep-alive 60
         ;;
     initdb)
         echo "Apply database migrations"
