@@ -2,7 +2,7 @@
 # application based on the official python image and the application code
 
 # Stage 1: Build the application
-FROM python:3.10 as build
+FROM python:3.10.15 as build
 LABEL Stage="Build"
 
 ENV HOME_DIR=/usr/src/backend
@@ -23,9 +23,7 @@ RUN apt-get update && apt-get -y install libpq-dev gcc wget curl git \
     && /root/.cargo/bin/uv pip install --system --upgrade pip \
     && /root/.cargo/bin/uv pip install --system --no-cache-dir -r /requirements.txt \
     && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean 
-
-
+    && apt-get clean
 
 RUN mkdir -p ${HOME_DIR}/secrets \
     && mkdir -p ${HOME_DIR}/dbt/dbt \
@@ -43,7 +41,7 @@ COPY gunicorn-log.conf ${HOME_DIR}/gunicorn-log.conf
 
 
 # Stage 2 - Runtime
-from python:3.10-slim-bookworm as runtime
+from python:3.10.15-slim-bookworm as runtime
 
 ARG BUILD_DATE
 
