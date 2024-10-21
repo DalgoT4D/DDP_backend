@@ -153,3 +153,6 @@ parseprefectlogs.env
 # yml configs
 whitelist.py
 cloudbuild.yaml
+
+# ignore docker related
+Docker/.env*
