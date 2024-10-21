@@ -9,7 +9,7 @@ services:
     networks:
       - dalgo-network 
   backend:
-    image: dalgo_backend:0.1
+    image: dalgo_backend:latest
     command: backend
     restart: always
     ports:
@@ -19,7 +19,7 @@ services:
     networks:
       - dalgo-network
   celery_beat:
-    image: dalgo_backend:0.1
+    image: dalgo_backend:latest
     command: beat
     depends_on:
       - backend
@@ -32,7 +32,7 @@ services:
       - dalgo-network
 
   celery_worker:
-    image: dalgo_backend:0.1
+    image: dalgo_backend:latest
     command: worker
     depends_on:
       - backend
