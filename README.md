@@ -211,4 +211,4 @@ If using M1-based MacBook  run this before building image
 
 ### Step 5: Start Backend
 
--  `docker compose -f Docker/docker-compose.yml up -d`
+-  `docker compose --project-name dalgo_backend -f Docker/docker-compose.yml up -d`
