@@ -1,15 +1,19 @@
 import os
+import uuid
 import json
 from typing import Union
 from ninja.errors import HttpError
 from ddpui.models.dbt_workflow import OrgDbtModel, DbtEdge, OrgDbtOperation
 from ddpui.models.org_user import OrgUser
-from ddpui.models.org import Org
+from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.models.canvaslock import CanvasLock
 from ddpui.schemas.dbt_workflow_schema import (
     CreateDbtModelPayload,
     EditDbtOperationPayload,
     GenerateGraphSchema,
+)
+from ddpui.utils.transform_workflow_helpers import (
+    from_orgdbtoperation,
 )
 from ddpui.core import dbtautomation_service
 from autogen import ConversableAgent, initiate_chats
@@ -132,7 +136,82 @@ def check_canvas_locked(requestor_orguser: OrgUser, lock_id: str):
         raise HttpError(403, "acquire a canvas lock first")
 
 
-def chat_to_graph(payload: GenerateGraphSchema):
+def create_operation_node(
+    org,
+    orguser: OrgUser,
+    payload: CreateDbtModelPayload,
+):
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    # make sure the orgdbt here is the one we create locally
+    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    check_canvas_locked(orguser, payload.canvas_lock_id)
+
+    if payload.op_type not in dbtautomation_service.OPERATIONS_DICT.keys():
+        raise HttpError(422, "Operation not supported")
+
+    is_multi_input_op = payload.op_type in ["join", "unionall"]
+
+    target_model = None
+    if payload.target_model_uuid:
+        target_model = OrgDbtModel.objects.filter(uuid=payload.target_model_uuid).first()
+
+    if not target_model:
+        target_model = OrgDbtModel.objects.create(
+            uuid=uuid.uuid4(),
+            orgdbt=orgdbt,
+            under_construction=True,
+        )
+
+    # only under construction models can be modified
+    if not target_model.under_construction:
+        raise HttpError(422, "model is locked")
+
+    current_operations_chained = OrgDbtOperation.objects.filter(dbtmodel=target_model).count()
+
+    final_config, all_input_models = validate_operation_config(
+        payload, target_model, is_multi_input_op, current_operations_chained
+    )
+
+    # we create edges only with tables/models
+    for source in all_input_models:
+        edge = DbtEdge.objects.filter(from_node=source, to_node=target_model).first()
+        if not edge:
+            DbtEdge.objects.create(
+                from_node=source,
+                to_node=target_model,
+            )
+
+    output_cols = dbtautomation_service.get_output_cols_for_operation(
+        org_warehouse, payload.op_type, final_config["config"].copy()
+    )
+    logger.info("creating operation")
+
+    dbt_op = OrgDbtOperation.objects.create(
+        dbtmodel=target_model,
+        uuid=uuid.uuid4(),
+        seq=current_operations_chained + 1,
+        config=final_config,
+        output_cols=output_cols,
+    )
+
+    logger.info("created operation")
+
+    # save the output cols of the latest operation to the dbt model
+    target_model.output_cols = dbt_op.output_cols
+    target_model.save()
+
+    logger.info("updated output cols for the model")
+
+    return from_orgdbtoperation(dbt_op, chain_length=dbt_op.seq)
+
+
+def chat_to_graph(org, orguser: OrgUser, payload: GenerateGraphSchema):
     """
     1. Converts the query to dbt sql statement
     2. Creates the model file on disk
@@ -143,15 +222,6 @@ def chat_to_graph(payload: GenerateGraphSchema):
     config = payload.config
 
     prompt = config["query"]
-
-    def is_valid_json(message):
-        try:
-            print(message)
-            json.loads(message.get("content", ""))
-            return True
-        except ValueError as e:
-            print(f"Invalid JSON: {e}")
-            return False
 
     op_types = dbtautomation_service.OPERATIONS_DICT.keys()
     optypes_str = "\n".join(op_types)
@@ -208,29 +278,26 @@ def chat_to_graph(payload: GenerateGraphSchema):
             "max_turns": 1,
             "clear_history": True,
         },
-        {
-            "sender": classify_optype_agent,
-            "recipient": dbt_agent,
-            "message": "The operation is to be performed on the following source/reference model. "
-            "source columns: ['col1', 'col2', 'col3', 'col4'] \n"
-            "model_name: 'table2' \n"
-            "Using the operation type, return the dbt sql model information.",
-            "summary_method": "reflection_with_llm",
-            "summary_args": {
-                "summary_prompt": "Return the dbt sql model information with materialized as table. Return 3 things 1. sql file content in one single line 2. instructions 3. model name"
-                "into JSON object only: "
-                "{'sql_file_content': '', 'instructions': '', model_file_name: ''}",
-            },
-            "max_turns": 1,
-            "clear_history": True,
-        },
+        # {
+        #     "sender": classify_optype_agent,
+        #     "recipient": dbt_agent,
+        #     "message": "The operation is to be performed on the following source/reference model. "
+        #     "source columns: ['col1', 'col2', 'col3', 'col4'] \n"
+        #     "model_name: 'table2' \n"
+        #     "Using the operation type, return the dbt sql model information.",
+        #     "summary_method": "reflection_with_llm",
+        #     "summary_args": {
+        #         "summary_prompt": "Return the dbt sql model information with materialized as table. Return 3 things 1. sql file content in one single line 2. instructions 3. model name"
+        #         "into JSON object only: "
+        #         "{'sql_file_content': '', 'instructions': '', model_file_name: ''}",
+        #     },
+        #     "max_turns": 1,
+        #     "clear_history": True,
+        # },
     ]
     result = initiate_chats(chats)
 
-    # create operation node
-    # print("creating op node")
-    # print(result[0])
+    payload.op_type = "dropcolumns"  # TODO: pick from llm
+    payload.config = {"columns": ["_airbyte_extracted_at", "_airbyte_meta"]}  # TODO: pick from llm
 
-    # operation node
-
-    return result[-1].summary.sql_file_contentp
+    return create_operation_node(org, orguser, payload)
