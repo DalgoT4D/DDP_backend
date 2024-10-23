@@ -1,5 +1,5 @@
 import os
-
+import json
 from typing import Union
 from ninja.errors import HttpError
 from ddpui.models.dbt_workflow import OrgDbtModel, DbtEdge, OrgDbtOperation
@@ -9,8 +9,10 @@ from ddpui.models.canvaslock import CanvasLock
 from ddpui.schemas.dbt_workflow_schema import (
     CreateDbtModelPayload,
     EditDbtOperationPayload,
+    GenerateGraphSchema,
 )
-
+from ddpui.core import dbtautomation_service
+from autogen import ConversableAgent, initiate_chats
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
@@ -128,3 +130,81 @@ def check_canvas_locked(requestor_orguser: OrgUser, lock_id: str):
             )
     else:
         raise HttpError(403, "acquire a canvas lock first")
+
+
+def chat_to_graph(payload: GenerateGraphSchema):
+    """
+    1. Converts the query to dbt sql statement
+    2. Creates the model file on disk
+    3. Validates the model
+    4. Generates nodes and edges
+    """
+    op_types = dbtautomation_service.OPERATIONS_DICT.keys()
+    optypes_str = "\n".join(op_types)
+
+    llm_config = {"model": "gpt-4", "cache_seed": None, "api_key": os.getenv("OPENAI_API_KEY")}
+
+    classify_optype_agent = ConversableAgent(
+        name="classify_optype_agent",
+        system_message=f"You will be given a user prompt that you need to classify into one of the sql operations present in {optypes_str}",
+        llm_config=llm_config,
+        human_input_mode="NEVER",
+    )
+
+    sql_agent = ConversableAgent(
+        name="sql_agent",
+        system_message="You are very good at converting text to a sql query",
+        llm_config=llm_config,
+        human_input_mode="NEVER",  # "ALWAYS", "NEVER", "TERMINATE"
+    )
+
+    dbt_agent = ConversableAgent(
+        name="dbt_agent",
+        system_message="You are very good at converting sql query to a dbt model",
+        llm_config=llm_config,
+        human_input_mode="NEVER",
+    )
+
+    user_proxy_agent = ConversableAgent(
+        name="user_proxy_agent",
+        llm_config=False,
+        human_input_mode="NEVER",
+        code_execution_config=False,
+        is_termination_msg=lambda msg: "terminate" in msg.get("content").lower(),
+    )
+
+    chats = [
+        {
+            "sender": user_proxy_agent,
+            "recipient": classify_optype_agent,
+            "message": payload.query,
+            "summary_method": "reflection_with_llm",
+            "summary_args": {
+                "summary_prompt": f"Return the operation type as single word from the following list: {optypes_str}",
+            },
+            "summary_args": {
+                "summary_prompt": f"Return the operation type as single word from the following list: {optypes_str}"
+                "into as JSON object only: "
+                "{'operation_type': ''}",
+            },
+            "max_turns": 1,
+            "clear_history": True,
+        },
+    ]
+
+    # result = sql_agent.initiate_chat(
+    #     recipient=dbt_agent,
+    #     message=payload.query,
+    #     max_turns=1,
+    #     summary_method="reflection_with_llm",
+    #     summary_args={
+    #         "summary_prompt": "Return the dbt sql model information. Return 3 things 1. sql file content 2. instructions 3. model name"
+    #         "into as JSON object only: "
+    #         "{'sql_file_content': '', 'instructions': '', model_file_name: ''}",
+    #     },
+    # )
+
+    # result = sql_agent.generate_reply(messages=[{"content": payload.query, "role": "user"}])
+    result = initiate_chats(chats)
+    print(result)
+    return result.summary

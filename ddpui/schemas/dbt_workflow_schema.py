@@ -70,3 +70,9 @@ class LockCanvasResponseSchema(Schema):
     lock_id: str = None
     locked_by: str
     locked_at: str
+
+
+class GenerateGraphSchema(Schema):
+    """schema to acquire a lock on the ui4t canvas"""
+
+    query: str

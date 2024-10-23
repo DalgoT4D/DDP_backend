@@ -25,9 +25,14 @@ from ddpui.schemas.dbt_workflow_schema import (
     EditDbtOperationPayload,
     LockCanvasRequestSchema,
     LockCanvasResponseSchema,
+    GenerateGraphSchema,
 )
 from ddpui.utils.taskprogress import TaskProgress
-from ddpui.core.transformfunctions import validate_operation_config, check_canvas_locked
+from ddpui.core.transformfunctions import (
+    validate_operation_config,
+    check_canvas_locked,
+    chat_to_graph,
+)
 from ddpui.api.warehouse_api import get_warehouse_data
 from ddpui.models.tasks import TaskProgressHashPrefix
 
@@ -731,3 +736,32 @@ def post_unlock_canvas(request, payload: LockCanvasRequestSchema):
     canvas_lock.delete()
 
     return {"success": 1}
+
+
+@transform_router.post(
+    "/agent/chat/",
+    auth=auth.CustomAuthMiddleware(),
+)
+def post_generate_graph(request, payload: GenerateGraphSchema):
+    """
+    Unlock the canvas for the org
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    # canvas_lock = CanvasLock.objects.filter(locked_by__org=org).first()
+
+    # if canvas_lock is None:
+    #     raise HttpError(404, "no lock found")
+
+    # if canvas_lock.locked_by != orguser:
+    #     raise HttpError(403, "not allowed")
+
+    # if str(canvas_lock.lock_id) != payload.lock_id:
+    #     raise HttpError(422, "wrong lock id")
+
+    # canvas_lock.delete()
+
+    reply = chat_to_graph(payload)
+
+    return reply
