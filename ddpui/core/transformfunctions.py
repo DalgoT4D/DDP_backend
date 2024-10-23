@@ -227,7 +227,7 @@ def chat_to_graph(org, orguser: OrgUser, payload: GenerateGraphSchema):
     optypes_str = "\n".join(op_types)
 
     # custom prompts for each operation
-    op_prompts = {"dropcolumns": ""}
+    # op_prompts = {"dropcolumns": ""}
 
     llm_config = {"model": "gpt-4", "cache_seed": None, "api_key": os.getenv("OPENAI_API_KEY")}
 
@@ -236,21 +236,6 @@ def chat_to_graph(org, orguser: OrgUser, payload: GenerateGraphSchema):
         system_message=f"You will be given a user prompt that you need to classify into one of the sql operations present in {optypes_str}",
         llm_config=llm_config,
         human_input_mode="NEVER",
-    )
-
-    # sql_agent = ConversableAgent(
-    #     name="sql_agent",
-    #     system_message="You are very good at converting text to a sql query",
-    #     llm_config=llm_config,
-    #     human_input_mode="NEVER",  # "ALWAYS", "NEVER", "TERMINATE"
-    # )
-
-    dbt_agent = ConversableAgent(
-        name="dbt_agent",
-        system_message="You are very good at converting sql query to a dbt model",
-        llm_config=llm_config,
-        human_input_mode="NEVER",
-        # is_termination_msg=is_valid_json,
     )
 
     user_proxy_agent = ConversableAgent(
@@ -267,37 +252,139 @@ def chat_to_graph(org, orguser: OrgUser, payload: GenerateGraphSchema):
             "message": prompt,
             "summary_method": "reflection_with_llm",
             "summary_args": {
-                "summary_prompt": f"Return the operation type as single word from the following list: {optypes_str}",
-            },
-            "summary_args": {
-                "summary_prompt": f"""Return the following things as JSON object only\n
-                1. operation type from the following list: {optypes_str} 2. which columns to drop in list array
-                """
-                + "with the following JSON schema: {'operation_type': '', 'columns_to_drop': []}",  # TODO: will be different for diff operations
+                "summary_prompt": f"Return the operation type as single word from the following list: {optypes_str}, Just give the response as a single type among the follwing and no other sentence",
             },
             "max_turns": 1,
             "clear_history": True,
         },
-        # {
-        #     "sender": classify_optype_agent,
-        #     "recipient": dbt_agent,
-        #     "message": "The operation is to be performed on the following source/reference model. "
-        #     "source columns: ['col1', 'col2', 'col3', 'col4'] \n"
-        #     "model_name: 'table2' \n"
-        #     "Using the operation type, return the dbt sql model information.",
-        #     "summary_method": "reflection_with_llm",
-        #     "summary_args": {
-        #         "summary_prompt": "Return the dbt sql model information with materialized as table. Return 3 things 1. sql file content in one single line 2. instructions 3. model name"
-        #         "into JSON object only: "
-        #         "{'sql_file_content': '', 'instructions': '', model_file_name: ''}",
-        #     },
-        #     "max_turns": 1,
-        #     "clear_history": True,
-        # },
     ]
     result = initiate_chats(chats)
 
-    payload.op_type = "dropcolumns"  # TODO: pick from llm
-    payload.config = {"columns": ["_airbyte_extracted_at", "_airbyte_meta"]}  # TODO: pick from llm
+    # chat_result =   # Extract the first (and only) ChatResult object
+
+    # Access the summary directly from the ChatResult
+    operation_type = result[0].summary
+
+    print(operation_type)
+
+    payload.op_type = operation_type
+
+    if operation_type == "dropcolumns":
+
+        drop_columns = [
+            {
+                "sender": user_proxy_agent,
+                "recipient": classify_optype_agent,
+                "message": prompt,
+                "summary_method": "reflection_with_llm",
+                "summary_args": {
+                    "summary_prompt": "Return the column names to perform operations in the following array format: ['column name 1', 'column name 2', 'column name 3']",
+                },
+                "max_turns": 1,
+                "clear_history": True,
+            }
+        ]
+
+        result1 = initiate_chats(drop_columns)
+        print(result1)
+        columns = result1[0].summary
+        payload.config = {"columns": columns}
+
+    elif operation_type == "aggregate":
+        aggregate_columns = [
+            {
+                "sender": user_proxy_agent,
+                "recipient": classify_optype_agent,
+                "message": prompt,
+                "summary_method": "reflection_with_llm",
+                "summary_args": {
+                    "summary_prompt": "From the following list: [avg, sum, min, max, count], identify the aggregation operation mentioned in the input. Respond with only the operation name.",
+                },
+                "max_turns": 1,
+                "clear_history": True,
+            },
+            {
+                "sender": user_proxy_agent,
+                "recipient": classify_optype_agent,
+                "message": prompt,
+                "summary_method": "reflection_with_llm",
+                "summary_args": {
+                    "summary_prompt": "Extract the column name mentioned in the input for aggregation. If no column is mentioned, respond with 'none'.",
+                },
+                "max_turns": 1,
+                "clear_history": True,
+            },
+            # Step 3: Generate the output column name
+            {
+                "sender": user_proxy_agent,
+                "recipient": classify_optype_agent,
+                "message": prompt,
+                "summary_method": "reflection_with_llm",
+                "summary_args": {
+                    "summary_prompt": "Generate the output column name by combining the target column with the aggregation operation. Example: 'salary' + 'avg' -> 'salary_avg'. If no column is given, return 'invalid'.",
+                },
+                "max_turns": 1,
+                "clear_history": True,
+            },
+        ]
+
+        result = initiate_chats(aggregate_columns)
+
+        # Extract the operation, column, and output column name
+        operation = result[0].summary  # Aggregation operation
+        column = result[1].summary  # Target column
+        output_column_name = result[2].summary
+
+        payload.config = config = {
+            "aggregate_on": [
+                {
+                    "operation": operation,
+                    "column": column,
+                    "output_column_name": output_column_name,
+                }
+            ]
+        }
+
+    elif operation_type == "where":
+        clauses_chat = [
+            {
+                "sender": user_proxy_agent,
+                "recipient": classify_optype_agent,
+                "message": prompt,
+                "summary_method": "reflection_with_llm",
+                "summary_args": {
+                    "summary_prompt": "Extract the following details from the sentence:\n"
+                    "1. The column name (e.g., age, salary).\n"
+                    "2. The logical operator out of these ('between','=', '!=', '>=', '<=', '>', '<').\n"
+                    "3. The operand value (mention whether it is a column value or a constant).\n"
+                    "Respond in the following JSON format:\n"
+                    "{ \"column\": \"<column_name>\", \"operator\": \"<logical_operator>\", \"operand_value\": \"<value>\", \"is_col\": <true_or_false> }",
+                },
+                "max_turns": 1,
+                "clear_history": True,
+            }
+        ]
+        
+        clauses_result = initiate_chats(clauses_chat)
+        clauses_data = clauses_result[0].summary  # Extracted clauses as JSON-like string
+        print(f"Clauses: {clauses_data}")
+        clauses = json.loads(clauses_data)
+
+
+        payload.config = {
+            "where_type": "and",
+            "clauses": [
+                {
+                    "column": clauses["column"],
+                    "operator": clauses["operator"],
+                    "operand": {
+                        "value": clauses["operand_value"],
+                        "is_col": clauses["is_col"],
+                    },
+                }
+            ],
+        }
+
+    # print(columns, operation_type)
 
     return create_operation_node(org, orguser, payload)
