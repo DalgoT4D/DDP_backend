@@ -273,7 +273,7 @@ def chat_to_graph(org, orguser: OrgUser, payload: GenerateGraphSchema):
                 "summary_prompt": f"""Return the following things as JSON object only\n
                 1. operation type from the following list: {optypes_str} 2. which columns to drop in list array
                 """
-                + "with the following JSON schema: {'operation_type': '', 'columns_to_drop': []}",
+                + "with the following JSON schema: {'operation_type': '', 'columns_to_drop': []}",  # TODO: will be different for diff operations
             },
             "max_turns": 1,
             "clear_history": True,
