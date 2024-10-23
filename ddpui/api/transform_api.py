@@ -742,26 +742,29 @@ def post_unlock_canvas(request, payload: LockCanvasRequestSchema):
     "/agent/chat/",
     auth=auth.CustomAuthMiddleware(),
 )
-def post_generate_graph(request, payload: GenerateGraphSchema):
+@has_permission(["can_edit_dbt_model"])
+def post_generate_graph(request, payload: dict):
     """
     Unlock the canvas for the org
     """
-    orguser: OrgUser = request.orguser
-    org = orguser.org
+    # print("here")
+    # orguser: OrgUser = request.orguser
+    # org = orguser.org
 
-    # canvas_lock = CanvasLock.objects.filter(locked_by__org=org).first()
+    # # canvas_lock = CanvasLock.objects.filter(locked_by__org=org).first()
 
-    # if canvas_lock is None:
-    #     raise HttpError(404, "no lock found")
+    # # if canvas_lock is None:
+    # #     raise HttpError(404, "no lock found")
 
-    # if canvas_lock.locked_by != orguser:
-    #     raise HttpError(403, "not allowed")
+    # # if canvas_lock.locked_by != orguser:
+    # #     raise HttpError(403, "not allowed")
 
-    # if str(canvas_lock.lock_id) != payload.lock_id:
-    #     raise HttpError(422, "wrong lock id")
+    # # if str(canvas_lock.lock_id) != payload.lock_id:
+    # #     raise HttpError(422, "wrong lock id")
 
-    # canvas_lock.delete()
+    # # canvas_lock.delete()
 
-    reply = chat_to_graph(payload)
+    # reply = chat_to_graph(payload)
 
-    return reply
+    # return reply
+    return True

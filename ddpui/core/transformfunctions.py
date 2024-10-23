@@ -132,15 +132,33 @@ def check_canvas_locked(requestor_orguser: OrgUser, lock_id: str):
         raise HttpError(403, "acquire a canvas lock first")
 
 
-def chat_to_graph(payload: GenerateGraphSchema):
+def chat_to_graph(payload):
     """
     1. Converts the query to dbt sql statement
     2. Creates the model file on disk
     3. Validates the model
     4. Generates nodes and edges
     """
+
+    if "config" not in payload and "query" not in payload["config"]:
+        raise HttpError(422, "query is required")
+
+    query = payload["config"]["query"]
+
+    def is_valid_json(message):
+        try:
+            print(message)
+            json.loads(message.get("content", ""))
+            return True
+        except ValueError as e:
+            print(f"Invalid JSON: {e}")
+            return False
+
     op_types = dbtautomation_service.OPERATIONS_DICT.keys()
     optypes_str = "\n".join(op_types)
+
+    # custom prompts for each operation
+    op_prompts = {"dropcolumns": ""}
 
     llm_config = {"model": "gpt-4", "cache_seed": None, "api_key": os.getenv("OPENAI_API_KEY")}
 
@@ -151,18 +169,19 @@ def chat_to_graph(payload: GenerateGraphSchema):
         human_input_mode="NEVER",
     )
 
-    sql_agent = ConversableAgent(
-        name="sql_agent",
-        system_message="You are very good at converting text to a sql query",
-        llm_config=llm_config,
-        human_input_mode="NEVER",  # "ALWAYS", "NEVER", "TERMINATE"
-    )
+    # sql_agent = ConversableAgent(
+    #     name="sql_agent",
+    #     system_message="You are very good at converting text to a sql query",
+    #     llm_config=llm_config,
+    #     human_input_mode="NEVER",  # "ALWAYS", "NEVER", "TERMINATE"
+    # )
 
     dbt_agent = ConversableAgent(
         name="dbt_agent",
         system_message="You are very good at converting sql query to a dbt model",
         llm_config=llm_config,
         human_input_mode="NEVER",
+        # is_termination_msg=is_valid_json,
     )
 
     user_proxy_agent = ConversableAgent(
@@ -170,7 +189,6 @@ def chat_to_graph(payload: GenerateGraphSchema):
         llm_config=False,
         human_input_mode="NEVER",
         code_execution_config=False,
-        is_termination_msg=lambda msg: "terminate" in msg.get("content").lower(),
     )
 
     chats = [
@@ -183,28 +201,37 @@ def chat_to_graph(payload: GenerateGraphSchema):
                 "summary_prompt": f"Return the operation type as single word from the following list: {optypes_str}",
             },
             "summary_args": {
-                "summary_prompt": f"Return the operation type as single word from the following list: {optypes_str}"
-                "into as JSON object only: "
-                "{'operation_type': ''}",
+                "summary_prompt": f"""Return the following things as JSON object only\n
+                1. operation type from the following list: {optypes_str} 2. which columns to drop in list array
+                """
+                + "with the following JSON schema: {'operation_type': '', 'columns_to_drop': []}",
+            },
+            "max_turns": 1,
+            "clear_history": True,
+        },
+        {
+            "sender": classify_optype_agent,
+            "recipient": dbt_agent,
+            "message": "The operation is to be performed on the following source/reference model. "
+            "source columns: ['col1', 'col2', 'col3', 'col4'] \n"
+            "model_name: 'table2' \n"
+            "Using the operation type, return the dbt sql model information.",
+            "summary_method": "reflection_with_llm",
+            "summary_args": {
+                "summary_prompt": "Return the dbt sql model information with materialized as table. Return 3 things 1. sql file content in one single line 2. instructions 3. model name"
+                "into JSON object only: "
+                "{'sql_file_content': '', 'instructions': '', model_file_name: ''}",
             },
             "max_turns": 1,
             "clear_history": True,
         },
     ]
-
-    # result = sql_agent.initiate_chat(
-    #     recipient=dbt_agent,
-    #     message=payload.query,
-    #     max_turns=1,
-    #     summary_method="reflection_with_llm",
-    #     summary_args={
-    #         "summary_prompt": "Return the dbt sql model information. Return 3 things 1. sql file content 2. instructions 3. model name"
-    #         "into as JSON object only: "
-    #         "{'sql_file_content': '', 'instructions': '', model_file_name: ''}",
-    #     },
-    # )
-
-    # result = sql_agent.generate_reply(messages=[{"content": payload.query, "role": "user"}])
     result = initiate_chats(chats)
-    print(result)
-    return result.summary
+
+    # create operation node
+    print("creating op node")
+    print(result[0])
+
+    # operation node
+
+    return result[-1].summary.sql_file_contentp
