@@ -743,28 +743,13 @@ def post_unlock_canvas(request, payload: LockCanvasRequestSchema):
     auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_edit_dbt_model"])
-def post_generate_graph(request, payload: dict):
+def post_generate_graph(request, payload: GenerateGraphSchema):
     """
     Unlock the canvas for the org
     """
-    # print("here")
-    # orguser: OrgUser = request.orguser
-    # org = orguser.org
+    orguser: OrgUser = request.orguser
+    org = orguser.org
 
-    # # canvas_lock = CanvasLock.objects.filter(locked_by__org=org).first()
+    reply = chat_to_graph(payload)
 
-    # # if canvas_lock is None:
-    # #     raise HttpError(404, "no lock found")
-
-    # # if canvas_lock.locked_by != orguser:
-    # #     raise HttpError(403, "not allowed")
-
-    # # if str(canvas_lock.lock_id) != payload.lock_id:
-    # #     raise HttpError(422, "wrong lock id")
-
-    # # canvas_lock.delete()
-
-    # reply = chat_to_graph(payload)
-
-    # return reply
-    return True
+    return reply

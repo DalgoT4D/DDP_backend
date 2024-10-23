@@ -132,7 +132,7 @@ def check_canvas_locked(requestor_orguser: OrgUser, lock_id: str):
         raise HttpError(403, "acquire a canvas lock first")
 
 
-def chat_to_graph(payload):
+def chat_to_graph(payload: GenerateGraphSchema):
     """
     1. Converts the query to dbt sql statement
     2. Creates the model file on disk
@@ -140,10 +140,9 @@ def chat_to_graph(payload):
     4. Generates nodes and edges
     """
 
-    if "config" not in payload and "query" not in payload["config"]:
-        raise HttpError(422, "query is required")
+    config = payload.config
 
-    query = payload["config"]["query"]
+    prompt = config["query"]
 
     def is_valid_json(message):
         try:
@@ -195,7 +194,7 @@ def chat_to_graph(payload):
         {
             "sender": user_proxy_agent,
             "recipient": classify_optype_agent,
-            "message": payload.query,
+            "message": prompt,
             "summary_method": "reflection_with_llm",
             "summary_args": {
                 "summary_prompt": f"Return the operation type as single word from the following list: {optypes_str}",
@@ -229,8 +228,8 @@ def chat_to_graph(payload):
     result = initiate_chats(chats)
 
     # create operation node
-    print("creating op node")
-    print(result[0])
+    # print("creating op node")
+    # print(result[0])
 
     # operation node
 

@@ -75,4 +75,9 @@ class LockCanvasResponseSchema(Schema):
 class GenerateGraphSchema(Schema):
     """schema to acquire a lock on the ui4t canvas"""
 
-    query: str
+    config: dict
+    input_uuid: str = ""
+    op_type: str = ""
+    source_columns: list[str] = []
+    other_inputs: list[InputModelPayload] = []
+    canvas_lock_id: str = None
