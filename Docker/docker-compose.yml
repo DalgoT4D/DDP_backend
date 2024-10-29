@@ -16,6 +16,10 @@ services:
       - "8002:8002"
     env_file:
       - .env.docker
+    volumes:
+      - ${CLIENTS_DBT_MOUNT}:/data/clients_dbt
+      - ${DEV_SECRETS_MOUNT}:/data/secrets
+      - ${LOGS_MOUNT}:/usr/src/backend/ddpui/logs
     networks:
       - dalgo-network
   celery_beat:
@@ -40,14 +44,15 @@ services:
     env_file:
       - .env.docker
     volumes:
-      - celerybeat_worker:/data
+      - ${CLIENTS_DBT_MOUNT}:/data/clients_dbt
+      - ${DEV_SECRETS_MOUNT}:/data/secrets
+      - ${LOGS_MOUNT}:/usr/src/backend/ddpui/logs
     networks:
       - dalgo-network
 
 volumes:
   redis_data:
   celerybeat_volume:
-  celerybeat_worker:
 
 networks:
   dalgo-network:
