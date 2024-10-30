@@ -20,7 +20,7 @@ class DbtProjectManager:
 
         dbt_env_dir = (
             DbtProjectManager.dbt_venv_base_dir() / orgdbt.dbt_venv
-        )  # /data/dbt_venv/ + /venv
+        )  # /data/dbt_venv/ + venv
         if not dbt_env_dir.exists():
             raise HttpError(400, "create the dbt env first")
 
@@ -28,7 +28,7 @@ class DbtProjectManager:
         venv_binary = str(dbt_env_dir / "bin")
         project_dir = str(
             DbtProjectManager.clients_base_dir() / orgdbt.project_dir
-        )  # /data/clients_dbt/ + /{org.slug}/dbtrepo
+        )  # /data/clients_dbt/ + {org.slug}/dbtrepo
         target = orgdbt.default_schema
         org_dir = DbtProjectManager.clients_base_dir() / org.slug
 
@@ -47,7 +47,7 @@ class DbtProjectManager:
 
         return str(
             DbtProjectManager.clients_base_dir() / orgdbt.project_dir
-        )  # /data/clients_dbt/ + /{org.slug}/dbtrepo
+        )  # /data/clients_dbt/ + {org.slug}/dbtrepo
 
     def get_org_dir(org: Org) -> str:
         return str(DbtProjectManager.clients_base_dir() / org.slug)

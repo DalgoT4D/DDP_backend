@@ -68,6 +68,7 @@ def test_map_airbyte_destination_spec_to_dbtcli_profile_success_ssl_params(tmpdi
         project_dir="/path/to/project_dir",
         target="target",
         dbt_binary="dbt_binary",
+        venv_binary="path/to/venv/bin",
     )
 
     conn_info = {"ssl_mode": {"mode": "verify-ca", "ca_certificate": "ca_certificate"}}

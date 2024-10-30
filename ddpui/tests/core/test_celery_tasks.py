@@ -90,6 +90,7 @@ def test_post_dbt_workspace_failed_gitclone(orguser, tmp_path):
 
 def test_post_dbt_workspace_success(orguser, tmp_path):
     """a success test case for setting up dbt workspace"""
+    os.environ["CLIENTDBT_ROOT"] = str(tmp_path)
     OrgWarehouse.objects.create(
         org=orguser.org,
         wtype="postgres",
@@ -103,8 +104,12 @@ def test_post_dbt_workspace_success(orguser, tmp_path):
 
     with patch.object(TaskProgress, "__init__", return_value=None), patch.object(
         TaskProgress, "add", return_value=Mock()
-    ) as add_progress_mock, patch("os.getenv", return_value=tmp_path), patch(
-        "ddpui.celeryworkers.tasks.clone_github_repo", return_value=True
+    ) as add_progress_mock, patch(
+        "ddpui.celeryworkers.tasks.DbtProjectManager.get_org_dir",
+        return_value=str(tmp_path / orguser.org.slug),
+    ), patch(
+        "ddpui.celeryworkers.tasks.clone_github_repo",
+        return_value=str(tmp_path / orguser.org.slug / "dbtrepo"),
     ) as gitclone_method_mock:
         assert OrgDbt.objects.filter(org=orguser.org).count() == 0
         setup_dbtworkspace(orguser.org.id, payload.dict())

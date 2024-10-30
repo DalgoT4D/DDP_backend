@@ -346,7 +346,7 @@ def post_run_prefect_org_task(
 
         task_config = setup_git_pull_shell_task_config(
             org_task,
-            dbt_project_params,
+            dbt_project_params.project_dir,
             gitpull_secret_block,
         )
 
