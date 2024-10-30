@@ -477,6 +477,7 @@ def test_post_construct_dbt_model_operation_failure_validate_input(orguser: OrgU
     """
     os.environ["CANVAS_LOCK"] = "False"
     os.environ["CLIENTDBT_ROOT"] = str(tmp_path)
+    os.environ["DBT_VENV"] = str(tmp_path)
     warehouse = OrgWarehouse.objects.create(
         org=orguser.org,
         wtype="postgres",
