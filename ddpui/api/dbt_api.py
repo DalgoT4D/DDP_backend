@@ -19,6 +19,7 @@ from ddpui.ddpprefect import DBTCLIPROFILE, prefect_service
 from ddpui.ddpprefect.schema import OrgDbtGitHub, OrgDbtSchema, OrgDbtTarget
 from ddpui.models.org import OrgPrefectBlockv1, Org
 from ddpui.models.org_user import OrgUser, OrgUserResponse
+from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.dbtdocs import create_single_html
 from ddpui.utils.helpers import runcmd
@@ -69,13 +70,13 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
     org.dbt.gitrepo_access_token_secret = payload.gitrepoAccessToken
     org.dbt.save()
 
-    project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
+    org_dir = DbtProjectManager.get_org_dir(org)
 
     task = clone_github_repo.delay(
         org.slug,
         org.dbt.gitrepo_url,
         org.dbt.gitrepo_access_token_secret,
-        str(project_dir),
+        org_dir,
         None,
     )
 
@@ -115,10 +116,11 @@ def get_dbt_workspace(request):
 def post_dbt_git_pull(request):
     """Pull the dbt repo from github for the organization"""
     orguser: OrgUser = request.orguser
-    if orguser.org.dbt is None:
+    orgdbt = orguser.org.dbt
+    if orgdbt is None:
         raise HttpError(400, "dbt is not configured for this client")
 
-    project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / orguser.org.slug
+    project_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
     if not os.path.exists(project_dir):
         raise HttpError(400, "create the dbt env first")
 
@@ -134,11 +136,12 @@ def post_dbt_git_pull(request):
 @has_permission(["can_create_dbt_docs"])
 def post_dbt_makedocs(request):
     """prepare the dbt docs single html"""
-    orguser = request.orguser
-    if orguser.org.dbt is None:
+    orguser: OrgUser = request.orguser
+    orgdbt = orguser.org.dbt
+    if orgdbt is None:
         raise HttpError(400, "dbt is not configured for this client")
 
-    project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / orguser.org.slug
+    project_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
     if not os.path.exists(project_dir):
         raise HttpError(400, "create the dbt env first")
 

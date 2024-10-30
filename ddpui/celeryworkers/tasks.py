@@ -45,6 +45,8 @@ from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.singletaskprogress import SingleTaskProgress
+from ddpui.core.orgdbt_manager import DbtProjectManager
+from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 from ddpui.ddpprefect.prefect_service import (
     get_flow_run_graphs,
@@ -80,7 +82,7 @@ def clone_github_repo(
     org_slug: str,
     gitrepo_url: str,
     gitrepo_access_token: str | None,
-    project_dir: str,
+    org_dir: str,
     taskprogress: TaskProgress | None,
 ) -> bool:
     """clones an org's github repo"""
@@ -107,17 +109,17 @@ def clone_github_repo(
             "github.com", "oauth2:" + gitrepo_access_token + "@github.com"
         )
 
-    project_dir: Path = Path(project_dir)
-    dbtrepo_dir = project_dir / "dbtrepo"
-    if not project_dir.exists():
-        project_dir.mkdir()
+    org_dir: Path = Path(org_dir)
+    dbtrepo_dir = org_dir / "dbtrepo"
+    if not org_dir.exists():
+        org_dir.mkdir()
         taskprogress.add(
             {
                 "message": "created project_dir",
                 "status": "running",
             }
         )
-        logger.info("created project_dir %s", project_dir)
+        logger.info("created project_dir %s", org_dir)
 
     elif dbtrepo_dir.exists():
         shutil.rmtree(str(dbtrepo_dir))
@@ -125,7 +127,7 @@ def clone_github_repo(
     cmd = f"git clone {gitrepo_url} dbtrepo"
 
     try:
-        runcmd(cmd, project_dir)
+        runcmd(cmd, org_dir)
     except Exception as error:
         taskprogress.add(
             {
@@ -135,7 +137,7 @@ def clone_github_repo(
             }
         )
         logger.exception(error)
-        return False
+        return None
 
     taskprogress.add(
         {
@@ -143,7 +145,7 @@ def clone_github_repo(
             "status": "running" if child else "completed",
         }
     )
-    return True
+    return dbtrepo_dir
 
 
 @app.task(bind=True)
@@ -178,23 +180,24 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
         org.save()
 
     # this client'a dbt setup happens here
-    project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
+    org_dir = DbtProjectManager.get_org_dir(org)
 
     # four parameters here is correct despite vscode thinking otherwise
-    if not clone_github_repo(
+    dbtcloned_repo_path = clone_github_repo(
         org.slug,
         payload["gitrepoUrl"],
         payload["gitrepoAccessToken"],
-        str(project_dir),
+        org_dir,
         taskprogress,
-    ):
+    )
+    if not dbtcloned_repo_path:
         raise Exception("Failed to clone git repo")
 
     logger.info("git clone succeeded for org %s", org.name)
 
     dbt = OrgDbt(
         gitrepo_url=payload["gitrepoUrl"],
-        project_dir=str(project_dir),
+        project_dir=DbtProjectManager.get_dbt_repo_relative_path(dbtcloned_repo_path),
         dbt_venv=os.getenv("DBT_VENV"),
         target_type=warehouse.wtype,
         default_schema=payload["profile"]["target_configs_schema"],
@@ -275,16 +278,20 @@ def run_dbt_commands(self, orguser_id: int, task_id: str, dbt_run_params: dict =
             logger.error("need to set up a dbt cli profile first for org %s", org.name)
             return
 
+        dbt_project_params: DbtProjectParams = DbtProjectManager.gather_dbt_project_params(
+            org, orgdbt
+        )
+
         profile = get_dbt_cli_profile_block(dbt_cli_profile.block_name)["profile"]
-        profile_dirname = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug / "dbtrepo" / "profiles"
+        profile_dirname = Path(dbt_project_params.project_dir) / "profiles"
         os.makedirs(profile_dirname, exist_ok=True)
         profile_filename = profile_dirname / "profiles.yml"
         logger.info("writing dbt profile to " + str(profile_filename))
         with open(profile_filename, "w", encoding="utf-8") as f:
             yaml.safe_dump(profile, f)
 
-        dbt_binary = Path(os.getenv("DBT_VENV")) / "venv/bin/dbt"
-        project_dir = Path(orgdbt.project_dir) / "dbtrepo"
+        dbt_binary = dbt_project_params.dbt_binary
+        project_dir = dbt_project_params.project_dir
 
         # dbt clean
         taskprogress.add({"message": "starting dbt clean", "status": "running"})
@@ -511,7 +518,7 @@ def create_elementary_report(task_key: str, org_id: int, bucket_file_path: str):
     org = Org.objects.filter(id=org_id).first()
     org_task = get_edr_send_report_task(org, create=True)
 
-    project_dir = Path(org.dbt.project_dir) / "dbtrepo"
+    project_dir = Path(DbtProjectManager.get_dbt_project_dir(org.dbt))
     # profiles_dir = project_dir / "elementary_profiles"
     aws_access_key_id = os.getenv("ELEMENTARY_AWS_ACCESS_KEY_ID")
     aws_secret_access_key = os.getenv("ELEMENTARY_AWS_SECRET_ACCESS_KEY")

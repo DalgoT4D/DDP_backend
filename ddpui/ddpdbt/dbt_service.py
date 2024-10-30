@@ -37,6 +37,7 @@ from ddpui.utils.singletaskprogress import SingleTaskProgress
 from ddpui.utils.redis_client import RedisClient
 from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.celeryworkers.tasks import create_elementary_report
+from ddpui.core.orgdbt_manager import DbtProjectManager
 
 logger = CustomLogger("ddpui")
 
@@ -125,7 +126,7 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
         org.save()
 
     # this client'a dbt setup happens here
-    project_dir: Path = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
+    project_dir: Path = Path(DbtProjectManager.get_org_dir(org))
     dbtrepo_dir: Path = project_dir / project_name
     if dbtrepo_dir.exists():
         return None, f"Project {project_name} already exists"
@@ -179,7 +180,7 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
         logger.info("created %s", target_path)
 
     dbt = OrgDbt(
-        project_dir=str(project_dir),
+        project_dir=DbtProjectManager.get_dbt_repo_relative_path(dbtrepo_dir),
         dbt_venv=os.getenv("DBT_VENV"),
         target_type=warehouse.wtype,
         default_schema=default_schema,
@@ -236,12 +237,9 @@ def refresh_elementary_report(org: Org):
     if org.dbt is None:
         return "dbt is not configured for this client", None
 
-    project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
-    if not os.path.exists(project_dir):
-        return "create the dbt env first", None
+    project_dir = Path(DbtProjectManager.get_dbt_project_dir(org.dbt))
 
-    repo_dir = project_dir / "dbtrepo"
-    if not os.path.exists(repo_dir / "elementary_profiles"):
+    if not os.path.exists(project_dir / "elementary_profiles"):
         return "set up elementary profile first", None
 
     task_str = f"{TaskProgressHashPrefix.RUNELEMENTARY}-{org.slug}"
@@ -261,12 +259,9 @@ def fetch_elementary_report(org: Org):
     if org.dbt is None:
         return "dbt is not configured for this client", None
 
-    project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
-    if not os.path.exists(project_dir):
-        return "create the dbt env first", None
+    project_dir = Path(DbtProjectManager.get_dbt_project_dir(org.dbt))
 
-    repo_dir = project_dir / "dbtrepo"
-    if not os.path.exists(repo_dir / "elementary_profiles"):
+    if not os.path.exists(project_dir / "elementary_profiles"):
         return "set up elementary profile first", None
 
     s3 = boto3.client(
@@ -288,7 +283,7 @@ def fetch_elementary_report(org: Org):
         return "error fetching elementary report", None
 
     report_html = s3response["Body"].read().decode("utf-8")
-    htmlfilename = str(repo_dir / "elementary-report.html")
+    htmlfilename = str(project_dir / "elementary-report.html")
     with open(htmlfilename, "w", encoding="utf-8") as indexfile:
         indexfile.write(report_html)
         indexfile.close()

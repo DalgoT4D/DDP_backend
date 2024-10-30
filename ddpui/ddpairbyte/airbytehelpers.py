@@ -33,6 +33,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteDestinationUpdate,
     AirbyteConnectionSchemaUpdateSchedule,
 )
+from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
     PrefectDataFlowUpdateSchema3,
@@ -61,7 +62,7 @@ from ddpui.core.pipelinefunctions import (
 )
 from ddpui.core.orgtaskfunctions import fetch_orgtask_lock, fetch_orgtask_lock_v1
 from ddpui.models.tasks import TaskLock
-from ddpui.core.dbtfunctions import gather_dbt_project_params
+from ddpui.core.orgdbt_manager import DbtProjectManager
 
 logger = CustomLogger("airbyte")
 
@@ -901,12 +902,11 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
         )
     profile_name = None
     target = None
-    dbt_project_params = None
+    dbt_project_params: DbtProjectParams = None
     try:
-        dbt_project_params, error = gather_dbt_project_params(org)
-        if error:
-            raise HttpError(400, error)
-        dbt_project_filename = str(dbt_project_params.dbt_repo_dir / "dbt_project.yml")
+        dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
+
+        dbt_project_filename = str(dbt_project_params.project_dir / "dbt_project.yml")
         if not os.path.exists(dbt_project_filename):
             raise HttpError(400, dbt_project_filename + " is missing")
 

@@ -126,10 +126,11 @@ def setup_git_pull_shell_task_config(
 
 
 def setup_edr_send_report_task_config(
-    org_task: OrgTask, project_dir: str, dbt_env_dir: Path, seq: int = 1
+    org_task: OrgTask, project_dir: str, venv_binary: str, seq: int = 1
 ):
     """constructs the prefect payload for edr"""
-    shell_env = {"PATH": str(dbt_env_dir / "venv/bin"), "shell": "/bin/bash"}
+    # shell_env = {"PATH": str(dbt_env_dir / "venv/bin"), "shell": "/bin/bash"}
+    shell_env = {"PATH": venv_binary, "shell": "/bin/bash"}  # venv_binary: ..../venv/bin
     return PrefectShellTaskSetup(
         commands=[
             org_task.task.type + " " + org_task.get_task_parameters(),
@@ -179,7 +180,7 @@ def pipeline_with_orgtasks(
             task_config = setup_edr_send_report_task_config(
                 org_task,
                 dbt_project_params.project_dir,
-                dbt_project_params.dbt_env_dir,
+                dbt_project_params.venv_binary,
             ).to_json()
         else:
             task_config = setup_dbt_core_task_config(
