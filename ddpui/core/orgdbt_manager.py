@@ -7,8 +7,8 @@ from ddpui.ddpdbt.schema import DbtProjectParams
 
 
 class DbtProjectManager:
-    clients_base_dir: Path = Path(os.getenv("CLIENTDBT_ROOT"))  # /data/clients_dbt
-    dbt_venv_base_dir: Path = Path(os.getenv("DBT_VENV"))  # /data/dbt_venv
+    clients_base_dir: Path = Path(os.getenv("CLIENTDBT_ROOT", ""))  # /data/clients_dbt
+    dbt_venv_base_dir: Path = Path(os.getenv("DBT_VENV", ""))  # /data/dbt_venv
 
     def gather_dbt_project_params(org: Org, orgdbt: OrgDbt) -> DbtProjectParams:
         """Returns the dbt project parameters"""
