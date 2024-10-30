@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Union
 
 from ninja.errors import HttpError
 from ddpui.models.org import Org, OrgDbt
@@ -52,7 +53,12 @@ class DbtProjectManager:
     def get_org_dir(org: Org) -> str:
         return str(DbtProjectManager.clients_base_dir() / org.slug)
 
-    def get_dbt_repo_relative_path(path: str) -> str:
+    def get_dbt_repo_relative_path(path: Union[str, Path]) -> str:
         absolute_path = Path(path).resolve()
         relative_path = absolute_path.relative_to(DbtProjectManager.clients_base_dir())
+        return str(relative_path)
+
+    def get_dbt_venv_relative_path(path: Union[str, Path]) -> str:
+        absolute_path = Path(path).resolve()
+        relative_path = absolute_path.relative_to(DbtProjectManager.dbt_venv_base_dir())
         return str(relative_path)
