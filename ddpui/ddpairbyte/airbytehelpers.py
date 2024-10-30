@@ -6,6 +6,7 @@ import json
 import os
 import yaml
 from ninja.errors import HttpError
+from pathlib import Path
 from django.utils.text import slugify
 from django.conf import settings
 from django.db import transaction
@@ -906,7 +907,7 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
     try:
         dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
 
-        dbt_project_filename = str(dbt_project_params.project_dir / "dbt_project.yml")
+        dbt_project_filename = str(Path(dbt_project_params.project_dir) / "dbt_project.yml")
         if not os.path.exists(dbt_project_filename):
             raise HttpError(400, dbt_project_filename + " is missing")
 
