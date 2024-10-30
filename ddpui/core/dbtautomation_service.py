@@ -317,7 +317,7 @@ def sync_sources_for_warehouse(
         }
     )
 
-    dbt_project = dbtProject(Path(org_dbt.project_dir) / "dbtrepo")
+    dbt_project = dbtProject(Path(DbtProjectManager.get_dbt_project_dir(org_dbt)))
 
     try:
         wclient = _get_wclient(org_warehouse)

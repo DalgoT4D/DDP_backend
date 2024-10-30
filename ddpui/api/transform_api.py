@@ -56,8 +56,8 @@ def create_dbt_project(request, payload: DbtProjectSchema):
     orguser: OrgUser = request.orguser
     org = orguser.org
 
-    project_dir = Path(DbtProjectManager.get_dbt_project_dir(org.dbt))
-    project_dir.mkdir(parents=True, exist_ok=True)
+    org_dir = Path(DbtProjectManager.get_org_dir(org))
+    org_dir.mkdir(parents=True, exist_ok=True)
 
     # Call the post_dbt_workspace function
     _, error = setup_local_dbt_workspace(

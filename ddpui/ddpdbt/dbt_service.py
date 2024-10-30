@@ -128,6 +128,7 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
     # this client'a dbt setup happens here
     project_dir: Path = Path(DbtProjectManager.get_org_dir(org))
     dbtrepo_dir: Path = project_dir / project_name
+
     if dbtrepo_dir.exists():
         return None, f"Project {project_name} already exists"
 
