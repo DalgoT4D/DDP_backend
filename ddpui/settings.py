@@ -54,6 +54,8 @@ ALLOWED_HOSTS = [
     "127.0.0.1",
     "staging-api.dalgo.in",
     "api.dalgo.in",
+    "staging.dalgo.in",
+    "dashboard.dalgo.in",
 ]
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_METHODS = [
