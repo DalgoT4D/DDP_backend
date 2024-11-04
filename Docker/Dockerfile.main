@@ -37,8 +37,6 @@ COPY requirements_dbt.txt ${DATA_DIR}/dbt/requirements.txt
 
 RUN python -m venv ${DATA_DIR}/dbt/venv && ${DATA_DIR}/dbt/venv/bin/python -m pip install -r ${DATA_DIR}/dbt/requirements.txt
 
-RUN cp ${HOME_DIR}/ddpui/assets/whitelist.template.py ${HOME_DIR}/ddpui/assets/whitelist.py
-
 # Copy the current directory contents into the container at /app
 COPY ddpui ${HOME_DIR}/ddpui
 COPY manage.py ${HOME_DIR}/manage.py
@@ -46,6 +44,7 @@ COPY seed ${HOME_DIR}/seed
 COPY Docker/entrypoint.sh /entrypoint.sh
 COPY gunicorn-log.conf ${HOME_DIR}/gunicorn-log.conf
 
+RUN cp ${HOME_DIR}/ddpui/assets/whitelist.template.py ${HOME_DIR}/ddpui/assets/whitelist.py
 
 # Stage 2 - Runtime
 from python:3.10.15-slim-bookworm as runtime
