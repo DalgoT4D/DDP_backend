@@ -1,15 +1,17 @@
 import os
 from typing import Union
 from pathlib import Path
+
+from ninja.errors import HttpError
 from ddpui.models.org import Org
 from ddpui.ddpdbt.schema import DbtProjectParams
 
 
-def gather_dbt_project_params(org: Org):
+def gather_dbt_project_params(org: Org) -> DbtProjectParams:
     """Returns the dbt project parameters"""
     dbt_env_dir = Path(org.dbt.dbt_venv)
     if not dbt_env_dir.exists():
-        return None, "create the dbt env first"
+        raise HttpError(400, "create the dbt env first")
 
     dbt_binary = str(dbt_env_dir / "venv/bin/dbt")
     dbtrepodir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug / "dbtrepo"
@@ -17,16 +19,13 @@ def gather_dbt_project_params(org: Org):
     target = org.dbt.default_schema
     org_project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
 
-    return (
-        DbtProjectParams(
-            dbt_binary=dbt_binary,
-            dbt_env_dir=dbt_env_dir,
-            dbt_repo_dir=dbtrepodir,
-            target=target,
-            project_dir=project_dir,
-            org_project_dir=org_project_dir,
-        ),
-        None,
+    return DbtProjectParams(
+        dbt_binary=dbt_binary,
+        dbt_env_dir=dbt_env_dir,
+        dbt_repo_dir=dbtrepodir,
+        target=target,
+        project_dir=project_dir,
+        org_project_dir=org_project_dir,
     )
 
 

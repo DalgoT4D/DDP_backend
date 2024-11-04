@@ -9,8 +9,8 @@ class DbtProjectParams(Schema):
     """
 
     dbt_env_dir: Union[str, Path]
-    dbt_binary: Union[str, Path]
     project_dir: Union[str, Path]
-    target: str
-    dbt_repo_dir: Union[str, Path]
     org_project_dir: Union[str, Path]
+    target: str
+    venv_binary: Union[str, Path]
+    dbt_binary: Union[str, Path]

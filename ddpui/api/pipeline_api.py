@@ -24,6 +24,7 @@ from ddpui.ddpprefect.schema import (
 from ddpui.utils.constants import TASK_DBTRUN, TASK_AIRBYTESYNC
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.schemas.org_task_schema import TaskParameters
+from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.utils.prefectlogs import parse_prefect_logs
 from ddpui.utils.helpers import generate_hash_id
 from ddpui.core.pipelinefunctions import (
@@ -33,7 +34,7 @@ from ddpui.core.pipelinefunctions import (
     lock_tasks_for_dataflow,
 )
 from ddpui.celeryworkers.tasks import summarize_logs
-from ddpui.core.dbtfunctions import gather_dbt_project_params
+from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.auth import has_permission
 from ddpui.models.tasks import TaskLock
 
@@ -98,15 +99,14 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
     logger.info(f"Pipline has {len(sync_orgtasks)} airbyte syncs")
 
     # push dbt pipeline orgtasks
-    dbt_project_params = None
+    dbt_project_params: DbtProjectParams = None
     dbt_git_orgtasks = []
+    orgdbt = orguser.org.dbt
     if payload.transformTasks and len(payload.transformTasks) > 0:
         logger.info("Dbt tasks being pushed to the pipeline")
 
         # dbt params
-        dbt_project_params, error = gather_dbt_project_params(orguser.org)
-        if error:
-            raise HttpError(400, error)
+        dbt_project_params = DbtProjectManager.gather_dbt_project_params(orguser.org, orgdbt)
 
         # dbt cli profile block
         cli_block = OrgPrefectBlockv1.objects.filter(
@@ -400,13 +400,14 @@ def put_prefect_dataflow_v1(request, deployment_id, payload: PrefectDataFlowUpda
     # push dbt pipeline orgtasks
     dbt_project_params = None
     dbt_git_orgtasks = []
+    orgdbt = orguser.org.dbt
     if payload.transformTasks and len(payload.transformTasks) > 0:
         logger.info(f"Dbt tasks being pushed to the pipeline")
 
         # dbt params
-        dbt_project_params, error = gather_dbt_project_params(orguser.org)
-        if error:
-            raise HttpError(400, error)
+        dbt_project_params: DbtProjectParams = DbtProjectManager.gather_dbt_project_params(
+            orguser.org, orgdbt
+        )
 
         # dbt cli profile block
         cli_block = OrgPrefectBlockv1.objects.filter(
@@ -517,6 +518,8 @@ def post_run_prefect_org_deployment_task(request, deployment_id, payload: TaskPa
     if dataflow_orgtasks.count() == 0:
         raise HttpError(400, "no org task mapped to the deployment")
 
+    orgdbt = orguser.org.dbt
+
     # ordered
     org_tasks: list[OrgTask] = [dataflow_orgtask.orgtask for dataflow_orgtask in dataflow_orgtasks]
 
@@ -542,7 +545,9 @@ def post_run_prefect_org_deployment_task(request, deployment_id, payload: TaskPa
             cli_profile_block = OrgPrefectBlockv1.objects.filter(
                 org=orguser.org, block_type=DBTCLIPROFILE
             ).first()
-            dbt_project_params, error = gather_dbt_project_params(orguser.org)
+            dbt_project_params: DbtProjectParams = DbtProjectManager.gather_dbt_project_params(
+                orguser.org, orgdbt
+            )
 
             # dont set any parameters if cli block is not present or there is an error
             if cli_profile_block and not error:

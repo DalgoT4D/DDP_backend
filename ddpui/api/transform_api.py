@@ -26,6 +26,7 @@ from ddpui.schemas.dbt_workflow_schema import (
     LockCanvasRequestSchema,
     LockCanvasResponseSchema,
 )
+from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.core.transformfunctions import validate_operation_config, check_canvas_locked
 from ddpui.api.warehouse_api import get_warehouse_data
@@ -55,8 +56,8 @@ def create_dbt_project(request, payload: DbtProjectSchema):
     orguser: OrgUser = request.orguser
     org = orguser.org
 
-    project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
-    project_dir.mkdir(parents=True, exist_ok=True)
+    org_dir = Path(DbtProjectManager.get_org_dir(org))
+    org_dir.mkdir(parents=True, exist_ok=True)
 
     # Call the post_dbt_workspace function
     _, error = setup_local_dbt_workspace(
@@ -76,25 +77,25 @@ def delete_dbt_project(request, project_name: str):
     """
     orguser: OrgUser = request.orguser
     org = orguser.org
+    orgdbt = org.dbt
 
-    project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
+    org_dir = Path(DbtProjectManager.get_org_dir(org))
 
-    if not project_dir.exists():
+    if not org_dir.exists():
         raise HttpError(404, f"Organization {org.slug} does not have any projects")
 
-    dbtrepo_dir: Path = project_dir / project_name
+    project_dir: Path = org_dir / project_name
 
-    if not dbtrepo_dir.exists():
+    if not project_dir.exists():
         raise HttpError(422, f"Project {project_name} does not exist in organization {org.slug}")
 
-    if org.dbt:
-        dbt = org.dbt
+    if orgdbt:
         org.dbt = None
         org.save()
 
-        dbt.delete()
+        orgdbt.delete()
 
-    shutil.rmtree(dbtrepo_dir)
+    shutil.rmtree(project_dir)
 
     return {"message": f"Project {project_name} deleted successfully"}
 

@@ -857,6 +857,7 @@ def test_create_or_update_org_cli_block_update_case(
     mock_update_dbt_cli_profile_block: Mock, tmp_path
 ):
     """test create_or_update_org_cli_block when the block is updated"""
+    os.environ["CLIENTDBT_ROOT"] = str(tmp_path)
     org = Org.objects.create(name="org", slug="org")
     warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", name="name")
 
@@ -880,13 +881,12 @@ def test_create_or_update_org_cli_block_update_case(
     )
     project_name = "dbtrepo"
 
-    os.environ["CLIENTDBT_ROOT"] = str(tmp_path)
     project_dir = Path(tmp_path) / org.slug
     project_dir.mkdir(parents=True, exist_ok=True)
     dbtrepo_dir = project_dir / project_name
     dbtrepo_dir.mkdir(parents=True, exist_ok=True)
     dbt = OrgDbt.objects.create(
-        project_dir=str(project_dir),
+        project_dir=f"{org.slug}/{project_name}",
         dbt_venv=str(tmp_path),
         target_type="postgres",
         default_schema="default",

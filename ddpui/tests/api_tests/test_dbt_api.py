@@ -204,16 +204,12 @@ def test_post_dbt_git_pull_gitpull_failed(orguser: OrgUser):
     orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
     request = mock_request(orguser)
 
-    with pytest.raises(HttpError) as excinfo:
-        post_dbt_git_pull(request)
-    assert (
-        str(excinfo.value)
-        == "git pull failed in "
-        + os.getenv("CLIENTDBT_ROOT")
-        + "/"
-        + request.orguser.org.slug
-        + "/dbtrepo"
-    )
+    with patch(
+        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir", return_value="project_dir"
+    ):
+        with pytest.raises(HttpError) as excinfo:
+            post_dbt_git_pull(request)
+        assert str(excinfo.value) == "git pull failed in " + os.path.join("project_dir", "dbtrepo")
 
 
 @patch.multiple("os.path", exists=Mock(return_value=True))
