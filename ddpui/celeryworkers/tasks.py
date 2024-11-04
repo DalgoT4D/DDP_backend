@@ -194,7 +194,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
         raise Exception("Failed to clone git repo")
 
     logger.info("git clone succeeded for org %s", org.name)
-    print("hereeeee", DbtProjectManager.get_dbt_repo_relative_path(dbtcloned_repo_path))
+
     dbt = OrgDbt(
         gitrepo_url=payload["gitrepoUrl"],
         project_dir=DbtProjectManager.get_dbt_repo_relative_path(dbtcloned_repo_path),
