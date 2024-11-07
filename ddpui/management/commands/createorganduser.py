@@ -86,5 +86,6 @@ class Command(BaseCommand):
             print("UserAttributes created for User")
         ua = UserAttributes.objects.filter(user=user).first()
         ua.email_verified = True
+        ua.can_create_orgs = True
         ua.save()
         print(f"UserAttributes updated for User {user.email} with email_verified=True")
