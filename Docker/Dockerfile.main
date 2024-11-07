@@ -20,7 +20,7 @@ COPY requirements.txt /requirements.txt
 ADD https://astral.sh/uv/install.sh /install.sh
 
 #Install system dependencies. git is needed because there are some packages that are not available in PyPI
-RUN apt-get update && apt-get -y install libpq-dev gcc wget curl git curl \
+RUN apt-get update && apt-get -y install libpq-dev gcc wget curl git \
     && chmod -R 755 /install.sh && /install.sh && rm /install.sh \
     && set -ex apt-get autoremove -y --purge wget && rm -rf /var/lib/apt/lists/* \
     && /root/.cargo/bin/uv pip install --system --upgrade pip \
@@ -28,9 +28,7 @@ RUN apt-get update && apt-get -y install libpq-dev gcc wget curl git curl \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-RUN mkdir -p ${DATA_DIR}/secrets \
-    && mkdir -p ${DATA_DIR}/dbt \
-    && mkdir -p ${DATA_DIR}/clients_dbt \
+RUN mkdir -p ${DATA_DIR}/dbt \
     && mkdir -p ${HOME_DIR}/ddpui/logs
 
 COPY requirements_dbt.txt ${DATA_DIR}/dbt/requirements.txt
