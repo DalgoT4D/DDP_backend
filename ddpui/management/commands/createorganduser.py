@@ -10,6 +10,8 @@ from django.utils.text import slugify
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser, UserAttributes
 from ddpui.models.role_based_access import Role
+from ddpui.core.orgfunctions import create_organization
+from ddpui.models.org import OrgSchema
 
 
 class Command(BaseCommand):
@@ -45,7 +47,9 @@ class Command(BaseCommand):
 
         # fetch / create the Org
         if not Org.objects.filter(name=options["orgname"]).exists():
-            Org.objects.create(name=options["orgname"], slug=slugify(options["orgname"]))
+            create_organization(
+                OrgSchema(name=options["orgname"], slug=slugify(options["orgname"]))
+            )
             print(f"Org {options['orgname']} created")
         else:
             print(f"Org {options['orgname']} already exists")
