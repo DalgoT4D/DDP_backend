@@ -291,7 +291,7 @@ def test_mark_as_read_success(orguser):
         )
         response = mark_as_read(request, payload)
         assert response["success"] is True
-        assert response["message"] is "Notification updated successfully"
+        assert response["message"] == "Notification updated successfully"
         mock_mark_as_read.assert_called_once_with(orguser.id, 1, True)
 
 
@@ -332,7 +332,7 @@ def test_delete_notification_success():
         )
         response = delete_notification(MagicMock(), notification_id=1)
         assert response["success"] is True
-        assert response["message"] is "Notification with id: 1 has been successfully deleted"
+        assert response["message"] == "Notification with id: 1 has been successfully deleted"
         mock_delete_notification.assert_called_once_with(1)
 
 
