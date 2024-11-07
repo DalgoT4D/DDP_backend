@@ -178,8 +178,8 @@ DJANGOSECRET=
 -   Start the server `python manage.py runserver`
 
 ### Step 10: Create first org and user
-
 -   Run `python manage.py createorganduser <Org Name> <Email address> --role super-admin`
+-   The above command creates a user with super admin role. If we don't provide any role, the default role is of account manager.
 
 ## Using Docker
 Follow the steps below:
