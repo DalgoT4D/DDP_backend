@@ -179,7 +179,7 @@ DJANGOSECRET=
 
 ### Step 10: Create first org and user
 
--   Run `python manage.py createorganduser <Org Name> <Email address>`
+-   Run `python manage.py createorganduser <Org Name> <Email address> --role super-admin`
 
 ## Using Docker
 Follow the steps below:
