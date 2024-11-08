@@ -116,7 +116,7 @@ AIRBYTE_SERVER_HOST=
 AIRBYTE_SERVER_PORT=
 AIRBYTE_SERVER_APIVER=
 AIRBYTE_API_TOKEN= <token> # base64 encryption of username:password. Default username and password is airbyte:password and token will be YWlyYnl0ZTpwYXNzd29yZA==
-AIRBYTE_DESTINATION_TYPES=
+AIRBYTE_DESTINATION_TYPES="Postgres,BigQuery"
 ```
 
 ### Step 5: Install Prefect and Start Prefect Proxy
