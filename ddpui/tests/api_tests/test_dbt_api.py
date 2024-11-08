@@ -20,8 +20,9 @@ from ddpui.api.dbt_api import (
     put_dbt_github,
 )
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.ddpprefect import SECRET
 from ddpui.ddpprefect.schema import DbtProfile, OrgDbtGitHub, OrgDbtSchema
-from ddpui.models.org import Org, OrgDbt
+from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser, OrgUserRole
 from ddpui.models.role_based_access import Permission, Role, RolePermission
 from ddpui.tests.api_tests.test_user_org_api import mock_request, seed_db
@@ -114,6 +115,12 @@ def test_put_dbt_github(orguser):
     request.orguser.org.slug = "org-slug"
 
     payload = OrgDbtGitHub(gitrepoUrl="new-url", gitrepoAccessToken="new-access-token")
+
+    OrgPrefectBlockv1.objects.create(
+        org=request.orguser.org,
+        block_type=SECRET,
+        block_name=f"{request.orguser.org.slug}-git-pull-url",
+    )
 
     mocked_task = Mock()
     mocked_task.id = "task-id"
