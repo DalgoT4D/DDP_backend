@@ -16,7 +16,7 @@ from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.ddpdbt import dbt_service
 from ddpui.ddpprefect import DBTCLIPROFILE, prefect_service
-from ddpui.ddpprefect.schema import OrgDbtGitHub, OrgDbtSchema, OrgDbtTarget
+from ddpui.ddpprefect.schema import OrgDbtGitHub, OrgDbtSchema, OrgDbtTarget, PrefectSecretBlockEdit
 from ddpui.models.org import OrgPrefectBlockv1, Org
 from ddpui.models.org_user import OrgUser, OrgUserResponse
 from ddpui.core.orgdbt_manager import DbtProjectManager
@@ -69,6 +69,19 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
     org.dbt.gitrepo_url = payload.gitrepoUrl
     org.dbt.gitrepo_access_token_secret = payload.gitrepoAccessToken
     org.dbt.save()
+
+    if payload.gitrepoAccessToken is not None and payload.gitrepoAccessToken != "":
+        gitrepo_url = payload.gitrepoUrl.replace(
+            "github.com", "oauth2:" + payload.gitrepoAccessToken + "@github.com"
+        )
+
+        # update the git oauth endpoint with token in the prefect secret block
+        secret_block_edit_params = PrefectSecretBlockEdit(
+            block_name=f"{orguser.org.slug}-git-pull-url",
+            secret=gitrepo_url,
+        )
+
+        prefect_service.edit_secret_block(secret_block_edit_params)
 
     org_dir = DbtProjectManager.get_org_dir(org)
 
