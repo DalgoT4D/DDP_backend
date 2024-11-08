@@ -81,7 +81,7 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
             secret=gitrepo_url,
         )
 
-        prefect_service.edit_secret_block(secret_block_edit_params)
+        prefect_service.upsert_secret_block(secret_block_edit_params)
 
     org_dir = DbtProjectManager.get_org_dir(org)
 

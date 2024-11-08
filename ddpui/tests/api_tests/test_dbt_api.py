@@ -121,7 +121,7 @@ def test_put_dbt_github(orguser):
         "ddpui.celeryworkers.tasks.clone_github_repo.delay", return_value=mocked_task
     ) as delay:
         with patch("ddpui.api.dbt_api.dbt_service.check_repo_exists", return_value=True):
-            with patch("ddpui.ddpprefect.prefect_service.edit_secret_block"):
+            with patch("ddpui.ddpprefect.prefect_service.upsert_secret_block"):
                 put_dbt_github(request, payload)
                 delay.assert_called_once_with(
                     "org-slug",

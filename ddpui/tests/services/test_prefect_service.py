@@ -26,7 +26,7 @@ from ddpui.ddpprefect.prefect_service import (
     PrefectSecretBlockCreate,
     PrefectSecretBlockEdit,
     create_secret_block,
-    edit_secret_block,
+    upsert_secret_block,
     delete_secret_block,
     update_dbt_core_block_schema,
     get_flow_runs_by_deployment_id,
@@ -342,10 +342,10 @@ def test_create_secret_block(mock_post: Mock):
 
 
 @patch("ddpui.ddpprefect.prefect_service.prefect_put")
-def test_edit_secret_block(mock_put: Mock):
+def test_upsert_secret_block(mock_put: Mock):
     mock_put.return_value = {"block_id": "block-id"}
     secret_block = PrefectSecretBlockEdit(block_name="bname", secret="secret")
-    response = edit_secret_block(secret_block)
+    response = upsert_secret_block(secret_block)
     assert response == {"block_id": "block-id"}
     mock_put.assert_called_once_with(
         "blocks/secret/",

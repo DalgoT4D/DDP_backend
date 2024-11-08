@@ -307,7 +307,7 @@ def create_secret_block(secret_block: PrefectSecretBlockCreate):
     return response
 
 
-def edit_secret_block(secret_block: PrefectSecretBlockEdit):
+def upsert_secret_block(secret_block: PrefectSecretBlockEdit):
     """This will create a secret block in the prefect to store any password like string"""
     response = prefect_put(
         "blocks/secret/",
