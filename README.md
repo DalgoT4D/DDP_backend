@@ -191,7 +191,7 @@ Follow the steps below:
 
 ### Step 2: Create .env file
 
--  create `.env` from `.env.template` inside the Docker folder
+-  create `.env.docker` from `.env.template` inside the Docker folder
 
 ### Step 3: Create `whitelist.py` file
 
@@ -209,6 +209,7 @@ If using M1-based MacBook  run this before building image
 
 -  Follow [Step 4](#step-4-install-airbyte) and [Step 5](#step-5-install-prefect-and-start-prefect-proxy) in the Setup Instructions
 
-### Step 5: Start Backend
+### Step 5: Start/stop Backend
 
--  `docker-compose -f Docker/docker-compose.dev.yml up`
+-  `docker compose -p dalgo_backend -f Docker/docker-compose.yml --env-file Docker/.env.docker up -d`
+-  `docker compose -p dalgo_backend -f Docker/docker-compose.yml --env-file Docker/.env.docker down`
