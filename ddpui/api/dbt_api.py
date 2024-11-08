@@ -15,7 +15,7 @@ from ddpui.celeryworkers.tasks import (
 from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.ddpdbt import dbt_service
-from ddpui.ddpprefect import DBTCLIPROFILE, prefect_service
+from ddpui.ddpprefect import DBTCLIPROFILE, SECRET, prefect_service
 from ddpui.ddpprefect.schema import OrgDbtGitHub, OrgDbtSchema, OrgDbtTarget, PrefectSecretBlockEdit
 from ddpui.models.org import OrgPrefectBlockv1, Org
 from ddpui.models.org_user import OrgUser, OrgUserResponse
@@ -81,7 +81,16 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
             secret=gitrepo_url,
         )
 
-        prefect_service.upsert_secret_block(secret_block_edit_params)
+        response = prefect_service.upsert_secret_block(secret_block_edit_params)
+        if not OrgPrefectBlockv1.objects.filter(
+            org=orguser.org, block_type=SECRET, block_name=secret_block_edit_params.block_name
+        ).exists():
+            OrgPrefectBlockv1.objects.create(
+                org=orguser.org,
+                block_type=SECRET,
+                block_name=secret_block_edit_params.block_name,
+                block_id=response["block_id"],
+            )
 
     org_dir = DbtProjectManager.get_org_dir(org)
 
