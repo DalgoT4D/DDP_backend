@@ -81,7 +81,7 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
             org=orguser.org, block_type=SECRET, block_name=block_name
         ).first()
         if secret_block:
-            prefect_service.delete_secret_block(secret_block["block_id"])
+            prefect_service.delete_secret_block(secret_block.block_id)
             secret_block.delete()
 
     # else create / update the secret block
