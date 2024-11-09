@@ -147,7 +147,7 @@ def get_dbt_workspace(request):
 
     return {
         "gitrepo_url": orguser.org.dbt.gitrepo_url,
-        "gitrepo_access_token_secret": "*********" if secret_block_exists else None,
+        "gitrepo_access_token": "*********" if secret_block_exists else None,
         "target_type": orguser.org.dbt.target_type,
         "default_schema": orguser.org.dbt.default_schema,
     }
