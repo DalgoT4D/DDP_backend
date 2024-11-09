@@ -70,7 +70,22 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
     org.dbt.gitrepo_access_token_secret = payload.gitrepoAccessToken
     org.dbt.save()
 
-    if payload.gitrepoAccessToken is not None and payload.gitrepoAccessToken != "":
+    # ignore if token is *******
+    if set(payload.gitrepoAccessToken.strip()) == set("*"):
+        pass
+
+    # if token is empty, delete the secret block
+    elif payload.gitrepoAccessToken in [None, ""]:
+        block_name = f"{orguser.org.slug}-git-pull-url"
+        secret_block = OrgPrefectBlockv1.objects.filter(
+            org=orguser.org, block_type=SECRET, block_name=block_name
+        ).first()
+        if secret_block:
+            prefect_service.delete_secret_block(secret_block["block_id"])
+            secret_block.delete()
+
+    # else create / update the secret block
+    else:
         gitrepo_url = payload.gitrepoUrl.replace(
             "github.com", "oauth2:" + payload.gitrepoAccessToken + "@github.com"
         )
@@ -126,8 +141,13 @@ def get_dbt_workspace(request):
     if orguser.org.dbt is None:
         return {"error": "no dbt workspace has been configured"}
 
+    secret_block_exists = OrgPrefectBlockv1.objects.filter(
+        org=orguser.org, block_type=SECRET, block_name=f"{orguser.org.slug}-git-pull-url"
+    ).exists()
+
     return {
         "gitrepo_url": orguser.org.dbt.gitrepo_url,
+        "gitrepo_access_token_secret": "*********" if secret_block_exists else None,
         "target_type": orguser.org.dbt.target_type,
         "default_schema": orguser.org.dbt.default_schema,
     }
