@@ -11,6 +11,7 @@ from datetime import datetime
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
     PrefectSecretBlockCreate,
+    PrefectSecretBlockEdit,
     PrefectShellTaskSetup,
     PrefectDbtTaskSetup,
     PrefectDataFlowUpdateSchema3,
@@ -300,6 +301,15 @@ def get_dbt_cli_profile_block(block_name: str) -> dict:
 def create_secret_block(secret_block: PrefectSecretBlockCreate):
     """This will create a secret block in the prefect to store any password like string"""
     response = prefect_post(
+        "blocks/secret/",
+        {"blockName": secret_block.block_name, "secret": secret_block.secret},
+    )
+    return response
+
+
+def upsert_secret_block(secret_block: PrefectSecretBlockEdit):
+    """This will create a secret block in the prefect to store any password like string"""
+    response = prefect_put(
         "blocks/secret/",
         {"blockName": secret_block.block_name, "secret": secret_block.secret},
     )

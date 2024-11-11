@@ -212,6 +212,13 @@ class PrefectSecretBlockCreate(Schema):
     block_name: str
 
 
+class PrefectSecretBlockEdit(Schema):
+    """Docstring"""
+
+    secret: str
+    block_name: str
+
+
 class OrgDbtSchema(Schema):
     """Docstring"""
 
