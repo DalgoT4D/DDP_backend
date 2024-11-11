@@ -116,7 +116,7 @@ AIRBYTE_SERVER_HOST=
 AIRBYTE_SERVER_PORT=
 AIRBYTE_SERVER_APIVER=
 AIRBYTE_API_TOKEN= <token> # base64 encryption of username:password. Default username and password is airbyte:password and token will be YWlyYnl0ZTpwYXNzd29yZA==
-AIRBYTE_DESTINATION_TYPES=
+AIRBYTE_DESTINATION_TYPES="Postgres,BigQuery"
 ```
 
 ### Step 5: Install Prefect and Start Prefect Proxy
@@ -178,8 +178,8 @@ DJANGOSECRET=
 -   Start the server `python manage.py runserver`
 
 ### Step 10: Create first org and user
-
--   Run `python manage.py createorganduser <Org Name> <Email address>`
+-   Run `python manage.py createorganduser <Org Name> <Email address> --role super-admin`
+-   The above command creates a user with super admin role. If we don't provide any role, the default role is of account manager.
 
 ## Using Docker
 Follow the steps below:
@@ -191,7 +191,7 @@ Follow the steps below:
 
 ### Step 2: Create .env file
 
--  create `.env` from `.env.template` inside the Docker folder
+-  create `.env.docker` from `.env.template` inside the Docker folder
 
 ### Step 3: Create `whitelist.py` file
 
@@ -209,6 +209,7 @@ If using M1-based MacBook  run this before building image
 
 -  Follow [Step 4](#step-4-install-airbyte) and [Step 5](#step-5-install-prefect-and-start-prefect-proxy) in the Setup Instructions
 
-### Step 5: Start Backend
+### Step 5: Start/stop Backend
 
--  `docker-compose -f Docker/docker-compose.dev.yml up`
+-  `docker compose -p dalgo_backend -f Docker/docker-compose.yml --env-file Docker/.env.docker up -d`
+-  `docker compose -p dalgo_backend -f Docker/docker-compose.yml --env-file Docker/.env.docker down`

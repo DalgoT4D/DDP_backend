@@ -7,8 +7,12 @@ import pytest
 from ninja.errors import HttpError
 
 from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1, OrgWarehouse
-from ddpui.ddpdbt.dbt_service import delete_dbt_workspace, setup_local_dbt_workspace
-from ddpui.ddpprefect import DBTCORE, SHELLOPERATION, DBTCLIPROFILE, SECRET
+from ddpui.ddpdbt.dbt_service import (
+    delete_dbt_workspace,
+    setup_local_dbt_workspace,
+)
+from ddpui.ddpprefect import DBTCLIPROFILE, SECRET
+from ddpui.ddpdbt.schema import DbtProjectParams
 from dbt_automation import assets
 
 pytestmark = pytest.mark.django_db

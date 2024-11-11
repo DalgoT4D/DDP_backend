@@ -20,8 +20,9 @@ from ddpui.api.dbt_api import (
     put_dbt_github,
 )
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.ddpprefect import SECRET
 from ddpui.ddpprefect.schema import DbtProfile, OrgDbtGitHub, OrgDbtSchema
-from ddpui.models.org import Org, OrgDbt
+from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser, OrgUserRole
 from ddpui.models.role_based_access import Permission, Role, RolePermission
 from ddpui.tests.api_tests.test_user_org_api import mock_request, seed_db
@@ -115,22 +116,29 @@ def test_put_dbt_github(orguser):
 
     payload = OrgDbtGitHub(gitrepoUrl="new-url", gitrepoAccessToken="new-access-token")
 
+    OrgPrefectBlockv1.objects.create(
+        org=request.orguser.org,
+        block_type=SECRET,
+        block_name=f"{request.orguser.org.slug}-git-pull-url",
+    )
+
     mocked_task = Mock()
     mocked_task.id = "task-id"
     with patch(
         "ddpui.celeryworkers.tasks.clone_github_repo.delay", return_value=mocked_task
     ) as delay:
         with patch("ddpui.api.dbt_api.dbt_service.check_repo_exists", return_value=True):
-            put_dbt_github(request, payload)
-            delay.assert_called_once_with(
-                "org-slug",
-                "new-url",
-                "new-access-token",
-                os.getenv("CLIENTDBT_ROOT") + "/org-slug",
-                None,
-            )
-            assert request.orguser.org.dbt.gitrepo_url == "new-url"
-            assert request.orguser.org.dbt.gitrepo_access_token_secret == "new-access-token"
+            with patch("ddpui.ddpprefect.prefect_service.upsert_secret_block"):
+                put_dbt_github(request, payload)
+                delay.assert_called_once_with(
+                    "org-slug",
+                    "new-url",
+                    "new-access-token",
+                    os.getenv("CLIENTDBT_ROOT") + "/org-slug",
+                    None,
+                )
+                assert request.orguser.org.dbt.gitrepo_url == "new-url"
+                assert request.orguser.org.dbt.gitrepo_access_token_secret == "new-access-token"
 
 
 def test_dbt_delete_no_org(orguser):
@@ -204,16 +212,12 @@ def test_post_dbt_git_pull_gitpull_failed(orguser: OrgUser):
     orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
     request = mock_request(orguser)
 
-    with pytest.raises(HttpError) as excinfo:
-        post_dbt_git_pull(request)
-    assert (
-        str(excinfo.value)
-        == "git pull failed in "
-        + os.getenv("CLIENTDBT_ROOT")
-        + "/"
-        + request.orguser.org.slug
-        + "/dbtrepo"
-    )
+    with patch(
+        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir", return_value="project_dir"
+    ):
+        with pytest.raises(HttpError) as excinfo:
+            post_dbt_git_pull(request)
+        assert str(excinfo.value) == "git pull failed in " + os.path.join("project_dir", "dbtrepo")
 
 
 @patch.multiple("os.path", exists=Mock(return_value=True))

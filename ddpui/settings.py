@@ -54,6 +54,8 @@ ALLOWED_HOSTS = [
     "127.0.0.1",
     "staging-api.dalgo.in",
     "api.dalgo.in",
+    "staging.dalgo.in",
+    "dashboard.dalgo.in",
 ]
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_METHODS = [
@@ -95,7 +97,8 @@ INSTALLED_APPS = [
 # Feature flags
 # AIRBYTE_PROFILE: to get airbyte credentials through prefect block
 # LOG_SUMMARY: allow summarizing logs through open AI
-FLAGS = {"AIRBYTE_PROFILE": [], "LOG_SUMMARY": []}
+# AIRBYTE_RESET_JOB: to reset airbyte connection
+FLAGS = {"AIRBYTE_PROFILE": [], "LOG_SUMMARY": [], "AIRBYTE_RESET_JOB": []}
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
@@ -143,7 +146,9 @@ ASGI_APPLICATION = "ddpui.asgi.application"  # for websockets
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {"hosts": [("127.0.0.1", "6379")]},
+        "CONFIG": {
+            "hosts": [(os.getenv("REDIS_HOST", "localhost"), os.getenv("REDIS_PORT", "6379"))]
+        },
     }
 }
 

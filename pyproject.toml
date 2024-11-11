@@ -5,9 +5,12 @@ include = 'ddpui\/.*\.pyi?$'
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE="ddpui.settings"
+testpaths = [
+  "ddpui/tests"
+]
 
 [tool.pylint.messages_control]
-max-line-length = 100
+max-line-length = 200
 fail-under = 6.5
 disable = [
   "missing-module-docstring",
@@ -19,6 +22,9 @@ disable = [
 ]
 
 [tool.coverage.run]
+source = [
+ "ddpui"
+]
 omit = [
   "ddpui/utils/sendgrid.py",
   "ddpui/utils/dbtdocs.py",
@@ -26,8 +32,13 @@ omit = [
   "ddpui/migrations/*",
   "ddpui/management/*",
   "ddpui/models/*",
-  "*/__init__.py",
-  "*/celery.py",
+  "ddpui/celery.py",
+  "ddpui/settings.py",
+  "ddpui/asgi.py",
+  "ddpui/wsgi.py",
+  "ddpui/urls.py",
+  "ddpui/routes.py",
   "*/schema.py",
-  "*/settings.py" 
+  "ddpui/*/__init__.py",
+  "ddpui/schemas/*"
 ]

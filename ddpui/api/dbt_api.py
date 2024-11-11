@@ -15,10 +15,11 @@ from ddpui.celeryworkers.tasks import (
 from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.ddpdbt import dbt_service
-from ddpui.ddpprefect import DBTCLIPROFILE, prefect_service
-from ddpui.ddpprefect.schema import OrgDbtGitHub, OrgDbtSchema, OrgDbtTarget
+from ddpui.ddpprefect import DBTCLIPROFILE, SECRET, prefect_service
+from ddpui.ddpprefect.schema import OrgDbtGitHub, OrgDbtSchema, OrgDbtTarget, PrefectSecretBlockEdit
 from ddpui.models.org import OrgPrefectBlockv1, Org
 from ddpui.models.org_user import OrgUser, OrgUserResponse
+from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.dbtdocs import create_single_html
 from ddpui.utils.helpers import runcmd
@@ -69,13 +70,50 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
     org.dbt.gitrepo_access_token_secret = payload.gitrepoAccessToken
     org.dbt.save()
 
-    project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
+    # ignore if token is *******
+    if set(payload.gitrepoAccessToken.strip()) == set("*"):
+        pass
+
+    # if token is empty, delete the secret block
+    elif payload.gitrepoAccessToken in [None, ""]:
+        block_name = f"{orguser.org.slug}-git-pull-url"
+        secret_block = OrgPrefectBlockv1.objects.filter(
+            org=orguser.org, block_type=SECRET, block_name=block_name
+        ).first()
+        if secret_block:
+            prefect_service.delete_secret_block(secret_block.block_id)
+            secret_block.delete()
+
+    # else create / update the secret block
+    else:
+        gitrepo_url = payload.gitrepoUrl.replace(
+            "github.com", "oauth2:" + payload.gitrepoAccessToken + "@github.com"
+        )
+
+        # update the git oauth endpoint with token in the prefect secret block
+        secret_block_edit_params = PrefectSecretBlockEdit(
+            block_name=f"{orguser.org.slug}-git-pull-url",
+            secret=gitrepo_url,
+        )
+
+        response = prefect_service.upsert_secret_block(secret_block_edit_params)
+        if not OrgPrefectBlockv1.objects.filter(
+            org=orguser.org, block_type=SECRET, block_name=secret_block_edit_params.block_name
+        ).exists():
+            OrgPrefectBlockv1.objects.create(
+                org=orguser.org,
+                block_type=SECRET,
+                block_name=secret_block_edit_params.block_name,
+                block_id=response["block_id"],
+            )
+
+    org_dir = DbtProjectManager.get_org_dir(org)
 
     task = clone_github_repo.delay(
         org.slug,
         org.dbt.gitrepo_url,
         org.dbt.gitrepo_access_token_secret,
-        str(project_dir),
+        org_dir,
         None,
     )
 
@@ -103,8 +141,13 @@ def get_dbt_workspace(request):
     if orguser.org.dbt is None:
         return {"error": "no dbt workspace has been configured"}
 
+    secret_block_exists = OrgPrefectBlockv1.objects.filter(
+        org=orguser.org, block_type=SECRET, block_name=f"{orguser.org.slug}-git-pull-url"
+    ).exists()
+
     return {
         "gitrepo_url": orguser.org.dbt.gitrepo_url,
+        "gitrepo_access_token": "*********" if secret_block_exists else None,
         "target_type": orguser.org.dbt.target_type,
         "default_schema": orguser.org.dbt.default_schema,
     }
@@ -115,10 +158,11 @@ def get_dbt_workspace(request):
 def post_dbt_git_pull(request):
     """Pull the dbt repo from github for the organization"""
     orguser: OrgUser = request.orguser
-    if orguser.org.dbt is None:
+    orgdbt = orguser.org.dbt
+    if orgdbt is None:
         raise HttpError(400, "dbt is not configured for this client")
 
-    project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / orguser.org.slug
+    project_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
     if not os.path.exists(project_dir):
         raise HttpError(400, "create the dbt env first")
 
@@ -134,11 +178,12 @@ def post_dbt_git_pull(request):
 @has_permission(["can_create_dbt_docs"])
 def post_dbt_makedocs(request):
     """prepare the dbt docs single html"""
-    orguser = request.orguser
-    if orguser.org.dbt is None:
+    orguser: OrgUser = request.orguser
+    orgdbt = orguser.org.dbt
+    if orgdbt is None:
         raise HttpError(400, "dbt is not configured for this client")
 
-    project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / orguser.org.slug
+    project_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
     if not os.path.exists(project_dir):
         raise HttpError(400, "create the dbt env first")
 

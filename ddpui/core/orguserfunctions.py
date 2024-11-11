@@ -30,6 +30,7 @@ from ddpui.models.org_user import (
     UserAttributes,
     VerifyEmailSchema,
 )
+from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.orgtnc import OrgTnC
 from ddpui.models.role_based_access import Role
 from ddpui.utils import helpers, sendgrid, timezone
@@ -108,6 +109,7 @@ def signup_orguser(payload: OrgUserCreate):
         ),
     )
     orguser.save()
+    UserPreferences.objects.create(orguser=orguser, enable_email_notifications=True)
     logger.info(
         f"created user [account-manager] " f"{orguser.user.email} having userid {orguser.user.id}"
     )

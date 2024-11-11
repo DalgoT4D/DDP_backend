@@ -4,6 +4,7 @@ import os
 from typing import List
 from ninja.errors import HttpError
 from ninja import Router
+from flags.state import flag_enabled
 
 from ddpui import auth
 from ddpui import settings
@@ -480,6 +481,11 @@ def post_airbyte_connection_reset_v1(request, connection_id):
     org = orguser.org
     if org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
+
+    if not flag_enabled("AIRBYTE_RESET_JOB", request_org_slug=org.slug):
+        raise HttpError(
+            400, "Reset job is disabled. Please contact the dalgo support team at support@dalgo.in"
+        )
 
     _, error = airbytehelpers.reset_connection(org, connection_id)
     if error:

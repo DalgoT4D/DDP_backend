@@ -31,8 +31,11 @@ from ddpui.models.tasks import (
 from ddpui.ddpprefect.schema import (
     PrefectSecretBlockCreate,
 )
+from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.schemas.org_task_schema import CreateOrgTaskPayload, TaskParameters
-from ddpui.core.dbtfunctions import gather_dbt_project_params
+
+# from ddpui.core.dbtfunctions import DbtProjectManager.gather_dbt_project_params
+from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.core.orgtaskfunctions import (
     create_default_transform_tasks,
     create_prefect_deployment_for_dbtcore_task,
@@ -68,7 +71,8 @@ logger = CustomLogger("ddpui")
 def post_orgtask(request, payload: CreateOrgTaskPayload):
     """Create a custom client org task (dbt or git). If base task is dbt run create a deployment"""
     orguser: OrgUser = request.orguser
-    if orguser.org.dbt is None:
+    orgdbt = orguser.org.dbt
+    if orgdbt is None:
         raise HttpError(400, "create a dbt workspace first")
 
     task = Task.objects.filter(slug=payload.task_slug).first()
@@ -94,9 +98,9 @@ def post_orgtask(request, payload: CreateOrgTaskPayload):
 
     dataflow = None
     if task.slug in LONG_RUNNING_TASKS:
-        dbt_project_params, error = gather_dbt_project_params(orguser.org)
-        if error:
-            raise HttpError(400, error)
+        dbt_project_params: DbtProjectParams = DbtProjectManager.gather_dbt_project_params(
+            orguser.org, orgdbt
+        )
 
         # fetch the cli profile block
         cli_profile_block = OrgPrefectBlockv1.objects.filter(
@@ -319,10 +323,13 @@ def post_run_prefect_org_task(
     if org_task.task.type not in ["dbt", "git", "edr"]:
         raise HttpError(400, "task not supported")
 
-    if orguser.org.dbt is None:
+    orgdbt = orguser.org.dbt
+    if orgdbt is None:
         raise HttpError(400, "dbt is not configured for this client")
 
-    dbt_project_params, error = gather_dbt_project_params(orguser.org)
+    dbt_project_params: DbtProjectParams = DbtProjectManager.gather_dbt_project_params(
+        orguser.org, orgdbt
+    )
 
     # check if the task is locked
     task_lock = TaskLock.objects.filter(orgtask=org_task).first()
@@ -357,12 +364,8 @@ def post_run_prefect_org_task(
             raise HttpError(400, f"failed to run the shell task {org_task.task.slug}") from error
 
     elif org_task.task.slug == TASK_GENERATE_EDR:
-        dbt_env_dir = Path(orguser.org.dbt.dbt_venv)
-        if not dbt_env_dir.exists():
-            raise HttpError(400, "create the dbt env first")
-
         task_config = setup_edr_send_report_task_config(
-            org_task, dbt_project_params.project_dir, dbt_env_dir
+            org_task, dbt_project_params.project_dir, dbt_project_params.venv_binary
         )
 
         if task_config.flow_name is None:
@@ -379,10 +382,6 @@ def post_run_prefect_org_task(
             raise HttpError(400, f"failed to run the shell task {org_task.task.slug}") from error
 
     else:
-        dbt_env_dir = Path(orguser.org.dbt.dbt_venv)
-        if not dbt_env_dir.exists():
-            raise HttpError(400, "create the dbt env first")
-
         # fetch the cli profile block
         cli_profile_block = OrgPrefectBlockv1.objects.filter(
             org=orguser.org, block_type=DBTCLIPROFILE

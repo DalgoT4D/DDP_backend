@@ -1,4 +1,8 @@
+import threading
+from typing import List
 import json
+import csv
+from io import StringIO
 import sqlparse
 from sqlparse.tokens import Keyword, Number, Token
 import uuid
@@ -10,6 +14,7 @@ import sqlalchemy.exc
 from django.http import StreamingHttpResponse
 from ddpui import auth
 from ddpui.core import dbtautomation_service
+from ddpui.core.warehousefunctions import get_warehouse_data, fetch_warehouse_tables
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import TaskProgressHashPrefix
@@ -36,46 +41,10 @@ from ddpui.models.llm import (
 from ddpui.utils import secretsmanager
 from ddpui.utils.helpers import convert_to_standard_types
 from ddpui.utils.constants import LIMIT_ROWS_TO_SEND_TO_LLM
+from ddpui.utils.redis_client import RedisClient
 
 warehouse_router = Router()
 logger = CustomLogger("ddpui")
-
-
-def get_warehouse_data(request, data_type: str, **kwargs):
-    """
-    Fetches data from a warehouse based on the data type
-    and optional parameters
-    """
-    try:
-        org_user = request.orguser
-        org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).first()
-
-        data = []
-        client = dbtautomation_service._get_wclient(org_warehouse)
-        if data_type == "tables":
-            data = client.get_tables(kwargs["schema_name"])
-        elif data_type == "schemas":
-            data = client.get_schemas()
-        elif data_type == "table_columns":
-            data = client.get_table_columns(kwargs["schema_name"], kwargs["table_name"])
-        elif data_type == "table_data":
-            data = client.get_table_data(
-                schema=kwargs["schema_name"],
-                table=kwargs["table_name"],
-                limit=kwargs["limit"],
-                page=kwargs["page"],
-                order_by=kwargs["order_by"],
-                order=kwargs["order"],
-            )
-            for element in data:
-                for key, value in element.items():
-                    if (isinstance(value, list) or isinstance(value, dict)) and value:
-                        element[key] = json.dumps(value)
-    except Exception as error:
-        logger.exception(f"Exception occurred in get_{data_type}: {error}")
-        raise HttpError(500, f"Failed to get {data_type}")
-
-    return convert_to_standard_types(data)
 
 
 @warehouse_router.get("/tables/{schema_name}", auth=auth.CustomAuthMiddleware())
@@ -254,10 +223,18 @@ def get_download_warehouse_data(request, schema_name: str, table_name: str):
             if not data:
                 break
             if not header_written:
-                yield ",".join(data[0].keys()) + "\n"  # Write CSV header
+                output = StringIO()
+                writer = csv.DictWriter(output, fieldnames=data[0].keys())
+                writer.writeheader()
+                yield output.getvalue()
                 header_written = True
+            output = StringIO()
+            writer = csv.DictWriter(output, fieldnames=data[0].keys())
             for row in data:
-                yield ",".join(map(str, row.values())) + "\n"  # Write CSV row
+                writer.writerow(row)
+                yield output.getvalue()
+                output.seek(0)
+                output.truncate(0)
             page += 1
             logger.info(f"Streaming page {page} of {schema_name}.{table_name}")
 
@@ -461,3 +438,44 @@ def get_warehouse_llm_analysis_sessions(
             for session in sessions
         ],
     }
+
+
+@warehouse_router.get(
+    "/sync_tables",
+    auth=auth.CustomAuthMiddleware(),
+)
+@has_permission(["can_view_warehouse_data"])
+def get_warehouse_schemas_and_tables(
+    request,
+):
+    """
+    Get all tables under all schemas in the warehouse
+    Read from warehouse directly if no cache is found
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    res = []
+    cache_key = f"{org.slug}_warehouse_tables"
+    redis_client = RedisClient.get_instance()
+    try:
+        # fetch & set response in redis asynchronously
+        if redis_client.exists(cache_key):
+            logger.info("Fetching warehouse tables from cache")
+            res = json.loads(redis_client.get(cache_key))
+            threading.Thread(
+                target=fetch_warehouse_tables, args=(request, org_warehouse, cache_key)
+            ).start()
+        else:
+            logger.info("Fetching warehouse tables directly")
+            res = fetch_warehouse_tables(request, org_warehouse, cache_key)
+
+    except Exception as err:
+        logger.error("Failed to fetch data from the warehouse - %s", err)
+        raise HttpError(500, "Failed to fetch data from the warehouse") from err
+
+    return res

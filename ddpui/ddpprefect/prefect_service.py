@@ -6,10 +6,12 @@ from dotenv import load_dotenv
 from django.db import transaction
 from django.db.models import Window
 from django.db.models.functions import RowNumber
+from datetime import datetime
 
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
     PrefectSecretBlockCreate,
+    PrefectSecretBlockEdit,
     PrefectShellTaskSetup,
     PrefectDbtTaskSetup,
     PrefectDataFlowUpdateSchema3,
@@ -121,6 +123,29 @@ def prefect_delete_a_block(block_id: str, **kwargs) -> None:
     try:
         res = requests.delete(
             f"{PREFECT_PROXY_API_URL}/delete-a-block/{block_id}",
+            headers=headers,
+            timeout=timeout,
+            **kwargs,
+        )
+    except Exception as error:
+        raise HttpError(500, "connection error") from error
+    try:
+        res.raise_for_status()
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(res.status_code, res.text) from error
+
+
+def prefect_delete(endpoint: str, **kwargs) -> None:
+    """makes a DELETE request to the proxy"""
+    # we send headers and timeout separately from kwargs, just to be explicit about it
+    headers = kwargs.pop("headers", {})
+    headers["x-ddp-org"] = logger.get_slug()
+    timeout = kwargs.pop("timeout", http_timeout)
+
+    try:
+        res = requests.delete(
+            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}",
             headers=headers,
             timeout=timeout,
             **kwargs,
@@ -276,6 +301,15 @@ def get_dbt_cli_profile_block(block_name: str) -> dict:
 def create_secret_block(secret_block: PrefectSecretBlockCreate):
     """This will create a secret block in the prefect to store any password like string"""
     response = prefect_post(
+        "blocks/secret/",
+        {"blockName": secret_block.block_name, "secret": secret_block.secret},
+    )
+    return response
+
+
+def upsert_secret_block(secret_block: PrefectSecretBlockEdit):
+    """This will create a secret block in the prefect to store any password like string"""
+    response = prefect_put(
         "blocks/secret/",
         {"blockName": secret_block.block_name, "secret": secret_block.secret},
     )
@@ -504,6 +538,12 @@ def get_flow_run_graphs(flow_run_id: str) -> dict:
     return res
 
 
+def delete_flow_run(flow_run_id: str) -> dict:
+    """retreive the logs from a flow-run from prefect"""
+    res = prefect_delete(f"flow_runs/{flow_run_id}")
+    return res
+
+
 def get_flow_run(flow_run_id: str) -> dict:
     """retreive the logs from a flow-run from prefect"""
     res = prefect_get(f"flow_runs/{flow_run_id}")
@@ -511,12 +551,29 @@ def get_flow_run(flow_run_id: str) -> dict:
 
 
 def create_deployment_flow_run(
-    deployment_id: str, flow_run_params: dict = None
+    deployment_id: str,
+    flow_run_params: dict = None,
 ) -> dict:  # pragma: no cover
     """Proxy call to create a flow run for deployment."""
     res = prefect_post(
         f"deployments/{deployment_id}/flow_run",
         flow_run_params if flow_run_params else {},
+    )
+    return res
+
+
+def schedule_deployment_flow_run(
+    deployment_id: str, flow_run_params: dict = None, scheduled_time: datetime = None
+) -> dict:  # pragma: no cover
+    """
+    Proxy call to create a flow run for deployment.
+    """
+    res = prefect_post(
+        f"deployments/{deployment_id}/flow_run/schedule",
+        {
+            "runParams": flow_run_params,
+            "scheduledTime": str(scheduled_time) if scheduled_time else None,
+        },
     )
     return res
 

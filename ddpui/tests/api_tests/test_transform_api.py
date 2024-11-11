@@ -23,7 +23,7 @@ from ddpui.auth import (
 )
 from ddpui.schemas.org_task_schema import DbtProjectSchema
 from ddpui.ddpprefect.schema import DbtProfile, OrgDbtSchema
-from ddpui.celeryworkers.tasks import setup_dbtworkspace
+from ddpui.celeryworkers.tasks import setup_dbtworkspace, TaskProgressHashPrefix
 from ddpui.tests.api_tests.test_user_org_api import (
     seed_db,
     orguser,
@@ -83,9 +83,9 @@ def mock_setup_dbt_workspace_ui_transform(orguser: OrgUser, tmp_path):
         os.makedirs(dbtrepo_dir / "macros")
         os.makedirs(dbtrepo_dir / "models")
 
-    with patch("os.getenv", return_value=tmp_path), patch(
-        "subprocess.check_call", side_effect=run_dbt_init
-    ) as mock_subprocess_call:
+    with patch(
+        "ddpui.ddpdbt.dbt_service.DbtProjectManager.get_org_dir", return_value=project_dir
+    ), patch("subprocess.check_call", side_effect=run_dbt_init) as mock_subprocess_call:
         result, error = setup_local_dbt_workspace(
             org, project_name=project_name, default_schema=default_schema
         )
@@ -122,7 +122,7 @@ def mock_setup_sync_sources(orgdbt: OrgDbt, warehouse: OrgWarehouse):
         get_wclient_mock.return_value = mock_instance
 
         assert OrgDbtModel.objects.filter(type="source", orgdbt=orgdbt).count() == 0
-        sync_sources_for_warehouse(orgdbt.id, warehouse.id, warehouse.org.slug)
+        sync_sources_for_warehouse(orgdbt.id, warehouse.id, "task-id", "hashkey")
         for schema in SCHEMAS_TABLES:
             assert (
                 list(
@@ -295,10 +295,13 @@ def test_delete_dbt_project_failure_projectdir_does_not_exist(orguser: OrgUser, 
     """a failure test for delete a dbt project api when project dir does not exist"""
     request = mock_request(orguser)
     project_name = "dummy-project"
-    with patch("os.getenv", return_value=tmp_path):
+    with patch("ddpui.api.transform_api.DbtProjectManager.get_org_dir", return_value=tmp_path):
         with pytest.raises(HttpError) as excinfo:
             delete_dbt_project(request, project_name)
-    assert str(excinfo.value) == f"Organization {orguser.org.slug} does not have any projects"
+    assert (
+        str(excinfo.value)
+        == f"Project {project_name} does not exist in organization {orguser.org.slug}"
+    )
 
 
 def test_delete_dbt_project_failure_dbtrepodir_does_not_exist(orguser: OrgUser, tmp_path):
@@ -337,7 +340,7 @@ def test_delete_dbt_project_success(orguser: OrgUser, tmp_path):
 
     assert OrgDbt.objects.filter(org=orguser.org).count() == 1
 
-    with patch("os.getenv", return_value=tmp_path):
+    with patch("ddpui.api.transform_api.DbtProjectManager.get_org_dir", return_value=project_dir):
         delete_dbt_project(request, project_name)
 
     assert not dbtrepo_dir.exists()
@@ -393,8 +396,14 @@ def test_sync_sources_success(orguser: OrgUser, tmp_path):
     ) as delay:
         result = sync_sources(request)
 
-        delay.assert_called_once_with(orgdbt.id, org_warehouse.id, orguser.org.slug)
-        assert result["task_id"] == "task-id"
+        args, kwargs = delay.call_args
+        assert len(args) == 4
+        assert args[0] == orgdbt.id
+        assert args[1] == org_warehouse.id
+        # args[2] is a random uuid
+        assert args[3] == f"{TaskProgressHashPrefix.SYNCSOURCES.value}-{orguser.org.slug}"
+        assert "task_id" in result
+        assert "hashkey" in result
 
 
 def test_post_construct_dbt_model_operation_failure_warehouse_not_setup(
@@ -467,6 +476,8 @@ def test_post_construct_dbt_model_operation_failure_validate_input(orguser: OrgU
     - validate input for multi input operations
     """
     os.environ["CANVAS_LOCK"] = "False"
+    os.environ["CLIENTDBT_ROOT"] = str(tmp_path)
+    os.environ["DBT_VENV"] = str(tmp_path)
     warehouse = OrgWarehouse.objects.create(
         org=orguser.org,
         wtype="postgres",
@@ -474,7 +485,7 @@ def test_post_construct_dbt_model_operation_failure_validate_input(orguser: OrgU
     )
     orgdbt = OrgDbt.objects.create(
         gitrepo_url=None,
-        project_dir=str(Path(tmp_path) / orguser.org.slug),
+        project_dir=str(Path(orguser.org.slug) / "dbtrepo"),
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",
@@ -554,6 +565,7 @@ def test_post_construct_dbt_model_operation_success_chain1(orguser: OrgUser, tmp
     Chain 2 operations
     """
     os.environ["CANVAS_LOCK"] = "False"
+    os.environ["CLIENTDBT_ROOT"] = str(tmp_path)
     warehouse = OrgWarehouse.objects.create(
         org=orguser.org,
         wtype="postgres",
@@ -561,7 +573,7 @@ def test_post_construct_dbt_model_operation_success_chain1(orguser: OrgUser, tmp
     )
     orgdbt = OrgDbt.objects.create(
         gitrepo_url=None,
-        project_dir=str(Path(tmp_path) / orguser.org.slug),
+        project_dir=str(Path(orguser.org.slug) / "dbtrepo"),
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",
@@ -656,6 +668,7 @@ def test_post_construct_dbt_model_operation_success_chain2(orguser: OrgUser, tmp
     Chain
     """
     os.environ["CANVAS_LOCK"] = "False"
+    os.environ["CLIENTDBT_ROOT"] = str(tmp_path)
     warehouse = OrgWarehouse.objects.create(
         org=orguser.org,
         wtype="postgres",
@@ -663,7 +676,7 @@ def test_post_construct_dbt_model_operation_success_chain2(orguser: OrgUser, tmp
     )
     orgdbt = OrgDbt.objects.create(
         gitrepo_url=None,
-        project_dir=str(Path(tmp_path) / orguser.org.slug),
+        project_dir=str(Path(orguser.org.slug) / "dbtrepo"),
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",
@@ -801,6 +814,7 @@ def test_post_save_model_success_save_chained_model(orguser: OrgUser, tmp_path):
     Single input operations
     """
     os.environ["CANVAS_LOCK"] = "False"
+    os.environ["CLIENTDBT_ROOT"] = str(tmp_path)
 
     warehouse = OrgWarehouse.objects.create(
         org=orguser.org,
@@ -809,7 +823,7 @@ def test_post_save_model_success_save_chained_model(orguser: OrgUser, tmp_path):
     )
     orgdbt = OrgDbt.objects.create(
         gitrepo_url=None,
-        project_dir=str(Path(tmp_path) / orguser.org.slug),
+        project_dir=str(Path(orguser.org.slug) / "dbtrepo"),
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",
@@ -868,11 +882,15 @@ def test_post_save_model_success_save_chained_model(orguser: OrgUser, tmp_path):
         assert target_model_after_save is not None
         assert target_model_after_save.under_construction is False
 
-        assert (Path(orgdbt.project_dir) / "dbtrepo").exists()
-        assert (Path(orgdbt.project_dir) / "dbtrepo" / "models").exists()
-        assert (Path(orgdbt.project_dir) / "dbtrepo" / "models" / "intermediate").exists()
+        assert (Path(tmp_path) / Path(orgdbt.project_dir)).exists()
+        assert (Path(tmp_path) / Path(orgdbt.project_dir) / "models").exists()
+        assert (Path(tmp_path) / Path(orgdbt.project_dir) / "models" / "intermediate").exists()
         assert (
-            Path(orgdbt.project_dir) / "dbtrepo" / "models" / "intermediate" / "output_model.sql"
+            Path(tmp_path)
+            / Path(orgdbt.project_dir)
+            / "models"
+            / "intermediate"
+            / "output_model.sql"
         ).exists()
 
 
@@ -881,6 +899,7 @@ def test_get_dbt_project_DAG(orguser: OrgUser, tmp_path):
     Checks if the correct no of nodes and edges are returned
     """
     os.environ["CANVAS_LOCK"] = "False"
+    os.environ["CLIENTDBT_ROOT"] = str(tmp_path)
 
     warehouse = OrgWarehouse.objects.create(
         org=orguser.org,
@@ -889,7 +908,7 @@ def test_get_dbt_project_DAG(orguser: OrgUser, tmp_path):
     )
     orgdbt = OrgDbt.objects.create(
         gitrepo_url=None,
-        project_dir=str(Path(tmp_path) / orguser.org.slug),
+        project_dir=str(Path(orguser.org.slug) / "dbtrepo"),
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",

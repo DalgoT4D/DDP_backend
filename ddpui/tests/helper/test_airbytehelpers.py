@@ -1,8 +1,11 @@
 from unittest.mock import patch, Mock
 import os
 import yaml
+from datetime import datetime
 from pathlib import Path
 import pytest
+import pytz
+from ninja.errors import HttpError
 from ddpui.ddpairbyte.airbytehelpers import (
     add_custom_airbyte_connector,
     update_connection_schema,
@@ -14,16 +17,69 @@ from ddpui.ddpairbyte.airbytehelpers import (
     delete_source,
     get_sync_job_history_for_connection,
     create_or_update_org_cli_block,
+    schedule_update_connection_schema,
 )
 from ddpui.ddpairbyte.schema import (
     AirbyteConnectionSchemaUpdate,
     AirbyteDestinationUpdate,
+    AirbyteConnectionSchemaUpdateSchedule,
 )
-from ddpui.models.org import Org, OrgPrefectBlockv1, OrgWarehouse, OrgDbt, TransformType
+from ddpui.models.role_based_access import Role, RolePermission, Permission
+from ddpui.models.org import (
+    Org,
+    OrgPrefectBlockv1,
+    OrgWarehouse,
+    OrgDbt,
+    TransformType,
+    ConnectionJob,
+    ConnectionMeta,
+    OrgSchemaChange,
+)
+from ddpui.models.org_user import OrgUser, OrgUserRole, User
+from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.models.tasks import Task, OrgTask, OrgDataFlowv1, DataflowOrgTask
 from ddpui.ddpprefect import DBTCLIPROFILE
 
+
 pytestmark = pytest.mark.django_db
+
+# ================================================================================
+
+
+@pytest.fixture
+def authuser():
+    """a django User object"""
+    user = User.objects.create(
+        username="tempusername", email="tempuseremail", password="tempuserpassword"
+    )
+    yield user
+    user.delete()
+
+
+@pytest.fixture
+def org_without_workspace():
+    """a pytest fixture which creates an Org without an airbyte workspace"""
+    print("creating org_without_workspace")
+    org = Org.objects.create(airbyte_workspace_id=None, slug="test-org-slug")
+    yield org
+    print("deleting org_without_workspace")
+    org.delete()
+
+
+@pytest.fixture
+def orguser(authuser, org_without_workspace):
+    """a pytest fixture representing an OrgUser having the account-manager role"""
+    orguser = OrgUser.objects.create(
+        user=authuser,
+        org=org_without_workspace,
+        role=OrgUserRole.ACCOUNT_MANAGER,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+    )
+    yield orguser
+    orguser.delete()
+
+
+# ================================================================================
 
 
 @patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.create_custom_source_definition")
@@ -801,6 +857,7 @@ def test_create_or_update_org_cli_block_update_case(
     mock_update_dbt_cli_profile_block: Mock, tmp_path
 ):
     """test create_or_update_org_cli_block when the block is updated"""
+    os.environ["CLIENTDBT_ROOT"] = str(tmp_path)
     org = Org.objects.create(name="org", slug="org")
     warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", name="name")
 
@@ -824,13 +881,12 @@ def test_create_or_update_org_cli_block_update_case(
     )
     project_name = "dbtrepo"
 
-    os.environ["CLIENTDBT_ROOT"] = str(tmp_path)
     project_dir = Path(tmp_path) / org.slug
     project_dir.mkdir(parents=True, exist_ok=True)
     dbtrepo_dir = project_dir / project_name
     dbtrepo_dir.mkdir(parents=True, exist_ok=True)
     dbt = OrgDbt.objects.create(
-        project_dir=str(project_dir),
+        project_dir=f"{org.slug}/{project_name}",
         dbt_venv=str(tmp_path),
         target_type="postgres",
         default_schema="default",
@@ -854,3 +910,115 @@ def test_create_or_update_org_cli_block_update_case(
         profilename=yml_obj["profile"],
         target="default",
     )
+
+
+def test_schedule_update_connection_schema_test_for_small_connection(orguser):
+    """Tests the flow of schema change update when the connection is not large enough"""
+    connection_id = "same-conn-id"
+    payload = AirbyteConnectionSchemaUpdateSchedule(catalogDiff={"diff": "catalogDiff"})
+
+    with pytest.raises(HttpError) as excinfo:
+        schedule_update_connection_schema(orguser, connection_id, payload)
+    assert str(excinfo.value) == "airbyte server block not found"
+
+    OrgPrefectBlockv1.objects.create(
+        org=orguser.org, block_type=AIRBYTESERVER, block_name="airbyte-server"
+    )
+
+    with pytest.raises(HttpError) as excinfo:
+        schedule_update_connection_schema(orguser, connection_id, payload)
+    assert str(excinfo.value) == "Orgtask not found"
+
+    airbyte_task_config = {
+        "type": "airbyte",
+        "slug": "airbyte-sync",
+        "label": "AIRBYTE sync",
+        "command": None,
+    }
+    task = Task.objects.create(**airbyte_task_config)
+
+    org_task = OrgTask.objects.create(task=task, org=orguser.org, connection_id=connection_id)
+    dataflow = OrgDataFlowv1.objects.create(
+        org=orguser.org,
+        name="test-deployment",
+        deployment_id="fake-deployment-id",
+        deployment_name="test-deployment",
+        cron=None,
+        dataflow_type="manual",
+    )
+    DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=org_task)
+
+    with patch(
+        "ddpui.ddpprefect.prefect_service.lock_tasks_for_deployment"
+    ) as lock_tasks_mock, patch(
+        "ddpui.ddpprefect.prefect_service.schedule_deployment_flow_run"
+    ) as schedule_flow_run_mock:
+        schedule_update_connection_schema(orguser, connection_id, payload)
+
+        lock_tasks_mock.assert_called_once()
+        args, kwargs = schedule_flow_run_mock.call_args
+        # schedule time should none
+        assert args[2] is None
+
+
+def test_schedule_update_connection_schema_test_for_large_connection(orguser):
+    """Tests the flow of schema change update when the connection is large enough"""
+    connection_id = "same-conn-id"
+    payload = AirbyteConnectionSchemaUpdateSchedule(catalogDiff={"diff": "catalogDiff"})
+
+    OrgPrefectBlockv1.objects.create(
+        org=orguser.org, block_type=AIRBYTESERVER, block_name="airbyte-server"
+    )
+
+    airbyte_task_config = {
+        "type": "airbyte",
+        "slug": "airbyte-sync",
+        "label": "AIRBYTE sync",
+        "command": None,
+    }
+    task = Task.objects.create(**airbyte_task_config)
+
+    org_task = OrgTask.objects.create(task=task, org=orguser.org, connection_id=connection_id)
+    dataflow = OrgDataFlowv1.objects.create(
+        org=orguser.org,
+        name="test-deployment",
+        deployment_id="fake-deployment-id",
+        deployment_name="test-deployment",
+        cron=None,
+        dataflow_type="manual",
+    )
+    DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=org_task)
+
+    # mark the connection as large
+    ConnectionMeta.objects.create(connection_id=connection_id, schedule_large_jobs=True)
+
+    with patch(
+        "ddpui.ddpprefect.prefect_service.lock_tasks_for_deployment"
+    ) as lock_tasks_mock, patch(
+        "ddpui.ddpprefect.prefect_service.schedule_deployment_flow_run"
+    ) as schedule_flow_run_mock, patch(
+        "ddpui.ddpprefect.prefect_service.delete_flow_run"
+    ) as delete_flow_run_mock:
+        schedule_flow_run_mock.return_value = {"flow_run_id": "schame-change-schedule-flow-run-id"}
+
+        OrgSchemaChange.objects.create(
+            connection_id=connection_id, org=orguser.org, change_type="non-breaking"
+        )
+
+        schedule_update_connection_schema(orguser, connection_id, payload)
+
+        lock_tasks_mock.assert_not_called()
+        args, kwargs = schedule_flow_run_mock.call_args
+        # schedule time should not be none
+        assert args[2] is not None
+
+        schema_change = OrgSchemaChange.objects.filter(
+            org=orguser.org, connection_id=connection_id
+        ).first()
+
+        assert schema_change is not None
+        assert schema_change.schedule_job is not None
+
+        scheduled_job = schema_change.schedule_job
+        assert scheduled_job is not None
+        assert scheduled_job.scheduled_at > datetime.now(pytz.utc)

@@ -1,4 +1,4 @@
-import os, uuid
+import os, uuid, time
 from pathlib import Path
 
 from dbt_automation.operations.arithmetic import arithmetic, arithmetic_dbt_sql
@@ -58,6 +58,7 @@ from ddpui.utils import secretsmanager
 from ddpui.utils.helpers import map_airbyte_keys_to_postgres_keys
 from ddpui.celery import app
 from ddpui.utils.taskprogress import TaskProgress
+from ddpui.core.orgdbt_manager import DbtProjectManager
 
 OPERATIONS_DICT = {
     "flatten": flatten_operation,
@@ -187,7 +188,7 @@ def create_or_update_dbt_model_in_project(
     )
 
     model_sql_path, output_cols = merge_operations(
-        merge_config, wclient, Path(orgdbt_model.orgdbt.project_dir) / "dbtrepo"
+        merge_config, wclient, Path(DbtProjectManager.get_dbt_project_dir(orgdbt_model.orgdbt))
     )
 
     return model_sql_path, output_cols
@@ -232,7 +233,7 @@ def sync_sources_in_schema(
 def read_dbt_sources_in_project(orgdbt: OrgDbt):
     """Read the sources from .yml files in the dbt project"""
 
-    return read_sources(Path(orgdbt.project_dir) / "dbtrepo")
+    return read_sources(DbtProjectManager.get_dbt_project_dir(orgdbt))
 
 
 def get_table_columns(org_warehouse: OrgWarehouse, dbtmodel: OrgDbtModel):
@@ -293,14 +294,16 @@ def propagate_changes_to_downstream_operations(
 
 
 @app.task(bind=True)
-def sync_sources_for_warehouse(self, org_dbt_id: str, org_warehouse_id: str, orgslug: str):
+def sync_sources_for_warehouse(
+    self, org_dbt_id: str, org_warehouse_id: str, task_id: str, hashkey: str
+):
     """
     Sync all tables in all schemas in the warehouse.
     Dbt source name will be the same as the schema name.
     """
     taskprogress = TaskProgress(
-        task_id=self.request.id,
-        hashkey=f"{TaskProgressHashPrefix.SYNCSOURCES}-{orgslug}",
+        task_id=task_id,
+        hashkey=hashkey,
         expire_in_seconds=10 * 60,  # max 10 minutes
     )
 
@@ -314,7 +317,7 @@ def sync_sources_for_warehouse(self, org_dbt_id: str, org_warehouse_id: str, org
         }
     )
 
-    dbt_project = dbtProject(Path(org_dbt.project_dir) / "dbtrepo")
+    dbt_project = dbtProject(Path(DbtProjectManager.get_dbt_project_dir(org_dbt)))
 
     try:
         wclient = _get_wclient(org_warehouse)

@@ -26,8 +26,11 @@ from ddpui.schemas.dbt_workflow_schema import (
     LockCanvasRequestSchema,
     LockCanvasResponseSchema,
 )
+from ddpui.core.orgdbt_manager import DbtProjectManager
+from ddpui.utils.taskprogress import TaskProgress
 from ddpui.core.transformfunctions import validate_operation_config, check_canvas_locked
 from ddpui.api.warehouse_api import get_warehouse_data
+from ddpui.models.tasks import TaskProgressHashPrefix
 
 from ddpui.core import dbtautomation_service
 from ddpui.core.dbtautomation_service import sync_sources_for_warehouse
@@ -53,8 +56,8 @@ def create_dbt_project(request, payload: DbtProjectSchema):
     orguser: OrgUser = request.orguser
     org = orguser.org
 
-    project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
-    project_dir.mkdir(parents=True, exist_ok=True)
+    org_dir = Path(DbtProjectManager.get_org_dir(org))
+    org_dir.mkdir(parents=True, exist_ok=True)
 
     # Call the post_dbt_workspace function
     _, error = setup_local_dbt_workspace(
@@ -74,25 +77,25 @@ def delete_dbt_project(request, project_name: str):
     """
     orguser: OrgUser = request.orguser
     org = orguser.org
+    orgdbt = org.dbt
 
-    project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / org.slug
+    org_dir = Path(DbtProjectManager.get_org_dir(org))
 
-    if not project_dir.exists():
+    if not org_dir.exists():
         raise HttpError(404, f"Organization {org.slug} does not have any projects")
 
-    dbtrepo_dir: Path = project_dir / project_name
+    project_dir: Path = org_dir / project_name
 
-    if not dbtrepo_dir.exists():
+    if not project_dir.exists():
         raise HttpError(422, f"Project {project_name} does not exist in organization {org.slug}")
 
-    if org.dbt:
-        dbt = org.dbt
+    if orgdbt:
         org.dbt = None
         org.save()
 
-        dbt.delete()
+        orgdbt.delete()
 
-    shutil.rmtree(dbtrepo_dir)
+    shutil.rmtree(project_dir)
 
     return {"message": f"Project {project_name} deleted successfully"}
 
@@ -114,9 +117,24 @@ def sync_sources(request):
     if not orgdbt:
         raise HttpError(404, "DBT workspace not set up")
 
-    task = sync_sources_for_warehouse.delay(orgdbt.id, org_warehouse.id, org_warehouse.org.slug)
+    task_id = str(uuid.uuid4())
+    hashkey = f"{TaskProgressHashPrefix.SYNCSOURCES.value}-{org.slug}"
 
-    return {"task_id": task.id}
+    taskprogress = TaskProgress(
+        task_id=task_id,
+        hashkey=hashkey,
+        expire_in_seconds=10 * 60,  # max 10 minutes)
+    )
+    taskprogress.add(
+        {
+            "message": "Started syncing sources",
+            "status": "runnning",
+        }
+    )
+
+    sync_sources_for_warehouse.delay(orgdbt.id, org_warehouse.id, task_id, hashkey)
+
+    return {"task_id": task_id, "hashkey": hashkey}
 
 
 ########################## Models & Sources #############################################
@@ -363,6 +381,22 @@ def post_save_model(request, model_uuid: str, payload: CompleteDbtModelPayload):
     orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid).first()
     if not orgdbt_model:
         raise HttpError(404, "model not found")
+
+    # prevent duplicate models
+    if (
+        OrgDbtModel.objects.filter(orgdbt=orgdbt, name=payload.name)
+        .exclude(uuid=orgdbt_model.uuid)
+        .exists()
+    ):
+        raise HttpError(422, "model with this name already exists")
+
+    # when you are overwriting the existing model with same name but different schema; which again leads to duplicate models
+    if (
+        payload.name == orgdbt_model.name
+        and payload.dest_schema != orgdbt_model.schema
+        and not orgdbt_model.under_construction
+    ):
+        raise HttpError(422, "model with this name already exists in the schema")
 
     check_canvas_locked(orguser, payload.canvas_lock_id)
 

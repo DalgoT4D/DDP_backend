@@ -90,6 +90,7 @@ def test_post_dbt_workspace_failed_gitclone(orguser, tmp_path):
 
 def test_post_dbt_workspace_success(orguser, tmp_path):
     """a success test case for setting up dbt workspace"""
+    os.environ["CLIENTDBT_ROOT"] = str(tmp_path)
     OrgWarehouse.objects.create(
         org=orguser.org,
         wtype="postgres",
@@ -103,8 +104,12 @@ def test_post_dbt_workspace_success(orguser, tmp_path):
 
     with patch.object(TaskProgress, "__init__", return_value=None), patch.object(
         TaskProgress, "add", return_value=Mock()
-    ) as add_progress_mock, patch("os.getenv", return_value=tmp_path), patch(
-        "ddpui.celeryworkers.tasks.clone_github_repo", return_value=True
+    ) as add_progress_mock, patch(
+        "ddpui.celeryworkers.tasks.DbtProjectManager.get_org_dir",
+        return_value=str(tmp_path / orguser.org.slug),
+    ), patch(
+        "ddpui.celeryworkers.tasks.clone_github_repo",
+        return_value=str(tmp_path / orguser.org.slug / "dbtrepo"),
     ) as gitclone_method_mock:
         assert OrgDbt.objects.filter(org=orguser.org).count() == 0
         setup_dbtworkspace(orguser.org.id, payload.dict())
@@ -145,7 +150,7 @@ def test_sync_sources_failed_to_connect_to_warehouse(orguser: OrgUser, tmp_path)
         Mock(side_effect=Exception("_get_wclient failed")),
     ) as get_wclient_mock:
         with pytest.raises(Exception) as exc:
-            sync_sources_for_warehouse(orgdbt.id, warehouse.id, orguser.org.slug)
+            sync_sources_for_warehouse(orgdbt.id, warehouse.id, "task-id", "hashkey")
 
         assert exc.value.args[0] == f"Error syncing sources: _get_wclient failed"
         add_progress_mock.assert_has_calls(
@@ -201,7 +206,7 @@ def test_sync_sources_failed_to_fetch_schemas(orguser: OrgUser, tmp_path):
         get_wclient_mock.return_value = mock_instance
 
         with pytest.raises(Exception) as exc:
-            sync_sources_for_warehouse(orgdbt.id, warehouse.id, orguser.org.slug)
+            sync_sources_for_warehouse(orgdbt.id, warehouse.id, "task-id", "hashkey")
 
         assert exc.value.args[0] == f"Error syncing sources: get_schemas failed"
         add_progress_mock.assert_has_calls(
@@ -273,7 +278,7 @@ def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
         get_wclient_mock.return_value = mock_instance
 
         assert OrgDbtModel.objects.filter(type="source", orgdbt=orgdbt).count() == 0
-        sync_sources_for_warehouse(orgdbt.id, warehouse.id, orguser.org.slug)
+        sync_sources_for_warehouse(orgdbt.id, warehouse.id, "task-id", "hashkey")
         for schema in SCHEMAS_TABLES:
             assert set(
                 OrgDbtModel.objects.filter(type="source", orgdbt=orgdbt, schema=schema).values_list(
@@ -318,7 +323,7 @@ def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
         )
 
         # syncing sources again should not create any new entries
-        sync_sources_for_warehouse(orgdbt.id, warehouse.id, orguser.org.slug)
+        sync_sources_for_warehouse(orgdbt.id, warehouse.id, "task-id", "hashkey")
         for schema in SCHEMAS_TABLES:
             assert set(
                 OrgDbtModel.objects.filter(type="source", orgdbt=orgdbt, schema=schema).values_list(
@@ -328,7 +333,7 @@ def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
 
         # add a new table in the warehouse
         SCHEMAS_TABLES["schema1"].append("table5")
-        sync_sources_for_warehouse(orgdbt.id, warehouse.id, orguser.org.slug)
+        sync_sources_for_warehouse(orgdbt.id, warehouse.id, "task-id", "hashkey")
         for schema in SCHEMAS_TABLES:
             assert set(
                 OrgDbtModel.objects.filter(type="source", orgdbt=orgdbt, schema=schema).values_list(

@@ -9,7 +9,8 @@ from ddpui.models.tasks import DataflowOrgTask
 from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.core.orgtaskfunctions import fetch_elementary_profile_target
 from ddpui.core.pipelinefunctions import setup_edr_send_report_task_config
-from ddpui.core.dbtfunctions import gather_dbt_project_params
+from ddpui.core.orgdbt_manager import DbtProjectManager
+from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpprefect.schema import PrefectDataFlowUpdateSchema3
 
@@ -55,15 +56,12 @@ class Command(BaseCommand):
 
             # update the deployment in prefect with the profile-target
             try:
-                dbt_project_params, error = gather_dbt_project_params(org)
-                if error:
-                    print(error)
-                    continue
-
-                dbt_env_dir = Path(org.dbt.dbt_venv)
+                dbt_project_params: DbtProjectParams = DbtProjectManager.gather_dbt_project_params(
+                    org, org.dbt
+                )
 
                 task_config = setup_edr_send_report_task_config(
-                    org_task, dbt_project_params.project_dir, dbt_env_dir
+                    org_task, dbt_project_params.project_dir, dbt_project_params.venv_binary
                 )
 
                 prefect_service.update_dataflow_v1(
