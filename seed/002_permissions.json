@@ -398,5 +398,21 @@
             "name": "Can view feature flags of an organization",
             "slug": "can_view_flags"
         }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 60,
+        "fields": {
+            "name": "Can Edit LLM Settings",
+            "slug": "can_edit_llm_settings"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 61,
+        "fields": {
+            "name": "Can Edit Discord Notifications Settings",
+            "slug": "can_edit_discord_notifications_settings"
+        }
     }
 ]
