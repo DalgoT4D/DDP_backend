@@ -72,7 +72,7 @@ task_router.tags = ["Task"]
 transform_router.tags = ["Transform"]
 user_org_router.tags = ["UserOrg"]
 userpreference_router.tags = ["UserPreference"]
-orgpreference_router.tags =["OrgPreference"]
+orgpreference_router.tags = ["OrgPreference"]
 warehouse_router.tags = ["Warehouse"]
 webhook_router.tags = ["Webhook"]
 
@@ -91,4 +91,4 @@ src_api.add_router("/api/userpreferences/", userpreference_router)
 src_api.add_router("/api/warehouse/", warehouse_router)
 src_api.add_router("/api/", user_org_router)
 src_api.add_router("/webhooks/", webhook_router)
-src_api.add_router("/api/orgpreferences/",orgpreference_router )
+src_api.add_router("/api/orgpreferences/", orgpreference_router)

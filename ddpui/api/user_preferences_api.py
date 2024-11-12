@@ -21,14 +21,13 @@ def create_user_preferences(request, payload: CreateUserPreferencesSchema):
 
     userpreferences = UserPreferences.objects.create(
         orguser=orguser,
-        llm_optin = payload.llm_optin,
+        llm_optin=payload.llm_optin,
         enable_email_notifications=payload.enable_email_notifications,
-        
     )
 
     preferences = {
         "enable_email_notifications": userpreferences.enable_email_notifications,
-        "llm_optin": userpreferences.llm_optin
+        "llm_optin": userpreferences.llm_optin,
     }
 
     return {"success": True, "res": preferences}

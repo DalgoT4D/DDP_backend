@@ -4,6 +4,8 @@ from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from django.utils import timezone
 from django.core.exceptions import ValidationError
+
+
 class OrgType(str, Enum):
     """an enum representing the type of organization"""
 
@@ -15,6 +17,8 @@ class OrgType(str, Enum):
     def choices(cls):
         """django model definition needs an iterable for `choices`"""
         return [(key.value, key.name) for key in cls]
+
+
 class OrgPreferences(models.Model):
     """Model to store org preferences for settings panel"""
 
