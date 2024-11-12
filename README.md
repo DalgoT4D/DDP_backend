@@ -109,12 +109,14 @@ DBADMINPASSWORD=<password>
 
 ### Step 4: Install Airbyte
 -   Open a new terminal
--   [Start Airbyte](https://docs.airbyte.com/deploying-airbyte/local-deployment) and populate connection info in `.env`
+-   Download [run-ab-platform.sh](https://raw.githubusercontent.com/airbytehq/airbyte/v0.58.0/run-ab-platform.sh) for Airbyte 0.58.0
+-   Run `./run-ab-platform.sh` to start Airbyte. This is a self-contained application which includes the configuration database
+-   Populate Airbyte connection credentials in the `.env` from Step 2:
 
 ```
-AIRBYTE_SERVER_HOST=
-AIRBYTE_SERVER_PORT=
-AIRBYTE_SERVER_APIVER=
+AIRBYTE_SERVER_HOST=localhost
+AIRBYTE_SERVER_PORT=8000
+AIRBYTE_SERVER_APIVER=v1
 AIRBYTE_API_TOKEN= <token> # base64 encryption of username:password. Default username and password is airbyte:password and token will be YWlyYnl0ZTpwYXNzd29yZA==
 AIRBYTE_DESTINATION_TYPES="Postgres,BigQuery"
 ```
