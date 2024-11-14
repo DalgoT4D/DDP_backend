@@ -28,12 +28,19 @@ orgpreference_router = Router()
 
 @orgpreference_router.post("/", auth=auth.CustomAuthMiddleware())
 def create_org_preferences(request, payload: CreateOrgPreferencesSchema):
-    print(payload, "payload")
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    payload.org = org
     """Creates preferences for an organization"""
-    if OrgPreferences.objects.filter(org_id=payload.org_id).exists():
+    if OrgPreferences.objects.filter(org=org).exists():
         raise HttpError(400, "Organization preferences already exist")
 
-    org_preferences = OrgPreferences.objects.create(**payload.dict())
+    payload_data = payload.dict(exclude={"org"})
+
+    # Create OrgPreferences
+    org_preferences = OrgPreferences.objects.create(
+        org=org, **payload_data  # Use the rest of the payload
+    )
 
     preferences = {
         "trial_start_date": org_preferences.trial_start_date,
@@ -78,13 +85,18 @@ def create_org_preferences(request, payload: CreateOrgPreferencesSchema):
 #     return {"success": True, "res": 1}
 
 
-@orgpreference_router.put("/{org_id}/llm_approval", auth=auth.CustomAuthMiddleware())
+@orgpreference_router.put("/llm_approval", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_llm_settings"])
-def update_org_preferences(request, payload: UpdateLLMOptinSchema, org_id: int):
-    """Updates llm preferences for an organization"""
+def update_org_preferences(request, payload: UpdateLLMOptinSchema):
+    """Updates llm preferences for the logged-in user's organization"""
+
+    # Get the organization associated with the current user
+    orguser: OrgUser = request.orguser
+    org = orguser.org
 
     try:
-        org_preferences = OrgPreferences.objects.get(org_id=org_id)
+        # Fetch organization preferences for the user's organization
+        org_preferences = OrgPreferences.objects.get(org=org)
     except OrgPreferences.DoesNotExist:
         raise HttpError(404, "Preferences for this organization not found")
 
@@ -106,49 +118,59 @@ def update_org_preferences(request, payload: UpdateLLMOptinSchema, org_id: int):
     return {"success": True, "res": 1}
 
 
-@orgpreference_router.put(
-    "/{org_id}/enable-discord-notifications", auth=auth.CustomAuthMiddleware()
-)
+@orgpreference_router.put("/enable-discord-notifications", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_discord_notifications_settings"])
-def update_org_preferences(request, payload: UpdateDiscordNotificationsSchema, org_id: int):
-    """Updates preferences for an organization"""
+def update_discord_notifications(request, payload: UpdateDiscordNotificationsSchema):
+    """Updates Discord notifications preferences for the logged-in user's organization."""
+
+    orguser: OrgUser = request.orguser
+    org = orguser.org
 
     try:
-        org_preferences = OrgPreferences.objects.get(org_id=org_id)
+        org_preferences = OrgPreferences.objects.get(org=org)
     except OrgPreferences.DoesNotExist:
         raise HttpError(404, "Preferences for this organization not found")
 
-    # Check for discord_link in the database when enabling notifications
     if payload.enable_discord_notifications:
         if not org_preferences.discord_webhook and not payload.discord_webhook:
-            raise HttpError(
-                400, "Discord link is missing. Please add a Discord link to enable notifications."
-            )
+            raise HttpError(400, "Discord webhook is required to enable notifications.")
+        discord_webhook = payload.discord_webhook or org_preferences.discord_webhook
+    else:
+        discord_webhook = None
 
-    # Update the OrgPreferences instance
     org_preferences.enable_discord_notifications = payload.enable_discord_notifications
-    if payload.discord_webhook:
-        org_preferences.discord_webhook = payload.discord_webhook
+    org_preferences.discord_webhook = discord_webhook
     org_preferences.save()
 
-    return {"success": True, "res": 1}
+    response_data = {
+        "enable_discord_notifications": org_preferences.enable_discord_notifications,
+        "discord_webhook": org_preferences.discord_webhook,
+    }
+
+    return {"success": True, "res": response_data}
 
 
-@orgpreference_router.get("/{org_id}/", auth=auth.CustomAuthMiddleware())
-def get_org_preferences(request, org_id: int):
-    """Gets preferences for an organization by org_id"""
+@orgpreference_router.get("/", auth=auth.CustomAuthMiddleware())
+def get_org_preferences(request):
+    """Gets preferences for an organization based on the logged-in user's organization"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org  # Get the organization associated with the current user
+
     try:
+        # Fetch organization preferences for the user's organization
         org_preferences = OrgPreferences.objects.select_related("org", "llm_optin_approved_by").get(
-            org_id=org_id
+            org=org
         )
     except OrgPreferences.DoesNotExist:
         raise HttpError(404, "Organization preferences not found")
 
+    # Prepare data for the user who approved LLM opt-in, if available
     approved_by_data = None
     if org_preferences.llm_optin_approved_by and org_preferences.llm_optin_approved_by.user:
         user = org_preferences.llm_optin_approved_by.user
         approved_by_data = {"user_id": user.pk, "email": user.email}
 
+    # Structure the preferences response
     preferences = {
         "org": {
             "id": org_preferences.org.id,
@@ -168,14 +190,16 @@ def get_org_preferences(request, org_id: int):
     return {"success": True, "res": preferences}
 
 
-# api to get more superset related information.
-@orgpreference_router.get("/{org_id}/org-superset", auth=auth.CustomAuthMiddleware())
-def get_org_superset_details(request, org_id: int):
+@orgpreference_router.get("/org-superset", auth=auth.CustomAuthMiddleware())
+def get_org_superset_details(request):
     """Gets preferences for an organization by org_id"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
     try:
         org_superset = OrgSupersets.objects.select_related(
             "org",
-        ).get(org_id=org_id)
+        ).get(org=org)
 
     except OrgSupersets.DoesNotExist:
         raise HttpError(404, "Organizations superset details not found")
@@ -192,33 +216,39 @@ def get_org_superset_details(request, org_id: int):
     return {"success": True, "res": response_data}
 
 
-@orgpreference_router.post("/{org_id}/org-superset", auth=auth.CustomAuthMiddleware())
-def create_org_superset_details(request, payload: CreateOrgSupersetDetailsSchema, org_id: int):
-    """Creates an entry in db with org superset details"""
-    try:
-        org = Org.objects.get(id=org_id)
-    except Org.DoesNotExist:
-        raise HttpError(404, "Organization not found")
+@orgpreference_router.post("/org-superset", auth=auth.CustomAuthMiddleware())
+def create_org_superset_details(request, payload: CreateOrgSupersetDetailsSchema):
+    """Creates or updates an entry in db with org superset details."""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
 
-    org_superset, created = OrgSupersets.objects.update_or_create(org=org, **payload.dict())
+    org_superset, created = OrgSupersets.objects.update_or_create(org=org, defaults=payload.dict())
 
     response_data = {
         "org": {
-            "id": org.id,
             "name": org.name,
             "slug": org.slug,
             "type": org.type,
         },
-        "id": org_superset.id,
         "superset_version": org_superset.superset_version,
+        "created": created,
     }
 
     return {"success": True, "res": response_data}
 
 
-@orgpreference_router.get("/{org_id}/versions", auth=auth.CustomAuthMiddleware())
-def get_tools_versions(request, org_id: int):
-    versions = {}
+@orgpreference_router.get("/toolinfo", auth=auth.CustomAuthMiddleware())
+def get_tools_versions(request):
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    try:
+        # Validate org_id
+        org_superset = OrgSupersets.objects.get(org=org)
+    except OrgSupersets.DoesNotExist:
+        return {"success": False, "error": "Organization not found"}
+
+    versions = []
 
     # Airbyte Version
     try:
@@ -226,22 +256,23 @@ def get_tools_versions(request, org_id: int):
         airbyte_response = requests.get(airbyte_url)
         if airbyte_response.status_code == 200:
             airbyte_data = airbyte_response.json()
-            versions["Airbyte"] = airbyte_data.get("version")
+            versions.append({"Airbyte": {"version": airbyte_data.get("version")}})
         else:
-            versions["Airbyte"] = "Error: Unable to retrieve version"
-    except Exception as e:
-        versions["Airbyte"] = f"Error: {e}"
+            versions.append({"Airbyte": {"version": "Not available"}})
+    except Exception:
+        versions.append({"Airbyte": {"version": "Not available"}})
 
     # Prefect Version
     try:
         prefect_url = PREFECT_URL_TO_GET_VERSION
         prefect_response = requests.get(prefect_url)
         if prefect_response.status_code == 200:
-            versions["Prefect"] = prefect_response.text.strip()
+            version = prefect_response.text.strip().strip('"')
+            versions.append({"Prefect": {"version": version}})
         else:
-            versions["Prefect"] = "Error: Unable to retrieve version"
-    except Exception as e:
-        versions["Prefect"] = f"Error: {e}"
+            versions.append({"Prefect": {"version": "Not available"}})
+    except Exception:
+        versions.append({"Prefect": {"version": "Not available"}})
 
     # dbt Version
     try:
@@ -249,10 +280,12 @@ def get_tools_versions(request, org_id: int):
         dbt_output = subprocess.check_output(dbt_version_command, text=True)
         for line in dbt_output.splitlines():
             if "installed:" in line:
-                versions["dbt"] = line.split(":")[1].strip()
+                versions.append({"DBT": {"version": line.split(":")[1].strip()}})
                 break
-    except Exception as e:
-        versions["dbt"] = f"Error: {e}"
+        else:
+            versions.append({"DBT": {"version": "Not available"}})
+    except Exception:
+        versions.append({"DBT": {"version": "Not available"}})
 
     # Elementary Version
     try:
@@ -260,17 +293,14 @@ def get_tools_versions(request, org_id: int):
         elementary_output = subprocess.check_output(elementary_version_command, text=True)
         for line in elementary_output.splitlines():
             if "Elementary version" in line:
-                versions["Elementary"] = line.split()[-1].strip()
+                versions.append({"Elementary": {"version": line.split()[-1].strip()}})
                 break
-    except Exception as e:
-        versions["Elementary"] = f"Error: {e}"
+        else:
+            versions.append({"Elementary": {"version": "Not available"}})
+    except Exception:
+        versions.append({"Elementary": {"version": "Not available"}})
 
-    # Superset_version
-    try:
-        org_superset = OrgSupersets.objects.get(org_id=org_id)
-    except OrgSupersets.DoesNotExist:
-        raise HttpError(404, "Organizations superset details not found")
-
-    versions["Superset"] = org_superset.superset_version
+    # Superset Version
+    versions.append({"Superset": {"version": org_superset.superset_version}})
 
     return {"success": True, "res": versions}

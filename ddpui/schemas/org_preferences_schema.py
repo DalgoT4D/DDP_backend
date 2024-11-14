@@ -6,7 +6,7 @@ from ninja import Schema
 class CreateOrgPreferencesSchema(Schema):
     """Schema for creating organization preferences."""
 
-    org_id: int
+    org: Optional[int]
     trial_start_date: Optional[datetime]
     trial_end_date: Optional[datetime]
     llm_optin: Optional[bool] = False
