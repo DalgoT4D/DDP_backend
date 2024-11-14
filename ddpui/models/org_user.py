@@ -188,6 +188,13 @@ class ResetPasswordSchema(Schema):
     password: SecretStr
 
 
+class ChangePasswordSchema(Schema):
+    """Reset password from settings pannel"""
+
+    password: SecretStr
+    confirmPassword: SecretStr
+
+
 class VerifyEmailSchema(Schema):
     """the payload for the verify-email workflow"""
 

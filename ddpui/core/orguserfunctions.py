@@ -27,6 +27,7 @@ from ddpui.models.org_user import (
     OrgUserUpdate,
     OrgUserUpdatev1,
     ResetPasswordSchema,
+    ChangePasswordSchema,
     UserAttributes,
     VerifyEmailSchema,
 )
@@ -586,6 +587,18 @@ def confirm_reset_password(payload: ResetPasswordSchema):
     if orguser is None:
         logger.error("no orguser having id %s", orguserid_str)
         return None, "could not look up request from this token"
+
+    orguser.user.set_password(payload.password.get_secret_value())
+    orguser.user.save()
+
+    return None, None
+
+
+def change_password(payload: ChangePasswordSchema, orguser):
+    """If password and confirm password are same reset the password"""
+
+    if payload.password != payload.confirmPassword:
+        return None, "Password and confirm password must be same"
 
     orguser.user.set_password(payload.password.get_secret_value())
     orguser.user.save()

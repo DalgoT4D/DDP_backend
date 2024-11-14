@@ -7,8 +7,8 @@ from ninja import Schema
 class OrgType(str, Enum):
     """an enum representing the type of organization"""
 
-    DEMO = "demo"
-    POC = "poc"
+    SUBSCRIPTION = "subscription"
+    TRIAL = "trial"
     CLIENT = "client"
 
     @classmethod
