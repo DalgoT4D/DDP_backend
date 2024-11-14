@@ -204,8 +204,6 @@ def get_tools_versions(request):
 
     # Airbyte Version
     try:
-        a = airbyte_service.get_airbyte_version()
-        print(a, "a")
         airbyte_url = AIRBYTE_URL_TO_GET_VERSION
         airbyte_response = requests.get(airbyte_url)
         if airbyte_response.status_code == 200:
@@ -218,8 +216,6 @@ def get_tools_versions(request):
 
     # Prefect Version
     try:
-        b = prefect_service.get_prefect_version()
-
         prefect_url = PREFECT_URL_TO_GET_VERSION
         prefect_response = requests.get(prefect_url)
         if prefect_response.status_code == 200:
