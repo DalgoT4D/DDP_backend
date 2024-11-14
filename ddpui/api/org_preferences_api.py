@@ -1,3 +1,4 @@
+import os
 from ninja import Router
 from ninja.errors import HttpError
 from ddpui import auth
@@ -11,12 +12,6 @@ from ddpui.schemas.org_preferences_schema import (
     UpdateLLMOptinSchema,
     UpdateDiscordNotificationsSchema,
     CreateOrgSupersetDetailsSchema,
-)
-from ddpui.utils.constants import (
-    AIRBYTE_URL_TO_GET_VERSION,
-    PREFECT_URL_TO_GET_VERSION,
-    DBT_VERSION_COMMAND,
-    ELEMENTARY_VERSION_COMMAND,
 )
 from ddpui.auth import has_permission
 from ddpui.models.org import Org
@@ -194,6 +189,7 @@ def create_org_superset_details(request, payload: CreateOrgSupersetDetailsSchema
 
 @orgpreference_router.get("/toolinfo", auth=auth.CustomAuthMiddleware())
 def get_tools_versions(request):
+    """get versions of the tools used in the system"""
     orguser: OrgUser = request.orguser
     org = orguser.org
     org_superset = OrgSupersets.objects.filter(org=org).first()
@@ -203,21 +199,28 @@ def get_tools_versions(request):
     versions = []
 
     # Airbyte Version
-    try:
-        airbyte_url = AIRBYTE_URL_TO_GET_VERSION
-        airbyte_response = requests.get(airbyte_url)
-        if airbyte_response.status_code == 200:
-            airbyte_data = airbyte_response.json()
-            versions.append({"Airbyte": {"version": airbyte_data.get("version")}})
-        else:
-            versions.append({"Airbyte": {"version": "Not available"}})
-    except Exception:
-        versions.append({"Airbyte": {"version": "Not available"}})
+    versions.append({"Airbyte": {"version": "0.58"}})
+    # this api will eventually work at some Airbyte version... but not at 0.58
+    # try:
+    #     abhost = os.getenv("AIRBYTE_SERVER_HOST")
+    #     abport = os.getenv("AIRBYTE_SERVER_PORT")
+    #     abver = os.getenv("AIRBYTE_SERVER_APIVER")
+    #     airbyte_url = f"http://{abhost}:{abport}/api/{abver}/instance_configuration"
+    #     airbyte_response = requests.get(airbyte_url, timeout=5)
+    #     if airbyte_response.status_code == 200:
+    #         airbyte_data = airbyte_response.json()
+    #         versions.append({"Airbyte": {"version": airbyte_data.get("version")}})
+    #     else:
+    #         versions.append({"Airbyte": {"version": "Not available"}})
+    # except Exception:
+    #     versions.append({"Airbyte": {"version": "Not available"}})
 
     # Prefect Version
     try:
-        prefect_url = PREFECT_URL_TO_GET_VERSION
-        prefect_response = requests.get(prefect_url)
+        prefect_host = os.getenv("PREFECT_SERVER_HOST")
+        prefect_port = os.getenv("PREFECT_SERVER_PORT")
+        prefect_url = f"http://{prefect_host}:{prefect_port}/api/admin/version"
+        prefect_response = requests.get(prefect_url, timeout=5)
         if prefect_response.status_code == 200:
             version = prefect_response.text.strip().strip('"')
             versions.append({"Prefect": {"version": version}})
@@ -226,9 +229,10 @@ def get_tools_versions(request):
     except Exception:
         versions.append({"Prefect": {"version": "Not available"}})
 
+    dbt_venv = os.getenv("DBT_VENV")
     # dbt Version
     try:
-        dbt_version_command = DBT_VERSION_COMMAND
+        dbt_version_command = [os.path.join(dbt_venv, "venv", "bin", "dbt"), "--version"]
         dbt_output = subprocess.check_output(dbt_version_command, text=True)
         for line in dbt_output.splitlines():
             if "installed:" in line:
@@ -241,7 +245,7 @@ def get_tools_versions(request):
 
     # Elementary Version
     try:
-        elementary_version_command = ELEMENTARY_VERSION_COMMAND
+        elementary_version_command = [os.path.join(dbt_venv, "venv", "bin", "edr"), "--version"]
         elementary_output = subprocess.check_output(elementary_version_command, text=True)
         for line in elementary_output.splitlines():
             if "Elementary version" in line:
