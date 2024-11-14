@@ -19,22 +19,12 @@ def create_user_preferences(request, payload: CreateUserPreferencesSchema):
     if UserPreferences.objects.filter(orguser=orguser).exists():
         raise HttpError(400, "Preferences already exist")
 
-    userpreferences = UserPreferences.objects.create(
+    user_preferences = UserPreferences.objects.create(
         orguser=orguser,
-        llm_optin=payload.llm_optin,
-        enable_discord_notifications=payload.enable_discord_notifications,
-        discord_webhook=payload.discord_webhook,
         enable_email_notifications=payload.enable_email_notifications,
     )
 
-    preferences = {
-        "enable_email_notifications": userpreferences.enable_email_notifications,
-        "llm_optin": userpreferences.llm_optin,
-        "discord_webhook": userpreferences.discord_webhook,
-        "enable_discord_notifications": userpreferences.enable_discord_notifications,
-    }
-
-    return {"success": True, "res": preferences}
+    return {"success": True, "res": user_preferences.to_json()}
 
 
 @userpreference_router.put("/", auth=auth.CustomAuthMiddleware())
@@ -44,24 +34,11 @@ def update_user_preferences(request, payload: UpdateUserPreferencesSchema):
 
     user_preferences, created = UserPreferences.objects.get_or_create(orguser=orguser)
 
-    if payload.enable_discord_notifications is not None:
-        user_preferences.enable_discord_notifications = payload.enable_discord_notifications
-    if payload.llm_optin is not None:
-        user_preferences.llm_optin = payload.llm_optin
     if payload.enable_email_notifications is not None:
         user_preferences.enable_email_notifications = payload.enable_email_notifications
-    if payload.discord_webhook is not None:
-        user_preferences.discord_webhook = payload.discord_webhook
     user_preferences.save()
 
-    preferences = {
-        "discord_webhook": user_preferences.discord_webhook,
-        "enable_discord_notifications": user_preferences.enable_discord_notifications,
-        "enable_email_notifications": user_preferences.enable_email_notifications,
-        "llm_optin": user_preferences.llm_optin,
-    }
-
-    return {"success": True, "res": preferences}
+    return {"success": True, "res": user_preferences.to_json()}
 
 
 @userpreference_router.get("/", auth=auth.CustomAuthMiddleware())
@@ -71,10 +48,4 @@ def get_user_preferences(request):
 
     user_preferences, created = UserPreferences.objects.get_or_create(orguser=orguser)
 
-    preferences = {
-        "discord_webhook": user_preferences.discord_webhook,
-        "enable_discord_notifications": user_preferences.enable_discord_notifications,
-        "enable_email_notifications": user_preferences.enable_email_notifications,
-        "llm_optin": user_preferences.llm_optin,
-    }
-    return {"success": True, "res": preferences}
+    return {"success": True, "res": user_preferences.to_json()}
