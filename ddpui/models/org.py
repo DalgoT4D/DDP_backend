@@ -9,7 +9,7 @@ class OrgType(str, Enum):
 
     SUBSCRIPTION = "subscription"
     TRIAL = "trial"
-    CLIENT = "client"
+    DEMO = "demo"
 
     @classmethod
     def choices(cls):
