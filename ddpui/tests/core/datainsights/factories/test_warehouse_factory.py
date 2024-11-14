@@ -1,7 +1,5 @@
 import os
 import django
-from django.core.management import call_command
-from django.apps import apps
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
@@ -45,3 +43,16 @@ def test_warehouse_factory():
 
     with pytest.raises(ValueError):
         WarehouseFactory.connect({}, "some-no-supported-warehouse-type")
+
+
+def test_url_encoding():
+    """tests url encoding of username and password"""
+
+    with patch("ddpui.datainsights.warehouse.postgres.inspect"):
+        with patch("ddpui.datainsights.warehouse.postgres.create_engine") as mock_create_engine:
+            PostgresClient(
+                {"username": "user name", "password": "pass word", "host": "host", "database": "db"}
+            )
+            mock_create_engine.assert_called_with(
+                "postgresql://user%20name:pass%20word@host/db", pool_size=5, pool_timeout=30
+            )
