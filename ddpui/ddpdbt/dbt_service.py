@@ -331,3 +331,31 @@ def refresh_elementary_report_via_prefect(orguser: OrgUser) -> dict:
         raise HttpError(400, "failed to start a run") from error
 
     return res
+
+
+def get_dbt_version():
+    """get dbt version"""
+    dbt_venv = os.getenv("DBT_VENV")
+    try:
+        dbt_version_command = [os.path.join(dbt_venv, "venv", "bin", "dbt"), "--version"]
+        dbt_output = subprocess.check_output(dbt_version_command, text=True)
+        for line in dbt_output.splitlines():
+            if "installed:" in line:
+                return line.split(":")[1].strip()
+        return "Not available"
+    except Exception:
+        return "Not available"
+
+
+def get_edr_version():
+    """get elementary report version"""
+    dbt_venv = os.getenv("DBT_VENV")
+    try:
+        elementary_version_command = [os.path.join(dbt_venv, "venv", "bin", "edr"), "--version"]
+        elementary_output = subprocess.check_output(elementary_version_command, text=True)
+        for line in elementary_output.splitlines():
+            if "Elementary version" in line:
+                return line.split()[-1].strip()
+        return "Not available"
+    except Exception:
+        return "Not available"

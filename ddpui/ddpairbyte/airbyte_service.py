@@ -971,3 +971,22 @@ def update_schema_change(
         raise HttpError(500, "failed to trigger Prefect flow run") from error
 
     return res
+
+
+def get_airbyte_version():
+    """Get the version of the Airbyte server"""
+    return "0.58"
+    # the following will eventually work at some Airbyte version... but not at 0.58
+    # try:
+    #     abhost = os.getenv("AIRBYTE_SERVER_HOST")
+    #     abport = os.getenv("AIRBYTE_SERVER_PORT")
+    #     abver = os.getenv("AIRBYTE_SERVER_APIVER")
+    #     airbyte_url = f"http://{abhost}:{abport}/api/{abver}/instance_configuration"
+    #     airbyte_response = requests.get(airbyte_url, timeout=5)
+    #     if airbyte_response.status_code == 200:
+    #         airbyte_data = airbyte_response.json()
+    #         return airbyte_data.get("version")
+    #     else:
+    #         return "Not available"
+    # except Exception:
+    #     return "Not available"

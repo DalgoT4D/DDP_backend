@@ -1,28 +1,25 @@
 import os
+import subprocess
 from ninja import Router
 from ninja.errors import HttpError
+from django.utils import timezone
 from ddpui import auth
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_supersets import OrgSupersets
 from ddpui.models.org_plans import OrgPlans
-from django.utils import timezone
 from ddpui.schemas.org_preferences_schema import (
     CreateOrgPreferencesSchema,
-    UpdateOrgPreferencesSchema,
     UpdateLLMOptinSchema,
     UpdateDiscordNotificationsSchema,
     CreateOrgSupersetDetailsSchema,
 )
 from ddpui.auth import has_permission
-from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
+from ddpui.ddpdbt import dbt_service
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect import (
     prefect_service,
 )
-from ddpui.core.orgdbt_manager import DbtProjectManager
-import requests
-import subprocess
 
 orgpreference_router = Router()
 
@@ -192,72 +189,24 @@ def get_tools_versions(request):
     """get versions of the tools used in the system"""
     orguser: OrgUser = request.orguser
     org = orguser.org
-    org_superset = OrgSupersets.objects.filter(org=org).first()
-    if org_superset is None:
-        raise HttpError(400, "Supserset not found.")
 
     versions = []
 
-    # Airbyte Version
-    versions.append({"Airbyte": {"version": "0.58"}})
-    # this api will eventually work at some Airbyte version... but not at 0.58
-    # try:
-    #     abhost = os.getenv("AIRBYTE_SERVER_HOST")
-    #     abport = os.getenv("AIRBYTE_SERVER_PORT")
-    #     abver = os.getenv("AIRBYTE_SERVER_APIVER")
-    #     airbyte_url = f"http://{abhost}:{abport}/api/{abver}/instance_configuration"
-    #     airbyte_response = requests.get(airbyte_url, timeout=5)
-    #     if airbyte_response.status_code == 200:
-    #         airbyte_data = airbyte_response.json()
-    #         versions.append({"Airbyte": {"version": airbyte_data.get("version")}})
-    #     else:
-    #         versions.append({"Airbyte": {"version": "Not available"}})
-    # except Exception:
-    #     versions.append({"Airbyte": {"version": "Not available"}})
+    airbyte_version = airbyte_service.get_airbyte_version()
+    versions.append({"Airbyte": {"version": airbyte_version}})
 
-    # Prefect Version
-    try:
-        prefect_host = os.getenv("PREFECT_SERVER_HOST")
-        prefect_port = os.getenv("PREFECT_SERVER_PORT")
-        prefect_url = f"http://{prefect_host}:{prefect_port}/api/admin/version"
-        prefect_response = requests.get(prefect_url, timeout=5)
-        if prefect_response.status_code == 200:
-            version = prefect_response.text.strip().strip('"')
-            versions.append({"Prefect": {"version": version}})
-        else:
-            versions.append({"Prefect": {"version": "Not available"}})
-    except Exception:
-        versions.append({"Prefect": {"version": "Not available"}})
+    prefect_version = prefect_service.get_prefect_server_version()
+    versions.append({"Prefect": {"version": prefect_version}})
 
-    dbt_venv = os.getenv("DBT_VENV")
-    # dbt Version
-    try:
-        dbt_version_command = [os.path.join(dbt_venv, "venv", "bin", "dbt"), "--version"]
-        dbt_output = subprocess.check_output(dbt_version_command, text=True)
-        for line in dbt_output.splitlines():
-            if "installed:" in line:
-                versions.append({"DBT": {"version": line.split(":")[1].strip()}})
-                break
-        else:
-            versions.append({"DBT": {"version": "Not available"}})
-    except Exception:
-        versions.append({"DBT": {"version": "Not available"}})
+    dbt_version = dbt_service.get_dbt_version()
+    versions.append({"DBT": {"version": dbt_version}})
 
-    # Elementary Version
-    try:
-        elementary_version_command = [os.path.join(dbt_venv, "venv", "bin", "edr"), "--version"]
-        elementary_output = subprocess.check_output(elementary_version_command, text=True)
-        for line in elementary_output.splitlines():
-            if "Elementary version" in line:
-                versions.append({"Elementary": {"version": line.split()[-1].strip()}})
-                break
-        else:
-            versions.append({"Elementary": {"version": "Not available"}})
-    except Exception:
-        versions.append({"Elementary": {"version": "Not available"}})
+    edr_version = dbt_service.get_edr_version()
+    versions.append({"Elementary": {"version": edr_version}})
 
-    # Superset Version
-    versions.append({"Superset": {"version": org_superset.superset_version}})
+    org_superset = OrgSupersets.objects.filter(org=org).first()
+    superset_version = org_superset.superset_version if org_superset else "Not available"
+    versions.append({"Superset": {"version": superset_version}})
 
     return {"success": True, "res": versions}
 
