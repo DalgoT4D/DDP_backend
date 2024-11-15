@@ -69,7 +69,7 @@ def update_org_preferences(request, payload: UpdateLLMOptinSchema):
 
 
 @orgpreference_router.put("/enable-discord-notifications", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_edit_discord_notifications_settings"])
+@has_permission(["can_edit_org_notification_settings"])
 def update_discord_notifications(request, payload: UpdateDiscordNotificationsSchema):
     """Updates Discord notifications preferences for the logged-in user's organization."""
 

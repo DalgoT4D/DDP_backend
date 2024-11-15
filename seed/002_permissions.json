@@ -2,27 +2,42 @@
     {
         "model": "ddpui.Permission",
         "pk": 1,
-        "fields": { "name": "Can View Dashboard", "slug": "can_view_dashboard" }
+        "fields": {
+            "name": "Can View Dashboard",
+            "slug": "can_view_dashboard"
+        }
     },
     {
         "model": "ddpui.Permission",
         "pk": 2,
-        "fields": { "name": "Can View Sources", "slug": "can_view_sources" }
+        "fields": {
+            "name": "Can View Sources",
+            "slug": "can_view_sources"
+        }
     },
     {
         "model": "ddpui.Permission",
         "pk": 3,
-        "fields": { "name": "Can Create Source", "slug": "can_create_source" }
+        "fields": {
+            "name": "Can Create Source",
+            "slug": "can_create_source"
+        }
     },
     {
         "model": "ddpui.Permission",
         "pk": 4,
-        "fields": { "name": "Can Edit Source", "slug": "can_edit_source" }
+        "fields": {
+            "name": "Can Edit Source",
+            "slug": "can_edit_source"
+        }
     },
     {
         "model": "ddpui.Permission",
         "pk": 5,
-        "fields": { "name": "Can View Source", "slug": "can_view_source" }
+        "fields": {
+            "name": "Can View Source",
+            "slug": "can_view_source"
+        }
     },
     {
         "model": "ddpui.Permission",
@@ -35,7 +50,10 @@
     {
         "model": "ddpui.Permission",
         "pk": 7,
-        "fields": { "name": "Can View Warehouse", "slug": "can_view_warehouse" }
+        "fields": {
+            "name": "Can View Warehouse",
+            "slug": "can_view_warehouse"
+        }
     },
     {
         "model": "ddpui.Permission",
@@ -48,7 +66,10 @@
     {
         "model": "ddpui.Permission",
         "pk": 9,
-        "fields": { "name": "Can Edit Warehouse", "slug": "can_edit_warehouse" }
+        "fields": {
+            "name": "Can Edit Warehouse",
+            "slug": "can_edit_warehouse"
+        }
     },
     {
         "model": "ddpui.Permission",
@@ -61,7 +82,10 @@
     {
         "model": "ddpui.Permission",
         "pk": 11,
-        "fields": { "name": "Can Create Org", "slug": "can_create_org" }
+        "fields": {
+            "name": "Can Create Org",
+            "slug": "can_create_org"
+        }
     },
     {
         "model": "ddpui.Permission",
@@ -106,17 +130,26 @@
     {
         "model": "ddpui.Permission",
         "pk": 17,
-        "fields": { "name": "Can Delete Source", "slug": "can_delete_source" }
+        "fields": {
+            "name": "Can Delete Source",
+            "slug": "can_delete_source"
+        }
     },
     {
         "model": "ddpui.Permission",
         "pk": 18,
-        "fields": { "name": "View Tasks", "slug": "can_view_master_tasks" }
+        "fields": {
+            "name": "View Tasks",
+            "slug": "can_view_master_tasks"
+        }
     },
     {
         "model": "ddpui.Permission",
         "pk": 19,
-        "fields": { "name": "View Task Config", "slug": "can_view_master_task" }
+        "fields": {
+            "name": "View Task Config",
+            "slug": "can_view_master_task"
+        }
     },
     {
         "model": "ddpui.Permission",
@@ -153,7 +186,10 @@
     {
         "model": "ddpui.Permission",
         "pk": 24,
-        "fields": { "name": "Can Run Orgtask", "slug": "can_run_orgtask" }
+        "fields": {
+            "name": "Can Run Orgtask",
+            "slug": "can_run_orgtask"
+        }
     },
     {
         "model": "ddpui.Permission",
@@ -166,17 +202,26 @@
     {
         "model": "ddpui.Permission",
         "pk": 26,
-        "fields": { "name": "Can Create Orgtask", "slug": "can_create_orgtask" }
+        "fields": {
+            "name": "Can Create Orgtask",
+            "slug": "can_create_orgtask"
+        }
     },
     {
         "model": "ddpui.Permission",
         "pk": 27,
-        "fields": { "name": "Can View Orgtasks", "slug": "can_view_orgtasks" }
+        "fields": {
+            "name": "Can View Orgtasks",
+            "slug": "can_view_orgtasks"
+        }
     },
     {
         "model": "ddpui.Permission",
         "pk": 28,
-        "fields": { "name": "Can Delete Orgtask", "slug": "can_delete_orgtask" }
+        "fields": {
+            "name": "Can Delete Orgtask",
+            "slug": "can_delete_orgtask"
+        }
     },
     {
         "model": "ddpui.Permission",
@@ -189,12 +234,18 @@
     {
         "model": "ddpui.Permission",
         "pk": 30,
-        "fields": { "name": "Can View Pipelines", "slug": "can_view_pipelines" }
+        "fields": {
+            "name": "Can View Pipelines",
+            "slug": "can_view_pipelines"
+        }
     },
     {
         "model": "ddpui.Permission",
         "pk": 31,
-        "fields": { "name": "Can View Pipeline", "slug": "can_view_pipeline" }
+        "fields": {
+            "name": "Can View Pipeline",
+            "slug": "can_view_pipeline"
+        }
     },
     {
         "model": "ddpui.Permission",
@@ -207,12 +258,18 @@
     {
         "model": "ddpui.Permission",
         "pk": 33,
-        "fields": { "name": "Can Edit Pipeline", "slug": "can_edit_pipeline" }
+        "fields": {
+            "name": "Can Edit Pipeline",
+            "slug": "can_edit_pipeline"
+        }
     },
     {
         "model": "ddpui.Permission",
         "pk": 34,
-        "fields": { "name": "Can Run Pipeline", "slug": "can_run_pipeline" }
+        "fields": {
+            "name": "Can Run Pipeline",
+            "slug": "can_run_pipeline"
+        }
     },
     {
         "model": "ddpui.Permission",
@@ -233,7 +290,10 @@
     {
         "model": "ddpui.Permission",
         "pk": 37,
-        "fields": { "name": "Can Sync Sources", "slug": "can_sync_sources" }
+        "fields": {
+            "name": "Can Sync Sources",
+            "slug": "can_sync_sources"
+        }
     },
     {
         "model": "ddpui.Permission",
@@ -262,7 +322,10 @@
     {
         "model": "ddpui.Permission",
         "pk": 41,
-        "fields": { "name": "Can Edit Dbt Model", "slug": "can_edit_dbt_model" }
+        "fields": {
+            "name": "Can Edit Dbt Model",
+            "slug": "can_edit_dbt_model"
+        }
     },
     {
         "model": "ddpui.Permission",
@@ -299,7 +362,10 @@
     {
         "model": "ddpui.Permission",
         "pk": 46,
-        "fields": { "name": "Can View Org Users", "slug": "can_view_orgusers" }
+        "fields": {
+            "name": "Can View Org Users",
+            "slug": "can_view_orgusers"
+        }
     },
     {
         "model": "ddpui.Permission",
@@ -320,7 +386,10 @@
     {
         "model": "ddpui.Permission",
         "pk": 49,
-        "fields": { "name": "Can Edit Org User", "slug": "can_edit_orguser" }
+        "fields": {
+            "name": "Can Edit Org User",
+            "slug": "can_edit_orguser"
+        }
     },
     {
         "model": "ddpui.Permission",
@@ -341,7 +410,10 @@
     {
         "model": "ddpui.Permission",
         "pk": 52,
-        "fields": { "name": "Public", "slug": "public" }
+        "fields": {
+            "name": "Public",
+            "slug": "public"
+        }
     },
     {
         "model": "ddpui.Permission",
@@ -403,7 +475,7 @@
         "model": "ddpui.Permission",
         "pk": 60,
         "fields": {
-            "name": "Can Edit LLM Settings",
+            "name": "Can Edit LLM settings",
             "slug": "can_edit_llm_settings"
         }
     },
@@ -411,8 +483,8 @@
         "model": "ddpui.Permission",
         "pk": 61,
         "fields": {
-            "name": "Can Edit Discord Notifications Settings",
-            "slug": "can_edit_discord_notifications_settings"
+            "name": "Can edit org level notifications settings like discord",
+            "slug": "can_edit_org_notification_settings"
         }
     }
 ]
