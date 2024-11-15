@@ -112,6 +112,8 @@ def get_tools_versions(request):
     orguser: OrgUser = request.orguser
     org = orguser.org
 
+    org_superset = OrgSupersets.objects.filter(org=org).first()
+
     versions = []
 
     ver = airbyte_service.get_current_airbyte_version()
@@ -122,33 +124,21 @@ def get_tools_versions(request):
     versions.append({"Prefect": {"version": ver if ver else "Not available"}})
 
     # dbt Version
-    try:
-        dbt_version_command = DBT_VERSION_COMMAND
-        dbt_output = subprocess.check_output(dbt_version_command, text=True)
-        for line in dbt_output.splitlines():
-            if "installed:" in line:
-                versions.append({"DBT": {"version": line.split(":")[1].strip()}})
-                break
-        else:
-            versions.append({"DBT": {"version": "Not available"}})
-    except Exception:
-        versions.append({"DBT": {"version": "Not available"}})
+    ver = dbt_service.get_dbt_version(org)
+    versions.append({"DBT": {"version": ver if ver else "Not available"}})
 
-    # Elementary Version
-    try:
-        elementary_version_command = ELEMENTARY_VERSION_COMMAND
-        elementary_output = subprocess.check_output(elementary_version_command, text=True)
-        for line in elementary_output.splitlines():
-            if "Elementary version" in line:
-                versions.append({"Elementary": {"version": line.split()[-1].strip()}})
-                break
-        else:
-            versions.append({"Elementary": {"version": "Not available"}})
-    except Exception:
-        versions.append({"Elementary": {"version": "Not available"}})
+    # elementary Version
+    ver = dbt_service.get_edr_version(org)
+    versions.append({"Elementary": {"version": ver if ver else "Not available"}})
 
     # Superset Version
-    versions.append({"Superset": {"version": org_superset.superset_version}})
+    versions.append(
+        {
+            "Superset": {
+                "version": org_superset.superset_version if org_superset else "Not available"
+            }
+        }
+    )
 
     return {"success": True, "res": versions}
 
