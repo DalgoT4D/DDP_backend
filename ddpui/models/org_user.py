@@ -132,6 +132,7 @@ class OrgUserResponse(Schema):
     new_role_slug: str | None
     permissions: list[dict]
     llm_optin: bool = None
+    is_llm_active: bool = None
 
 
 class Invitation(models.Model):
