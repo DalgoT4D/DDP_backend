@@ -21,7 +21,7 @@ from ddpui.core.notifications_service import (
     delete_scheduled_notification,
     get_unread_notifications_count,
 )
-from ddpui.schemas.notifications_api_schemas import SentToEnum
+from ddpui.schemas.notifications_api_schemas import SentToEnum, NotificationDataSchema
 from ddpui.tests.api_tests.test_user_org_api import mock_request, seed_db
 
 from django.contrib.auth.models import User
@@ -209,13 +209,14 @@ def test_handle_recipient_discord_error(mocker: Mock, orguser, unsent_notificati
 
 
 def test_create_notification_success(orguser):
-    notification_data = {
-        "author": "test_author",
-        "message": "test_message",
-        "urgent": True,
-        "scheduled_time": None,
-        "recipients": [orguser.id],
-    }
+    notification_data = NotificationDataSchema(
+        author="test_author",
+        message="test_message",
+        urgent=True,
+        scheduled_time=None,
+        recipients=[orguser.id],
+    )
+
     error, result = create_notification(notification_data)
     assert error is None
     assert result is not None

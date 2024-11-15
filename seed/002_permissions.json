@@ -486,5 +486,21 @@
             "name": "Can edit org level notifications settings like discord",
             "slug": "can_edit_org_notification_settings"
         }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 62,
+        "fields": {
+            "name": "Can initiate upgrade of Dalgo subscription for the org",
+            "slug": "can_initiate_org_plan_upgrade"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 63,
+        "fields": {
+            "name": "Can request (to the higher role) llm analysis feature to be enabled",
+            "slug": "can_request_llm_analysis_feature"
+        }
     }
 ]

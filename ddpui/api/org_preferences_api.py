@@ -159,6 +159,7 @@ def get_org_plans(request):
 
 
 @orgpreference_router.post("/org-plan/upgrade", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_initiate_org_plan_upgrade"])
 def initiate_upgrade_dalgo_plan(request):
     """User can click on the upgrade button from the settings panel
     which will trigger email to biz dev team"""
