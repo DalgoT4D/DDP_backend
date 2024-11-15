@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 from sqlalchemy.engine import create_engine
 from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy import inspect
@@ -14,7 +16,11 @@ class PostgresClient(Warehouse):
         Establish connection to the postgres database using sqlalchemy engine
         Creds come from the secrets manager
         """
-        connection_string = "postgresql://{username}:{password}@{host}/{database}".format(**creds)
+        creds["encoded_username"] = quote(creds["username"].strip())
+        creds["encoded_password"] = quote(creds["password"].strip())
+        connection_string = (
+            "postgresql://{encoded_username}:{encoded_password}@{host}/{database}".format(**creds)
+        )
 
         self.engine = create_engine(connection_string, pool_size=5, pool_timeout=30)
         self.inspect_obj: Inspector = inspect(
