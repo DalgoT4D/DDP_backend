@@ -202,29 +202,12 @@ def get_tools_versions(request):
 
     versions = []
 
-    # Airbyte Version
-    try:
-        airbyte_url = AIRBYTE_URL_TO_GET_VERSION
-        airbyte_response = requests.get(airbyte_url)
-        if airbyte_response.status_code == 200:
-            airbyte_data = airbyte_response.json()
-            versions.append({"Airbyte": {"version": airbyte_data.get("version")}})
-        else:
-            versions.append({"Airbyte": {"version": "Not available"}})
-    except Exception:
-        versions.append({"Airbyte": {"version": "Not available"}})
+    ver = airbyte_service.get_current_airbyte_version()
+    versions.append({"Airbyte": {"version": ver if ver else "Not available"}})
 
     # Prefect Version
-    try:
-        prefect_url = PREFECT_URL_TO_GET_VERSION
-        prefect_response = requests.get(prefect_url)
-        if prefect_response.status_code == 200:
-            version = prefect_response.text.strip().strip('"')
-            versions.append({"Prefect": {"version": version}})
-        else:
-            versions.append({"Prefect": {"version": "Not available"}})
-    except Exception:
-        versions.append({"Prefect": {"version": "Not available"}})
+    ver = prefect_service.get_prefect_version()
+    versions.append({"Prefect": {"version": ver if ver else "Not available"}})
 
     # dbt Version
     try:

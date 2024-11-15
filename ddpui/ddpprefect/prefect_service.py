@@ -630,3 +630,9 @@ def recurse_flow_run_logs(
             break
 
     return logs
+
+
+def get_prefect_version():
+    """Fetch secret block id and block name"""
+    response = prefect_get("prefect/version")
+    return response
