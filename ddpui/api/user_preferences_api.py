@@ -6,6 +6,7 @@ from ddpui.schemas.userpreferences_schema import (
     CreateUserPreferencesSchema,
     UpdateUserPreferencesSchema,
 )
+from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_user import OrgUser
 
 userpreference_router = Router()
@@ -22,6 +23,7 @@ def create_user_preferences(request, payload: CreateUserPreferencesSchema):
     user_preferences = UserPreferences.objects.create(
         orguser=orguser,
         enable_email_notifications=payload.enable_email_notifications,
+        llm_optin=payload.llm_optin,
     )
 
     return {"success": True, "res": user_preferences.to_json()}
@@ -36,6 +38,8 @@ def update_user_preferences(request, payload: UpdateUserPreferencesSchema):
 
     if payload.enable_email_notifications is not None:
         user_preferences.enable_email_notifications = payload.enable_email_notifications
+    if payload.llm_optin is not None:
+        user_preferences.llm_optin = payload.llm_optin
     user_preferences.save()
 
     return {"success": True, "res": user_preferences.to_json()}
@@ -45,7 +49,13 @@ def update_user_preferences(request, payload: UpdateUserPreferencesSchema):
 def get_user_preferences(request):
     """gets user preferences for the user"""
     orguser: OrgUser = request.orguser
-
+    org = orguser.org
     user_preferences, created = UserPreferences.objects.get_or_create(orguser=orguser)
+    org_preferences, created = OrgPreferences.objects.get_or_create(org=org)
 
-    return {"success": True, "res": user_preferences.to_json()}
+    res = {
+        "enable_email_notifications": user_preferences.enable_email_notifications,
+        "llm_optin": user_preferences.llm_optin,
+        "is_llm_active": org_preferences.llm_optin,
+    }
+    return {"success": True, "res": res}

@@ -18,4 +18,5 @@ class UserPreferences(models.Model):
         """Return a dict representation of the model"""
         return {
             "enable_email_notifications": self.enable_email_notifications,
+            "llm_optin": self.llm_optin,
         }

@@ -26,11 +26,11 @@ class OrgPreferences(models.Model):
                 "slug": self.org.slug,
                 "type": self.org.type,
             },
-            "llm_optin": str(self.llm_optin),
+            "llm_optin": bool(self.llm_optin),
             "llm_optin_approved_by": (
                 self.llm_optin_approved_by.user.email if self.llm_optin_approved_by else None
             ),
             "llm_optin_date": self.llm_optin_date.isoformat() if self.llm_optin_date else None,
-            "enable_discord_notifications": str(self.enable_discord_notifications),
+            "enable_discord_notifications": bool(self.enable_discord_notifications),
             "discord_webhook": self.discord_webhook,
         }
