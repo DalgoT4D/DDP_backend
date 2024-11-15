@@ -155,8 +155,6 @@ def test_get_user_preferences_success(orguser, user_preferences):
     response = get_user_preferences(request)
     assert response["success"] is True
     assert response["res"] == {
-        "discord_webhook": user_preferences.discord_webhook,
-        "enable_email_notifications": user_preferences.enable_email_notifications,
         "enable_discord_notifications": user_preferences.enable_discord_notifications,
     }
 
@@ -170,8 +168,6 @@ def test_get_user_preferences_success_if_not_exist(orguser):
     response = get_user_preferences(request)
     assert response["success"] is True
     assert response["res"] == {
-        "discord_webhook": None,
         "enable_email_notifications": False,
-        "enable_discord_notifications": False,
     }
     assert UserPreferences.objects.filter(orguser=orguser).exists()
