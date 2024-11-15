@@ -23,3 +23,20 @@ class OrgPlans(models.Model):
     can_upgrade_plan = models.BooleanField(default=False)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(default=timezone.now)
+
+    def to_json(self) -> dict:
+        """Return a dict representation of the model"""
+        return {
+            "org": {
+                "name": self.org.name,
+                "slug": self.org.slug,
+                "type": self.org.type,
+            },
+            "base_plan": self.base_plan,
+            "superset_included": self.superset_included,
+            "subscription_duration": self.subscription_duration,
+            "features": self.features,
+            "start_date": self.start_date,
+            "end_date": self.end_date,
+            "can_upgrade_plan": self.can_upgrade_plan,
+        }

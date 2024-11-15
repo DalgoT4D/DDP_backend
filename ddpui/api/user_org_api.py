@@ -66,7 +66,7 @@ def get_current_user_v2(request, org_slug: str = None):
 
     org_preferences = OrgPreferences.objects.filter(org=org).first()
     if org_preferences is None:
-        raise HttpError(400, "Organizations preferences  not found")
+        org_preferences = OrgPreferences.objects.create(org=org)
 
     res = []
     for curr_orguser in curr_orgusers.prefetch_related(
@@ -91,7 +91,6 @@ def get_current_user_v2(request, org_slug: str = None):
         if curr_orguser.org.orgtncs.exists():
             curr_orguser.org.tnc_accepted = curr_orguser.org.orgtncs.exists()
 
-        print("broooo")
         res.append(
             OrgUserResponse(
                 email=user.email,

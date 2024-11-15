@@ -594,7 +594,7 @@ def confirm_reset_password(payload: ResetPasswordSchema):
     return None, None
 
 
-def change_password(payload: ChangePasswordSchema, orguser):
+def change_password(payload: ChangePasswordSchema, orguser: OrgUser):
     """If password and confirm password are same reset the password"""
 
     if payload.password != payload.confirmPassword:

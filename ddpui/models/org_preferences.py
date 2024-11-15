@@ -17,3 +17,20 @@ class OrgPreferences(models.Model):
     discord_webhook = models.URLField(blank=True, null=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(default=timezone.now)
+
+    def to_json(self) -> dict:
+        """Return a dict representation of the model"""
+        return {
+            "org": {
+                "name": self.org.name,
+                "slug": self.org.slug,
+                "type": self.org.type,
+            },
+            "llm_optin": str(self.llm_optin),
+            "llm_optin_approved_by": (
+                self.llm_optin_approved_by.user.email if self.llm_optin_approved_by else None
+            ),
+            "llm_optin_date": self.llm_optin_date.isoformat() if self.llm_optin_date else None,
+            "enable_discord_notifications": str(self.enable_discord_notifications),
+            "discord_webhook": self.discord_webhook,
+        }

@@ -51,8 +51,3 @@ FLOW_RUN_LOGS_OFFSET_LIMIT = 200
 
 # LLM data analysis ; row limit fetched and sent to llm service
 LIMIT_ROWS_TO_SEND_TO_LLM = 500
-
-AIRBYTE_URL_TO_GET_VERSION = "http://localhost:8000/api/v1/instance_configuration"
-PREFECT_URL_TO_GET_VERSION = "http://localhost:4200/api/admin/version"
-DBT_VERSION_COMMAND = ["/home/ddp/dbt/venv/bin/dbt", "--version"]
-ELEMENTARY_VERSION_COMMAND = ["/home/ddp/dbt/venv/bin/edr", "--version"]
