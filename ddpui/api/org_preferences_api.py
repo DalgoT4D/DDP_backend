@@ -1,3 +1,4 @@
+import os
 from ninja import Router
 from ninja.errors import HttpError
 from django.utils import timezone
@@ -18,6 +19,7 @@ from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect import (
     prefect_service,
 )
+from ddpui.utils.awsses import send_text_message
 
 orgpreference_router = Router()
 
@@ -154,3 +156,28 @@ def get_org_plans(request):
         raise HttpError(400, "Org's Plan not found")
 
     return {"success": True, "res": org_plan.to_json()}
+
+
+@orgpreference_router.post("/org-plan/upgrade", auth=auth.CustomAuthMiddleware())
+def initiate_upgrade_dalgo_plan(request):
+    """User can click on the upgrade button from the settings panel
+    which will trigger email to biz dev team"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_plan = OrgPlans.objects.filter(org=org).first()
+
+    if not org_plan:
+        raise HttpError(400, "Org's Plan not found")
+
+    biz_dev_emails = os.getenv("BIZ_DEV_EMAILS", []).split(",")
+
+    message = "Upgrade plan request from org: {org_name} with plan: {plan_name}".format(
+        org_name=org.name, plan_name=org_plan.features
+    )
+    subject = "Upgrade plan request from org: {org_name}".format(org_name=org.name)
+
+    for email in biz_dev_emails:
+        send_text_message(email, subject, message)
+
+    return {"success": True}
