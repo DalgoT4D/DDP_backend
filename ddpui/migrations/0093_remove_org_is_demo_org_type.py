@@ -18,8 +18,8 @@ class Migration(migrations.Migration):
             model_name="org",
             name="type",
             field=models.CharField(
-                choices=[("demo", "DEMO"), ("poc", "POC"), ("client", "CLIENT")],
-                default=ddpui.models.org.OrgType["CLIENT"],
+                choices=[("demo", "DEMO"), ("trial", "TRIAL"), ("subscription", "SUBSCRIPTION")],
+                default=ddpui.models.org.OrgType["SUBSCRIPTION"],
                 max_length=50,
             ),
         ),
