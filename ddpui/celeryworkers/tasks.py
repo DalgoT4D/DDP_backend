@@ -1,3 +1,4 @@
+import pytz
 import os
 import shutil
 from pathlib import Path
@@ -16,6 +17,8 @@ from ddpui.utils.sendgrid import send_email_notification, send_schema_changes_em
 from ddpui.utils import timezone
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.core.orgtaskfunctions import get_edr_send_report_task
+from ddpui.utils.awsses import send_text_message
+from ddpui.models.org_plans import OrgPlans
 from ddpui.models.org import (
     Org,
     OrgDbt,
@@ -1024,6 +1027,32 @@ def summarize_warehouse_results(
         return
 
 
+@app.task()
+def check_org_plan_expiry_notify_people():
+    """detects schema changes for all the orgs and sends an email to admins if there is a change"""
+    roles_to_notify = [ACCOUNT_MANAGER_ROLE]
+    days_before_expiry = 7
+
+    for org in Org.objects.all():
+        org_plan = OrgPlans.objects.filter(org=org).first()
+        if not org_plan:
+            continue
+
+        # send a notification 7 days before the plan expires
+        if org_plan.end_date - timedelta(days=days_before_expiry) < datetime.now(pytz.utc):
+            try:
+                org_users = OrgUser.objects.filter(
+                    org=org,
+                    new_role__slug__in=roles_to_notify,
+                )
+                message = f"""This email is to let you know that your Dalgo plan is about to expire. Please renew it to continue using the services."""
+                subject = "Dalgo plan expiry"
+                for orguser in org_users:
+                    send_text_message(orguser.user.email, subject, message)
+            except Exception as err:
+                logger.error(err)
+
+
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender, **kwargs):
     """check for old locks every minute"""
@@ -1038,6 +1067,11 @@ def setup_periodic_tasks(sender, **kwargs):
         crontab(minute=0, hour="*/6"),
         sync_flow_runs_of_deployments.s(),
         name="sync flow runs of deployments into our db",
+    )
+    sender.add_periodic_task(
+        crontab(minute=0, hour="*/12"),
+        check_org_plan_expiry_notify_people.s(),
+        name="check org plan expiry and notify the right people",
     )
 
 
