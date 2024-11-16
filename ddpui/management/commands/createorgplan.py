@@ -61,7 +61,7 @@ class Command(BaseCommand):
                 "superset": ["Superset dashboards", "Superset Usage dashboards"],
             }
 
-        org_plan = OrgPlans.objects.create(
+        org_plan = OrgPlans.objects.update_or_create(
             org=org,
             base_plan=base_plan,
             superset_included=options["with_superset"],
