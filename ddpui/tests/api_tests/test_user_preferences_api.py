@@ -62,9 +62,7 @@ def user_preferences(orguser):
     """a pytest fixture which creates the user preferences for the OrgUser"""
     return UserPreferences.objects.create(
         orguser=orguser,
-        enable_discord_notifications=True,
         enable_email_notifications=True,
-        discord_webhook="http://example.com/webhook",
     )
 
 
@@ -155,7 +153,7 @@ def test_get_user_preferences_success(orguser, user_preferences):
     response = get_user_preferences(request)
     assert response["success"] is True
     assert response["res"] == {
-        "enable_discord_notifications": user_preferences.enable_discord_notifications,
+        "enable_email_notifications": user_preferences.enable_email_notifications,
     }
 
 

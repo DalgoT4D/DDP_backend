@@ -53,14 +53,10 @@ def update_user_preferences(request, payload: UpdateUserPreferencesSchema):
 def get_user_preferences(request):
     """gets user preferences for the user"""
     orguser: OrgUser = request.orguser
-    org = orguser.org
     user_preferences, created = UserPreferences.objects.get_or_create(orguser=orguser)
-    org_preferences, created = OrgPreferences.objects.get_or_create(org=org)
 
     res = {
         "enable_email_notifications": user_preferences.enable_email_notifications,
-        "llm_optin": user_preferences.llm_optin,
-        "is_llm_active": org_preferences.llm_optin,
     }
     return {"success": True, "res": res}
 
