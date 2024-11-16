@@ -23,6 +23,7 @@ class Command(BaseCommand):
         )
         parser.add_argument("--start-date", type=str, help="Start date", required=False)
         parser.add_argument("--end-date", type=str, help="Start date", required=False)
+        parser.add_argument("--overwrite", action="store_true", help="Overwrite existing plan")
 
     def handle(self, *args, **options):
         """create the OrgPlan for the Org"""
@@ -31,7 +32,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR(f"Org {options['org']} not found"))
             return
 
-        if OrgPlans.objects.filter(org=org).exists():
+        if OrgPlans.objects.filter(org=org).exists() and not options["overwrite"]:
             self.stdout.write(self.style.ERROR(f"Org {options['org']} already has a plan"))
             return
 
