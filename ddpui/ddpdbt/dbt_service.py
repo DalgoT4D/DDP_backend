@@ -359,8 +359,8 @@ def get_edr_version(org: Org):
         ]
         elementary_output = subprocess.check_output(elementary_version_command, text=True)
         for line in elementary_output.splitlines():
-            if "Elementary version" in line:
-                return line.split()[-1].strip()
+            if line.startswith("Elementary version"):
+                return line.split()[-1].strip()[:-1]
         return "Not available"
     except Exception as err:
         logger.error("Error getting elementary version: %s", err)
