@@ -1,6 +1,6 @@
 from django.db import models
-from ddpui.models.org import Org
 from django.utils import timezone
+from ddpui.models.org import Org
 
 
 class OrgSupersets(models.Model):
