@@ -16,17 +16,22 @@ class Command(BaseCommand):
         parser.add_argument("--org", type=str, help="Org slug", required=True)
         parser.add_argument("--with-superset", action="store_true", help="Include superset")
         parser.add_argument(
+            "--is-free-trial",
+            action="store_true",
+            help="Set the plan as Free Trial",
+        )
+        parser.add_argument(
             "--duration",
             choices=["Monthly", "Annual"],
             help="Subscription duration",
             required=True,
         )
         parser.add_argument("--start-date", type=str, help="Start date", required=False)
-        parser.add_argument("--end-date", type=str, help="Start date", required=False)
+        parser.add_argument("--end-date", type=str, help="End date", required=False)
         parser.add_argument("--overwrite", action="store_true", help="Overwrite existing plan")
 
     def handle(self, *args, **options):
-        """create the OrgPlan for the Org"""
+        """Create the OrgPlan for the Org"""
         org = Org.objects.filter(slug=options["org"]).first()
         if org is None:
             self.stdout.write(self.style.ERROR(f"Org {options['org']} not found"))
@@ -40,7 +45,6 @@ class Command(BaseCommand):
         if not org_plan:
             org_plan = OrgPlans(org=org)
 
-        org_plan.superset_included = options["with_superset"]
         org_plan.subscription_duration = options["duration"]
 
         org_plan.start_date = (
@@ -50,16 +54,9 @@ class Command(BaseCommand):
             datetime.strptime(options["end_date"], "%Y-%m-%d") if options["end_date"] else None
         )
 
-        if options["with_superset"]:
-            org_plan.base_plan = "DALGO + Superset"
-            org_plan.can_upgrade_plan = False
-            org_plan.features = {
-                "pipeline": ["Ingest", "Transform", "Orchestrate"],
-                "aiFeatures": ["AI data analysis"],
-                "dataQuality": ["Data quality dashboards"],
-            }
-        else:
-            org_plan.base_plan = "DALGO"
+        if options["is_free_trial"]:
+            org_plan.base_plan = "Free trial"
+            org_plan.superset_included = True
             org_plan.can_upgrade_plan = True
             org_plan.features = {
                 "pipeline": ["Ingest", "Transform", "Orchestrate"],
@@ -67,6 +64,25 @@ class Command(BaseCommand):
                 "dataQuality": ["Data quality dashboards"],
                 "superset": ["Superset dashboards", "Superset Usage dashboards"],
             }
+        else:
+            org_plan.base_plan = "DALGO"
+            if options["with_superset"]:
+                org_plan.superset_included = True
+                org_plan.can_upgrade_plan = False
+                org_plan.features = {
+                    "pipeline": ["Ingest", "Transform", "Orchestrate"],
+                    "aiFeatures": ["AI data analysis"],
+                    "dataQuality": ["Data quality dashboards"],
+                    "superset": ["Superset dashboards", "Superset Usage dashboards"],
+                }
+            else:
+                org_plan.superset_included = False
+                org_plan.can_upgrade_plan = True
+                org_plan.features = {
+                    "pipeline": ["Ingest", "Transform", "Orchestrate"],
+                    "aiFeatures": ["AI data analysis"],
+                    "dataQuality": ["Data quality dashboards"],
+                }
 
         org_plan.save()
 
