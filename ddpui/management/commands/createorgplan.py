@@ -32,43 +32,42 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR(f"Org {options['org']} not found"))
             return
 
-        if OrgPlans.objects.filter(org=org).exists() and not options["overwrite"]:
+        org_plan = OrgPlans.objects.filter(org=org).first()
+        if org_plan and not options["overwrite"]:
             self.stdout.write(self.style.ERROR(f"Org {options['org']} already has a plan"))
             return
 
-        start_date = (
+        if not org_plan:
+            org_plan = OrgPlans(org=org)
+
+        org_plan.superset_included = options["with_superset"]
+        org_plan.subscription_duration = options["duration"]
+
+        org_plan.start_date = (
             datetime.strptime(options["start_date"], "%Y-%m-%d") if options["start_date"] else None
         )
-        end_date = (
+        org_plan.end_date = (
             datetime.strptime(options["end_date"], "%Y-%m-%d") if options["end_date"] else None
         )
 
         if options["with_superset"]:
-            base_plan = "DALGO + Superset"
-            can_upgrade_plan = False
-            features = {
+            org_plan.base_plan = "DALGO + Superset"
+            org_plan.can_upgrade_plan = False
+            org_plan.features = {
                 "pipeline": ["Ingest", "Transform", "Orchestrate"],
                 "aiFeatures": ["AI data analysis"],
                 "dataQuality": ["Data quality dashboards"],
             }
         else:
-            base_plan = "DALGO"
-            can_upgrade_plan = True
-            features = {
+            org_plan.base_plan = "DALGO"
+            org_plan.can_upgrade_plan = True
+            org_plan.features = {
                 "pipeline": ["Ingest", "Transform", "Orchestrate"],
                 "aiFeatures": ["AI data analysis"],
                 "dataQuality": ["Data quality dashboards"],
                 "superset": ["Superset dashboards", "Superset Usage dashboards"],
             }
 
-        org_plan = OrgPlans.objects.update_or_create(
-            org=org,
-            base_plan=base_plan,
-            superset_included=options["with_superset"],
-            subscription_duration=options["duration"],
-            start_date=start_date,
-            end_date=end_date,
-            can_upgrade_plan=can_upgrade_plan,
-            features=features,
-        )
+        org_plan.save()
+
         print(org_plan.to_json())
