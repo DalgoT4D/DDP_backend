@@ -77,9 +77,7 @@ def test_create_user_preferences_success(orguser):
     """tests the success of creating user preferences for the OrgUser"""
     request = mock_request(orguser)
     payload = CreateUserPreferencesSchema(
-        enable_discord_notifications=True,
         enable_email_notifications=True,
-        discord_webhook="http://example.com/webhook",
     )
 
     response = create_user_preferences(request, payload)
@@ -87,9 +85,7 @@ def test_create_user_preferences_success(orguser):
     # Assertions
     assert response["success"] is True
     preferences = response["res"]
-    assert preferences["discord_webhook"] == "http://example.com/webhook"
     assert preferences["enable_email_notifications"] is True
-    assert preferences["enable_discord_notifications"] is True
 
 
 def test_create_user_preferences_already_exists(user_preferences):
@@ -99,9 +95,7 @@ def test_create_user_preferences_already_exists(user_preferences):
     """
     request = mock_request(orguser=user_preferences.orguser)
     payload = CreateUserPreferencesSchema(
-        enable_discord_notifications=True,
         enable_email_notifications=True,
-        discord_webhook="http://example.com/webhook",
     )
 
     with pytest.raises(HttpError) as excinfo:
@@ -114,17 +108,13 @@ def test_update_user_preferences_success(orguser, user_preferences):
     """tests the success of updating user preferences for the OrgUser"""
     request = mock_request(orguser)
     payload = UpdateUserPreferencesSchema(
-        enable_discord_notifications=False,
         enable_email_notifications=False,
-        discord_webhook="http://example.org/webhook",
     )
 
     response = update_user_preferences(request, payload)
     assert response["success"] is True
     updated_preferences = UserPreferences.objects.get(orguser=user_preferences.orguser)
-    assert updated_preferences.enable_discord_notifications is False
     assert updated_preferences.enable_email_notifications is False
-    assert updated_preferences.discord_webhook == "http://example.org/webhook"
 
 
 def test_update_user_preferences_create_success_if_not_exist(orguser):
@@ -134,17 +124,13 @@ def test_update_user_preferences_create_success_if_not_exist(orguser):
     """
     request = mock_request(orguser)
     payload = UpdateUserPreferencesSchema(
-        enable_discord_notifications=True,
         enable_email_notifications=True,
-        discord_webhook="http://example.com/webhook",
     )
 
     response = update_user_preferences(request, payload)
     assert response["success"] is True
     user_preferences = UserPreferences.objects.get(orguser=orguser)
-    assert user_preferences.enable_discord_notifications is True
     assert user_preferences.enable_email_notifications is True
-    assert user_preferences.discord_webhook == "http://example.com/webhook"
 
 
 def test_get_user_preferences_success(orguser, user_preferences):

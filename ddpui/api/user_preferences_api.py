@@ -27,7 +27,6 @@ def create_user_preferences(request, payload: CreateUserPreferencesSchema):
     user_preferences = UserPreferences.objects.create(
         orguser=orguser,
         enable_email_notifications=payload.enable_email_notifications,
-        llm_optin=payload.llm_optin,
     )
 
     return {"success": True, "res": user_preferences.to_json()}
@@ -42,8 +41,6 @@ def update_user_preferences(request, payload: UpdateUserPreferencesSchema):
 
     if payload.enable_email_notifications is not None:
         user_preferences.enable_email_notifications = payload.enable_email_notifications
-    if payload.llm_optin is not None:
-        user_preferences.llm_optin = payload.llm_optin
     user_preferences.save()
 
     return {"success": True, "res": user_preferences.to_json()}
