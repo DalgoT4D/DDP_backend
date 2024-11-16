@@ -12,7 +12,7 @@ class Command(BaseCommand):
     This script creates OrgPermissions from UserPermissions
     """
 
-    help = "Edit a dbt cli profile"
+    help = "Create OrgPermissions from UserPermissions"
 
     def add_arguments(self, parser):
         parser.add_argument("--org", type=str, help="Org slug, use 'all' to update all orgs")
