@@ -23,8 +23,8 @@ ADD https://astral.sh/uv/install.sh /install.sh
 RUN apt-get update && apt-get -y install libpq-dev gcc wget curl git \
     && chmod -R 755 /install.sh && /install.sh && rm /install.sh \
     && set -ex apt-get autoremove -y --purge wget && rm -rf /var/lib/apt/lists/* \
-    && /root/.cargo/bin/uv pip install --system --upgrade pip \
-    && /root/.cargo/bin/uv pip install --system --no-cache-dir -r /requirements.txt \
+    && /root/.local/bin/uv pip install --system --upgrade pip \
+    && /root/.local/bin/uv pip install --system --no-cache-dir -r /requirements.txt \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
