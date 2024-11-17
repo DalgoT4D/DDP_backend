@@ -105,7 +105,6 @@ def get_current_user_v2(request, org_slug: str = None):
                     for rolep in curr_orguser.new_role.rolepermissions.all()
                 ],
                 is_demo=(curr_orguser.org.type == OrgType.DEMO if curr_orguser.org else False),
-                llm_optin=curr_orguser.llm_optin,
                 is_llm_active=org_preferences.llm_optin,
             )
         )

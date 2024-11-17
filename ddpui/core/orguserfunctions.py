@@ -154,8 +154,6 @@ def update_orguser_v1(orguser: OrgUser, payload: OrgUserUpdatev1):
         orguser.user.is_active = payload.active
     if payload.role_uuid:
         orguser.new_role = Role.objects.filter(uuid=payload.role_uuid).first()
-    if payload.llm_optin is not None:
-        orguser.llm_optin = payload.llm_optin
     orguser.user.save()
     orguser.save()
 
