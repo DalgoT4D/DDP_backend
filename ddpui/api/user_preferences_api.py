@@ -27,6 +27,7 @@ def create_user_preferences(request, payload: CreateUserPreferencesSchema):
     user_preferences = UserPreferences.objects.create(
         orguser=orguser,
         enable_email_notifications=payload.enable_email_notifications,
+        disclaimer_shown=payload.disclaimer_shown,
     )
 
     return {"success": True, "res": user_preferences.to_json()}
@@ -41,6 +42,8 @@ def update_user_preferences(request, payload: UpdateUserPreferencesSchema):
 
     if payload.enable_email_notifications is not None:
         user_preferences.enable_email_notifications = payload.enable_email_notifications
+    if payload.disclaimer_shown is not None:
+        user_preferences.disclaimer_shown = payload.disclaimer_shown
     user_preferences.save()
 
     return {"success": True, "res": user_preferences.to_json()}
