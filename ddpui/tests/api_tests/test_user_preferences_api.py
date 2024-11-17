@@ -140,6 +140,8 @@ def test_get_user_preferences_success(orguser, user_preferences):
     assert response["success"] is True
     assert response["res"] == {
         "enable_email_notifications": user_preferences.enable_email_notifications,
+        "disclaimer_shown": user_preferences.disclaimer_shown,
+        "is_llm_active": False,
     }
 
 
@@ -153,5 +155,7 @@ def test_get_user_preferences_success_if_not_exist(orguser):
     assert response["success"] is True
     assert response["res"] == {
         "enable_email_notifications": False,
+        "disclaimer_shown": False,
+        "is_llm_active": False,
     }
     assert UserPreferences.objects.filter(orguser=orguser).exists()

@@ -51,9 +51,12 @@ def get_user_preferences(request):
     """gets user preferences for the user"""
     orguser: OrgUser = request.orguser
     user_preferences, created = UserPreferences.objects.get_or_create(orguser=orguser)
+    org_preferences, created = OrgPreferences.objects.get_or_create(org=orguser.org)
 
     res = {
         "enable_email_notifications": user_preferences.enable_email_notifications,
+        "disclaimer_shown": user_preferences.disclaimer_shown,
+        "is_llm_active": org_preferences.llm_optin,
     }
     return {"success": True, "res": res}
 
