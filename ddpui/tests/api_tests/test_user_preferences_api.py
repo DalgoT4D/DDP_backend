@@ -76,9 +76,7 @@ def test_seed_data(seed_db):
 def test_create_user_preferences_success(orguser):
     """tests the success of creating user preferences for the OrgUser"""
     request = mock_request(orguser)
-    payload = CreateUserPreferencesSchema(
-        enable_email_notifications=True,
-    )
+    payload = CreateUserPreferencesSchema(enable_email_notifications=True, disclaimer_shown=True)
 
     response = create_user_preferences(request, payload)
 
