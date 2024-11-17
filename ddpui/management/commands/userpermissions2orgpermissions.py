@@ -38,7 +38,10 @@ class Command(BaseCommand):
                 if userpreferences is not None:
                     print("Found user preferences for " + orguser.user.email)
 
-                    if orgpreferences.llm_optin is False and userpreferences.llm_optin is True:
+                    if (
+                        orgpreferences.llm_optin is False
+                        and userpreferences.disclaimer_shown is True
+                    ):
                         print("Approving LLM opt-in by " + orguser.user.email)
                         orgpreferences.llm_optin = True
                         orgpreferences.llm_optin_approved_by = orguser
