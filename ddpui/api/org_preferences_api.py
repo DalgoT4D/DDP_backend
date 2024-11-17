@@ -6,12 +6,14 @@ from ddpui import auth
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_supersets import OrgSupersets
 from ddpui.models.org_plans import OrgPlans
+from ddpui.models.userpreferences import UserPreferences
 from ddpui.schemas.org_preferences_schema import (
     CreateOrgPreferencesSchema,
     UpdateLLMOptinSchema,
     UpdateDiscordNotificationsSchema,
     CreateOrgSupersetDetailsSchema,
 )
+from django.db import transaction
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
 from ddpui.ddpdbt import dbt_service
@@ -44,6 +46,7 @@ def create_org_preferences(request, payload: CreateOrgPreferencesSchema):
 
 @orgpreference_router.put("/llm_approval", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_llm_settings"])
+@transaction.atomic
 def update_org_preferences(request, payload: UpdateLLMOptinSchema):
     """Updates llm preferences for the logged-in user's organization"""
 
@@ -51,6 +54,8 @@ def update_org_preferences(request, payload: UpdateLLMOptinSchema):
     org = orguser.org
 
     org_preferences = OrgPreferences.objects.filter(org=org).first()
+    user_preferences = UserPreferences.objects.filter(orguser=orguser).first()
+
     if org_preferences is None:
         org_preferences = OrgPreferences.objects.create(org=org)
 
@@ -58,11 +63,12 @@ def update_org_preferences(request, payload: UpdateLLMOptinSchema):
         org_preferences.llm_optin = True
         org_preferences.llm_optin_approved_by = orguser
         org_preferences.llm_optin_date = timezone.now()
+        user_preferences.disclaimer_shown = True
     else:
         org_preferences.llm_optin = False
         org_preferences.llm_optin_approved_by = None
         org_preferences.llm_optin_date = None
-
+    user_preferences.save()
     org_preferences.save()
 
     return {"success": True, "res": org_preferences.to_json()}
