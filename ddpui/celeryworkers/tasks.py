@@ -989,7 +989,7 @@ def check_for_long_running_flow_runs():
                 email_body += (
                     f"Org: {orgtask.org.slug} \n"  # might appear above as well, we don't care
                 )
-                connection_url = f"http://localhost:8000/workspaces/{org['airbyte_workspace_id']}/connections/{connection_id}"
+                connection_url = f"http://localhost:8000/workspaces/{orgtask.org['airbyte_workspace_id']}/connections/{connection_id}"
                 email_body += f"Connection URL: {connection_url} \n"
             else:
                 email_body += f"Connection ID: {connection_id} \n"
