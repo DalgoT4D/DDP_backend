@@ -284,18 +284,6 @@ def post_fetch_elementary_report(request):
     return result
 
 
-@dbt_router.post("/refresh-elementary-report/", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_view_dbt_workspace"])
-def post_refresh_elementary_report(request):
-    """prepare the dbt docs single html"""
-    orguser: OrgUser = request.orguser
-    error, result = dbt_service.refresh_elementary_report(orguser.org)
-    if error:
-        raise HttpError(400, error)
-
-    return result
-
-
 @dbt_router.post("/v1/refresh-elementary-report/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_dbt_workspace"])
 def post_refresh_elementary_report_via_prefect(request):

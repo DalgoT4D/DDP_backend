@@ -33,10 +33,7 @@ from ddpui.utils.constants import (
 )
 from ddpui.utils.timezone import as_ist
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.singletaskprogress import SingleTaskProgress
 from ddpui.utils.redis_client import RedisClient
-from ddpui.models.tasks import TaskProgressHashPrefix
-from ddpui.celeryworkers.tasks import create_elementary_report
 from ddpui.core.orgdbt_manager import DbtProjectManager
 
 logger = CustomLogger("ddpui")
@@ -231,28 +228,6 @@ def make_edr_report_s3_path(org: Org):
     todays_date = datetime.today().strftime("%Y-%m-%d")
     bucket_file_path = f"reports/{org.slug}.{todays_date}.html"
     return bucket_file_path
-
-
-def refresh_elementary_report(org: Org):
-    """refreshes the elementary report for the current date"""
-    if org.dbt is None:
-        return "dbt is not configured for this client", None
-
-    project_dir = Path(DbtProjectManager.get_dbt_project_dir(org.dbt))
-
-    if not os.path.exists(project_dir / "elementary_profiles"):
-        return "set up elementary profile first", None
-
-    task_str = f"{TaskProgressHashPrefix.RUNELEMENTARY}-{org.slug}"
-    if SingleTaskProgress.fetch(task_str) is None:
-        bucket_file_path = make_edr_report_s3_path(org)
-        logger.info("creating new elementary report at %s", bucket_file_path)
-        create_elementary_report.delay(task_str, org.id, bucket_file_path)
-        ttl = int(os.getenv("EDR_TTL", "180"))
-    else:
-        logger.info("edr already running for org %s", org.slug)
-        ttl = SingleTaskProgress.get_ttl(task_str)
-    return None, {"task_id": task_str, "ttl": ttl}
 
 
 def fetch_elementary_report(org: Org):
