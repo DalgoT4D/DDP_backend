@@ -1,10 +1,7 @@
 import os
-from datetime import datetime, timedelta
-import pytz
 import streamlit
 import django
 import dotenv
-import requests
 
 dotenv.load_dotenv(".env")
 
@@ -14,18 +11,7 @@ django.setup()
 from ddpui.models.org import Org
 from ddpui.models.tasks import OrgTask
 from ddpui.ddpprefect.prefect_service import get_long_running_flow_runs
-
-
-def find_key_in_dictionary(dictionary: dict, key):
-    """Recursively find first occurence of a key in a dictionary and return its value"""
-    for k, v in dictionary.items():
-        if k == key:
-            return v
-        if isinstance(v, dict):
-            val = find_key_in_dictionary(v, key)
-            if val:
-                return val
-    return None
+from ddpui.utils.helpers import find_key_in_dictionary
 
 
 def show_workspaces():
