@@ -82,7 +82,7 @@ def post_request_llm_analysis_feature_enabled(request):
     # send notification to all account managers
     notification_data = NotificationDataSchema(
         author=orguser.user.email,
-        message=f"{orguser.user.first_name} is requesting to enable LLM analysis feature",
+        message=f"{orguser.user.email} is requesting to enable LLM analysis feature",
         urgent=False,
         scheduled_time=None,
         recipients=[acc_manager.id for acc_manager in acc_managers],
