@@ -855,7 +855,9 @@ def get_job_info(job_id: str) -> dict:
     return res
 
 
-def get_jobs_for_connection(connection_id: str, limit: int = 1, offset: int = 0) -> int | None:
+def get_jobs_for_connection(
+    connection_id: str, limit: int = 1, offset: int = 0, job_types: list[str] = ["sync"]
+) -> int | None:
     """
     returns most recent job for a connection
     possible configTypes are
@@ -874,7 +876,7 @@ def get_jobs_for_connection(connection_id: str, limit: int = 1, offset: int = 0)
     result = abreq(
         "jobs/list",
         {
-            "configTypes": ["sync"],
+            "configTypes": job_types,
             "configId": connection_id,
             "pagination": {"rowOffset": offset, "pageSize": limit},
         },
@@ -885,6 +887,7 @@ def get_jobs_for_connection(connection_id: str, limit: int = 1, offset: int = 0)
 def parse_job_info(jobinfo: dict) -> dict:
     """extract summary info from job and successfull attempt"""
     retval = {
+        "job_type": jobinfo["job"]["configType"],
         "job_id": jobinfo["job"]["id"],
         "status": jobinfo["job"]["status"],
         "date": None,
@@ -894,6 +897,7 @@ def parse_job_info(jobinfo: dict) -> dict:
         "bytesEmitted": nice_bytes(0),
         "recordsCommitted": 0,
         "totalTimeInSeconds": 0,
+        "resetConfig": jobinfo["job"].get("resetConfig", None),
     }
     retval["attempt_no"] = 0
     for attempt in jobinfo["attempts"]:
