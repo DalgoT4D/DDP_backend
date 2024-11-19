@@ -649,13 +649,27 @@ def get_prefect_flow_runs_log_history(request, deployment_id, limit: int = 0, fe
 def get_prefect_flow_runs_log_history_v1(request, deployment_id, limit: int = 0, offset: int = 0):
     # pylint: disable=unused-argument
     """Fetch all flow runs for the deployment and the logs for each flow run"""
+    orguser: OrgUser = request.orguser
+
+    if orguser.org is None:
+        raise HttpError(404, "organization not found")
+
     flow_runs = prefect_service.get_flow_runs_by_deployment_id_v1(
         deployment_id=deployment_id, limit=limit, offset=offset
     )
 
     for flow_run in flow_runs:
-        graph_dict = prefect_service.get_flow_run_graphs(flow_run["id"])
-        flow_run["runs"] = graph_dict
+        runs = prefect_service.get_flow_run_graphs(flow_run["id"])
+        # attach connection name to each flow run
+        for run in runs:
+            if "parameters" in run and run["kind"] == "flow-run":
+                connection_id = run["parameters"]["connection_id"]
+                connection = airbyte_service.get_connection(
+                    orguser.org.airbyte_workspace_id, connection_id
+                )
+                run["parameters"]["connection_name"] = connection["name"]
+
+        flow_run["runs"] = runs
 
     return flow_runs
 
