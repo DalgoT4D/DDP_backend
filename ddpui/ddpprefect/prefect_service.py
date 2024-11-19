@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 import requests
 
 from ninja.errors import HttpError
@@ -6,7 +7,6 @@ from dotenv import load_dotenv
 from django.db import transaction
 from django.db.models import Window
 from django.db.models.functions import RowNumber
-from datetime import datetime
 
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
@@ -657,6 +657,12 @@ def recurse_flow_run_logs(
             break
 
     return logs
+
+
+def get_long_running_flow_runs(nhours: int):
+    """gets long running flow runs from prefect"""
+    flow_runs = prefect_get(f"flow_runs/long-running/{nhours}")
+    return flow_runs["flow_runs"]
 
 
 def get_prefect_version():

@@ -9,8 +9,6 @@ import json
 from decimal import Decimal
 from datetime import datetime, date, time, timedelta
 import pytz
-import csv
-import io
 
 
 def runcmd(cmd: str, cwd: str):
@@ -213,3 +211,15 @@ def get_schedule_time_for_large_jobs(
         next_slot = next_slot.astimezone(pytz.utc)
 
     return next_slot
+
+
+def find_key_in_dictionary(dictionary: dict, key):
+    """Recursively find first occurence of a key in a dictionary and return its value"""
+    for k, v in dictionary.items():
+        if k == key:
+            return v
+        if isinstance(v, dict):
+            val = find_key_in_dictionary(v, key)
+            if val:
+                return val
+    return None
