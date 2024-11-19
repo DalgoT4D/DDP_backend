@@ -162,6 +162,9 @@ class OrgDataFlowv1(models.Model):
     )  # skipcq: PTC-W0901, PTC-W0906
 
     reset_conn_dataflow = models.ForeignKey("self", on_delete=models.SET_NULL, null=True)
+    clear_conn_dataflow = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True, related_name="clear_connection_dataflow"
+    )
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
