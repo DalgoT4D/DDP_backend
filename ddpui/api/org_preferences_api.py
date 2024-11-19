@@ -59,6 +59,9 @@ def update_org_preferences(request, payload: UpdateLLMOptinSchema):
     if org_preferences is None:
         org_preferences = OrgPreferences.objects.create(org=org)
 
+    if user_preferences is None:
+        user_preferences = UserPreferences.objects.create(orguser=orguser)
+
     if payload.llm_optin is True:
         org_preferences.llm_optin = True
         org_preferences.llm_optin_approved_by = orguser
