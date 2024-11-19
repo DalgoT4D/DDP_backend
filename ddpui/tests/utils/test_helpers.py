@@ -10,6 +10,7 @@ from ddpui.utils.helpers import (
     update_dict_but_not_stars,
     nice_bytes,
     get_schedule_time_for_large_jobs,
+    find_key_in_dictionary,
 )
 
 
@@ -255,3 +256,11 @@ def test_get_schedule_time_for_large_jobs_5():
     now = datetime(2024, 1, 7, 13, 45).astimezone(pytz.utc)
     r1 = get_schedule_time_for_large_jobs(now, time(12, 30))
     assert r1 >= now
+
+
+def test_find_key_in_dictionary():
+    """tests find_key_in_dictionary"""
+    assert find_key_in_dictionary({"a": "b"}, "a") == "b"
+    assert find_key_in_dictionary({"a": {"b": "c"}}, "b") == "c"
+    assert find_key_in_dictionary({"a": {"b": {"c": "d"}}}, "c") == "d"
+    assert find_key_in_dictionary({"a": {"b": {"c": "d"}}}, "d") is None
