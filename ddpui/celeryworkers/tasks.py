@@ -1,3 +1,5 @@
+"""these are tasks which we run through celery"""
+
 import os
 import shutil
 from pathlib import Path
@@ -13,9 +15,9 @@ from ddpui.models.notifications import Notification
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.utils.discord import send_discord_notification
 from ddpui.utils.sendgrid import send_email_notification, send_schema_changes_email
-from ddpui.utils import timezone
+from ddpui.utils import timezone, awsses
+from ddpui.utils.helpers import find_key_in_dictionary
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.models.org import (
     Org,
     OrgDbt,
@@ -45,31 +47,28 @@ from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.singletaskprogress import SingleTaskProgress
-from ddpui.core.orgdbt_manager import DbtProjectManager
-from ddpui.ddpdbt.schema import DbtProjectParams
-from ddpui.ddpairbyte import airbyte_service, airbytehelpers
-from ddpui.ddpprefect.prefect_service import (
-    get_flow_run_graphs,
-    get_flow_run_logs,
-    update_dbt_core_block_schema,
-    get_dbt_cli_profile_block,
-    prefect_get,
-    get_flow_run_logs_v2,
-    recurse_flow_run_logs,
-)
 from ddpui.utils.constants import (
     TASK_DBTRUN,
     TASK_DBTCLEAN,
     TASK_DBTDEPS,
     TASK_AIRBYTESYNC,
-    FLOW_RUN_LOGS_OFFSET_LIMIT,
+)
+from ddpui.core.orgdbt_manager import DbtProjectManager
+from ddpui.ddpdbt.schema import DbtProjectParams
+from ddpui.ddpairbyte import airbyte_service, airbytehelpers
+from ddpui.ddpprefect.prefect_service import (
+    get_flow_run_graphs,
+    update_dbt_core_block_schema,
+    get_dbt_cli_profile_block,
+    prefect_get,
+    recurse_flow_run_logs,
+    get_long_running_flow_runs,
 )
 from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.core import llm_service
 from ddpui.utils.helpers import (
     convert_sqlalchemy_rows_to_csv_string,
-    convert_sqlalchemy_rows_to_json_string,
 )
 
 logger = CustomLogger("ddpui")
@@ -510,70 +509,6 @@ def get_connection_catalog_task(task_key, org_id, connection_id):
 
 
 @app.task(bind=False)
-def create_elementary_report(task_key: str, org_id: int, bucket_file_path: str):
-    """run edr report to create the elementary report and write to s3"""
-    taskprogress = SingleTaskProgress(task_key, int(os.getenv("EDR_TTL", "180")))
-
-    edr_binary = Path(os.getenv("DBT_VENV")) / "venv/bin/edr"
-    org = Org.objects.filter(id=org_id).first()
-    org_task = get_edr_send_report_task(org, create=True)
-
-    project_dir = Path(DbtProjectManager.get_dbt_project_dir(org.dbt))
-    # profiles_dir = project_dir / "elementary_profiles"
-    aws_access_key_id = os.getenv("ELEMENTARY_AWS_ACCESS_KEY_ID")
-    aws_secret_access_key = os.getenv("ELEMENTARY_AWS_SECRET_ACCESS_KEY")
-    s3_bucket_name = os.getenv("ELEMENTARY_S3_BUCKET")
-
-    # cli args based on the edr org task
-    cli_params = org_task.parameters
-    cli_options = cli_params.get("options", {})
-
-    # its a relative path ({"profiles-dir": "elementary_profiles", ...}) since deployment run via shell task in prefect that have a "working_dir"
-    if "profiles-dir" in cli_options:
-        profiles_dir = project_dir / cli_options["profiles-dir"]
-        cli_options["profiles-dir"] = str(profiles_dir)
-
-    if "bucket-file-path" in cli_options:
-        cli_options["bucket-file-path"] = bucket_file_path
-
-    os.environ["PATH"] += ":" + str(Path(os.getenv("DBT_VENV")) / "venv/bin")
-    cmd = [
-        str(edr_binary),
-        org_task.get_task_parameters(),
-        "--aws-access-key-id",
-        aws_access_key_id,
-        "--aws-secret-access-key",
-        aws_secret_access_key,
-        "--s3-bucket-name",
-        s3_bucket_name,
-    ]
-    taskprogress.add(
-        {
-            "message": "started",
-            "status": "running",
-        }
-    )
-    try:
-        runcmd(" ".join(cmd), project_dir)
-    except subprocess.CalledProcessError:
-        taskprogress.add(
-            {
-                "message": "edr failed",
-                # "error": str(error), # error contains the aws secrets
-                "status": "failed",
-            }
-        )
-        # logger.exception(error)  # error contains the aws secrets
-        return
-    taskprogress.add(
-        {
-            "message": "generated edr report",
-            "status": "completed",
-        }
-    )
-
-
-@app.task(bind=False)
 def update_dbt_core_block_schema_task(block_name, default_schema):
     """single http PUT request to the prefect-proxy"""
     logger.info("updating default_schema of %s to %s", block_name, default_schema)
@@ -758,7 +693,6 @@ def summarize_logs(
 
     # logs
     logs_text = ""
-    log_file_name = ""
     try:
         if type == LogsSummarizationType.DEPLOYMENT:
             all_task = get_flow_run_graphs(flow_run_id)
@@ -1024,6 +958,51 @@ def summarize_warehouse_results(
         return
 
 
+@app.task(bind=False)
+def check_for_long_running_flow_runs():
+    """checks for long-running flow runs in prefect"""
+    flow_runs = get_long_running_flow_runs(2)
+
+    email_body = ""
+
+    for flow_run in flow_runs:
+        logger.info(f"Found long running flow run {flow_run['id']} in prefect")
+
+        flow_run_url = "http://localhost:4200/flow-runs/flow-run/" + flow_run["id"]
+        email_body += f"Flow Run ID: {flow_run['id']} \n"
+        email_body += f"Flow Run URL: {flow_run_url} \n"
+
+        org_slug = find_key_in_dictionary(flow_run["parameters"], "org_slug")
+        if org_slug:
+            email_body += f"Org: {org_slug} \n"
+
+        tasks = find_key_in_dictionary(flow_run["parameters"], "tasks")
+        if tasks:
+            email_body += f"Tasks: {tasks} \n"
+            for x in tasks:
+                email_body += f"- {x['slug']} \n"
+
+        connection_id = find_key_in_dictionary(flow_run["parameters"], "connection_id")
+        if connection_id:
+            orgtask = OrgTask.objects.filter(connection_id=connection_id).first()
+            if orgtask:
+                email_body += (
+                    f"Org: {orgtask.org.slug} \n"  # might appear above as well, we don't care
+                )
+                connection_url = f"http://localhost:8000/workspaces/{orgtask.org['airbyte_workspace_id']}/connections/{connection_id}"
+                email_body += f"Connection URL: {connection_url} \n"
+            else:
+                email_body += f"Connection ID: {connection_id} \n"
+
+        email_body += "=" * 20
+
+    awsses.send_text_message(
+        os.getenv("ADMIN_EMAIL"),
+        "Long Running Flow Runs",
+        email_body,
+    )
+
+
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender, **kwargs):
     """check for old locks every minute"""
@@ -1039,6 +1018,12 @@ def setup_periodic_tasks(sender, **kwargs):
         sync_flow_runs_of_deployments.s(),
         name="sync flow runs of deployments into our db",
     )
+    if os.getenv("ADMIN_EMAIL"):
+        sender.add_periodic_task(
+            3600 * 1.0,
+            check_for_long_running_flow_runs.s(),
+            name="check for long-running flow-runs",
+        )
 
 
 @app.task(bind=True)
