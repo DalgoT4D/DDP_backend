@@ -3,6 +3,7 @@ from django.core.management.base import BaseCommand
 
 from ddpui.models.org import Org
 from ddpui.models.org_plans import OrgPlans
+from ddpui.utils.constants import DALGO_WITH_SUPERSET, DALGO, FREE_TRIAL
 
 
 class Command(BaseCommand):
@@ -58,31 +59,17 @@ class Command(BaseCommand):
             org_plan.base_plan = "Free trial"
             org_plan.superset_included = True
             org_plan.can_upgrade_plan = True
-            org_plan.features = {
-                "pipeline": ["Ingest", "Transform", "Orchestrate"],
-                "aiFeatures": ["AI data analysis"],
-                "dataQuality": ["Data quality dashboards"],
-                "superset": ["Superset dashboards", "Superset Usage dashboards"],
-            }
+            org_plan.features = FREE_TRIAL
         else:
             org_plan.base_plan = "DALGO"
             if options["with_superset"]:
                 org_plan.superset_included = True
                 org_plan.can_upgrade_plan = False
-                org_plan.features = {
-                    "pipeline": ["Ingest", "Transform", "Orchestrate"],
-                    "aiFeatures": ["AI data analysis"],
-                    "dataQuality": ["Data quality dashboards"],
-                    "superset": ["Superset dashboards", "Superset Usage dashboards"],
-                }
+                org_plan.features = DALGO
             else:
                 org_plan.superset_included = False
                 org_plan.can_upgrade_plan = True
-                org_plan.features = {
-                    "pipeline": ["Ingest", "Transform", "Orchestrate"],
-                    "aiFeatures": ["AI data analysis"],
-                    "dataQuality": ["Data quality dashboards"],
-                }
+                org_plan.features = DALGO_WITH_SUPERSET
 
         org_plan.save()
 
