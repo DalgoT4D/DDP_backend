@@ -13,11 +13,8 @@ from ddpui.schemas.org_preferences_schema import (
     UpdateDiscordNotificationsSchema,
     CreateOrgSupersetDetailsSchema,
 )
-from ddpui.schemas.notifications_api_schemas import SentToEnum, CreateNotificationPayloadSchema
-from ddpui.api.notifications_api import post_create_notification
-from datetime import timedelta
-from django.utils.timezone import now
-
+from ddpui.core.notifications_service import create_notification
+from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
 from django.db import transaction
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
@@ -83,17 +80,19 @@ def update_org_preferences(request, payload: UpdateLLMOptinSchema):
 
     # sending notification to all users in the org.
     if payload.llm_optin is True:
-        notification_payload = CreateNotificationPayloadSchema(
-            sent_to=SentToEnum.ALL_ORG_USERS,
-            org_slug=org.slug,
+        recipients: list[OrgUser] = OrgUser.objects.filter(org=org).all()
+        print(recipients, "recipients")
+        notification_payload = NotificationDataSchema(
             author=orguser.user.email,
             message="The AI LLM Data Analysis feature is now enabled.",
-            scheduled_time=now() + timedelta(minutes=1),
+            urgent=False,
+            scheduled_time=None,
+            recipients=[recipient.id for recipient in recipients],
         )
-
-        error, result = post_create_notification(request, notification_payload)
-        if error:
-            return HttpError(400, error)
+        print(notification_payload, "notfpaylod")
+        res, errors = create_notification(notification_payload)
+        if errors:
+            return HttpError(400, "Issue with creating the request notification")
 
     return {"success": True, "res": org_preferences.to_json()}
 
