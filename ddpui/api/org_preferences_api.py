@@ -190,4 +190,7 @@ def initiate_upgrade_dalgo_plan(request):
     for email in biz_dev_emails:
         send_text_message(email, subject, message)
 
+    org_plan.upgrade_requested = True
+    org_plan.save()
+
     return {"success": True}
