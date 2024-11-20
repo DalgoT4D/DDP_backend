@@ -81,7 +81,7 @@ def update_org_preferences(request, payload: UpdateLLMOptinSchema):
     # sending notification to all users in the org.
     if payload.llm_optin is True:
         recipients: list[OrgUser] = OrgUser.objects.filter(org=org).all()
-        print(recipients, "recipients")
+
         notification_payload = NotificationDataSchema(
             author=orguser.user.email,
             message="The AI LLM Data Analysis feature is now enabled.",
@@ -89,7 +89,7 @@ def update_org_preferences(request, payload: UpdateLLMOptinSchema):
             scheduled_time=None,
             recipients=[recipient.id for recipient in recipients],
         )
-        print(notification_payload, "notfpaylod")
+
         res, errors = create_notification(notification_payload)
         if errors:
             return HttpError(400, "Issue with creating the request notification")
