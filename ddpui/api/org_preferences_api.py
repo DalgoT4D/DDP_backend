@@ -13,6 +13,11 @@ from ddpui.schemas.org_preferences_schema import (
     UpdateDiscordNotificationsSchema,
     CreateOrgSupersetDetailsSchema,
 )
+from ddpui.schemas.notifications_api_schemas import SentToEnum, CreateNotificationPayloadSchema
+from ddpui.api.notifications_api import post_create_notification
+from datetime import timedelta
+from django.utils.timezone import now
+
 from django.db import transaction
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
@@ -67,12 +72,28 @@ def update_org_preferences(request, payload: UpdateLLMOptinSchema):
         org_preferences.llm_optin_approved_by = orguser
         org_preferences.llm_optin_date = timezone.now()
         user_preferences.disclaimer_shown = True
+        org_preferences.enable_llm_request = False
+        org_preferences.enable_llm_requested_by = None
     else:
         org_preferences.llm_optin = False
         org_preferences.llm_optin_approved_by = None
         org_preferences.llm_optin_date = None
     user_preferences.save()
     org_preferences.save()
+
+    # sending notification to all users in the org.
+    if payload.llm_optin is True:
+        notification_payload = CreateNotificationPayloadSchema(
+            sent_to=SentToEnum.ALL_ORG_USERS,
+            org_slug=org.slug,
+            author=orguser.user.email,
+            message="The AI LLM Data Analysis feature is now enabled.",
+            scheduled_time=now() + timedelta(minutes=1),
+        )
+
+        error, result = post_create_notification(request, notification_payload)
+        if error:
+            return HttpError(400, error)
 
     return {"success": True, "res": org_preferences.to_json()}
 
