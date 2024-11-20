@@ -60,6 +60,7 @@ def get_user_preferences(request):
         "enable_email_notifications": user_preferences.enable_email_notifications,
         "disclaimer_shown": user_preferences.disclaimer_shown,
         "is_llm_active": org_preferences.llm_optin,
+        "enable_llm_requested": org_preferences.enable_llm_request,
     }
     return {"success": True, "res": res}
 
@@ -88,6 +89,17 @@ def post_request_llm_analysis_feature_enabled(request):
         recipients=[acc_manager.id for acc_manager in acc_managers],
     )
 
-    create_notification(notification_data)
+    res, errors = create_notification(notification_data)
+
+    if errors:
+        return HttpError(400, "Issue with creating the request notification")
+
+    rows_updated = OrgPreferences.objects.filter(org=org).update(
+        enable_llm_request=True, enable_llm_requested_by=orguser
+    )
+    if rows_updated == 0:
+        raise HttpError(
+            400, "No rows were updated. OrgPreferences may not exist for this organization."
+        )
 
     return {"success": True, "res": "Notified account manager(s) to enable LLM analysis feature"}
