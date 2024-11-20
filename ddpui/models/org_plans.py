@@ -39,4 +39,5 @@ class OrgPlans(models.Model):
             "start_date": self.start_date,
             "end_date": self.end_date,
             "can_upgrade_plan": self.can_upgrade_plan,
+            "upgrade_requested": self.upgrade_requested,
         }
