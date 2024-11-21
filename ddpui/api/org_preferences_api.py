@@ -200,6 +200,10 @@ def initiate_upgrade_dalgo_plan(request):
     if not org_plan:
         raise HttpError(400, "Org's Plan not found")
 
+    # trigger emails only once
+    if org_plan.upgrade_requested:
+        return {"success": True, "res": "Upgrade request already sent"}
+
     biz_dev_emails = os.getenv("BIZ_DEV_EMAILS", []).split(",")
 
     message = "Upgrade plan request from org: {org_name} with plan: {plan_name}".format(
