@@ -20,6 +20,7 @@ class OrgPlans(models.Model):
     start_date = models.DateTimeField(null=True, blank=True, default=None)
     end_date = models.DateTimeField(null=True, blank=True, default=None)
     can_upgrade_plan = models.BooleanField(default=False)
+    upgrade_requested = models.BooleanField(default=False)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(default=timezone.now)
 
@@ -38,4 +39,5 @@ class OrgPlans(models.Model):
             "start_date": self.start_date,
             "end_date": self.end_date,
             "can_upgrade_plan": self.can_upgrade_plan,
+            "upgrade_requested": self.upgrade_requested,
         }

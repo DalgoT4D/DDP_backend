@@ -13,6 +13,10 @@ class OrgPreferences(models.Model):
         OrgUser, on_delete=models.CASCADE, related_name="approvedby", null=True, blank=True
     )
     llm_optin_date = models.DateTimeField(null=True, blank=True)
+    enable_llm_request = models.BooleanField(default=False)
+    enable_llm_requested_by = models.ForeignKey(
+        OrgUser, on_delete=models.CASCADE, related_name="llm_request", null=True, blank=True
+    )
     enable_discord_notifications = models.BooleanField(default=False)
     discord_webhook = models.URLField(blank=True, null=True)
     created_at = models.DateTimeField(default=timezone.now)
