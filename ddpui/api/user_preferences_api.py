@@ -89,10 +89,10 @@ def post_request_llm_analysis_feature_enabled(request):
         recipients=[acc_manager.id for acc_manager in acc_managers],
     )
 
-    res, errors = create_notification(notification_data)
+    error, res = create_notification(notification_data)
 
-    if errors:
-        return HttpError(400, "Issue with creating the request notification")
+    if "errors" in res and len(res["errors"]) > 0:
+        raise HttpError(400, "Issue with creating the request notification")
 
     rows_updated = OrgPreferences.objects.filter(org=org).update(
         enable_llm_request=True, enable_llm_requested_by=orguser
