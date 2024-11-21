@@ -90,9 +90,9 @@ def update_org_preferences(request, payload: UpdateLLMOptinSchema):
             recipients=[recipient.id for recipient in recipients],
         )
 
-        res, errors = create_notification(notification_payload)
-        if errors:
-            return HttpError(400, "Issue with creating the request notification")
+        error, res = create_notification(notification_payload)
+        if res and "errors" in res and len(res["errors"]) > 0:
+            raise HttpError(400, "Issue with creating the request notification")
 
     return {"success": True, "res": org_preferences.to_json()}
 

@@ -90,8 +90,7 @@ def post_request_llm_analysis_feature_enabled(request):
     )
 
     error, res = create_notification(notification_data)
-
-    if "errors" in res and len(res["errors"]) > 0:
+    if res and "errors" in res and len(res["errors"]) > 0:
         raise HttpError(400, "Issue with creating the request notification")
 
     rows_updated = OrgPreferences.objects.filter(org=org).update(
