@@ -1025,11 +1025,12 @@ def check_for_long_running_flow_runs():
 
         email_body += "=" * 20
 
-    awsses.send_text_message(
-        os.getenv("ADMIN_EMAIL"),
-        "Long Running Flow Runs",
-        email_body,
-    )
+    if email_body != "":
+        awsses.send_text_message(
+            os.getenv("ADMIN_EMAIL"),
+            "Long Running Flow Runs",
+            email_body,
+        )
 
 
 @app.on_after_finalize.connect
