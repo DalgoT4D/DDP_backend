@@ -6,7 +6,12 @@ from ddpui.schemas.userpreferences_schema import (
     CreateUserPreferencesSchema,
     UpdateUserPreferencesSchema,
 )
+from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_user import OrgUser
+from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.core.notifications_service import create_notification
+from ddpui.auth import has_permission
+from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
 
 userpreference_router = Router()
 
@@ -19,20 +24,13 @@ def create_user_preferences(request, payload: CreateUserPreferencesSchema):
     if UserPreferences.objects.filter(orguser=orguser).exists():
         raise HttpError(400, "Preferences already exist")
 
-    userpreferences = UserPreferences.objects.create(
+    user_preferences = UserPreferences.objects.create(
         orguser=orguser,
-        enable_discord_notifications=payload.enable_discord_notifications,
         enable_email_notifications=payload.enable_email_notifications,
-        discord_webhook=payload.discord_webhook,
+        disclaimer_shown=payload.disclaimer_shown,
     )
 
-    preferences = {
-        "discord_webhook": userpreferences.discord_webhook,
-        "enable_email_notifications": userpreferences.enable_email_notifications,
-        "enable_discord_notifications": userpreferences.enable_discord_notifications,
-    }
-
-    return {"success": True, "res": preferences}
+    return {"success": True, "res": user_preferences.to_json()}
 
 
 @userpreference_router.put("/", auth=auth.CustomAuthMiddleware())
@@ -42,34 +40,65 @@ def update_user_preferences(request, payload: UpdateUserPreferencesSchema):
 
     user_preferences, created = UserPreferences.objects.get_or_create(orguser=orguser)
 
-    if payload.enable_discord_notifications is not None:
-        user_preferences.enable_discord_notifications = payload.enable_discord_notifications
     if payload.enable_email_notifications is not None:
         user_preferences.enable_email_notifications = payload.enable_email_notifications
-    if payload.discord_webhook is not None:
-        user_preferences.discord_webhook = payload.discord_webhook
-
+    if payload.disclaimer_shown is not None:
+        user_preferences.disclaimer_shown = payload.disclaimer_shown
     user_preferences.save()
 
-    preferences = {
-        "discord_webhook": user_preferences.discord_webhook,
-        "enable_email_notifications": user_preferences.enable_email_notifications,
-        "enable_discord_notifications": user_preferences.enable_discord_notifications,
-    }
-
-    return {"success": True, "res": preferences}
+    return {"success": True, "res": user_preferences.to_json()}
 
 
 @userpreference_router.get("/", auth=auth.CustomAuthMiddleware())
 def get_user_preferences(request):
     """gets user preferences for the user"""
     orguser: OrgUser = request.orguser
-
     user_preferences, created = UserPreferences.objects.get_or_create(orguser=orguser)
+    org_preferences, created = OrgPreferences.objects.get_or_create(org=orguser.org)
 
-    preferences = {
-        "discord_webhook": user_preferences.discord_webhook,
+    res = {
         "enable_email_notifications": user_preferences.enable_email_notifications,
-        "enable_discord_notifications": user_preferences.enable_discord_notifications,
+        "disclaimer_shown": user_preferences.disclaimer_shown,
+        "is_llm_active": org_preferences.llm_optin,
+        "enable_llm_requested": org_preferences.enable_llm_request,
     }
-    return {"success": True, "res": preferences}
+    return {"success": True, "res": res}
+
+
+@userpreference_router.post("/llm_analysis/request", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_request_llm_analysis_feature"])
+def post_request_llm_analysis_feature_enabled(request):
+    """Sends a notification to org's account manager for enabling LLM analysis feature"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    # get the account managers of the org
+    acc_managers: list[OrgUser] = OrgUser.objects.filter(
+        org=org, new_role__slug=ACCOUNT_MANAGER_ROLE
+    ).all()
+
+    if len(acc_managers) == 0:
+        raise HttpError(400, "No account manager found for the organization")
+
+    # send notification to all account managers
+    notification_data = NotificationDataSchema(
+        author=orguser.user.email,
+        message=f"{orguser.user.email} is requesting to enable LLM analysis feature",
+        urgent=False,
+        scheduled_time=None,
+        recipients=[acc_manager.id for acc_manager in acc_managers],
+    )
+
+    error, res = create_notification(notification_data)
+    if res and "errors" in res and len(res["errors"]) > 0:
+        raise HttpError(400, "Issue with creating the request notification")
+
+    rows_updated = OrgPreferences.objects.filter(org=org).update(
+        enable_llm_request=True, enable_llm_requested_by=orguser
+    )
+    if rows_updated == 0:
+        raise HttpError(
+            400, "No rows were updated. OrgPreferences may not exist for this organization."
+        )
+
+    return {"success": True, "res": "Notified account manager(s) to enable LLM analysis feature"}

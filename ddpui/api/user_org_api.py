@@ -30,6 +30,7 @@ from ddpui.models.org_user import (
     OrgUserUpdateNewRole,
     OrgUserUpdatev1,
     ResetPasswordSchema,
+    ChangePasswordSchema,
     UserAttributes,
     VerifyEmailSchema,
 )
@@ -38,6 +39,7 @@ from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.deleteorg import delete_warehouse_v1
 from ddpui.models.org import OrgWarehouse, Org, OrgType
 from ddpui.ddpairbyte import airbytehelpers
+from ddpui.models.org_preferences import OrgPreferences
 
 user_org_router = Router()
 load_dotenv()
@@ -55,13 +57,16 @@ def get_current_user_v2(request, org_slug: str = None):
     orguser: OrgUser = request.orguser
     user: User = request.orguser.user
     org: Org = orguser.org
-
     # warehouse
     warehouse = OrgWarehouse.objects.filter(org=org).first()
     curr_orgusers = OrgUser.objects.filter(user=user)
 
     if org_slug:
         curr_orgusers = curr_orgusers.filter(org__slug=org_slug)
+
+    org_preferences = OrgPreferences.objects.filter(org=org).first()
+    if org_preferences is None:
+        org_preferences = OrgPreferences.objects.create(org=org)
 
     res = []
     for curr_orguser in curr_orgusers.prefetch_related(
@@ -85,6 +90,7 @@ def get_current_user_v2(request, org_slug: str = None):
     ):
         if curr_orguser.org.orgtncs.exists():
             curr_orguser.org.tnc_accepted = curr_orguser.org.orgtncs.exists()
+
         res.append(
             OrgUserResponse(
                 email=user.email,
@@ -99,7 +105,7 @@ def get_current_user_v2(request, org_slug: str = None):
                     for rolep in curr_orguser.new_role.rolepermissions.all()
                 ],
                 is_demo=(curr_orguser.org.type == OrgType.DEMO if curr_orguser.org else False),
-                llm_optin=curr_orguser.llm_optin,
+                is_llm_active=org_preferences.llm_optin,
             )
         )
 
@@ -395,6 +401,18 @@ def post_forgot_password(request, payload: ForgotPasswordSchema):  # pylint: dis
 def post_reset_password(request, payload: ResetPasswordSchema):  # pylint: disable=unused-argument
     """step 2 of the forgot-password flow"""
     _, error = orguserfunctions.confirm_reset_password(payload)
+    if error:
+        raise HttpError(400, error)
+    return {"success": 1}
+
+
+@user_org_router.post(
+    "/users/change_password/", auth=auth.CustomAuthMiddleware()
+)  # from the settings panel
+def change_password(request, payload: ChangePasswordSchema):  # pylint: disable=unused-argument
+    """step 2 of the forgot-password flow"""
+    orguser = request.orguser
+    _, error = orguserfunctions.change_password(payload, orguser)
     if error:
         raise HttpError(400, error)
     return {"success": 1}

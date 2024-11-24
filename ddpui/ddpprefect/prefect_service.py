@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 import requests
 
 from ninja.errors import HttpError
@@ -6,7 +7,6 @@ from dotenv import load_dotenv
 from django.db import transaction
 from django.db.models import Window
 from django.db.models.functions import RowNumber
-from datetime import datetime
 
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
@@ -157,6 +157,23 @@ def prefect_delete(endpoint: str, **kwargs) -> None:
     except Exception as error:
         logger.exception(error)
         raise HttpError(res.status_code, res.text) from error
+
+
+# ================================================================================================
+def get_prefect_server_version():
+    """fetches the prefect server version"""
+    try:
+        prefect_host = os.getenv("PREFECT_SERVER_HOST")
+        prefect_port = os.getenv("PREFECT_SERVER_PORT")
+        prefect_url = f"http://{prefect_host}:{prefect_port}/api/admin/version"
+        prefect_response = requests.get(prefect_url, timeout=5)
+        if prefect_response.status_code == 200:
+            version = prefect_response.text.strip().strip('"')
+            return version
+        else:
+            return "Not available"
+    except Exception:
+        return "Not available"
 
 
 # ================================================================================================
@@ -640,3 +657,15 @@ def recurse_flow_run_logs(
             break
 
     return logs
+
+
+def get_long_running_flow_runs(nhours: int):
+    """gets long running flow runs from prefect"""
+    flow_runs = prefect_get(f"flow_runs/long-running/{nhours}")
+    return flow_runs["flow_runs"]
+
+
+def get_prefect_version():
+    """Fetch secret block id and block name"""
+    response = prefect_get("prefect/version")
+    return response

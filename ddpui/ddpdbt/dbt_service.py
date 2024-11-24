@@ -31,12 +31,10 @@ from ddpui.utils.constants import (
     TASK_DBTSEED,
     TASK_DBTDEPS,
 )
+from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.utils.timezone import as_ist
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.singletaskprogress import SingleTaskProgress
 from ddpui.utils.redis_client import RedisClient
-from ddpui.models.tasks import TaskProgressHashPrefix
-from ddpui.celeryworkers.tasks import create_elementary_report
 from ddpui.core.orgdbt_manager import DbtProjectManager
 
 logger = CustomLogger("ddpui")
@@ -233,28 +231,6 @@ def make_edr_report_s3_path(org: Org):
     return bucket_file_path
 
 
-def refresh_elementary_report(org: Org):
-    """refreshes the elementary report for the current date"""
-    if org.dbt is None:
-        return "dbt is not configured for this client", None
-
-    project_dir = Path(DbtProjectManager.get_dbt_project_dir(org.dbt))
-
-    if not os.path.exists(project_dir / "elementary_profiles"):
-        return "set up elementary profile first", None
-
-    task_str = f"{TaskProgressHashPrefix.RUNELEMENTARY}-{org.slug}"
-    if SingleTaskProgress.fetch(task_str) is None:
-        bucket_file_path = make_edr_report_s3_path(org)
-        logger.info("creating new elementary report at %s", bucket_file_path)
-        create_elementary_report.delay(task_str, org.id, bucket_file_path)
-        ttl = int(os.getenv("EDR_TTL", "180"))
-    else:
-        logger.info("edr already running for org %s", org.slug)
-        ttl = SingleTaskProgress.get_ttl(task_str)
-    return None, {"task_id": task_str, "ttl": ttl}
-
-
 def fetch_elementary_report(org: Org):
     """fetch previously generated elementary report"""
     if org.dbt is None:
@@ -331,3 +307,36 @@ def refresh_elementary_report_via_prefect(orguser: OrgUser) -> dict:
         raise HttpError(400, "failed to start a run") from error
 
     return res
+
+
+def get_dbt_version(org: Org):
+    """get dbt version"""
+    try:
+        dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
+        dbt_version_command = [str(dbt_project_params.dbt_binary), "--version"]
+        dbt_output = subprocess.check_output(dbt_version_command, text=True)
+        for line in dbt_output.splitlines():
+            if "installed:" in line:
+                return line.split(":")[1].strip()
+        return "Not available"
+    except Exception as err:
+        logger.error("Error getting dbt version: %s", err)
+        return "Not available"
+
+
+def get_edr_version(org: Org):
+    """get elementary report version"""
+    try:
+        dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
+        elementary_version_command = [
+            os.path.join(dbt_project_params.venv_binary, "edr"),
+            "--version",
+        ]
+        elementary_output = subprocess.check_output(elementary_version_command, text=True)
+        for line in elementary_output.splitlines():
+            if line.startswith("Elementary version"):
+                return line.split()[-1].strip()[:-1]
+        return "Not available"
+    except Exception as err:
+        logger.error("Error getting elementary version: %s", err)
+        return "Not available"

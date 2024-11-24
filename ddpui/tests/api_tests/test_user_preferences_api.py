@@ -62,9 +62,7 @@ def user_preferences(orguser):
     """a pytest fixture which creates the user preferences for the OrgUser"""
     return UserPreferences.objects.create(
         orguser=orguser,
-        enable_discord_notifications=True,
         enable_email_notifications=True,
-        discord_webhook="http://example.com/webhook",
     )
 
 
@@ -78,20 +76,14 @@ def test_seed_data(seed_db):
 def test_create_user_preferences_success(orguser):
     """tests the success of creating user preferences for the OrgUser"""
     request = mock_request(orguser)
-    payload = CreateUserPreferencesSchema(
-        enable_discord_notifications=True,
-        enable_email_notifications=True,
-        discord_webhook="http://example.com/webhook",
-    )
+    payload = CreateUserPreferencesSchema(enable_email_notifications=True, disclaimer_shown=True)
 
     response = create_user_preferences(request, payload)
 
     # Assertions
     assert response["success"] is True
     preferences = response["res"]
-    assert preferences["discord_webhook"] == "http://example.com/webhook"
     assert preferences["enable_email_notifications"] is True
-    assert preferences["enable_discord_notifications"] is True
 
 
 def test_create_user_preferences_already_exists(user_preferences):
@@ -101,9 +93,7 @@ def test_create_user_preferences_already_exists(user_preferences):
     """
     request = mock_request(orguser=user_preferences.orguser)
     payload = CreateUserPreferencesSchema(
-        enable_discord_notifications=True,
         enable_email_notifications=True,
-        discord_webhook="http://example.com/webhook",
     )
 
     with pytest.raises(HttpError) as excinfo:
@@ -116,17 +106,13 @@ def test_update_user_preferences_success(orguser, user_preferences):
     """tests the success of updating user preferences for the OrgUser"""
     request = mock_request(orguser)
     payload = UpdateUserPreferencesSchema(
-        enable_discord_notifications=False,
         enable_email_notifications=False,
-        discord_webhook="http://example.org/webhook",
     )
 
     response = update_user_preferences(request, payload)
     assert response["success"] is True
     updated_preferences = UserPreferences.objects.get(orguser=user_preferences.orguser)
-    assert updated_preferences.enable_discord_notifications is False
     assert updated_preferences.enable_email_notifications is False
-    assert updated_preferences.discord_webhook == "http://example.org/webhook"
 
 
 def test_update_user_preferences_create_success_if_not_exist(orguser):
@@ -136,17 +122,13 @@ def test_update_user_preferences_create_success_if_not_exist(orguser):
     """
     request = mock_request(orguser)
     payload = UpdateUserPreferencesSchema(
-        enable_discord_notifications=True,
         enable_email_notifications=True,
-        discord_webhook="http://example.com/webhook",
     )
 
     response = update_user_preferences(request, payload)
     assert response["success"] is True
     user_preferences = UserPreferences.objects.get(orguser=orguser)
-    assert user_preferences.enable_discord_notifications is True
     assert user_preferences.enable_email_notifications is True
-    assert user_preferences.discord_webhook == "http://example.com/webhook"
 
 
 def test_get_user_preferences_success(orguser, user_preferences):
@@ -155,9 +137,10 @@ def test_get_user_preferences_success(orguser, user_preferences):
     response = get_user_preferences(request)
     assert response["success"] is True
     assert response["res"] == {
-        "discord_webhook": user_preferences.discord_webhook,
         "enable_email_notifications": user_preferences.enable_email_notifications,
-        "enable_discord_notifications": user_preferences.enable_discord_notifications,
+        "disclaimer_shown": user_preferences.disclaimer_shown,
+        "is_llm_active": False,
+        "enable_llm_requested": False,
     }
 
 
@@ -170,8 +153,9 @@ def test_get_user_preferences_success_if_not_exist(orguser):
     response = get_user_preferences(request)
     assert response["success"] is True
     assert response["res"] == {
-        "discord_webhook": None,
         "enable_email_notifications": False,
-        "enable_discord_notifications": False,
+        "disclaimer_shown": False,
+        "is_llm_active": False,
+        "enable_llm_requested": False,
     }
     assert UserPreferences.objects.filter(orguser=orguser).exists()

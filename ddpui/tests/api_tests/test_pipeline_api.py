@@ -25,6 +25,7 @@ from ddpui.api.pipeline_api import (
     delete_prefect_dataflow_v1,
     put_prefect_dataflow_v1,
     post_deployment_set_schedule,
+    get_prefect_flow_runs_log_history_v1,
 )
 from ddpui.ddpprefect import (
     DBTCLIPROFILE,
@@ -909,3 +910,48 @@ def test_post_run_prefect_org_deployment_task_success(orguser_transform_tasks):
     post_run_prefect_org_deployment_task(request, dataflow_orgtask.dataflow.deployment_id)
 
     assert TaskLock.objects.filter(orgtask=org_task).count() == 1
+
+
+@patch("ddpui.api.pipeline_api.prefect_service.get_flow_runs_by_deployment_id_v1")
+@patch("ddpui.api.pipeline_api.prefect_service.get_flow_run_graphs")
+@patch("ddpui.api.pipeline_api.airbyte_service.get_connection")
+def test_get_prefect_flow_runs_log_history_v1(
+    mock_get_connection,
+    mock_get_flow_run_graphs,
+    mock_get_flow_runs_by_deployment_id_v1,
+    orguser_transform_tasks,
+):
+    request = mock_request(orguser_transform_tasks)
+    # Mock the return values of the prefect_service functions
+    mock_get_flow_runs_by_deployment_id_v1.return_value = [
+        {"id": "flow_run_id_1"},
+        {"id": "flow_run_id_2"},
+    ]
+    mock_get_flow_run_graphs.return_value = [
+        {"id": "run_id_1", "kind": "flow-run", "parameters": {"connection_id": "conn_id_1"}},
+        {"id": "run_id_2", "kind": "flow-run", "parameters": {"connection_id": "conn_id_2"}},
+    ]
+    mock_get_connection.side_effect = lambda workspace_id, connection_id: {
+        "name": f"connection_name_{connection_id}"
+    }
+
+    # Call the function
+    result = get_prefect_flow_runs_log_history_v1(request, "deployment_id", limit=2, offset=0)
+
+    # Assertions
+    assert len(result) == 2
+    assert result[0]["id"] == "flow_run_id_1"
+    assert result[1]["id"] == "flow_run_id_2"
+    assert "runs" in result[0]
+    assert "runs" in result[1]
+    assert result[0]["runs"][0]["parameters"]["connection_name"] == "connection_name_conn_id_1"
+    assert result[1]["runs"][1]["parameters"]["connection_name"] == "connection_name_conn_id_2"
+
+
+def test_get_prefect_flow_runs_log_history_v1_org_not_found(orguser_transform_tasks):
+    orguser_transform_tasks.org = None
+    request = mock_request(orguser_transform_tasks)
+    with pytest.raises(HttpError) as excinfo:
+        get_prefect_flow_runs_log_history_v1(request, "deployment_id", limit=2, offset=0)
+    assert excinfo.value.status_code == 404
+    assert str(excinfo.value) == "organization not found"

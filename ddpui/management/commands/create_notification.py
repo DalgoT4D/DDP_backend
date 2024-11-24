@@ -5,6 +5,7 @@ from ddpui.core import notifications_service
 from ddpui.schemas.notifications_api_schemas import (
     CreateNotificationPayloadSchema,
     SentToEnum,
+    NotificationDataSchema,
 )
 
 
@@ -83,13 +84,13 @@ class Command(BaseCommand):
             sys.exit(1)
 
         # Create notification data
-        notification_data = {
-            "author": payload.author,
-            "message": payload.message,
-            "urgent": payload.urgent,
-            "scheduled_time": payload.scheduled_time,
-            "recipients": recipients,
-        }
+        notification_data = NotificationDataSchema(
+            author=payload.author,
+            message=payload.message,
+            urgent=payload.urgent,
+            scheduled_time=payload.scheduled_time,
+            recipients=recipients,
+        )
 
         # Call the create notification service
         error, result = notifications_service.create_notification(notification_data)

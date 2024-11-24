@@ -1774,5 +1774,77 @@
       "role": 2,
       "permission": 58
     }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 219,
+    "fields": {
+      "role": 2,
+      "permission": 60
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 220,
+    "fields": {
+      "role": 1,
+      "permission": 60
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 221,
+    "fields": {
+      "role": 2,
+      "permission": 61
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 222,
+    "fields": {
+      "role": 1,
+      "permission": 61
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 223,
+    "fields": {
+      "role": 1,
+      "permission": 62
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 224,
+    "fields": {
+      "role": 2,
+      "permission": 62
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 225,
+    "fields": {
+      "role": 3,
+      "permission": 63
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 226,
+    "fields": {
+      "role": 4,
+      "permission": 63
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 227,
+    "fields": {
+      "role": 5,
+      "permission": 63
+    }
   }
 ]
