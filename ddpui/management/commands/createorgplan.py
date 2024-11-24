@@ -16,9 +16,9 @@ class Command(BaseCommand):
         parser.add_argument("--org", type=str, help="Org slug", required=True)
         parser.add_argument("--with-superset", action="store_true", help="Include superset")
         parser.add_argument(
-            "--is-free-trial",
-            action="store_true",
-            help="Set the plan as Free Trial",
+            "--plan",
+            choices=["Free Trial", "DALGO", "Internal"],
+            default="DALGO",
         )
         parser.add_argument(
             "--duration",
@@ -54,35 +54,26 @@ class Command(BaseCommand):
             datetime.strptime(options["end_date"], "%Y-%m-%d") if options["end_date"] else None
         )
 
-        if options["is_free_trial"]:
-            org_plan.base_plan = "Free trial"
-            org_plan.superset_included = True
+        org_plan.features = {
+            "pipeline": ["Ingest", "Transform", "Orchestrate"],
+            "aiFeatures": ["AI data analysis"],
+            "dataQuality": ["Data quality dashboards"],
+        }
+
+        org_plan.superset_included = options["with_superset"]
+        if options["with_superset"]:
+            org_plan.features["superset"] = ["Superset dashboards", "Superset Usage dashboards"]
+
+        org_plan.base_plan = options["plan"]
+
+        if options["plan"] == "Free Trial":
             org_plan.can_upgrade_plan = True
-            org_plan.features = {
-                "pipeline": ["Ingest", "Transform", "Orchestrate"],
-                "aiFeatures": ["AI data analysis"],
-                "dataQuality": ["Data quality dashboards"],
-                "superset": ["Superset dashboards", "Superset Usage dashboards"],
-            }
+
+        elif options["plan"] == "Internal":
+            org_plan.can_upgrade_plan = False
+
         else:
-            org_plan.base_plan = "DALGO"
-            if options["with_superset"]:
-                org_plan.superset_included = True
-                org_plan.can_upgrade_plan = False
-                org_plan.features = {
-                    "pipeline": ["Ingest", "Transform", "Orchestrate"],
-                    "aiFeatures": ["AI data analysis"],
-                    "dataQuality": ["Data quality dashboards"],
-                    "superset": ["Superset dashboards", "Superset Usage dashboards"],
-                }
-            else:
-                org_plan.superset_included = False
-                org_plan.can_upgrade_plan = True
-                org_plan.features = {
-                    "pipeline": ["Ingest", "Transform", "Orchestrate"],
-                    "aiFeatures": ["AI data analysis"],
-                    "dataQuality": ["Data quality dashboards"],
-                }
+            org_plan.can_upgrade_plan = not options["with_superset"]
 
         org_plan.save()
 
