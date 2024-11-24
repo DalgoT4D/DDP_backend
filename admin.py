@@ -16,11 +16,11 @@ from ddpui.utils.helpers import find_key_in_dictionary
 
 def show_workspaces():
     """streamlit function to show workspaces"""
-    org_to_workspace = Org.objects.order_by("name").values("name", "airbyte_workspace_id")
+    org_to_workspace = Org.objects.order_by("name").values("name", "airbyte_workspace_id", "slug")
     streamlit.title("Airbyte workspace URLs")
     for org in org_to_workspace:
         org["airbyte_url"] = f"http://localhost:8000/workspaces/{org['airbyte_workspace_id']}"
-        streamlit.markdown(f"[{org['name']}]({org['airbyte_url']})")
+        streamlit.markdown(f"[{org['name']}]({org['airbyte_url']}) {org['slug']}")
 
 
 def main():
