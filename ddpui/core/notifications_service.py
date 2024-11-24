@@ -11,7 +11,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.utils import timezone
 from ddpui.utils.discord import send_discord_notification
 from ddpui.utils.sendgrid import send_email_notification
-from ddpui.schemas.notifications_api_schemas import SentToEnum
+from ddpui.schemas.notifications_api_schemas import SentToEnum, NotificationDataSchema
 from ddpui.celeryworkers.tasks import schedule_notification_task
 
 
@@ -102,18 +102,18 @@ def handle_recipient(
 
 # main function for sending notification
 def create_notification(
-    notification_data,
+    notification_data: NotificationDataSchema,
 ) -> Tuple[Optional[Dict[str, str]], Optional[Dict[str, Any]]]:
     """
     main function for creating notification.
     Add notification to the notification table.
     """
 
-    author = notification_data["author"]
-    message = notification_data["message"]
-    urgent = notification_data["urgent"]
-    scheduled_time = notification_data["scheduled_time"]
-    recipients = notification_data["recipients"]
+    author = notification_data.author
+    message = notification_data.message
+    urgent = notification_data.urgent
+    scheduled_time = notification_data.scheduled_time
+    recipients = notification_data.recipients
 
     errors = []
     notification = Notification.objects.create(

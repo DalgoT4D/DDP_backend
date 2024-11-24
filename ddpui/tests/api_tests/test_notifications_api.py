@@ -9,7 +9,7 @@ from ddpui.models.org_user import OrgUser, OrgUserRole
 from ddpui import auth
 from django.contrib.auth.models import User
 from ddpui.api.notifications_api import (
-    create_notification,
+    post_create_notification,
     get_notification_history,
     get_notification_recipients,
     get_user_notifications,
@@ -77,7 +77,7 @@ def test_create_notification_success(mock_create_notification, mock_get_recipien
     create_notification_payload = CreateNotificationPayloadSchema(**payload)
     mock_get_recipients.return_value = (None, [1, 2, 3])
     mock_create_notification.return_value = (None, {"res": [], "errors": []})
-    response = create_notification(MagicMock(), create_notification_payload)
+    response = post_create_notification(MagicMock(), create_notification_payload)
     assert isinstance(response["res"], list)
     assert isinstance(response["errors"], list)
     mock_get_recipients.assert_called_once_with(
@@ -117,7 +117,7 @@ def test_create_notification_no_recipients(mock_create_notification, mock_get_re
     create_notification_payload = CreateNotificationPayloadSchema(**payload)
     mock_get_recipients.return_value = ("No users found for the given information", [])
     with pytest.raises(HttpError) as excinfo:
-        create_notification(MagicMock(), create_notification_payload)
+        post_create_notification(MagicMock(), create_notification_payload)
     assert "No users found for the given information" in str(excinfo.value)
     mock_get_recipients.assert_called_once_with(
         payload["sent_to"],
@@ -151,7 +151,7 @@ def test_create_notification_no_org_slug(mock_create_notification, mock_get_reci
         [],
     )
     with pytest.raises(HttpError) as excinfo:
-        create_notification(MagicMock(), create_notification_payload)
+        post_create_notification(MagicMock(), create_notification_payload)
     assert "org_slug is required to sent notification to all org users." in str(excinfo.value)
     mock_get_recipients.assert_called_once_with(
         payload["sent_to"],
@@ -185,7 +185,7 @@ def test_create_notification_no_user_email(mock_create_notification, mock_get_re
         [],
     )
     with pytest.raises(HttpError) as excinfo:
-        create_notification(MagicMock(), create_notification_payload)
+        post_create_notification(MagicMock(), create_notification_payload)
     assert "user email is required to sent notification to a user." in str(excinfo.value)
     mock_get_recipients.assert_called_once_with(
         payload["sent_to"],
@@ -219,7 +219,7 @@ def test_create_notification_user_does_not_exist(mock_create_notification, mock_
         [],
     )
     with pytest.raises(HttpError) as excinfo:
-        create_notification(MagicMock(), create_notification_payload)
+        post_create_notification(MagicMock(), create_notification_payload)
     assert "User with the provided email does not exist" in str(excinfo.value)
     mock_get_recipients.assert_called_once_with(
         payload["sent_to"],

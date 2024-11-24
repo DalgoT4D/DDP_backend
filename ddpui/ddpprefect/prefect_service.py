@@ -160,6 +160,23 @@ def prefect_delete(endpoint: str, **kwargs) -> None:
 
 
 # ================================================================================================
+def get_prefect_server_version():
+    """fetches the prefect server version"""
+    try:
+        prefect_host = os.getenv("PREFECT_SERVER_HOST")
+        prefect_port = os.getenv("PREFECT_SERVER_PORT")
+        prefect_url = f"http://{prefect_host}:{prefect_port}/api/admin/version"
+        prefect_response = requests.get(prefect_url, timeout=5)
+        if prefect_response.status_code == 200:
+            version = prefect_response.text.strip().strip('"')
+            return version
+        else:
+            return "Not available"
+    except Exception:
+        return "Not available"
+
+
+# ================================================================================================
 def get_airbyte_server_block_id(blockname) -> str | None:
     """get the block_id for the server block having this name"""
     response = prefect_get(f"blocks/airbyte/server/{blockname}")
@@ -646,3 +663,9 @@ def get_long_running_flow_runs(nhours: int):
     """gets long running flow runs from prefect"""
     flow_runs = prefect_get(f"flow_runs/long-running/{nhours}")
     return flow_runs["flow_runs"]
+
+
+def get_prefect_version():
+    """Fetch secret block id and block name"""
+    response = prefect_get("prefect/version")
+    return response

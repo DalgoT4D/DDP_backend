@@ -44,3 +44,13 @@ class UpdateReadStatusSchemav1(Schema):
 
     notification_ids: list[int]
     read_status: bool
+
+
+class NotificationDataSchema(Schema):
+    """Schema use to call the notification service function for creating a notification"""
+
+    author: str
+    message: str
+    urgent: Optional[bool] = False
+    scheduled_time: Optional[datetime] = None
+    recipients: List[int]  # list of orguser ids
