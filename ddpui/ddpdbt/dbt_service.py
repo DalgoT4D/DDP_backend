@@ -31,6 +31,7 @@ from ddpui.utils.constants import (
     TASK_DBTSEED,
     TASK_DBTDEPS,
 )
+from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.utils.timezone import as_ist
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.redis_client import RedisClient
@@ -306,3 +307,36 @@ def refresh_elementary_report_via_prefect(orguser: OrgUser) -> dict:
         raise HttpError(400, "failed to start a run") from error
 
     return res
+
+
+def get_dbt_version(org: Org):
+    """get dbt version"""
+    try:
+        dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
+        dbt_version_command = [str(dbt_project_params.dbt_binary), "--version"]
+        dbt_output = subprocess.check_output(dbt_version_command, text=True)
+        for line in dbt_output.splitlines():
+            if "installed:" in line:
+                return line.split(":")[1].strip()
+        return "Not available"
+    except Exception as err:
+        logger.error("Error getting dbt version: %s", err)
+        return "Not available"
+
+
+def get_edr_version(org: Org):
+    """get elementary report version"""
+    try:
+        dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
+        elementary_version_command = [
+            os.path.join(dbt_project_params.venv_binary, "edr"),
+            "--version",
+        ]
+        elementary_output = subprocess.check_output(elementary_version_command, text=True)
+        for line in elementary_output.splitlines():
+            if line.startswith("Elementary version"):
+                return line.split()[-1].strip()[:-1]
+        return "Not available"
+    except Exception as err:
+        logger.error("Error getting elementary version: %s", err)
+        return "Not available"

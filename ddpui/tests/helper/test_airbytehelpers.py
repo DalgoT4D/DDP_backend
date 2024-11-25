@@ -335,6 +335,7 @@ def test_get_job_info_for_connection(
         "jobs": [
             {
                 "job": {
+                    "configType": "sync",
                     "id": "JOB_ID",
                     "status": "JOB_STATUS",
                 },

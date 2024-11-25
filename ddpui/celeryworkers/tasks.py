@@ -1,5 +1,6 @@
 """these are tasks which we run through celery"""
 
+import pytz
 import os
 import shutil
 from pathlib import Path
@@ -18,6 +19,8 @@ from ddpui.utils.sendgrid import send_email_notification, send_schema_changes_em
 from ddpui.utils import timezone, awsses
 from ddpui.utils.helpers import find_key_in_dictionary
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.awsses import send_text_message
+from ddpui.models.org_plans import OrgPlans
 from ddpui.models.org import (
     Org,
     OrgDbt,
@@ -958,6 +961,32 @@ def summarize_warehouse_results(
         return
 
 
+@app.task()
+def check_org_plan_expiry_notify_people():
+    """detects schema changes for all the orgs and sends an email to admins if there is a change"""
+    roles_to_notify = [ACCOUNT_MANAGER_ROLE]
+    days_before_expiry = 7
+
+    for org in Org.objects.all():
+        org_plan = OrgPlans.objects.filter(org=org).first()
+        if not org_plan:
+            continue
+
+        # send a notification 7 days before the plan expires
+        if org_plan.end_date - timedelta(days=days_before_expiry) < datetime.now(pytz.utc):
+            try:
+                org_users = OrgUser.objects.filter(
+                    org=org,
+                    new_role__slug__in=roles_to_notify,
+                )
+                message = f"""This email is to let you know that your Dalgo plan is about to expire. Please renew it to continue using the services."""
+                subject = "Dalgo plan expiry"
+                for orguser in org_users:
+                    send_text_message(orguser.user.email, subject, message)
+            except Exception as err:
+                logger.error(err)
+
+
 @app.task(bind=False)
 def check_for_long_running_flow_runs():
     """checks for long-running flow runs in prefect"""
@@ -996,11 +1025,12 @@ def check_for_long_running_flow_runs():
 
         email_body += "=" * 20
 
-    awsses.send_text_message(
-        os.getenv("ADMIN_EMAIL"),
-        "Long Running Flow Runs",
-        email_body,
-    )
+    if email_body != "":
+        awsses.send_text_message(
+            os.getenv("ADMIN_EMAIL"),
+            "Long Running Flow Runs",
+            email_body,
+        )
 
 
 @app.on_after_finalize.connect
@@ -1024,6 +1054,11 @@ def setup_periodic_tasks(sender, **kwargs):
             check_for_long_running_flow_runs.s(),
             name="check for long-running flow-runs",
         )
+    sender.add_periodic_task(
+        crontab(minute=0, hour="*/12"),
+        check_org_plan_expiry_notify_people.s(),
+        name="check org plan expiry and notify the right people",
+    )
 
 
 @app.task(bind=True)

@@ -108,5 +108,16 @@
             "command": "send-report",
             "is_system": true
         }
+    },
+    {
+        "model": "ddpui.Task",
+        "pk": 11,
+        "fields": {
+            "type": "airbyte",
+            "slug": "airbyte-clear",
+            "label": "AIRBYTE clear",
+            "command": null,
+            "is_system": false
+        }
     }
 ]

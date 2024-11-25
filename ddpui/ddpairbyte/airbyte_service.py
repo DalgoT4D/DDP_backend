@@ -35,6 +35,10 @@ logger = CustomLogger("airbyte")
 
 def abreq(endpoint, req=None, **kwargs):
     """Request to the airbyte server"""
+    method = kwargs.get("method", "POST")
+    if method not in ["GET", "POST"]:
+        raise HttpError(500, "method not supported")
+
     request = thread.get_current_request()
 
     abhost = os.getenv("AIRBYTE_SERVER_HOST")
@@ -68,12 +72,21 @@ def abreq(endpoint, req=None, **kwargs):
 
     logger.info("Making request to Airbyte server: %s", endpoint)
     try:
-        res = requests.post(
-            f"http://{abhost}:{abport}/api/{abver}/{endpoint}",
-            headers={"Authorization": f"Basic {token}"},
-            json=req,
-            timeout=kwargs.get("timeout", 30),
-        )
+        res = {}
+        if method == "POST":
+            res = requests.post(
+                f"http://{abhost}:{abport}/api/{abver}/{endpoint}",
+                headers={"Authorization": f"Basic {token}"},
+                json=req,
+                timeout=kwargs.get("timeout", 30),
+            )
+        elif method == "GET":
+            res = requests.get(
+                f"http://{abhost}:{abport}/api/{abver}/{endpoint}",
+                headers={"Authorization": f"Basic {token}"},
+                json=req,
+                timeout=kwargs.get("timeout", 30),
+            )
     except requests.exceptions.ConnectionError as conn_error:
         logger.exception(conn_error)
         raise HttpError(500, str(conn_error)) from conn_error
@@ -855,7 +868,9 @@ def get_job_info(job_id: str) -> dict:
     return res
 
 
-def get_jobs_for_connection(connection_id: str, limit: int = 1, offset: int = 0) -> int | None:
+def get_jobs_for_connection(
+    connection_id: str, limit: int = 1, offset: int = 0, job_types: list[str] = ["sync"]
+) -> int | None:
     """
     returns most recent job for a connection
     possible configTypes are
@@ -874,7 +889,7 @@ def get_jobs_for_connection(connection_id: str, limit: int = 1, offset: int = 0)
     result = abreq(
         "jobs/list",
         {
-            "configTypes": ["sync"],
+            "configTypes": job_types,
             "configId": connection_id,
             "pagination": {"rowOffset": offset, "pageSize": limit},
         },
@@ -885,6 +900,7 @@ def get_jobs_for_connection(connection_id: str, limit: int = 1, offset: int = 0)
 def parse_job_info(jobinfo: dict) -> dict:
     """extract summary info from job and successfull attempt"""
     retval = {
+        "job_type": jobinfo["job"]["configType"],
         "job_id": jobinfo["job"]["id"],
         "status": jobinfo["job"]["status"],
         "date": None,
@@ -894,6 +910,7 @@ def parse_job_info(jobinfo: dict) -> dict:
         "bytesEmitted": nice_bytes(0),
         "recordsCommitted": 0,
         "totalTimeInSeconds": 0,
+        "resetConfig": jobinfo["job"].get("resetConfig", None),
     }
     retval["attempt_no"] = 0
     for attempt in jobinfo["attempts"]:
@@ -971,3 +988,14 @@ def update_schema_change(
         raise HttpError(500, "failed to trigger Prefect flow run") from error
 
     return res
+
+
+def get_current_airbyte_version():
+    """Fetch airbyte version"""
+
+    res = abreq("instance_configuration", method="GET")
+    print(res, "AIRBYTE RESPONSE")
+    if "version" not in res:
+        logger.error("No version found")
+        return None
+    return res["version"]

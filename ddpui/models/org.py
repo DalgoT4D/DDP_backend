@@ -7,9 +7,9 @@ from ninja import Schema
 class OrgType(str, Enum):
     """an enum representing the type of organization"""
 
+    SUBSCRIPTION = "subscription"
+    TRIAL = "trial"
     DEMO = "demo"
-    POC = "poc"
-    CLIENT = "client"
 
     @classmethod
     def choices(cls):
@@ -70,7 +70,7 @@ class Org(models.Model):
     )
     viz_url = models.CharField(max_length=100, null=True)
     viz_login_type = models.CharField(choices=OrgVizLoginType.choices(), max_length=50, null=True)
-    type = models.CharField(choices=OrgType.choices(), max_length=50, default=OrgType.CLIENT)
+    type = models.CharField(choices=OrgType.choices(), max_length=50, default=OrgType.SUBSCRIPTION)
     ses_whitelisted_email = models.TextField(max_length=100, null=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -162,6 +162,9 @@ class OrgDataFlowv1(models.Model):
     )  # skipcq: PTC-W0901, PTC-W0906
 
     reset_conn_dataflow = models.ForeignKey("self", on_delete=models.SET_NULL, null=True)
+    clear_conn_dataflow = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True, related_name="clear_connection_dataflow"
+    )
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 

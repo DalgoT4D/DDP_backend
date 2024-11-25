@@ -13,7 +13,7 @@ notification_router = Router()
 
 
 @notification_router.post("/")
-def create_notification(request, payload: CreateNotificationPayloadSchema):
+def post_create_notification(request, payload: CreateNotificationPayloadSchema):
     """Handle the task of creating a notification"""
 
     # Filter OrgUser data based on sent_to field
