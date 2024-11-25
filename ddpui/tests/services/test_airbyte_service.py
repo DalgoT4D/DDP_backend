@@ -1455,7 +1455,7 @@ def test_get_jobs_for_connection_raise():
 def test_parse_job_info():
     ret = parse_job_info(
         {
-            "job": {"id": "job-id", "status": "job-status"},
+            "job": {"configType": "sync", "id": "job-id", "status": "job-status"},
             "attempts": [
                 {"id": 1, "status": "failed", "recordsSynced": 0},
                 {

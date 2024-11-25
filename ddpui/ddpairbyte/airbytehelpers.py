@@ -10,7 +10,7 @@ from pathlib import Path
 from django.utils.text import slugify
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Prefetch, F, Window
+from django.db.models import Prefetch, F, Window, Q
 from django.db.models.functions import RowNumber
 from django.forms.models import model_to_dict
 
@@ -48,7 +48,12 @@ from ddpui.models.tasks import (
     OrgTask,
     DataflowOrgTask,
 )
-from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTERESET, UPDATE_SCHEMA
+from ddpui.utils.constants import (
+    TASK_AIRBYTESYNC,
+    TASK_AIRBYTERESET,
+    UPDATE_SCHEMA,
+    TASK_AIRBYTECLEAR,
+)
 from ddpui.utils.helpers import (
     generate_hash_id,
     update_dict_but_not_stars,
@@ -245,9 +250,9 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
     if sync_task is None:
         return None, "sync task not supported"
 
-    reset_task = Task.objects.filter(slug=TASK_AIRBYTERESET).first()
-    if reset_task is None:
-        return None, "reset task not supported"
+    clear_task = Task.objects.filter(slug=TASK_AIRBYTECLEAR).first()
+    if clear_task is None:
+        return None, "clear task not supported"
 
     airbyte_conn = airbyte_service.create_connection(org.airbyte_workspace_id, payload)
 
@@ -262,16 +267,16 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
                 org, org_task, org_airbyte_server_block
             )
 
-            # create reset connection deplpyment & dataflow
+            # create clear connection task & dataflow/deployment
             org_task = OrgTask.objects.create(
-                org=org, task=reset_task, connection_id=airbyte_conn["connectionId"]
+                org=org, task=clear_task, connection_id=airbyte_conn["connectionId"]
             )
 
-            reset_dataflow: OrgDataFlowv1 = create_airbyte_deployment(
+            clear_dataflow: OrgDataFlowv1 = create_airbyte_deployment(
                 org, org_task, org_airbyte_server_block
             )
 
-            sync_dataflow.reset_conn_dataflow = reset_dataflow
+            sync_dataflow.clear_conn_dataflow = clear_dataflow
             sync_dataflow.save()
 
     except Exception as err:
@@ -292,7 +297,8 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
         "syncCatalog": airbyte_conn["syncCatalog"],
         "status": airbyte_conn["status"],
         "deploymentId": sync_dataflow.deployment_id,
-        "resetConnDeploymentId": reset_dataflow.deployment_id,
+        "resetConnDeploymentId": None,
+        "clearConnDeploymentId": clear_dataflow.deployment_id,
     }
     return res, None
 
@@ -300,14 +306,21 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
 def get_connections(org: Org):
     """return connections with last run details"""
 
-    sync_dataflows = OrgDataFlowv1.objects.filter(
-        org=org, dataflow_type="manual", reset_conn_dataflow_id__isnull=False
-    ).select_related("reset_conn_dataflow")
+    sync_dataflows = (
+        OrgDataFlowv1.objects.filter(
+            org=org,
+            dataflow_type="manual",
+        )
+        .filter(Q(reset_conn_dataflow_id__isnull=False) | Q(clear_conn_dataflow_id__isnull=False))
+        .select_related("clear_conn_dataflow")
+    )
 
     dataflow_ids = sync_dataflows.values_list("id", flat=True)
-    reset_dataflow_ids = sync_dataflows.values_list("reset_conn_dataflow_id", flat=True)
+    clear_dataflow_ids = sync_dataflows.values_list("clear_conn_dataflow_id", flat=True)
     all_dataflow_orgtasks = DataflowOrgTask.objects.filter(
-        dataflow_id__in=list(dataflow_ids) + list(reset_dataflow_ids)
+        dataflow_id__in=[
+            pk_id for pk_id in list(dataflow_ids) + list(clear_dataflow_ids) if pk_id is not None
+        ]
     ).select_related("orgtask")
 
     org_task_ids = all_dataflow_orgtasks.values_list("orgtask_id", flat=True)
@@ -330,10 +343,11 @@ def get_connections(org: Org):
             dfot for dfot in all_dataflow_orgtasks if dfot.dataflow_id == sync_dataflow.id
         ]
 
-        reset_dataflow_orgtasks = [
+        clear_dataflow_orgtasks = [
             dfot
             for dfot in all_dataflow_orgtasks
-            if dfot.dataflow_id == sync_dataflow.reset_conn_dataflow.id
+            if dfot.dataflow_id
+            == (sync_dataflow.clear_conn_dataflow.id if sync_dataflow.clear_conn_dataflow else -1)
         ]
 
         org_tasks: list[OrgTask] = [
@@ -354,15 +368,20 @@ def get_connections(org: Org):
 
         org_task: OrgTask = org_tasks[0]
 
-        reset_org_task: OrgTask = None
-        if len(reset_dataflow_orgtasks) > 0:
+        clear_org_task: OrgTask = None
+        if len(clear_dataflow_orgtasks) > 0:
             rst_orgtasks = [
                 dfot.orgtask
-                for dfot in reset_dataflow_orgtasks
-                if dfot.dataflow_id == sync_dataflow.reset_conn_dataflow.id
+                for dfot in clear_dataflow_orgtasks
+                if dfot.dataflow_id
+                == (
+                    sync_dataflow.clear_conn_dataflow.id
+                    if sync_dataflow.clear_conn_dataflow
+                    else -1
+                )
             ]
             if len(rst_orgtasks) > 0:
-                reset_org_task = rst_orgtasks[0]
+                clear_org_task = rst_orgtasks[0]
 
         # find the airbyte connection
         connection = [
@@ -382,7 +401,7 @@ def get_connections(org: Org):
         ]:
             look_up_last_run_deployment_ids.append(df_orgtask.dataflow.deployment_id)
 
-        reset_dataflow: OrgDataFlowv1 = sync_dataflow.reset_conn_dataflow
+        clear_dataflow: OrgDataFlowv1 = sync_dataflow.clear_conn_dataflow
 
         lock = None
 
@@ -398,13 +417,13 @@ def get_connections(org: Org):
         if sync_lock:
             lock = fetch_orgtask_lock_v1(org_task, sync_lock)
 
-        if not lock and reset_org_task:
+        if not lock and clear_org_task:
             for lock in [
                 org_task_locks
                 for org_task_locks in all_org_task_locks
-                if org_task_locks.orgtask_id == reset_org_task.id
+                if org_task_locks.orgtask_id == clear_org_task.id
             ]:
-                lock = fetch_orgtask_lock_v1(reset_org_task, lock)
+                lock = fetch_orgtask_lock_v1(clear_org_task, lock)
                 break
 
         connection["destination"]["name"] = warehouse.name
@@ -418,7 +437,8 @@ def get_connections(org: Org):
                 "deploymentId": sync_dataflow.deployment_id,
                 "lastRun": None,  # updated below
                 "lock": lock,  # this will have the status of the flow run
-                "resetConnDeploymentId": (reset_dataflow.deployment_id if reset_dataflow else None),
+                "resetConnDeploymentId": None,
+                "clearConnDeploymentId": clear_dataflow.deployment_id if clear_dataflow else None,
                 "look_up_last_run_deployment_ids": look_up_last_run_deployment_ids,
             }
         )
@@ -775,7 +795,9 @@ def get_sync_job_history_for_connection(
         return None, "connection not found"
 
     res = {"history": [], "totalSyncs": 0}
-    result = airbyte_service.get_jobs_for_connection(connection_id, limit, offset)
+    result = airbyte_service.get_jobs_for_connection(
+        connection_id, limit, offset, job_types=["sync", "reset_connection"]
+    )
     res["totalSyncs"] = result["totalJobCount"]
     if len(result["jobs"]) == 0:
         return [], None
