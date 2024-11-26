@@ -963,7 +963,7 @@ def summarize_warehouse_results(
 
 @app.task()
 def check_org_plan_expiry_notify_people():
-    """detects schema changes for all the orgs and sends an email to admins if there is a change"""
+    """sends an email to the org's account manager to notify them that their plan will expire in a week"""
     roles_to_notify = [ACCOUNT_MANAGER_ROLE]
     days_before_expiry = 7
 
@@ -971,7 +971,8 @@ def check_org_plan_expiry_notify_people():
         org_plan = OrgPlans.objects.filter(org=org).first()
         if not org_plan:
             continue
-
+        if org_plan and not org_plan.end_date:
+            continue
         # send a notification 7 days before the plan expires
         if org_plan.end_date - timedelta(days=days_before_expiry) < datetime.now(pytz.utc):
             try:

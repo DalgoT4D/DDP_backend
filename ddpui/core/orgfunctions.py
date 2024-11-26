@@ -65,11 +65,14 @@ def create_orgPlan(payload: CreateOrgSchema, org):
         "end_date": payload.end_date,
         "features": {},
     }
-    if payload.base_plan == "Free trial":
+
+    if payload.base_plan == "Free Trial":
         plan_payload["features"] = FREE_TRIAL
-    elif payload.base_plan == "DALGO" and payload.superset_included:
+    elif payload.base_plan == "Internal":
         plan_payload["features"] = DALGO_WITH_SUPERSET
-    elif payload.base_plan == "DALGO" and not payload.superset_included:
+    elif payload.base_plan == "Dalgo" and payload.superset_included:
+        plan_payload["features"] = DALGO_WITH_SUPERSET
+    elif payload.base_plan == "Dalgo" and not payload.superset_included:
         plan_payload["features"] = DALGO
 
     org_plan = OrgPlans.objects.create(org=org, **plan_payload)

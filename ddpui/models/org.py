@@ -2,7 +2,7 @@ from enum import Enum
 from django.db import models
 from django.utils import timezone
 from ninja import Schema
-from typing import Dict
+from typing import Dict, Optional
 
 
 class OrgType(str, Enum):
@@ -104,8 +104,8 @@ class CreateOrgSchema(Schema):
     can_upgrade_plan: bool
     subscription_duration: str
     superset_included: bool
-    start_date: str
-    end_date: str
+    start_date: Optional[str]
+    end_date: Optional[str]
 
 
 class OrgPlan(Schema):
@@ -113,8 +113,8 @@ class OrgPlan(Schema):
     can_upgrade_plan: bool
     subscription_duration: str
     superset_included: bool
-    start_date: str
-    end_date: str
+    start_date: Optional[str]
+    end_date: Optional[str]
     features: Dict[str, list]
 
 
