@@ -55,6 +55,7 @@ from ddpui.utils.constants import (
     TASK_DBTCLEAN,
     TASK_DBTDEPS,
     TASK_AIRBYTESYNC,
+    ORG_BASE_PLANS,
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.ddpdbt.schema import DbtProjectParams
@@ -969,9 +970,9 @@ def check_org_plan_expiry_notify_people():
 
     for org in Org.objects.all():
         org_plan = OrgPlans.objects.filter(org=org).first()
-        if not org_plan:
+        if not org_plan or not org_plan.end_date:
             continue
-        if org_plan and not org_plan.end_date:
+        if org_plan.base_plan != ORG_BASE_PLANS["FREE_TRIAL"]:
             continue
         # send a notification 7 days before the plan expires
         if org_plan.end_date - timedelta(days=days_before_expiry) < datetime.now(pytz.utc):

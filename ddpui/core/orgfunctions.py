@@ -15,7 +15,7 @@ from ddpui.models.org import (
     OrgWarehouse,
     OrgWarehouseSchema,
 )
-from ddpui.utils.constants import DALGO_WITH_SUPERSET, DALGO, FREE_TRIAL
+from ddpui.utils.constants import DALGO_WITH_SUPERSET, DALGO, FREE_TRIAL, ORG_BASE_PLANS
 from ddpui.models.org_plans import OrgPlans
 from ddpui.celeryworkers.tasks import add_custom_connectors_to_workspace
 
@@ -50,7 +50,7 @@ def create_organization(payload: CreateOrgSchema):
     return org, None
 
 
-def create_orgPlan(payload: CreateOrgSchema, org):
+def create_org_plan(payload: CreateOrgSchema, org):
     """creates a new Org's plan"""
     existing_plan = OrgPlans.objects.filter(org=org).first()
     if existing_plan:
@@ -66,13 +66,13 @@ def create_orgPlan(payload: CreateOrgSchema, org):
         "features": {},
     }
 
-    if payload.base_plan == "Free Trial":
+    if payload.base_plan == ORG_BASE_PLANS["FREE_TRIAL"]:
         plan_payload["features"] = FREE_TRIAL
-    elif payload.base_plan == "Internal":
+    elif payload.base_plan == ORG_BASE_PLANS["INTERNAL"]:
         plan_payload["features"] = DALGO_WITH_SUPERSET
-    elif payload.base_plan == "Dalgo" and payload.superset_included:
+    elif payload.base_plan == ORG_BASE_PLANS["DALGO"] and payload.superset_included:
         plan_payload["features"] = DALGO_WITH_SUPERSET
-    elif payload.base_plan == "Dalgo" and not payload.superset_included:
+    elif payload.base_plan == ORG_BASE_PLANS["DALGO"] and not payload.superset_included:
         plan_payload["features"] = DALGO
 
     org_plan = OrgPlans.objects.create(org=org, **plan_payload)

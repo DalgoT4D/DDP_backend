@@ -575,7 +575,7 @@ def post_organization_v1(request, payload: CreateOrgSchema):
     orguserfunctions.ensure_orguser_for_org(orguser, org)
 
     # create a new orgplan
-    org_plan, error = orgfunctions.create_orgPlan(payload, org)
+    org_plan, error = orgfunctions.create_org_plan(payload, org)
     if error:
         raise HttpError(400, error)
 
