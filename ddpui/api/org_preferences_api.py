@@ -13,6 +13,8 @@ from ddpui.schemas.org_preferences_schema import (
     UpdateDiscordNotificationsSchema,
     CreateOrgSupersetDetailsSchema,
 )
+from ddpui.core.notifications_service import create_notification
+from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
 from django.db import transaction
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
@@ -67,12 +69,30 @@ def update_org_preferences(request, payload: UpdateLLMOptinSchema):
         org_preferences.llm_optin_approved_by = orguser
         org_preferences.llm_optin_date = timezone.now()
         user_preferences.disclaimer_shown = True
+        org_preferences.enable_llm_request = False
+        org_preferences.enable_llm_requested_by = None
     else:
         org_preferences.llm_optin = False
         org_preferences.llm_optin_approved_by = None
         org_preferences.llm_optin_date = None
     user_preferences.save()
     org_preferences.save()
+
+    # sending notification to all users in the org.
+    if payload.llm_optin is True:
+        recipients: list[OrgUser] = OrgUser.objects.filter(org=org).all()
+
+        notification_payload = NotificationDataSchema(
+            author=orguser.user.email,
+            message="The AI LLM Data Analysis feature is now enabled.",
+            urgent=False,
+            scheduled_time=None,
+            recipients=[recipient.id for recipient in recipients],
+        )
+
+        error, res = create_notification(notification_payload)
+        if res and "errors" in res and len(res["errors"]) > 0:
+            raise HttpError(400, "Issue with creating the request notification")
 
     return {"success": True, "res": org_preferences.to_json()}
 
@@ -180,6 +200,10 @@ def initiate_upgrade_dalgo_plan(request):
     if not org_plan:
         raise HttpError(400, "Org's Plan not found")
 
+    # trigger emails only once
+    if org_plan.upgrade_requested:
+        return {"success": True, "res": "Upgrade request already sent"}
+
     biz_dev_emails = os.getenv("BIZ_DEV_EMAILS", []).split(",")
 
     message = "Upgrade plan request from org: {org_name} with plan: {plan_name}".format(
@@ -189,5 +213,8 @@ def initiate_upgrade_dalgo_plan(request):
 
     for email in biz_dev_emails:
         send_text_message(email, subject, message)
+
+    org_plan.upgrade_requested = True
+    org_plan.save()
 
     return {"success": True}

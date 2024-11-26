@@ -224,7 +224,7 @@ def sync_sources_in_schema(
     sources_file_path = sync_sources(
         config={"source_schema": schema_name, "source_name": source_name},
         warehouse=warehouse_client,
-        dbtproject=dbtProject(Path(os.getenv("CLIENTDBT_ROOT")) / org.slug / "dbtrepo"),
+        dbtproject=dbtProject(Path(DbtProjectManager.get_dbt_project_dir(org.dbt))),
     )
 
     return str(sources_file_path), None
@@ -256,7 +256,7 @@ def get_output_cols_for_operation(org_warehouse: OrgWarehouse, op_type: str, con
 
 def delete_dbt_model_in_project(orgdbt_model: OrgDbtModel):
     """Delete a dbt model in the project"""
-    dbt_project = dbtProject(Path(orgdbt_model.orgdbt.project_dir) / "dbtrepo")
+    dbt_project = dbtProject(Path(DbtProjectManager.get_dbt_project_dir(orgdbt_model.orgdbt)))
     dbt_project.delete_model(orgdbt_model.sql_path)
     return True
 
