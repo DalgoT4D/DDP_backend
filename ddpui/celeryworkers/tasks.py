@@ -966,7 +966,8 @@ def summarize_warehouse_results(
 def check_org_plan_expiry_notify_people():
     """sends an email to the org's account manager to notify them that their plan will expire in a week"""
     roles_to_notify = [ACCOUNT_MANAGER_ROLE]
-    days_before_expiry = 7
+    first_reminder = 7
+    second_reminder = 2
 
     for org in Org.objects.all():
         org_plan = OrgPlans.objects.filter(org=org).first()
@@ -975,7 +976,7 @@ def check_org_plan_expiry_notify_people():
         if org_plan.base_plan != ORG_BASE_PLANS["FREE_TRIAL"]:
             continue
         # send a notification 7 days before the plan expires
-        if org_plan.end_date - timedelta(days=days_before_expiry) < datetime.now(pytz.utc):
+        if (org_plan.end_date - datetime.now(pytz.utc)).days in [first_reminder, second_reminder]:
             try:
                 org_users = OrgUser.objects.filter(
                     org=org,
