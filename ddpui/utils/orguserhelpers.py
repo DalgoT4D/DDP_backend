@@ -20,7 +20,6 @@ def from_orguser(orguser: OrgUser):
             {"slug": item.permission.slug, "name": item.permission.name}
             for item in role_permissions
         ]
-
     response = OrgUserResponse(
         email=orguser.user.email,
         org=orguser.org,
@@ -30,7 +29,7 @@ def from_orguser(orguser: OrgUser):
         new_role_slug=orguser_new_role,
         permissions=permissions,
         wtype=warehouse.wtype if warehouse else None,
-        is_demo=orguser.org.type == OrgType.DEMO if orguser.org else False,
+        is_demo=orguser.org.base_plan() == OrgType.DEMO if orguser.org else False,
     )
     if orguser.org:
         response.org.tnc_accepted = OrgTnC.objects.filter(org=orguser.org).exists()

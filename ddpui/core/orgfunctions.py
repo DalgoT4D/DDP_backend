@@ -1,19 +1,13 @@
 """functions for working with Orgs"""
 
-import json
 from django.utils.text import slugify
 
-from ddpui.ddpairbyte import airbyte_service, airbytehelpers
-from ddpui.utils import secretsmanager
+from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui import settings
 from ddpui.models.org import (
     Org,
-    OrgSchema,
-    OrgPlan,
     CreateOrgSchema,
-    OrgWarehouse,
-    OrgWarehouseSchema,
 )
 from ddpui.utils.constants import DALGO_WITH_SUPERSET, DALGO, FREE_TRIAL, ORG_BASE_PLANS
 from ddpui.models.org_plans import OrgPlans

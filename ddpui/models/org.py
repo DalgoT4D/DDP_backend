@@ -1,8 +1,8 @@
+from typing import Dict, Optional
 from enum import Enum
 from django.db import models
 from django.utils import timezone
 from ninja import Schema
-from typing import Dict, Optional
 
 
 class OrgType(str, Enum):
@@ -71,13 +71,16 @@ class Org(models.Model):
     )
     viz_url = models.CharField(max_length=100, null=True)
     viz_login_type = models.CharField(choices=OrgVizLoginType.choices(), max_length=50, null=True)
-    type = models.CharField(choices=OrgType.choices(), max_length=50, default=OrgType.SUBSCRIPTION)
     ses_whitelisted_email = models.TextField(max_length=100, null=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
-        return f"Org[{self.slug}|{self.name}|{self.airbyte_workspace_id}|{self.type}]"
+        return f"Org[{self.slug}|{self.name}|{self.airbyte_workspace_id}]"
+
+    def base_plan(self):
+        """returns the base plan of the organization"""
+        return self.org_plans.base_plan if hasattr(self, "org_plans") else None
 
 
 class OrgSchema(Schema):
@@ -93,6 +96,8 @@ class OrgSchema(Schema):
 
 
 class CreateOrgSchema(Schema):
+    """payload for org creation"""
+
     name: str
     slug: str = None
     airbyte_workspace_id: str = None
@@ -108,7 +113,9 @@ class CreateOrgSchema(Schema):
     end_date: Optional[str]
 
 
-class OrgPlan(Schema):
+class OrgPlanSchema(Schema):
+    """payload for org plan creation"""
+
     base_plan: str
     can_upgrade_plan: bool
     subscription_duration: str
