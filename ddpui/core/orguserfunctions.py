@@ -647,7 +647,7 @@ def verify_email(payload: VerifyEmailSchema):
         email_verified=True, updated_at=django_timezone.now()
     )
 
-    if orguser.org.type == OrgType.DEMO:
+    if orguser.org.base_plan() == OrgType.DEMO:
         try:
             sendgrid.send_demo_account_post_verify_email(orguser.user.email)
         except Exception:

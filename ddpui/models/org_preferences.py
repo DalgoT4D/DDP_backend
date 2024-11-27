@@ -28,7 +28,6 @@ class OrgPreferences(models.Model):
             "org": {
                 "name": self.org.name,
                 "slug": self.org.slug,
-                "type": self.org.type,
             },
             "llm_optin": bool(self.llm_optin),
             "llm_optin_approved_by": (

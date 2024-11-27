@@ -105,7 +105,9 @@ def get_current_user_v2(request, org_slug: str = None):
                     {"slug": rolep.permission.slug, "name": rolep.permission.name}
                     for rolep in curr_orguser.new_role.rolepermissions.all()
                 ],
-                is_demo=(curr_orguser.org.type == OrgType.DEMO if curr_orguser.org else False),
+                is_demo=(
+                    curr_orguser.org.base_plan() == OrgType.DEMO if curr_orguser.org else False
+                ),
                 is_llm_active=org_preferences.llm_optin,
             )
         )
@@ -193,7 +195,9 @@ def get_organization_users(request):
                     {"slug": rolep.permission.slug, "name": rolep.permission.name}
                     for rolep in curr_orguser.new_role.rolepermissions.all()
                 ],
-                is_demo=(curr_orguser.org.type == OrgType.DEMO if curr_orguser.org else False),
+                is_demo=(
+                    curr_orguser.org.base_plan() == OrgType.DEMO if curr_orguser.org else False
+                ),
             )
         )
 
@@ -591,7 +595,7 @@ def delete_organization_warehouses_v1(request):
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
 
-    if orguser.org.type == OrgType.DEMO:
+    if orguser.org.base_plan() == OrgType.DEMO:
         raise HttpError(403, "insufficient permissions")
 
     delete_warehouse_v1(orguser.org)

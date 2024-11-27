@@ -30,7 +30,6 @@ class OrgPlans(models.Model):
             "org": {
                 "name": self.org.name,
                 "slug": self.org.slug,
-                "type": self.org.type,
             },
             "base_plan": self.base_plan,
             "superset_included": self.superset_included,
