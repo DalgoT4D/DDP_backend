@@ -113,18 +113,6 @@ class CreateOrgSchema(Schema):
     end_date: Optional[str]
 
 
-class OrgPlanSchema(Schema):
-    """payload for org plan creation"""
-
-    base_plan: str
-    can_upgrade_plan: bool
-    subscription_duration: str
-    superset_included: bool
-    start_date: Optional[str]
-    end_date: Optional[str]
-    features: Dict[str, list]
-
-
 class OrgWarehouse(models.Model):
     """A data warehouse for an org. Typically we expect exactly one"""
 
