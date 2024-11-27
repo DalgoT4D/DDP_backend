@@ -13,7 +13,7 @@ from django.db.models import F
 from ddpui import auth
 from ddpui.auth import has_permission
 from ddpui.core import orgfunctions, orguserfunctions
-from ddpui.models.org import OrgSchema, OrgWarehouseSchema
+from ddpui.models.org import OrgSchema, OrgWarehouseSchema, CreateOrgSchema
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
     DeleteOrgUserPayload,
@@ -40,6 +40,7 @@ from ddpui.utils.deleteorg import delete_warehouse_v1
 from ddpui.models.org import OrgWarehouse, Org, OrgType
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.models.org_preferences import OrgPreferences
+from django.db import transaction
 
 user_org_router = Router()
 load_dotenv()
@@ -104,7 +105,9 @@ def get_current_user_v2(request, org_slug: str = None):
                     {"slug": rolep.permission.slug, "name": rolep.permission.name}
                     for rolep in curr_orguser.new_role.rolepermissions.all()
                 ],
-                is_demo=(curr_orguser.org.type == OrgType.DEMO if curr_orguser.org else False),
+                is_demo=(
+                    curr_orguser.org.base_plan() == OrgType.DEMO if curr_orguser.org else False
+                ),
                 is_llm_active=org_preferences.llm_optin,
             )
         )
@@ -192,7 +195,9 @@ def get_organization_users(request):
                     {"slug": rolep.permission.slug, "name": rolep.permission.name}
                     for rolep in curr_orguser.new_role.rolepermissions.all()
                 ],
-                is_demo=(curr_orguser.org.type == OrgType.DEMO if curr_orguser.org else False),
+                is_demo=(
+                    curr_orguser.org.base_plan() == OrgType.DEMO if curr_orguser.org else False
+                ),
             )
         )
 
@@ -557,7 +562,8 @@ def delete_invitation(request, invitation_id):
 
 @user_org_router.post("/v1/organizations/", response=OrgSchema, auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_org"])
-def post_organization_v1(request, payload: OrgSchema):
+@transaction.atomic
+def post_organization_v1(request, payload: CreateOrgSchema):
     """creates a new org & new orguser (if required) and attaches it to the requestor"""
     orguser: OrgUser = request.orguser
 
@@ -572,6 +578,11 @@ def post_organization_v1(request, payload: OrgSchema):
     # create a new orguser if the org is already there
     orguserfunctions.ensure_orguser_for_org(orguser, org)
 
+    # create a new orgplan
+    org_plan, error = orgfunctions.create_org_plan(payload, org)
+    if error:
+        raise HttpError(400, error)
+
     logger.info(f"{orguser.user.email} created new org {org.name}")
     return OrgSchema(name=org.name, airbyte_workspace_id=org.airbyte_workspace_id, slug=org.slug)
 
@@ -584,7 +595,7 @@ def delete_organization_warehouses_v1(request):
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
 
-    if orguser.org.type == OrgType.DEMO:
+    if orguser.org.base_plan() == OrgType.DEMO:
         raise HttpError(403, "insufficient permissions")
 
     delete_warehouse_v1(orguser.org)

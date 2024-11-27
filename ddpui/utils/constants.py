@@ -52,3 +52,27 @@ FLOW_RUN_LOGS_OFFSET_LIMIT = 200
 
 # LLM data analysis ; row limit fetched and sent to llm service
 LIMIT_ROWS_TO_SEND_TO_LLM = 500
+
+# Org plans
+
+DALGO_WITH_SUPERSET = {
+    "pipeline": ["Ingest", "Transform", "Orchestrate"],
+    "aiFeatures": ["AI data analysis"],
+    "dataQuality": ["Data quality dashboards"],
+    "superset": ["Superset dashboards", "Superset Usage dashboards"],
+}
+
+DALGO = {
+    "pipeline": ["Ingest", "Transform", "Orchestrate"],
+    "aiFeatures": ["AI data analysis"],
+    "dataQuality": ["Data quality dashboards"],
+}
+
+FREE_TRIAL = {
+    "pipeline": ["Ingest", "Transform", "Orchestrate"],
+    "aiFeatures": ["AI data analysis"],
+    "dataQuality": ["Data quality dashboards"],
+    "superset": ["Superset dashboards", "Superset Usage dashboards"],
+}
+
+ORG_BASE_PLANS = {"FREE_TRIAL": "Free Trial", "INTERNAL": "Internal", "DALGO": "Dalgo"}

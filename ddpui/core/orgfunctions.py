@@ -1,24 +1,22 @@
 """functions for working with Orgs"""
 
-import json
 from django.utils.text import slugify
 
-from ddpui.ddpairbyte import airbyte_service, airbytehelpers
-from ddpui.utils import secretsmanager
+from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui import settings
 from ddpui.models.org import (
     Org,
-    OrgSchema,
-    OrgWarehouse,
-    OrgWarehouseSchema,
+    CreateOrgSchema,
 )
+from ddpui.utils.constants import DALGO_WITH_SUPERSET, DALGO, FREE_TRIAL, ORG_BASE_PLANS
+from ddpui.models.org_plans import OrgPlans
 from ddpui.celeryworkers.tasks import add_custom_connectors_to_workspace
 
 logger = CustomLogger("ddpui")
 
 
-def create_organization(payload: OrgSchema):
+def create_organization(payload: CreateOrgSchema):
     """creates a new Org"""
     org = Org.objects.filter(name__iexact=payload.name).first()
     if org:
@@ -44,3 +42,33 @@ def create_organization(payload: OrgSchema):
     org.refresh_from_db()
 
     return org, None
+
+
+def create_org_plan(payload: CreateOrgSchema, org):
+    """creates a new Org's plan"""
+    existing_plan = OrgPlans.objects.filter(org=org).first()
+    if existing_plan:
+        return None, "client org's plan already exists"
+
+    plan_payload = {
+        "base_plan": payload.base_plan,
+        "can_upgrade_plan": payload.can_upgrade_plan,
+        "subscription_duration": payload.subscription_duration,
+        "superset_included": payload.superset_included,
+        "start_date": payload.start_date,
+        "end_date": payload.end_date,
+        "features": {},
+    }
+
+    if payload.base_plan == ORG_BASE_PLANS["FREE_TRIAL"]:
+        plan_payload["features"] = FREE_TRIAL
+    elif payload.base_plan == ORG_BASE_PLANS["INTERNAL"]:
+        plan_payload["features"] = DALGO_WITH_SUPERSET
+    elif payload.base_plan == ORG_BASE_PLANS["DALGO"] and payload.superset_included:
+        plan_payload["features"] = DALGO_WITH_SUPERSET
+    elif payload.base_plan == ORG_BASE_PLANS["DALGO"] and not payload.superset_included:
+        plan_payload["features"] = DALGO
+
+    org_plan = OrgPlans.objects.create(org=org, **plan_payload)
+
+    return org_plan, None

@@ -16,6 +16,8 @@ logger = CustomLogger("ddpui")
 
 
 class SourceCheckConnectionConsumer(BaseConsumer):
+    """websocket for checking source connection"""
+
     def websocket_receive(self, message):
         logger.info("Recieved the message from client, inside check connection for source consumer")
         payload = json.loads(message["text"])
@@ -27,7 +29,7 @@ class SourceCheckConnectionConsumer(BaseConsumer):
         else:
             payload = AirbyteSourceCreate(**payload)
 
-        if self.orguser.org.type == OrgType.DEMO:
+        if self.orguser.org.base_plan() == OrgType.DEMO:
             logger.info("Demo account user")
             source_def = airbyte_service.get_source_definition(
                 self.orguser.org.airbyte_workspace_id, payload.sourceDefId
@@ -56,7 +58,7 @@ class SourceCheckConnectionConsumer(BaseConsumer):
                 response = airbyte_service.check_source_connection(
                     self.orguser.org.airbyte_workspace_id, payload
                 )
-        except Exception as e:
+        except Exception:
             self.respond(
                 WebsocketResponse(
                     data={},
@@ -78,6 +80,8 @@ class SourceCheckConnectionConsumer(BaseConsumer):
 
 
 class DestinationCheckConnectionConsumer(BaseConsumer):
+    """websocket for checking destination connection"""
+
     def websocket_receive(self, message):
         logger.info(
             "Recieved the message from client, inside check connection for destination consumer"
@@ -100,7 +104,7 @@ class DestinationCheckConnectionConsumer(BaseConsumer):
                 response = airbyte_service.check_destination_connection(
                     self.orguser.org.airbyte_workspace_id, payload
                 )
-        except Exception as e:
+        except Exception:
             self.respond(
                 WebsocketResponse(
                     data={},

@@ -177,7 +177,7 @@ DJANGOSECRET=
 
 -   Create the system user `python manage.py create-system-orguser`
 
--   Start the server `python manage.py runserver`
+-   Start the server `uvicorn ddpui.asgi:application --port <PORT_TO_LISTEN_ON>`
 
 ### Step 10: Create first org and user
 -   Run `python manage.py createorganduser <Org Name> <Email address> --role super-admin`
