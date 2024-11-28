@@ -53,7 +53,7 @@ def main():
             orgtask = OrgTask.objects.filter(connection_id=connection_id).first()
             if orgtask:
                 streamlit.write(orgtask.org.slug)
-                connection_url = f"http://localhost:8000/workspaces/{org['airbyte_workspace_id']}/connections/{connection_id}"
+                connection_url = f"http://localhost:8000/workspaces/{orgtask.org['airbyte_workspace_id']}/connections/{connection_id}"
                 streamlit.markdown(f"[{connection_id}]({connection_url})")
             else:
                 streamlit.write(connection_id)
