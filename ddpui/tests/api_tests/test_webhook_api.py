@@ -23,8 +23,8 @@ from ddpui.api.webhook_api import (
 from ddpui.utils.webhook_helpers import (
     get_org_from_flow_run,
     generate_notification_email,
-    email_orgusers,
-    email_flowrun_logs_to_orgusers,
+    email_superadmins,
+    email_flowrun_logs_to_superadmins,
 )
 from ddpui.auth import SUPER_ADMIN_ROLE, GUEST_ROLE, ACCOUNT_MANAGER_ROLE
 from ddpui.models.role_based_access import Role
@@ -123,7 +123,7 @@ def test_email_orgusers():
     OrgUser.objects.create(org=org, new_role=new_role, user=user)
     UserAttributes.objects.create(user=user, is_platform_admin=True)
     with patch("ddpui.utils.webhook_helpers.send_text_message") as mock_send_text_message:
-        email_orgusers(org, "hello")
+        email_superadmins(org, "hello")
         tag = " [STAGING]" if not PRODUCTION else ""
         subject = f"Dalgo notification{tag}"
         mock_send_text_message.assert_called_once_with("useremail", subject, "hello")
@@ -136,7 +136,7 @@ def test_email_orgusers_not_non_admins():
     new_role = Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first()
     OrgUser.objects.create(org=org, new_role=new_role, user=user)
     with patch("ddpui.utils.webhook_helpers.send_text_message") as mock_send_text_message:
-        email_orgusers(org, "hello")
+        email_superadmins(org, "hello")
         mock_send_text_message.assert_not_called()
 
 
@@ -147,7 +147,7 @@ def test_email_orgusers_not_to_report_viewers():
     new_role = Role.objects.filter(slug=GUEST_ROLE).first()
     OrgUser.objects.create(org=org, new_role=new_role, user=user)
     with patch("ddpui.utils.webhook_helpers.send_text_message") as mock_send_text_message:
-        email_orgusers(org, "hello")
+        email_superadmins(org, "hello")
         mock_send_text_message.assert_not_called()
 
 
@@ -168,7 +168,7 @@ def test_email_flowrun_logs_to_orgusers():
             }
         }
         with patch("ddpui.utils.webhook_helpers.email_orgusers") as mock_email_orgusers:
-            email_flowrun_logs_to_orgusers(org, "flow-run-id")
+            email_flowrun_logs_to_superadmins(org, "flow-run-id")
             tag = " [STAGING]" if not PRODUCTION else ""
             mock_email_orgusers.assert_called_once_with(
                 org,

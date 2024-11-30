@@ -30,6 +30,7 @@ from ddpui.models.org import (
     OrgDataFlowv1,
     TransformType,
 )
+from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import (
     TaskLock,
@@ -1066,9 +1067,10 @@ def setup_periodic_tasks(sender, **kwargs):
 
 @app.task(bind=True)
 def schedule_notification_task(self, notification_id, recipient_id):
+    """send scheduled notifications"""
     notification = Notification.objects.get(id=notification_id)
     recipient = OrgUser.objects.get(user_id=recipient_id)
-    user_preference, created = UserPreferences.objects.get_or_create(orguser=recipient)
+    user_preference, _ = UserPreferences.objects.get_or_create(orguser=recipient)
 
     notification.sent_time = timezone.as_utc(datetime.now())
     notification.save()
@@ -1077,10 +1079,13 @@ def schedule_notification_task(self, notification_id, recipient_id):
         try:
             send_email_notification(user_preference.orguser.user.email, notification.message)
         except Exception as e:
-            raise Exception(f"Error sending discord notification: {str(e)}")
+            logger.error(f"Error sending discord notification: {str(e)}")
 
-    if user_preference.enable_discord_notifications and user_preference.discord_webhook:
-        try:
-            send_discord_notification(user_preference.discord_webhook, notification.message)
-        except Exception as e:
-            raise Exception(f"Error sending discord notification: {str(e)}")
+    org = recipient.org
+    if hasattr(org, "preferences"):
+        orgpreferences: OrgPreferences = org.preferences
+        if orgpreferences.enable_discord_notifications and orgpreferences.discord_webhook:
+            try:
+                send_discord_notification(orgpreferences.discord_webhook, notification.message)
+            except Exception as e:
+                logger.error(f"Error sending discord message: {e}")

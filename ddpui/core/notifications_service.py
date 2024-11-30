@@ -9,7 +9,6 @@ from ddpui.models.notifications import (
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.org_user import OrgUser
 from ddpui.utils import timezone
-from ddpui.utils.discord import send_discord_notification
 from ddpui.utils.sendgrid import send_email_notification
 from ddpui.schemas.notifications_api_schemas import SentToEnum, NotificationDataSchema
 from ddpui.celeryworkers.tasks import schedule_notification_task
@@ -86,15 +85,6 @@ def handle_recipient(
                 return {
                     "recipient": notification_recipient.recipient.user.email,
                     "error": f"Error sending email notification: {str(e)}",
-                }
-
-        if user_preference.enable_discord_notifications and user_preference.discord_webhook:
-            try:
-                send_discord_notification(user_preference.discord_webhook, notification.message)
-            except Exception as e:
-                return {
-                    "recipient": notification_recipient.recipient.user.email,
-                    "error": f"Error sending discord notification: {str(e)}",
                 }
 
     return None
