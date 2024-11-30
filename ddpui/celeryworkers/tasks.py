@@ -14,7 +14,7 @@ from ddpui.auth import ACCOUNT_MANAGER_ROLE, PIPELINE_MANAGER_ROLE
 from ddpui.celery import app
 from ddpui.models.notifications import Notification
 from ddpui.models.userpreferences import UserPreferences
-from ddpui.utils.discord import send_discord_notification
+
 from ddpui.utils.sendgrid import send_email_notification, send_schema_changes_email
 from ddpui.utils import timezone, awsses
 from ddpui.utils.helpers import find_key_in_dictionary
@@ -30,7 +30,7 @@ from ddpui.models.org import (
     OrgDataFlowv1,
     TransformType,
 )
-from ddpui.models.org_preferences import OrgPreferences
+
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import (
     TaskLock,
@@ -51,6 +51,7 @@ from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.singletaskprogress import SingleTaskProgress
+from ddpui.utils.webhook_helpers import notify_org_managers
 from ddpui.utils.constants import (
     TASK_DBTRUN,
     TASK_DBTCLEAN,
@@ -454,17 +455,10 @@ def detect_schema_changes_for_org(org: Org):
         # notify users
         if change_type in ["breaking", "non_breaking"]:
             try:
-                org_users = OrgUser.objects.filter(
-                    org=org,
-                    new_role__slug__in=[
-                        ACCOUNT_MANAGER_ROLE,
-                        PIPELINE_MANAGER_ROLE,
-                    ],
+                notify_org_managers(
+                    org,
+                    "This email is to let you know that schema changes have been detected in your Dalgo pipeline, which require your review.",
                 )
-                message = """This email is to let you know that schema changes have been detected in your Dalgo pipeline, which require your review."""
-                for orguser in org_users:
-                    logger.info(f"sending notification email to {orguser.user.email}")
-                    send_schema_changes_email(org.name, orguser.user.email, message)
             except Exception as err:
                 logger.error(err)
 
@@ -1080,12 +1074,3 @@ def schedule_notification_task(self, notification_id, recipient_id):
             send_email_notification(user_preference.orguser.user.email, notification.message)
         except Exception as e:
             logger.error(f"Error sending discord notification: {str(e)}")
-
-    org = recipient.org
-    if hasattr(org, "preferences"):
-        orgpreferences: OrgPreferences = org.preferences
-        if orgpreferences.enable_discord_notifications and orgpreferences.discord_webhook:
-            try:
-                send_discord_notification(orgpreferences.discord_webhook, notification.message)
-            except Exception as e:
-                logger.error(f"Error sending discord message: {e}")

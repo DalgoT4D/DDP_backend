@@ -8,7 +8,9 @@ from ddpui.models.notifications import (
 )
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.org_user import OrgUser
+from ddpui.models.org_preferences import OrgPreferences
 from ddpui.utils import timezone
+from ddpui.utils.discord import send_discord_notification
 from ddpui.utils.sendgrid import send_email_notification
 from ddpui.schemas.notifications_api_schemas import SentToEnum, NotificationDataSchema
 from ddpui.celeryworkers.tasks import schedule_notification_task
@@ -116,10 +118,22 @@ def create_notification(
     if not notification:
         return {"message": "Failed to sent notification."}, None
 
+    last_recipient_id = None
     for recipient_id in recipients:
+        last_recipient_id = recipient_id
         error = handle_recipient(recipient_id, scheduled_time, notification)
         if error:
             errors.append(error)
+
+    recipient = OrgUser.objects.get(user_id=last_recipient_id)
+    org = recipient.org
+    if hasattr(org, "preferences"):
+        orgpreferences: OrgPreferences = org.preferences
+        if orgpreferences.enable_discord_notifications and orgpreferences.discord_webhook:
+            try:
+                send_discord_notification(orgpreferences.discord_webhook, notification.message)
+            except Exception as e:
+                errors.append(f"Error sending discord message: {e}")
 
     response = {
         "notification_id": notification.id,

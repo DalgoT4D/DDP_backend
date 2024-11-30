@@ -12,7 +12,7 @@ from ddpui.utils.webhook_helpers import (
     get_message_type,
     get_flowrun_id_and_state,
     get_org_from_flow_run,
-    notify_users,
+    notify_org_managers,
     email_flowrun_logs_to_superadmins,
     email_orgusers_ses_whitelisted,
     FLOW_RUN,
@@ -125,7 +125,7 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
         org = get_org_from_flow_run(flow_run)
         if org:
             email_flowrun_logs_to_superadmins(org, flow_run["id"])
-            notify_users(
+            notify_org_managers(
                 org, "A jobs has failed, please visit https://dashboard.dalgo.in/ for more details"
             )
             email_orgusers_ses_whitelisted(
