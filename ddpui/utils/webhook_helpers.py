@@ -2,11 +2,19 @@ import re
 from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.models.org import Org
+from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_user import OrgUser
 from ddpui.utils.awsses import send_text_message
 from ddpui.ddpprefect import prefect_service
 from ddpui.settings import PRODUCTION
 from ddpui.auth import SUPER_ADMIN_ROLE
+from ddpui.core.notifications_service import (
+    create_notification,
+    get_recipients,
+    SentToEnum,
+    NotificationDataSchema,
+)
+from ddpui.utils.discord import send_discord_notification
 
 logger = CustomLogger("ddpui")
 
@@ -80,7 +88,7 @@ Logs:
     return email_body
 
 
-def email_orgusers(org: Org, email_body: str):
+def email_superadmins(org: Org, email_body: str):
     """sends a notificationemail to all OrgUsers"""
     tag = " [STAGING]" if not PRODUCTION else ""
     subject = f"Dalgo notification{tag}"
@@ -105,9 +113,34 @@ def email_orgusers_ses_whitelisted(org: Org, email_body: str):
         )
 
 
-def email_flowrun_logs_to_orgusers(org: Org, flow_run_id: str):
+def email_flowrun_logs_to_superadmins(org: Org, flow_run_id: str):
     """retrieves logs for a flow-run and emails them to all users for the org"""
     logs_arr = prefect_service.recurse_flow_run_logs(flow_run_id)
     logmessages = [x["message"] for x in logs_arr]
     email_body = generate_notification_email(org.name, flow_run_id, logmessages)
-    email_orgusers(org, email_body)
+    email_superadmins(org, email_body)
+
+
+def notify_users(org: Org, message: str):
+    """send a notification to all users in the org"""
+    error, recipients = get_recipients(
+        SentToEnum.ALL_ORG_USERS, org.slug, None, manager_or_above=True
+    )
+    if error:
+        logger.error(f"Error getting recipients: {error}")
+        return
+    error, response = create_notification(
+        NotificationDataSchema(author="Dalgo", message=message, recipients=recipients)
+    )
+    if error:
+        logger.error(f"Error creating notification: {error}")
+        return
+    logger.info(f"Notification created: {response}")
+
+    if hasattr(org, "preferences"):
+        orgpreferences: OrgPreferences = org.preferences
+        if orgpreferences.enable_discord_notifications and orgpreferences.discord_webhook:
+            try:
+                send_discord_notification(orgpreferences.discord_webhook, message)
+            except Exception as e:
+                logger.error(f"Error sending discord message: {e}")
