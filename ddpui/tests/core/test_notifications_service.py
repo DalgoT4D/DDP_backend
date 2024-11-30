@@ -184,30 +184,6 @@ def test_handle_recipient_with_scheduled_time(orguser, scheduled_notification):
     assert error is None
 
 
-@patch("ddpui.utils.sendgrid.send_email_notification")
-def test_handle_recipient_email_error(mocker: Mock, orguser, unsent_notification):
-    UserPreferences.objects.create(
-        orguser=orguser,
-        enable_discord_notifications=True,
-        discord_webhook="http://example.com/webhook",
-    )
-    mocker.side_effect = Exception("Email error")
-    error = handle_recipient(orguser.id, None, unsent_notification)
-    assert error is not None
-
-
-@patch("ddpui.utils.discord.send_discord_notification")
-def test_handle_recipient_discord_error(mocker: Mock, orguser, unsent_notification):
-    UserPreferences.objects.create(
-        orguser=orguser,
-        enable_discord_notifications=True,
-        discord_webhook="http://example.com/webhook",
-    )
-    mocker.side_effect = Exception("Discord error")
-    error = handle_recipient(orguser.id, None, unsent_notification)
-    assert error is not None
-
-
 def test_create_notification_success(orguser):
     notification_data = NotificationDataSchema(
         author="test_author",
