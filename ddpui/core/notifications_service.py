@@ -13,7 +13,7 @@ from ddpui.utils import timezone
 from ddpui.utils.discord import send_discord_notification
 from ddpui.utils.sendgrid import send_email_notification
 from ddpui.schemas.notifications_api_schemas import SentToEnum, NotificationDataSchema
-from ddpui.celeryworkers.tasks import schedule_notification_task
+from ddpui.celeryworkers.moretasks import schedule_notification_task
 
 
 def get_recipients(
@@ -125,7 +125,7 @@ def create_notification(
         if error:
             errors.append(error)
 
-    recipient = OrgUser.objects.get(user_id=last_recipient_id)
+    recipient = OrgUser.objects.get(id=last_recipient_id)
     org = recipient.org
     if hasattr(org, "preferences"):
         orgpreferences: OrgPreferences = org.preferences

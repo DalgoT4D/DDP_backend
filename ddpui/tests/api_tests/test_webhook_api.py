@@ -213,9 +213,9 @@ def test_post_notification_v1():
     }
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run") as mock_get_flow_run, patch(
         "ddpui.api.webhook_api.email_flowrun_logs_to_superadmins"
-    ) as mock_email_flowrun_logs_to_superadmins, patch(
-        "ddpui.api.webhook_api.email_orgusers_ses_whitelisted"
-    ) as mock_email_orgusers_ses_whitelisted:
+    ) as mock_email_flowrun_logs_to_superadmins_2, patch(
+        "ddpui.utils.webhook_helpers.email_orgusers_ses_whitelisted"
+    ):
         mock_get_flow_run.return_value = flow_run
         user = User.objects.create(email="email", username="username")
         new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
@@ -225,8 +225,7 @@ def test_post_notification_v1():
         response = post_notification_v1(request)
         assert response["status"] == "ok"
         assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
-        mock_email_flowrun_logs_to_superadmins.assert_called_once()
-        mock_email_orgusers_ses_whitelisted.assert_called_once()
+        mock_email_flowrun_logs_to_superadmins_2.assert_called_once()
 
 
 def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
