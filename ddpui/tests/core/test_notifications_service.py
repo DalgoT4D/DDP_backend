@@ -1,6 +1,5 @@
 import os
 from datetime import datetime
-from unittest.mock import patch, Mock
 import django
 import pytest
 from django.utils import timezone
@@ -9,7 +8,6 @@ from ddpui.models.notifications import Notification, NotificationRecipient
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser, OrgUserRole
 from ddpui.models.role_based_access import Permission, Role, RolePermission
-from ddpui.models.userpreferences import UserPreferences
 from ddpui.core.notifications_service import (
     get_recipients,
     handle_recipient,
