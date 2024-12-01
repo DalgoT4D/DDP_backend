@@ -3,7 +3,7 @@ from ddpui.celery import app
 from ddpui.models.notifications import Notification
 from ddpui.models.org_user import OrgUser
 from ddpui.models.userpreferences import UserPreferences
-from ddpui.utils.sendgrid import send_email_notification
+from ddpui.utils.awsses import send_text_message
 from ddpui.utils import timezone
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -22,6 +22,8 @@ def schedule_notification_task(self, notification_id, recipient_id):
 
     if user_preference.enable_email_notifications:
         try:
-            send_email_notification(user_preference.orguser.user.email, notification.message)
+            send_text_message(
+                user_preference.orguser.user.email, "Message from Dalgo", notification.message
+            )
         except Exception as e:
             logger.error(f"Error sending discord notification: {str(e)}")
