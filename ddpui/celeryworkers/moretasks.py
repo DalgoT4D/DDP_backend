@@ -11,7 +11,7 @@ logger = CustomLogger("ddpui")
 
 
 @app.task(bind=True)
-def schedule_notification_task(self, notification_id, recipient_id):
+def schedule_notification_task(self, notification_id, recipient_id):  # skipcq: PYL-W0613
     """send scheduled notifications"""
     notification = Notification.objects.get(id=notification_id)
     recipient = OrgUser.objects.get(user_id=recipient_id)

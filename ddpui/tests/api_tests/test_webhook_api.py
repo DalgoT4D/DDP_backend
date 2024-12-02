@@ -29,7 +29,6 @@ from ddpui.utils.webhook_helpers import (
     notify_platform_admins,
 )
 from ddpui.auth import SUPER_ADMIN_ROLE, GUEST_ROLE, ACCOUNT_MANAGER_ROLE
-from ddpui.models.role_based_access import Role
 from ddpui.models.org import Org
 from ddpui.models.org import OrgDataFlowv1
 from ddpui.models.org_user import OrgUser, User, OrgUserRole, UserAttributes
