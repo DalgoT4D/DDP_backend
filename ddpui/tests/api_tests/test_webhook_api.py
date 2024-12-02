@@ -1,10 +1,10 @@
 import os
-import django
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 import json
 from unittest.mock import Mock, patch
+import django
 import pytest
 from ninja.errors import HttpError
 from django.core.management import call_command
@@ -25,15 +25,16 @@ from ddpui.utils.webhook_helpers import (
     generate_notification_email,
     email_superadmins,
     email_flowrun_logs_to_superadmins,
+    notify_platform_admins,
 )
 from ddpui.auth import SUPER_ADMIN_ROLE, GUEST_ROLE, ACCOUNT_MANAGER_ROLE
 from ddpui.models.role_based_access import Role
 from ddpui.models.org import Org
+from ddpui.models.org import OrgDataFlowv1
 from ddpui.models.org_user import OrgUser, User, OrgUserRole, UserAttributes
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskLock
-from ddpui.models.org import OrgDataFlowv1
 from ddpui.settings import PRODUCTION
 from ddpui.tests.api_tests.test_user_org_api import seed_db
 from ddpui.ddpprefect import (
@@ -398,3 +399,27 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
             TaskLock.objects.filter(locking_dataflow=dataflow, flow_run_id=flow_run["id"]).count()
             == 0
         )
+
+
+def test_notify_platform_admins():
+    """tests notify_platform_admins"""
+    with patch(
+        "ddpui.utils.webhook_helpers.send_discord_notification"
+    ) as mock_send_discord_notification, patch(
+        "ddpui.utils.webhook_helpers.send_text_message"
+    ) as mock_send_text_message:
+        org = Mock(slug="orgslug", airbyte_workspace_id="airbyte_workspace_id")
+        os.environ["ADMIN_EMAIL"] = "adminemail"
+        os.environ["ADMIN_DISCORD_WEBHOOK"] = "admindiscordwebhook"
+
+        message = (
+            "Flow run for orgslug has failed"
+            "\n"
+            "\nhttp://localhost:4200/flow-runs/flow-run/flow-run-id"
+            "\n"
+            "\nAirbyte workspace URL: http://localhost:8000/workspaces/airbyte_workspace_id"
+        )
+
+        notify_platform_admins(org, "flow-run-id")
+        mock_send_discord_notification.assert_called_once_with("admindiscordwebhook", message)
+        mock_send_text_message.assert_called_once_with("adminemail", "Dalgo notification", message)

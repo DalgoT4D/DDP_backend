@@ -1,3 +1,4 @@
+import os
 import re
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -144,3 +145,18 @@ def notify_org_managers(org: Org, message: str):
                 send_discord_notification(orgpreferences.discord_webhook, message)
             except Exception as e:
                 logger.error(f"Error sending discord message: {e}")
+
+
+def notify_platform_admins(org: Org, flow_run_id: str):
+    """send a notification to platform admins discord webhook"""
+    message = (
+        f"Flow run for {org.slug} has failed"
+        "\n"
+        f"\nhttp://localhost:4200/flow-runs/flow-run/{flow_run_id}"
+        "\n"
+        f"\nAirbyte workspace URL: http://localhost:8000/workspaces/{org.airbyte_workspace_id}"
+    )
+    if os.getenv("ADMIN_EMAIL"):
+        send_text_message(os.getenv("ADMIN_EMAIL"), "Dalgo notification", message)
+    if os.getenv("ADMIN_DISCORD_WEBHOOK"):
+        send_discord_notification(os.getenv("ADMIN_DISCORD_WEBHOOK"), message)
