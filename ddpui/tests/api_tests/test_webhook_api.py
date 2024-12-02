@@ -402,6 +402,20 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
         )
 
 
+def test_email_superadmins():
+    """tests email_superadmins"""
+    with patch("ddpui.utils.webhook_helpers.send_text_message") as mock_send_text_message:
+        org = Org.objects.create(name="temp", slug="temp")
+        new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
+        OrgUser.objects.create(
+            org=org, user=User.objects.create(email="adminemail"), new_role=new_role
+        )
+        email_superadmins(org, "hello")
+        tag = " [STAGING]" if not PRODUCTION else ""
+        subject = f"Dalgo notification{tag}"
+        mock_send_text_message.assert_called_once_with("adminemail", subject, "hello")
+
+
 def test_email_orgusers_ses_whitelisted():
     """tests email_orgusers_ses_whitelisted"""
     with patch("ddpui.utils.webhook_helpers.send_text_message") as mock_send_text_message:
