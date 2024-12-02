@@ -982,7 +982,7 @@ def check_org_plan_expiry_notify_people():
                     org=org,
                     new_role__slug__in=roles_to_notify,
                 )
-                message = f"""This email is to let you know that your Dalgo plan is about to expire. Please renew it to continue using the services."""
+                message = f"""This email is to let you know that your Dalgo plan for {org.name} is about to expire. Please renew it to continue using the services."""
                 subject = "Dalgo plan expiry"
                 for orguser in org_users:
                     send_text_message(orguser.user.email, subject, message)
