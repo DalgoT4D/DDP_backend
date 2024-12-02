@@ -24,6 +24,7 @@ from ddpui.utils.webhook_helpers import (
     get_org_from_flow_run,
     generate_notification_email,
     email_superadmins,
+    email_orgusers_ses_whitelisted,
     email_flowrun_logs_to_superadmins,
     notify_platform_admins,
 )
@@ -398,6 +399,40 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
         assert (
             TaskLock.objects.filter(locking_dataflow=dataflow, flow_run_id=flow_run["id"]).count()
             == 0
+        )
+
+
+def test_email_orgusers_ses_whitelisted():
+    """tests email_orgusers_ses_whitelisted"""
+    with patch("ddpui.utils.webhook_helpers.send_text_message") as mock_send_text_message:
+        org = Org.objects.create(name="temp", slug="temp", ses_whitelisted_email="email")
+        email_orgusers_ses_whitelisted(org, "hello")
+        tag = " [STAGING]" if not PRODUCTION else ""
+        subject = f"Dalgo notification{tag}"
+        mock_send_text_message.assert_called_once_with("email", subject, "hello")
+
+
+def test_email_flowrun_logs_to_superadmins():
+    """tests email_flowrun_logs_to_superadmins"""
+    with patch(
+        "ddpui.utils.webhook_helpers.prefect_service.recurse_flow_run_logs"
+    ) as mock_recurse_flow_run_logs, patch(
+        "ddpui.utils.webhook_helpers.generate_notification_email"
+    ) as mock_generate_notification_email, patch(
+        "ddpui.utils.webhook_helpers.email_superadmins"
+    ) as mock_email_superadmins:
+        org = Mock(slug="org", name="org")
+        mock_recurse_flow_run_logs.return_value = [
+            {"message": "log-message-1"},
+            {"message": "log-message-2"},
+        ]
+        mock_generate_notification_email.return_value = "email-body"
+        email_flowrun_logs_to_superadmins(org, "flow-run-id")
+        mock_generate_notification_email.assert_called_once_with(
+            org.name, "flow-run-id", ["log-message-1", "log-message-2"]
+        )
+        mock_email_superadmins.assert_called_once_with(
+            org, mock_generate_notification_email.return_value
         )
 
 
