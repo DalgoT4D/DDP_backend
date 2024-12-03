@@ -457,17 +457,20 @@ def test_notify_platform_admins():
         "ddpui.utils.webhook_helpers.send_text_message"
     ) as mock_send_text_message:
         org = Mock(slug="orgslug", airbyte_workspace_id="airbyte_workspace_id")
+        org.base_plan = Mock(return_value="baseplan")
         os.environ["ADMIN_EMAIL"] = "adminemail"
         os.environ["ADMIN_DISCORD_WEBHOOK"] = "admindiscordwebhook"
 
         message = (
-            "Flow run for orgslug has failed"
+            "Flow run for orgslug has failed with state FAILED"
+            "\n"
+            "\nBase plan: baseplan"
             "\n"
             "\nhttp://localhost:4200/flow-runs/flow-run/flow-run-id"
             "\n"
             "\nAirbyte workspace URL: http://localhost:8000/workspaces/airbyte_workspace_id"
         )
 
-        notify_platform_admins(org, "flow-run-id")
+        notify_platform_admins(org, "flow-run-id", "FAILED")
         mock_send_discord_notification.assert_called_once_with("admindiscordwebhook", message)
         mock_send_text_message.assert_called_once_with("adminemail", "Dalgo notification", message)
