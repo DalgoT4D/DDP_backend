@@ -139,10 +139,12 @@ def notify_org_managers(org: Org, message: str):
     logger.info(f"Notification created: {response}")
 
 
-def notify_platform_admins(org: Org, flow_run_id: str):
+def notify_platform_admins(org: Org, flow_run_id: str, state: str):
     """send a notification to platform admins discord webhook"""
     message = (
-        f"Flow run for {org.slug} has failed"
+        f"Flow run for {org.slug} has failed with state {state}"
+        "\n"
+        f"\nBase plan: {org.base_plan() if org.base_plan() else 'Unknown'}"
         "\n"
         f"\nhttp://localhost:4200/flow-runs/flow-run/{flow_run_id}"
         "\n"

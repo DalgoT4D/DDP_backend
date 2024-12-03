@@ -127,9 +127,9 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
         org = get_org_from_flow_run(flow_run)
         if org:
             email_flowrun_logs_to_superadmins(org, flow_run["id"])
-            notify_platform_admins(org, flow_run["id"])
+            notify_platform_admins(org, flow_run["id"], state)
             notify_org_managers(
-                org, "A jobs has failed, please visit https://dashboard.dalgo.in/ for more details"
+                org, f"A jobs has failed, please visit {os.getenv('FRONTEND_URL')} for more details"
             )
             email_orgusers_ses_whitelisted(
                 org, "There is a problem with the pipeline; we are working on a fix"
