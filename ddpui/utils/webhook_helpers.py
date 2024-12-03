@@ -138,14 +138,6 @@ def notify_org_managers(org: Org, message: str):
         return
     logger.info(f"Notification created: {response}")
 
-    if hasattr(org, "preferences"):
-        orgpreferences: OrgPreferences = org.preferences
-        if orgpreferences.enable_discord_notifications and orgpreferences.discord_webhook:
-            try:
-                send_discord_notification(orgpreferences.discord_webhook, message)
-            except Exception as e:
-                logger.error(f"Error sending discord message: {e}")
-
 
 def notify_platform_admins(org: Org, flow_run_id: str):
     """send a notification to platform admins discord webhook"""
