@@ -7,6 +7,7 @@ from ddpui.models.notifications import (
     NotificationRecipient,
 )
 from ddpui.models.userpreferences import UserPreferences
+from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.utils import timezone
@@ -118,22 +119,22 @@ def create_notification(
     if not notification:
         return {"message": "Failed to sent notification."}, None
 
-    last_recipient_id = None
+    org_ids = set()
     for recipient_id in recipients:
-        last_recipient_id = recipient_id
+        org_ids.add(OrgUser.objects.get(id=recipient_id).org.id)
         error = handle_recipient(recipient_id, scheduled_time, notification)
         if error:
             errors.append(error)
 
-    recipient = OrgUser.objects.get(id=last_recipient_id)
-    org = recipient.org
-    if hasattr(org, "preferences"):
-        orgpreferences: OrgPreferences = org.preferences
-        if orgpreferences.enable_discord_notifications and orgpreferences.discord_webhook:
-            try:
-                send_discord_notification(orgpreferences.discord_webhook, notification.message)
-            except Exception as e:
-                errors.append(f"Error sending discord message: {e}")
+    for org_id in org_ids:
+        org = Org.objects.get(id=org_id)
+        if hasattr(org, "preferences"):
+            orgpreferences: OrgPreferences = org.preferences
+            if orgpreferences.enable_discord_notifications and orgpreferences.discord_webhook:
+                try:
+                    send_discord_notification(orgpreferences.discord_webhook, notification.message)
+                except Exception as e:
+                    errors.append(f"Error sending discord message: {e}")
 
     response = {
         "notification_id": notification.id,
