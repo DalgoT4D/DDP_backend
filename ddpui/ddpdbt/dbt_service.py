@@ -140,7 +140,8 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
     try:
         subprocess.check_call(
             [
-                Path(os.getenv("DBT_VENV")) / "venv/bin/dbt",
+                DbtProjectManager.dbt_venv_base_dir()
+                / f"{DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH}/bin/dbt",
                 "init",
                 project_name,
                 "--skip-profile-setup",
