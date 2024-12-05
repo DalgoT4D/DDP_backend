@@ -8,7 +8,7 @@ from ddpui.ddpdbt.schema import DbtProjectParams
 class Command(BaseCommand):
     """Docstring"""
 
-    help = "Sets the name of the worker pool for all manual deployments."
+    help = "Update relative path of project and dbt vevn dirs in OrgDbt"
 
     def add_arguments(self, parser):
         """Docstring"""

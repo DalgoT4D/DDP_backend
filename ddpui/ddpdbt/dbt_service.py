@@ -180,7 +180,7 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
 
     dbt = OrgDbt(
         project_dir=DbtProjectManager.get_dbt_repo_relative_path(dbtrepo_dir),
-        dbt_venv=os.getenv("DBT_VENV"),
+        dbt_venv=DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH,
         target_type=warehouse.wtype,
         default_schema=default_schema,
         transform_type=TransformType.UI,

@@ -144,7 +144,7 @@ def post_system_transformation_tasks(request):
     credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
 
     if orguser.org.dbt.dbt_venv is None:
-        orguser.org.dbt.dbt_venv = os.getenv("DBT_VENV")
+        orguser.org.dbt.dbt_venv = DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH
         orguser.org.dbt.save()
 
     # create a secret block to save the github endpoint url along with token

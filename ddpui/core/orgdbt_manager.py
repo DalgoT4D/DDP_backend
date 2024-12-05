@@ -10,6 +10,8 @@ from ddpui.ddpdbt.schema import DbtProjectParams
 class DbtProjectManager:
     """Helper functions to access dbt & dbt projects on disk"""
 
+    DEFAULT_DBT_VENV_REL_PATH = "venv"  # for all orgs
+
     @staticmethod
     def clients_base_dir() -> Path:
         """returns the directory where all clients' dbt projects are stored"""
