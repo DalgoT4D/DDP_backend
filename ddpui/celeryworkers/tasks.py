@@ -201,7 +201,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     dbt = OrgDbt(
         gitrepo_url=payload["gitrepoUrl"],
         project_dir=DbtProjectManager.get_dbt_repo_relative_path(dbtcloned_repo_path),
-        dbt_venv="venv",
+        dbt_venv=DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH,
         target_type=warehouse.wtype,
         default_schema=payload["profile"]["target_configs_schema"],
         transform_type=TransformType.GIT,
