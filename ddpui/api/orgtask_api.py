@@ -34,7 +34,6 @@ from ddpui.ddpprefect.schema import (
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.schemas.org_task_schema import CreateOrgTaskPayload, TaskParameters
 
-# from ddpui.core.dbtfunctions import DbtProjectManager.gather_dbt_project_params
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.core.orgtaskfunctions import (
     create_default_transform_tasks,
