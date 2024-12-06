@@ -7,12 +7,14 @@ from ddpui.models.notifications import (
     NotificationRecipient,
 )
 from ddpui.models.userpreferences import UserPreferences
+from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
+from ddpui.models.org_preferences import OrgPreferences
 from ddpui.utils import timezone
 from ddpui.utils.discord import send_discord_notification
 from ddpui.utils.sendgrid import send_email_notification
 from ddpui.schemas.notifications_api_schemas import SentToEnum, NotificationDataSchema
-from ddpui.celeryworkers.tasks import schedule_notification_task
+from ddpui.celeryworkers.moretasks import schedule_notification_task
 
 
 def get_recipients(
@@ -88,15 +90,6 @@ def handle_recipient(
                     "error": f"Error sending email notification: {str(e)}",
                 }
 
-        if user_preference.enable_discord_notifications and user_preference.discord_webhook:
-            try:
-                send_discord_notification(user_preference.discord_webhook, notification.message)
-            except Exception as e:
-                return {
-                    "recipient": notification_recipient.recipient.user.email,
-                    "error": f"Error sending discord notification: {str(e)}",
-                }
-
     return None
 
 
@@ -126,10 +119,22 @@ def create_notification(
     if not notification:
         return {"message": "Failed to sent notification."}, None
 
+    org_ids = set()
     for recipient_id in recipients:
+        org_ids.add(OrgUser.objects.get(id=recipient_id).org.id)
         error = handle_recipient(recipient_id, scheduled_time, notification)
         if error:
             errors.append(error)
+
+    for org_id in org_ids:
+        org = Org.objects.get(id=org_id)
+        if hasattr(org, "preferences"):
+            orgpreferences: OrgPreferences = org.preferences
+            if orgpreferences.enable_discord_notifications and orgpreferences.discord_webhook:
+                try:
+                    send_discord_notification(orgpreferences.discord_webhook, notification.message)
+                except Exception as e:
+                    errors.append(f"Error sending discord message: {e}")
 
     response = {
         "notification_id": notification.id,

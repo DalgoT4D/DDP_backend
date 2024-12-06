@@ -381,8 +381,8 @@ def test_detect_schema_changes_for_org_send_schema_changes_email(
     with patch(
         "ddpui.ddpairbyte.airbytehelpers.fetch_and_update_org_schema_changes"
     ) as fetch_and_update_org_schema_changes_mock, patch(
-        "ddpui.celeryworkers.tasks.send_schema_changes_email"
-    ) as send_schema_changes_email_mock:
+        "ddpui.celeryworkers.tasks.notify_org_managers"
+    ) as notify_org_managers_mock:
         fetch_and_update_org_schema_changes_mock.return_value = {"schemaChange": "breaking"}, None
         orguser.org = org_without_workspace
         role = Role.objects.filter(slug="account-manager").first()
@@ -392,9 +392,8 @@ def test_detect_schema_changes_for_org_send_schema_changes_email(
         orguser.save()
         detect_schema_changes_for_org(org_without_workspace)
     assert OrgSchemaChange.objects.filter(org=org_without_workspace).count() == 0
-    send_schema_changes_email_mock.assert_called_once_with(
-        org_without_workspace.name,
-        orguser.user.email,
+    notify_org_managers_mock.assert_called_once_with(
+        org_without_workspace,
         """This email is to let you know that schema changes have been detected in your Dalgo pipeline, which require your review.""",
     )
 

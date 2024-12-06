@@ -1,21 +1,19 @@
 """these are tasks which we run through celery"""
 
-import pytz
 import os
 import shutil
 from pathlib import Path
 from datetime import datetime, timedelta
 from subprocess import CompletedProcess
+import pytz
 
 import yaml
 from celery.schedules import crontab
 from django.utils.text import slugify
-from ddpui.auth import ACCOUNT_MANAGER_ROLE, PIPELINE_MANAGER_ROLE
+from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.celery import app
-from ddpui.models.notifications import Notification
-from ddpui.models.userpreferences import UserPreferences
-from ddpui.utils.discord import send_discord_notification
-from ddpui.utils.sendgrid import send_email_notification, send_schema_changes_email
+
+
 from ddpui.utils import timezone, awsses
 from ddpui.utils.helpers import find_key_in_dictionary
 from ddpui.utils.custom_logger import CustomLogger
@@ -30,6 +28,7 @@ from ddpui.models.org import (
     OrgDataFlowv1,
     TransformType,
 )
+
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import (
     TaskLock,
@@ -50,6 +49,7 @@ from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.singletaskprogress import SingleTaskProgress
+from ddpui.utils.webhook_helpers import notify_org_managers
 from ddpui.utils.constants import (
     TASK_DBTRUN,
     TASK_DBTCLEAN,
@@ -185,7 +185,7 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     # this client'a dbt setup happens here
     org_dir = DbtProjectManager.get_org_dir(org)
 
-    # four parameters here is correct despite vscode thinking otherwise
+    # five parameters here is correct despite vscode thinking otherwise
     dbtcloned_repo_path = clone_github_repo(
         org.slug,
         payload["gitrepoUrl"],
@@ -453,17 +453,10 @@ def detect_schema_changes_for_org(org: Org):
         # notify users
         if change_type in ["breaking", "non_breaking"]:
             try:
-                org_users = OrgUser.objects.filter(
-                    org=org,
-                    new_role__slug__in=[
-                        ACCOUNT_MANAGER_ROLE,
-                        PIPELINE_MANAGER_ROLE,
-                    ],
+                notify_org_managers(
+                    org,
+                    "This email is to let you know that schema changes have been detected in your Dalgo pipeline, which require your review.",
                 )
-                message = """This email is to let you know that schema changes have been detected in your Dalgo pipeline, which require your review."""
-                for orguser in org_users:
-                    logger.info(f"sending notification email to {orguser.user.email}")
-                    send_schema_changes_email(org.name, orguser.user.email, message)
             except Exception as err:
                 logger.error(err)
 
@@ -1062,25 +1055,3 @@ def setup_periodic_tasks(sender, **kwargs):
         check_org_plan_expiry_notify_people.s(),
         name="check org plan expiry and notify the right people",
     )
-
-
-@app.task(bind=True)
-def schedule_notification_task(self, notification_id, recipient_id):
-    notification = Notification.objects.get(id=notification_id)
-    recipient = OrgUser.objects.get(user_id=recipient_id)
-    user_preference, created = UserPreferences.objects.get_or_create(orguser=recipient)
-
-    notification.sent_time = timezone.as_utc(datetime.now())
-    notification.save()
-
-    if user_preference.enable_email_notifications:
-        try:
-            send_email_notification(user_preference.orguser.user.email, notification.message)
-        except Exception as e:
-            raise Exception(f"Error sending discord notification: {str(e)}")
-
-    if user_preference.enable_discord_notifications and user_preference.discord_webhook:
-        try:
-            send_discord_notification(user_preference.discord_webhook, notification.message)
-        except Exception as e:
-            raise Exception(f"Error sending discord notification: {str(e)}")
