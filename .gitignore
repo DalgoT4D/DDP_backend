@@ -153,3 +153,6 @@ cloudbuild.yaml
 
 # ignore docker related
 Docker/.env*
+
+# django admin static assests
+static
