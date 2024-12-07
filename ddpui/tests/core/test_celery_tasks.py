@@ -398,7 +398,7 @@ def test_detect_schema_changes_for_org_send_schema_changes_email(
 
     notify_org_managers_mock.assert_called_once_with(
         org_without_workspace,
-        f"To the admins of {org_without_workspace.name},\n\nThis email is to let you know that schema changes have been detected in your Dalgo pipeline.\n\nPlease visit {connections_page} and review the Pending Actions",
+        f"To the admins of {org_without_workspace.name},\n\nThis email is to let you know that schema changes have been detected in your Dalgo sources.\n\nPlease visit {connections_page} and review the Pending Actions",
     )
 
 
