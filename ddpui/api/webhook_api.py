@@ -134,7 +134,7 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
             notify_platform_admins(org, flow_run["id"], state)
             notify_org_managers(
                 org,
-                f"A job for \"{name_of_deployment}\" of type \"{type_of_deployment}\" has failed, please visit {os.getenv('FRONTEND_URL')} for more details",
+                f"To the admins of {org.name},\n\nA job for \"{name_of_deployment}\" of type \"{type_of_deployment}\" has failed, please visit {os.getenv('FRONTEND_URL')} for more details",
             )
             email_orgusers_ses_whitelisted(
                 org,

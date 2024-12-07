@@ -453,9 +453,15 @@ def detect_schema_changes_for_org(org: Org):
         # notify users
         if change_type in ["breaking", "non_breaking"]:
             try:
+                frontend_url = os.getenv("FRONTEND_URL")
+                if frontend_url.endswith("/"):
+                    frontend_url = frontend_url[:-1]
+                connections_page = f"{frontend_url}/pipeline/ingest?tab=connections"
                 notify_org_managers(
                     org,
-                    "This email is to let you know that schema changes have been detected in your Dalgo pipeline, which require your review.",
+                    f"To the admins of {org.name},\n\nThis email is to let you know that"
+                    " schema changes have been detected in your Dalgo sources.\n\nPlease"
+                    f" visit {connections_page} and review the Pending Actions",
                 )
             except Exception as err:
                 logger.error(err)

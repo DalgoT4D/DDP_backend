@@ -12,7 +12,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.utils import timezone
 from ddpui.utils.discord import send_discord_notification
-from ddpui.utils.sendgrid import send_email_notification
+from ddpui.utils.awsses import send_text_message
 from ddpui.schemas.notifications_api_schemas import SentToEnum, NotificationDataSchema
 from ddpui.celeryworkers.moretasks import schedule_notification_task
 
@@ -83,7 +83,9 @@ def handle_recipient(
 
         if user_preference.enable_email_notifications:
             try:
-                send_email_notification(user_preference.orguser.user.email, notification.message)
+                send_text_message(
+                    user_preference.orguser.user.email, "Message from Dalgo", notification.message
+                )
             except Exception as e:
                 return {
                     "recipient": notification_recipient.recipient.user.email,
