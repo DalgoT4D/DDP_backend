@@ -378,6 +378,7 @@ def test_detect_schema_changes_for_org_send_schema_changes_email(
     )
     OrgSchemaChange.objects.create(org=org_without_workspace, connection_id="fake-connection-id")
     assert OrgSchemaChange.objects.filter(org=org_without_workspace).count() == 1
+    os.environ["FRONTEND_URL"] = "http://localhost:3000"
     with patch(
         "ddpui.ddpairbyte.airbytehelpers.fetch_and_update_org_schema_changes"
     ) as fetch_and_update_org_schema_changes_mock, patch(
@@ -393,10 +394,7 @@ def test_detect_schema_changes_for_org_send_schema_changes_email(
         detect_schema_changes_for_org(org_without_workspace)
     assert OrgSchemaChange.objects.filter(org=org_without_workspace).count() == 0
 
-    frontend_url = os.getenv("FRONTEND_URL")
-    if frontend_url.endswith("/"):
-        frontend_url = frontend_url[:-1]
-    connections_page = f"{frontend_url}/pipeline/ingest?tab=connections"
+    connections_page = "http://localhost:3000/pipeline/ingest?tab=connections"
 
     notify_org_managers_mock.assert_called_once_with(
         org_without_workspace,
