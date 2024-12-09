@@ -240,6 +240,12 @@ AIRBYTE_CUSTOM_SOURCES = {
         "docker_image_tag": "0.1.0",
         "documentation_url": "",
     },
+    "dhwaniris/airbyte-greythr-connector": {
+        "name": "greytHR",
+        "docker_repository": "dhwaniris/airbyte-greythr-connector",
+        "docker_image_tag": "1.0.4",
+        "documentation_url": "",
+    },
 }
 
 # finally set up the loggers
