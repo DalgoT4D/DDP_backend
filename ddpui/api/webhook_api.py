@@ -6,13 +6,16 @@ from ninja.errors import HttpError
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpprefect import prefect_service
 from ddpui.models.tasks import TaskLock
+from ddpui.models.org import OrgDataFlowv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.webhook_helpers import (
     get_message_type,
     get_flowrun_id_and_state,
     get_org_from_flow_run,
-    email_flowrun_logs_to_orgusers,
+    notify_org_managers,
+    notify_platform_admins,
+    email_flowrun_logs_to_superadmins,
     email_orgusers_ses_whitelisted,
     FLOW_RUN,
 )
@@ -53,6 +56,7 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
         message_object = message
 
     flow_run_id = None
+    state = "unknown"
     if message_object:
         message_type = get_message_type(message_object)
         if message_type == FLOW_RUN:
@@ -123,9 +127,18 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
     if send_failure_notifications:
         org = get_org_from_flow_run(flow_run)
         if org:
-            email_flowrun_logs_to_orgusers(org, flow_run["id"])
+            odf = OrgDataFlowv1.objects.filter(deployment_id=deployment_id).first()
+            name_of_deployment = odf.name if odf else "[no deployment name]"
+            type_of_deployment = odf.dataflow_type if odf else "[no deployment type]"
+            email_flowrun_logs_to_superadmins(org, flow_run["id"])
+            notify_platform_admins(org, flow_run["id"], state)
+            notify_org_managers(
+                org,
+                f"To the admins of {org.name},\n\nA job for \"{name_of_deployment}\" of type \"{type_of_deployment}\" has failed, please visit {os.getenv('FRONTEND_URL')} for more details",
+            )
             email_orgusers_ses_whitelisted(
-                org, "There is a problem with the pipeline; we are working on a fix"
+                org,
+                f'There is a problem with the pipeline "{name_of_deployment}"; we are working on a fix',
             )
 
     if state in [FLOW_RUN_COMPLETED_STATE_NAME]:

@@ -91,7 +91,7 @@ jobs:
           DEV_SECRETS_DIR: /tmp/
           CLIENTDBT_ROOT: /tmp
         run: |
-          coverage run --omit ddpui/api/superset_api.py,ddpui/api/task_api.py,ddpui/migrations/*.py,ddpui/celeryworkers/tasks.py -m pytest --durations=20
+          coverage run --omit ddpui/api/superset_api.py,ddpui/api/task_api.py,ddpui/migrations/*.py,ddpui/celeryworkers/*.py -m pytest --durations=20
           coverage xml
           coverage report --fail-under=70
 

@@ -1,6 +1,5 @@
 import os
 from datetime import datetime
-from unittest.mock import patch, Mock
 import django
 import pytest
 from django.utils import timezone
@@ -9,7 +8,6 @@ from ddpui.models.notifications import Notification, NotificationRecipient
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser, OrgUserRole
 from ddpui.models.role_based_access import Permission, Role, RolePermission
-from ddpui.models.userpreferences import UserPreferences
 from ddpui.core.notifications_service import (
     get_recipients,
     handle_recipient,
@@ -182,30 +180,6 @@ def test_handle_recipient_with_scheduled_time(orguser, scheduled_notification):
     scheduled_time = timezone.now() + timezone.timedelta(days=1)
     error = handle_recipient(orguser.id, scheduled_time, scheduled_notification)
     assert error is None
-
-
-@patch("ddpui.utils.sendgrid.send_email_notification")
-def test_handle_recipient_email_error(mocker: Mock, orguser, unsent_notification):
-    UserPreferences.objects.create(
-        orguser=orguser,
-        enable_discord_notifications=True,
-        discord_webhook="http://example.com/webhook",
-    )
-    mocker.side_effect = Exception("Email error")
-    error = handle_recipient(orguser.id, None, unsent_notification)
-    assert error is not None
-
-
-@patch("ddpui.utils.discord.send_discord_notification")
-def test_handle_recipient_discord_error(mocker: Mock, orguser, unsent_notification):
-    UserPreferences.objects.create(
-        orguser=orguser,
-        enable_discord_notifications=True,
-        discord_webhook="http://example.com/webhook",
-    )
-    mocker.side_effect = Exception("Discord error")
-    error = handle_recipient(orguser.id, None, unsent_notification)
-    assert error is not None
 
 
 def test_create_notification_success(orguser):

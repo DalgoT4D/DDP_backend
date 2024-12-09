@@ -34,7 +34,7 @@ def main():
         streamlit.write(flow_run["state_name"])
 
         flow_run_url = "http://localhost:4200/flow-runs/flow-run/" + flow_run["id"]
-        streamlit.markdown(f"[{flow_run['id']}]({flow_run_url})")
+        streamlit.markdown(f"[Prefect flow run {flow_run['id']}]({flow_run_url})")
 
         org_slug = find_key_in_dictionary(flow_run["parameters"], "org_slug")
         if org_slug:
@@ -53,8 +53,8 @@ def main():
             orgtask = OrgTask.objects.filter(connection_id=connection_id).first()
             if orgtask:
                 streamlit.write(orgtask.org.slug)
-                connection_url = f"http://localhost:8000/workspaces/{org['airbyte_workspace_id']}/connections/{connection_id}"
-                streamlit.markdown(f"[{connection_id}]({connection_url})")
+                connection_url = f"http://localhost:8000/workspaces/{orgtask.org.airbyte_workspace_id}/connections/{connection_id}"
+                streamlit.markdown(f"[Airbyte connection {connection_id}]({connection_url})")
             else:
                 streamlit.write(connection_id)
 
