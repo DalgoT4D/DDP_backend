@@ -10,7 +10,6 @@ from datetime import datetime
 import requests
 from dotenv import load_dotenv
 from ninja.errors import HttpError
-from django.utils.text import slugify
 from flags.state import flag_enabled
 from ddpui.ddpairbyte import schema
 from ddpui.ddpprefect import prefect_service, AIRBYTESERVER
