@@ -454,7 +454,9 @@ def get_source_schema_catalog(
     if not isinstance(source_id, str):
         raise HttpError(400, "source_id must be a string")
 
-    res = abreq("sources/discover_schema", {"sourceId": source_id})
+    res = abreq(
+        "sources/discover_schema", {"sourceId": source_id}, timeout=600
+    )  # timeout of 10 mins
     # is it not possible that the job is long-running
     # and we need to check its status later?
     if "catalog" not in res and "jobInfo" in res:
