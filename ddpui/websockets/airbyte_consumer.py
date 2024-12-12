@@ -134,13 +134,13 @@ class DestinationCheckConnectionConsumer(BaseConsumer):
 class SchemaCatalogConsumer(BaseConsumer):
     """websocket for checking source schema_catalog"""
 
-    def websocket_receive(self, message):
+    def websocket_receive(consumer, message):
         logger.info("Recieved the message from client, get schema_catalog inside the connection")
         payload = json.loads(message["text"])
 
-        orguser: OrgUser = self.orguser
+        orguser: OrgUser = consumer.orguser
         if orguser.org.airbyte_workspace_id is None:
-            self.respond(
+            consumer.respond(
                 WebsocketResponse(
                     data={},
                     message="Create an airbyte workspace first.",
@@ -149,8 +149,8 @@ class SchemaCatalogConsumer(BaseConsumer):
             )
             return
 
-        if "sourceId" not in payload:
-            self.respond(
+        if "sourceId" not in payload or payload["sourceId"] is None:
+            consumer.respond(
                 WebsocketResponse(
                     data={},
                     message="SourceId is required in the payload",
@@ -158,27 +158,27 @@ class SchemaCatalogConsumer(BaseConsumer):
                 )
             )
             return
-        source_id = payload.get("sourceId", None)
+
+        source_id = payload["sourceId"]
 
         # creating a key and checking if it exists or not
-        task_key = f"{TaskProgressHashPrefix.SOURCE_SCHEMA_CATALOG}-{orguser.org.slug}-{source_id}"  # change this schema change to catalog
-        print(task_key, "taskkey ")
+        task_key = f"{TaskProgressHashPrefix.SOURCE_SCHEMA_CATALOG}-{orguser.org.slug}-{source_id}"
         task_progress = SingleTaskProgress.fetch(task_key)
 
         if task_progress is not None:
-            polling_celery(self, task_key)
+            polling_celery(consumer, task_key)
             return
 
-        # creating a celery task now #.delay gives this task to celery
+        # This gives the task to celery
         get_schema_catalog_task.delay(task_key, str(orguser.org.airbyte_workspace_id), source_id)
         time.sleep(2)
-        polling_celery(self, task_key)
+        polling_celery(consumer, task_key)
 
 
-def polling_celery(self, task_key):
+def polling_celery(consumer, task_key):
     task_progress = SingleTaskProgress.fetch(task_key)
     if task_progress is None:
-        self.respond(
+        consumer.respond(
             WebsocketResponse(
                 data={},
                 message="No Task of this task_key found",
@@ -189,13 +189,15 @@ def polling_celery(self, task_key):
 
     last_status = task_progress[-1]["status"]
 
+    # Loop to check task progress every two seconds.
     while last_status == TaskProgressStatus.RUNNING:
+        time.sleep(2)
         task_progress = SingleTaskProgress.fetch(task_key)
         last_status = None if task_progress is None else task_progress[-1]["status"]
-        time.sleep(2)
+        logger.info(f"{last_status}")
 
     if last_status == TaskProgressStatus.FAILED:
-        self.respond(
+        consumer.respond(
             WebsocketResponse(
                 data={},
                 message="Invalid credentials",
@@ -203,18 +205,18 @@ def polling_celery(self, task_key):
             )
         )
     elif last_status == TaskProgressStatus.COMPLETED:
-        self.respond(
+        consumer.respond(
             WebsocketResponse(
                 data={
                     "status": last_status,
                     "result": task_progress[-1]["result"],
                 },
-                message="Destination connection check completed",
+                message="Successfully fetched source schema",
                 status=WebsocketResponseStatus.SUCCESS,
             )
         )
     else:
-        self.respond(
+        consumer.respond(
             WebsocketResponse(
                 data={},
                 message="No task found",

@@ -516,13 +516,11 @@ def get_schema_catalog_task(task_key, workspace_id, source_id):
     """Fetch a schema_catalog while creating a connection as a Celery task"""
 
     # created the task below
-    taskprogress = SingleTaskProgress(task_key, 600)  # chnage this expiry time
+    taskprogress = SingleTaskProgress(task_key, 60)
     taskprogress.add({"message": "started", "status": TaskProgressStatus.RUNNING, "result": None})
-    logger.info(taskprogress, "print")
 
     try:
         res = airbyte_service.get_source_schema_catalog(workspace_id, source_id)
-        logger.info(res, "RESPOnse@@@@@")
         taskprogress.add(
             {
                 "message": "fetched catalog data",
