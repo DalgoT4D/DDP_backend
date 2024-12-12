@@ -515,8 +515,8 @@ def get_connection_catalog_task(task_key, org_id, connection_id):
 def get_schema_catalog_task(task_key, workspace_id, source_id):
     """Fetch a schema_catalog while creating a connection as a Celery task"""
 
-    # created the task below
-    taskprogress = SingleTaskProgress(task_key, 60)
+    # create the task below. the STP has to live longer than the task with take
+    taskprogress = SingleTaskProgress(task_key, 600)
     taskprogress.add({"message": "started", "status": TaskProgressStatus.RUNNING, "result": None})
 
     try:
