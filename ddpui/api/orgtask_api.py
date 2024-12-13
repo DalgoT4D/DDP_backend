@@ -31,7 +31,7 @@ from ddpui.models.tasks import (
 from ddpui.ddpprefect.schema import (
     PrefectSecretBlockCreate,
 )
-from ddpui.ddpdbt.schema import DbtProjectParams
+from ddpui.ddpdbt.schema import DbtCliParams, DbtCloudParams
 from ddpui.schemas.org_task_schema import CreateOrgTaskPayload, TaskParameters
 
 from ddpui.core.orgdbt_manager import DbtProjectManager
@@ -90,14 +90,15 @@ def post_orgtask(request, payload: CreateOrgTaskPayload):
     orgtask = OrgTask.objects.create(
         org=orguser.org,
         task=task,
-        parameters=parameters,
+        parameters=parameters,  # here the accountId, jobId and apiKey will be recieved for dbt-cloud
         generated_by="client",
         uuid=uuid.uuid4(),
     )
 
     dataflow = None
-    if task.slug in LONG_RUNNING_TASKS:
-        dbt_project_params: DbtProjectParams = DbtProjectManager.gather_dbt_project_params(
+    # For dbt-cli
+    if task.slug in LONG_RUNNING_TASKS and task.type is "dbt":
+        dbt_project_params: DbtCliParams = DbtProjectManager.gather_dbt_project_params(
             orguser.org, orgdbt
         )
 
@@ -112,6 +113,14 @@ def post_orgtask(request, payload: CreateOrgTaskPayload):
         dataflow = create_prefect_deployment_for_dbtcore_task(
             orgtask, cli_profile_block, dbt_project_params
         )
+
+    # For dbt-cloud
+    if task.slug in LONG_RUNNING_TASKS and task.type is "dbtcloud":
+        dbt_cloud_params: DbtCloudParams = parameters["options"]
+        dataflow = create_prefect_deployment_for_dbtcore_task(
+            orgtask, dbt_cloud_params  # this will contain accountId, apikey, and jobId
+        )
+    # if the task id dbtcloud run then create another dataflow createprfectdeployfor dbtcloud task  (112, 114 but for cloud)
 
     return {
         **model_to_dict(orgtask, fields=["parameters"]),
@@ -326,7 +335,7 @@ def post_run_prefect_org_task(
     if orgdbt is None:
         raise HttpError(400, "dbt is not configured for this client")
 
-    dbt_project_params: DbtProjectParams = DbtProjectManager.gather_dbt_project_params(
+    dbt_project_params: DbtCliParams = DbtProjectManager.gather_dbt_project_params(
         orguser.org, orgdbt
     )
 
