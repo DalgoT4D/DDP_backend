@@ -24,7 +24,7 @@ from ddpui.ddpprefect.schema import (
 from ddpui.utils.constants import TASK_DBTRUN, TASK_AIRBYTESYNC
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.schemas.org_task_schema import TaskParameters
-from ddpui.ddpdbt.schema import DbtProjectParams
+from ddpui.ddpdbt.schema import DbtProjectParams, DbtCloudParams
 from ddpui.utils.prefectlogs import parse_prefect_logs
 from ddpui.utils.helpers import generate_hash_id
 from ddpui.core.pipelinefunctions import (
@@ -53,6 +53,9 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
 
     if payload.name in [None, ""]:
         raise HttpError(400, "must provide a name for the flow")
+
+    if payload.alignment is None:
+        raise HttpError(400, "must provide alignment type i.e Simple, Advanced or DBT Cloud")
 
     tasks = []  # This is main task array- containing airbyte and dbt task both.
     map_org_tasks = []  # seq of org tasks to be mapped in pipelin/ dataflow
@@ -103,13 +106,35 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
     dbt_git_orgtasks = []
     orgdbt = orguser.org.dbt
 
-    # checkng
     if (
-        payload.transformTasks and len(payload.transformTasks) > 0
+        payload.transformTasks
+        and len(payload.transformTasks) > 0
+        and payload.alignment == "DBT Cloud"
+    ):
+        # get the deployment task configs
+        dbt_task_parameters = OrgTask.objects.filter(org=orguser.org).first()
+
+        if dbt_task_parameters is None:
+            raise HttpError(400, "dbt cloud task parameters not found")
+
+        dbt_project_params: DbtCloudParams = dbt_task_parameters[
+            "object"
+        ]  # this contains account_key, api_key and job_id
+
+        task_configs, error = pipeline_with_orgtasks(
+            orguser.org,
+            dbt_project_params=dbt_project_params,
+            start_seq=len(tasks),
+        )
+        if error:
+            raise HttpError(400, error)
+        tasks += task_configs
+
+    elif (
+        payload.transformTasks and len(payload.transformTasks) > 0  ## For dbt cli
     ):  # dont modify this block as its of rlocal
         logger.info("Dbt tasks being pushed to the pipeline")
 
-        # for dbt cloud we dont check the dbcliblcok (add if condition to check it)
         # dbt params
 
         dbt_project_params = DbtProjectManager.gather_dbt_project_params(orguser.org, orgdbt)
@@ -143,7 +168,7 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
         if error:
             raise HttpError(400, error)
         tasks += task_configs
-    # new  if payload.cloud transorm task, get taskconfig, dbt-run
+
     map_org_tasks += dbt_git_orgtasks
 
     # create deployment

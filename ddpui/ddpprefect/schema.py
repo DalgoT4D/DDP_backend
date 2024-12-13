@@ -328,6 +328,7 @@ class PrefectDataFlowCreateSchema4(Schema):
     name: str
     connections: list[PrefectFlowAirbyteConnection2]
     cron: str
+    alignment: str  # Simple, Advanced and DBTCloud
     transformTasks: list[PrefectDataFlowOrgTasks]
 
 

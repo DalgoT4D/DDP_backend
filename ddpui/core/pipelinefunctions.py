@@ -201,6 +201,8 @@ def pipeline_with_orgtasks(
                 dbt_project_params.project_dir,
                 dbt_project_params.venv_binary,
             ).to_json()
+        elif dbt_project_params.get("job_id") is not None:  # its dbt cloud task
+            task_config = setup_dbt_cloud_task_config(org_task, dbt_project_params).to_json()
         else:
             task_config = setup_dbt_core_task_config(
                 org_task, cli_block, dbt_project_params

@@ -258,6 +258,7 @@ def test_post_prefect_dataflow_v1_failure1(orguser):
         name="test-dataflow",
         connections=connections,
         cron="",
+        alignment="simple",
         transformTasks=[],
     )
     orguser.org = None
@@ -273,7 +274,11 @@ def test_post_prefect_dataflow_v1_failure2(orguser_transform_tasks):
     """tests the failure due to missing name of the dataflow in the payload"""
     connections = [PrefectFlowAirbyteConnection2(id="test-conn-id", seq=1)]
     payload = PrefectDataFlowCreateSchema4(
-        name="", connections=connections, cron="", transformTasks=[]
+        name="",
+        connections=connections,
+        cron="",
+        transformTasks=[],
+        alignment="simple",
     )
     request = mock_request(orguser_transform_tasks)
 
@@ -309,6 +314,7 @@ def test_post_prefect_dataflow_v1_success(orguser_transform_tasks):
         connections=connections,
         cron="test-cron",
         transformTasks=[],
+        alignment="simple",
     )
 
     deployment = post_prefect_dataflow_v1(request, payload)
@@ -357,6 +363,7 @@ def test_post_prefect_dataflow_v1_success2(orguser_transform_tasks):
         name="test-dataflow",
         connections=connections,
         cron="test-cron",
+        alignment="simple",
         transformTasks=[
             PrefectDataFlowOrgTasks(uuid=str(org_task.uuid), seq=idx)
             for idx, org_task in enumerate(transform_tasks)
@@ -612,6 +619,7 @@ def test_get_prefect_dataflow_v1_success(orguser_transform_tasks):
         name="test-dataflow",
         connections=connections,
         cron="test-cron",
+        alignment="simple",
         transformTasks=[
             PrefectDataFlowOrgTasks(uuid=str(org_task.uuid), seq=idx)
             for idx, org_task in enumerate(transform_tasks)
