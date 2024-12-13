@@ -20,9 +20,9 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
 )
 from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE
-from ddpui.ddpdbt.schema import DbtProjectParams
+from ddpui.ddpdbt.schema import DbtCliParams, DbtProjectParams
 from ddpui.ddpprefect import prefect_service
-from ddpui.core.pipelinefunctions import setup_dbt_core_task_config
+from ddpui.core.pipelinefunctions import setup_dbt_core_task_config, setup_dbt_cloud_task_config
 from ddpui.utils.constants import TASK_DBTRUN, TASK_GENERATE_EDR
 from ddpui.utils.helpers import generate_hash_id
 
@@ -117,6 +117,15 @@ def create_prefect_deployment_for_dbtcore_task(
     """
     hash_code = generate_hash_id(8)
     deployment_name = f"manual-{org_task.org.slug}-{org_task.task.slug}-{hash_code}"
+
+    tasks = []
+    if org_task.task.type == "dbt":
+        tasks = [
+            setup_dbt_core_task_config(org_task, cli_profile_block, dbt_project_params).to_json()
+        ]
+    elif org_task.task.type == "dbtcloud":
+        tasks = [setup_dbt_cloud_task_config(org_task, dbt_project_params).to_json()]
+
     dataflow = prefect_service.create_dataflow_v1(
         PrefectDataFlowCreateSchema3(
             deployment_name=deployment_name,
@@ -124,11 +133,7 @@ def create_prefect_deployment_for_dbtcore_task(
             orgslug=org_task.org.slug,
             deployment_params={
                 "config": {
-                    "tasks": [
-                        setup_dbt_core_task_config(
-                            org_task, cli_profile_block, dbt_project_params
-                        ).to_json()
-                    ],
+                    "tasks": tasks,
                     "org_slug": org_task.org.slug,
                 }
             },

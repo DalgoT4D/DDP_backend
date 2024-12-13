@@ -54,7 +54,7 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
     if payload.name in [None, ""]:
         raise HttpError(400, "must provide a name for the flow")
 
-    tasks = []
+    tasks = []  # This is main task array- containing airbyte and dbt task both.
     map_org_tasks = []  # seq of org tasks to be mapped in pipelin/ dataflow
 
     # push conection orgtasks in pipelin
@@ -102,10 +102,16 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
     dbt_project_params: DbtProjectParams = None
     dbt_git_orgtasks = []
     orgdbt = orguser.org.dbt
-    if payload.transformTasks and len(payload.transformTasks) > 0:
+
+    # checkng
+    if (
+        payload.transformTasks and len(payload.transformTasks) > 0
+    ):  # dont modify this block as its of rlocal
         logger.info("Dbt tasks being pushed to the pipeline")
 
+        # for dbt cloud we dont check the dbcliblcok (add if condition to check it)
         # dbt params
+
         dbt_project_params = DbtProjectManager.gather_dbt_project_params(orguser.org, orgdbt)
 
         # dbt cli profile block
@@ -137,7 +143,7 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
         if error:
             raise HttpError(400, error)
         tasks += task_configs
-
+    # new  if payload.cloud transorm task, get taskconfig, dbt-run
     map_org_tasks += dbt_git_orgtasks
 
     # create deployment

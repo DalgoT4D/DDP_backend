@@ -15,6 +15,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpprefect.schema import (
     PrefectDbtTaskSetup,
+    PrefectDbtCloudTaskSetup,
     PrefectShellTaskSetup,
     PrefectAirbyteSyncTaskSetup,
     PrefectAirbyteRefreshSchemaTaskSetup,
@@ -22,6 +23,7 @@ from ddpui.ddpprefect.schema import (
 )
 from ddpui.ddpprefect import (
     AIRBYTECONNECTION,
+    DBTCLOUD,
     DBTCORE,
     SECRET,
     SHELLOPERATION,
@@ -39,7 +41,7 @@ from ddpui.utils.constants import (
     UPDATE_SCHEMA,
     TRANSFORM_TASKS_SEQ,
 )
-from ddpui.ddpdbt.schema import DbtProjectParams
+from ddpui.ddpdbt.schema import DbtCliParams, DbtCloudParams, DbtProjectParams
 
 logger = CustomLogger("ddpui")
 
@@ -83,7 +85,7 @@ def setup_airbyte_update_schema_task_config(
 def setup_dbt_core_task_config(
     org_task: OrgTask,
     cli_profile_block: OrgPrefectBlockv1,
-    dbt_project_params: DbtProjectParams,
+    dbt_project_params: DbtCliParams,
     seq: int = 1,
 ):
     """constructs the prefect payload for a dbt job"""
@@ -98,6 +100,23 @@ def setup_dbt_core_task_config(
         project_dir=dbt_project_params.project_dir,
         cli_profile_block=cli_profile_block.block_name,
         cli_args=[],
+        orgtask_uuid=str(org_task.uuid),
+    )
+
+
+def setup_dbt_cloud_task_config(
+    org_task: OrgTask,
+    dbt_project_params: DbtCloudParams,
+    seq: int = 1,
+):
+    """constructs the prefect payload for a dbt-cloud job"""
+    return PrefectDbtCloudTaskSetup(
+        seq=seq,
+        slug=org_task.task.slug,
+        type=DBTCLOUD,
+        api_key=dbt_project_params.api_key,
+        account_id=dbt_project_params.account_id,
+        job_id=dbt_project_params.job_id,
         orgtask_uuid=str(org_task.uuid),
     )
 
@@ -157,7 +176,7 @@ def pipeline_with_orgtasks(
     This assumes the list of orgtasks is in the correct sequence
     """
     task_configs = []
-
+    # This block works perfectly for dbt cli tasks and dbt cloud tasks both.
     for org_task in org_tasks:
         task_config = None
         if org_task.task.slug == TASK_AIRBYTERESET:
