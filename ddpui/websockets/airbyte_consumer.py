@@ -135,7 +135,7 @@ class SchemaCatalogConsumer(BaseConsumer):
     """websocket for checking source schema_catalog"""
 
     def websocket_receive(self, message):
-        logger.info("Recieved the message from client, get schema_catalog inside the connection")
+        """Starts the task to get the schema catalog if it isn't running already"""
         payload = json.loads(message["text"])
 
         orguser: OrgUser = self.orguser
