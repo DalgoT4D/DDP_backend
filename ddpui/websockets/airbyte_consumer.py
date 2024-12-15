@@ -134,13 +134,13 @@ class DestinationCheckConnectionConsumer(BaseConsumer):
 class SchemaCatalogConsumer(BaseConsumer):
     """websocket for checking source schema_catalog"""
 
-    def websocket_receive(consumer, message):
+    def websocket_receive(self, message):
         logger.info("Recieved the message from client, get schema_catalog inside the connection")
         payload = json.loads(message["text"])
 
-        orguser: OrgUser = consumer.orguser
+        orguser: OrgUser = self.orguser
         if orguser.org.airbyte_workspace_id is None:
-            consumer.respond(
+            self.respond(
                 WebsocketResponse(
                     data={},
                     message="Create an airbyte workspace first.",
@@ -150,7 +150,7 @@ class SchemaCatalogConsumer(BaseConsumer):
             return
 
         if "sourceId" not in payload or payload["sourceId"] is None:
-            consumer.respond(
+            self.respond(
                 WebsocketResponse(
                     data={},
                     message="SourceId is required in the payload",
@@ -166,16 +166,17 @@ class SchemaCatalogConsumer(BaseConsumer):
         task_progress = SingleTaskProgress.fetch(task_key)
 
         if task_progress is not None:
-            polling_celery(consumer, task_key)
+            polling_celery(self, task_key)
             return
 
         # This gives the task to celery
         get_schema_catalog_task.delay(task_key, str(orguser.org.airbyte_workspace_id), source_id)
         time.sleep(2)
-        polling_celery(consumer, task_key)
+        polling_celery(self, task_key)
 
 
 def polling_celery(consumer, task_key):
+    """Polling celery to get the task progress"""
     task_progress = SingleTaskProgress.fetch(task_key)
     if task_progress is None:
         consumer.respond(
