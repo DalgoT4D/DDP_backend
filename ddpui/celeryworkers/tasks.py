@@ -511,6 +511,35 @@ def get_connection_catalog_task(task_key, org_id, connection_id):
     return connection_catalog
 
 
+@app.task()
+def get_schema_catalog_task(task_key, workspace_id, source_id):
+    """Fetch a schema_catalog while creating a connection as a Celery task"""
+    # the STP has to live longer than the task will take
+    taskprogress = SingleTaskProgress(task_key, 600)
+    taskprogress.add({"message": "started", "status": TaskProgressStatus.RUNNING, "result": None})
+
+    try:
+        res = airbyte_service.get_source_schema_catalog(workspace_id, source_id)
+        taskprogress.add(
+            {
+                "message": "fetched catalog data",
+                "status": TaskProgressStatus.COMPLETED,
+                "result": res,
+            }
+        )
+        return res
+    except Exception as err:
+        logger.error(err)
+        taskprogress.add(
+            {
+                "message": "invalid error",
+                "status": TaskProgressStatus.FAILED,
+                "result": None,
+            }
+        )
+        return err
+
+
 @app.task(bind=False)
 def update_dbt_core_block_schema_task(block_name, default_schema):
     """single http PUT request to the prefect-proxy"""

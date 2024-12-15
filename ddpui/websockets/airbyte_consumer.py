@@ -1,6 +1,10 @@
 import json
 
+from ddpui.celeryworkers.tasks import get_schema_catalog_task
+from ddpui.models.org_user import OrgUser
+from ddpui.models.tasks import TaskProgressHashPrefix, TaskProgressStatus
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.singletaskprogress import SingleTaskProgress
 from ddpui.websockets.schemas import WebsocketResponse, WebsocketResponseStatus
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 from ddpui.models.org import OrgType
@@ -11,6 +15,8 @@ from ddpui.ddpairbyte.schema import (
     AirbyteDestinationUpdateCheckConnection,
 )
 from ddpui.websockets import BaseConsumer
+
+import time
 
 logger = CustomLogger("ddpui")
 
@@ -123,3 +129,99 @@ class DestinationCheckConnectionConsumer(BaseConsumer):
                 status=WebsocketResponseStatus.SUCCESS,
             )
         )
+
+
+class SchemaCatalogConsumer(BaseConsumer):
+    """websocket for checking source schema_catalog"""
+
+    def websocket_receive(self, message):
+        """Starts the task to get the schema catalog if it isn't running already"""
+        payload = json.loads(message["text"])
+
+        orguser: OrgUser = self.orguser
+        if orguser.org.airbyte_workspace_id is None:
+            self.respond(
+                WebsocketResponse(
+                    data={},
+                    message="Create an airbyte workspace first.",
+                    status=WebsocketResponseStatus.ERROR,
+                )
+            )
+            return
+
+        if "sourceId" not in payload or payload["sourceId"] is None:
+            self.respond(
+                WebsocketResponse(
+                    data={},
+                    message="SourceId is required in the payload",
+                    status=WebsocketResponseStatus.ERROR,
+                )
+            )
+            return
+
+        source_id = payload["sourceId"]
+
+        # creating a key and checking if it exists or not
+        task_key = f"{TaskProgressHashPrefix.SOURCE_SCHEMA_CATALOG}-{orguser.org.slug}-{source_id}"
+        task_progress = SingleTaskProgress.fetch(task_key)
+
+        if task_progress is not None:
+            polling_celery(self, task_key)
+            return
+
+        # This gives the task to celery
+        get_schema_catalog_task.delay(task_key, str(orguser.org.airbyte_workspace_id), source_id)
+        time.sleep(2)
+        polling_celery(self, task_key)
+
+
+def polling_celery(consumer, task_key):
+    """Polling celery to get the task progress"""
+    task_progress = SingleTaskProgress.fetch(task_key)
+    if task_progress is None:
+        consumer.respond(
+            WebsocketResponse(
+                data={},
+                message="No Task of this task_key found",
+                status=WebsocketResponseStatus.ERROR,
+            )
+        )
+        return
+
+    last_status = task_progress[-1]["status"]
+
+    # Loop to check task progress every two seconds.
+    while last_status == TaskProgressStatus.RUNNING:
+        time.sleep(2)
+        task_progress = SingleTaskProgress.fetch(task_key)
+        last_status = None if task_progress is None else task_progress[-1]["status"]
+        logger.info(f"{last_status}")
+
+    if last_status == TaskProgressStatus.FAILED:
+        consumer.respond(
+            WebsocketResponse(
+                data={},
+                message="Invalid credentials",
+                status=WebsocketResponseStatus.ERROR,
+            )
+        )
+    elif last_status == TaskProgressStatus.COMPLETED:
+        consumer.respond(
+            WebsocketResponse(
+                data={
+                    "status": last_status,
+                    "result": task_progress[-1]["result"],
+                },
+                message="Successfully fetched source schema",
+                status=WebsocketResponseStatus.SUCCESS,
+            )
+        )
+    else:
+        consumer.respond(
+            WebsocketResponse(
+                data={},
+                message="No task found",
+                status=WebsocketResponseStatus.ERROR,
+            )
+        )
+    return
