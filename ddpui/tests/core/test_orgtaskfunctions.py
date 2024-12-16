@@ -34,7 +34,7 @@ def seed_master_tasks_db(django_db_setup, django_db_blocker):
 
 def test_seed_master_tasks(seed_master_tasks_db):
     """a test to seed the database"""
-    assert Task.objects.count() == 11
+    assert Task.objects.count() == 12
 
 
 # ================================================================================
