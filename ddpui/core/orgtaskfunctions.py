@@ -20,7 +20,7 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
 )
 from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE
-from ddpui.ddpdbt.schema import DbtCliParams, DbtProjectParams
+from ddpui.ddpdbt.schema import DbtCloudJobParams, DbtProjectParams
 from ddpui.ddpprefect import prefect_service
 from ddpui.core.pipelinefunctions import setup_dbt_core_task_config, setup_dbt_cloud_task_config
 from ddpui.utils.constants import TASK_DBTRUN, TASK_GENERATE_EDR
@@ -109,11 +109,14 @@ def get_edr_send_report_task(org: Org, **kwargs) -> OrgTask | None:
 
 def create_prefect_deployment_for_dbtcore_task(
     org_task: OrgTask,
-    cli_profile_block: OrgPrefectBlockv1,
-    dbt_project_params: DbtProjectParams,
+    credentials_profile_block: OrgPrefectBlockv1,
+    dbt_project_params: Union[DbtProjectParams, DbtCloudJobParams],
 ):
     """
-    create a prefect deployment for a single dbt command and save the deployment id to an OrgDataFlowv1 object
+    - create a prefect deployment for a single dbt command or dbt cloud job
+    - save the deployment id to an OrgDataFlowv1 object
+    - for dbt core operation; the credentials_profile_block is cli profile block
+    - for dbt cloud job; the credentials_profile_block is dbt cloud credentials block
     """
     hash_code = generate_hash_id(8)
     deployment_name = f"manual-{org_task.org.slug}-{org_task.task.slug}-{hash_code}"
@@ -121,10 +124,16 @@ def create_prefect_deployment_for_dbtcore_task(
     tasks = []
     if org_task.task.type == "dbt":
         tasks = [
-            setup_dbt_core_task_config(org_task, cli_profile_block, dbt_project_params).to_json()
+            setup_dbt_core_task_config(
+                org_task, credentials_profile_block, dbt_project_params
+            ).to_json()
         ]
     elif org_task.task.type == "dbtcloud":
-        tasks = [setup_dbt_cloud_task_config(org_task, dbt_project_params).to_json()]
+        tasks = [
+            setup_dbt_cloud_task_config(
+                org_task, credentials_profile_block, dbt_project_params
+            ).to_json()
+        ]
 
     dataflow = prefect_service.create_dataflow_v1(
         PrefectDataFlowCreateSchema3(

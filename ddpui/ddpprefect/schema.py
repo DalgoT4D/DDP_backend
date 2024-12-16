@@ -162,24 +162,22 @@ class PrefectDbtTaskSetup(Schema):
 
 class PrefectDbtCloudTaskSetup(Schema):
     "request payload to trigger a dbt cloud run task in prefect"
-    seq = int = (0,)
-    slug = (str,)
-    type = (str,)
-    api_key = (str,)
-    account_id = (str,)
-    job_id = (str,)
-    orgtask_uuid = (str,)
+    type: str
+    slug: str
+    dbt_cloud_job_id: int
+    dbt_cloud_creds_block: str
+    orgtask_uuid = str
+    seq: int = 0
 
     def to_json(self):
         """JSON serialization"""
         return {
-            "seq": self.seq,
             "slug": self.slug,
             "type": self.type,
-            "api_key": self.api_key,
-            "account_id": self.account_id,
-            "job_id": self.job_id,
+            "dbt_cloud_job_id": self.dbt_cloud_job_id,
+            "dbt_cloud_creds_block": self.dbt_cloud_creds_block,
             "orgtask_uuid": self.orgtask_uuid,
+            "seq": self.seq,
         }
 
 

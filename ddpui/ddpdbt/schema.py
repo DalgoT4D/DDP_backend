@@ -1,11 +1,11 @@
-from typing import Literal, Optional, Union
+from typing import Union
 from ninja import Schema
 from pathlib import Path
 
 
-class DbtCliParams(Schema):
+class DbtProjectParams(Schema):
     """
-    Schema to define all parameters required to run a dbt project using CLI.
+    schema to define all parameters required to run a dbt project
     """
 
     dbt_env_dir: Union[str, Path]
@@ -16,14 +16,9 @@ class DbtCliParams(Schema):
     dbt_binary: Union[str, Path]
 
 
-class DbtCloudParams(Schema):
+class DbtCloudJobParams(Schema):
     """
-    Schema to define all parameters required to run a dbt project using dbt Cloud.
+    Schema to define all parameters required to run a any dbt command using dbt Cloud.
     """
 
-    api_key: str
-    account_id: int
     job_id: int
-
-
-DbtProjectParams = Union[DbtCliParams, DbtCloudParams]

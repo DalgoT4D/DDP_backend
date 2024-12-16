@@ -122,12 +122,12 @@
     },
     {
         "model": "ddpui.Task",
-        "pk": 11,
+        "pk": 12,
         "fields": {
             "type": "dbtcloud",
-            "slug": "dbtcloud-run",
-            "label": "DBT Cloud run",
-            "command": "cloud-run",
+            "slug": "dbt-cloud-job",
+            "label": "DBT Cloud job",
+            "command": null,
             "is_system": true
         }
     }

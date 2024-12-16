@@ -30,7 +30,7 @@ from ddpui.utils.constants import (
     TASK_DBTRUN,
     TASK_DBTSEED,
     TASK_DBTDEPS,
-    TASK_DBTCLOUDRUN,
+    TASK_DBTCLOUD_JOB,
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.utils.timezone import as_ist
@@ -108,7 +108,7 @@ def task_config_params(task: Task):
         TASK_DBTTEST: {"flags": [], "options": ["select", "exclude"]},
         TASK_DBTSEED: {"flags": [], "options": ["select"]},
         TASK_DOCSGENERATE: {"flags": [], "options": []},
-        TASK_DBTCLOUDRUN: {"flags": [], "options": ["account_id", "api-key", "job-id"]},
+        TASK_DBTCLOUD_JOB: {"flags": [], "options": ["job-id"]},
     }
 
     return TASK_CONIF_PARAM[task.slug] if task.slug in TASK_CONIF_PARAM else None

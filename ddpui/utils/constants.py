@@ -4,7 +4,7 @@ TASK_DBTTEST = "dbt-test"
 TASK_DBTCLEAN = "dbt-clean"
 TASK_DBTDEPS = "dbt-deps"
 TASK_GITPULL = ("git-pull",)
-TASK_DBTCLOUDRUN = "dbtcloud-run"  # this is task slug so it should match the seed data.
+TASK_DBTCLOUD_JOB = "dbt-cloud-job"  # this is task slug so it should match the seed data.
 TASK_DOCSGENERATE = "dbt-docs-generate"
 TASK_AIRBYTESYNC = "airbyte-sync"
 TASK_AIRBYTERESET = "airbyte-reset"
@@ -31,13 +31,13 @@ DEFAULT_TRANSFORM_TASKS_IN_PIPELINE = [
     TASK_DBTDEPS,
     TASK_DBTRUN,
     TASK_DBTTEST,
-    TASK_DBTCLOUDRUN,
+    TASK_DBTCLOUD_JOB,
 ]
 
 # These are tasks to be run via deployment
 # Adding a new task here will work for any new orgtask created
 # But for the current ones a script would need to be run to set them with a deployment
-LONG_RUNNING_TASKS = [TASK_DBTRUN, TASK_DBTSEED, TASK_DBTTEST, TASK_DBTCLOUDRUN]
+LONG_RUNNING_TASKS = [TASK_DBTRUN, TASK_DBTSEED, TASK_DBTTEST, TASK_DBTCLOUD_JOB]
 
 # airbyte sync timeout in deployment params
 AIRBYTE_SYNC_TIMEOUT = 15

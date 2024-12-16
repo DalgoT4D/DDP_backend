@@ -23,7 +23,7 @@ from ddpui.ddpprefect.schema import (
 )
 from ddpui.ddpprefect import (
     AIRBYTECONNECTION,
-    DBTCLOUD,
+    DBTCLOUDJOB,
     DBTCORE,
     SECRET,
     SHELLOPERATION,
@@ -41,7 +41,7 @@ from ddpui.utils.constants import (
     UPDATE_SCHEMA,
     TRANSFORM_TASKS_SEQ,
 )
-from ddpui.ddpdbt.schema import DbtCliParams, DbtCloudParams, DbtProjectParams
+from ddpui.ddpdbt.schema import DbtCloudJobParams, DbtProjectParams
 
 logger = CustomLogger("ddpui")
 
@@ -106,17 +106,17 @@ def setup_dbt_core_task_config(
 
 def setup_dbt_cloud_task_config(
     org_task: OrgTask,
-    dbt_project_params: DbtCloudParams,
+    cloud_creds_block: OrgPrefectBlockv1,
+    dbt_project_params: DbtCloudJobParams,
     seq: int = 1,
 ):
     """constructs the prefect payload for a dbt-cloud job"""
     return PrefectDbtCloudTaskSetup(
         seq=seq,
         slug=org_task.task.slug,
-        type=DBTCLOUD,
-        api_key=dbt_project_params.api_key,
-        account_id=dbt_project_params.account_id,
-        job_id=dbt_project_params.job_id,
+        type=DBTCLOUDJOB,
+        dbt_cloud_job_id=dbt_project_params.job_id,
+        dbt_cloud_creds_block=cloud_creds_block.block_name,
         orgtask_uuid=str(org_task.uuid),
     )
 

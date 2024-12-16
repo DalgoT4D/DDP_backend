@@ -11,10 +11,7 @@ from ddpui import auth
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbytehelpers
 
-from ddpui.ddpprefect import (
-    DBTCLIPROFILE,
-    SECRET,
-)
+from ddpui.ddpprefect import DBTCLIPROFILE, SECRET, DBTCLOUDCREDS
 from ddpui.models.org import (
     Org,
     OrgWarehouse,
@@ -31,7 +28,7 @@ from ddpui.models.tasks import (
 from ddpui.ddpprefect.schema import (
     PrefectSecretBlockCreate,
 )
-from ddpui.ddpdbt.schema import DbtCliParams, DbtCloudParams
+from ddpui.ddpdbt.schema import DbtProjectParams, DbtCloudJobParams
 from ddpui.schemas.org_task_schema import CreateOrgTaskPayload, TaskParameters
 
 from ddpui.core.orgdbt_manager import DbtProjectManager
@@ -90,37 +87,45 @@ def post_orgtask(request, payload: CreateOrgTaskPayload):
     orgtask = OrgTask.objects.create(
         org=orguser.org,
         task=task,
-        parameters=parameters,  # here the accountId, jobId and apiKey will be recieved for dbt-cloud
+        parameters=parameters,
         generated_by="client",
         uuid=uuid.uuid4(),
     )
 
     dataflow = None
-    # For dbt-cli
-    if task.slug in LONG_RUNNING_TASKS and task.type is "dbt":
-        dbt_project_params: DbtCliParams = DbtProjectManager.gather_dbt_project_params(
-            orguser.org, orgdbt
-        )
+    if task.slug in LONG_RUNNING_TASKS:
+        # For dbt-cli
+        if task.type == "dbt":
+            dbt_project_params: DbtProjectParams = DbtProjectManager.gather_dbt_project_params(
+                orguser.org, orgdbt
+            )
 
-        # fetch the cli profile block
-        cli_profile_block = OrgPrefectBlockv1.objects.filter(
-            org=orguser.org, block_type=DBTCLIPROFILE
-        ).first()
+            # fetch the cli profile block
+            cli_profile_block = OrgPrefectBlockv1.objects.filter(
+                org=orguser.org, block_type=DBTCLIPROFILE
+            ).first()
 
-        if cli_profile_block is None:
-            raise HttpError(400, "dbt cli profile block not found")
+            if cli_profile_block is None:
+                raise HttpError(400, "dbt cli profile block not found")
 
-        dataflow = create_prefect_deployment_for_dbtcore_task(
-            orgtask, cli_profile_block, dbt_project_params
-        )
+            dataflow = create_prefect_deployment_for_dbtcore_task(
+                orgtask, cli_profile_block, dbt_project_params
+            )
 
-    # For dbt-cloud
-    if task.slug in LONG_RUNNING_TASKS and task.type is "dbtcloud":
-        dbt_cloud_params: DbtCloudParams = parameters["options"]
-        dataflow = create_prefect_deployment_for_dbtcore_task(
-            orgtask, dbt_cloud_params  # this will contain accountId, apikey, and jobId
-        )
-    # if the task id dbtcloud run then create another dataflow createprfectdeployfor dbtcloud task  (112, 114 but for cloud)
+        # For dbt-cloud
+        if task.type is "dbtcloud":
+            # fetch dbt cloud creds block
+            dbt_cloud_creds_block = OrgPrefectBlockv1.objects.filter(
+                org=orguser.org, block_type=DBTCLOUDCREDS
+            ).first()
+
+            if dbt_cloud_creds_block is None:
+                raise HttpError(400, "dbt cloud credentials block not found")
+
+            dbt_cloud_params: DbtCloudJobParams = DbtCloudJobParams(**parameters["options"])
+            dataflow = create_prefect_deployment_for_dbtcore_task(
+                orgtask, dbt_cloud_creds_block, dbt_cloud_params
+            )
 
     return {
         **model_to_dict(orgtask, fields=["parameters"]),
@@ -335,7 +340,7 @@ def post_run_prefect_org_task(
     if orgdbt is None:
         raise HttpError(400, "dbt is not configured for this client")
 
-    dbt_project_params: DbtCliParams = DbtProjectManager.gather_dbt_project_params(
+    dbt_project_params: DbtProjectParams = DbtProjectManager.gather_dbt_project_params(
         orguser.org, orgdbt
     )
 
