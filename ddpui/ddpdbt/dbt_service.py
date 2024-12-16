@@ -108,7 +108,7 @@ def task_config_params(task: Task):
         TASK_DBTTEST: {"flags": [], "options": ["select", "exclude"]},
         TASK_DBTSEED: {"flags": [], "options": ["select"]},
         TASK_DOCSGENERATE: {"flags": [], "options": []},
-        TASK_DBTCLOUD_JOB: {"flags": [], "options": ["job-id"]},
+        TASK_DBTCLOUD_JOB: {"flags": [], "options": ["job_id"]},
     }
 
     return TASK_CONIF_PARAM[task.slug] if task.slug in TASK_CONIF_PARAM else None

@@ -81,6 +81,7 @@ def prefect_post(endpoint: str, json: dict, **kwargs) -> dict:
             **kwargs,
         )
     except Exception as error:
+        logger.error(error)
         raise HttpError(500, "connection error") from error
     try:
         res.raise_for_status()

@@ -3,7 +3,6 @@ functions to work with pipelies/dataflows
 do not raise http errors here
 """
 
-from pathlib import Path
 from typing import Union
 from functools import cmp_to_key
 from django.db import transaction

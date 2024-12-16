@@ -1,7 +1,6 @@
-from typing import List, Optional
+from typing import Optional
 
 from ninja import Schema
-from pydantic import Field
 
 
 class PrefectAirbyteSync(Schema):
@@ -161,19 +160,20 @@ class PrefectDbtTaskSetup(Schema):
 
 
 class PrefectDbtCloudTaskSetup(Schema):
-    "request payload to trigger a dbt cloud run task in prefect"
+    """request payload to trigger a dbt cloud run task in prefect"""
+
     type: str
     slug: str
     dbt_cloud_job_id: int
     dbt_cloud_creds_block: str
-    orgtask_uuid = str
+    orgtask_uuid: str
     seq: int = 0
 
     def to_json(self):
         """JSON serialization"""
         return {
-            "slug": self.slug,
             "type": self.type,
+            "slug": self.slug,
             "dbt_cloud_job_id": self.dbt_cloud_job_id,
             "dbt_cloud_creds_block": self.dbt_cloud_creds_block,
             "orgtask_uuid": self.orgtask_uuid,
