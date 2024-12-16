@@ -39,6 +39,7 @@ from ddpui.utils.constants import (
     TASK_AIRBYTERESET,
     UPDATE_SCHEMA,
     TRANSFORM_TASKS_SEQ,
+    TASK_DBTCLOUD_JOB,
 )
 from ddpui.ddpdbt.schema import DbtCloudJobParams, DbtProjectParams
 
@@ -169,6 +170,7 @@ def pipeline_with_orgtasks(
     cli_block: OrgPrefectBlockv1 = None,
     dbt_project_params: DbtProjectParams = None,
     start_seq: int = 0,
+    dbt_cloud_creds_block: OrgPrefectBlockv1 = None,
 ):
     """
     Returns a list of task configs for a pipeline;
@@ -200,8 +202,10 @@ def pipeline_with_orgtasks(
                 dbt_project_params.project_dir,
                 dbt_project_params.venv_binary,
             ).to_json()
-        elif dbt_project_params.get("job_id") is not None:  # its dbt cloud task
-            task_config = setup_dbt_cloud_task_config(org_task, dbt_project_params).to_json()
+        elif org_task.task.slug == TASK_DBTCLOUD_JOB:
+            task_config = setup_dbt_cloud_task_config(
+                org_task, dbt_cloud_creds_block, DbtCloudJobParams(**org_task.options())
+            ).to_json()
         else:
             task_config = setup_dbt_core_task_config(
                 org_task, cli_block, dbt_project_params
