@@ -19,6 +19,7 @@ class DbtProjectParams(Schema):
 class DbtCloudJobParams(Schema):
     """
     Schema to define all parameters required to run a any dbt command using dbt Cloud.
+    Extend this if you need to add more params while triggering a dbt cloud job
     """
 
     job_id: int
