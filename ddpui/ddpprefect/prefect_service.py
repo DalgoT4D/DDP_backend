@@ -18,13 +18,15 @@ from ddpui.ddpprefect.schema import (
 )
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.tasks import DataflowOrgTask, TaskLock
-from ddpui.models.org_user import OrgUser
+from ddpui.models.org_user import OrgUser, Org
+from ddpui.models.org import OrgPrefectBlockv1
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.ddpprefect import (
     DDP_WORK_QUEUE,
     FLOW_RUN_COMPLETED_STATE_TYPE,
     FLOW_RUN_CRASHED_STATE_TYPE,
     FLOW_RUN_FAILED_STATE_TYPE,
+    DBTCLOUDCREDS,
 )
 from ddpui.utils.constants import (
     FLOW_RUN_LOGS_OFFSET_LIMIT,
@@ -97,6 +99,31 @@ def prefect_put(endpoint: str, json: dict, **kwargs) -> dict:
 
     try:
         res = requests.put(
+            f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}",
+            headers=headers,
+            timeout=timeout,
+            json=json,
+            **kwargs,
+        )
+    except Exception as error:
+        raise HttpError(500, "connection error") from error
+    try:
+        res.raise_for_status()
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(res.status_code, res.text) from error
+    return res.json()
+
+
+def prefect_patch(endpoint: str, json: dict, **kwargs) -> dict:
+    """make a PATCH request to the proxy"""
+    # we send headers and timeout separately from kwargs, just to be explicit about it
+    headers = kwargs.pop("headers", {})
+    headers["x-ddp-org"] = logger.get_slug()
+    timeout = kwargs.pop("timeout", http_timeout)
+
+    try:
+        res = requests.patch(
             f"{PREFECT_PROXY_API_URL}/proxy/{endpoint}",
             headers=headers,
             timeout=timeout,
@@ -669,3 +696,40 @@ def get_prefect_version():
     """Fetch secret block id and block name"""
     response = prefect_get("prefect/version")
     return response
+
+
+def upsert_dbt_cloud_creds_block(block_name: str, account_id: int, api_key: str) -> dict:
+    """Create a dbt cloud creds block in prefect; using patch style create or udpate"""
+    response = prefect_patch(
+        "blocks/dbtcloudcreds/",
+        {"block_name": block_name, "account_id": account_id, "api_key": api_key},
+    )
+    return response
+
+
+def create_or_update_dbt_cloud_creds_block(
+    org: Org,
+    account_id: int,
+    api_key: str,
+) -> OrgPrefectBlockv1:
+    """Create a dbt cli profile block in that has the warehouse information"""
+    cloud_creds_block = OrgPrefectBlockv1.objects.filter(org=org, block_type=DBTCLOUDCREDS).first()
+    block_name = None
+
+    if not cloud_creds_block:
+        block_name = f"{org.slug}-dbtcloud-creds"
+        cloud_creds_block = OrgPrefectBlockv1(
+            org=org,
+            block_type=DBTCLOUDCREDS,
+            block_name=block_name,
+        )
+    else:
+        block_name = cloud_creds_block.block_name
+
+    result = upsert_dbt_cloud_creds_block(block_name, account_id, api_key)
+
+    cloud_creds_block.block_id = result["block_id"]
+    cloud_creds_block.block_name = result["block_name"]
+    cloud_creds_block.save()
+
+    return cloud_creds_block

@@ -24,7 +24,7 @@ from ddpui.ddpprefect.schema import (
 from ddpui.utils.constants import TASK_DBTRUN, TASK_AIRBYTESYNC
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.schemas.org_task_schema import TaskParameters
-from ddpui.ddpdbt.schema import DbtProjectParams, DbtCloudParams
+from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.utils.prefectlogs import parse_prefect_logs
 from ddpui.utils.helpers import generate_hash_id
 from ddpui.core.pipelinefunctions import (
@@ -117,7 +117,7 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
         if dbt_task_parameters is None:
             raise HttpError(400, "dbt cloud task parameters not found")
 
-        dbt_project_params: DbtCloudParams = dbt_task_parameters[
+        dbt_project_params: DbtProjectParams = dbt_task_parameters[
             "object"
         ]  # this contains account_key, api_key and job_id
 

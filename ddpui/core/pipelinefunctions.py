@@ -85,7 +85,7 @@ def setup_airbyte_update_schema_task_config(
 def setup_dbt_core_task_config(
     org_task: OrgTask,
     cli_profile_block: OrgPrefectBlockv1,
-    dbt_project_params: DbtCliParams,
+    dbt_project_params: DbtProjectParams,
     seq: int = 1,
 ):
     """constructs the prefect payload for a dbt job"""
