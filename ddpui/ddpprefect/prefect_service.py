@@ -204,8 +204,16 @@ def create_airbyte_server_block(blockname):
 
 
 def update_airbyte_server_block(blockname):
-    """We don't update server blocks"""
-    raise Exception("not implemented")
+    """Create airbyte server block in prefect"""
+    response = prefect_put(
+        "blocks/airbyte/server/",
+        {
+            "blockName": blockname,
+            "serverHost": os.getenv("AIRBYTE_SERVER_HOST"),
+            "serverPort": os.getenv("AIRBYTE_SERVER_PORT"),
+        },
+    )
+    return (response["block_id"], response["cleaned_block_name"])
 
 
 def delete_airbyte_server_block(block_id):
