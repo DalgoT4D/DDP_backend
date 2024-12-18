@@ -37,5 +37,5 @@ class Command(BaseCommand):
             block: OrgPrefectBlockv1 = prefect_service.create_or_update_dbt_cloud_creds_block(
                 org, options["account_id"], options["api_key"]
             )
-            print("DBT Cloud credentials block created/updated %s", block.block_name)
+            print(f"DBT Cloud credentials block created/updated {block.block_name}")
             return
