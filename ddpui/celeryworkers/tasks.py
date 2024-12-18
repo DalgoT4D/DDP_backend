@@ -457,11 +457,12 @@ def detect_schema_changes_for_org(org: Org):
                 if frontend_url.endswith("/"):
                     frontend_url = frontend_url[:-1]
                 connections_page = f"{frontend_url}/pipeline/ingest?tab=connections"
+                connection_name = connection_catalog["name"]
                 notify_org_managers(
                     org,
                     f"To the admins of {org.name},\n\nThis email is to let you know that"
-                    " schema changes have been detected in your Dalgo sources.\n\nPlease"
-                    f" visit {connections_page} and review the Pending Actions",
+                    f' schema changes have been detected in your Dalgo sources for "{connection_name}".'
+                    f"\n\nPlease visit {connections_page} and review the Pending Actions",
                 )
             except Exception as err:
                 logger.error(err)
