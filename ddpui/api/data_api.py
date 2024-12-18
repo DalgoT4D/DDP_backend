@@ -25,7 +25,7 @@ def get_tasks(request):
     """Fetch master list of tasks related to transformation"""
     tasks = [
         model_to_dict(task, exclude=["id"])
-        for task in Task.objects.filter(type__in=["dbt", "git"]).all()
+        for task in Task.objects.filter(type__in=["dbt", "git", "dbtcloud"]).all()
     ]
     return tasks
 

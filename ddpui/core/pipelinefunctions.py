@@ -3,7 +3,6 @@ functions to work with pipelies/dataflows
 do not raise http errors here
 """
 
-from pathlib import Path
 from typing import Union
 from functools import cmp_to_key
 from django.db import transaction
@@ -15,6 +14,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpprefect.schema import (
     PrefectDbtTaskSetup,
+    PrefectDbtCloudTaskSetup,
     PrefectShellTaskSetup,
     PrefectAirbyteSyncTaskSetup,
     PrefectAirbyteRefreshSchemaTaskSetup,
@@ -22,6 +22,7 @@ from ddpui.ddpprefect.schema import (
 )
 from ddpui.ddpprefect import (
     AIRBYTECONNECTION,
+    DBTCLOUDJOB,
     DBTCORE,
     SECRET,
     SHELLOPERATION,
@@ -38,8 +39,9 @@ from ddpui.utils.constants import (
     TASK_AIRBYTERESET,
     UPDATE_SCHEMA,
     TRANSFORM_TASKS_SEQ,
+    TASK_DBTCLOUD_JOB,
 )
-from ddpui.ddpdbt.schema import DbtProjectParams
+from ddpui.ddpdbt.schema import DbtCloudJobParams, DbtProjectParams
 
 logger = CustomLogger("ddpui")
 
@@ -102,6 +104,23 @@ def setup_dbt_core_task_config(
     )
 
 
+def setup_dbt_cloud_task_config(
+    org_task: OrgTask,
+    cloud_creds_block: OrgPrefectBlockv1,
+    dbt_project_params: DbtCloudJobParams,
+    seq: int = 1,
+):
+    """constructs the prefect payload for a dbt-cloud job"""
+    return PrefectDbtCloudTaskSetup(
+        seq=seq,
+        slug=org_task.task.slug,
+        type=DBTCLOUDJOB,
+        dbt_cloud_job_id=dbt_project_params.job_id,
+        dbt_cloud_creds_block=cloud_creds_block.block_name,
+        orgtask_uuid=str(org_task.uuid),
+    )
+
+
 def setup_git_pull_shell_task_config(
     org_task: OrgTask,
     project_dir: str,
@@ -151,13 +170,14 @@ def pipeline_with_orgtasks(
     cli_block: OrgPrefectBlockv1 = None,
     dbt_project_params: DbtProjectParams = None,
     start_seq: int = 0,
+    dbt_cloud_creds_block: OrgPrefectBlockv1 = None,
 ):
     """
     Returns a list of task configs for a pipeline;
     This assumes the list of orgtasks is in the correct sequence
     """
     task_configs = []
-
+    # This block works perfectly for dbt cli tasks and dbt cloud tasks both.
     for org_task in org_tasks:
         task_config = None
         if org_task.task.slug == TASK_AIRBYTERESET:
@@ -181,6 +201,10 @@ def pipeline_with_orgtasks(
                 org_task,
                 dbt_project_params.project_dir,
                 dbt_project_params.venv_binary,
+            ).to_json()
+        elif org_task.task.slug == TASK_DBTCLOUD_JOB:
+            task_config = setup_dbt_cloud_task_config(
+                org_task, dbt_cloud_creds_block, DbtCloudJobParams(**org_task.options())
             ).to_json()
         else:
             task_config = setup_dbt_core_task_config(

@@ -245,7 +245,7 @@ def test_seed_data(seed_db):
 
 def test_seed_master_tasks(seed_master_tasks_db):
     """a test to seed the database"""
-    assert Task.objects.count() == 11
+    assert Task.objects.count() == 12
 
 
 # ================================================================================
@@ -273,7 +273,10 @@ def test_post_prefect_dataflow_v1_failure2(orguser_transform_tasks):
     """tests the failure due to missing name of the dataflow in the payload"""
     connections = [PrefectFlowAirbyteConnection2(id="test-conn-id", seq=1)]
     payload = PrefectDataFlowCreateSchema4(
-        name="", connections=connections, cron="", transformTasks=[]
+        name="",
+        connections=connections,
+        cron="",
+        transformTasks=[],
     )
     request = mock_request(orguser_transform_tasks)
 
