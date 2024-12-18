@@ -384,7 +384,10 @@ def test_detect_schema_changes_for_org_send_schema_changes_email(
     ) as fetch_and_update_org_schema_changes_mock, patch(
         "ddpui.celeryworkers.tasks.notify_org_managers"
     ) as notify_org_managers_mock:
-        fetch_and_update_org_schema_changes_mock.return_value = {"schemaChange": "breaking"}, None
+        fetch_and_update_org_schema_changes_mock.return_value = {
+            "schemaChange": "breaking",
+            "name": "CONN_NAME",
+        }, None
         orguser.org = org_without_workspace
         role = Role.objects.filter(slug="account-manager").first()
         if role is None:
@@ -398,7 +401,7 @@ def test_detect_schema_changes_for_org_send_schema_changes_email(
 
     notify_org_managers_mock.assert_called_once_with(
         org_without_workspace,
-        f"To the admins of {org_without_workspace.name},\n\nThis email is to let you know that schema changes have been detected in your Dalgo sources.\n\nPlease visit {connections_page} and review the Pending Actions",
+        f'To the admins of {org_without_workspace.name},\n\nThis email is to let you know that schema changes have been detected in your Dalgo sources for "CONN_NAME".\n\nPlease visit {connections_page} and review the Pending Actions',
     )
 
 
