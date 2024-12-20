@@ -252,7 +252,10 @@ def test_create_airbyte_server_block(mock_post: Mock):
     assert response == ("the-block-id", "theblockname")
 
 
-def test_update_airbyte_server_block():
+@patch("ddpui.ddpprefect.prefect_service.prefect_put")
+def test_update_airbyte_server_block(mock_put: Mock):
+    """tests update_airbyte_server_block"""
+    mock_put.side_effect = Exception("not implemented")
     with pytest.raises(Exception) as excinfo:
         update_airbyte_server_block("blockname")
     assert str(excinfo.value) == "not implemented"
