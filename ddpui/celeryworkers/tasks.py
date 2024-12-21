@@ -443,6 +443,7 @@ def detect_schema_changes_for_org(org: Org):
             continue
 
         change_type = connection_catalog.get("schemaChange")
+        catalog_diff: dict = connection_catalog.get("catalogDiff")
 
         logger.info(
             "Found schema changes for connection %s of type %s",
@@ -451,7 +452,11 @@ def detect_schema_changes_for_org(org: Org):
         )
 
         # notify users
-        if change_type in ["breaking", "non_breaking"]:
+        if change_type == "breaking" or (
+            change_type == "non_breaking"
+            and catalog_diff
+            and len(catalog_diff.get("transforms", [])) > 0
+        ):
             try:
                 frontend_url = os.getenv("FRONTEND_URL")
                 if frontend_url.endswith("/"):
