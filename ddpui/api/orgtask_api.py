@@ -11,10 +11,7 @@ from ddpui import auth
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbytehelpers
 
-from ddpui.ddpprefect import (
-    DBTCLIPROFILE,
-    SECRET,
-)
+from ddpui.ddpprefect import DBTCLIPROFILE, SECRET, DBTCLOUDCREDS
 from ddpui.models.org import (
     Org,
     OrgWarehouse,
@@ -31,7 +28,7 @@ from ddpui.models.tasks import (
 from ddpui.ddpprefect.schema import (
     PrefectSecretBlockCreate,
 )
-from ddpui.ddpdbt.schema import DbtProjectParams
+from ddpui.ddpdbt.schema import DbtProjectParams, DbtCloudJobParams
 from ddpui.schemas.org_task_schema import CreateOrgTaskPayload, TaskParameters
 
 from ddpui.core.orgdbt_manager import DbtProjectManager
@@ -97,21 +94,47 @@ def post_orgtask(request, payload: CreateOrgTaskPayload):
 
     dataflow = None
     if task.slug in LONG_RUNNING_TASKS:
-        dbt_project_params: DbtProjectParams = DbtProjectManager.gather_dbt_project_params(
-            orguser.org, orgdbt
-        )
+        # For dbt-cli
+        if task.type == "dbt":
+            dbt_project_params: DbtProjectParams = DbtProjectManager.gather_dbt_project_params(
+                orguser.org, orgdbt
+            )
 
-        # fetch the cli profile block
-        cli_profile_block = OrgPrefectBlockv1.objects.filter(
-            org=orguser.org, block_type=DBTCLIPROFILE
-        ).first()
+            # fetch the cli profile block
+            cli_profile_block = OrgPrefectBlockv1.objects.filter(
+                org=orguser.org, block_type=DBTCLIPROFILE
+            ).first()
 
-        if cli_profile_block is None:
-            raise HttpError(400, "dbt cli profile block not found")
+            if cli_profile_block is None:
+                raise HttpError(400, "dbt cli profile block not found")
 
-        dataflow = create_prefect_deployment_for_dbtcore_task(
-            orgtask, cli_profile_block, dbt_project_params
-        )
+            dataflow = create_prefect_deployment_for_dbtcore_task(
+                orgtask, cli_profile_block, dbt_project_params
+            )
+
+        # For dbt-cloud
+        if task.type == "dbtcloud":
+            # fetch dbt cloud creds block
+            dbt_cloud_creds_block = OrgPrefectBlockv1.objects.filter(
+                org=orguser.org, block_type=DBTCLOUDCREDS
+            ).first()
+
+            if dbt_cloud_creds_block is None:
+                raise HttpError(400, "dbt cloud credentials block not found")
+
+            try:
+                dbt_cloud_params = DbtCloudJobParams(**parameters["options"])
+            except Exception as error:
+                logger.exception(error)
+                raise HttpError(400, "Job id should be numeric") from error
+
+            try:
+                dataflow = create_prefect_deployment_for_dbtcore_task(
+                    orgtask, dbt_cloud_creds_block, dbt_cloud_params
+                )
+            except Exception as error:
+                logger.exception(error)
+                raise HttpError(400, "failed to create dbt cloud deployment") from error
 
     return {
         **model_to_dict(orgtask, fields=["parameters"]),
@@ -208,7 +231,7 @@ def get_prefect_transformation_tasks(request):
     org_tasks = (
         OrgTask.objects.filter(
             org=orguser.org,
-            task__type__in=["git", "dbt"],
+            task__type__in=["git", "dbt", "dbtcloud"],
         )
         .order_by("-generated_by")
         .select_related("task")
@@ -226,7 +249,9 @@ def get_prefect_transformation_tasks(request):
     for org_task in org_tasks:
         # git pull               : "git" + " " + "pull"
         # dbt run --full-refresh : "dbt" + " " + "run --full-refresh"
-        command = org_task.task.type + " " + org_task.get_task_parameters()
+        command = None
+        if org_task.task.type != "dbtcloud":
+            command = org_task.task.type + " " + org_task.get_task_parameters()
 
         lock = None
         all_locks = [lock for lock in all_org_task_locks if lock.orgtask_id == org_task.id]
@@ -432,7 +457,7 @@ def post_delete_orgtask(request, orgtask_uuid):  # pylint: disable=unused-argume
     if org_task is None:
         raise HttpError(400, "task not found")
 
-    if org_task.task.type not in ["dbt", "git", "edr"]:
+    if org_task.task.type not in ["dbt", "git", "edr", "dbtcloud"]:
         raise HttpError(400, "task not supported")
 
     if orguser.org.dbt is None:

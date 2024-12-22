@@ -1,3 +1,4 @@
+import tempfile
 from urllib.parse import quote
 
 from sqlalchemy.engine import create_engine
@@ -18,11 +19,45 @@ class PostgresClient(Warehouse):
         """
         creds["encoded_username"] = quote(creds["username"].strip())
         creds["encoded_password"] = quote(creds["password"].strip())
-        connection_string = (
-            "postgresql://{encoded_username}:{encoded_password}@{host}/{database}".format(**creds)
-        )
 
-        self.engine = create_engine(connection_string, pool_size=5, pool_timeout=30)
+        connection_args = {
+            "host": creds["host"],
+            "port": creds["port"],
+            "dbname": creds["database"],
+            "user": creds["encoded_username"],
+            "password": creds["encoded_password"],
+        }
+
+        connection_string = "postgresql+psycopg2://"
+
+        if "ssl_mode" in creds:
+            creds["sslmode"] = creds["ssl_mode"]
+
+        if "sslrootcert" in creds:
+            connection_args["sslrootcert"] = creds["sslrootcert"]
+
+        if "sslmode" in creds and isinstance(creds["sslmode"], str):
+            connection_args["sslmode"] = creds["sslmode"]
+
+        if "sslmode" in creds and isinstance(creds["sslmode"], bool):
+            connection_args["sslmode"] = "require" if creds["sslmode"] else "disable"
+
+        if (
+            "sslmode" in creds
+            and isinstance(creds["sslmode"], dict)
+            and "ca_certificate" in creds["sslmode"]
+        ):
+            # connect_params['sslcert'] needs a file path but
+            # creds['sslmode']['ca_certificate']
+            # is a string (i.e. the actual certificate). so we write
+            # it to disk and pass the file path
+            with tempfile.NamedTemporaryFile(delete=False) as fp:
+                fp.write(creds["sslmode"]["ca_certificate"].encode())
+                connection_args["sslrootcert"] = fp.name
+
+        self.engine = create_engine(
+            connection_string, connect_args=connection_args, pool_size=5, pool_timeout=30
+        )
         self.inspect_obj: Inspector = inspect(
             self.engine
         )  # this will be used to fetch metadata of the database

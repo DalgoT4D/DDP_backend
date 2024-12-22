@@ -63,6 +63,7 @@ class Command(BaseCommand):
                         "org_slug": org_task.org.slug,
                     }
                 },
+                cron=cron,
             ),
             MANUL_DBT_WORK_QUEUE,
         )

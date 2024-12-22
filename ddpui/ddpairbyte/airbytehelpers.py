@@ -4,13 +4,13 @@ functions which work with airbyte and with the dalgo database
 
 import json
 import os
+from pathlib import Path
 import yaml
 from ninja.errors import HttpError
-from pathlib import Path
 from django.utils.text import slugify
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Prefetch, F, Window, Q
+from django.db.models import F, Window, Q
 from django.db.models.functions import RowNumber
 from django.forms.models import model_to_dict
 
@@ -57,7 +57,6 @@ from ddpui.utils.constants import (
 from ddpui.utils.helpers import (
     generate_hash_id,
     update_dict_but_not_stars,
-    map_airbyte_keys_to_postgres_keys,
     get_schedule_time_for_large_jobs,
 )
 from ddpui.utils import secretsmanager

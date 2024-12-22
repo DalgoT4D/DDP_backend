@@ -119,5 +119,16 @@
             "command": null,
             "is_system": false
         }
+    },
+    {
+        "model": "ddpui.Task",
+        "pk": 12,
+        "fields": {
+            "type": "dbtcloud",
+            "slug": "dbt-cloud-job",
+            "label": "DBT Cloud job",
+            "command": null,
+            "is_system": true
+        }
     }
 ]

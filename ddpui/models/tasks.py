@@ -33,6 +33,7 @@ class TaskProgressHashPrefix(str, Enum):
     RUNELEMENTARY = "run-elementary"
     DATAINSIGHTS = "data-insights"
     SCHEMA_CHANGE = "schema-change"
+    SOURCE_SCHEMA_CATALOG = "source-schema-catalog"
 
 
 class OrgTaskGeneratedBy(str, Enum):

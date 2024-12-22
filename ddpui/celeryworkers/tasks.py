@@ -443,6 +443,7 @@ def detect_schema_changes_for_org(org: Org):
             continue
 
         change_type = connection_catalog.get("schemaChange")
+        catalog_diff: dict = connection_catalog.get("catalogDiff")
 
         logger.info(
             "Found schema changes for connection %s of type %s",
@@ -451,17 +452,22 @@ def detect_schema_changes_for_org(org: Org):
         )
 
         # notify users
-        if change_type in ["breaking", "non_breaking"]:
+        if change_type == "breaking" or (
+            change_type == "non_breaking"
+            and catalog_diff
+            and len(catalog_diff.get("transforms", [])) > 0
+        ):
             try:
                 frontend_url = os.getenv("FRONTEND_URL")
                 if frontend_url.endswith("/"):
                     frontend_url = frontend_url[:-1]
                 connections_page = f"{frontend_url}/pipeline/ingest?tab=connections"
+                connection_name = connection_catalog["name"]
                 notify_org_managers(
                     org,
                     f"To the admins of {org.name},\n\nThis email is to let you know that"
-                    " schema changes have been detected in your Dalgo sources.\n\nPlease"
-                    f" visit {connections_page} and review the Pending Actions",
+                    f' schema changes have been detected in your Dalgo sources for "{connection_name}".'
+                    f"\n\nPlease visit {connections_page} and review the Pending Actions",
                 )
             except Exception as err:
                 logger.error(err)
@@ -509,6 +515,35 @@ def get_connection_catalog_task(task_key, org_id, connection_id):
         }
     )
     return connection_catalog
+
+
+@app.task()
+def get_schema_catalog_task(task_key, workspace_id, source_id):
+    """Fetch a schema_catalog while creating a connection as a Celery task"""
+    # the STP has to live longer than the task will take
+    taskprogress = SingleTaskProgress(task_key, 600)
+    taskprogress.add({"message": "started", "status": TaskProgressStatus.RUNNING, "result": None})
+
+    try:
+        res = airbyte_service.get_source_schema_catalog(workspace_id, source_id)
+        taskprogress.add(
+            {
+                "message": "fetched catalog data",
+                "status": TaskProgressStatus.COMPLETED,
+                "result": res,
+            }
+        )
+        return res
+    except Exception as err:
+        logger.error(err)
+        taskprogress.add(
+            {
+                "message": "invalid error",
+                "status": TaskProgressStatus.FAILED,
+                "result": None,
+            }
+        )
+        return err
 
 
 @app.task(bind=False)
