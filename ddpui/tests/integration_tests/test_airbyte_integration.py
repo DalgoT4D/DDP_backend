@@ -19,7 +19,7 @@ def load_configurations():
         return json.load(config_file)
 
 
-integration_configs = load_configurations()
+# integration_configs = load_configurations()  #commenting the code for a while
 
 
 @pytest.mark.skip(reason="Skipping this test as airbyte integraion needs to be done")
