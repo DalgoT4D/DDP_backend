@@ -12,6 +12,16 @@ from ddpui.tests.helper.test_airbyte_unit_schemas import *
 from ddpui.ddpairbyte.airbyte_service import *
 
 
+def load_configurations():
+    """Loads all configurations from a single JSON file."""
+    config_file_path = os.getenv("INTEGRATION_TESTS_PATH")  # file path defined in env file.
+    with open(config_file_path, "r") as config_file:
+        return json.load(config_file)
+
+
+integration_configs = load_configurations()
+
+
 @pytest.mark.skip(reason="Skipping this test as airbyte integraion needs to be done")
 class TestDeleteSource:
     def test_create_workspace(self):  # skipcq: PYL-R0201
@@ -65,51 +75,69 @@ class TestDeleteSource:
 
 @pytest.mark.skip(reason="Skipping this test as airbyte integraion needs to be done")
 class TestWorkspace:
-    """class which holds all the workspace tests"""
+    """Class which holds all the workspace tests dynamically for multiple workspaces."""
 
-    workspace_id = None
+    def test_create_workspace(self):
+        """Creates workspaces dynamically and checks airbyte response."""
+        workspace_configs = integration_configs.get("workspaces", [])
+        TestWorkspace.created_workspaces = []  # Store created workspaces for later use
 
-    def test_create_workspace(self):  # skipcq: PYL-R0201
-        """creates a workspace, checks airbyte response"""
-        payload = {"name": "test_workspace"}
+        for workspace_config in workspace_configs:
+            payload = {"name": workspace_config["name"]}
 
-        try:
-            CreateWorkspaceTestPayload(**payload)
-        except ValidationError as error:
-            raise ValueError(f"Field do not match in the payload: {error.errors()}") from error
+            try:
+                CreateWorkspaceTestPayload(**payload)
+                res = create_workspace(**payload)
+                CreateWorkspaceTestResponse(**res)
+                TestWorkspace.created_workspaces.append(
+                    {"workspace_id": res["workspaceId"], "name": workspace_config["name"]}
+                )
+                print(
+                    f"Successfully created workspace: {workspace_config['name']} with ID: {res['workspaceId']}"
+                )
+            except ValidationError as error:
+                raise ValueError(
+                    f"Error creating workspace '{workspace_config['name']}': {error.errors()}"
+                )
 
-        try:
-            res = create_workspace(**payload)
-            CreateWorkspaceTestResponse(**res)
-            TestWorkspace.workspace_id = res["workspaceId"]
-        except ValidationError as error:
-            raise ValueError(f"Response validation failed: {error.errors()}") from error
+    def test_get_workspace(self):
+        """Gets details for all created workspaces."""
+        for workspace in TestWorkspace.created_workspaces:
+            workspace_id = workspace["workspace_id"]
+            try:
+                res = get_workspace(workspace_id=workspace_id)
+                GetWorkspaceTestResponse(**res)
+                print(f"Successfully retrieved details for workspace ID: {workspace_id}")
+            except ValidationError as error:
+                raise ValueError(
+                    f"Response validation failed for workspace ID '{workspace_id}': {error.errors()}"
+                )
 
-    def test_get_workspace(self):  # skipcq: PYL-R0201
-        """gets a workspace, checks airbyte response"""
-        try:
-            res = get_workspace(workspace_id=TestWorkspace.workspace_id)
-            GetWorkspaceTestResponse(**res)
-        except ValidationError as error:
-            raise ValueError(f"Response validation failed: {error.errors()}") from error
-
-    def test_get_workspaces(self):  # skipcq: PYL-R0201
-        """gets all workspaces, checks airbyte response"""
+    def test_get_workspaces(self):
+        """Gets all workspaces and checks airbyte response."""
         try:
             res = get_workspaces()
             GetWorkspacesTestResponse(**res)
+            print("Successfully retrieved all workspaces.")
         except ValidationError as error:
-            raise ValueError(f"Response validation failed: {error.errors()}") from error
+            raise ValueError(f"Response validation failed: {error.errors()}")
 
-    def test_set_workspace_name(self):  # skipcq: PYL-R0201
-        """sets workspace name, checks airbyte response"""
-        new_name = "test"
+    def test_set_workspace_name(self):
+        """Sets new names for all created workspaces."""
+        for workspace in TestWorkspace.created_workspaces:
+            workspace_id = workspace["workspace_id"]
+            new_name = f"{workspace['name']}_updated"
 
-        try:
-            res = set_workspace_name(workspace_id=TestWorkspace.workspace_id, name=new_name)
-            SetWorkspaceTestResponse(**res)
-        except ValidationError as error:
-            raise ValueError(f"Response validation failed: {error.errors()}") from error
+            payload = {"workspace_id": workspace_id, "name": new_name}
+
+            try:
+                res = set_workspace_name(**payload)
+                SetWorkspaceTestResponse(**res)
+                print(f"Successfully updated workspace ID: {workspace_id} to new name: {new_name}")
+            except ValidationError as error:
+                raise ValueError(
+                    f"Response validation failed for workspace ID '{workspace_id}': {error.errors()}"
+                )
 
 
 @pytest.fixture(scope="session")
@@ -124,32 +152,26 @@ def test_workspace_id():
 class TestAirbyteSource:
     """class which holds all the source tests"""
 
-    def load_configurations():
-        """Loads source configurations from a JSON file."""
-        config_file_path = os.getenv("INTEGRATION_TESTS_PATH")  # this is the path of the json file.
-        with open(config_file_path, "r") as config_file:
-            return json.load(config_file)
-
     def test_source_connection(self, test_workspace_id):
         """tests connectivity to a source"""
-        source_configs = self.load_configurations()
+        source_configs = integration_configs.get("sources", [])
         source_definitions = get_source_definitions(workspace_id=test_workspace_id)[
             "sourceDefinitions"
         ]
 
         for source_config in source_configs:
-            source_name = source_config["source_name"]
+            name = source_config["name"]
             config = source_config["config"]
 
             # Finiding source definition for the current source
             source_definition = None
             for sd in source_definitions:
-                if sd["name"] == source_name:
+                if sd["name"] == name:
                     source_definition = sd
                     break
 
             if not source_definition:
-                raise ValueError(f"Source definition '{source_name}' not found.")
+                raise ValueError(f"Source definition '{name}' not found.")
 
             source_definition_id = source_definition["sourceDefinitionId"]
 
@@ -158,16 +180,16 @@ class TestAirbyteSource:
                 res = check_source_connection(
                     test_workspace_id,
                     AirbyteSourceCreate(
-                        name=f"source_{source_name.lower().replace(' ', '_')}",
+                        name=f"source_{name.lower().replace(' ', '_')}",
                         sourceDefId=source_definition_id,
                         config=config,
                     ),
                 )
                 CheckSourceConnectionTestResponse(**res)
-                print(f"Successfully connected to source: {source_name}")
+                print(f"Successfully connected to source: {name}")
             except ValidationError as error:
                 raise ValueError(
-                    f"Response validation failed for source '{source_name}': {error.errors()}"
+                    f"Response validation failed for source '{name}': {error.errors()}"
                 )
 
     def test_a_create_source(self, test_workspace_id):
@@ -180,18 +202,18 @@ class TestAirbyteSource:
         TestAirbyteSource.created_sources = []  # Store created source IDs for later tests
 
         for source_config in source_configs:
-            source_name = source_config["source_name"]
+            name = source_config["name"]
             config = source_config["config"]
 
             # Find the source definition
             source_definition = None
             for sd in source_definitions:
-                if sd["name"] == source_name:
+                if sd["name"] == name:
                     source_definition = sd
                     break
 
             if not source_definition:
-                raise ValueError(f"Source definition '{source_name}' not found.")
+                raise ValueError(f"Source definition '{name}' not found.")
 
             source_definition_id = source_definition["sourceDefinitionId"]
 
@@ -200,7 +222,7 @@ class TestAirbyteSource:
                 "sourcedef_id": source_definition_id,
                 "config": config,
                 "workspace_id": str(test_workspace_id),
-                "name": f"source_{source_name.lower().replace(' ', '_')}",
+                "name": f"source_{name.lower().replace(' ', '_')}",
             }
 
             # Create the source
@@ -211,22 +233,22 @@ class TestAirbyteSource:
                 TestAirbyteSource.created_sources.append(
                     {"source_id": res["sourceId"], "config": config}
                 )
-                print(f"Successfully created source: {source_name} with ID: {res['sourceId']}")
+                print(f"Successfully created source: {name} with ID: {res['sourceId']}")
             except ValidationError as error:
-                raise ValueError(f"Error creating source '{source_name}': {error.errors()}")
+                raise ValueError(f"Error creating source '{name}': {error.errors()}")
 
     def test_source_connection_for_update(self):
         """Tests connectivity for updating all sources dynamically."""
         for source in TestAirbyteSource.created_sources:
             source_id = source["source_id"]
             config = source["config"]
-            source_name = source["name"]
+            name = source["name"]
 
             try:
                 res = check_source_connection_for_update(
                     source_id,
                     AirbyteSourceUpdateCheckConnection(
-                        name=source_name,
+                        name=name,
                         config=config,
                     ),
                 )
