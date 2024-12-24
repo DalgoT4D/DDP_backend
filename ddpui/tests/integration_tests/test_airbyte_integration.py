@@ -458,103 +458,124 @@ def test_destination_id(test_workspace_id):
 
 @pytest.mark.skip(reason="Skipping this test as airbyte integraion needs to be done")
 class TestConnection:
-    def test_a_create_connection(
-        self,
-        test_workspace_id,
-        test_source_id,
-        test_destination_id,
-    ):  # skipcq: PYL-R0201
+    def test_a_create_connections(self, test_workspace_id, test_destination_id):
+        """Creates connections dynamically for all sources and checks responses."""
         workspace_id = str(test_workspace_id)
-        connection_info = schema.AirbyteConnectionCreate(
-            sourceId=str(test_source_id),
-            destinationId=str(test_destination_id),
-            name="Test Connection",
-            streams=[
-                {
-                    "name": "covid19data",
-                    "selected": True,
-                    "syncMode": "full_refresh",
-                    "destinationSyncMode": "overwrite",
-                    "cursorField": "default",
-                }
-            ],
-        )
+        sources = get_sources(workspace_id=workspace_id)["sources"]  # getting all the  sources.
+        TestConnection.created_connections = []  # Store created connection IDs for later tests
 
-        try:
-            res = create_connection(workspace_id, connection_info)
-            CreateConnectionTestResponse(**res)
-            TestConnection.connection_id = res["connectionId"]
-            # check if the streams have been set in the connection
-            conn = get_connection(workspace_id, res["connectionId"])
-            assert conn is not None
-            assert "syncCatalog" in conn
-            assert "streams" in conn["syncCatalog"]
-            assert len(conn["syncCatalog"]["streams"]) == len(connection_info.streams)
+        for source in sources:
+            source_id = source["sourceId"]
+            source_name = source["name"]
 
-            for stream in conn["syncCatalog"]["streams"]:
-                assert "config" in stream
-                assert stream["config"]["selected"] is True
-                assert stream["config"]["cursorField"] == []
+            # Fetch streams dynamically for the source
+            streams = get_source_schema_catalog(
+                test_workspace_id, source_id
+            )  # this fetches the schema catalog for the source.
+            GetSourceSchemaCatalogTestResponse(catalog=res)(workspace_id, source_id)
 
-        except ValidationError as error:
-            raise ValueError(f"Response validation failed: {error.errors()}") from error
+            if not streams:
+                print(
+                    f"No streams found for source: {source_name} ({source_id}). Skipping connection creation."
+                )
+                continue
 
-    def test_get_connection(self, test_workspace_id):  # skipcq: PYL-R0201
+            connection_info = schema.AirbyteConnectionCreate(
+                sourceId=str(source_id),
+                destinationId=str(test_destination_id),
+                name=f"Connection_for_{source_name}",
+                streams=streams,
+            )
+
+            try:
+                # Create the connection
+                res = create_connection(
+                    workspace_id, connection_info
+                )  # so we fetched all sources then, for each source we fetched streams and then created connection.
+                CreateConnectionTestResponse(**res)
+                TestConnection.created_connections.append(
+                    {
+                        "connection_id": res["connectionId"],
+                        "source_id": source_id,
+                        "streams": streams,
+                    }
+                )
+
+                # Validate the created connection
+                conn = get_connection(workspace_id, res["connectionId"])
+                assert conn is not None
+                assert "syncCatalog" in conn
+                assert "streams" in conn["syncCatalog"]
+                assert len(conn["syncCatalog"]["streams"]) == len(streams)
+
+                print(f"Successfully created connection for source: {source_name} ({source_id})")
+
+            except ValidationError as error:
+                raise ValueError(
+                    f"Response validation failed for connection to source '{source_name}': {error.errors()}"
+                )
+
+    def test_get_connection(self, test_workspace_id):
+        """Gets details for all created connections."""
         workspace_id = test_workspace_id
-        connection_id = TestConnection.connection_id
 
-        try:
-            res = get_connection(workspace_id, connection_id)
-            GetConnectionTestResponse(**res)
-        except ValidationError as error:
-            raise ValueError(f"Response validation failed: {error.errors()}") from error
+        for connection in TestConnection.created_connections:
+            connection_id = connection["connection_id"]
 
-    def test_update_connection(
-        self, test_workspace_id, test_source_id, test_destination_id
-    ):  # skipcq: PYL-R0201
+            try:
+                res = get_connection(workspace_id, connection_id)
+                GetConnectionTestResponse(**res)
+                print(f"Successfully retrieved connection ID: {connection_id}")
+            except ValidationError as error:
+                raise ValueError(
+                    f"Response validation failed for connection ID '{connection_id}': {error.errors()}"
+                )
+
+    def test_update_connections(self, test_workspace_id, test_destination_id):
+        """Updates all created connections dynamically."""
         workspace_id = test_workspace_id
-        current_connection = get_connection(workspace_id, TestConnection.connection_id)
-        connection_info = schema.AirbyteConnectionUpdate(
-            sourceId=test_source_id,
-            destinationId=test_destination_id,
-            connectionId=TestConnection.connection_id,
-            streams=[
-                {
-                    "name": "covid19data",
-                    "selected": True,
-                    "syncMode": "full_refresh",
-                    "destinationSyncMode": "append",
-                    "cursorField": ["default"],
-                }
-            ],
-            name="New Connection Name",
-        )
 
-        try:
-            res = update_connection(workspace_id, connection_info, current_connection)
-            UpdateConnectionTestResponse(**res)
+        for connection in TestConnection.created_connections:
+            connection_id = connection["connection_id"]
+            source_id = connection["source_id"]
+            streams = connection["streams"]
 
-            # check if the streams have been set in the connection
-            conn = get_connection(workspace_id, res["connectionId"])
-            assert conn is not None
-            assert "syncCatalog" in conn
-            assert "streams" in conn["syncCatalog"]
-            assert len(conn["syncCatalog"]["streams"]) == len(connection_info.streams)
+            # Modify the streams (e.g., change destinationSyncMode to "append")
+            updated_streams = []
+            for stream in streams:
+                new_stream = dict(stream)  # Copy the original stream
+                new_stream["destinationSyncMode"] = "append"  # Update destinationSyncMode
+                updated_streams.append(new_stream)
 
-            for stream in conn["syncCatalog"]["streams"]:
-                assert "config" in stream
-                assert stream["config"]["selected"] is True
-                assert stream["config"]["cursorField"] == []
+            connection_info = schema.AirbyteConnectionUpdate(
+                sourceId=source_id,
+                destinationId=test_destination_id,
+                connectionId=connection_id,
+                streams=updated_streams,
+                name=f"Updated Connection for {connection_id}",
+            )
 
-        except ValidationError as error:
-            raise ValueError(f"Response validation failed: {error.errors()}") from error
+            try:
+                res = update_connection(workspace_id, connection_info, {})
+                UpdateConnectionTestResponse(**res)
+                print(f"Successfully updated connection ID: {connection_id}")
+            except ValidationError as error:
+                raise ValueError(
+                    f"Response validation failed for connection ID '{connection_id}': {error.errors()}"
+                )
 
-    def test_delete_connection(self, test_workspace_id):  # skipcq: PYL-R0201
+    def test_delete_connections(self, test_workspace_id):
+        """Deletes all created connections dynamically."""
         workspace_id = test_workspace_id
-        connection_id = TestConnection.connection_id
 
-        try:
-            res = delete_connection(workspace_id, connection_id)
-            assert res == {}
-        except ValidationError as error:
-            raise ValueError(f"Response validation failed: {error.errors()}") from error
+        for connection in TestConnection.created_connections:
+            connection_id = connection["connection_id"]
+
+            try:
+                res = delete_connection(workspace_id, connection_id)
+                assert res == {}
+                print(f"Successfully deleted connection ID: {connection_id}")
+            except ValidationError as error:
+                raise ValueError(
+                    f"Response validation failed for connection ID '{connection_id}': {error.errors()}"
+                )
