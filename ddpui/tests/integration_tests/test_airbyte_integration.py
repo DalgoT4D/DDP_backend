@@ -1,3 +1,4 @@
+import json
 import os
 import django
 from pydantic import ValidationError
@@ -123,134 +124,196 @@ def test_workspace_id():
 class TestAirbyteSource:
     """class which holds all the source tests"""
 
-    source_config = {
-        "url": "https://storage.googleapis.com/covid19-open-data/v2/latest/epidemiology.csv",
-        "format": "csv",
-        "provider": {"storage": "HTTPS"},
-        "dataset_name": "covid19data",
-    }
+    def load_configurations():
+        """Loads source configurations from a JSON file."""
+        config_file_path = os.getenv("INTEGRATION_TESTS_PATH")  # this is the path of the json file.
+        with open(config_file_path, "r") as config_file:
+            return json.load(config_file)
 
     def test_source_connection(self, test_workspace_id):
         """tests connectivity to a source"""
+        source_configs = self.load_configurations()
         source_definitions = get_source_definitions(workspace_id=test_workspace_id)[
             "sourceDefinitions"
         ]
-        for source_definition in source_definitions:
-            if source_definition["name"] == "File (CSV, JSON, Excel, Feather, Parquet)":
-                TestAirbyteSource.source_definition_id = source_definition["sourceDefinitionId"]
-                break
 
-        try:
-            res = check_source_connection(
-                test_workspace_id,
-                AirbyteSourceCreate(
-                    name="unused",
-                    sourceDefId=TestAirbyteSource.source_definition_id,
-                    config=self.source_config,
-                ),
-            )
-            CheckSourceConnectionTestResponse(**res)
-        except ValidationError as error:
-            raise ValueError(f"Response validation failed: {error.errors()}") from error
+        for source_config in source_configs:
+            source_name = source_config["source_name"]
+            config = source_config["config"]
 
-    def test_a_create_source(self, test_workspace_id):  # skipcq: PYL-R0201
-        """tests source creation"""
-        payload = {
-            "sourcedef_id": TestAirbyteSource.source_definition_id,
-            "config": TestAirbyteSource.source_config,
-            "workspace_id": str(test_workspace_id),
-            "name": "source1",
-        }
-        try:
-            CreateSourceTestPayload(**payload)
-        except ValidationError as error:
-            raise ValueError(f"Field do not match in payload: {error.errors()}") from error
-        try:
-            res = create_source(**payload)
-            CreateSourceTestResponse(**res)
-            TestAirbyteSource.source_id = res["sourceId"]
-        except ValidationError as error:
-            raise ValueError(f"Response validation failed: {error.errors()}") from error
+            # Finiding source definition for the current source
+            source_definition = None
+            for sd in source_definitions:
+                if sd["name"] == source_name:
+                    source_definition = sd
+                    break
+
+            if not source_definition:
+                raise ValueError(f"Source definition '{source_name}' not found.")
+
+            source_definition_id = source_definition["sourceDefinitionId"]
+
+            # Check the source connection
+            try:
+                res = check_source_connection(
+                    test_workspace_id,
+                    AirbyteSourceCreate(
+                        name=f"source_{source_name.lower().replace(' ', '_')}",
+                        sourceDefId=source_definition_id,
+                        config=config,
+                    ),
+                )
+                CheckSourceConnectionTestResponse(**res)
+                print(f"Successfully connected to source: {source_name}")
+            except ValidationError as error:
+                raise ValueError(
+                    f"Response validation failed for source '{source_name}': {error.errors()}"
+                )
+
+    def test_a_create_source(self, test_workspace_id):
+        """Tests source creation dynamically for each source."""
+        source_configs = self.load_configurations()
+        source_definitions = get_source_definitions(workspace_id=test_workspace_id)[
+            "sourceDefinitions"
+        ]
+
+        TestAirbyteSource.created_sources = []  # Store created source IDs for later tests
+
+        for source_config in source_configs:
+            source_name = source_config["source_name"]
+            config = source_config["config"]
+
+            # Find the source definition
+            source_definition = None
+            for sd in source_definitions:
+                if sd["name"] == source_name:
+                    source_definition = sd
+                    break
+
+            if not source_definition:
+                raise ValueError(f"Source definition '{source_name}' not found.")
+
+            source_definition_id = source_definition["sourceDefinitionId"]
+
+            # Build the payload for source creation
+            payload = {
+                "sourcedef_id": source_definition_id,
+                "config": config,
+                "workspace_id": str(test_workspace_id),
+                "name": f"source_{source_name.lower().replace(' ', '_')}",
+            }
+
+            # Create the source
+            try:
+                CreateSourceTestPayload(**payload)
+                res = create_source(**payload)
+                CreateSourceTestResponse(**res)
+                TestAirbyteSource.created_sources.append(
+                    {"source_id": res["sourceId"], "config": config}
+                )
+                print(f"Successfully created source: {source_name} with ID: {res['sourceId']}")
+            except ValidationError as error:
+                raise ValueError(f"Error creating source '{source_name}': {error.errors()}")
 
     def test_source_connection_for_update(self):
-        """tests connectivity to a source while editing"""
-        try:
-            res = check_source_connection_for_update(
-                TestAirbyteSource.source_id,
-                AirbyteSourceUpdateCheckConnection(
-                    name="unused",
-                    config=self.source_config,
-                ),
-            )
-            CheckSourceConnectionTestResponse(**res)
-        except ValidationError as error:
-            raise ValueError(f"Response validation failed: {error.errors()}") from error
+        """Tests connectivity for updating all sources dynamically."""
+        for source in TestAirbyteSource.created_sources:
+            source_id = source["source_id"]
+            config = source["config"]
+            source_name = source["name"]
 
-    def test_get_definitions(self, test_workspace_id):  # skipcq: PYL-R0201
-        """tests retrieval of source definitions"""
+            try:
+                res = check_source_connection_for_update(
+                    source_id,
+                    AirbyteSourceUpdateCheckConnection(
+                        name=source_name,
+                        config=config,
+                    ),
+                )
+                CheckSourceConnectionTestResponse(**res)
+                print(f"Successfully tested connection for update on source ID: {source_id}")
+            except ValidationError as error:
+                raise ValueError(
+                    f"Response validation failed for source ID '{source_id}': {error.errors()}"
+                )
+
+    def test_get_definitions(self, test_workspace_id):
+        """Tests retrieval of source definitions."""
         try:
             res = get_source_definitions(workspace_id=test_workspace_id)["sourceDefinitions"]
             GetSourceDefinitionsTestResponse(__root__=res)
+            print("Successfully retrieved source definitions.")
         except ValidationError as error:
-            raise ValueError(f"Response validation failed: {error.errors()}") from error
+            raise ValueError(f"Response validation failed: {error.errors()}")
 
-    def test_get_source_schema_catalog(self, test_workspace_id):  # skipcq: PYL-R0201
-        """fetches the schema catalog for a source"""
-        try:
-            res = get_source_schema_catalog(test_workspace_id, TestAirbyteSource.source_id)
-            GetSourceSchemaCatalogTestResponse(catalog=res)
-        except ValidationError as error:
-            raise ValueError(f"Response validation failed: {error.errors()}") from error
+    def test_get_source_schema_catalog(self, test_workspace_id):
+        """Fetches the schema catalog for all created sources."""
+        for source in TestAirbyteSource.created_sources:
+            source_id = source["source_id"]
+            try:
+                res = get_source_schema_catalog(test_workspace_id, source_id)
+                GetSourceSchemaCatalogTestResponse(catalog=res)
+                print(f"Successfully retrieved schema catalog for source ID: {source_id}")
+            except ValidationError as error:
+                raise ValueError(
+                    f"Response validation failed for source ID '{source_id}': {error.errors()}"
+                )
 
-    def test_fail_to_get_source_schema_catalog(self, test_workspace_id):  # skipcq: PYL-R0201
-        """fetches the schema catalog for a source"""
+    def test_fail_to_get_source_schema_catalog(self, test_workspace_id):
+        """Fetches the schema catalog for a non-existent source to validate failure."""
         try:
             get_source_schema_catalog(test_workspace_id, "not-a-source-id")
         except HttpError:
-            pass
+            print("Correctly failed to fetch schema catalog for invalid source ID.")
 
-    def test_get_source(self, test_workspace_id):  # skipcq: PYL-R0201
-        """tests retrieval of a single source"""
-        try:
-            res = get_source(
-                workspace_id=test_workspace_id,
-                source_id=TestAirbyteSource.source_id,
-            )
-            GetSourceTestResponse(**res)
-        except ValidationError as error:
-            raise ValueError(f"Response validation failed: {error.errors()}") from error
+    def test_get_source(self, test_workspace_id):
+        """Tests retrieval of a single source."""
+        for source in TestAirbyteSource.created_sources:
+            source_id = source["source_id"]
+            try:
+                res = get_source(
+                    workspace_id=test_workspace_id,
+                    source_id=source_id,
+                )
+                GetSourceTestResponse(**res)
+                print(f"Successfully retrieved details for source ID: {source_id}")
+            except ValidationError as error:
+                raise ValueError(
+                    f"Response validation failed for source ID '{source_id}': {error.errors()}"
+                )
 
-    def test_get_sources(self, test_workspace_id):  # skipcq: PYL-R0201
-        """tests retrieval of all sources"""
+    def test_get_sources(self, test_workspace_id):
+        """Tests retrieval of all sources."""
         try:
             res = get_sources(workspace_id=test_workspace_id)["sources"]
             GetSourcesTestResponse(sources=res)
+            print("Successfully retrieved all sources.")
         except ValidationError as error:
-            raise ValueError(f"Response validation failed: {error.errors()}") from error
+            raise ValueError(f"Response validation failed: {error.errors()}")
 
-    def test_update_source(self):  # skipcq: PYL-R0201
-        """tests updating a source"""
-        payload = {
-            "name": "source9",
-            "sourcedef_id": TestAirbyteSource.source_definition_id,
-            "source_id": TestAirbyteSource.source_id,
-            "config": {
-                "url": "https://storage.googleapis.com/covid19-open-data/v2/latest/epidemiology.csv",
-                "format": "csv",
-                "provider": {"storage": "HTTPS"},
-                "dataset_name": "covid19data",
-            },
-        }
-        try:
-            UpdateSourceTestPayload(**payload)
-        except ValidationError as error:
-            raise ValueError(f"Field do not match in payload: {error.errors()}") from error
+    def test_update_source(self):
+        """Tests updating all created sources dynamically."""
+        for source in TestAirbyteSource.created_sources:
+            source_id = source["source_id"]
+            config = source["config"]
+            source_definition_id = source["sourceDefinitionId"]
 
-        try:
-            res = update_source(**payload)
-            UpdateSourceTestResponse(**res)
-        except ValidationError as error:
-            raise ValueError(f"Response validation failed: {error.errors()}") from error
+            payload = {
+                "name": f"updated_{source_id}",
+                "sourcedef_id": source_definition_id,
+                "source_id": source_id,
+                "config": config,
+            }
+
+            try:
+                UpdateSourceTestPayload(**payload)
+                res = update_source(**payload)
+                UpdateSourceTestResponse(**res)
+                print(f"Successfully updated source ID: {source_id}")
+            except ValidationError as error:
+                raise ValueError(
+                    f"Response validation failed for source ID '{source_id}': {error.errors()}"
+                )
 
 
 @pytest.fixture(scope="session")
