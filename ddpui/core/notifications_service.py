@@ -84,7 +84,9 @@ def handle_recipient(
         if user_preference.enable_email_notifications:
             try:
                 send_text_message(
-                    user_preference.orguser.user.email, "Message from Dalgo", notification.message
+                    user_preference.orguser.user.email,
+                    "Message from Dalgo for " + recipient.org.name,
+                    notification.message,
                 )
             except Exception as e:
                 return {
