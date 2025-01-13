@@ -14,7 +14,11 @@ import sqlalchemy.exc
 from django.http import StreamingHttpResponse
 from ddpui import auth
 from ddpui.core import dbtautomation_service
-from ddpui.core.warehousefunctions import get_warehouse_data, fetch_warehouse_tables
+from ddpui.core.warehousefunctions import (
+    get_warehouse_data,
+    fetch_warehouse_tables,
+    parse_sql_query_with_limit,
+)
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import TaskProgressHashPrefix
@@ -39,7 +43,6 @@ from ddpui.models.llm import (
     LlmAssistantType,
 )
 from ddpui.utils import secretsmanager
-from ddpui.utils.helpers import convert_to_standard_types
 from ddpui.utils.constants import LIMIT_ROWS_TO_SEND_TO_LLM
 from ddpui.utils.redis_client import RedisClient
 
@@ -254,17 +257,6 @@ def post_warehouse_prompt(request, payload: AskWarehouseRequest):
     Ask the warehouse a question/prompt on a result set and get a response from llm service
     Be default a new session will be saved
     """
-    stmts = sqlparse.parse(payload.sql)
-
-    if len(stmts) > 1:
-        raise HttpError(400, "Only one query is allowed")
-
-    if len(stmts) == 0:
-        raise HttpError(400, "No query provided")
-
-    if not stmts[0].get_type() == "SELECT":
-        raise HttpError(400, "Only SELECT queries are allowed")
-
     orguser: OrgUser = request.orguser
     org = orguser.org
 
@@ -272,33 +264,19 @@ def post_warehouse_prompt(request, payload: AskWarehouseRequest):
     if not org_warehouse:
         raise HttpError(404, "Please set up your warehouse first")
 
-    # limit the records going to llm
-    limit = float("inf")
-    limit_found = False
-    for stmt in stmts:
-        for token in stmt.tokens:
-            if not limit_found and token.ttype is Keyword and token.value.upper() == "LIMIT":
-                limit_found = True
-            if limit_found and token.ttype is Token.Literal.Number.Integer:
-                limit = int(token.value)
-                break
-
-    if limit_found and limit > LIMIT_ROWS_TO_SEND_TO_LLM:
-        raise HttpError(
-            400,
-            f"Please make sure the limit in query is less than {LIMIT_ROWS_TO_SEND_TO_LLM}",
-        )
-
-    if not limit_found:
-        logger.info(f"Setting LIMIT {LIMIT_ROWS_TO_SEND_TO_LLM} to the query")
-        payload.sql = f"{payload.sql} LIMIT {LIMIT_ROWS_TO_SEND_TO_LLM}"
+    sql = payload.sql
+    try:
+        sql = parse_sql_query_with_limit(sql, LIMIT_ROWS_TO_SEND_TO_LLM)
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, str(error)) from error
 
     try:
         task = summarize_warehouse_results.apply_async(
             kwargs={
                 "orguser_id": orguser.id,
                 "org_warehouse_id": org_warehouse.id,
-                "sql": payload.sql,
+                "sql": sql,
                 "user_prompt": payload.user_prompt,
             },
         )

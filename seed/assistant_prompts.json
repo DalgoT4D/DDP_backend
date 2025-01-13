@@ -14,5 +14,13 @@
             "type": "long_text_summarization",
             "prompt": "You are very good at summarizing what you read."
         }
+    },
+    {
+        "model": "ddpui.AssistantPrompt",
+        "pk": 3,
+        "fields": {
+            "type": "chat_with_data_assistant",
+            "prompt": "You are a chat with data assistant that is good at answering queries on structured data."
+        }
     }
 ]

@@ -1,6 +1,9 @@
 import json
 from ninja.errors import HttpError
 
+import sqlparse
+from sqlparse.tokens import Keyword, Number, Token
+
 from ddpui.core import dbtautomation_service
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.helpers import convert_to_standard_types
@@ -74,3 +77,41 @@ def fetch_warehouse_tables(request, org_warehouse, cache_key=None):
         RedisClient.get_instance().set(cache_key, json.dumps(res))
 
     return res
+
+
+def parse_sql_query_with_limit(sql: str, DEFAULT_LIMIT: int = 1000):
+    """
+    Parses the sql query and adds a limit clause to it if not present
+    """
+    stmts = sqlparse.parse(sql)
+
+    if len(stmts) > 1:
+        raise Exception("Only one query is allowed")
+
+    if len(stmts) == 0:
+        raise Exception("No query provided")
+
+    if not stmts[0].get_type() == "SELECT":
+        raise Exception("Only SELECT queries are allowed")
+
+    # limit the records going to llm
+    limit = float("inf")
+    limit_found = False
+    for stmt in stmts:
+        for token in stmt.tokens:
+            if not limit_found and token.ttype is Keyword and token.value.upper() == "LIMIT":
+                limit_found = True
+            if limit_found and token.ttype is Token.Literal.Number.Integer:
+                limit = int(token.value)
+                break
+
+    if limit_found and limit > DEFAULT_LIMIT:
+        raise Exception(
+            f"Please make sure the limit in query is less than {DEFAULT_LIMIT}",
+        )
+
+    if not limit_found:
+        logger.info(f"Setting LIMIT {DEFAULT_LIMIT} to the query")
+        sql = f"{sql} LIMIT {DEFAULT_LIMIT}"
+
+    return sql
