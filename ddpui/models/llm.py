@@ -31,6 +31,7 @@ class LlmAssistantType(str, Enum):
 
     LOG_SUMMARIZATION = "log_summarization"
     LONG_TEXT_SUMMARIZATION = "long_text_summarization"
+    CHAT_WITH_DATA_ASSISTANT = "chat_with_data_assistant"
 
     @classmethod
     def choices(cls):
