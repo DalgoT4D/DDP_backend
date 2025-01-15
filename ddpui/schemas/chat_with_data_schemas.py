@@ -17,6 +17,7 @@ class StartThreadRequest(Schema):
     """
 
     sql: str
+    meta: dict = {}
 
 
 class AskChatWithDataBotRequest(Schema):
@@ -34,3 +35,11 @@ class CloseThreadRequest(Schema):
     """
 
     thread_uuid: str
+
+
+class GenerateSqlAndStartThreadRequest(Schema):
+    """
+    Schema to take in the user prompt for sql filter to start a thread
+    """
+
+    user_prompt: str

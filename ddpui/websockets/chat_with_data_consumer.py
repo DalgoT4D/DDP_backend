@@ -10,6 +10,7 @@ from ddpui.schemas.chat_with_data_schemas import (
     StartThreadRequest,
     AskChatWithDataBotRequest,
     CloseThreadRequest,
+    GenerateSqlAndStartThreadRequest,
 )
 from ddpui.core.warehousefunctions import parse_sql_query_with_limit
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
@@ -18,6 +19,7 @@ from ddpui.models.chat_with_data import Thread, Message, MessageType
 from ddpui.models.llm import LlmAssistantType, AssistantPrompt
 from ddpui.utils import secretsmanager
 from ddpui.core import llm_service
+from ddpui.core.sqlgeneration_service import SqlGeneration
 from ddpui.utils.helpers import (
     convert_sqlalchemy_rows_to_csv_string,
 )
@@ -48,6 +50,8 @@ class ChatWithDataBotConsumer(BaseConsumer):
                         params = AskChatWithDataBotRequest(**params)
                     elif action == "close_thread":
                         params = CloseThreadRequest(**params)
+                    elif action == "generate_sql_and_start_thread":
+                        params = GenerateSqlAndStartThreadRequest(**params)
                     method(params)
                 except Exception as e:
                     logger.error(f"Error in calling the method: {e}")
@@ -99,11 +103,13 @@ class ChatWithDataBotConsumer(BaseConsumer):
             )
         )
 
+    @classmethod
     def start_thread(self, payload: StartThreadRequest):
         """
         - Filters the data from a sql query
         - Starts a session by sending the results of sql query to llm service
         - Creates a thread with the session_id
+        You can pass any meta information to save to the thread being created
         """
         org_warehouse = OrgWarehouse.objects.filter(org=self.orguser.org).first()
         credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
@@ -141,7 +147,7 @@ class ChatWithDataBotConsumer(BaseConsumer):
             uuid=uuid.uuid4(),
             orguser=self.orguser,
             session_id=session_id,
-            meta={"sql": payload.sql},
+            meta={"sql": payload.sql, **payload.meta},
         )
 
         self.respond(
@@ -258,3 +264,37 @@ class ChatWithDataBotConsumer(BaseConsumer):
                     status=WebsocketResponseStatus.ERROR,
                 )
             )
+
+    def generate_sql_and_start_thread(self, payload: GenerateSqlAndStartThreadRequest):
+        """
+        - Generate sql query from the user input/prompt
+        - If the successful, create/start a thread.
+        This assumes the model for sql generation is trained before hand
+        """
+        warehouse = OrgWarehouse.objects.filter(org=self.orguser.org).first()
+
+        if not warehouse:
+            self.respond(
+                WebsocketResponse(
+                    data={},
+                    message="No warehouse found for the org",
+                    status=WebsocketResponseStatus.ERROR,
+                )
+            )
+            return
+
+        sqlgeneration_client = SqlGeneration(warehouse)
+
+        sql = sqlgeneration_client.generate_sql(payload.user_prompt)
+        if not sql:
+            self.respond(
+                WebsocketResponse(
+                    data={},
+                    message="Failed to generate sql query",
+                    status=WebsocketResponseStatus.ERROR,
+                )
+            )
+            return
+
+        logger.info(f"Generated SQL: {sql}")
+        self.start_thread(StartThreadRequest(sql=sql, meta={"user_prompt": payload.user_prompt}))
