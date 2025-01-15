@@ -103,7 +103,6 @@ class ChatWithDataBotConsumer(BaseConsumer):
             )
         )
 
-    @classmethod
     def start_thread(self, payload: StartThreadRequest):
         """
         - Filters the data from a sql query
