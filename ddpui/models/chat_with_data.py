@@ -1,4 +1,3 @@
-import uuid
 from enum import Enum
 from django.db import models
 from django.utils import timezone
@@ -18,6 +17,18 @@ class MessageType(str, Enum):
         return [(key.value, key.name) for key in cls]
 
 
+class ThreadStatus(str, Enum):
+    """an enum representing the type of messages"""
+
+    OPEN = "open"
+    CLOSE = "close"
+
+    @classmethod
+    def choices(cls):
+        """django model definition needs an iterable for `choices`"""
+        return [(key.value, key.name) for key in cls]
+
+
 class Thread(models.Model):
     """
     Model to store thread that represents a series of message(questions) on particular set of data
@@ -28,11 +39,14 @@ class Thread(models.Model):
     session_id = models.CharField(max_length=200, null=True)
     meta = models.JSONField(null=True)
     orguser = models.ForeignKey(OrgUser, on_delete=models.CASCADE)
+    status = models.CharField(
+        choices=ThreadStatus.choices(), max_length=50, default=ThreadStatus.OPEN.value
+    )
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
-        return f"Thread[{self.uuid}]"
+        return f"Thread[{self.uuid} | {self.status}]"
 
     class Meta:
         db_table = "ddpui_threads"
