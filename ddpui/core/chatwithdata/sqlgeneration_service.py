@@ -12,7 +12,7 @@ from ddpui.utils import secretsmanager
 
 
 class DalgoVannaClient(PG_VectorStore, OpenAI_Chat):
-    def __init__(self, config={}):
+    def __init__(self, openai_config={}):
         PG_VectorStore.__init__(
             self,
             config={
@@ -32,14 +32,18 @@ class DalgoVannaClient(PG_VectorStore, OpenAI_Chat):
             config={
                 "api_key": os.environ["OPENAI_API_KEY"],
                 "model": "gpt-4o-mini",
-                **config,
+                **openai_config,
             },
         )
 
 
 class SqlGeneration:
     def __init__(self, warehouse: OrgWarehouse, config=None):
-        self.vanna = DalgoVannaClient(config=config)
+        self.vanna = DalgoVannaClient(
+            openai_config={
+                "initial_prompt": "Please qualify all table names with their schema names in the generated SQL"
+            }
+        )
         warehouse_creds = secretsmanager.retrieve_warehouse_credentials(warehouse)
         if warehouse.wtype == WarehouseType.POSTGRES:
             required_creds = {
@@ -57,7 +61,7 @@ class SqlGeneration:
                 if k not in ["host", "port", "database", "username", "password"]
             }
 
-            self.vanna.connect_to_postgres(**required_creds, **remaining_creds)
+            self.vanna.connect_to_postgres(**required_creds)
         elif warehouse.wtype == WarehouseType.BIGQUERY:
             cred_file_path = None
             with tempfile.NamedTemporaryFile(delete=False, mode="w", suffix=".json") as temp_file:
@@ -75,7 +79,9 @@ class SqlGeneration:
         return self.vanna.generate_questions()
 
     def generate_sql(self, question: str):
-        return self.vanna.generate_sql(question=question)
+        return self.vanna.generate_sql(
+            question=question,
+        )
 
     def is_sql_valid(self, sql: str):
         return self.vanna.is_sql_valid(sql=sql)

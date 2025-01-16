@@ -15,14 +15,15 @@ from ddpui.schemas.chat_with_data_schemas import (
 from ddpui.core.warehousefunctions import parse_sql_query_with_limit
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.models.org import OrgWarehouse
-from ddpui.models.chat_with_data import Thread, Message, MessageType
+from ddpui.models.chat_with_data import Thread, Message, MessageType, ThreadStatus
 from ddpui.models.llm import LlmAssistantType, AssistantPrompt
 from ddpui.utils import secretsmanager
 from ddpui.core import llm_service
-from ddpui.core.sqlgeneration_service import SqlGeneration
+from ddpui.core.chatwithdata.sqlgeneration_service import SqlGeneration
 from ddpui.utils.helpers import (
     convert_sqlalchemy_rows_to_csv_string,
 )
+from sqlalchemy.sql import text
 
 
 logger = CustomLogger("ddpui")
@@ -40,6 +41,7 @@ class ChatWithDataBotConsumer(BaseConsumer):
         params = payload.get("params", {})
         if action:
             method = getattr(self, action, None)
+            logger.info(f"Action found {method}")
             if method:
                 try:
                     if action == "get_messages":
@@ -130,9 +132,19 @@ class ChatWithDataBotConsumer(BaseConsumer):
         logger.info(f"Submitting query to warehouse for execution \n '''{sql}'''")
         rows = []
         try:
-            rows = wclient.execute(sql)
+            rows = wclient.execute(text(sql))
+            if len(rows) == 0:
+                logger.error("No results found for the query")
+                self.respond(
+                    WebsocketResponse(
+                        data={},
+                        message="No results found for the query. Thread not started",
+                        status=WebsocketResponseStatus.ERROR,
+                    )
+                )
+                return
         except Exception as err:
-            logger.error(err)
+            logger.error(f"Failed to execute the query: {err}")
             return
 
         fpath, session_id = llm_service.upload_text_as_file(
@@ -247,7 +259,8 @@ class ChatWithDataBotConsumer(BaseConsumer):
         thread = Thread.objects.filter(uuid=payload.thread_uuid).first()
         if thread:
             llm_service.close_file_search_session(thread.session_id)
-            thread.delete()
+            thread.status = ThreadStatus.CLOSE.value
+            thread.save()
             self.respond(
                 WebsocketResponse(
                     data={},
@@ -285,6 +298,8 @@ class ChatWithDataBotConsumer(BaseConsumer):
         sqlgeneration_client = SqlGeneration(warehouse)
 
         sql = sqlgeneration_client.generate_sql(payload.user_prompt)
+        logger.info(f"Generated SQL: {sql}")
+
         if not sql:
             self.respond(
                 WebsocketResponse(
@@ -295,5 +310,9 @@ class ChatWithDataBotConsumer(BaseConsumer):
             )
             return
 
-        logger.info(f"Generated SQL: {sql}")
-        self.start_thread(StartThreadRequest(sql=sql, meta={"user_prompt": payload.user_prompt}))
+        cleaned_sql = sql.replace("\n", " ").replace(";", " ")
+        logger.info(f"Cleaned sql: {cleaned_sql}")
+
+        self.start_thread(
+            StartThreadRequest(sql=cleaned_sql, meta={"user_prompt": payload.user_prompt})
+        )

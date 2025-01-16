@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 from ddpui.models.org import Org, OrgWarehouse
-from ddpui.core.sqlgeneration_service import SqlGeneration
+from ddpui.core.chatwithdata.sqlgeneration_service import SqlGeneration
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
