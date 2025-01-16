@@ -10,9 +10,11 @@ from ddpui.models.org import OrgWarehouse
 from ddpui.datainsights.warehouse.warehouse_interface import WarehouseType
 from ddpui.utils import secretsmanager
 
+from langchain_openai import OpenAIEmbeddings
+
 
 class DalgoVannaClient(PG_VectorStore, OpenAI_Chat):
-    def __init__(self, openai_config={}):
+    def __init__(self, openai_config={}, pg_vector_config={}):
         PG_VectorStore.__init__(
             self,
             config={
@@ -24,7 +26,8 @@ class DalgoVannaClient(PG_VectorStore, OpenAI_Chat):
                         "port": os.environ["PGVECTOR_PORT"],
                         "database": os.environ["PGVECTOR_DB"],
                     }
-                )
+                ),
+                **pg_vector_config,
             },
         )
         OpenAI_Chat.__init__(
@@ -42,7 +45,8 @@ class SqlGeneration:
         self.vanna = DalgoVannaClient(
             openai_config={
                 "initial_prompt": "Please qualify all table names with their schema names in the generated SQL"
-            }
+            },
+            pg_vector_config={"embedding_function": OpenAIEmbeddings()},
         )
         warehouse_creds = secretsmanager.retrieve_warehouse_credentials(warehouse)
         if warehouse.wtype == WarehouseType.POSTGRES:
