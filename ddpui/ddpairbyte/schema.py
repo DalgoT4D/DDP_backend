@@ -60,8 +60,8 @@ class AirbyteConnectionCreate(Schema):
 
     name: str
     sourceId: str
-    destinationId: str = None
-    destinationSchema: str = None
+    destinationId: Optional[str] = None
+    destinationSchema: Optional[str] = None
     streams: list
 
 
@@ -75,12 +75,12 @@ class AirbyteConnectionCreateResponse(Schema):
     catalogId: str
     syncCatalog: dict
     status: str
-    deploymentId: str = None
+    deploymentId: Optional[str] = None
     lastRun: Optional[dict | None]
     destinationSchema: str = ""
     lock: Optional[dict | None]
     isRunning: bool = False
-    resetConnDeploymentId: str = None
+    resetConnDeploymentId: Optional[str] = None
 
 
 class AirbyteGetConnectionsResponse(Schema):
@@ -91,13 +91,13 @@ class AirbyteGetConnectionsResponse(Schema):
     source: dict
     destination: dict
     status: str
-    deploymentId: str = None
+    deploymentId: Optional[str] = None
     lastRun: Optional[dict | None]
     destinationSchema: str = ""
     lock: Optional[dict | None]
-    isRunning: bool = False
-    resetConnDeploymentId: str = None
-    clearConnDeploymentId: str = None
+    isRunning: Optional[bool] = False
+    resetConnDeploymentId: Optional[str] = None
+    clearConnDeploymentId: Optional[str] = None
 
 
 class AirbyteConnectionUpdate(Schema):
@@ -105,8 +105,8 @@ class AirbyteConnectionUpdate(Schema):
 
     name: str
     streams: list
-    destinationId: str = None
-    destinationSchema: str = None
+    destinationId: Optional[str] = None
+    destinationSchema: Optional[str] = None
 
 
 # response schemas
@@ -130,4 +130,4 @@ class AirbyteConnectionSchemaUpdateSchedule(Schema):
     """Docstring"""
 
     catalogDiff: dict
-    cron: str = None
+    cron: Optional[str] = None
