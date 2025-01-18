@@ -115,3 +115,29 @@ def parse_sql_query_with_limit(sql: str, DEFAULT_LIMIT: int = 1000):
         sql = f"{sql} LIMIT {DEFAULT_LIMIT}"
 
     return sql
+
+
+def parse_sql_query_with_limit_offset(sql_query, limit, offset):
+    """
+    Parse the SQL query and add LIMIT and OFFSET clauses.
+    """
+    parsed = sqlparse.parse(sql_query)
+    statement = parsed[0]
+
+    if not statement.get_type() == "SELECT":
+        raise Exception("Only SELECT queries are allowed")
+
+    # Check if LIMIT or OFFSET already exists
+    has_limit = any(
+        token.ttype is Keyword and token.value.upper() == "LIMIT" for token in statement.tokens
+    )
+    has_offset = any(
+        token.ttype is Keyword and token.value.upper() == "OFFSET" for token in statement.tokens
+    )
+
+    if not has_limit:
+        statement.tokens.append(sqlparse.sql.Token(Keyword, f" LIMIT {limit}"))
+    if not has_offset:
+        statement.tokens.append(sqlparse.sql.Token(Keyword, f" OFFSET {offset}"))
+
+    return str(statement)

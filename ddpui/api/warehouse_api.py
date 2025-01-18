@@ -18,6 +18,7 @@ from ddpui.core.warehousefunctions import (
     get_warehouse_data,
     fetch_warehouse_tables,
     parse_sql_query_with_limit,
+    parse_sql_query_with_limit_offset,
 )
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.org_user import OrgUser
@@ -36,6 +37,7 @@ from ddpui.schemas.warehouse_api_schemas import (
     AskWarehouseRequest,
     SaveLlmSessionRequest,
     LlmSessionFeedbackRequest,
+    FetchSqlqueryResults,
 )
 from ddpui.models.llm import (
     LlmSession,
@@ -45,6 +47,7 @@ from ddpui.models.llm import (
 from ddpui.utils import secretsmanager
 from ddpui.utils.constants import LIMIT_ROWS_TO_SEND_TO_LLM
 from ddpui.utils.redis_client import RedisClient
+from sqlalchemy.sql import text
 
 warehouse_router = Router()
 logger = CustomLogger("ddpui")
@@ -156,6 +159,40 @@ def get_warehouse_table_columns_spec(request, schema_name: str, table_name: str)
         return cols
     except sqlalchemy.exc.NoSuchTableError:
         raise HttpError(404, "Table not found")
+    except Exception as err:
+        logger.error(err)
+        raise HttpError(500, str(err))
+
+
+@warehouse_router.post("/v1/table_data/run_sql", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse_data"])
+def post_warehouse_run_sql_query(request, payload: FetchSqlqueryResults):
+    """
+    Runs a SQL query against the warehouse and returns the results
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+
+    try:
+        wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
+
+        # Parse the SQL query and add LIMIT and OFFSET
+        sql_query_with_limit_offset = parse_sql_query_with_limit_offset(
+            payload.sql, payload.limit, payload.offset
+        )
+
+        results = wclient.execute(text(sql_query_with_limit_offset))
+        columns = []
+        if len(results) > 0:
+            columns = list(results[0].keys())
+
+        return {"rows": results, "columns": columns}
     except Exception as err:
         logger.error(err)
         raise HttpError(500, str(err))

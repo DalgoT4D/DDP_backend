@@ -91,14 +91,12 @@ class ChatWithDataBotConsumer(BaseConsumer):
                 data={
                     "messages": [
                         {
-                            **model_to_dict(
-                                message, exclude=["thread_id", "id", "created_at", "updated_at"]
-                            ),
+                            **model_to_dict(message, exclude=["thread_id", "updated_at"]),
                             "created_at": str(message.created_at),
                             "updated_at": str(message.updated_at),
                         }
                         for message in messages
-                    ]
+                    ][::-1]
                 },
                 message="Messages fetched successfully",
                 status=WebsocketResponseStatus.SUCCESS,
@@ -231,7 +229,7 @@ class ChatWithDataBotConsumer(BaseConsumer):
         """
         Fetch all the threads started by the authenticated orguser
         """
-        threads = Thread.objects.filter(orguser=self.orguser).all()
+        threads = Thread.objects.filter(orguser=self.orguser).order_by("-created_at").all()
         self.respond(
             WebsocketResponse(
                 data={
