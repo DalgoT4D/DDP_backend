@@ -3,6 +3,7 @@ import uuid
 
 from django.forms.models import model_to_dict
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.models.org_user import OrgUser
 from ddpui.websockets import BaseConsumer
 from ddpui.websockets.schemas import WebsocketResponse, WebsocketResponseStatus
 from ddpui.schemas.chat_with_data_schemas import (
@@ -31,6 +32,122 @@ logger = CustomLogger("ddpui")
 
 class ChatWithDataBotConsumer(BaseConsumer):
     """chat with data consumer"""
+
+    @staticmethod
+    def get_all_threads(orguser: OrgUser):
+        """
+        Fetch all(open & close) the threads started by the authenticated orguser
+        """
+        threads = Thread.objects.filter(orguser=orguser).order_by("-created_at").all()
+
+        return {
+            "threads": [
+                {
+                    **model_to_dict(thread, exclude=["id", "created_at", "updated_at", "orguser"]),
+                    "uuid": str(thread.uuid),
+                    "created_at": str(thread.created_at),
+                    "updated_at": str(thread.updated_at),
+                }
+                for thread in threads
+            ]
+        }
+
+    @staticmethod
+    def create_thread(orguser: OrgUser, payload: StartThreadRequest, return_threads=False):
+        """
+        - Filters the data from a sql query
+        - Starts a session by sending the results of sql query to llm service
+        - Creates a thread with the session_id
+        You can pass any meta information to save to the thread being created
+        """
+        org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+        credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+
+        try:
+            wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
+        except Exception as err:
+            logger.error("Failed to connect to the warehouse - %s", err)
+            raise Exception(f"Failed to connect to the warehouse {err}")
+
+        # fetch the results of the query
+        sql = parse_sql_query_with_limit(payload.sql)
+        logger.info(f"Submitting query to warehouse for execution \n '''{sql}'''")
+        rows = []
+        try:
+            rows = wclient.execute(text(sql))
+            if len(rows) == 0:
+                logger.error("No results found for the query")
+                raise Exception("No results found for the query")
+        except Exception as err:
+            logger.error(f"Failed to execute the query: {err}")
+            raise Exception(f"Failed to execute the query: {err}")
+
+        fpath, session_id = llm_service.upload_text_as_file(
+            convert_sqlalchemy_rows_to_csv_string(rows), "warehouse_results"
+        )
+        logger.info("Uploaded file successfully to LLM service at " + str(fpath))
+        logger.info("Session ID: " + session_id)
+
+        # create the thread
+        thread = Thread.objects.create(
+            uuid=uuid.uuid4(),
+            orguser=orguser,
+            session_id=session_id,
+            meta={"sql": payload.sql, **payload.meta},
+        )
+
+        res = {"thread_uuid": str(thread.uuid)}
+
+        if return_threads:
+            res = ChatWithDataBotConsumer.get_all_threads(orguser)
+
+        return res
+
+    @staticmethod
+    def ask_bot_prompt(orguser: OrgUser, payload: AskChatWithDataBotRequest):
+        """
+        - Create a message for the user sending/asking the bot
+        - Generate the response via llm service using the session_id in thread
+        - Create a message for the bot sending the response
+        """
+
+        # fetch the thread
+        thread: Thread = Thread.objects.filter(uuid=payload.thread_uuid).first()
+        if not thread:
+            raise Exception("Thread not found")
+
+        # create user message
+        user_message = Message.objects.create(
+            content=payload.message,
+            sender=orguser,
+            thread=thread,
+            type=MessageType.HUMAN.value,
+        )
+
+        # generate response
+        assistant_prompt = AssistantPrompt.objects.filter(
+            type=LlmAssistantType.CHAT_WITH_DATA_ASSISTANT
+        ).first()
+        if not assistant_prompt:
+            raise Exception("Assistant/System prompt not found for chat with data bot")
+
+        ai_result = llm_service.file_search_query_and_poll(
+            assistant_prompt=assistant_prompt.prompt,
+            queries=[user_message.content],
+            session_id=thread.session_id,
+        )
+
+        if len(ai_result["result"]) == 0:
+            raise Exception("No response from llm service")
+
+        # create ai message
+        ai_message = Message.objects.create(
+            content=ai_result["result"][0],
+            thread=thread,
+            type=MessageType.AI.value,
+        )
+
+        return {"response": ai_message.content}
 
     def websocket_receive(self, message):
         logger.info("Recieved the message from client, inside chat with data consumer")
@@ -103,69 +220,30 @@ class ChatWithDataBotConsumer(BaseConsumer):
             )
         )
 
-    def start_thread(self, payload: StartThreadRequest):
+    def start_thread(self, payload: StartThreadRequest, return_threads=False):
         """
         - Filters the data from a sql query
         - Starts a session by sending the results of sql query to llm service
         - Creates a thread with the session_id
         You can pass any meta information to save to the thread being created
         """
-        org_warehouse = OrgWarehouse.objects.filter(org=self.orguser.org).first()
-        credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
-
         try:
-            wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
-        except Exception as err:
-            logger.error("Failed to connect to the warehouse - %s", err)
+            res = self.create_thread(self.orguser, payload, return_threads)
+            self.respond(
+                WebsocketResponse(
+                    data=res,
+                    message="Thread created successfully",
+                    status=WebsocketResponseStatus.SUCCESS,
+                )
+            )
+        except Exception as e:
             self.respond(
                 WebsocketResponse(
                     data={},
-                    message=f"Failed to connect to the warehouse {err}",
+                    message=f"Failed to create thread: {e}",
                     status=WebsocketResponseStatus.ERROR,
                 )
             )
-
-        # fetch the results of the query
-        sql = parse_sql_query_with_limit(payload.sql)
-        logger.info(f"Submitting query to warehouse for execution \n '''{sql}'''")
-        rows = []
-        try:
-            rows = wclient.execute(text(sql))
-            if len(rows) == 0:
-                logger.error("No results found for the query")
-                self.respond(
-                    WebsocketResponse(
-                        data={},
-                        message="No results found for the query. Thread not started",
-                        status=WebsocketResponseStatus.ERROR,
-                    )
-                )
-                return
-        except Exception as err:
-            logger.error(f"Failed to execute the query: {err}")
-            return
-
-        fpath, session_id = llm_service.upload_text_as_file(
-            convert_sqlalchemy_rows_to_csv_string(rows), "warehouse_results"
-        )
-        logger.info("Uploaded file successfully to LLM service at " + str(fpath))
-        logger.info("Session ID: " + session_id)
-
-        # create the thread
-        thread = Thread.objects.create(
-            uuid=uuid.uuid4(),
-            orguser=self.orguser,
-            session_id=session_id,
-            meta={"sql": payload.sql, **payload.meta},
-        )
-
-        self.respond(
-            WebsocketResponse(
-                data={"thread_uuid": str(thread.uuid)},
-                message="Thread created successfully",
-                status=WebsocketResponseStatus.SUCCESS,
-            )
-        )
 
     def ask_bot(self, payload: AskChatWithDataBotRequest):
         """
@@ -174,77 +252,31 @@ class ChatWithDataBotConsumer(BaseConsumer):
         - Create a message for the bot sending the response
         """
 
-        # fetch the thread
-        thread: Thread = Thread.objects.filter(uuid=payload.thread_uuid).first()
-        if not thread:
+        try:
+            res = self.ask_bot_prompt(self.orguser, payload)
+            self.respond(
+                WebsocketResponse(
+                    data=res,
+                    message="Response generated by bot successfully",
+                    status=WebsocketResponseStatus.SUCCESS,
+                )
+            )
+        except Exception as e:
             self.respond(
                 WebsocketResponse(
                     data={},
-                    message="Thread not found",
+                    message=f"Failed to generate response: {e}",
                     status=WebsocketResponseStatus.ERROR,
                 )
             )
-            return
-
-        # create user message
-        user_message = Message.objects.create(
-            content=payload.message,
-            sender=self.orguser,
-            thread=thread,
-            type=MessageType.HUMAN.value,
-        )
-
-        # generate response
-        assistant_prompt = AssistantPrompt.objects.filter(
-            type=LlmAssistantType.CHAT_WITH_DATA_ASSISTANT
-        ).first()
-        if not assistant_prompt:
-            raise Exception("Assistant/System prompt not found for chat with data bot")
-
-        ai_result = llm_service.file_search_query_and_poll(
-            assistant_prompt=assistant_prompt.prompt,
-            queries=[user_message.content],
-            session_id=thread.session_id,
-        )
-
-        if len(ai_result["result"]) == 0:
-            raise Exception("No response from llm service")
-
-        # create ai message
-        ai_message = Message.objects.create(
-            content=ai_result["result"][0],
-            thread=thread,
-            type=MessageType.AI.value,
-        )
-
-        self.respond(
-            WebsocketResponse(
-                data={"response": ai_message.content},
-                message="Response generated by bot successfully",
-                status=WebsocketResponseStatus.SUCCESS,
-            )
-        )
 
     def get_threads(self, payload: dict):
         """
         Fetch all the threads started by the authenticated orguser
         """
-        threads = Thread.objects.filter(orguser=self.orguser).order_by("-created_at").all()
         self.respond(
             WebsocketResponse(
-                data={
-                    "threads": [
-                        {
-                            **model_to_dict(
-                                thread, exclude=["id", "created_at", "updated_at", "orguser"]
-                            ),
-                            "uuid": str(thread.uuid),
-                            "created_at": str(thread.created_at),
-                            "updated_at": str(thread.updated_at),
-                        }
-                        for thread in threads
-                    ]
-                },
+                data=self.get_all_threads(self.orguser),
                 message="Threads fetched successfully",
                 status=WebsocketResponseStatus.SUCCESS,
             )
@@ -311,6 +343,27 @@ class ChatWithDataBotConsumer(BaseConsumer):
         cleaned_sql = sql.replace("\n", " ").replace(";", " ")
         logger.info(f"Cleaned sql: {cleaned_sql}")
 
-        self.start_thread(
-            StartThreadRequest(sql=cleaned_sql, meta={"user_prompt": payload.user_prompt})
+        # create the thread
+        thread_res = ChatWithDataBotConsumer.create_thread(
+            self.orguser,
+            StartThreadRequest(sql=cleaned_sql, meta={"user_prompt": payload.user_prompt}),
+            return_threads=False,
+        )
+
+        # run the thread with that current prompt
+        ChatWithDataBotConsumer.ask_bot_prompt(
+            self.orguser,
+            AskChatWithDataBotRequest(
+                message=payload.user_prompt, thread_uuid=thread_res["thread_uuid"]
+            ),
+        )
+
+        # respond with new list of threads
+        threads = ChatWithDataBotConsumer.get_all_threads(self.orguser)
+        self.respond(
+            WebsocketResponse(
+                data=threads,
+                message="Thread started successfully",
+                status=WebsocketResponseStatus.SUCCESS,
+            )
         )

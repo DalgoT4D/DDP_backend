@@ -1,7 +1,6 @@
 import os
 import tempfile
 import json
-from functools import lru_cache
 
 from vanna.openai import OpenAI_Chat
 from vanna.pgvector import PG_VectorStore
@@ -83,9 +82,7 @@ class SqlGeneration:
         return self.vanna.generate_questions()
 
     def generate_sql(self, question: str):
-        return self.vanna.generate_sql(
-            question=question,
-        )
+        return self.vanna.generate_sql(question=question, allow_llm_to_see_data=True)
 
     def is_sql_valid(self, sql: str):
         return self.vanna.is_sql_valid(sql=sql)
