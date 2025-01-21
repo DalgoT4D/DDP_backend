@@ -11,7 +11,7 @@ testpaths = [
 
 [tool.pylint.messages_control]
 max-line-length = 200
-fail-under = 6.5
+fail-under = 8.5
 disable = [
   "missing-module-docstring",
   "broad-exception-raised",
