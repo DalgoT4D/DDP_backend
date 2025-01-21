@@ -87,12 +87,12 @@ class OrgSchema(Schema):
     """Docstring"""
 
     name: str
-    slug: str = None
-    airbyte_workspace_id: str = None
-    viz_url: str = None
-    viz_login_type: str = None
-    tnc_accepted: bool = None
-    is_demo: bool = False
+    slug: Optional[str] = None
+    airbyte_workspace_id: Optional[str] = None
+    viz_url: Optional[str] = None
+    viz_login_type: Optional[str] = None
+    tnc_accepted: Optional[bool] = None
+    is_demo: Optional[bool] = False
 
 
 class CreateOrgSchema(Schema):

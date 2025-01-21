@@ -10,6 +10,7 @@ from ddpui.html.elementary import get_elementary_report
 from ddpui.datainsights.generate_result import DataInsightsConsumer
 from ddpui.websockets.airbyte_consumer import SchemaCatalogConsumer, SourceCheckConnectionConsumer
 from ddpui.websockets.airbyte_consumer import DestinationCheckConnectionConsumer
+from ddpui.websockets.chat_with_data_consumer import ChatWithDataBotConsumer
 
 
 def trigger_error(request):  # pylint: disable=unused-argument # skipcq PYK-W0612
@@ -41,4 +42,5 @@ ws_urlpatterns = [
         DestinationCheckConnectionConsumer.as_asgi(),
     ),
     path("wss/airbyte/connection/schema_catalog", SchemaCatalogConsumer.as_asgi()),
+    path("wss/chat/bot", ChatWithDataBotConsumer.as_asgi()),
 ]

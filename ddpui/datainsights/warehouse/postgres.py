@@ -68,7 +68,7 @@ class PostgresClient(Warehouse):
         """
         with self.engine.connect() as connection:
             result = connection.execute(sql)
-            rows = result.fetchall()
+            rows = result.mappings().all()
             return [dict(row) for row in rows]
 
     def get_table_columns(self, db_schema: str, db_table: str) -> dict:

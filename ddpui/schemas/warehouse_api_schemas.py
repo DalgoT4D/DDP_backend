@@ -13,6 +13,16 @@ class RequestorColumnSchema(Schema):
     refresh: bool = False
 
 
+class FetchSqlqueryResults(Schema):
+    """
+    schema to run a sql query against wareohuse
+    """
+
+    sql: str
+    limit: int = 10
+    offset: int = 0
+
+
 class AskWarehouseRequest(Schema):
     """
     Payload to ask warehouse a question to be responded via llm
