@@ -1,0 +1,53 @@
+{% extends "admin/base_site.html" %}
+
+{% block title %}Long-running flows{% endblock %}
+
+{% block content %}
+<h1>Long-running flows ({{nhours}} hrs)</h1>
+{% for flow_run in flow_runs %}
+    <div class="module">
+        <h2><a href="{{ flow_run.flow_run_url }}" target="_blank" style="text-decoration: underline;">Flow Run</a></h2>
+        <p>State: {{ flow_run.state_name }}</p>
+        {% if flow_run.org_slug %}
+            <p>Org Slug: {{ flow_run.org_slug }}</p>
+        {% endif %}
+        {% if flow_run.tasks %}
+            <p>Tasks: {{ flow_run.tasks }}</p>
+        {% endif %}
+        {% if flow_run.flow_name %}
+            <p>Flow Name: {{ flow_run.flow_name }}</p>
+        {% endif %}
+        {% if flow_run.connection_id %}
+            {% if flow_run.connection_url %}
+                <p>Connection: <a href="{{ flow_run.connection_url }}">{{ flow_run.connection_id }}</a></p>
+            {% else %}
+                <p>Connection ID: {{ flow_run.connection_id }}</p>
+            {% endif %}
+        {% endif %}
+        <hr>
+    </div>
+{% endfor %}
+
+<h1>Airbyte workspaces</h1>
+{% for w in workspaces %}
+    <div class="module">
+        <h2>Org: {{w.org_slug}}</h2>
+        <p>Workspace: <a href="{{ w.workspace_url }}" style="text-decoration: underline;">{{ w.workspace_id }}</a></p>
+        <hr>
+    </div>
+{% endfor %}
+
+
+<h1>LLM feedback</h1>
+{% for session in llm_sessions %}
+    <div class="module">
+        <h2>Org: {{session.org_slug}}</h2>
+        {% for res in session.response %}
+            <p>Prompt: {{res.prompt}}</p>
+            <p>Response: {{res.response}}</p>
+        {% endfor %}
+        <p>Feedback: {{session.feedback}}</p>
+        <hr>
+    </div>
+{% endfor %}
+{% endblock %}

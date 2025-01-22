@@ -2,6 +2,8 @@
 from django.contrib import admin
 from django.urls import include, path
 from django.http import HttpResponse
+from django.conf import settings
+from django.conf.urls.static import static
 
 from ddpui.routes import src_api
 from ddpui.html.docs import get_dbt_docs
@@ -10,6 +12,8 @@ from ddpui.html.elementary import get_elementary_report
 from ddpui.datainsights.generate_result import DataInsightsConsumer
 from ddpui.websockets.airbyte_consumer import SchemaCatalogConsumer, SourceCheckConnectionConsumer
 from ddpui.websockets.airbyte_consumer import DestinationCheckConnectionConsumer
+
+from ddpui.admin.views.custom_views import orgs_index_view
 
 
 def trigger_error(request):  # pylint: disable=unused-argument # skipcq PYK-W0612
@@ -23,6 +27,7 @@ def healthcheck(request):  # pylint:disable=unused-argument
 
 
 urlpatterns = [
+    path("admin/orgs/", orgs_index_view, name="orgs_index_view"),
     path("admin/", admin.site.urls),
     path("healthcheck", healthcheck),
     path("docs/<tokenhex>/", get_dbt_docs),
@@ -31,6 +36,8 @@ urlpatterns = [
     path("sentry-debug/", trigger_error),
     path("", src_api.urls),
 ]
+
+urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
 
 # socket endpoints
 ws_urlpatterns = [
