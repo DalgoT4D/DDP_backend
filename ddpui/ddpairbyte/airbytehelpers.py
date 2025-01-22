@@ -720,7 +720,7 @@ def delete_connection(org: Org, connection_id: str):
             parameters = deployment["parameters"]
             # logger.info(parameters)
             for task in parameters["config"]["tasks"]:
-                if task["connection_id"] == connection_id:
+                if task.get("connection_id") == connection_id:
                     logger.info(f"deleting task {task['slug']} from deployment")
                     parameters["config"]["tasks"].remove(task)
             # logger.info(parameters)
@@ -882,6 +882,13 @@ def create_warehouse(org: Org, payload: OrgWarehouseSchema):
         #   ssh_key: string if SSH_KEY_AUTH
         #   tunnel_user_password: string if SSH_PASSWORD_AUTH
         dbt_credentials = payload.airbyteConfig
+        if (
+            "rds.amazonaws.com" in dbt_credentials["host"]
+            and dbt_credentials["ssl_mode"]["mode"] == "require"
+            and "sslrootcert" not in dbt_credentials
+        ):
+            dbt_credentials["sslrootcert"] = "/home/ddp/global-bundle.pem"  # make this an ENV var
+
     elif payload.wtype == "bigquery":
         credentials_json = json.loads(payload.airbyteConfig["credentials_json"])
         dbt_credentials = credentials_json
