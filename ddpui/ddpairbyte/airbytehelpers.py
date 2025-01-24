@@ -882,12 +882,6 @@ def create_warehouse(org: Org, payload: OrgWarehouseSchema):
         #   ssh_key: string if SSH_KEY_AUTH
         #   tunnel_user_password: string if SSH_PASSWORD_AUTH
         dbt_credentials = payload.airbyteConfig
-        if (
-            "rds.amazonaws.com" in dbt_credentials["host"]
-            and dbt_credentials["ssl_mode"]["mode"] == "require"
-            and "sslrootcert" not in dbt_credentials
-        ):
-            dbt_credentials["sslrootcert"] = "/home/ddp/global-bundle.pem"  # make this an ENV var
 
     elif payload.wtype == "bigquery":
         credentials_json = json.loads(payload.airbyteConfig["credentials_json"])
