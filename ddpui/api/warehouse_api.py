@@ -248,7 +248,7 @@ def get_download_warehouse_data(request, schema_name: str, table_name: str):
         output.close()
 
     response = StreamingHttpResponse(
-        stream_warehouse_data(request, schema_name, table_name, page_size=50),
+        stream_warehouse_data(request, schema_name, table_name, page_size=30000),
         content_type="application/octet-stream",
     )
     response["Content-Disposition"] = f"attachment; filename={schema_name}__{table_name}.csv"
