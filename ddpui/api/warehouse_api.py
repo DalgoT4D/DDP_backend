@@ -207,9 +207,34 @@ def get_download_warehouse_data(request, schema_name: str, table_name: str):
     def stream_warehouse_data(
         request, schema_name, table_name, page_size=10, order_by=None, order=1
     ):
-        page = 0
+        page = 1
         header_written = False
-        while True:
+        output = StringIO()
+        data: list[dict] = get_warehouse_data(
+            request,
+            "table_data",
+            schema_name=schema_name,
+            table_name=table_name,
+            page=page,
+            limit=page_size,
+            order_by=order_by,
+            order=order,
+        )
+        writer = csv.DictWriter(output, fieldnames=data[0].keys() if data else [])
+        while len(data) > 0:
+            logger.info("Length of data: %s", len(data))
+            for i, row in enumerate(data):
+                if i == 0 and not header_written:
+                    writer.writeheader()
+                    header_written = True
+                else:
+                    writer.writerow(row)
+
+            yield output.getvalue()
+            output.truncate(0)
+            output.seek(0)
+            page += 1
+            logger.info(f"Streaming page {page} of {schema_name}.{table_name}")
             data = get_warehouse_data(
                 request,
                 "table_data",
@@ -220,26 +245,10 @@ def get_download_warehouse_data(request, schema_name: str, table_name: str):
                 order_by=order_by,
                 order=order,
             )
-            if not data:
-                break
-            if not header_written:
-                output = StringIO()
-                writer = csv.DictWriter(output, fieldnames=data[0].keys())
-                writer.writeheader()
-                yield output.getvalue()
-                header_written = True
-            output = StringIO()
-            writer = csv.DictWriter(output, fieldnames=data[0].keys())
-            for row in data:
-                writer.writerow(row)
-                yield output.getvalue()
-                output.seek(0)
-                output.truncate(0)
-            page += 1
-            logger.info(f"Streaming page {page} of {schema_name}.{table_name}")
+        output.close()
 
     response = StreamingHttpResponse(
-        stream_warehouse_data(request, schema_name, table_name, page_size=30000),
+        stream_warehouse_data(request, schema_name, table_name, page_size=50),
         content_type="application/octet-stream",
     )
     response["Content-Disposition"] = f"attachment; filename={schema_name}__{table_name}.csv"
