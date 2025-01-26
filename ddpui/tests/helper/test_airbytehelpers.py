@@ -17,7 +17,6 @@ from ddpui.ddpairbyte.airbytehelpers import (
     delete_source,
     create_airbyte_deployment,
     create_connection,
-    delete_connection,
     get_sync_job_history_for_connection,
     create_or_update_org_cli_block,
     schedule_update_connection_schema,
