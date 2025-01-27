@@ -151,6 +151,13 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
         source_id, payload.name, payload.config, payload.sourceDefId
     )
     logger.info("updated source having id " + source["sourceId"])
+
+    # remove the source schema catalog that is cached
+    task_key = f"{TaskProgressHashPrefix.SOURCE_SCHEMA_CATALOG}-{orguser.org.slug}-{source_id}"
+    task_progress = SingleTaskProgress.fetch(task_key)
+    if task_progress:
+        SingleTaskProgress.remove(task_key)
+
     return {"sourceId": source["sourceId"]}
 
 

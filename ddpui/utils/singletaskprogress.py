@@ -46,3 +46,9 @@ class SingleTaskProgress:
         """return the ttl for the key"""
         redis = RedisClient.get_instance()
         return redis.ttl(task_key)
+
+    @staticmethod
+    def remove(task_key: str) -> int:
+        """remove the key"""
+        redis = RedisClient.get_instance()
+        return redis.delete(task_key)
