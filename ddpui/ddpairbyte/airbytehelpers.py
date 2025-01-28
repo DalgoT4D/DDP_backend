@@ -720,7 +720,7 @@ def delete_connection(org: Org, connection_id: str):
             parameters = deployment["parameters"]
             # logger.info(parameters)
             for task in parameters["config"]["tasks"]:
-                if task["connection_id"] == connection_id:
+                if task.get("connection_id") == connection_id:
                     logger.info(f"deleting task {task['slug']} from deployment")
                     parameters["config"]["tasks"].remove(task)
             # logger.info(parameters)

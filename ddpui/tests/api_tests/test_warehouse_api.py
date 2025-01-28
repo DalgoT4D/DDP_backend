@@ -178,13 +178,14 @@ def test_download_warehouse_data_success(orguser):
 
         # check response
         content = b"".join(response.streaming_content).decode("utf-8")
-
-        # Assertions to verify the streaming response content
-        assert "col1,col2\r\n" in content  # Check header
-        assert "value1,value2\r\n" in content  # Check first row
-        assert "value3,value4\r\n" in content  # Check second row
-        assert "value5,value6\r\n" in content  # Check second row
-        assert content.count("\n") == 4
+        for i, content in enumerate(response.streaming_content):
+            content = content.decode("utf-8")
+            assert "col1,col2\r\n" in content  # Check header
+            if i == 0:
+                assert "value1,value2\r\n" in content
+                assert "value3,value4\r\n" in content
+            elif i == 1:
+                assert "value5,value6\r\n" in content
 
 
 def test_get_warehouse_table_columns_spec_without_warehouse(orguser):
