@@ -1,8 +1,8 @@
 from unittest.mock import patch, Mock
 import os
-import yaml
 from datetime import datetime
 from pathlib import Path
+import yaml
 import pytest
 import pytz
 from ninja.errors import HttpError
@@ -15,6 +15,8 @@ from ddpui.ddpairbyte.airbytehelpers import (
     get_job_info_for_connection,
     update_destination,
     delete_source,
+    create_airbyte_deployment,
+    create_connection,
     get_sync_job_history_for_connection,
     create_or_update_org_cli_block,
     schedule_update_connection_schema,
@@ -23,15 +25,15 @@ from ddpui.ddpairbyte.schema import (
     AirbyteConnectionSchemaUpdate,
     AirbyteDestinationUpdate,
     AirbyteConnectionSchemaUpdateSchedule,
+    AirbyteConnectionCreate,
 )
-from ddpui.models.role_based_access import Role, RolePermission, Permission
+from ddpui.models.role_based_access import Role
 from ddpui.models.org import (
     Org,
     OrgPrefectBlockv1,
     OrgWarehouse,
     OrgDbt,
     TransformType,
-    ConnectionJob,
     ConnectionMeta,
     OrgSchemaChange,
 )
@@ -39,6 +41,7 @@ from ddpui.models.org_user import OrgUser, OrgUserRole, User
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.models.tasks import Task, OrgTask, OrgDataFlowv1, DataflowOrgTask
 from ddpui.ddpprefect import DBTCLIPROFILE
+from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTECLEAR
 
 
 pytestmark = pytest.mark.django_db
@@ -59,24 +62,75 @@ def authuser():
 @pytest.fixture
 def org_without_workspace():
     """a pytest fixture which creates an Org without an airbyte workspace"""
-    print("creating org_without_workspace")
     org = Org.objects.create(airbyte_workspace_id=None, slug="test-org-slug")
     yield org
-    print("deleting org_without_workspace")
+    org.delete()
+
+
+@pytest.fixture
+def org_with_workspace():
+    """a pytest fixture which creates an Org with a fake airbyte workspace id"""
+    org = Org.objects.create(slug="test-org", airbyte_workspace_id="wsid")
+    warehouse = OrgWarehouse.objects.create(
+        org=org,
+        wtype="bigquery",
+        name="test-warehouse",
+        airbyte_destination_id="fake-destination-id",
+    )
+    block = OrgPrefectBlockv1.objects.create(
+        org=org, block_type=AIRBYTESERVER, block_id="blockid", block_name="blockname"
+    )
+    yield org
+    warehouse.delete()
+    block.delete()
     org.delete()
 
 
 @pytest.fixture
 def orguser(authuser, org_without_workspace):
     """a pytest fixture representing an OrgUser having the account-manager role"""
-    orguser = OrgUser.objects.create(
+    orguser_ = OrgUser.objects.create(
         user=authuser,
         org=org_without_workspace,
         role=OrgUserRole.ACCOUNT_MANAGER,
         new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
     )
-    yield orguser
-    orguser.delete()
+    yield orguser_
+    orguser_.delete()
+
+
+@pytest.fixture
+def task():
+    """a pytest fixture which creates a Task object"""
+    task_ = Task.objects.create(slug="test-task", label="test-label")
+    yield task_
+    task_.delete()
+
+
+@pytest.fixture
+def sync_task():
+    """a pytest fixture which creates a Task object"""
+    task_ = Task.objects.create(slug=TASK_AIRBYTESYNC, label=TASK_AIRBYTESYNC)
+    yield task_
+    task_.delete()
+
+
+@pytest.fixture
+def clear_task():
+    """a pytest fixture which creates a Task object"""
+    task_ = Task.objects.create(slug=TASK_AIRBYTECLEAR, label=TASK_AIRBYTECLEAR)
+    yield task_
+    task_.delete()
+
+
+@pytest.fixture
+def org_task(org_with_workspace, task):
+    """a pytest fixture which creates an OrgTask object"""
+    orgtask = OrgTask.objects.create(
+        task=task, org=org_with_workspace, connection_id="connection_id"
+    )
+    yield orgtask
+    orgtask.delete()
 
 
 # ================================================================================
@@ -467,6 +521,99 @@ def test_get_sync_history_for_connection_success(
     result, error = get_sync_job_history_for_connection(org, "connection_id")
     assert error is None
     assert result == []
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.generate_hash_id")
+@patch("ddpui.ddpairbyte.airbytehelpers.logger")
+@patch("ddpui.ddpairbyte.airbytehelpers.prefect_service.create_dataflow_v1")
+@patch("ddpui.ddpairbyte.airbytehelpers.setup_airbyte_sync_task_config")
+@patch("ddpui.ddpairbyte.airbytehelpers.OrgDataFlowv1")
+@patch("ddpui.ddpairbyte.airbytehelpers.DataflowOrgTask")
+def test_create_airbyte_deployment(
+    mock_dataflow_org_task,
+    mock_org_dataflow,
+    mock_setup_task_config,
+    mock_create_dataflow,
+    mock_logger,
+    mock_generate_hash_id,
+    org_with_workspace,
+    org_task,
+):
+    """test create_airbyte_deployment"""
+    mock_generate_hash_id.return_value = "12345678"
+    mock_setup_task_config.return_value.to_json.return_value = {"task": "config"}
+    mock_create_dataflow.return_value = {
+        "deployment": {"id": "deployment-id", "name": "deployment-name"}
+    }
+    mock_org_dataflow.objects.filter.return_value.first.return_value = None
+
+    org_airbyte_server_block = OrgPrefectBlockv1.objects.filter(
+        org=org_with_workspace,
+        block_type=AIRBYTESERVER,
+    ).first()
+    result = create_airbyte_deployment(org_with_workspace, org_task, org_airbyte_server_block)
+
+    mock_generate_hash_id.assert_called_once_with(8)
+    mock_logger.info.assert_called_once_with("using the hash code 12345678 for the deployment name")
+    mock_create_dataflow.assert_called_once()
+    mock_org_dataflow.objects.filter.assert_called_once_with(deployment_id="deployment-id")
+    mock_org_dataflow.objects.create.assert_called_once_with(
+        org=org_with_workspace,
+        name="manual-test-org-test-task-12345678",
+        deployment_name="deployment-name",
+        deployment_id="deployment-id",
+        dataflow_type="manual",
+    )
+    mock_dataflow_org_task.objects.create.assert_called_once_with(
+        dataflow=mock_org_dataflow.objects.create.return_value,
+        orgtask=org_task,
+    )
+
+    assert result == mock_org_dataflow.objects.create.return_value
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.create_connection")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.delete_connection")
+@patch("ddpui.ddpairbyte.airbytehelpers.create_airbyte_deployment")
+@patch("ddpui.ddpairbyte.airbytehelpers.logger")
+def test_create_connection(
+    mock_logger,
+    mock_create_airbyte_deployment,
+    mock_delete_connection,
+    mock_create_connection,
+    org_with_workspace,
+    sync_task,
+    clear_task,
+):
+    mock_create_connection.return_value = {
+        "connectionId": "connection-id",
+        "sourceId": "source-id",
+        "destinationId": "destination-id",
+        "sourceCatalogId": "source-catalog-id",
+        "syncCatalog": {},
+        "status": "status",
+        "name": "test-connection",
+    }
+    payload = AirbyteConnectionCreate(
+        name="test-connection", sourceId="source-id", destinationId="destination-id", streams=[]
+    )
+
+    new_dataflow = Mock(clear_conn_dataflow=None)
+    create_airbyte_deployment.return_value = new_dataflow
+
+    result, error = create_connection(org_with_workspace, payload)
+
+    assert error is None
+
+    mock_create_connection.assert_called_once_with(org_with_workspace.airbyte_workspace_id, payload)
+
+    assert result["name"] == "test-connection"
+    assert result["connectionId"] == "connection-id"
+    assert result["source"] == {"id": "source-id"}
+    assert result["destination"] == {"id": "destination-id"}
+    assert result["catalogId"] == "source-catalog-id"
+    assert result["syncCatalog"] == {}
+    assert result["status"] == "status"
 
 
 @patch(
