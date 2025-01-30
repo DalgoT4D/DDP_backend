@@ -160,6 +160,27 @@ def create_elementary_tracking_tables(org: Org):
     return {"task_id": task_id}
 
 
+def extract_profile_from_generate_elementary_cli_profile(lines: list[str]):
+    """skips the first few lines of the output until the profile yaml begins"""
+    buffer = ""
+    gather = False
+    for line in lines:
+        if line == "elementary:":
+            gather = True
+        if gather:
+            buffer += line + "\n"
+
+    if buffer == "":
+        logger.error(
+            "macro elementary.generate_elementary_cli_profile returned nothing\n" + "\n".join(lines)
+        )
+        return {"error": "macro elementary.generate_elementary_cli_profile returned nothing"}, None
+
+    elementary_profile = yaml.safe_load(buffer)
+    logger.info(elementary_profile)  # safe since there are no secrets here
+    return None, elementary_profile
+
+
 def create_elementary_profile(org: Org):
     """creates elementary's dbt profile"""
     if org.dbt is None:
@@ -178,20 +199,9 @@ def create_elementary_profile(org: Org):
         text=True,
     )
 
-    buffer = ""
-    gather = False
-    for line in r.split("\n"):
-        if line == "elementary:":
-            gather = True
-        if gather:
-            buffer += line + "\n"
-
-    if buffer == "":
-        logger.error("macro elementary.generate_elementary_cli_profile returned nothing\n" + r)
-        return {"error": "macro elementary.generate_elementary_cli_profile returned nothing"}
-
-    elementary_profile = yaml.safe_load(buffer)
-    logger.info(elementary_profile)
+    error, elementary_profile = extract_profile_from_generate_elementary_cli_profile(r.split("\n"))
+    if error:
+        return error
 
     # now we have to fix up the auth section by copying the dbt profile's auth section
     dbt_profile_file = Path(dbt_project_params.project_dir) / "profiles/profiles.yml"
