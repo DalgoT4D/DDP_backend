@@ -18,6 +18,11 @@ from ddpui.api.dbt_api import (
     post_dbt_makedocs,
     post_dbt_workspace,
     put_dbt_github,
+    get_elementary_setup_status,
+    get_check_dbt_files,
+    post_create_elementary_tracking_tables,
+    post_create_elementary_profile,
+    post_create_edr_sendreport_dataflow,
 )
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.ddpprefect import SECRET
@@ -289,3 +294,120 @@ def test_post_dbt_makedocs(
 
     post_dbt_makedocs(request)
     mock_create_single_html.assert_called_once()
+
+
+def test_get_elementary_setup_status_failure(orguser):
+    """failure"""
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.api.dbt_api.elementary_service.elementary_setup_status",
+        return_value={"error": "error-message"},
+    ):
+        with pytest.raises(HttpError) as excinfo:
+            get_elementary_setup_status(request)
+            assert str(excinfo.value) == "error-message"
+
+
+def test_get_elementary_setup_status_success(orguser):
+    """success"""
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.api.dbt_api.elementary_service.elementary_setup_status",
+        return_value={"status": "set-up"},
+    ):
+        response = get_elementary_setup_status(request)
+        assert response == {"status": "set-up"}
+
+
+def test_get_check_dbt_files_failure(orguser):
+    """failure"""
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.api.dbt_api.elementary_service.check_dbt_files",
+        return_value=("error-message", None),
+    ):
+        with pytest.raises(HttpError) as excinfo:
+            get_check_dbt_files(request)
+            assert str(excinfo.value) == "error-message"
+
+
+def test_get_check_dbt_files_success(orguser):
+    """success"""
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.api.dbt_api.elementary_service.check_dbt_files",
+        return_value=(None, {"status": "ok"}),
+    ):
+        response = get_check_dbt_files(request)
+        assert response == {"status": "ok"}
+
+
+def test_post_create_elementary_tracking_tables_failure(orguser):
+    """failure"""
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.api.dbt_api.elementary_service.create_elementary_tracking_tables",
+        return_value={"error": "error-message"},
+    ):
+        with pytest.raises(HttpError) as excinfo:
+            post_create_elementary_tracking_tables(request)
+            assert str(excinfo.value) == "error-message"
+
+
+def test_post_create_elementary_tracking_tables_success(orguser):
+    """success"""
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.api.dbt_api.elementary_service.create_elementary_tracking_tables",
+        return_value={"status": "ok"},
+    ):
+        response = post_create_elementary_tracking_tables(request)
+        assert response == {"status": "ok"}
+
+
+def test_post_create_elementary_profile_failure(orguser):
+    """failure"""
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.api.dbt_api.elementary_service.create_elementary_profile",
+        return_value={"error": "error-message"},
+    ):
+        with pytest.raises(HttpError) as excinfo:
+            post_create_elementary_profile(request)
+            assert str(excinfo.value) == "error-message"
+
+
+def test_post_create_elementary_profile_success(orguser):
+    """success"""
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.api.dbt_api.elementary_service.create_elementary_profile",
+        return_value={"status": "ok"},
+    ):
+        response = post_create_elementary_profile(request)
+        assert response == {"status": "ok"}
+
+
+def test_post_create_edr_sendreport_dataflow_failure(orguser):
+    """failure"""
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.api.dbt_api.elementary_service.create_edr_sendreport_dataflow",
+        return_value={"error": "error-message"},
+    ):
+        with patch("ddpui.api.dbt_api.get_edr_send_report_task", return_value="orgtask"):
+            with pytest.raises(HttpError) as excinfo:
+                post_create_edr_sendreport_dataflow(request)
+                assert str(excinfo.value) == "error-message"
+
+
+def test_post_create_edr_sendreport_dataflow_success(orguser):
+    """success"""
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.api.dbt_api.elementary_service.create_edr_sendreport_dataflow",
+        return_value={"status": "ok"},
+    ):
+        with patch("ddpui.api.dbt_api.get_edr_send_report_task", return_value="orgtask"):
+            response = post_create_edr_sendreport_dataflow(request)
+            assert response == {"status": "ok"}
