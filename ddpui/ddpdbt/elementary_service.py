@@ -72,7 +72,7 @@ def check_dbt_files(org: Org):
 
     def get_elementary_target_schema(dbt_project_yml: str):
         """{'schema': 'elementary'} or {'+schema': 'elementary'}"""
-        with open(dbt_project_yml, "r", encoding="utf-8") as dbt_project_yml_f:
+        with open(dbt_project_yml, "r", encoding="utf-8") as dbt_project_yml_f:  # skipcq: PTC-W6004
             dbt_project_obj = yaml.safe_load(dbt_project_yml_f)
             if "elementary" not in dbt_project_obj["models"]:
                 return None
@@ -84,7 +84,7 @@ def check_dbt_files(org: Org):
 
     def get_elementary_package_version(packages_yml: str):
         """{'package': 'elementary-data/elementary', 'version': '0.15.2'}"""
-        with open(packages_yml, "r", encoding="utf-8") as packages_yml_f:
+        with open(packages_yml, "r", encoding="utf-8") as packages_yml_f:  # skipcq: PTC-W6004
             packages_obj = yaml.safe_load(packages_yml_f)
             if (
                 packages_obj is not None
