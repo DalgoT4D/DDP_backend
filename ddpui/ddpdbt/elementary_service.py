@@ -54,6 +54,34 @@ def elementary_setup_status(org: Org) -> dict:
     return {"status": "set-up"}
 
 
+def get_elementary_target_schema(dbt_project_yml: str):
+    """{'schema': 'elementary'} or {'+schema': 'elementary'}"""
+    with open(dbt_project_yml, "r", encoding="utf-8") as dbt_project_yml_f:  # skipcq: PTC-W6004
+        dbt_project_obj = yaml.safe_load(dbt_project_yml_f)
+        if "elementary" not in dbt_project_obj["models"]:
+            return None
+        if "schema" in dbt_project_obj["models"]["elementary"]:
+            return {"schema": dbt_project_obj["models"]["elementary"]["schema"]}
+        if "+schema" in dbt_project_obj["models"]["elementary"]:
+            return {"+schema": dbt_project_obj["models"]["elementary"]["+schema"]}
+        return None
+
+
+def get_elementary_package_version(packages_yml: str):
+    """{'package': 'elementary-data/elementary', 'version': '0.15.2'}"""
+    with open(packages_yml, "r", encoding="utf-8") as packages_yml_f:  # skipcq: PTC-W6004
+        packages_obj = yaml.safe_load(packages_yml_f)
+        if (
+            packages_obj is not None
+            and "packages" in packages_obj
+            and isinstance(packages_obj["packages"], list)
+        ):
+            for package in packages_obj["packages"]:
+                if package["package"] == "elementary-data/elementary":
+                    return package
+    return None
+
+
 def check_dbt_files(org: Org):
     """checks for the existence of the required lines in dbt_project.yml and packages.yml"""
     if org.dbt is None:
@@ -69,32 +97,6 @@ def check_dbt_files(org: Org):
 
     if not packages_yml.exists():
         return str(packages_yml) if settings.DEBUG else "packages.yml not found", None
-
-    def get_elementary_target_schema(dbt_project_yml: str):
-        """{'schema': 'elementary'} or {'+schema': 'elementary'}"""
-        with open(dbt_project_yml, "r", encoding="utf-8") as dbt_project_yml_f:  # skipcq: PTC-W6004
-            dbt_project_obj = yaml.safe_load(dbt_project_yml_f)
-            if "elementary" not in dbt_project_obj["models"]:
-                return None
-            if "schema" in dbt_project_obj["models"]["elementary"]:
-                return {"schema": dbt_project_obj["models"]["elementary"]["schema"]}
-            if "+schema" in dbt_project_obj["models"]["elementary"]:
-                return {"+schema": dbt_project_obj["models"]["elementary"]["+schema"]}
-            return None
-
-    def get_elementary_package_version(packages_yml: str):
-        """{'package': 'elementary-data/elementary', 'version': '0.15.2'}"""
-        with open(packages_yml, "r", encoding="utf-8") as packages_yml_f:  # skipcq: PTC-W6004
-            packages_obj = yaml.safe_load(packages_yml_f)
-            if (
-                packages_obj is not None
-                and "packages" in packages_obj
-                and isinstance(packages_obj["packages"], list)
-            ):
-                for package in packages_obj["packages"]:
-                    if package["package"] == "elementary-data/elementary":
-                        return package
-        return None
 
     elementary_package = get_elementary_package_version(packages_yml)
     elementary_target_schema = get_elementary_target_schema(dbt_project_yml)

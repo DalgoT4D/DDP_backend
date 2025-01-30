@@ -1,11 +1,13 @@
 from pathlib import Path
-from unittest.mock import patch, Mock
+from unittest.mock import patch, Mock, mock_open
 import pytest
 from django.contrib.auth.models import User
 from ddpui.models.org import Org, OrgDbt
 from ddpui.models.org_user import OrgUser
 from ddpui.ddpdbt.elementary_service import (
     elementary_setup_status,
+    get_elementary_target_schema,
+    get_elementary_package_version,
     create_elementary_tracking_tables,
     extract_profile_from_generate_elementary_cli_profile,
     refresh_elementary_report_via_prefect,
@@ -62,6 +64,98 @@ def test_elementary_setup_status_no_dbt(org):
     org.dbt = None
     result = elementary_setup_status(org)
     assert result == {"error": "dbt is not configured for this client"}
+
+
+def test_get_elementary_target_schema_schema():
+    """tests get_elementary_target_schema"""
+    dbt_project_content = """
+    models:
+      elementary:
+        schema: elementary
+    """
+    with patch("builtins.open", mock_open(read_data=dbt_project_content)):
+        result = get_elementary_target_schema("dbt_project.yml")
+        assert result == {"schema": "elementary"}
+
+
+def test_get_elementary_target_schema_plus_schema():
+    """tests get_elementary_target_schema"""
+    dbt_project_content = """
+    models:
+      elementary:
+        +schema: elementary
+    """
+    with patch("builtins.open", mock_open(read_data=dbt_project_content)):
+        result = get_elementary_target_schema("dbt_project.yml")
+        assert result == {"+schema": "elementary"}
+
+
+def test_get_elementary_target_schema_no_elementary():
+    """tests get_elementary_target_schema"""
+    dbt_project_content = """
+    models:
+      not_elementary:
+        schema: not_elementary
+    """
+    with patch("builtins.open", mock_open(read_data=dbt_project_content)):
+        result = get_elementary_target_schema("dbt_project.yml")
+        assert result is None
+
+
+def test_get_elementary_target_schema_no_schema():
+    """tests get_elementary_target_schema"""
+    dbt_project_content = """
+    models:
+      elementary:
+        other_key: other_value
+    """
+    with patch("builtins.open", mock_open(read_data=dbt_project_content)):
+        result = get_elementary_target_schema("dbt_project.yml")
+        assert result is None
+
+
+def test_get_elementary_package_version_found():
+    """tests get_elementary_package_version"""
+    packages_content = """
+    packages:
+      - package: elementary-data/elementary
+        version: 0.15.2
+    """
+    with patch("builtins.open", mock_open(read_data=packages_content)):
+        result = get_elementary_package_version("packages.yml")
+        assert result == {"package": "elementary-data/elementary", "version": "0.15.2"}
+
+
+def test_get_elementary_package_version_not_found():
+    """tests get_elementary_package_version"""
+    packages_content = """
+    packages:
+      - package: other-package
+        version: 1.0.0
+    """
+    with patch("builtins.open", mock_open(read_data=packages_content)):
+        result = get_elementary_package_version("packages.yml")
+        assert result is None
+
+
+def test_get_elementary_package_version_no_packages_key():
+    """tests get_elementary_package_version"""
+    packages_content = """
+    other_key:
+      - package: elementary-data/elementary
+        version: 0.15.2
+    """
+    with patch("builtins.open", mock_open(read_data=packages_content)):
+        result = get_elementary_package_version("packages.yml")
+        assert result is None
+
+
+def test_get_elementary_package_version_empty_file():
+    """tests get_elementary_package_version"""
+    packages_content = ""
+    with patch("builtins.open", mock_open(read_data=packages_content)):
+        result = get_elementary_package_version("packages.yml")
+        assert result is None
 
 
 @patch("ddpui.ddpdbt.elementary_service.TaskProgress")
