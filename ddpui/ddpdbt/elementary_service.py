@@ -1,4 +1,4 @@
-""" functions to set up elementary """
+"""functions to set up elementary"""
 
 import os
 from pathlib import Path
