@@ -11,8 +11,14 @@ from ddpui.ddpdbt.elementary_service import (
     create_elementary_tracking_tables,
     extract_profile_from_generate_elementary_cli_profile,
     refresh_elementary_report_via_prefect,
+    get_dbt_version,
+    get_edr_version,
+    create_edr_sendreport_dataflow,
 )
-
+from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE
+from ddpui.ddpprefect.schema import (
+    PrefectDataFlowCreateSchema3,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -252,5 +258,136 @@ def test_refresh_elementary_report_via_prefect(
     mock_create_deployment_flow_run.assert_called_once_with(mock_odf.deployment_id)
 
 
-def test_get_dbt_version():
+@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
+@patch("ddpui.ddpdbt.elementary_service.subprocess.check_output")
+def test_get_dbt_version_success(mock_check_output, mock_gather_dbt_project_params, org):
     """tests get_dbt_version"""
+    mock_gather_dbt_project_params.return_value = Mock(dbt_binary="test-binary")
+    mock_check_output.return_value = "line1\nline2\ninstalled: 0.19.0\nline4"
+
+    response = get_dbt_version(org)
+
+    mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
+    mock_check_output.assert_called_once_with(["test-binary", "--version"], text=True)
+
+    assert response == "0.19.0"
+
+
+@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
+@patch("ddpui.ddpdbt.elementary_service.subprocess.check_output")
+def test_get_dbt_version_failure(mock_check_output, mock_gather_dbt_project_params, org):
+    """tests get_dbt_version"""
+    mock_gather_dbt_project_params.return_value = Mock(dbt_binary="test-binary")
+    mock_check_output.return_value = "line1\nline2\nline3\nline4"
+
+    response = get_dbt_version(org)
+
+    mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
+    mock_check_output.assert_called_once_with(["test-binary", "--version"], text=True)
+
+    assert response == "Not available"
+
+
+@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
+@patch("ddpui.ddpdbt.elementary_service.subprocess.check_output")
+def test_get_edr_version_failure(mock_check_output, mock_gather_dbt_project_params, org):
+    """tests get_edr_version"""
+
+    mock_gather_dbt_project_params.return_value = Mock(venv_binary="venv/bin")
+    mock_check_output.return_value = "line1\nline2\nline3\nline4"
+
+    response = get_edr_version(org)
+
+    mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
+
+    mock_check_output.assert_called_once_with(["venv/bin/edr", "--version"], text=True)
+
+    assert response == "Not available"
+
+
+@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
+@patch("ddpui.ddpdbt.elementary_service.subprocess.check_output")
+def test_get_edr_version_success(mock_check_output, mock_gather_dbt_project_params, org):
+    """tests get_edr_version"""
+
+    mock_gather_dbt_project_params.return_value = Mock(venv_binary="venv/bin")
+    mock_check_output.return_value = "line1\nline2\nElementary version is 1.\nline4"
+
+    response = get_edr_version(org)
+
+    mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
+
+    mock_check_output.assert_called_once_with(["venv/bin/edr", "--version"], text=True)
+
+    assert response == "1"
+
+
+@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
+@patch("ddpui.ddpdbt.elementary_service.setup_edr_send_report_task_config")
+@patch("ddpui.ddpdbt.elementary_service.generate_hash_id")
+@patch("ddpui.ddpdbt.elementary_service.prefect_service.create_dataflow_v1")
+@patch("ddpui.ddpdbt.elementary_service.OrgDataFlowv1.objects.create")
+def test_create_edr_sendreport_dataflow(
+    mock_create_orgdataflowv1,
+    mock_create_dataflow_v1,
+    mock_generate_hash_id,
+    mock_setup_edr_send_report_task_config,
+    mock_gather_dbt_project_params,
+    org,
+):
+    """tests create_edr_sendreport_dataflow"""
+
+    org_task = Mock(org=org, task=Mock(slug="taskslug"))
+    cron = "0 0 * * *"
+
+    mock_gather_dbt_project_params.return_value = Mock(
+        venv_binary="venv/bin", project_dir="project-dir"
+    )
+    mock_setup_edr_send_report_task_config.return_value = Mock(
+        to_json=Mock(return_value={"task": "config"})
+    )
+    mock_generate_hash_id.return_value = "hashcode"
+
+    deployment_name = f"pipeline-{org.slug}-taskslug-hashcode"
+
+    mock_create_dataflow_v1.return_value = {
+        "deployment": {
+            "name": deployment_name,
+            "id": "deployment-id",
+        }
+    }
+
+    mock_create_orgdataflowv1.return_value = Mock(name=deployment_name)
+
+    response = create_edr_sendreport_dataflow(org, org_task, cron)
+
+    mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
+    mock_setup_edr_send_report_task_config.assert_called_once_with(
+        org_task, "project-dir", "venv/bin"
+    )
+    mock_generate_hash_id.assert_called_once_with(8)
+
+    mock_create_dataflow_v1.assert_called_once_with(
+        PrefectDataFlowCreateSchema3(
+            deployment_name=deployment_name,
+            flow_name=deployment_name,
+            orgslug=org.slug,
+            deployment_params={
+                "config": {
+                    "tasks": [{"task": "config"}],
+                    "org_slug": org_task.org.slug,
+                }
+            },
+            cron=cron,
+        ),
+        MANUL_DBT_WORK_QUEUE,
+    )
+
+    mock_create_orgdataflowv1.assert_called_once_with(
+        org=org,
+        name=deployment_name,
+        deployment_name=deployment_name,
+        deployment_id="deployment-id",
+        dataflow_type="manual",
+        cron=cron,
+    )
