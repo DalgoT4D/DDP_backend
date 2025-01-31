@@ -1,8 +1,8 @@
 from pathlib import Path
 from unittest.mock import patch, Mock, mock_open, MagicMock, ANY
 import pytest
-from ddpui import settings
 from django.contrib.auth.models import User
+from ddpui import settings
 from ddpui.models.org import Org, OrgDbt
 from ddpui.models.org_user import OrgUser
 from ddpui.ddpdbt.elementary_service import (
@@ -174,7 +174,6 @@ def test_check_dbt_files_missing_packages_yml(
     org,
 ):
     """tests check_dbt_files"""
-
     mock_gather_dbt_project_params.retval = Mock(project_dir="test-project-dir")
 
     mock_dbt_project_yml = MagicMock()
@@ -206,7 +205,6 @@ def test_check_dbt_files_missing_dbt_project_yml(
     org,
 ):
     """tests check_dbt_files"""
-
     mock_gather_dbt_project_params.retval = Mock(project_dir="test-project-dir")
 
     mock_dbt_project_yml = MagicMock()
@@ -242,7 +240,6 @@ def test_check_dbt_files_missing_elementary_package_missing_target_schema(
     org,
 ):
     """tests check_dbt_files"""
-
     mock_gather_dbt_project_params.retval = Mock(project_dir="test-project-dir")
 
     mock_dbt_project_yml = MagicMock()
@@ -290,7 +287,6 @@ def test_check_dbt_files_have_elementary_package_missing_target_schema(
     org,
 ):
     """tests check_dbt_files"""
-
     mock_gather_dbt_project_params.retval = Mock(project_dir="test-project-dir")
 
     mock_dbt_project_yml = MagicMock()
@@ -339,7 +335,6 @@ def test_check_dbt_files_missing_elementary_package_have_target_schema(
     org,
 ):
     """tests check_dbt_files"""
-
     mock_gather_dbt_project_params.retval = Mock(project_dir="test-project-dir")
 
     mock_dbt_project_yml = MagicMock()
