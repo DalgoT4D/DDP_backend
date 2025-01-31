@@ -248,9 +248,7 @@ AIRBYTE_CUSTOM_SOURCES = {
     },
 }
 
-AIRBYTE_SOURCE_BLACKLIST = [
-    "airbyte/source-commcare",
-]
+AIRBYTE_SOURCE_BLACKLIST = os.getenv("AIRBYTE_SOURCE_BLACKLIST", "").split(",")
 
 # finally set up the loggers
 setup_ddp_logger()

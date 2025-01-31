@@ -12,7 +12,7 @@ django.setup()
 
 from ninja.errors import HttpError
 from ddpui.tests.helper.test_airbyte_unit_schemas import *
-
+from ddpui import settings
 from ddpui.ddpairbyte.airbyte_service import (
     abreq,
     create_workspace,
@@ -287,6 +287,30 @@ def test_get_source_definitions_success():
         }
         result = get_source_definitions("test")["sourceDefinitions"]
         assert isinstance(result, list)
+        assert len(result) == 2
+
+
+def test_get_source_definitions_blacklist():
+    with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.headers = {"Content-Type": "application/json"}
+        mock_post.return_value.json.return_value = {
+            "sourceDefinitions": [
+                {
+                    "sourceDefinitionId": "1",
+                    "name": "Example Source Definition 1",
+                    "dockerRepository": "docker-repo",
+                },
+                {
+                    "sourceDefinitionId": "2",
+                    "name": "Example Source Definition 2",
+                    "dockerRepository": "blacklisted",
+                },
+            ]
+        }
+        settings.AIRBYTE_SOURCE_BLACKLIST = ["blacklisted"]
+        result = get_source_definitions("test")["sourceDefinitions"]
+        assert len(result) == 1
 
 
 def test_get_source_definitions_failure():
