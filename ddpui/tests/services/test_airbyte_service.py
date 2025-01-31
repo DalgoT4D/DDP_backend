@@ -273,8 +273,16 @@ def test_get_source_definitions_success():
         mock_post.return_value.headers = {"Content-Type": "application/json"}
         mock_post.return_value.json.return_value = {
             "sourceDefinitions": [
-                {"sourceDefinitionId": "1", "name": "Example Source Definition 1"},
-                {"sourceDefinitionId": "2", "name": "Example Source Definition 2"},
+                {
+                    "sourceDefinitionId": "1",
+                    "name": "Example Source Definition 1",
+                    "dockerRepository": "docker-repo",
+                },
+                {
+                    "sourceDefinitionId": "2",
+                    "name": "Example Source Definition 2",
+                    "dockerRepository": "docker-repo",
+                },
             ]
         }
         result = get_source_definitions("test")["sourceDefinitions"]

@@ -248,6 +248,10 @@ AIRBYTE_CUSTOM_SOURCES = {
     },
 }
 
+AIRBYTE_SOURCE_BLACKLIST = [
+    "airbyte/source-commcare",
+]
+
 # finally set up the loggers
 setup_ddp_logger()
 setup_ab_logger()
