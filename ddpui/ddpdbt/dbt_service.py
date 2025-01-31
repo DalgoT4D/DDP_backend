@@ -1,15 +1,11 @@
 import re
-from uuid import uuid4
+
 import glob
 import os
 import shutil
-from datetime import datetime
 import subprocess
 from pathlib import Path
 import requests
-import boto3
-import boto3.exceptions
-from ninja.errors import HttpError
 from django.utils.text import slugify
 from dbt_automation import assets
 from ddpui.ddpprefect import (
@@ -17,8 +13,6 @@ from ddpui.ddpprefect import (
     DBTCLIPROFILE,
     SECRET,
 )
-from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import OrgDataFlowv1
 from ddpui.models.org import OrgDbt, OrgPrefectBlockv1, OrgWarehouse, TransformType
 from ddpui.models.org_user import Org
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask
@@ -33,10 +27,7 @@ from ddpui.utils.constants import (
     TASK_DBTCLOUD_JOB,
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager
-from ddpui.utils.timezone import as_ist
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.redis_client import RedisClient
-from ddpui.core.orgdbt_manager import DbtProjectManager
 
 logger = CustomLogger("ddpui")
 
@@ -225,121 +216,3 @@ def check_repo_exists(gitrepo_url: str, gitrepo_access_token: str | None) -> boo
         return False
 
     return response.status_code == 200
-
-
-def make_edr_report_s3_path(org: Org):
-    """make s3 path for elementary report"""
-    todays_date = datetime.today().strftime("%Y-%m-%d")
-    bucket_file_path = f"reports/{org.slug}.{todays_date}.html"
-    return bucket_file_path
-
-
-def fetch_elementary_report(org: Org):
-    """fetch previously generated elementary report"""
-    if org.dbt is None:
-        return "dbt is not configured for this client", None
-
-    project_dir = Path(DbtProjectManager.get_dbt_project_dir(org.dbt))
-
-    if not os.path.exists(project_dir / "elementary_profiles"):
-        return "set up elementary profile first", None
-
-    s3 = boto3.client(
-        "s3",
-        "ap-south-1",
-        aws_access_key_id=os.getenv("ELEMENTARY_AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("ELEMENTARY_AWS_SECRET_ACCESS_KEY"),
-    )
-    bucket_file_path = make_edr_report_s3_path(org)
-    try:
-        s3response = s3.get_object(
-            Bucket=os.getenv("ELEMENTARY_S3_BUCKET"),
-            Key=bucket_file_path,
-        )
-        logger.info("fetched s3response")
-    except boto3.exceptions.botocore.exceptions.ClientError:
-        return "report has not been generated", None
-    except Exception:
-        return "error fetching elementary report", None
-
-    report_html = s3response["Body"].read().decode("utf-8")
-    htmlfilename = str(project_dir / "elementary-report.html")
-    with open(htmlfilename, "w", encoding="utf-8") as indexfile:
-        indexfile.write(report_html)
-        indexfile.close()
-    logger.info("wrote elementary report to %s", htmlfilename)
-
-    redis = RedisClient.get_instance()
-    token = uuid4()
-    redis_key = f"elementary-report-{token.hex}"
-    redis.set(redis_key, htmlfilename.encode("utf-8"), 600)
-    logger.info("created redis key %s", redis_key)
-
-    return None, {
-        "token": token.hex,
-        "created_on_utc": s3response["LastModified"].isoformat(),  # e.g. 2024-06-07T00:44:08+00:00
-        "created_on_ist": as_ist(
-            s3response["LastModified"]
-        ).isoformat(),  # e.g. 2024-06-07T06:14:08+05:30
-    }
-
-
-def refresh_elementary_report_via_prefect(orguser: OrgUser) -> dict:
-    """refreshes the elementary report for the current date using the prefect deployment"""
-    org: Org = orguser.org
-    odf = OrgDataFlowv1.objects.filter(
-        org=org, name__startswith=f"pipeline-{org.slug}-generate-edr"
-    ).first()
-
-    if odf is None:
-        return {"error": "pipeline not found"}
-
-    locks = prefect_service.lock_tasks_for_deployment(odf.deployment_id, orguser)
-
-    try:
-        res = prefect_service.create_deployment_flow_run(odf.deployment_id)
-        for tasklock in locks:
-            tasklock.flow_run_id = res["flow_run_id"]
-            tasklock.save()
-
-    except Exception as error:
-        for task_lock in locks:
-            logger.info("deleting TaskLock %s", task_lock.orgtask.task.slug)
-            task_lock.delete()
-        logger.exception(error)
-        raise HttpError(400, "failed to start a run") from error
-
-    return res
-
-
-def get_dbt_version(org: Org):
-    """get dbt version"""
-    try:
-        dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
-        dbt_version_command = [str(dbt_project_params.dbt_binary), "--version"]
-        dbt_output = subprocess.check_output(dbt_version_command, text=True)
-        for line in dbt_output.splitlines():
-            if "installed:" in line:
-                return line.split(":")[1].strip()
-        return "Not available"
-    except Exception as err:
-        logger.error("Error getting dbt version: %s", err)
-        return "Not available"
-
-
-def get_edr_version(org: Org):
-    """get elementary report version"""
-    try:
-        dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
-        elementary_version_command = [
-            os.path.join(dbt_project_params.venv_binary, "edr"),
-            "--version",
-        ]
-        elementary_output = subprocess.check_output(elementary_version_command, text=True)
-        for line in elementary_output.splitlines():
-            if line.startswith("Elementary version"):
-                return line.split()[-1].strip()[:-1]
-        return "Not available"
-    except Exception as err:
-        logger.error("Error getting elementary version: %s", err)
-        return "Not available"

@@ -12,14 +12,24 @@ from ddpui.celeryworkers.tasks import (
     run_dbt_commands,
     setup_dbtworkspace,
 )
-from ddpui.models.tasks import TaskProgressHashPrefix
+from ddpui.models.tasks import (
+    TaskProgressHashPrefix,
+    TaskLock,
+    OrgTask,
+)
 from ddpui.utils.taskprogress import TaskProgress
-from ddpui.ddpdbt import dbt_service
+from ddpui.utils.constants import (
+    TASK_DBTRUN,
+    TASK_DBTCLEAN,
+    TASK_DBTDEPS,
+)
+from ddpui.ddpdbt import dbt_service, elementary_service
 from ddpui.ddpprefect import DBTCLIPROFILE, SECRET, prefect_service
 from ddpui.ddpprefect.schema import OrgDbtGitHub, OrgDbtSchema, OrgDbtTarget, PrefectSecretBlockEdit
 from ddpui.models.org import OrgPrefectBlockv1, Org
 from ddpui.models.org_user import OrgUser, OrgUserResponse
 from ddpui.core.orgdbt_manager import DbtProjectManager
+from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.dbtdocs import create_single_html
 from ddpui.utils.helpers import runcmd
@@ -266,8 +276,28 @@ def post_run_dbt_commands(request, payload: TaskParameters = None):
 
     taskprogress.add({"message": "Added dbt commands in queue", "status": "queued"})
 
-    # executes clean, deps, run
-    run_dbt_commands.delay(orguser.id, task_id, payload.dict() if payload else None)
+    try:
+        task_locks: list[TaskLock] = []
+
+        # acquire locks for clean, deps and run
+        org_tasks = OrgTask.objects.filter(
+            org=org,
+            task__slug__in=[TASK_DBTCLEAN, TASK_DBTDEPS, TASK_DBTRUN],
+            generated_by="system",
+        ).all()
+        for org_task in org_tasks:
+            task_lock = TaskLock.objects.create(
+                orgtask=org_task, locked_by=orguser, celery_task_id=task_id
+            )
+            task_locks.append(task_lock)
+
+        # executes clean, deps, run
+        run_dbt_commands.delay(org.id, task_id, payload.dict() if payload else None)
+
+    finally:
+        # clear all locks
+        for lock in task_locks:
+            lock.delete()
 
     return {"task_id": task_id}
 
@@ -277,7 +307,7 @@ def post_run_dbt_commands(request, payload: TaskParameters = None):
 def post_fetch_elementary_report(request):
     """prepare the dbt docs single html"""
     orguser: OrgUser = request.orguser
-    error, result = dbt_service.fetch_elementary_report(orguser.org)
+    error, result = elementary_service.fetch_elementary_report(orguser.org)
     if error:
         raise HttpError(400, error)
 
@@ -289,4 +319,70 @@ def post_fetch_elementary_report(request):
 def post_refresh_elementary_report_via_prefect(request):
     """prepare the dbt docs single html via prefect deployment"""
     orguser: OrgUser = request.orguser
-    return dbt_service.refresh_elementary_report_via_prefect(orguser)
+    return elementary_service.refresh_elementary_report_via_prefect(orguser)
+
+
+@dbt_router.get("/elementary-setup-status", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_dbt_workspace"])
+def get_elementary_setup_status(request):
+    """prepare the dbt docs single html"""
+    orguser: OrgUser = request.orguser
+    result = elementary_service.elementary_setup_status(orguser.org)
+    if "error" in result:
+        raise HttpError(400, result["error"])
+
+    return result
+
+
+@dbt_router.get("/check-dbt-files", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_dbt_workspace"])
+def get_check_dbt_files(request):
+    """checks that the dbt project is set up for elementary"""
+    orguser: OrgUser = request.orguser
+    error, result = elementary_service.check_dbt_files(orguser.org)
+    if error:
+        raise HttpError(400, error)
+
+    return result
+
+
+@dbt_router.post("/create-elementary-tracking-tables/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_dbt_workspace"])
+def post_create_elementary_tracking_tables(request):
+    """prepare the dbt docs single html via prefect deployment"""
+    orguser: OrgUser = request.orguser
+    result = elementary_service.create_elementary_tracking_tables(orguser.org)
+    if "error" in result:
+        raise HttpError(400, result["error"])
+
+    return result
+
+
+@dbt_router.post("/create-elementary-profile/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_dbt_workspace"])
+def post_create_elementary_profile(request):
+    """prepare the dbt docs single html via prefect deployment"""
+    orguser: OrgUser = request.orguser
+    result = elementary_service.create_elementary_profile(orguser.org)
+    if "error" in result:
+        raise HttpError(400, result["error"])
+
+    return result
+
+
+@dbt_router.post("/create-edr-deployment/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_dbt_workspace"])
+def post_create_edr_sendreport_dataflow(request):
+    """prepare the dbt docs single html via prefect deployment"""
+    orguser: OrgUser = request.orguser
+
+    org_task = get_edr_send_report_task(orguser.org)
+    if org_task is None:
+        logger.info("creating OrgTask for edr-send-report for %s", orguser.org.slug)
+        org_task = get_edr_send_report_task(orguser.org, create=True)
+
+    result = elementary_service.create_edr_sendreport_dataflow(orguser.org, org_task, "0 0 * * *")
+    if "error" in result:
+        raise HttpError(400, result["error"])
+
+    return result
