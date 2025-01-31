@@ -292,7 +292,6 @@ def test_get_dbt_version_failure(mock_check_output, mock_gather_dbt_project_para
 @patch("ddpui.ddpdbt.elementary_service.subprocess.check_output")
 def test_get_edr_version_failure(mock_check_output, mock_gather_dbt_project_params, org):
     """tests get_edr_version"""
-
     mock_gather_dbt_project_params.return_value = Mock(venv_binary="venv/bin")
     mock_check_output.return_value = "line1\nline2\nline3\nline4"
 
@@ -309,7 +308,6 @@ def test_get_edr_version_failure(mock_check_output, mock_gather_dbt_project_para
 @patch("ddpui.ddpdbt.elementary_service.subprocess.check_output")
 def test_get_edr_version_success(mock_check_output, mock_gather_dbt_project_params, org):
     """tests get_edr_version"""
-
     mock_gather_dbt_project_params.return_value = Mock(venv_binary="venv/bin")
     mock_check_output.return_value = "line1\nline2\nElementary version is 1.\nline4"
 
@@ -336,7 +334,6 @@ def test_create_edr_sendreport_dataflow(
     org,
 ):
     """tests create_edr_sendreport_dataflow"""
-
     org_task = Mock(org=org, task=Mock(slug="taskslug"))
     cron = "0 0 * * *"
 
@@ -359,7 +356,7 @@ def test_create_edr_sendreport_dataflow(
 
     mock_create_orgdataflowv1.return_value = Mock(name=deployment_name)
 
-    response = create_edr_sendreport_dataflow(org, org_task, cron)
+    create_edr_sendreport_dataflow(org, org_task, cron)
 
     mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
     mock_setup_edr_send_report_task_config.assert_called_once_with(
