@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import patch, Mock, mock_open
+from unittest.mock import patch, Mock, mock_open, MagicMock, ANY
 import pytest
 from django.contrib.auth.models import User
 from ddpui.models.org import Org, OrgDbt
@@ -8,6 +8,7 @@ from ddpui.ddpdbt.elementary_service import (
     elementary_setup_status,
     get_elementary_target_schema,
     get_elementary_package_version,
+    check_dbt_files,
     create_elementary_tracking_tables,
     extract_profile_from_generate_elementary_cli_profile,
     refresh_elementary_report_via_prefect,
@@ -162,6 +163,216 @@ def test_get_elementary_package_version_empty_file():
     with patch("builtins.open", mock_open(read_data=packages_content)):
         result = get_elementary_package_version("packages.yml")
         assert result is None
+
+
+@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
+@patch("ddpui.ddpdbt.elementary_service.Path")
+def test_check_dbt_files_missing_packages_yml(
+    mock_path,
+    mock_gather_dbt_project_params,
+    org,
+):
+    """tests check_dbt_files"""
+
+    mock_gather_dbt_project_params.retval = Mock(project_dir="test-project-dir")
+
+    mock_dbt_project_yml = MagicMock()
+    mock_dbt_project_yml.__str__.return_value = "dbt_project.yml"
+    mock_packages_yml = MagicMock()
+    mock_packages_yml.__str__.return_value = "packages.yml"
+
+    # Configure the mock to handle the "/" operator
+    mock_path.return_value.__truediv__.side_effect = lambda other: (
+        mock_dbt_project_yml if other == "dbt_project.yml" else mock_packages_yml
+    )
+
+    # Configure the mock to handle the exists() method
+    mock_dbt_project_yml.exists.return_value = True
+    mock_packages_yml.exists.return_value = False
+
+    response = check_dbt_files(org)
+
+    mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
+
+    assert response == ("packages.yml", None)
+
+
+@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
+@patch("ddpui.ddpdbt.elementary_service.Path")
+def test_check_dbt_files_missing_dbt_project_yml(
+    mock_path,
+    mock_gather_dbt_project_params,
+    org,
+):
+    """tests check_dbt_files"""
+
+    mock_gather_dbt_project_params.retval = Mock(project_dir="test-project-dir")
+
+    mock_dbt_project_yml = MagicMock()
+    mock_dbt_project_yml.__str__.return_value = "dbt_project.yml"
+    mock_packages_yml = MagicMock()
+    mock_packages_yml.__str__.return_value = "packages.yml"
+
+    # Configure the mock to handle the "/" operator
+    mock_path.return_value.__truediv__.side_effect = lambda other: (
+        mock_dbt_project_yml if other == "dbt_project.yml" else mock_packages_yml
+    )
+
+    # Configure the mock to handle the exists() method
+    mock_dbt_project_yml.exists.return_value = False
+    mock_packages_yml.exists.return_value = True
+
+    response = check_dbt_files(org)
+
+    mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
+
+    assert response == ("dbt_project.yml", None)
+
+
+@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
+@patch("ddpui.ddpdbt.elementary_service.get_elementary_package_version")
+@patch("ddpui.ddpdbt.elementary_service.get_elementary_target_schema")
+@patch("ddpui.ddpdbt.elementary_service.Path")
+def test_check_dbt_files_missing_elementary_package_missing_target_schema(
+    mock_path,
+    mock_get_elementary_target_schema,
+    mock_get_elementary_package_version,
+    mock_gather_dbt_project_params,
+    org,
+):
+    """tests check_dbt_files"""
+
+    mock_gather_dbt_project_params.retval = Mock(project_dir="test-project-dir")
+
+    mock_dbt_project_yml = MagicMock()
+    mock_dbt_project_yml.__str__.return_value = "dbt_project.yml"
+    mock_packages_yml = MagicMock()
+    mock_packages_yml.__str__.return_value = "packages.yml"
+
+    # Configure the mock to handle the "/" operator
+    mock_path.return_value.__truediv__.side_effect = lambda other: (
+        mock_dbt_project_yml if other == "dbt_project.yml" else mock_packages_yml
+    )
+
+    # Configure the mock to handle the exists() method
+    mock_dbt_project_yml.exists.return_value = True
+    mock_packages_yml.exists.return_value = True
+
+    mock_get_elementary_target_schema.return_value = None
+    mock_get_elementary_package_version.return_value = None
+
+    response = check_dbt_files(org)
+
+    mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
+
+    assert response == (
+        None,
+        {
+            "exists": {},
+            "missing": {
+                "elementary_package": ANY,
+                "elementary_target_schema": ANY,
+            },
+        },
+    )
+
+
+@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
+@patch("ddpui.ddpdbt.elementary_service.get_elementary_package_version")
+@patch("ddpui.ddpdbt.elementary_service.get_elementary_target_schema")
+@patch("ddpui.ddpdbt.elementary_service.Path")
+def test_check_dbt_files_have_elementary_package_missing_target_schema(
+    mock_path,
+    mock_get_elementary_target_schema,
+    mock_get_elementary_package_version,
+    mock_gather_dbt_project_params,
+    org,
+):
+    """tests check_dbt_files"""
+
+    mock_gather_dbt_project_params.retval = Mock(project_dir="test-project-dir")
+
+    mock_dbt_project_yml = MagicMock()
+    mock_dbt_project_yml.__str__.return_value = "dbt_project.yml"
+    mock_packages_yml = MagicMock()
+    mock_packages_yml.__str__.return_value = "packages.yml"
+
+    # Configure the mock to handle the "/" operator
+    mock_path.return_value.__truediv__.side_effect = lambda other: (
+        mock_dbt_project_yml if other == "dbt_project.yml" else mock_packages_yml
+    )
+
+    # Configure the mock to handle the exists() method
+    mock_dbt_project_yml.exists.return_value = True
+    mock_packages_yml.exists.return_value = True
+
+    mock_get_elementary_target_schema.return_value = None
+    mock_get_elementary_package_version.return_value = "100"
+
+    response = check_dbt_files(org)
+
+    mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
+
+    assert response == (
+        None,
+        {
+            "exists": {
+                "elementary_package": "100",
+            },
+            "missing": {
+                "elementary_target_schema": ANY,
+            },
+        },
+    )
+
+
+@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
+@patch("ddpui.ddpdbt.elementary_service.get_elementary_package_version")
+@patch("ddpui.ddpdbt.elementary_service.get_elementary_target_schema")
+@patch("ddpui.ddpdbt.elementary_service.Path")
+def test_check_dbt_files_missing_elementary_package_have_target_schema(
+    mock_path,
+    mock_get_elementary_target_schema,
+    mock_get_elementary_package_version,
+    mock_gather_dbt_project_params,
+    org,
+):
+    """tests check_dbt_files"""
+
+    mock_gather_dbt_project_params.retval = Mock(project_dir="test-project-dir")
+
+    mock_dbt_project_yml = MagicMock()
+    mock_dbt_project_yml.__str__.return_value = "dbt_project.yml"
+    mock_packages_yml = MagicMock()
+    mock_packages_yml.__str__.return_value = "packages.yml"
+
+    # Configure the mock to handle the "/" operator
+    mock_path.return_value.__truediv__.side_effect = lambda other: (
+        mock_dbt_project_yml if other == "dbt_project.yml" else mock_packages_yml
+    )
+
+    # Configure the mock to handle the exists() method
+    mock_dbt_project_yml.exists.return_value = True
+    mock_packages_yml.exists.return_value = True
+
+    mock_get_elementary_target_schema.return_value = "100"
+    mock_get_elementary_package_version.return_value = None
+
+    response = check_dbt_files(org)
+
+    mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
+
+    assert response == (
+        None,
+        {
+            "exists": {
+                "elementary_target_schema": "100",
+            },
+            "missing": {
+                "elementary_package": ANY,
+            },
+        },
+    )
 
 
 @patch("ddpui.ddpdbt.elementary_service.TaskProgress")
