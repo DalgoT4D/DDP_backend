@@ -125,10 +125,12 @@ def create_notification(
 
     org_ids = set()
     for recipient_id in recipients:
-        org_ids.add(OrgUser.objects.get(id=recipient_id).org.id)
-        error = handle_recipient(recipient_id, scheduled_time, notification)
-        if error:
-            errors.append(error)
+        recipient_orguser = OrgUser.objects.get(id=recipient_id)
+        if recipient_orguser.org:
+            org_ids.add(recipient_orguser.org.id)
+            error = handle_recipient(recipient_id, scheduled_time, notification)
+            if error:
+                errors.append(error)
 
     for org_id in org_ids:
         org = Org.objects.get(id=org_id)
