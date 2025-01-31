@@ -250,3 +250,7 @@ def test_refresh_elementary_report_via_prefect(
 
     mock_lock_tasks_for_deployment.assert_called_once_with("test-deployment-id", orguser)
     mock_create_deployment_flow_run.assert_called_once_with(mock_odf.deployment_id)
+
+
+def test_get_dbt_version():
+    """tests get_dbt_version"""
