@@ -11,6 +11,7 @@ import requests
 from dotenv import load_dotenv
 from ninja.errors import HttpError
 from flags.state import flag_enabled
+from ddpui import settings
 from ddpui.ddpairbyte import schema
 from ddpui.ddpprefect import prefect_service, AIRBYTESERVER
 from ddpui.models.org import Org
@@ -205,6 +206,17 @@ def get_source_definitions(workspace_id: str) -> List[Dict]:
         error_message = f"Source definitions not found for workspace: {workspace_id}"
         logger.error(error_message)
         raise HttpError(404, error_message)
+
+    # filter out sources we don't want to show
+    indices = []
+    blacklist = settings.AIRBYTE_SOURCE_BLACKLIST
+    for idx, sdef in enumerate(res["sourceDefinitions"]):
+        if sdef["dockerRepository"] in blacklist:
+            indices.append(idx)
+
+    # delete from the end so we don't have index shifting confusion
+    for idx in reversed(indices):
+        del res["sourceDefinitions"][idx]
 
     return res
 
