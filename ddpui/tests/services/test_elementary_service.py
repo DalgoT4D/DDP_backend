@@ -1,6 +1,7 @@
 from pathlib import Path
 from unittest.mock import patch, Mock, mock_open, MagicMock, ANY
 import pytest
+from ddpui import settings
 from django.contrib.auth.models import User
 from ddpui.models.org import Org, OrgDbt
 from ddpui.models.org_user import OrgUser
@@ -194,7 +195,7 @@ def test_check_dbt_files_missing_packages_yml(
 
     mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
 
-    assert response == ("packages.yml", None)
+    assert response == ("packages.yml" if settings.DEBUG else "packages.yml not found", None)
 
 
 @patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
@@ -226,7 +227,7 @@ def test_check_dbt_files_missing_dbt_project_yml(
 
     mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
 
-    assert response == ("dbt_project.yml", None)
+    assert response == ("dbt_project.yml" if settings.DEBUG else "dbt_project.yml not found", None)
 
 
 @patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
