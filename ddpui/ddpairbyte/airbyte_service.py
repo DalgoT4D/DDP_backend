@@ -764,7 +764,9 @@ def create_connection(
                 schema_cat["config"]["primaryKey"] = [selected_streams[stream_name]["primaryKey"]]
             else:
                 schema_cat["config"]["cursorField"] = []
-                schema_cat["config"]["primaryKey"] = []
+                schema_cat["config"]["primaryKey"] = [
+                    selected_streams[stream_name].get("primaryKey", [])
+                ]
 
             payload["syncCatalog"]["streams"].append(schema_cat)
 
@@ -820,7 +822,9 @@ def update_connection(
                 schema_cat["config"]["primaryKey"] = [selected_streams[stream_name]["primaryKey"]]
             else:
                 schema_cat["config"]["cursorField"] = []
-                schema_cat["config"]["primaryKey"] = []
+                schema_cat["config"]["primaryKey"] = [
+                    selected_streams[stream_name].get("primaryKey", [])
+                ]
 
             current_connection["syncCatalog"]["streams"].append(schema_cat)
 
