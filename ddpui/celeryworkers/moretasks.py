@@ -23,7 +23,7 @@ def schedule_notification_task(self, notification_id, recipient_id):  # skipcq: 
     if user_preference.enable_email_notifications:
         try:
             send_text_message(
-                user_preference.orguser.user.email, "Message from Dalgo", notification.message
+                user_preference.orguser.user.email, notification.email_subject, notification.message
             )
         except Exception as e:
             logger.error(f"Error sending discord notification: {str(e)}")

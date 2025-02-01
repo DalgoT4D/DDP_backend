@@ -186,6 +186,7 @@ def test_create_notification_success(orguser):
     notification_data = NotificationDataSchema(
         author="test_author",
         message="test_message",
+        email_subject="test_subject",
         urgent=True,
         scheduled_time=None,
         recipients=[orguser.id],

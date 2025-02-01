@@ -1,5 +1,4 @@
 from django.db import models
-from django.utils import timezone
 from ddpui.models.org_user import OrgUser
 
 
@@ -8,6 +7,7 @@ class Notification(models.Model):
 
     author = models.EmailField()
     message = models.TextField()
+    email_subject = models.TextField()
     timestamp = models.DateTimeField(auto_now_add=True)
     urgent = models.BooleanField(default=False)
     scheduled_time = models.DateTimeField(null=True, blank=True)

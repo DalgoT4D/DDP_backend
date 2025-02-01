@@ -18,6 +18,7 @@ class Command(BaseCommand):
         """adds command line arguments"""
         parser.add_argument("author", type=str, help="Author of the notification")
         parser.add_argument("message", type=str, help="Message of the notification")
+        parser.add_argument("subject", type=str, help="Email subject of the notification")
         parser.add_argument(
             "sent_to",
             type=str,
@@ -87,6 +88,7 @@ class Command(BaseCommand):
         notification_data = NotificationDataSchema(
             author=payload.author,
             message=payload.message,
+            email_subject=options["subject"],
             urgent=payload.urgent,
             scheduled_time=payload.scheduled_time,
             recipients=recipients,

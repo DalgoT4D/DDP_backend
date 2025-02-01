@@ -51,6 +51,7 @@ class NotificationDataSchema(Schema):
 
     author: str
     message: str
+    email_subject: str
     urgent: Optional[bool] = False
     scheduled_time: Optional[datetime] = None
     recipients: List[int]  # list of orguser ids

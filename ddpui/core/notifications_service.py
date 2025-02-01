@@ -85,7 +85,7 @@ def handle_recipient(
             try:
                 send_text_message(
                     user_preference.orguser.user.email,
-                    "Message from Dalgo for " + recipient.org.name,
+                    notification.email_subject,
                     notification.message,
                 )
             except Exception as e:
@@ -108,6 +108,7 @@ def create_notification(
 
     author = notification_data.author
     message = notification_data.message
+    email_subject = notification_data.email_subject
     urgent = notification_data.urgent
     scheduled_time = notification_data.scheduled_time
     recipients = notification_data.recipients
@@ -116,6 +117,7 @@ def create_notification(
     notification = Notification.objects.create(
         author=author,
         message=message,
+        email_subject=email_subject,
         urgent=urgent,
         scheduled_time=scheduled_time,
     )

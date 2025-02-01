@@ -126,7 +126,7 @@ def test_email_orgusers():
     with patch("ddpui.utils.webhook_helpers.send_text_message") as mock_send_text_message:
         email_superadmins(org, "hello")
         tag = " [STAGING]" if not PRODUCTION else ""
-        subject = f"Dalgo notification{tag}"
+        subject = f"Dalgo notification for platform admins{tag}"
         mock_send_text_message.assert_called_once_with("useremail", subject, "hello")
 
 
@@ -411,7 +411,7 @@ def test_email_superadmins():
         )
         email_superadmins(org, "hello")
         tag = " [STAGING]" if not PRODUCTION else ""
-        subject = f"Dalgo notification{tag}"
+        subject = f"Dalgo notification for platform admins{tag}"
         mock_send_text_message.assert_called_once_with("adminemail", subject, "hello")
 
 
@@ -473,4 +473,6 @@ def test_notify_platform_admins():
 
         notify_platform_admins(org, "flow-run-id", "FAILED")
         mock_send_discord_notification.assert_called_once_with("admindiscordwebhook", message)
-        mock_send_text_message.assert_called_once_with("adminemail", "Dalgo notification", message)
+        mock_send_text_message.assert_called_once_with(
+            "adminemail", "Dalgo notification for platform admins", message
+        )

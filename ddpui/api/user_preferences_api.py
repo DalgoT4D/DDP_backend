@@ -84,6 +84,7 @@ def post_request_llm_analysis_feature_enabled(request):
     notification_data = NotificationDataSchema(
         author=orguser.user.email,
         message=f"{orguser.user.email} is requesting to enable LLM analysis feature",
+        email_subject=f"{org.name}: Request to enable LLM analysis feature",
         urgent=False,
         scheduled_time=None,
         recipients=[acc_manager.id for acc_manager in acc_managers],
