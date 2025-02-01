@@ -135,6 +135,7 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
             notify_org_managers(
                 org,
                 f"To the admins of {org.name},\n\nA job for \"{name_of_deployment}\" of type \"{type_of_deployment}\" has failed, please visit {os.getenv('FRONTEND_URL')} for more details",
+                f"{org.name}: Job failure for {name_of_deployment}",
             )
             email_orgusers_ses_whitelisted(
                 org,
