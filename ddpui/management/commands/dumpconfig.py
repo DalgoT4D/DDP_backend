@@ -88,6 +88,7 @@ class Command(BaseCommand):
                     "syncMode": stream["config"]["syncMode"],
                     "destinationSyncMode": stream["config"]["destinationSyncMode"],
                     "cursorField": stream["config"]["cursorField"],
+                    "primaryKey": stream["config"]["primaryKey"],
                 }
                 formatted_streams.append(formatted_stream)
 

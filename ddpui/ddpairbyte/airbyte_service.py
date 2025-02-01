@@ -773,8 +773,12 @@ def create_connection(
             # weirdhly the cursor field is an array of single element eg ["created_on"] or []
             if schema_cat["config"]["syncMode"] == "incremental":
                 schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
+                schema_cat["config"]["primaryKey"] = [selected_streams[stream_name]["primaryKey"]]
             else:
                 schema_cat["config"]["cursorField"] = []
+                schema_cat["config"]["primaryKey"] = [
+                    selected_streams[stream_name].get("primaryKey", [])
+                ]
 
             payload["syncCatalog"]["streams"].append(schema_cat)
 
@@ -827,8 +831,13 @@ def update_connection(
             # weirdhly the cursor field is an array of single element eg ["created_on"] or []
             if schema_cat["config"]["syncMode"] == "incremental":
                 schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
+                schema_cat["config"]["primaryKey"] = [selected_streams[stream_name]["primaryKey"]]
             else:
                 schema_cat["config"]["cursorField"] = []
+                schema_cat["config"]["primaryKey"] = [
+                    selected_streams[stream_name].get("primaryKey", [])
+                ]
+
             current_connection["syncCatalog"]["streams"].append(schema_cat)
 
     res = abreq("connections/update", current_connection)
