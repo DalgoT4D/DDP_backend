@@ -85,6 +85,7 @@ def update_org_preferences(request, payload: UpdateLLMOptinSchema):
         notification_payload = NotificationDataSchema(
             author=orguser.user.email,
             message=f"The AI LLM Data Analysis feature is now enabled for {org.name}.",
+            email_subject=f"{org.name}: AI LLM Data Analysis feature enabled",
             urgent=False,
             scheduled_time=None,
             recipients=[recipient.id for recipient in recipients],
