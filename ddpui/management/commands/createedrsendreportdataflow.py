@@ -66,4 +66,3 @@ class Command(BaseCommand):
 
         if dataflow_orgtask is None:
             dataflow = create_edr_sendreport_dataflow(org, org_task, options["cron"])
-            DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=org_task)

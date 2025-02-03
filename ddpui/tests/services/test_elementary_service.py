@@ -3,8 +3,9 @@ from unittest.mock import patch, Mock, mock_open, MagicMock, ANY
 import pytest
 from django.contrib.auth.models import User
 from ddpui import settings
-from ddpui.models.org import Org, OrgDbt
+from ddpui.models.org import Org, OrgDbt, OrgDataFlowv1
 from ddpui.models.org_user import OrgUser
+from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask
 from ddpui.ddpdbt.elementary_service import (
     elementary_setup_status,
     get_elementary_target_schema,
@@ -17,6 +18,7 @@ from ddpui.ddpdbt.elementary_service import (
     get_edr_version,
     create_edr_sendreport_dataflow,
 )
+from ddpui.utils.constants import TASK_GENERATE_EDR
 from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
@@ -51,6 +53,22 @@ def authuser():
 def orguser(org, authuser):
     """org user"""
     return OrgUser.objects.create(org=org, user=authuser)
+
+
+@pytest.fixture
+def task():
+    """task of type generate-edr"""
+    edrtask = Task.objects.create(type="edr", slug=TASK_GENERATE_EDR, label="EDR generate")
+    yield edrtask
+    edrtask.delete()
+
+
+@pytest.fixture
+def orgtask(org, task):
+    """org task of type generate-edr"""
+    edrorgtask = OrgTask.objects.create(org=org, task=task)
+    yield edrorgtask
+    edrorgtask.delete()
 
 
 @patch("ddpui.ddpdbt.elementary_service.DbtProjectManager")
@@ -443,28 +461,33 @@ elementary:
     }
 
 
-@patch("ddpui.ddpdbt.elementary_service.OrgDataFlowv1.objects.filter")
 @patch("ddpui.ddpdbt.elementary_service.prefect_service.lock_tasks_for_deployment")
 @patch("ddpui.ddpdbt.elementary_service.prefect_service.create_deployment_flow_run")
 def test_refresh_elementary_report_via_prefect(
-    mock_create_deployment_flow_run, mock_lock_tasks_for_deployment, mock_filter, orguser
+    mock_create_deployment_flow_run, mock_lock_tasks_for_deployment, orguser, orgtask
 ):
     """tests refresh_elementary_report_via_prefect"""
-    mock_odf = Mock(deployment_id="test-deployment-id")
-    mock_filter.return_value = Mock(first=Mock(return_value=mock_odf))
+    odf = OrgDataFlowv1.objects.create(
+        org=orguser.org,
+        name="test-name",
+        deployment_name="test-name",
+        deployment_id="test-deployment-id",
+        dataflow_type="manual",  # we dont want it to show in flows/pipelines page
+        cron="0 0 * * *",
+    )
 
     mock_lock_tasks_for_deployment.return_value = []
     mock_create_deployment_flow_run.return_value = "return-value"
 
+    DataflowOrgTask.objects.create(orgtask=orgtask, dataflow=odf)
+
     response = refresh_elementary_report_via_prefect(orguser)
     assert response == "return-value"
 
-    mock_filter.assert_called_once_with(
-        org=orguser.org, name__startswith=f"pipeline-{orguser.org.slug}-generate-edr"
-    )
-
     mock_lock_tasks_for_deployment.assert_called_once_with("test-deployment-id", orguser)
-    mock_create_deployment_flow_run.assert_called_once_with(mock_odf.deployment_id)
+    mock_create_deployment_flow_run.assert_called_once_with(odf.deployment_id)
+
+    odf.delete()
 
 
 @patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
@@ -533,17 +556,15 @@ def test_get_edr_version_success(mock_check_output, mock_gather_dbt_project_para
 @patch("ddpui.ddpdbt.elementary_service.setup_edr_send_report_task_config")
 @patch("ddpui.ddpdbt.elementary_service.generate_hash_id")
 @patch("ddpui.ddpdbt.elementary_service.prefect_service.create_dataflow_v1")
-@patch("ddpui.ddpdbt.elementary_service.OrgDataFlowv1.objects.create")
 def test_create_edr_sendreport_dataflow(
-    mock_create_orgdataflowv1,
     mock_create_dataflow_v1,
     mock_generate_hash_id,
     mock_setup_edr_send_report_task_config,
     mock_gather_dbt_project_params,
     org,
+    orgtask,
 ):
     """tests create_edr_sendreport_dataflow"""
-    org_task = Mock(org=org, task=Mock(slug="generate-edr"))
     cron = "0 0 * * *"
 
     mock_gather_dbt_project_params.return_value = Mock(
@@ -563,13 +584,11 @@ def test_create_edr_sendreport_dataflow(
         }
     }
 
-    mock_create_orgdataflowv1.return_value = Mock(name=deployment_name)
-
-    create_edr_sendreport_dataflow(org, org_task, cron)
+    create_edr_sendreport_dataflow(org, orgtask, cron)
 
     mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
     mock_setup_edr_send_report_task_config.assert_called_once_with(
-        org_task, "project-dir", "venv/bin"
+        orgtask, "project-dir", "venv/bin"
     )
     mock_generate_hash_id.assert_called_once_with(8)
 
@@ -581,19 +600,10 @@ def test_create_edr_sendreport_dataflow(
             deployment_params={
                 "config": {
                     "tasks": [{"task": "config"}],
-                    "org_slug": org_task.org.slug,
+                    "org_slug": orgtask.org.slug,
                 }
             },
             cron=cron,
         ),
         MANUL_DBT_WORK_QUEUE,
-    )
-
-    mock_create_orgdataflowv1.assert_called_once_with(
-        org=org,
-        name=deployment_name,
-        deployment_name=deployment_name,
-        deployment_id="deployment-id",
-        dataflow_type="manual",
-        cron=cron,
     )

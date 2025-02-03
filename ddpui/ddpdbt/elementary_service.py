@@ -14,7 +14,7 @@ from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import OrgDataFlowv1
 
-from ddpui.models.tasks import OrgTask
+from ddpui.models.tasks import OrgTask, DataflowOrgTask
 from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.constants import TASK_GENERATE_EDR
@@ -285,9 +285,13 @@ def fetch_elementary_report(org: Org):
 def refresh_elementary_report_via_prefect(orguser: OrgUser) -> dict:
     """refreshes the elementary report for the current date using the prefect deployment"""
     org: Org = orguser.org
-    odf = OrgDataFlowv1.objects.filter(
-        org=org, name__startswith=f"pipeline-{org.slug}-{TASK_GENERATE_EDR}"
-    ).first()
+    orgtask = OrgTask.objects.filter(org=org, task__slug=TASK_GENERATE_EDR).first()
+    if orgtask is None:
+        return {"error": "orgtask generate-edr not found for " + org.slug}
+    datafloworgtask = DataflowOrgTask.objects.filter(orgtask=orgtask).first()
+    if datafloworgtask is None:
+        return {"error": "datafloworgtask not found for " + org.slug}
+    odf = datafloworgtask.dataflow
 
     if odf is None:
         return {"error": "pipeline not found"}
@@ -355,13 +359,9 @@ def create_edr_sendreport_dataflow(org: Org, org_task: OrgTask, cron: str):
     if org_task.task.slug != TASK_GENERATE_EDR:
         return {"error": "This is not TASK_GENERATE_EDR task"}
 
-    if (
-        OrgDataFlowv1.objects.filter(
-            name__startswith=f"pipeline-{org_task.org.slug}-{TASK_GENERATE_EDR}-"
-        ).count()
-        > 0
-    ):
-        return {"error": "An edr pipeline for this org already exists"}
+    datafloworgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
+    if datafloworgtask is not None:
+        return {"error": "datafloworgtask already exists for for " + org.slug}
 
     task_config = setup_edr_send_report_task_config(
         org_task, dbt_project_params.project_dir, dbt_project_params.venv_binary
@@ -398,4 +398,5 @@ def create_edr_sendreport_dataflow(org: Org, org_task: OrgTask, cron: str):
         dataflow_type="manual",  # we dont want it to show in flows/pipelines page
         cron=cron,
     )
+    DataflowOrgTask.objects.create(dataflow=orgdataflow, orgtask=org_task)
     return {"status": "success", "dataflow": orgdataflow.name}
