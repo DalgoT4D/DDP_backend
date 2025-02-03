@@ -446,6 +446,7 @@ def detect_schema_changes_for_org(org: Org):
                     f"To the admins of {org.name},\n\nThis email is to let you know that"
                     f' schema changes have been detected in your Dalgo sources for "{connection_name}".'
                     f"\n\nPlease visit {connections_page} and review the Pending Actions",
+                    f"{org.name}: Schema changes detected in your Dalgo sources",
                 )
             except Exception as err:
                 logger.error(err)
