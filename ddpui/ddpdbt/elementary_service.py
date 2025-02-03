@@ -17,6 +17,7 @@ from ddpui.models.tasks import OrgDataFlowv1
 from ddpui.models.tasks import OrgTask
 from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.utils.taskprogress import TaskProgress
+from ddpui.utils.constants import TASK_GENERATE_EDR
 from ddpui.celeryworkers.tasks import run_dbt_commands
 from ddpui.core.pipelinefunctions import setup_edr_send_report_task_config
 from ddpui.ddpdbt.schema import DbtProjectParams
@@ -48,7 +49,7 @@ def elementary_setup_status(org: Org) -> dict:
 
     project_dir = Path(DbtProjectManager.get_dbt_project_dir(org.dbt))
 
-    if not os.path.exists(project_dir / "elementary_profiles"):
+    if not os.path.exists(project_dir / "elementary_profiles/profiles.yml"):
         return {"status": "not-set-up"}
 
     return {"status": "set-up"}
@@ -285,7 +286,7 @@ def refresh_elementary_report_via_prefect(orguser: OrgUser) -> dict:
     """refreshes the elementary report for the current date using the prefect deployment"""
     org: Org = orguser.org
     odf = OrgDataFlowv1.objects.filter(
-        org=org, name__startswith=f"pipeline-{org.slug}-generate-edr"
+        org=org, name__startswith=f"pipeline-{org.slug}-{TASK_GENERATE_EDR}"
     ).first()
 
     if odf is None:
@@ -351,9 +352,12 @@ def create_edr_sendreport_dataflow(org: Org, org_task: OrgTask, cron: str):
         logger.error(error)
         return None
 
+    if org_task.task.slug != TASK_GENERATE_EDR:
+        return {"error": "This is not TASK_GENERATE_EDR task"}
+
     if (
         OrgDataFlowv1.objects.filter(
-            name__startswith=f"pipeline-{org_task.org.slug}-{org_task.task.slug}-"
+            name__startswith=f"pipeline-{org_task.org.slug}-{TASK_GENERATE_EDR}-"
         ).count()
         > 0
     ):

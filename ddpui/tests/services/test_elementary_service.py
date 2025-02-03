@@ -64,7 +64,9 @@ def test_elementary_setup_status(mock_os_path_exists, dbt_project_manager, org):
     assert result == {"status": "set-up"}
 
     dbt_project_manager.get_dbt_project_dir.assert_called_once_with(org.dbt)
-    mock_os_path_exists.assert_called_once_with(Path("test-project-dir/elementary_profiles"))
+    mock_os_path_exists.assert_called_once_with(
+        Path("test-project-dir/elementary_profiles/profiles.yml")
+    )
 
 
 def test_elementary_setup_status_no_dbt(org):
@@ -541,7 +543,7 @@ def test_create_edr_sendreport_dataflow(
     org,
 ):
     """tests create_edr_sendreport_dataflow"""
-    org_task = Mock(org=org, task=Mock(slug="taskslug"))
+    org_task = Mock(org=org, task=Mock(slug="generate-edr"))
     cron = "0 0 * * *"
 
     mock_gather_dbt_project_params.return_value = Mock(
@@ -552,7 +554,7 @@ def test_create_edr_sendreport_dataflow(
     )
     mock_generate_hash_id.return_value = "hashcode"
 
-    deployment_name = f"pipeline-{org.slug}-taskslug-hashcode"
+    deployment_name = f"pipeline-{org.slug}-generate-edr-hashcode"
 
     mock_create_dataflow_v1.return_value = {
         "deployment": {
