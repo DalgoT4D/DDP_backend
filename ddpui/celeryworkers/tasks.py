@@ -14,7 +14,7 @@ from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.celery import app
 
 
-from ddpui.utils import timezone, awsses
+from ddpui.utils import timezone, awsses, constants
 from ddpui.utils.helpers import find_key_in_dictionary
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.awsses import send_text_message
@@ -225,6 +225,15 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
 @app.task(bind=True)
 def run_dbt_commands(self, org_id: int, task_id: str, dbt_run_params: dict = None):
     """run a dbt command via celery instead of via prefect"""
+    dbtrun_orgtask = OrgTask.objects.filter(
+        org__id=org_id, task__slug=constants.TASK_DBTRUN
+    ).first()
+    system_user = OrgUser.objects.filter(user__email=constants.SYSTEM_USER_EMAIL).first()
+    task_lock = TaskLock.objects.create(
+        orgtask=dbtrun_orgtask,
+        locked_by=system_user,
+    )
+
     try:
         org: Org = Org.objects.filter(id=org_id).first()
 
@@ -397,6 +406,9 @@ def run_dbt_commands(self, org_id: int, task_id: str, dbt_run_params: dict = Non
         taskprogress.add({"message": "dbt run completed", "status": "completed"})
     except Exception as e:
         logger.error(e)
+
+    finally:
+        task_lock.delete()
 
 
 def detect_schema_changes_for_org(org: Org):
