@@ -52,7 +52,14 @@ def elementary_setup_status(org: Org) -> dict:
     if not os.path.exists(project_dir / "elementary_profiles/profiles.yml"):
         return {"status": "not-set-up"}
 
-    return {"status": "set-up"}
+    orgtask = OrgTask.objects.filter(org=org, task__slug=TASK_GENERATE_EDR).first()
+    if orgtask:
+        dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=orgtask).first()
+        if dataflow_orgtask and dataflow_orgtask.dataflow:
+            logger.info(f"Generate edr deployment found for org {org.slug}")
+            return {"status": "set-up"}
+
+    return {"status": "not-set-up"}
 
 
 def get_elementary_target_schema(dbt_project_yml: str):
@@ -145,7 +152,8 @@ def create_elementary_tracking_tables(org: Org):
 
     task_id = str(uuid4())
 
-    taskprogress = TaskProgress(task_id, f"{TaskProgressHashPrefix.RUNDBTCMDS}-{org.slug}")
+    hashkey = f"{TaskProgressHashPrefix.RUNDBTCMDS}-{org.slug}"
+    taskprogress = TaskProgress(task_id, hashkey)
 
     taskprogress.add({"message": "Added dbt commands in queue", "status": "queued"})
 
@@ -160,7 +168,7 @@ def create_elementary_tracking_tables(org: Org):
             }
         },
     )
-    return {"task_id": task_id}
+    return {"task_id": task_id, "hashkey": hashkey}
 
 
 def extract_profile_from_generate_elementary_cli_profile(lines: list[str]):
@@ -196,7 +204,7 @@ def create_elementary_profile(org: Org):
             dbt_project_params.dbt_binary,
             "run-operation",
             "elementary.generate_elementary_cli_profile",
-            "--profiles-dir=profiles",
+            f"--profiles-dir={Path(dbt_project_params.project_dir) / 'profiles'}",
         ],
         cwd=dbt_project_params.project_dir,
         text=True,
@@ -206,6 +214,19 @@ def create_elementary_profile(org: Org):
     if error:
         return error
 
+    # get the profile from dbt_project.yaml
+    dbt_project_filename = str(Path(dbt_project_params.project_dir) / "dbt_project.yml")
+    if not os.path.exists(dbt_project_filename):
+        raise HttpError(400, dbt_project_filename + " is missing")
+
+    with open(dbt_project_filename, "r", encoding="utf-8") as dbt_project_file:
+        dbt_project = yaml.safe_load(dbt_project_file)
+        if "profile" not in dbt_project:
+            raise HttpError(400, "could not find 'profile:' in dbt_project.yml")
+
+    dbt_profile_name = dbt_project["profile"]
+    dbt_profiles_target = dbt_project_params.target
+
     # now we have to fix up the auth section by copying the dbt profile's auth section
     dbt_profile_file = Path(dbt_project_params.project_dir) / "profiles/profiles.yml"
     with open(dbt_profile_file, "r", encoding="utf-8") as dbt_profile_file_f:
@@ -213,7 +234,9 @@ def create_elementary_profile(org: Org):
         logger.info("read dbt profile from %s", dbt_profile_file)
 
     target = elementary_profile["elementary"].get("target", "default")
-    elementary_profile["elementary"]["outputs"][target] = dbt_profile[target]["outputs"][target]
+    elementary_profile["elementary"]["outputs"][target] = dbt_profile[dbt_profile_name]["outputs"][
+        dbt_profiles_target
+    ]
 
     # set schema to elementary
     elementary_profile["elementary"]["outputs"][target]["schema"] = "elementary"
