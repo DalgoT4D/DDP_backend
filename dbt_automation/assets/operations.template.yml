@@ -1,0 +1,765 @@
+version: 1
+description: "Yaml template to get you started on automating your dbt work. DO NOT EDIT this, make a copy and use"
+warehouse: <bigquery or postgres>
+operations:
+    - type: scaffold
+      config:
+        project_name: <name of the dbt project>
+        default_schema: <this is the schema where dbt will write models if nothing is specified>
+    - type: flatten
+      config:
+        source_schema: <source schema>
+        dest_schema: <destination schema>
+    - type: unionall
+      config:
+        output_name: <name of the output model>
+        dest_schema: <enter your destination/output schema>
+        input:
+            input_type: <"source" or "model">
+            input_name: <name of source table or ref model>
+            source_name: <name of the source defined in source.yml; will be null for type "model">
+        source_columns:
+          - <column name>
+          - <column name>
+          - <column name>
+          - ...
+        other_inputs:
+            - input:
+                input_type: <"source" or "model" table2>
+                input_name: <name of source table or ref model table2>
+                source_name: <name of the source defined in source.yml; will be null for type "model" table2>
+              source_columns:
+                - <column name>
+                - <column name>
+                - <column name>
+                - ..
+            - input:
+                input_type: <"source" or "model">
+                input_name: <name of source table or ref model>
+                source_name: <name of the source defined in source.yml; will be null for type "model">
+              source_columns:
+                - <column name>
+                - <column name>
+                - <column name>
+                - ...
+        
+    - type: syncsources
+      config:
+        source_name: <top level name of the source in sources.yml file in dbt project. all tables will go under here>
+        source_schema: <schema of the source mentioned above>
+    - type: flattenjson
+      config:
+        input: 
+          input_type: <"source" or "model">
+          input_name: <name of source table or ref model>
+          source_name: <name of the source defined in source.yml; will be null for type "model">
+        dest_schema: <destination schema>
+        output_name: <name of the output model>
+        source_columns:
+          - <column name>
+          - <column name>
+          - <column name>
+          - ...
+        columns_to_copy:
+          - column1
+          - column2
+        json_column: <name of the json column, strings are okay>
+        json_columns_to_copy:
+          - <json field 1>
+          - <json field 2>
+
+    - type: castdatatypes
+      config:
+        input: 
+          input_type: <"source" or "model">
+          input_name: <name of source table or ref model>
+          source_name: <name of the source defined in source.yml; will be null for type "model">
+        dest_schema: <destination schema>
+        output_name: <name of the output model>
+        source_columns:
+          - <column name>
+          - <column name>
+          - <column name>
+          - ...
+        columns:
+          - columnname: <column name>
+            columntype: <type to cast column to>
+    - type: coalescecolumns
+      config: 
+        input: 
+          input_type: <"source" or "model">
+          input_name: <name of source table or ref model>
+          source_name: <name of the source defined in source.yml; will be null for type "model">
+        dest_schema: <destination schema>
+        output_name: <name of the output model>
+        source_columns:
+          - <column name>
+          - <column name>
+          - <column name>
+          - ...
+        columns:
+          - <first column>
+          - <second column>
+          - ...
+        default_value: null
+        output_column_name: <output column name>
+    - type: concat
+      config: 
+        input: 
+          input_type: <"source" or "model">
+          input_name: <name of source table or ref model>
+          source_name: <name of the source defined in source.yml; will be null for type "model">
+        dest_schema: <destination schema>
+        output_name: <name of the output model>
+        source_columns:
+          - <column name>
+          - <column name>
+          - <column name>
+          - ...
+        columns:
+          - name: <string (column or const)>
+            is_col: <boolean>
+          - name: <string (column or const)>
+            is_col: <boolean>
+          - name: <string (column or const)>
+            is_col: <boolean>
+        output_column_name: <output column name>
+
+    - type: arithmetic
+      config:
+        input: 
+          input_type: <"source" or "model">
+          input_name: <name of source table or ref model>
+          source_name: <name of the source defined in source.yml; will be null for type "model">
+        output_name: <enter the name of the output model>
+        dest_schema: <enter your destination/output schema>
+        operator: <can be "add", "sub", "mul", "div">
+        source_columns:
+          - <column name>
+          - <column name>
+          - <column name>
+          - ...
+        operands:
+          - value: <string (column name or const)>
+            is_col: <boolean>
+          - value: <string (column name or const)>
+            is_col: <boolean>
+          - value: <string (column name or const)>
+            is_col: <boolean>
+        output_column_name: <output column name>
+    - type: dropcolumns
+      config:
+        input: 
+          input_type: <"source" or "model">
+          input_name: <name of source table or ref model>
+          source_name: <name of the source defined in source.yml; will be null for type "model">
+        dest_schema:  <destination schema>
+        output_name: <name of the output model>
+        source_columns:
+          - <column name>
+          - <column name>
+          - <column name>
+          - ...
+        columns:
+          - <column name>
+    - type: renamecolumns
+      config: 
+        input: 
+          input_type: <"source" or "model">
+          input_name: <name of source table or ref model>
+          source_name: <name of the source defined in source.yml; will be null for type "model">
+        dest_schema:  <destination schema>
+        output_name: <name of the output model>
+        source_columns:
+          - <column name>
+          - <column name>
+          - <column name>
+              - ...
+        columns:
+          <old column name>: <new column name>
+    - type: regexextraction
+      config:
+        input: 
+          input_type: <"source" or "model">
+          input_name: <name of source table or ref model>
+          source_name: <name of the source defined in source.yml; will be null for type "model">
+        dest_schema:  <destination schema>
+        output_name: <name of the output model>
+        source_columns:
+          - <column name>
+          - <column name>
+          - <column name>
+          - ...
+        columns:
+          column1: <regex operation>
+          column2: <regex operation>
+    - type: replace
+      config:
+        input: 
+            input_type: <"source" or "model">
+            input_name: <name of source table or ref model>
+            source_name: <name of the source defined in source.yml; will be null for type "model">
+        dest_schema:  <destination schema>
+        output_name: <name of the output model>
+        source_columns:
+          - <column name>
+          - <column name>
+          - <column name>
+        columns:
+          - col_name: <name of the col to look in>
+            output_column_name: <output_column_name>
+            replace_ops:
+              - find: <old string to be replaced>
+                replace: <new string to be replaced with>
+              - find: <old string to be replaced>
+                replace: <new string to be replaced with>
+          - col_name: <name of the col to look in>
+            output_column_name: <output_column_name>
+            replace_ops:
+              - find: <old string to be replaced>
+                replace: <new string to be replaced with>
+              - find: <old string to be replaced>
+                replace: <new string to be replaced with>
+
+    - type: join
+      config:
+        input:
+          input_type: <"source" or "model" of table1>
+          input_name: <name of source table or ref model table1>
+          source_name: <name of the source defined in source.yml; will be null for type "model" table1>
+        source_columns:
+          - <column name>
+          - <column name>
+          - <column name>
+        dest_schema:  <destination schema>
+        output_name: <name of the output model>
+        join_type: <"inner" or "left" or "full outer">
+        join_on:
+          key1: <colname of table1>
+          key2: <colname of table2>
+          compare_with: <"=" or "!=" or "<" or ">" or "<=" or ">=" >
+        other_inputs:
+          - input:
+              input_type: <"source" or "model" table2>
+              input_name: <name of source table or ref model table2>
+              source_name: <name of the source defined in source.yml; will be null for type "model" table2>
+            source_columns:
+              - <column name>
+              - <column name>
+              - <column name>
+            seq: < its 1 for the above input ; will help in mergeoperation chaininig to figure out if we want to do a left or a right join>
+
+    - type: where
+      config: 
+        input:
+          input_type: <"source" or "model" of table1>
+          input_name: <name of source table or ref model table1>
+          source_name: <name of the source defined in source.yml; will be null for type "model" table1>
+        source_columns:
+          - <column name>
+          - <column name>
+          - <column name>
+        dest_schema:  <destination schema>
+        output_name: <name of the output model>
+        where_type: <"and" or "or" or "sql">
+        clauses:
+            - column: <column name>
+              operator: <"=" or "!=" or "<" or ">" or "<=" or ">=" >
+              operand: 
+                value: <string (column name or string const)>
+                is_col: <boolean>
+            - column: <column name>
+              operator: <"=" or "!=" or "<" or ">" or "<=" or ">=" >
+              operand: 
+                value: <string (column name or string const)>
+                is_col: <boolean>
+            - column: <column name>
+              operator: <"=" or "!=" or "<" or ">" or "<=" or ">=" >
+              operand: 
+                value: <string (column name or string const)>
+                is_col: <boolean>
+            - column: <column name>
+              operator: <"=" or "!=" or "<" or ">" or "<=" or ">=" >
+              operand: 
+                value: <string (column name or string const)>
+                is_col: <boolean>
+        sql_snippet: < custom sql snippet assume its formatted; eg. col1 != 5 >
+
+    - type: groupby
+      config: 
+        input:
+          input_type: <"source" or "model" of table1>
+          input_name: <name of source table or ref model table1>
+          source_name: <name of the source defined in source.yml; will be null for type "model" table1>
+        source_columns:
+          - <column name>
+          - <column name>
+          - <column name>
+        dest_schema:  <destination schema>
+        output_name: <name of the output model>
+        aggregate_on:
+          - column: <column name from source column>
+            operation: <"sum" or "avg" or "count" or "min" or "max" or "countdistinct">
+            output_column_name: <output col name>
+          - column: <column name from source column>
+            operation: <"sum" or "avg" or "count" or "min" or "max" or "countdistinct">
+            output_column_name: <output col name>
+          - column: <column name from source column>
+            operation: <"sum" or "avg" or "count" or "min" or "max" or "countdistinct">
+            output_column_name: <output col name>
+
+    - type: aggregate
+      config: 
+        input:
+          input_type: <"source" or "model" of table1>
+          input_name: <name of source table or ref model table1>
+          source_name: <name of the source defined in source.yml; will be null for type "model" table1>
+        dest_schema:  <destination schema>
+        output_name: <name of the output model>
+        aggregate_on:
+          - column: <column name from source column>
+            operation: <"sum" or "avg" or "count" or "min" or "max" or "countdistinct">
+            output_column_name: <output col name>
+          - column: <column name from source column>
+            operation: <"sum" or "avg" or "count" or "min" or "max" or "countdistinct">
+            output_column_name: <output col name>
+          - column: <column name from source column>
+            operation: <"sum" or "avg" or "count" or "min" or "max" or "countdistinct">
+            output_column_name: <output col name>
+    
+    - type: casewhen
+      config: 
+        input:
+          input_type: <"source" or "model" of table1>
+          input_name: <name of source table or ref model table1>
+          source_name: <name of the source defined in source.yml; will be null for type "model" table1>
+        source_columns:
+          - <column name>
+          - <column name>
+          - <column name>
+        dest_schema:  <destination schema>
+        output_name: <name of the output model>
+        case_type: <"simple" or "advance">
+        when_clauses:
+          - column: <column name>
+            operator: <"=" or "!=" or "<" or ">" or "<=" or ">=" or "between">
+            operands:
+              - value: <string (column name or string const)>
+                is_col: <boolean>
+              - value: <string (column name or string const)>
+                is_col: <boolean>
+            then:
+              value: <string (column name or string const)>
+              is_col: <boolean>
+          - column: <column name>
+            operator: <"=" or "!=" or "<" or ">" or "<=" or ">=" or "between">
+            operands:
+              - value: <string (column name or string const)>
+                is_col: <boolean>
+            then:
+              value: <string (column name or string const)>
+              is_col: <boolean>
+        else_clause:
+          value: <string (column name or string const)>
+          is_col: <boolean>
+        output_column_name: <output column name>
+        sql_snippet: <custom sql snippet of CASE WHEN END AS 'output_column_name'>
+    - type: generic
+      config:
+        input:
+          input_type: <"source" or "model">
+          input_name: <name of source table or ref model>
+          source_name: <name of the source defined in source.yml; will be null for type "model">
+        source_columns:
+          - <column name>
+          - <column name>
+          - <column name>
+          - ...
+        dest_schema: <destination schema>
+        output_model_name: <name of the output model>
+        computed_columns:
+          - function_name: <name of the sql function>
+            operands:
+            - value: <string (column name or const)>
+              is_col: <boolean>
+            - value: <string (column name or const)>
+              is_col: <boolean>
+            - value: <string (column name or const)>
+              is_col: <boolean>
+            output_column_name: <output column name>
+
+    - type: pivot
+      config: 
+        input:
+          input_type: <"source" or "model" of table1>
+          input_name: <name of source table or ref model table1>
+          source_name: <name of the source defined in source.yml; will be null for type "model" table1>
+        source_columns:
+          - <column name>
+          - <column name>
+          - <column name>
+        pivot_column_name: <column name>
+        pivot_column_values:
+          - <pivot col value1>
+          - <pivot col value2>
+          - <pivot col value3>  
+        dest_schema:  <destination schema>
+        output_name: <name of the output model>
+
+    - type: unpivot
+      config: 
+        input:
+          input_type: <"source" or "model" of table1>
+          input_name: <name of source table or ref model table1>
+          source_name: <name of the source defined in source.yml; will be null for type "model" table1>
+        source_columns:
+          - <column name>
+          - <column name>
+          - <column name>
+        exclude_columns:
+          - <column name>
+          - <column name>
+          - <column name>
+        unpivot_columns:
+          - <column name>
+          - <column name>
+          - <column name>
+        unpivot_field_name: <by default - "field_name">
+        unpivot_value_name: <by default - "value">
+        cast_to: <data type to cast values to - "varchar" for postgres & "STRING" for bigquery>
+        dest_schema:  <destination schema>
+        output_name: <name of the output model>
+    - type: rawsql
+      config:
+        - input:
+            input_type: <"source" or "model" of table1>
+            input_name: <name of source table or ref model table1>
+            source_name: <name of the source defined in source.yml; will be null for type "model" table1>
+          sql_statement_1: <sql statement for select>
+          sql_statement_2: <optional sql statement for where or other clause and filters>
+          dest_schema: <destination schema>
+          output_model_name: <name of the output model>
+  
+    - type: mergeoperations
+      config:
+        dest_schema: <destination_schema>
+        output_name: mergeoperation
+        input:
+          input_type: <"source" or "model">
+          input_name: <name of source table or ref model>
+          source_name: <name of the source defined in source.yml; will be null for type "model">
+        operations:
+          - type: castdatatypes
+            config:
+              source_columns:
+                - <column name>
+                - <column name>
+                - <column name>
+                - ...
+              columns:
+                - columnname: <column_name>
+                  columntype: <column_type>
+          - type: arithmetic
+            config:
+              operator: <operator>
+              source_columns:
+                - <column name>
+                - <column name>
+                - <column name>
+                - ...
+              operands:
+                - value: <string (column name or const)>
+                  is_col: <boolean>
+                - value: <string (column name or const)>
+                  is_col: <boolean>
+                - value: <string (column name or const)>
+                  is_col: <boolean>
+              output_column_name: <output_column_name>
+          - type: coalescecolumns
+            config:
+              source_columns:
+                - <column name>
+                - <column name>
+                - <column name>
+                - ...
+              columns:
+                - <column_name>
+                - <column_name>
+              default_value: null
+              output_column_name: <output_column_name>
+          - type: concat
+            config:
+              source_columns:
+                - <column name>
+                - <column name>
+                - <column name>
+                - ...
+              columns:
+                - name: <column_name>
+                  is_col: <boolean>
+                - name: <column_name>
+                  is_col: <boolean>
+                - name: <column_name>
+                  is_col: <boolean>
+              output_column_name: <output_column_name>
+          - type: dropcolumns
+            config:
+              source_columns:
+                - <column name>
+                - <column name>
+                - <column name>
+              columns:
+                - <column_name>
+          - type: renamecolumns
+            config:
+              source_columns:
+                - <column name>
+                - <column name>
+                - <column name>
+                - ...
+              columns:
+                <old_column_name>: <new_column_name>
+          - type: flattenjson
+            config:
+              source_columns:
+                - <column name>
+                - <column name>
+                - <column name>
+                - ...
+              columns_to_copy:
+                - <column_name>
+                - <column_name>
+              json_column: <json_column>
+              json_columns_to_copy:
+                - <json_column_name>
+                - <json_column_name>
+          - type: regexextraction
+            config:
+              source_columns:
+                - <column name>
+                - <column name>
+                - <column name>
+              columns:
+                <column_name>: <regex_pattern>
+                <column_name>: <regex_pattern>
+          - type: replace
+            config:
+              source_columns:
+                - <column name>
+                - <column name>
+                - <column name>
+              columns:
+                - col_name: <name of the col to look in>
+                  output_column_name: <output_column_name>
+                  replace_ops:
+                    - find: <old string to be replaced>
+                      replace: <new string to be replaced with>
+                    - find: <old string to be replaced>
+                      replace: <new string to be replaced with>
+                - col_name: <name of the col to look in>
+                  output_column_name: <output_column_name>
+                  replace_ops:
+                    - find: <old string to be replaced>
+                      replace: <new string to be replaced with>
+                    - find: <old string to be replaced>
+                      replace: <new string to be replaced with>
+          - type: join
+            config:
+              source_columns:
+                - <column name>
+                - <column name>
+                - <column name>
+              join_type: <"inner" or "left" or "full outer">
+              join_on:
+                key1: <colname of table1>
+                key2: <colname of table2>
+                compare_with: <"=" or "!=" or "<" or ">" or "<=" or ">=" >
+              other_inputs:
+                - input:
+                    input_type: <"source" or "model" table2>
+                    input_name: <name of source table or ref model table2>
+                    source_name: <name of the source defined in source.yml; will be null for type "model" table2>
+                  source_columns:
+                    - <column name>
+                    - <column name>
+                    - <column name>
+                  seq: < its 1 for the above input ; will help in mergeoperation chaininig to figure out if we want to do a left or a right join>
+
+          - type: where
+            config: 
+              source_columns:
+                - <column name>
+                - <column name>
+                - <column name>
+              where_type: <"and" or "or" or "sql">
+              clauses:
+                - column: <column name>
+                  operator: <"=" or "!=" or "<" or ">" or "<=" or ">=" >
+                  operand: 
+                    value: <string (column name or string const)>
+                    is_col: <boolean>
+                - column: <column name>
+                  operator: <"=" or "!=" or "<" or ">" or "<=" or ">=" >
+                  operand: 
+                    value: <string (column name or string const)>
+                    is_col: <boolean>
+                - column: <column name>
+                  operator: <"=" or "!=" or "<" or ">" or "<=" or ">=" >
+                  operand: 
+                    value: <string (column name or string const)>
+                    is_col: <boolean>
+                - column: <column name>
+                  operator: <"=" or "!=" or "<" or ">" or "<=" or ">=" >
+                  operand: 
+                    value: <string (column name or string const)>
+                    is_col: <boolean>
+              sql_snippet: < custom sql snippet assume its formatted; eg. col1 != 5 >
+
+          - type: groupby
+            config: 
+              source_columns:
+                - <column name>
+                - <column name>
+                - <column name>
+              aggregate_on:
+                - column: <column name from source column>
+                  operation: <"sum" or "avg" or "count" or "min" or "max" or "countdistinct">
+                  output_column_name: <output col name>
+                - column: <column name from source column>
+                  operation: <"sum" or "avg" or "count" or "min" or "max" or "countdistinct">
+                  output_column_name: <output col name>
+                - column: <column name from source column>
+                  operation: <"sum" or "avg" or "count" or "min" or "max" or "countdistinct">
+                  output_column_name: <output col name>
+
+          - type: aggregate
+            config:
+              aggregate_on:
+                - column: <column name from source column>
+                  operation: <"sum" or "avg" or "count" or "min" or "max" or "countdistinct">
+                  output_column_name: <output col name>
+                - column: <column name from source column>
+                  operation: <"sum" or "avg" or "count" or "min" or "max" or "countdistinct">
+                  output_column_name: <output col name>
+                - column: <column name from source column>
+                  operation: <"sum" or "avg" or "count" or "min" or "max" or "countdistinct">
+                  output_column_name: <output col name>
+
+          - type: casewhen
+            config: 
+              source_columns:
+                - <column name>
+                - <column name>
+                - <column name>
+              case_type: <"simple" or "advance">
+              when_clauses:
+                - column: <column name>
+                  operator: <"=" or "!=" or "<" or ">" or "<=" or ">=" or "between">
+                  operands:
+                    - value: <string (column name or string const)>
+                      is_col: <boolean>
+                    - value: <string (column name or string const)>
+                      is_col: <boolean>
+                  then:
+                    value: <string (column name or string const)>
+                    is_col: <boolean>
+                - column: <column name>
+                  operator: <"=" or "!=" or "<" or ">" or "<=" or ">=" or "between">
+                  operands:
+                    - value: <string (column name or string const)>
+                      is_col: <boolean>
+                  then:
+                    value: <string (column name or string const)>
+                    is_col: <boolean>
+              else_clause:
+                value: <string (column name or string const)>
+                is_col: <boolean>
+              output_column_name: <output column name>
+              sql_snippet: <custom sql snippet of CASE WHEN END AS 'output_column_name'>
+          - type: unionall
+            config:
+              source_columns:
+                - <column name>
+                - <column name>
+                - <column name>
+                - ...
+              other_inputs:
+                  - input:
+                      input_type: <"source" or "model" table2>
+                      input_name: <name of source table or ref model table2>
+                      source_name: <name of the source defined in source.yml; will be null for type "model" table2>
+                    source_columns:
+                      - <column name>
+                      - <column name>
+                      - <column name>
+                      - ..
+                  - input:
+                      input_type: <"source" or "model">
+                      input_name: <name of source table or ref model>
+                      source_name: <name of the source defined in source.yml; will be null for type "model">
+                    source_columns:
+                      - <column name>
+                      - <column name>
+                      - <column name>
+                      - ...
+          - type: pivot
+            config:
+              source_columns:
+                - <column name>
+                - <column name>
+                - <column name>
+              pivot_column_name: <column name>
+              pivot_column_values:
+                - <pivot col value1>
+                - <pivot col value2>
+                - <pivot col value3>
+          - type: unpivot
+            config: 
+              source_columns:
+                - <column name>
+                - <column name>
+                - <column name>
+              exclude_columns:
+                - <column name>
+                - <column name>
+                - <column name>
+              unpivot_columns:
+                - <column name>
+                - <column name>
+                - <column name>
+              cast_to: <data type to cast values to - "varchar" for postgres & "STRING" for bigquery>
+              unpivot_field_name: <by default - "field_name">
+              unpivot_value_name: <by default - "value">
+          - type: generic
+            config:
+              input:
+                input_type: <"source" or "model">
+                input_name: <name of source table or ref model>
+                source_name: <name of the source defined in source.yml; will be null for type "model">
+              source_columns:
+                - <column name>
+                - <column name>
+                - <column name>
+                - ...
+              dest_schema: <destination schema>
+              output_model_name: <name of the output model>
+              computed_columns:
+                - function_name: <name of the sql function>
+                  operands:
+                  - value: <string (column name or const)>
+                    is_col: <boolean>
+                  - value: <string (column name or const)>
+                    is_col: <boolean>
+                  - value: <string (column name or const)>
+                    is_col: <boolean>
+                  output_column_name: <output column name>
+            - type: rawsql
+              config:
+                - input:
+                    input_type: <"source" or "model" of table1>
+                    input_name: <name of source table or ref model table1>
+                    source_name: <name of the source defined in source.yml; will be null for type "model" table1>
+                  sql_statement_1: <sql statement for select>
+                  sql_statement_2: <optional sql statement for where or other clause and filters>
+                  dest_schema: <destination schema>
+                  output_model_name: <name of the output model>

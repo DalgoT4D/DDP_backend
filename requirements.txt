@@ -61,7 +61,6 @@ dbt-core==1.8.7
 dbt-extractor==0.5.1
 dbt-postgres==1.8.2
 dbt-semantic-interfaces==0.5.1
-dbt_automation @ git+https://github.com/DalgoT4D/dbt-automation.git@c27d61a37aadf4666ca168c9e15b9fc9b29144a9
 debugpy==1.8.0
 decorator==5.1.1
 deepdiff==7.0.1
