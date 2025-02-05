@@ -177,9 +177,9 @@ def post_dbt_git_pull(request):
         raise HttpError(400, "create the dbt env first")
 
     try:
-        runcmd("git pull", project_dir / "dbtrepo")
+        runcmd("git pull", project_dir)
     except Exception as error:
-        raise HttpError(500, f"git pull failed in {str(project_dir / 'dbtrepo')}") from error
+        raise HttpError(500, f"git pull failed in {str(project_dir)}") from error
 
     return {"success": True}
 
