@@ -108,7 +108,7 @@ def check_dbt_files(org: Org):
         retval["exists"]["elementary_package"] = elementary_package
     else:
         retval["missing"][
-            "elementary_package"
+            "elementary_package: Add this to packages.yml file"
         ] = """packages:
   - package: elementary-data/elementary
     version: 0.16.1
@@ -119,7 +119,7 @@ def check_dbt_files(org: Org):
         retval["exists"]["elementary_target_schema"] = elementary_target_schema
     else:
         retval["missing"][
-            "elementary_target_schema"
+            "elementary_target_schema: Add this to dbt_project.yml file"
         ] = """models:
   ## see docs: https://docs.elementary-data.com/
   elementary:
