@@ -758,12 +758,14 @@ def create_connection(
                 "destinationSyncMode"
             ]
             # update the cursorField when the mode is incremental
-            # weirdhly the cursor field is an array of single element eg ["created_on"] or []
+            # weirdly the cursor field is an array of single element eg ["created_on"] or []; same behaviour for pk
             if (
                 schema_cat["config"]["syncMode"] == "incremental"
                 and schema_cat["config"]["destinationSyncMode"] == "append_dedup"
             ):
-                schema_cat["config"]["primaryKey"] = [selected_streams[stream_name]["primaryKey"]]
+                schema_cat["config"]["primaryKey"] = [
+                    [pk] for pk in selected_streams[stream_name]["primaryKey"]
+                ]
                 schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
             elif schema_cat["config"]["syncMode"] == "incremental":
                 schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
@@ -819,12 +821,14 @@ def update_connection(
                 "destinationSyncMode"
             ]
             # update the cursorField when the mode is incremental
-            # weirdhly the cursor field is an array of single element eg ["created_on"] or []
+            # weirdly the cursor field is an array of single element eg ["created_on"] or []; same behaviour for pk
             if (
                 schema_cat["config"]["syncMode"] == "incremental"
                 and schema_cat["config"]["destinationSyncMode"] == "append_dedup"
             ):
-                schema_cat["config"]["primaryKey"] = [selected_streams[stream_name]["primaryKey"]]
+                schema_cat["config"]["primaryKey"] = [
+                    [pk] for pk in selected_streams[stream_name]["primaryKey"]
+                ]
                 schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
             elif schema_cat["config"]["syncMode"] == "incremental":
                 schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
