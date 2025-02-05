@@ -1630,8 +1630,8 @@ def test_create_connection_success():
                 "selected": True,
                 "syncMode": "incremental",
                 "destinationSyncMode": "append_dedup",
-                "primaryKey": "id",
-                "cursorField": "updated_at",
+                "primaryKey": ["id"],
+                "cursorField": ["updated_at"],
             }
         ],
     )
