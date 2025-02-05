@@ -115,31 +115,34 @@ def check_dbt_files(org: Org):
         retval["exists"]["elementary_package"] = elementary_package
     else:
         retval["missing"][
-            "elementary_package: Add this to packages.yml file"
-        ] = """packages:
-  - package: elementary-data/elementary
-    version: 0.16.1
-    ## Docs: https://docs.elementary-data.com
-"""
+            "elementary_package"
+        ] = """
+            # Add this to packages.yml file
+            packages:
+            - package: elementary-data/elementary
+                version: 0.16.1
+                ## Docs: https://docs.elementary-data.com
+        """
 
     if elementary_target_schema is not None:
         retval["exists"]["elementary_target_schema"] = elementary_target_schema
     else:
         retval["missing"][
-            "elementary_target_schema: Add this to dbt_project.yml file"
+            "elementary_target_schema"
         ] = """models:
-  ## see docs: https://docs.elementary-data.com/
-  elementary:
-    ## elementary models will be created in the schema '<your_schema>_elementary'
-    +schema: "elementary"
-    ## To disable elementary for dev, uncomment this:
-    # enabled: "{{ target.name in ['prod','analytics'] }}"
+        # Add this to dbt_project.yml file
+        ## see docs: https://docs.elementary-data.com/
+        elementary:
+            ## elementary models will be created in the schema '<your_schema>_elementary'
+            +schema: "elementary"
+            ## To disable elementary for dev, uncomment this:
+            # enabled: "{{ target.name in ['prod','analytics'] }}"
 
-# Required from dbt 1.8 and above for certain Elementary features
-flags:
-  require_explicit_package_overrides_for_builtin_materializations: False
-  source_freshness_run_project_hooks: True
-"""
+        # Required from dbt 1.8 and above for certain Elementary features
+        flags:
+        require_explicit_package_overrides_for_builtin_materializations: False
+        source_freshness_run_project_hooks: True
+        """
 
     # logger.info(retval)
     return None, retval
@@ -152,7 +155,7 @@ def create_elementary_tracking_tables(org: Org):
 
     task_id = str(uuid4())
 
-    hashkey = f"{TaskProgressHashPrefix.RUNDBTCMDS}-{org.slug}"
+    hashkey = f"{TaskProgressHashPrefix.RUNDBTCMDS.value}-{org.slug}"
     taskprogress = TaskProgress(task_id, hashkey)
 
     taskprogress.add({"message": "Added dbt commands in queue", "status": "queued"})

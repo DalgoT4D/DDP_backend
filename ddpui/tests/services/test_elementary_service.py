@@ -5,7 +5,7 @@ from django.contrib.auth.models import User
 from ddpui import settings
 from ddpui.models.org import Org, OrgDbt, OrgDataFlowv1
 from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask
+from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask, TaskProgressHashPrefix
 from ddpui.ddpdbt.elementary_service import (
     elementary_setup_status,
     get_elementary_target_schema,
@@ -18,6 +18,7 @@ from ddpui.ddpdbt.elementary_service import (
     get_edr_version,
     create_edr_sendreport_dataflow,
 )
+from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.utils.constants import TASK_GENERATE_EDR
 from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE
 from ddpui.ddpprefect.schema import (
@@ -71,15 +72,55 @@ def orgtask(org, task):
     edrorgtask.delete()
 
 
+@pytest.fixture
+def edr_deployment_org():
+    """org task of type generate-edr"""
+    edrtask = Task.objects.create(type="edr", slug=TASK_GENERATE_EDR, label="EDR generate")
+    dbt = OrgDbt.objects.create(
+        project_dir="test-project-dir",
+        target_type="tgt_type",
+        default_schema="test-default_schema",
+    )
+    org = Org.objects.create(slug="test-org", dbt=dbt)
+    dataflow = OrgDataFlowv1.objects.create(
+        org=org,
+        name="dataflow-name",
+        deployment_name="deployment-name",
+        deployment_id="deployment-id",
+        dataflow_type="manual",
+        cron="0 0 * * *",
+    )
+    edrorgtask = OrgTask.objects.create(org=org, task=edrtask)
+    dfot = DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=edrorgtask)
+    yield org
+    dfot.delete()
+    edrorgtask.delete()
+    dataflow.delete()
+
+
+@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager")
+def test_elementary_setup_status_success(dbt_project_manager, edr_deployment_org):
+    """tests elementary_setup_status"""
+    dbt_project_manager.get_dbt_project_dir = Mock(return_value=Path("test-project-dir"))
+    with patch("ddpui.ddpdbt.elementary_service.os.path.exists", return_value=True):
+        result = elementary_setup_status(edr_deployment_org)
+
+        dbt_project_manager.get_dbt_project_dir.assert_called_once_with(edr_deployment_org.dbt)
+
+        assert result == {"status": "set-up"}
+
+
 @patch("ddpui.ddpdbt.elementary_service.DbtProjectManager")
 @patch("ddpui.ddpdbt.elementary_service.os.path.exists")
-def test_elementary_setup_status(mock_os_path_exists, dbt_project_manager, org):
+def test_elementary_setup_status_no_edr_deployment_found(
+    mock_os_path_exists, dbt_project_manager, org
+):
     """tests elementary_setup_status"""
     dbt_project_manager.get_dbt_project_dir = Mock(return_value="test-project-dir")
     mock_os_path_exists.return_value = True
 
     result = elementary_setup_status(org)
-    assert result == {"status": "set-up"}
+    assert result == {"status": "not-set-up"}
 
     dbt_project_manager.get_dbt_project_dir.assert_called_once_with(org.dbt)
     mock_os_path_exists.assert_called_once_with(
@@ -280,6 +321,7 @@ def test_check_dbt_files_missing_elementary_package_missing_target_schema(
     mock_get_elementary_package_version.return_value = None
 
     response = check_dbt_files(org)
+    print("here31231231", response)
 
     mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
 
@@ -403,7 +445,10 @@ def test_create_elementary_tracking_tables(
     mock_run_dbt_commands.delay = Mock()
 
     response = create_elementary_tracking_tables(org)
-    assert response == {"task_id": "test-uuid"}
+    assert response == {
+        "task_id": "test-uuid",
+        "hashkey": f"{TaskProgressHashPrefix.RUNDBTCMDS.value}-test-org",
+    }
 
     mock_task_progress.assert_called_once_with("test-uuid", "run-dbt-commands-" + org.slug)
     mock_run_dbt_commands.delay.assert_called_once_with(
