@@ -196,7 +196,7 @@ def create_elementary_profile(org: Org):
             dbt_project_params.dbt_binary,
             "run-operation",
             "elementary.generate_elementary_cli_profile",
-            "--profiles-dir=profiles",
+            f"--profiles-dir={Path(dbt_project_params.project_dir) / 'profiles'}",
         ],
         cwd=dbt_project_params.project_dir,
         text=True,
@@ -206,6 +206,19 @@ def create_elementary_profile(org: Org):
     if error:
         return error
 
+    # get the profile from dbt_project.yaml
+    dbt_project_filename = str(Path(dbt_project_params.project_dir) / "dbt_project.yml")
+    if not os.path.exists(dbt_project_filename):
+        raise HttpError(400, dbt_project_filename + " is missing")
+
+    with open(dbt_project_filename, "r", encoding="utf-8") as dbt_project_file:
+        dbt_project = yaml.safe_load(dbt_project_file)
+        if "profile" not in dbt_project:
+            raise HttpError(400, "could not find 'profile:' in dbt_project.yml")
+
+    dbt_profile_name = dbt_project["profile"]
+    dbt_profiles_target = dbt_project_params.target
+
     # now we have to fix up the auth section by copying the dbt profile's auth section
     dbt_profile_file = Path(dbt_project_params.project_dir) / "profiles/profiles.yml"
     with open(dbt_profile_file, "r", encoding="utf-8") as dbt_profile_file_f:
@@ -213,7 +226,9 @@ def create_elementary_profile(org: Org):
         logger.info("read dbt profile from %s", dbt_profile_file)
 
     target = elementary_profile["elementary"].get("target", "default")
-    elementary_profile["elementary"]["outputs"][target] = dbt_profile[target]["outputs"][target]
+    elementary_profile["elementary"]["outputs"][target] = dbt_profile[dbt_profile_name]["outputs"][
+        dbt_profiles_target
+    ]
 
     # set schema to elementary
     elementary_profile["elementary"]["outputs"][target]["schema"] = "elementary"
