@@ -52,7 +52,14 @@ def elementary_setup_status(org: Org) -> dict:
     if not os.path.exists(project_dir / "elementary_profiles/profiles.yml"):
         return {"status": "not-set-up"}
 
-    return {"status": "set-up"}
+    orgtask = OrgTask.objects.filter(org=org, task__slug=TASK_GENERATE_EDR).first()
+    if orgtask:
+        dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=orgtask).first()
+        if dataflow_orgtask and dataflow_orgtask.dataflow:
+            logger.info(f"Generate edr deployment found for org {org.slug}")
+            return {"status": "set-up"}
+
+    return {"status": "not-set-up"}
 
 
 def get_elementary_target_schema(dbt_project_yml: str):
