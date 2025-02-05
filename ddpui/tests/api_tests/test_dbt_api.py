@@ -18,6 +18,11 @@ from ddpui.api.dbt_api import (
     post_dbt_makedocs,
     post_dbt_workspace,
     put_dbt_github,
+    get_elementary_setup_status,
+    get_check_dbt_files,
+    post_create_elementary_tracking_tables,
+    post_create_elementary_profile,
+    post_create_edr_sendreport_dataflow,
 )
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.ddpprefect import SECRET
@@ -96,11 +101,10 @@ def test_post_dbt_workspace(orguser):
     mocked_task.id = "task-id"
     with patch(
         "ddpui.celeryworkers.tasks.setup_dbtworkspace.delay", return_value=mocked_task
-    ) as delay:
-        with patch("ddpui.api.dbt_api.dbt_service.check_repo_exists", return_value=True):
-            post_dbt_workspace(request, payload)
-            delay.assert_called_once_with(orguser.org.id, payload.dict())
-            assert orguser.org.dbt is None
+    ) as delay, patch("ddpui.api.dbt_api.dbt_service.check_repo_exists", return_value=True):
+        post_dbt_workspace(request, payload)
+        delay.assert_called_once_with(orguser.org.id, payload.dict())
+        assert orguser.org.dbt is None
 
 
 def test_put_dbt_github(orguser):
@@ -126,19 +130,19 @@ def test_put_dbt_github(orguser):
     mocked_task.id = "task-id"
     with patch(
         "ddpui.celeryworkers.tasks.clone_github_repo.delay", return_value=mocked_task
-    ) as delay:
-        with patch("ddpui.api.dbt_api.dbt_service.check_repo_exists", return_value=True):
-            with patch("ddpui.ddpprefect.prefect_service.upsert_secret_block"):
-                put_dbt_github(request, payload)
-                delay.assert_called_once_with(
-                    "org-slug",
-                    "new-url",
-                    "new-access-token",
-                    os.getenv("CLIENTDBT_ROOT") + "/org-slug",
-                    None,
-                )
-                assert request.orguser.org.dbt.gitrepo_url == "new-url"
-                assert request.orguser.org.dbt.gitrepo_access_token_secret == "new-access-token"
+    ) as delay, patch("ddpui.api.dbt_api.dbt_service.check_repo_exists", return_value=True), patch(
+        "ddpui.ddpprefect.prefect_service.upsert_secret_block"
+    ):
+        put_dbt_github(request, payload)
+        delay.assert_called_once_with(
+            "org-slug",
+            "new-url",
+            "new-access-token",
+            os.getenv("CLIENTDBT_ROOT") + "/org-slug",
+            None,
+        )
+        assert request.orguser.org.dbt.gitrepo_url == "new-url"
+        assert request.orguser.org.dbt.gitrepo_access_token_secret == "new-access-token"
 
 
 def test_dbt_delete_no_org(orguser):
@@ -214,9 +218,8 @@ def test_post_dbt_git_pull_gitpull_failed(orguser: OrgUser):
 
     with patch(
         "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir", return_value="project_dir"
-    ):
-        with pytest.raises(HttpError) as excinfo:
-            post_dbt_git_pull(request)
+    ), pytest.raises(HttpError) as excinfo:
+        post_dbt_git_pull(request)
         assert str(excinfo.value) == "git pull failed in " + os.path.join("project_dir", "dbtrepo")
 
 
@@ -289,3 +292,115 @@ def test_post_dbt_makedocs(
 
     post_dbt_makedocs(request)
     mock_create_single_html.assert_called_once()
+
+
+def test_get_elementary_setup_status_failure(orguser):
+    """failure"""
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.api.dbt_api.elementary_service.elementary_setup_status",
+        return_value={"error": "error-message"},
+    ), pytest.raises(HttpError) as excinfo:
+        get_elementary_setup_status(request)
+        assert str(excinfo.value) == "error-message"
+
+
+def test_get_elementary_setup_status_success(orguser):
+    """success"""
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.api.dbt_api.elementary_service.elementary_setup_status",
+        return_value={"status": "set-up"},
+    ):
+        response = get_elementary_setup_status(request)
+        assert response == {"status": "set-up"}
+
+
+def test_get_check_dbt_files_failure(orguser):
+    """failure"""
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.api.dbt_api.elementary_service.check_dbt_files",
+        return_value=("error-message", None),
+    ), pytest.raises(HttpError) as excinfo:
+        get_check_dbt_files(request)
+        assert str(excinfo.value) == "error-message"
+
+
+def test_get_check_dbt_files_success(orguser):
+    """success"""
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.api.dbt_api.elementary_service.check_dbt_files",
+        return_value=(None, {"status": "ok"}),
+    ):
+        response = get_check_dbt_files(request)
+        assert response == {"status": "ok"}
+
+
+def test_post_create_elementary_tracking_tables_failure(orguser):
+    """failure"""
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.api.dbt_api.elementary_service.create_elementary_tracking_tables",
+        return_value={"error": "error-message"},
+    ), pytest.raises(HttpError) as excinfo:
+        post_create_elementary_tracking_tables(request)
+        assert str(excinfo.value) == "error-message"
+
+
+def test_post_create_elementary_tracking_tables_success(orguser):
+    """success"""
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.api.dbt_api.elementary_service.create_elementary_tracking_tables",
+        return_value={"status": "ok"},
+    ):
+        response = post_create_elementary_tracking_tables(request)
+        assert response == {"status": "ok"}
+
+
+def test_post_create_elementary_profile_failure(orguser):
+    """failure"""
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.api.dbt_api.elementary_service.create_elementary_profile",
+        return_value={"error": "error-message"},
+    ), pytest.raises(HttpError) as excinfo:
+        post_create_elementary_profile(request)
+        assert str(excinfo.value) == "error-message"
+
+
+def test_post_create_elementary_profile_success(orguser):
+    """success"""
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.api.dbt_api.elementary_service.create_elementary_profile",
+        return_value={"status": "ok"},
+    ):
+        response = post_create_elementary_profile(request)
+        assert response == {"status": "ok"}
+
+
+def test_post_create_edr_sendreport_dataflow_failure(orguser):
+    """failure"""
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.api.dbt_api.elementary_service.create_edr_sendreport_dataflow",
+        return_value={"error": "error-message"},
+    ), patch("ddpui.api.dbt_api.get_edr_send_report_task", return_value="orgtask"), pytest.raises(
+        HttpError
+    ) as excinfo:
+        post_create_edr_sendreport_dataflow(request)
+        assert str(excinfo.value) == "error-message"
+
+
+def test_post_create_edr_sendreport_dataflow_success(orguser):
+    """success"""
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.api.dbt_api.elementary_service.create_edr_sendreport_dataflow",
+        return_value={"status": "ok"},
+    ), patch("ddpui.api.dbt_api.get_edr_send_report_task", return_value="orgtask"):
+        response = post_create_edr_sendreport_dataflow(request)
+        assert response == {"status": "ok"}
