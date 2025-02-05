@@ -56,6 +56,7 @@ from ddpui.ddpairbyte.airbyte_service import (
     parse_job_info,
     get_logs_for_job,
     schema,
+    create_connection,
 )
 
 
@@ -1646,3 +1647,244 @@ def test_update_schema_change_missing_syncCatalog():
         assert "syncCatalog" not in result
         mock_abreq.assert_called_once_with("web_backend/connections/update", current_connection)
         mock_trigger_reset_and_sync_workflow.assert_called_once_with(org, "test-connection-id")
+
+
+def test_create_connection_success():
+    """Test successful connection creation"""
+    connection_info = schema.AirbyteConnectionCreate(
+        sourceId="source-id",
+        destinationId="destination-id",
+        name="test-connection",
+        destinationSchema=None,
+        streams=[
+            {
+                "name": "stream-1",
+                "selected": True,
+                "syncMode": "incremental",
+                "destinationSyncMode": "append_dedup",
+                "primaryKey": ["id"],
+                "cursorField": ["updated_at"],
+            }
+        ],
+    )
+    workspace_id = "workspace-id"
+
+    with patch(
+        "my_module.get_source_schema_catalog",
+        return_value={
+            "catalogId": "catalog-id",
+            "catalog": {
+                "streams": [
+                    {
+                        "stream": {"name": "stream-1"},
+                        "config": {},
+                    }
+                ]
+            },
+        },
+    ), patch("my_module.abreq", return_value={"connectionId": "connection-id"}):
+        res = create_connection(workspace_id, connection_info)
+        assert res["connectionId"] == "connection-id"
+
+
+def test_create_connection_success():
+    """Test successful connection creation with required primaryKey and cursorField"""
+    connection_info = schema.AirbyteConnectionCreate(
+        sourceId="source-id",
+        destinationId="destination-id",
+        name="test-connection",
+        destinationSchema=None,
+        streams=[
+            {
+                "name": "stream-1",
+                "selected": True,
+                "syncMode": "incremental",
+                "destinationSyncMode": "append_dedup",
+                "primaryKey": ["id"],
+                "cursorField": ["updated_at"],
+            }
+        ],
+    )
+    workspace_id = "workspace-id"
+
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.get_source_schema_catalog",
+        return_value={
+            "catalogId": "catalog-id",
+            "catalog": {
+                "streams": [
+                    {
+                        "stream": {"name": "stream-1"},
+                        "config": {},
+                    }
+                ]
+            },
+        },
+    ), patch(
+        "ddpui.ddpairbyte.airbyte_service.abreq",
+        return_value={"connectionId": "test-connection-id"},
+    ):
+        res = create_connection(workspace_id, connection_info)
+        assert res["connectionId"] == "test-connection-id"
+
+
+def test_create_connection_missing_primary_key():
+    """Test that primaryKey is required when syncMode is 'incremental' and destinationSyncMode is 'append_dedup'"""
+    connection_info = schema.AirbyteConnectionCreate(
+        sourceId="source-id",
+        destinationId="destination-id",
+        name="test-connection",
+        destinationSchema=None,
+        streams=[
+            {
+                "name": "stream-1",
+                "selected": True,
+                "syncMode": "incremental",
+                "destinationSyncMode": "append_dedup",
+                "cursorField": ["updated_at"],  # primaryKey is missing
+            }
+        ],
+    )
+    workspace_id = "workspace-id"
+
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.get_source_schema_catalog",
+        return_value={
+            "catalogId": "catalog-id",
+            "catalog": {
+                "streams": [
+                    {
+                        "stream": {"name": "stream-1"},
+                        "config": {},
+                    }
+                ]
+            },
+        },
+    ):
+        with pytest.raises(HttpError) as exc_info:
+            create_connection(workspace_id, connection_info)
+
+    assert exc_info.value.status_code == 400
+    assert (
+        "primaryKey is required for stream 'stream-1' when syncMode is 'incremental' and destinationSyncMode is 'append_dedup'"
+        in str(exc_info.value)
+    )
+
+
+def test_create_connection_missing_cursor_field():
+    """Test that cursorField is required when syncMode is 'incremental'"""
+    connection_info = schema.AirbyteConnectionCreate(
+        sourceId="source-id",
+        destinationId="destination-id",
+        name="test-connection",
+        destinationSchema=None,
+        streams=[
+            {
+                "name": "stream-1",
+                "selected": True,
+                "syncMode": "incremental",
+                "destinationSyncMode": "append_dedup",
+                "primaryKey": ["id"],  # cursorField is missing
+            }
+        ],
+    )
+    workspace_id = "workspace-id"
+
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.get_source_schema_catalog",
+        return_value={
+            "catalogId": "catalog-id",
+            "catalog": {
+                "streams": [
+                    {
+                        "stream": {"name": "stream-1"},
+                        "config": {},
+                    }
+                ]
+            },
+        },
+    ):
+        with pytest.raises(HttpError) as exc_info:
+            create_connection(workspace_id, connection_info)
+
+    assert exc_info.value.status_code == 400
+    assert (
+        "cursor is required for stream 'stream-1' when syncMode is 'incremental' and destinationSyncMode is 'append_dedup'"
+        in str(exc_info.value)
+    )
+
+
+def test_update_connection_missing_cursor_field():
+    """Test that cursorField is required when syncMode is 'incremental'"""
+    connection_info = schema.AirbyteConnectionUpdate(
+        name="test-connection",
+        streams=[
+            {
+                "name": "stream-1",
+                "selected": True,
+                "syncMode": "incremental",
+                "destinationSyncMode": "append_dedup",
+                "primaryKey": ["id"],  # cursorField is missing
+            }
+        ],
+        destinationSchema=None,
+    )
+    workspace_id = "workspace-id"
+    current_connection = {"sourceId": "source-id", "syncCatalog": {"streams": []}}
+
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.get_source_schema_catalog",
+        return_value={
+            "catalogId": "catalog-id",
+            "catalog": {"streams": [{"stream": {"name": "stream-1"}, "config": {}}]},
+        },
+    ), patch(
+        "ddpui.ddpairbyte.airbyte_service.abreq",
+        return_value={"connectionId": "test-connection-id"},
+    ):
+        with pytest.raises(HttpError) as exc_info:
+            update_connection(workspace_id, connection_info, current_connection)
+
+    assert exc_info.value.status_code == 400
+    assert (
+        "cursor is required for stream 'stream-1' when syncMode is 'incremental' and destinationSyncMode is 'append_dedup'"
+        in str(exc_info.value)
+    )
+
+
+def test_update_connection_missing_primary_key():
+    """Test that primaryKey is required when syncMode is 'incremental' and destinationSyncMode is 'append_dedup'"""
+    connection_info = schema.AirbyteConnectionUpdate(
+        name="test-connection",
+        streams=[
+            {
+                "name": "stream-1",
+                "selected": True,
+                "syncMode": "incremental",
+                "destinationSyncMode": "append_dedup",
+                "cursorField": ["updated_at"],  # primaryKey is missing
+            }
+        ],
+        destinationSchema=None,
+    )
+    workspace_id = "workspace-id"
+    current_connection = {"sourceId": "source-id", "syncCatalog": {"streams": []}}
+
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.get_source_schema_catalog",
+        return_value={
+            "catalogId": "catalog-id",
+            "catalog": {"streams": [{"stream": {"name": "stream-1"}, "config": {}}]},
+        },
+    ), patch(
+        "ddpui.ddpairbyte.airbyte_service.abreq",
+        return_value={"connectionId": "test-connection-id"},
+    ):
+        with pytest.raises(HttpError) as exc_info:
+            update_connection(workspace_id, connection_info, current_connection)
+
+    assert exc_info.value.status_code == 400
+    assert (
+        "primaryKey is required for stream 'stream-1' when syncMode is 'incremental' and destinationSyncMode is 'append_dedup'"
+        in str(exc_info.value)
+    )
