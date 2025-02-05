@@ -763,10 +763,29 @@ def create_connection(
                 schema_cat["config"]["syncMode"] == "incremental"
                 and schema_cat["config"]["destinationSyncMode"] == "append_dedup"
             ):
+                if "primaryKey" not in selected_streams[stream_name]:
+                    raise HttpError(
+                        400,
+                        f"primaryKey is required for stream '{stream_name}' when syncMode is 'incremental' and destinationSyncMode is 'append_dedup'",
+                    )
+
+                if "cursorField" not in selected_streams[stream_name]:
+                    raise HttpError(
+                        400,
+                        f"cursor is required for stream '{stream_name}' when syncMode is 'incremental' and destinationSyncMode is 'append_dedup'",
+                    )
+
                 schema_cat["config"]["primaryKey"] = [selected_streams[stream_name]["primaryKey"]]
                 schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
+
             elif schema_cat["config"]["syncMode"] == "incremental":
+                if "cursorField" not in selected_streams[stream_name]:
+                    raise HttpError(
+                        400,
+                        f"cursor is required for stream '{stream_name}' when syncMode is 'incremental'",
+                    )
                 schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
+
             else:
                 schema_cat["config"]["cursorField"] = []
                 schema_cat["config"]["primaryKey"] = []
@@ -824,10 +843,29 @@ def update_connection(
                 schema_cat["config"]["syncMode"] == "incremental"
                 and schema_cat["config"]["destinationSyncMode"] == "append_dedup"
             ):
+                if "primaryKey" not in selected_streams[stream_name]:
+                    raise HttpError(
+                        400,
+                        f"primaryKey is required for stream '{stream_name}' when syncMode is 'incremental' and destinationSyncMode is 'append_dedup'",
+                    )
+
+                if "cursorField" not in selected_streams[stream_name]:
+                    raise HttpError(
+                        400,
+                        f"cursor is required for stream '{stream_name}' when syncMode is 'incremental' and destinationSyncMode is 'append_dedup'",
+                    )
+
                 schema_cat["config"]["primaryKey"] = [selected_streams[stream_name]["primaryKey"]]
                 schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
+
             elif schema_cat["config"]["syncMode"] == "incremental":
+                if "cursorField" not in selected_streams[stream_name]:
+                    raise HttpError(
+                        400,
+                        f"cursor is required for stream '{stream_name}' when syncMode is 'incremental'",
+                    )
                 schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
+
             else:
                 schema_cat["config"]["cursorField"] = []
                 schema_cat["config"]["primaryKey"] = []
