@@ -18,7 +18,6 @@ from ddpui.ddpdbt.elementary_service import (
     get_edr_version,
     create_edr_sendreport_dataflow,
 )
-from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.utils.constants import TASK_GENERATE_EDR
 from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE
 from ddpui.ddpprefect.schema import (
