@@ -759,13 +759,14 @@ def create_connection(
             ]
             # update the cursorField when the mode is incremental
             # weirdhly the cursor field is an array of single element eg ["created_on"] or []
-            if schema_cat["config"]["syncMode"] == "incremental":
-                schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
-            elif (
+            if (
                 schema_cat["config"]["syncMode"] == "incremental"
                 and schema_cat["config"]["destinationSyncMode"] == "append_dedup"
             ):
                 schema_cat["config"]["primaryKey"] = [selected_streams[stream_name]["primaryKey"]]
+                schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
+            elif schema_cat["config"]["syncMode"] == "incremental":
+                schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
             else:
                 schema_cat["config"]["cursorField"] = []
                 schema_cat["config"]["primaryKey"] = []
@@ -819,13 +820,14 @@ def update_connection(
             ]
             # update the cursorField when the mode is incremental
             # weirdhly the cursor field is an array of single element eg ["created_on"] or []
-            if schema_cat["config"]["syncMode"] == "incremental":
-                schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
-            elif (
+            if (
                 schema_cat["config"]["syncMode"] == "incremental"
                 and schema_cat["config"]["destinationSyncMode"] == "append_dedup"
             ):
                 schema_cat["config"]["primaryKey"] = [selected_streams[stream_name]["primaryKey"]]
+                schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
+            elif schema_cat["config"]["syncMode"] == "incremental":
+                schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
             else:
                 schema_cat["config"]["cursorField"] = []
                 schema_cat["config"]["primaryKey"] = []
