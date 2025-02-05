@@ -391,7 +391,7 @@ class TestConnection:
                     "syncMode": "full_refresh",
                     "destinationSyncMode": "overwrite",
                     "cursorField": "default",
-                    "primarKey": "[['id']]",
+                    "primarKey": "[]",
                 }
             ],
         )
@@ -411,7 +411,7 @@ class TestConnection:
                 assert "config" in stream
                 assert stream["config"]["selected"] is True
                 assert stream["config"]["cursorField"] == []
-                assert stream["config"]["primaryKey"] == [["id"]]
+                assert stream["config"]["primaryKey"] == []
 
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
@@ -442,7 +442,7 @@ class TestConnection:
                     "syncMode": "full_refresh",
                     "destinationSyncMode": "append",
                     "cursorField": ["default"],
-                    "primaryKey": [["id"]],
+                    "primaryKey": [],
                 }
             ],
             name="New Connection Name",
@@ -463,7 +463,7 @@ class TestConnection:
                 assert "config" in stream
                 assert stream["config"]["selected"] is True
                 assert stream["config"]["cursorField"] == []
-                assert stream["config"]["primaryKey"] == [["id"]]
+                assert stream["config"]["primaryKey"] == []
 
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
