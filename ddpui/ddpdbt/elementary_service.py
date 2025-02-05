@@ -145,7 +145,8 @@ def create_elementary_tracking_tables(org: Org):
 
     task_id = str(uuid4())
 
-    taskprogress = TaskProgress(task_id, f"{TaskProgressHashPrefix.RUNDBTCMDS}-{org.slug}")
+    hashkey = f"{TaskProgressHashPrefix.RUNDBTCMDS}-{org.slug}"
+    taskprogress = TaskProgress(task_id, hashkey)
 
     taskprogress.add({"message": "Added dbt commands in queue", "status": "queued"})
 
@@ -160,7 +161,7 @@ def create_elementary_tracking_tables(org: Org):
             }
         },
     )
-    return {"task_id": task_id}
+    return {"task_id": task_id, "hashkey": hashkey}
 
 
 def extract_profile_from_generate_elementary_cli_profile(lines: list[str]):
