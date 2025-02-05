@@ -761,6 +761,10 @@ def create_connection(
             # weirdhly the cursor field is an array of single element eg ["created_on"] or []
             if schema_cat["config"]["syncMode"] == "incremental":
                 schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
+            elif (
+                schema_cat["config"]["syncMode"] == "incremental"
+                and schema_cat["config"]["destinationSyncMode"] == "append_dedup"
+            ):
                 schema_cat["config"]["primaryKey"] = [selected_streams[stream_name]["primaryKey"]]
             else:
                 schema_cat["config"]["cursorField"] = []
@@ -817,6 +821,10 @@ def update_connection(
             # weirdhly the cursor field is an array of single element eg ["created_on"] or []
             if schema_cat["config"]["syncMode"] == "incremental":
                 schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
+            elif (
+                schema_cat["config"]["syncMode"] == "incremental"
+                and schema_cat["config"]["destinationSyncMode"] == "append_dedup"
+            ):
                 schema_cat["config"]["primaryKey"] = [selected_streams[stream_name]["primaryKey"]]
             else:
                 schema_cat["config"]["cursorField"] = []
