@@ -330,8 +330,8 @@ def test_check_dbt_files_missing_elementary_package_missing_target_schema(
         {
             "exists": {},
             "missing": {
-                "elementary_package: Add this to packages.yml file": ANY,
-                "elementary_target_schema: Add this to dbt_project.yml file": ANY,
+                "elementary_package": ANY,
+                "elementary_target_schema": ANY,
             },
         },
     )
@@ -376,10 +376,10 @@ def test_check_dbt_files_have_elementary_package_missing_target_schema(
         None,
         {
             "exists": {
-                "elementary_package: Add this to packages.yml file": "100",
+                "elementary_package": "100",
             },
             "missing": {
-                "elementary_target_schema: Add this to dbt_project.yml file": ANY,
+                "elementary_target_schema": ANY,
             },
         },
     )
@@ -424,10 +424,10 @@ def test_check_dbt_files_missing_elementary_package_have_target_schema(
         None,
         {
             "exists": {
-                "elementary_target_schema: Add this to dbt_project.yml file": "100",
+                "elementary_target_schema": "100",
             },
             "missing": {
-                "elementary_package: Add this to packages.yml file": ANY,
+                "elementary_package": ANY,
             },
         },
     )
