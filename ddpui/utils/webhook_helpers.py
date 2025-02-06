@@ -91,7 +91,7 @@ Logs:
 def email_superadmins(org: Org, email_body: str):
     """sends a notificationemail to all OrgUsers"""
     tag = " [STAGING]" if not PRODUCTION else ""
-    subject = f"Dalgo notification{tag}"
+    subject = f"Dalgo notification for platform admins{tag}"
     for orguser in OrgUser.objects.filter(
         org=org,
         new_role__slug=SUPER_ADMIN_ROLE,
@@ -121,7 +121,7 @@ def email_flowrun_logs_to_superadmins(org: Org, flow_run_id: str):
     email_superadmins(org, email_body)
 
 
-def notify_org_managers(org: Org, message: str):
+def notify_org_managers(org: Org, message: str, email_subject: str):
     """send a notification to all users in the org"""
     error, recipients = get_recipients(
         SentToEnum.ALL_ORG_USERS, org.slug, None, manager_or_above=True
@@ -130,7 +130,9 @@ def notify_org_managers(org: Org, message: str):
         logger.error(f"Error getting recipients: {error}")
         return
     error, response = create_notification(
-        NotificationDataSchema(author="Dalgo", message=message, recipients=recipients)
+        NotificationDataSchema(
+            author="Dalgo", message=message, email_subject=email_subject, recipients=recipients
+        )
     )
     if error:
         logger.error(f"Error creating notification: {error}")
@@ -150,6 +152,8 @@ def notify_platform_admins(org: Org, flow_run_id: str, state: str):
         f"\nAirbyte workspace URL: http://localhost:8000/workspaces/{org.airbyte_workspace_id}"
     )
     if os.getenv("ADMIN_EMAIL"):
-        send_text_message(os.getenv("ADMIN_EMAIL"), "Dalgo notification", message)
+        send_text_message(
+            os.getenv("ADMIN_EMAIL"), "Dalgo notification for platform admins", message
+        )
     if os.getenv("ADMIN_DISCORD_WEBHOOK"):
         send_discord_notification(os.getenv("ADMIN_DISCORD_WEBHOOK"), message)

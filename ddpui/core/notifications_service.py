@@ -84,7 +84,9 @@ def handle_recipient(
         if user_preference.enable_email_notifications:
             try:
                 send_text_message(
-                    user_preference.orguser.user.email, "Message from Dalgo", notification.message
+                    user_preference.orguser.user.email,
+                    notification.email_subject,
+                    notification.message,
                 )
             except Exception as e:
                 return {
@@ -106,6 +108,7 @@ def create_notification(
 
     author = notification_data.author
     message = notification_data.message
+    email_subject = notification_data.email_subject
     urgent = notification_data.urgent
     scheduled_time = notification_data.scheduled_time
     recipients = notification_data.recipients
@@ -114,6 +117,7 @@ def create_notification(
     notification = Notification.objects.create(
         author=author,
         message=message,
+        email_subject=email_subject,
         urgent=urgent,
         scheduled_time=scheduled_time,
     )
@@ -123,10 +127,12 @@ def create_notification(
 
     org_ids = set()
     for recipient_id in recipients:
-        org_ids.add(OrgUser.objects.get(id=recipient_id).org.id)
-        error = handle_recipient(recipient_id, scheduled_time, notification)
-        if error:
-            errors.append(error)
+        recipient_orguser = OrgUser.objects.get(id=recipient_id)
+        if recipient_orguser.org:
+            org_ids.add(recipient_orguser.org.id)
+            error = handle_recipient(recipient_id, scheduled_time, notification)
+            if error:
+                errors.append(error)
 
     for org_id in org_ids:
         org = Org.objects.get(id=org_id)

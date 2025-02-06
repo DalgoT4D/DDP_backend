@@ -14,7 +14,7 @@ from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.celery import app
 
 
-from ddpui.utils import timezone, awsses
+from ddpui.utils import timezone, awsses, constants
 from ddpui.utils.helpers import find_key_in_dictionary
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.awsses import send_text_message
@@ -51,9 +51,6 @@ from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.singletaskprogress import SingleTaskProgress
 from ddpui.utils.webhook_helpers import notify_org_managers
 from ddpui.utils.constants import (
-    TASK_DBTRUN,
-    TASK_DBTCLEAN,
-    TASK_DBTDEPS,
     TASK_AIRBYTESYNC,
     ORG_BASE_PLANS,
 )
@@ -226,12 +223,20 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
 
 
 @app.task(bind=True)
-def run_dbt_commands(self, orguser_id: int, task_id: str, dbt_run_params: dict = None):
+def run_dbt_commands(self, org_id: int, task_id: str, dbt_run_params: dict = None):
     """run a dbt command via celery instead of via prefect"""
-    try:
-        orguser: OrgUser = OrgUser.objects.filter(id=orguser_id).first()
+    dbtrun_orgtask = OrgTask.objects.filter(
+        org__id=org_id, task__slug=constants.TASK_DBTRUN
+    ).first()
+    system_user = OrgUser.objects.filter(user__email=constants.SYSTEM_USER_EMAIL).first()
+    task_lock = TaskLock.objects.create(
+        orgtask=dbtrun_orgtask,
+        locked_by=system_user,
+    )
 
-        org: Org = orguser.org
+    try:
+        org: Org = Org.objects.filter(id=org_id).first()
+
         logger.info("found org %s", org.name)
 
         taskprogress = TaskProgress(task_id, f"{TaskProgressHashPrefix.RUNDBTCMDS}-{org.slug}")
@@ -242,20 +247,6 @@ def run_dbt_commands(self, orguser_id: int, task_id: str, dbt_run_params: dict =
                 "status": "running",
             }
         )
-
-        task_locks: list[TaskLock] = []
-
-        # acquire locks for clean, deps and run
-        org_tasks = OrgTask.objects.filter(
-            org=org,
-            task__slug__in=[TASK_DBTCLEAN, TASK_DBTDEPS, TASK_DBTRUN],
-            generated_by="system",
-        ).all()
-        for org_task in org_tasks:
-            task_lock = TaskLock.objects.create(
-                orgtask=org_task, locked_by=orguser, celery_task_id=task_id
-            )
-            task_locks.append(task_lock)
 
         orgdbt = OrgDbt.objects.filter(org=org).first()
         if orgdbt is None:
@@ -415,10 +406,9 @@ def run_dbt_commands(self, orguser_id: int, task_id: str, dbt_run_params: dict =
         taskprogress.add({"message": "dbt run completed", "status": "completed"})
     except Exception as e:
         logger.error(e)
+
     finally:
-        # clear all locks
-        for lock in task_locks:
-            lock.delete()
+        task_lock.delete()
 
 
 def detect_schema_changes_for_org(org: Org):
@@ -468,6 +458,7 @@ def detect_schema_changes_for_org(org: Org):
                     f"To the admins of {org.name},\n\nThis email is to let you know that"
                     f' schema changes have been detected in your Dalgo sources for "{connection_name}".'
                     f"\n\nPlease visit {connections_page} and review the Pending Actions",
+                    f"{org.name}: Schema changes detected in your Dalgo sources",
                 )
             except Exception as err:
                 logger.error(err)

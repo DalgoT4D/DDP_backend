@@ -11,6 +11,7 @@ import requests
 from dotenv import load_dotenv
 from ninja.errors import HttpError
 from flags.state import flag_enabled
+from ddpui import settings
 from ddpui.ddpairbyte import schema
 from ddpui.ddpprefect import prefect_service, AIRBYTESERVER
 from ddpui.models.org import Org
@@ -205,6 +206,17 @@ def get_source_definitions(workspace_id: str) -> List[Dict]:
         error_message = f"Source definitions not found for workspace: {workspace_id}"
         logger.error(error_message)
         raise HttpError(404, error_message)
+
+    # filter out sources we don't want to show
+    indices = []
+    blacklist = settings.AIRBYTE_SOURCE_BLACKLIST
+    for idx, sdef in enumerate(res["sourceDefinitions"]):
+        if sdef["dockerRepository"] in blacklist:
+            indices.append(idx)
+
+    # delete from the end so we don't have index shifting confusion
+    for idx in reversed(indices):
+        del res["sourceDefinitions"][idx]
 
     return res
 
@@ -758,11 +770,39 @@ def create_connection(
                 "destinationSyncMode"
             ]
             # update the cursorField when the mode is incremental
-            # weirdhly the cursor field is an array of single element eg ["created_on"] or []
-            if schema_cat["config"]["syncMode"] == "incremental":
+            # weirdly the cursor field is an array of single element eg ["created_on"] or []; same behaviour for pk
+            if (
+                schema_cat["config"]["syncMode"] == "incremental"
+                and schema_cat["config"]["destinationSyncMode"] == "append_dedup"
+            ):
+                if "primaryKey" not in selected_streams[stream_name]:
+                    raise HttpError(
+                        400,
+                        f"primaryKey is required for stream '{stream_name}' when syncMode is 'incremental' and destinationSyncMode is 'append_dedup'",
+                    )
+
+                if "cursorField" not in selected_streams[stream_name]:
+                    raise HttpError(
+                        400,
+                        f"cursor is required for stream '{stream_name}' when syncMode is 'incremental' and destinationSyncMode is 'append_dedup'",
+                    )
+
+                schema_cat["config"]["primaryKey"] = [
+                    [pk] for pk in selected_streams[stream_name]["primaryKey"]
+                ]
                 schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
+
+            elif schema_cat["config"]["syncMode"] == "incremental":
+                if "cursorField" not in selected_streams[stream_name]:
+                    raise HttpError(
+                        400,
+                        f"cursor is required for stream '{stream_name}' when syncMode is 'incremental'",
+                    )
+                schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
+
             else:
                 schema_cat["config"]["cursorField"] = []
+                schema_cat["config"]["primaryKey"] = []
 
             payload["syncCatalog"]["streams"].append(schema_cat)
 
@@ -812,11 +852,40 @@ def update_connection(
                 "destinationSyncMode"
             ]
             # update the cursorField when the mode is incremental
-            # weirdhly the cursor field is an array of single element eg ["created_on"] or []
-            if schema_cat["config"]["syncMode"] == "incremental":
+            # weirdly the cursor field is an array of single element eg ["created_on"] or []; same behaviour for pk
+            if (
+                schema_cat["config"]["syncMode"] == "incremental"
+                and schema_cat["config"]["destinationSyncMode"] == "append_dedup"
+            ):
+                if "primaryKey" not in selected_streams[stream_name]:
+                    raise HttpError(
+                        400,
+                        f"primaryKey is required for stream '{stream_name}' when syncMode is 'incremental' and destinationSyncMode is 'append_dedup'",
+                    )
+
+                if "cursorField" not in selected_streams[stream_name]:
+                    raise HttpError(
+                        400,
+                        f"cursor is required for stream '{stream_name}' when syncMode is 'incremental' and destinationSyncMode is 'append_dedup'",
+                    )
+
+                schema_cat["config"]["primaryKey"] = [
+                    [pk] for pk in selected_streams[stream_name]["primaryKey"]
+                ]
                 schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
+
+            elif schema_cat["config"]["syncMode"] == "incremental":
+                if "cursorField" not in selected_streams[stream_name]:
+                    raise HttpError(
+                        400,
+                        f"cursor is required for stream '{stream_name}' when syncMode is 'incremental'",
+                    )
+                schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
+
             else:
                 schema_cat["config"]["cursorField"] = []
+                schema_cat["config"]["primaryKey"] = []
+
             current_connection["syncCatalog"]["streams"].append(schema_cat)
 
     res = abreq("connections/update", current_connection)
