@@ -18,7 +18,7 @@ from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
 from django.db import transaction
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
-from ddpui.ddpdbt import dbt_service
+from ddpui.ddpdbt import elementary_service
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect import (
     prefect_service,
@@ -156,11 +156,11 @@ def get_tools_versions(request):
     versions.append({"Prefect": {"version": ver if ver else "Not available"}})
 
     # dbt Version
-    ver = dbt_service.get_dbt_version(org)
+    ver = elementary_service.get_dbt_version(org)
     versions.append({"DBT": {"version": ver if ver else "Not available"}})
 
     # elementary Version
-    ver = dbt_service.get_edr_version(org)
+    ver = elementary_service.get_edr_version(org)
     versions.append({"Elementary": {"version": ver if ver else "Not available"}})
 
     # Superset Version
