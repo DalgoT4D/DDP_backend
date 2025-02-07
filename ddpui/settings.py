@@ -213,31 +213,31 @@ AIRBYTE_CUSTOM_SOURCES = {
     "tech4dev/source-kobotoolbox": {
         "name": "KoboToolbox",
         "docker_repository": "tech4dev/source-kobotoolbox",
-        "docker_image_tag": "0.2.0",
+        "docker_image_tag": "0.3.0",
         "documentation_url": "",
     },
     "tech4dev/source-commcare": {
         "name": "CommCare T4D",
         "docker_repository": "tech4dev/source-commcare",
-        "docker_image_tag": "0.1.0",
+        "docker_image_tag": "0.3.0",
         "documentation_url": "",
     },
     "tech4dev/source-avni": {
         "name": "Avni",
         "docker_repository": "tech4dev/source-avni",
-        "docker_image_tag": "0.1.0",
+        "docker_image_tag": "0.2.1",
         "documentation_url": "",
     },
-    "tech4dev/source-papersurvey": {
-        "name": "PaperSurvey",
-        "docker_repository": "tech4dev/source-papersurvey",
-        "docker_image_tag": "0.1.1",
-        "documentation_url": "",
-    },
+    # "tech4dev/source-papersurvey": {
+    #     "name": "PaperSurvey",
+    #     "docker_repository": "tech4dev/source-papersurvey",
+    #     "docker_image_tag": "0.1.1",
+    #     "documentation_url": "",
+    # },
     "tech4dev/source-glific": {
         "name": "Glific",
         "docker_repository": "tech4dev/source-glific",
-        "docker_image_tag": "0.1.0",
+        "docker_image_tag": "0.1.2",
         "documentation_url": "",
     },
     "dhwaniris/airbyte-greythr-connector": {
