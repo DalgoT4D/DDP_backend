@@ -466,7 +466,7 @@ def get_source_schema_catalog(
         raise HttpError(400, "source_id must be a string")
 
     res = abreq(
-        "sources/discover_schema", {"sourceId": source_id}, timeout=600
+        "sources/discover_schema", {"sourceId": source_id, "disable_cache": True}, timeout=600
     )  # timeout of 10 mins
     # is it not possible that the job is long-running
     # and we need to check its status later?
