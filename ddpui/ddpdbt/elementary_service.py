@@ -236,9 +236,8 @@ def create_elementary_profile(org: Org):
         dbt_profile = yaml.safe_load(dbt_profile_file_f)
         logger.info("read dbt profile from %s", dbt_profile_file)
 
-    elementary_schema = elementary_profile["elementary"]["outputs"][target]["schema"]
-
     target = elementary_profile["elementary"].get("target", "default")
+    elementary_schema = elementary_profile["elementary"]["outputs"][target]["schema"]
     elementary_profile["elementary"]["outputs"][target] = dbt_profile[dbt_profile_name]["outputs"][
         dbt_profiles_target
     ]
