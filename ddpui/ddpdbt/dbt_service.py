@@ -97,7 +97,7 @@ def task_config_params(task: Task):
         TASK_DBTDEPS: {"flags": ["upgrade"], "options": ["add-package"]},
         TASK_DBTRUN: {"flags": ["full-refresh"], "options": ["select", "exclude"]},
         TASK_DBTTEST: {"flags": [], "options": ["select", "exclude"]},
-        TASK_DBTSEED: {"flags": [], "options": ["select"]},
+        TASK_DBTSEED: {"flags": ["full-refresh"], "options": ["select"]},
         TASK_DOCSGENERATE: {"flags": [], "options": []},
         TASK_DBTCLOUD_JOB: {"flags": [], "options": ["job_id"]},
     }
