@@ -41,15 +41,29 @@ class BigqueryClient(Warehouse):
         """Fetch columns of a table; also send the translated col data type"""
         res = []
         for column in self.inspect_obj.get_columns(table_name=db_table, schema=db_schema):
+            data_type = None
+            try:
+                data_type = str(column["type"])
+            except Exception:  # sqlalchemy doesn't hanldle bigquery STRUCT type
+                pass
+
+            translated_type = None
+            try:
+                translated_type = (
+                    None
+                    if isinstance(column["type"], NullType)
+                    else MAP_TRANSLATE_TYPES[column["type"].python_type]
+                )
+            except (
+                Exception
+            ):  # sqlalchemy doesn't hanldle bigquery STRUCT type; there is no python_type for STRUCT
+                pass
+
             res.append(
                 {
                     "name": column["name"],
-                    "data_type": str(column["type"]),
-                    "translated_type": (
-                        None
-                        if isinstance(column["type"], NullType)
-                        else MAP_TRANSLATE_TYPES[column["type"].python_type]
-                    ),
+                    "data_type": data_type,
+                    "translated_type": translated_type,
                     "nullable": column["nullable"],
                 }
             )
