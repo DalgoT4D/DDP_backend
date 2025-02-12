@@ -40,6 +40,7 @@ class BigqueryClient(Warehouse):
     def get_table_columns(self, db_schema: str, db_table: str) -> dict:
         """Fetch columns of a table; also send the translated col data type"""
         res = []
+        not_supported_cols = []
         for column in self.inspect_obj.get_columns(table_name=db_table, schema=db_schema):
             data_type = None
             try:
@@ -57,7 +58,19 @@ class BigqueryClient(Warehouse):
             except (
                 Exception
             ):  # sqlalchemy doesn't hanldle bigquery STRUCT type; there is no python_type for STRUCT
-                pass
+                not_supported_cols.append(column["name"])
+                continue
+
+            # struct (record in bigquery) fields also come as columns; we don't support them
+            # if struct col name is test123; child columns will have values as test123.col1, test123.col3,..
+            # we want to ignore the struct col and its fields (that start with struct col name)
+            if any(
+                [
+                    column["name"].startswith(not_supported_col)
+                    for not_supported_col in not_supported_cols
+                ]
+            ):
+                continue
 
             res.append(
                 {
