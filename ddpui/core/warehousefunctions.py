@@ -38,10 +38,6 @@ def get_warehouse_data(request, data_type: str, **kwargs):
                 order_by=kwargs["order_by"],
                 order=kwargs["order"],
             )
-            # for element in data:
-            #     for key, value in element.items():
-            #         if (isinstance(value, list) or isinstance(value, dict)) and value:
-            #             element[key] = json.dumps(value)
     except Exception as error:
         logger.exception(f"Exception occurred in get_{data_type}: {error}")
         raise HttpError(500, f"Failed to get {data_type}")
