@@ -59,7 +59,7 @@ class BigqueryClient(Warehouse):
 
             # struct (record in bigquery) fields also come as columns; we don't support them
             # if struct col name is test123; child columns will have names as test123.col1, test123.col3,..
-            # we want these col fields (that start with struct col name)
+            # we want these col fields (that start with struct col name) to be ignored too
             # struct col itself is ignored in the above "continue" statement
             if any(
                 [
