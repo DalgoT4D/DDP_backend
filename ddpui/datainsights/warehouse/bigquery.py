@@ -45,7 +45,7 @@ class BigqueryClient(Warehouse):
             data_type = None
             try:
                 data_type = str(column["type"])
-            except Exception:  # sqlalchemy doesn't hanldle bigquery STRUCT type
+            except Exception:  # sqlalchemy doesn't handle bigquery STRUCT type
                 pass
 
             translated_type = None
@@ -57,7 +57,7 @@ class BigqueryClient(Warehouse):
                 )
             except (
                 Exception
-            ):  # sqlalchemy doesn't hanldle bigquery STRUCT type; there is no python_type for STRUCT
+            ):  # sqlalchemy doesn't handle bigquery STRUCT type; there is no python_type for STRUCT
                 not_supported_cols.append(column["name"])
                 continue
 
