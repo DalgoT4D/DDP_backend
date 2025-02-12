@@ -43,13 +43,9 @@ class BigqueryClient(Warehouse):
         not_supported_cols = []
         for column in self.inspect_obj.get_columns(table_name=db_table, schema=db_schema):
             data_type = None
-            try:
-                data_type = str(column["type"])
-            except Exception:  # sqlalchemy doesn't handle bigquery STRUCT type
-                pass
-
             translated_type = None
             try:
+                data_type = str(column["type"])
                 translated_type = (
                     None
                     if isinstance(column["type"], NullType)
