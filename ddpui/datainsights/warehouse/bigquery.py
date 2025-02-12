@@ -62,8 +62,9 @@ class BigqueryClient(Warehouse):
                 continue
 
             # struct (record in bigquery) fields also come as columns; we don't support them
-            # if struct col name is test123; child columns will have values as test123.col1, test123.col3,..
-            # we want to ignore the struct col and its fields (that start with struct col name)
+            # if struct col name is test123; child columns will have names as test123.col1, test123.col3,..
+            # we want these col fields (that start with struct col name)
+            # struct col itself is ignored in the above "continue" statement
             if any(
                 [
                     column["name"].startswith(not_supported_col)
