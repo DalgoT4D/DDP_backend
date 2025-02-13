@@ -16,11 +16,16 @@ jobs:
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
-          command_timeout: 120s
+          command_timeout: 500s
           script: |
             set -e
             source ~/.nvm/nvm.sh
             cd /home/ddp/DDP_backend
+            current_branch=$(git rev-parse --abbrev-ref HEAD)
+            if [ "$current_branch" != "main" ]; then
+              echo "Error: You are not on the main branch. Current branch is $current_branch."
+              exit 1
+            fi
             git pull
             /home/ddp/DDP_backend/venv/bin/python manage.py migrate
             /home/ddp/DDP_backend/venv/bin/python manage.py loaddata seed/*.json
