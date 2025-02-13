@@ -1,4 +1,4 @@
-name: Python package
+name: Dalgo CI
 
 on:
   push:
@@ -7,22 +7,22 @@ on:
     branches: [main]
 
 jobs:
-  dalgo-ci:
+  checks:
     runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:15
         env:
           POSTGRES_USER: ddp
-          POSTGRES_PASSWORD: ${{ secrets.DBPASSWORD }}
-          POSTGRES_DB: ${{ secrets.DBNAME }}
+          POSTGRES_PASSWORD: ${{ secrets.CI_DBPASSWORD }}
+          POSTGRES_DB: ${{ secrets.CI_DBNAME }}
         ports:
           - 5432:5432
         options: --health-cmd "pg_isready -U ddp" --health-interval 10s --health-timeout 5s --health-retries 5
 
     strategy:
       matrix:
-        python-version: ["3.10"]
+        python-version: ["3.10", "3.11"]
         redis-version: [6]
 
     steps:
@@ -56,9 +56,9 @@ jobs:
         env:
           DBHOST: localhost
           DBPORT: 5432
-          DBNAME: ${{ secrets.DBNAME }}
+          DBNAME: ${{ secrets.CI_DBNAME }}
           DBUSER: ddp
-          DBPASSWORD: ${{ secrets.DBPASSWORD }}
+          DBPASSWORD: ${{ secrets.CI_DBPASSWORD }}
         run: |
           python manage.py migrate
 
@@ -70,9 +70,9 @@ jobs:
           AIRBYTE_API_TOKEN: ${{ secrets.AIRBYTE_API_TOKEN }}
           DBHOST: localhost
           DBPORT: 5432
-          DBNAME: ${{ secrets.DBNAME }}
+          DBNAME: ${{ secrets.CI_DBNAME }}
           DBUSER: ddp
-          DBPASSWORD: ${{ secrets.DBPASSWORD }}
+          DBPASSWORD: ${{ secrets.CI_DBPASSWORD }}
           PREFECT_PROXY_API_URL: http://localhost:8080
           DEV_SECRETS_DIR: /tmp/
           CLIENTDBT_ROOT: /tmp

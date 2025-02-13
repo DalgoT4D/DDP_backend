@@ -1,4 +1,4 @@
-name: DDP backend deployment
+name: Dalgo CD
 
 on:
   push:
