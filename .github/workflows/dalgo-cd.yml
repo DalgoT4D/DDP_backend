@@ -1,16 +1,9 @@
 name: Dalgo CD
 
 on:
-  # push:
-  #   branches: [main]
-  # pull_request:
-  #   branches: [main]
-  workflow_run:
-    workflows: ["Dalgo CI"]
-    types:
-      - completed
-  workflow_dispatch:
-    
+  push:
+    branches: [main]
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
