@@ -3,6 +3,8 @@ name: Dalgo CD
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
   deploy:
@@ -22,5 +24,6 @@ jobs:
             cd /home/ddp/DDP_backend
             git pull
             /home/ddp/DDP_backend/venv/bin/python manage.py migrate
+            /home/ddp/DDP_backend/venv/bin/python manage.py loaddata seed/*.json
             /home/ddp/.yarn/bin/pm2 restart django-celery-worker django-backend-asgi
             
