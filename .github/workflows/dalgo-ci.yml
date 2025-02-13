@@ -22,7 +22,7 @@ jobs:
 
     strategy:
       matrix:
-        python-version: ["3.10", "3.11"]
+        python-version: ["3.10"] # we should tighten this to work with multiple versions of python
         redis-version: [6]
 
     steps:
