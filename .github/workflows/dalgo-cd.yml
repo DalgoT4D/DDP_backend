@@ -6,9 +6,10 @@ on:
   pull_request:
     branches: [main]
   workflow_run:
-    workflows: [Dalgo CI]
+    workflows: ["Dalgo CI"]
     types:
       - completed
+  workflow_dispatch:
     
 jobs:
   deploy:
