@@ -62,10 +62,8 @@ class BigqueryClient(Warehouse):
             # we want these col fields (that start with struct col name) to be ignored too
             # struct col itself is ignored in the above "continue" statement
             if any(
-                [
-                    column["name"].startswith(not_supported_col)
-                    for not_supported_col in not_supported_cols
-                ]
+                column["name"].startswith(not_supported_col)
+                for not_supported_col in not_supported_cols
             ):
                 continue
 
