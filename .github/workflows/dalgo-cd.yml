@@ -7,22 +7,22 @@ on:
     branches: [main]
 
 jobs:
-    deploy:
-        runs-on: ubuntu-latest
+  deploy:
+    runs-on: ubuntu-latest
 
-        steps: 
-            - name: Deploy code to EC2 server
-              uses: appleboy/ssh-action@v1.2.0
-              with:
-                host: ${{ secrets.SERVERIP }}
-                username: ${{ secrets.SERVER }}
-                key: ${{ secrets.SSH_PRIVATE_KEY }}
-                port: 22
-                command_timeout: 120s
-                script: "
-                  source ~/.nvm/nvm.sh &
-                  cd /home/ddp/DDP_backend &
-                  git pull &
-                  venv/bin/python manage.py migrate
-                  /home/ddp/.yarn/bin/pm2 restart django-celery-worker django-backend
-                  "
+    steps: 
+      - name: Deploy code to EC2 server
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVERIP }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          command_timeout: 120s
+          script: |
+            source ~/.nvm/nvm.sh &
+            cd /home/ddp/DDP_backend &
+            git pull &
+            venv/bin/python manage.py migrate
+            /home/ddp/.yarn/bin/pm2 restart django-celery-worker django-backend
+            
