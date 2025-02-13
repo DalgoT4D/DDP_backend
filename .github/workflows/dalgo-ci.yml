@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  dalgo-ci:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -61,20 +61,6 @@ jobs:
           DBPASSWORD: ${{ secrets.DBPASSWORD }}
         run: |
           python manage.py migrate
-
-      - name: Create known_hosts file
-        run: |
-          mkdir -p ~/.ssh
-          touch ~/.ssh/known_hosts
-
-      - name: Add remote host key to known_hosts
-        run: ssh-keyscan ${{ secrets.SERVERIP }} >> ~/.ssh/known_hosts
-
-      - name: Set up port forwarding via SSH
-        run: |
-          eval `ssh-agent -s`
-          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh -L 8080:localhost:8080 -L 8001:localhost:8001 ${{ secrets.SERVER }} -f -N
 
       - name: Test with pytest
         env:
