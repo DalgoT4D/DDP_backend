@@ -3,6 +3,10 @@ name: Dalgo CD
 on:
   push:
     branches: [main]
+  workflow_run:
+    workflows: ["Dalgo CI"]
+    types:
+      - completed
     
 jobs:
   deploy:
