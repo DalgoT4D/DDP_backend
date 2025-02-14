@@ -35,7 +35,6 @@ basicConfig(level=INFO)
 logger = getLogger()
 
 
-@pytest.mark.skip(reason="Skipping dbt automation integration tests")
 class TestBigqueryOperations:
     """test operations in bigquery warehouse"""
 

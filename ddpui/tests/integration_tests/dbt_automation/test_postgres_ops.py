@@ -32,7 +32,6 @@ basicConfig(level=INFO)
 logger = getLogger()
 
 
-@pytest.mark.skip(reason="Skipping dbt automation integration tests")
 class TestPostgresOperations:
     """test rename_columns operation"""
 
