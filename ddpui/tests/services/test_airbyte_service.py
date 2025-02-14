@@ -52,6 +52,7 @@ from ddpui.ddpairbyte.airbyte_service import (
     delete_connection,
     sync_connection,
     get_job_info,
+    get_job_info_without_logs,
     get_jobs_for_connection,
     parse_job_info,
     get_logs_for_job,
@@ -1461,6 +1462,15 @@ def test_get_job_info():
     ) as mock_abreq_:
         get_job_info("jobid")
         mock_abreq_.assert_called_once_with("jobs/get_debug_info", {"id": "jobid"})
+
+
+def test_get_job_without_logs():
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.abreq",
+        return_value={"connectionId": "connection-id"},
+    ) as mock_abreq_:
+        get_job_info_without_logs("jobid")
+        mock_abreq_.assert_called_once_with("jobs/get_without_logs", {"id": "jobid"})
 
 
 def test_get_jobs_for_connection():
