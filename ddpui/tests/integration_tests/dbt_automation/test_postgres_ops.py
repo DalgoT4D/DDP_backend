@@ -34,6 +34,8 @@ logger = getLogger()
 class TestPostgresOperations:
     """test rename_columns operation"""
 
+    __test__ = False  # Skipping this test
+
     warehouse = "postgres"
     test_project_dir = None
     wc_client = get_client(

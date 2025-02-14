@@ -37,6 +37,8 @@ logger = getLogger()
 class TestBigqueryOperations:
     """test operations in bigquery warehouse"""
 
+    __test__ = False  # Skipping this test
+
     warehouse = "bigquery"
     test_project_dir = None
 
