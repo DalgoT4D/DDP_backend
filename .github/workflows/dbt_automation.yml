@@ -61,13 +61,6 @@ jobs:
           python ddpui/dbt_automation/seeds/seed.py --warehouse postgres
           python ddpui/dbt_automation/seeds/seed.py --warehouse bigquery
 
-      - name: Run tests and collect coverage
+      - name: Run dbt automation (ui4t) integration tests
         run: |
-          pytest -s --cov=.
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: true
-          verbose: true
+          pytest ddpui/tests/integration_tests/dbt_automation/*.py -s 
