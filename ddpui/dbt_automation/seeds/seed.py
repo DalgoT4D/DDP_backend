@@ -24,8 +24,8 @@ load_dotenv("dbconnection.env")
 
 for json_file, tablename in zip(
     [
-        os.path.join(os.path.abspath(seeds.__file__), "..", "sample_sheet1.json"),
-        os.path.join(os.path.abspath(seeds.__file__), "..", "sample_sheet2.json"),
+        os.path.abspath(os.path.join(os.path.abspath(seeds.__file__), "..", "sample_sheet1.json")),
+        os.path.abspath(os.path.join(os.path.abspath(seeds.__file__), "..", "sample_sheet2.json")),
     ],
     ["_airbyte_raw_Sheet1", "_airbyte_raw_Sheet2"],
 ):
