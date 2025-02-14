@@ -48,7 +48,7 @@ jobs:
         run: |
           eval `ssh-agent -s`
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh -L 5432:${{ secrets.SSH_HOST }}:5432 -f -N ddp@${{ secrets.SSH_SERVERIP }} 
+          ssh -L 5432:${{ secrets.SSH_HOST }}:5432 -f -N ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_SERVERIP }} 
 
       - name: Install dependencies
         run: |
