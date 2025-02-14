@@ -23,6 +23,7 @@ MAP_TRANSLATE_TYPES = {
     float: TranslateColDataType.NUMERIC,
     datetime.datetime: TranslateColDataType.DATETIME,
     datetime.date: TranslateColDataType.DATETIME,
+    datetime.time: TranslateColDataType.DATETIME,
     bool: TranslateColDataType.BOOL,
     str: TranslateColDataType.STRING,
     dict: TranslateColDataType.JSON,

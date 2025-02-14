@@ -1,4 +1,4 @@
-name: Python package
+name: Dalgo CI
 
 on:
   push:
@@ -7,26 +7,26 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  checks:
     runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:15
         env:
           POSTGRES_USER: ddp
-          POSTGRES_PASSWORD: ${{ secrets.DBPASSWORD }}
-          POSTGRES_DB: ${{ secrets.DBNAME }}
+          POSTGRES_PASSWORD: ${{ secrets.CI_DBPASSWORD }}
+          POSTGRES_DB: ${{ secrets.CI_DBNAME }}
         ports:
           - 5432:5432
         options: --health-cmd "pg_isready -U ddp" --health-interval 10s --health-timeout 5s --health-retries 5
 
     strategy:
       matrix:
-        python-version: ["3.10"]
+        python-version: ["3.10"] # we should tighten this to work with multiple versions of python
         redis-version: [6]
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v4
@@ -56,25 +56,11 @@ jobs:
         env:
           DBHOST: localhost
           DBPORT: 5432
-          DBNAME: ${{ secrets.DBNAME }}
+          DBNAME: ${{ secrets.CI_DBNAME }}
           DBUSER: ddp
-          DBPASSWORD: ${{ secrets.DBPASSWORD }}
+          DBPASSWORD: ${{ secrets.CI_DBPASSWORD }}
         run: |
           python manage.py migrate
-
-      - name: Create known_hosts file
-        run: |
-          mkdir -p ~/.ssh
-          touch ~/.ssh/known_hosts
-
-      - name: Add remote host key to known_hosts
-        run: ssh-keyscan ${{ secrets.SERVERIP }} >> ~/.ssh/known_hosts
-
-      - name: Set up port forwarding via SSH
-        run: |
-          eval `ssh-agent -s`
-          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh -L 8080:localhost:8080 -L 8001:localhost:8001 ${{ secrets.SERVER }} -f -N
 
       - name: Test with pytest
         env:
@@ -84,9 +70,9 @@ jobs:
           AIRBYTE_API_TOKEN: ${{ secrets.AIRBYTE_API_TOKEN }}
           DBHOST: localhost
           DBPORT: 5432
-          DBNAME: ${{ secrets.DBNAME }}
+          DBNAME: ${{ secrets.CI_DBNAME }}
           DBUSER: ddp
-          DBPASSWORD: ${{ secrets.DBPASSWORD }}
+          DBPASSWORD: ${{ secrets.CI_DBPASSWORD }}
           PREFECT_PROXY_API_URL: http://localhost:8080
           DEV_SECRETS_DIR: /tmp/
           CLIENTDBT_ROOT: /tmp
