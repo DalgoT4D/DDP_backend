@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+import pytest
 import math
 import json
 import subprocess
@@ -34,10 +35,9 @@ basicConfig(level=INFO)
 logger = getLogger()
 
 
+@pytest.mark.skip(reason="Skipping dbt automation integration tests")
 class TestBigqueryOperations:
     """test operations in bigquery warehouse"""
-
-    __test__ = False  # Skipping this test
 
     warehouse = "bigquery"
     test_project_dir = None

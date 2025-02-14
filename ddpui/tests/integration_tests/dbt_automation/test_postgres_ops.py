@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import math
 import subprocess
+import pytest
 from logging import basicConfig, getLogger, INFO
 from ddpui.dbt_automation.operations.flattenjson import flattenjson
 from ddpui.dbt_automation.operations.droprenamecolumns import rename_columns, drop_columns
@@ -31,10 +32,9 @@ basicConfig(level=INFO)
 logger = getLogger()
 
 
+@pytest.mark.skip(reason="Skipping dbt automation integration tests")
 class TestPostgresOperations:
     """test rename_columns operation"""
-
-    __test__ = False  # Skipping this test
 
     warehouse = "postgres"
     test_project_dir = None
