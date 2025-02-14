@@ -45,7 +45,7 @@ jobs:
         run: |
           eval `ssh-agent -s`
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh -L 5555:${{ secrets.TEST_PG_DBHOST }}:${{ secrets.TEST_PG_DBPORT }} -f -N ${{ secrets.SSH_USERNAME }}@${{ secrets.SERVERIP }} 
+          ssh -L 5555:${{ secrets.TEST_PG_DBHOST }}:${{ secrets.TEST_PG_DBPORT }} -N -f ${{ secrets.SSH_USERNAME }}@${{ secrets.SERVERIP }} 
 
       - name: Install dependencies
         run: |
