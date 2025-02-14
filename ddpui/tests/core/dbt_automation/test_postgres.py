@@ -110,4 +110,4 @@ def test_get_connection_7():
             {"sslmode": {"mode": "disable", "ca_certificate": "LONG-CERTIFICATE"}}
         )
         mock_connect.assert_called_once()
-        mock_connect.assert_called_with(sslmode="disable", sslrootcert=ANY, sslcert=ANY)
+        mock_connect.assert_called_with(sslmode="disable", sslrootcert=ANY)
