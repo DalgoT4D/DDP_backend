@@ -3,10 +3,12 @@
 import argparse
 import os
 import json
+from pathlib import Path
 from logging import basicConfig, getLogger, INFO
 from google.cloud import bigquery
 from dotenv import load_dotenv
 from ddpui.dbt_automation.utils.warehouseclient import get_client
+from ddpui.dbt_automation import seeds
 
 
 basicConfig(level=INFO)
@@ -21,7 +23,10 @@ warehouse = args.warehouse
 load_dotenv("dbconnection.env")
 
 for json_file, tablename in zip(
-    ["seeds/sample_sheet1.json", "seeds/sample_sheet2.json"],
+    [
+        os.path.join(os.path.abspath(seeds.__file__), "..", "sample_sheet1.json"),
+        os.path.join(os.path.abspath(seeds.__file__), "..", "sample_sheet2.json"),
+    ],
     ["_airbyte_raw_Sheet1", "_airbyte_raw_Sheet2"],
 ):
     logger.info("seeding %s into %s", json_file, tablename)
