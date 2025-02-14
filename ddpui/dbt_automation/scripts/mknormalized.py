@@ -1,11 +1,12 @@
 """creates the dbt models which call our flatten_json macro"""
+
 import sys
 import argparse
 from logging import basicConfig, getLogger, INFO
 from string import Template
 from pathlib import Path
-from dbt_automation.utils.sourceschemas import get_source
-from dbt_automation.utils.dbtproject import dbtProject
+from ddpui.dbt_automation.utils.sourceschemas import get_source
+from ddpui.dbt_automation.utils.dbtproject import dbtProject
 
 basicConfig(level=INFO)
 logger = getLogger()

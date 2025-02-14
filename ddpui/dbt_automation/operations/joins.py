@@ -2,10 +2,10 @@
 This operation implements the standard joins operation for dbt automation
 """
 
-from dbt_automation.utils.columnutils import quote_columnname
-from dbt_automation.utils.dbtproject import dbtProject
-from dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
-from dbt_automation.utils.tableutils import source_or_ref
+from ddpui.dbt_automation.utils.columnutils import quote_columnname
+from ddpui.dbt_automation.utils.dbtproject import dbtProject
+from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
+from ddpui.dbt_automation.utils.tableutils import source_or_ref
 
 # sql, len_output_set = joins.joins_sql({
 #     "input": {

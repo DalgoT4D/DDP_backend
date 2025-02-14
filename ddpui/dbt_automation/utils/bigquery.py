@@ -6,8 +6,8 @@ from google.cloud import bigquery
 from google.cloud.exceptions import NotFound
 from google.oauth2 import service_account
 import json
-from dbt_automation.utils.columnutils import quote_columnname
-from dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
+from ddpui.dbt_automation.utils.columnutils import quote_columnname
+from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
 
 basicConfig(level=INFO)
 logger = getLogger()

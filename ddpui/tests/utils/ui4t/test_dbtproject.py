@@ -1,4 +1,4 @@
-from dbt_automation.utils.dbtproject import dbtProject
+from ddpui.dbt_automation.utils.dbtproject import dbtProject
 import os
 import yaml
 

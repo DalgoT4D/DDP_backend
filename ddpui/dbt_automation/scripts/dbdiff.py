@@ -1,4 +1,5 @@
 """diffs two schemas in two databases"""
+
 import os
 import sys
 import argparse
@@ -6,7 +7,7 @@ from logging import basicConfig, getLogger, INFO
 import subprocess
 import yaml
 
-from dbt_automation.utils.postgres import PostgresClient
+from ddpui.dbt_automation.utils.postgres import PostgresClient
 
 basicConfig(level=INFO)
 logger = getLogger()

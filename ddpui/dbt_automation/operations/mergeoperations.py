@@ -1,31 +1,31 @@
 from typing import List
-from dbt_automation.operations.arithmetic import arithmetic_dbt_sql
-from dbt_automation.operations.coalescecolumns import (
+from ddpui.dbt_automation.operations.arithmetic import arithmetic_dbt_sql
+from ddpui.dbt_automation.operations.coalescecolumns import (
     coalesce_columns_dbt_sql,
 )
-from dbt_automation.operations.concatcolumns import concat_columns_dbt_sql
-from dbt_automation.operations.droprenamecolumns import (
+from ddpui.dbt_automation.operations.concatcolumns import concat_columns_dbt_sql
+from ddpui.dbt_automation.operations.droprenamecolumns import (
     drop_columns_dbt_sql,
     rename_columns_dbt_sql,
 )
-from dbt_automation.operations.flattenjson import flattenjson_dbt_sql
-from dbt_automation.operations.generic import generic_function_dbt_sql
-from dbt_automation.operations.mergetables import union_tables_sql
-from dbt_automation.operations.regexextraction import regex_extraction_sql
-from dbt_automation.utils.dbtproject import dbtProject
-from dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
-from dbt_automation.operations.castdatatypes import cast_datatypes_sql
-from dbt_automation.operations.replace import replace_dbt_sql
-from dbt_automation.operations.joins import joins_sql
-from dbt_automation.operations.wherefilter import where_filter_sql
-from dbt_automation.operations.groupby import groupby_dbt_sql
-from dbt_automation.operations.aggregate import aggregate_dbt_sql
-from dbt_automation.operations.casewhen import casewhen_dbt_sql
-from dbt_automation.operations.flattenjson import flattenjson_dbt_sql
-from dbt_automation.operations.mergetables import union_tables_sql
-from dbt_automation.operations.pivot import pivot_dbt_sql
-from dbt_automation.operations.unpivot import unpivot_dbt_sql
-from dbt_automation.operations.rawsql import raw_generic_dbt_sql
+from ddpui.dbt_automation.operations.flattenjson import flattenjson_dbt_sql
+from ddpui.dbt_automation.operations.generic import generic_function_dbt_sql
+from ddpui.dbt_automation.operations.mergetables import union_tables_sql
+from ddpui.dbt_automation.operations.regexextraction import regex_extraction_sql
+from ddpui.dbt_automation.utils.dbtproject import dbtProject
+from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
+from ddpui.dbt_automation.operations.castdatatypes import cast_datatypes_sql
+from ddpui.dbt_automation.operations.replace import replace_dbt_sql
+from ddpui.dbt_automation.operations.joins import joins_sql
+from ddpui.dbt_automation.operations.wherefilter import where_filter_sql
+from ddpui.dbt_automation.operations.groupby import groupby_dbt_sql
+from ddpui.dbt_automation.operations.aggregate import aggregate_dbt_sql
+from ddpui.dbt_automation.operations.casewhen import casewhen_dbt_sql
+from ddpui.dbt_automation.operations.flattenjson import flattenjson_dbt_sql
+from ddpui.dbt_automation.operations.mergetables import union_tables_sql
+from ddpui.dbt_automation.operations.pivot import pivot_dbt_sql
+from ddpui.dbt_automation.operations.unpivot import unpivot_dbt_sql
+from ddpui.dbt_automation.operations.rawsql import raw_generic_dbt_sql
 
 
 def merge_operations_sql(

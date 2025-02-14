@@ -5,8 +5,8 @@ import tempfile
 from logging import basicConfig, getLogger, INFO
 import psycopg2
 from sshtunnel import SSHTunnelForwarder
-from dbt_automation.utils.columnutils import quote_columnname
-from dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
+from ddpui.dbt_automation.utils.columnutils import quote_columnname
+from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
 
 
 basicConfig(level=INFO)

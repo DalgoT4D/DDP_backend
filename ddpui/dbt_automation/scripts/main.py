@@ -8,29 +8,29 @@ from logging import basicConfig, getLogger, INFO
 import json
 import yaml
 from dotenv import load_dotenv
-from dbt_automation.operations.generic import generic_function
-from dbt_automation.operations.arithmetic import arithmetic
-from dbt_automation.operations.mergeoperations import merge_operations
-from dbt_automation.operations.rawsql import generic_sql_function
-from dbt_automation.operations.scaffold import scaffold
-from dbt_automation.utils.warehouseclient import get_client
-from dbt_automation.operations.droprenamecolumns import drop_columns, rename_columns
-from dbt_automation.operations.castdatatypes import cast_datatypes
-from dbt_automation.operations.coalescecolumns import coalesce_columns
-from dbt_automation.operations.concatcolumns import concat_columns
-from dbt_automation.operations.mergetables import union_tables
-from dbt_automation.operations.syncsources import sync_sources
-from dbt_automation.operations.flattenairbyte import flatten_operation
-from dbt_automation.operations.flattenjson import flattenjson
-from dbt_automation.operations.regexextraction import regex_extraction
-from dbt_automation.operations.replace import replace
-from dbt_automation.operations.joins import join
-from dbt_automation.operations.wherefilter import where_filter
-from dbt_automation.operations.groupby import groupby
-from dbt_automation.operations.aggregate import aggregate
-from dbt_automation.operations.casewhen import casewhen
-from dbt_automation.operations.pivot import pivot
-from dbt_automation.operations.unpivot import unpivot
+from ddpui.dbt_automation.operations.generic import generic_function
+from ddpui.dbt_automation.operations.arithmetic import arithmetic
+from ddpui.dbt_automation.operations.mergeoperations import merge_operations
+from ddpui.dbt_automation.operations.rawsql import generic_sql_function
+from ddpui.dbt_automation.operations.scaffold import scaffold
+from ddpui.dbt_automation.utils.warehouseclient import get_client
+from ddpui.dbt_automation.operations.droprenamecolumns import drop_columns, rename_columns
+from ddpui.dbt_automation.operations.castdatatypes import cast_datatypes
+from ddpui.dbt_automation.operations.coalescecolumns import coalesce_columns
+from ddpui.dbt_automation.operations.concatcolumns import concat_columns
+from ddpui.dbt_automation.operations.mergetables import union_tables
+from ddpui.dbt_automation.operations.syncsources import sync_sources
+from ddpui.dbt_automation.operations.flattenairbyte import flatten_operation
+from ddpui.dbt_automation.operations.flattenjson import flattenjson
+from ddpui.dbt_automation.operations.regexextraction import regex_extraction
+from ddpui.dbt_automation.operations.replace import replace
+from ddpui.dbt_automation.operations.joins import join
+from ddpui.dbt_automation.operations.wherefilter import where_filter
+from ddpui.dbt_automation.operations.groupby import groupby
+from ddpui.dbt_automation.operations.aggregate import aggregate
+from ddpui.dbt_automation.operations.casewhen import casewhen
+from ddpui.dbt_automation.operations.pivot import pivot
+from ddpui.dbt_automation.operations.unpivot import unpivot
 
 OPERATIONS_DICT = {
     "flatten": flatten_operation,

@@ -8,8 +8,8 @@ from dotenv import load_dotenv
 import yaml
 import pandas as pd
 
-# from dbt_automation.utils.dbtproject import dbtProject
-from dbt_automation.utils.warehouseclient import get_client
+# from ddpui.dbt_automation.utils.dbtproject import dbtProject
+from ddpui.dbt_automation.utils.warehouseclient import get_client
 
 
 basicConfig(level=INFO)

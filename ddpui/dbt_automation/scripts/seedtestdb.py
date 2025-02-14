@@ -7,7 +7,7 @@ import csv
 from pathlib import Path
 import yaml
 from dotenv import load_dotenv
-from dbt_automation.utils.warehouseclient import get_client
+from ddpui.dbt_automation.utils.warehouseclient import get_client
 
 parser = argparse.ArgumentParser(description="Seed a test database with test data")
 parser.add_argument(

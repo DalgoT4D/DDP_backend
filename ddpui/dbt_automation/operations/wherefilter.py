@@ -2,10 +2,10 @@
 
 from logging import basicConfig, getLogger, INFO
 
-from dbt_automation.utils.dbtproject import dbtProject
-from dbt_automation.utils.columnutils import quote_columnname, quote_constvalue
-from dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
-from dbt_automation.utils.tableutils import source_or_ref
+from ddpui.dbt_automation.utils.dbtproject import dbtProject
+from ddpui.dbt_automation.utils.columnutils import quote_columnname, quote_constvalue
+from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
+from ddpui.dbt_automation.utils.tableutils import source_or_ref
 
 basicConfig(level=INFO)
 logger = getLogger()

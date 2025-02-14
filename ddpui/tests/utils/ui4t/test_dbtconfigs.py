@@ -1,4 +1,4 @@
-from dbt_automation.utils.dbtconfigs import mk_model_config, get_columns_from_model
+from ddpui.dbt_automation.utils.dbtconfigs import mk_model_config, get_columns_from_model
 
 
 def test_mk_model_config():

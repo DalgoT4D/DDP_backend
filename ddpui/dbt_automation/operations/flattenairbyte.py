@@ -3,12 +3,12 @@
 import sys
 from logging import basicConfig, getLogger, INFO
 
-from dbt_automation.utils.sourceschemas import get_source
-from dbt_automation.utils.dbtproject import dbtProject
-from dbt_automation.utils.dbtconfigs import mk_model_config
-from dbt_automation.utils.columnutils import make_cleaned_column_names, dedup_list
-from dbt_automation.utils.warehouseclient import get_client
-from dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
+from ddpui.dbt_automation.utils.sourceschemas import get_source
+from ddpui.dbt_automation.utils.dbtproject import dbtProject
+from ddpui.dbt_automation.utils.dbtconfigs import mk_model_config
+from ddpui.dbt_automation.utils.columnutils import make_cleaned_column_names, dedup_list
+from ddpui.dbt_automation.utils.warehouseclient import get_client
+from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
 
 
 basicConfig(level=INFO)

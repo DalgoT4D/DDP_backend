@@ -8,7 +8,7 @@ import yaml
 from tqdm import tqdm
 
 from dotenv import load_dotenv
-from dbt_automation.utils.warehouseclient import get_client
+from ddpui.dbt_automation.utils.warehouseclient import get_client
 
 load_dotenv("dbconnection.env")
 

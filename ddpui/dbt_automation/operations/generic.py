@@ -3,11 +3,11 @@ This file contains the airthmetic operations for dbt automation
 """
 
 from logging import basicConfig, getLogger, INFO
-from dbt_automation.utils.dbtproject import dbtProject
-from dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
-from dbt_automation.utils.columnutils import quote_columnname, quote_constvalue
+from ddpui.dbt_automation.utils.dbtproject import dbtProject
+from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
+from ddpui.dbt_automation.utils.columnutils import quote_columnname, quote_constvalue
 
-from dbt_automation.utils.tableutils import source_or_ref
+from ddpui.dbt_automation.utils.tableutils import source_or_ref
 
 basicConfig(level=INFO)
 logger = getLogger()
@@ -37,9 +37,11 @@ def generic_function_dbt_sql(
     for computed_column in computed_columns:
         function_name = computed_column["function_name"]
         operands = [
-            quote_columnname(str(operand["value"]), warehouse.name)
-            if operand["is_col"]
-            else quote_constvalue(str(operand["value"]), warehouse.name)
+            (
+                quote_columnname(str(operand["value"]), warehouse.name)
+                if operand["is_col"]
+                else quote_constvalue(str(operand["value"]), warehouse.name)
+            )
             for operand in computed_column["operands"]
         ]
         output_column_name = computed_column["output_column_name"]

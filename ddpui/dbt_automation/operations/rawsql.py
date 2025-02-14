@@ -1,6 +1,6 @@
-from dbt_automation.utils.dbtproject import dbtProject
-from dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
-from dbt_automation.utils.tableutils import source_or_ref
+from ddpui.dbt_automation.utils.dbtproject import dbtProject
+from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
+from ddpui.dbt_automation.utils.tableutils import source_or_ref
 
 
 def raw_generic_dbt_sql(

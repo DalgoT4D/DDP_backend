@@ -7,9 +7,9 @@ from string import Template
 from logging import basicConfig, getLogger, INFO
 import subprocess, sys
 
-from dbt_automation.utils.warehouseclient import get_client
-from dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
-from dbt_automation import assets
+from ddpui.dbt_automation.utils.warehouseclient import get_client
+from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
+from ddpui.dbt_automation import assets
 
 
 basicConfig(level=INFO)

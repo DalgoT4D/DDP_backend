@@ -11,14 +11,14 @@ from dotenv import load_dotenv
 load_dotenv("dbconnection.env")
 
 # pylint:disable=wrong-import-position
-from dbt_automation.utils.sourceschemas import mksourcedefinition
-from dbt_automation.utils.warehouseclient import get_client
-from dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
-from dbt_automation.utils.dbtsources import (
+from ddpui.dbt_automation.utils.sourceschemas import mksourcedefinition
+from ddpui.dbt_automation.utils.warehouseclient import get_client
+from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
+from ddpui.dbt_automation.utils.dbtsources import (
     readsourcedefinitions,
     merge_sourcedefinitions,
 )
-from dbt_automation.utils.dbtproject import dbtProject
+from ddpui.dbt_automation.utils.dbtproject import dbtProject
 
 basicConfig(level=INFO)
 logger = getLogger()

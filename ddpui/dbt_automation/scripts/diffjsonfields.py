@@ -6,7 +6,7 @@ import json
 from logging import basicConfig, getLogger, INFO
 import yaml
 
-from dbt_automation.utils.postgres import PostgresClient
+from ddpui.dbt_automation.utils.postgres import PostgresClient
 
 basicConfig(level=INFO)
 logger = getLogger()

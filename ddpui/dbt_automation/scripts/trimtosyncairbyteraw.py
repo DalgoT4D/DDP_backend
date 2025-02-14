@@ -1,11 +1,12 @@
 """syncs one schema in one database to the corresponding schema in the other database"""
+
 import sys
 import argparse
 from logging import basicConfig, getLogger, INFO
 import json
 import yaml
 
-from dbt_automation.utils.postgres import PostgresClient
+from ddpui.dbt_automation.utils.postgres import PostgresClient
 
 basicConfig(level=INFO)
 logger = getLogger()

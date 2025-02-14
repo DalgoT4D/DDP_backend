@@ -1,5 +1,5 @@
 from unittest.mock import patch, ANY
-from dbt_automation.utils.postgres import PostgresClient
+from ddpui.dbt_automation.utils.postgres import PostgresClient
 
 
 def test_get_connection_1():
