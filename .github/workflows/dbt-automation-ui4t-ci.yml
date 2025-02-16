@@ -9,7 +9,7 @@ on:
 jobs:
   tests:
     env: 
-      TEST_PG_DBHOST: localhost
+      TEST_PG_DBHOST: 127.0.0.1
       TEST_PG_DBPORT: 5555
       TEST_PG_DBUSER: ${{ secrets.TEST_PG_DBUSER }}
       TEST_PG_DBPASSWORD: ${{ secrets.TEST_PG_DBPASSWORD }}
@@ -45,7 +45,7 @@ jobs:
         run: |
           eval `ssh-agent -s`
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh -L 5555:${{ secrets.TEST_PG_DBHOST }}:${{ secrets.TEST_PG_DBPORT }} -N -f ${{ secrets.SSH_USERNAME }}@${{ secrets.SERVERIP }} 
+          ssh -L 5555:${{ secrets.TEST_PG_DBHOST }}:${{ secrets.TEST_PG_DBPORT }} -N -f ${{ secrets.SSH_USERNAME }}@${{ secrets.SERVERIP }}
 
       - name: Install dependencies
         run: |
