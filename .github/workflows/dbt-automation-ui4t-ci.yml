@@ -9,16 +9,27 @@ on:
 jobs:
   tests:
     env: 
-      TEST_PG_DBHOST: 127.0.0.1
+      TEST_PG_DBHOST: localhost
       TEST_PG_DBPORT: 5555
-      TEST_PG_DBUSER: ${{ secrets.TEST_PG_DBUSER }}
-      TEST_PG_DBPASSWORD: ${{ secrets.TEST_PG_DBPASSWORD }}
-      TEST_PG_DBNAME: ${{ secrets.TEST_PG_DBNAME }}
-      TEST_PG_DBSCHEMA_SRC: ${{ secrets.TEST_PG_DBSCHEMA_SRC }}
+      TEST_PG_DBUSER: dbt_automation_user
+      TEST_PG_DBPASSWORD: ${{ secrets.CI_DBPASSWORD }}
+      TEST_PG_DBNAME: ${{ secrets.CI_DBNAME }}
+      TEST_PG_DBSCHEMA_SRC: pytest_staging
 
       TEST_BG_SERVICEJSON: ${{ secrets.TEST_BG_SERVICEJSON }}
       TEST_BG_LOCATION: ${{ secrets.TEST_BG_LOCATION }}
       TEST_BG_DATASET_SRC: ${{ secrets.TEST_BG_DATASET_SRC }}
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: dbt_automation_user
+          POSTGRES_PASSWORD: ${{ secrets.CI_DBPASSWORD }}
+          POSTGRES_DB: ${{ secrets.CI_DBNAME }}
+        ports:
+          - 5555:5432
+        options: --health-cmd "pg_isready -U dbt_automation_user" --health-interval 10s --health-timeout 5s --health-retries 5
 
     runs-on: ubuntu-latest
     strategy:
@@ -33,19 +44,19 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Create known_hosts file
-        run: |
-          mkdir -p ~/.ssh
-          touch ~/.ssh/known_hosts
+      # - name: Create known_hosts file
+      #   run: |
+      #     mkdir -p ~/.ssh
+      #     touch ~/.ssh/known_hosts
 
-      - name: Add remote host key to known_hosts
-        run: ssh-keyscan ${{ secrets.SERVERIP }} >> ~/.ssh/known_hosts
+      # - name: Add remote host key to known_hosts
+      #   run: ssh-keyscan ${{ secrets.SERVERIP }} >> ~/.ssh/known_hosts
     
-      - name: Login to the jump server and port forward to connect to the postgres warehouse
-        run: |
-          eval `ssh-agent -s`
-          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh -L 5555:${{ secrets.TEST_PG_DBHOST }}:${{ secrets.TEST_PG_DBPORT }} -N -f ${{ secrets.SSH_USERNAME }}@${{ secrets.SERVERIP }}
+      # - name: Login to the jump server and port forward to connect to the postgres warehouse
+      #   run: |
+      #     eval `ssh-agent -s`
+      #     ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
+      #     ssh -L 5555:${{ secrets.TEST_PG_DBHOST }}:${{ secrets.TEST_PG_DBPORT }} -N -f ${{ secrets.SSH_USERNAME }}@${{ secrets.SERVERIP }}
 
       - name: Install dependencies
         run: |
