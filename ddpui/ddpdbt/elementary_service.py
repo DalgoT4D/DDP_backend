@@ -237,8 +237,10 @@ def create_elementary_profile(org: Org):
         logger.info("read dbt profile from %s", dbt_profile_file)
 
     target = elementary_profile["elementary"].get("target", "default")
-    if elementary_profile["elementary"]["outputs"][target]["type"] == 'bigquery':
-        elementary_profile["elementary"]["outputs"][target]["schema"] = elementary_profile["elementary"]["outputs"][target]["dataset"]
+    if elementary_profile["elementary"]["outputs"][target]["type"] == "bigquery":
+        elementary_profile["elementary"]["outputs"][target]["schema"] = elementary_profile[
+            "elementary"
+        ]["outputs"][target]["dataset"]
     elementary_schema = elementary_profile["elementary"]["outputs"][target]["schema"]
     elementary_profile["elementary"]["outputs"][target] = dbt_profile[dbt_profile_name]["outputs"][
         dbt_profiles_target
