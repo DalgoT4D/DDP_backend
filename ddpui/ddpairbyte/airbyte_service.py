@@ -938,6 +938,15 @@ def get_job_info(job_id: str) -> dict:
     return res
 
 
+def get_job_info_without_logs(job_id: str) -> dict:
+    """get job info without logs for an airbyte job"""
+    if not isinstance(job_id, str):
+        raise HttpError(400, "job_id must be a string")
+
+    res = abreq("jobs/get_without_logs", {"id": job_id})
+    return res
+
+
 def get_jobs_for_connection(
     connection_id: str, limit: int = 1, offset: int = 0, job_types: list[str] = ["sync"]
 ) -> int | None:
