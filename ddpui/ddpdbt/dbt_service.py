@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 import requests
 from django.utils.text import slugify
-from dbt_automation import assets
+from ddpui.dbt_automation import assets
 from ddpui.ddpprefect import (
     prefect_service,
     DBTCLIPROFILE,

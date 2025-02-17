@@ -1,0 +1,27 @@
+[
+  {
+    "_airbyte_ab_id": "006b18b2-cccd-47f1-a9dc-5638d2d1abc7",
+    "_airbyte_data": "{\"NGO\": \"IMAGE\", \"SPOC\": \"SPOC C\", \"Month\": \"12/31/2022\", \"measure1\": \"183\", \"measure2\": \"183\", \"Indicator\": \"# of deliveries with an SBA in targeted communities\"}",
+    "_airbyte_emitted_at": "2023-09-28 08:50:17+00"
+  },
+  {
+    "_airbyte_ab_id": "009a7823-c119-4837-89a2-2c5808428d84",
+    "_airbyte_data": "{\"NGO\": \"FDSR\", \"SPOC\": \"SPOC B\", \"Month\": \"12/31/2022\", \"measure1\": \"937\", \"measure2\": \"41\", \"Indicator\": \"# of newborns born in supported clinics and catchment area receiving immediate newborn care (within 72 hours)\"}",
+    "_airbyte_emitted_at": "2023-09-28 08:50:17+00"
+  },
+  {
+    "_airbyte_ab_id": "0213d8fd-ea0b-447e-8d59-7ecbd7396b7c",
+    "_airbyte_data": "{\"NGO\": \"CRC\", \"SPOC\": \"SPOC A\", \"Month\": \"11/30/2022\", \"measure1\": \"41\", \"measure2\": \"0\", \"Indicator\": \"% of service contacts who qualify as poor\"}",
+    "_airbyte_emitted_at": "2023-09-28 08:50:16+00"
+  },
+  {
+    "_airbyte_ab_id": "033b0d74-cb2c-4edf-b586-90afe497cad9",
+    "_airbyte_data": "{\"NGO\": \"BAMANEH\", \"SPOC\": \"SPOC A\", \"Month\": \"12/31/2022\", \"measure1\": \"0\", \"measure2\": \"2308\", \"Indicator\": \"# of Pregnant & Lactating Women prescribed with 30IFA\"}",
+    "_airbyte_emitted_at": "2023-09-28 08:50:16+00"
+  },
+  {
+    "_airbyte_ab_id": "039b3d53-dadd-4a56-aed1-93ff8c39f259",
+    "_airbyte_data": "{\"NGO\": \"JTS\", \"SPOC\": \"SPOC C\", \"Month\": \"10/31/2022\", \"measure1\": \"2308\", \"measure2\": \"500\", \"Indicator\": \"ANC First visit\"}",
+    "_airbyte_emitted_at": "2023-09-28 08:50:17+00"
+  }
+]
