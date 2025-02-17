@@ -28,6 +28,7 @@ source = [
 omit = [
   "ddpui/utils/sendgrid.py",
   "ddpui/utils/dbtdocs.py",
+  "ddpui/celeryworkers/*.py",
   "ddpui/tests/*",
   "ddpui/migrations/*",
   "ddpui/management/*",
