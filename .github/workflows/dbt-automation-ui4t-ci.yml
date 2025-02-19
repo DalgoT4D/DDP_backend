@@ -1,0 +1,61 @@
+name: Dalgo UI4T Integration Tests
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  tests:
+    env: 
+      TEST_PG_DBHOST: localhost
+      TEST_PG_DBPORT: 5555
+      TEST_PG_DBUSER: dbt_automation_user
+      TEST_PG_DBPASSWORD: ${{ secrets.CI_DBPASSWORD }}
+      TEST_PG_DBNAME: ${{ secrets.CI_DBNAME }}
+      TEST_PG_DBSCHEMA_SRC: pytest_staging
+
+      TEST_BG_SERVICEJSON: ${{ secrets.TEST_BG_SERVICEJSON }}
+      TEST_BG_LOCATION: ${{ secrets.TEST_BG_LOCATION }}
+      TEST_BG_DATASET_SRC: ${{ secrets.TEST_BG_DATASET_SRC }}
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: dbt_automation_user
+          POSTGRES_PASSWORD: ${{ secrets.CI_DBPASSWORD }}
+          POSTGRES_DB: ${{ secrets.CI_DBNAME }}
+        ports:
+          - 5555:5432
+        options: --health-cmd "pg_isready -U dbt_automation_user" --health-interval 10s --health-timeout 5s --health-retries 5
+
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          
+      - name: Create logs directory
+        run: mkdir -p ddpui/logs
+
+      - name: Seed data in test warehouse
+        run: |
+          export PYTHONPATH=$(pwd)
+          python ddpui/dbt_automation/seeds/seed.py --warehouse postgres
+          python ddpui/dbt_automation/seeds/seed.py --warehouse bigquery
+
+      - name: Run dbt automation (ui4t) integration tests
+        run: |
+          pytest ddpui/tests/integration_tests/dbt_automation/*.py -s 

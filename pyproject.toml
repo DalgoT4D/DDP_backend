@@ -28,6 +28,7 @@ source = [
 omit = [
   "ddpui/utils/sendgrid.py",
   "ddpui/utils/dbtdocs.py",
+  "ddpui/celeryworkers/*.py",
   "ddpui/tests/*",
   "ddpui/migrations/*",
   "ddpui/management/*",
@@ -40,5 +41,8 @@ omit = [
   "ddpui/routes.py",
   "*/schema.py",
   "ddpui/*/__init__.py",
-  "ddpui/schemas/*"
+  "ddpui/schemas/*",
+  "ddpui/dbt_automation/assets/*",
+  "ddpui/dbt_automation/seeds/*",
+  "ddpui/dbt_automation/operations/*",
 ]

@@ -1,53 +1,53 @@
 import os, uuid, time
 from pathlib import Path
 
-from dbt_automation.operations.arithmetic import arithmetic, arithmetic_dbt_sql
-from dbt_automation.operations.castdatatypes import cast_datatypes, cast_datatypes_sql
-from dbt_automation.operations.coalescecolumns import (
+from ddpui.dbt_automation.operations.arithmetic import arithmetic, arithmetic_dbt_sql
+from ddpui.dbt_automation.operations.castdatatypes import cast_datatypes, cast_datatypes_sql
+from ddpui.dbt_automation.operations.coalescecolumns import (
     coalesce_columns,
     coalesce_columns_dbt_sql,
 )
-from dbt_automation.operations.concatcolumns import (
+from ddpui.dbt_automation.operations.concatcolumns import (
     concat_columns,
     concat_columns_dbt_sql,
 )
-from dbt_automation.operations.droprenamecolumns import (
+from ddpui.dbt_automation.operations.droprenamecolumns import (
     drop_columns,
     rename_columns,
     rename_columns_dbt_sql,
     drop_columns_dbt_sql,
 )
-from dbt_automation.operations.flattenairbyte import flatten_operation
+from ddpui.dbt_automation.operations.flattenairbyte import flatten_operation
 
-from dbt_automation.operations.flattenjson import flattenjson, flattenjson_dbt_sql
+from ddpui.dbt_automation.operations.flattenjson import flattenjson, flattenjson_dbt_sql
 
-# from dbt_automation.operations.mergetables import union_tables, union_tables_sql
-from dbt_automation.operations.regexextraction import (
+# from ddpui.dbt_automation.operations.mergetables import union_tables, union_tables_sql
+from ddpui.dbt_automation.operations.regexextraction import (
     regex_extraction,
     regex_extraction_sql,
 )
-from dbt_automation.operations.mergeoperations import (
+from ddpui.dbt_automation.operations.mergeoperations import (
     merge_operations,
     merge_operations_sql,
 )
-from dbt_automation.operations.syncsources import (
+from ddpui.dbt_automation.operations.syncsources import (
     sync_sources,
     generate_source_definitions_yaml,
 )
-from dbt_automation.operations.joins import join, joins_sql
-from dbt_automation.operations.groupby import groupby, groupby_dbt_sql
-from dbt_automation.operations.wherefilter import where_filter, where_filter_sql
-from dbt_automation.operations.mergetables import union_tables, union_tables_sql
-from dbt_automation.utils.warehouseclient import get_client
-from dbt_automation.utils.dbtproject import dbtProject
-from dbt_automation.utils.dbtsources import read_sources
-from dbt_automation.operations.replace import replace, replace_dbt_sql
-from dbt_automation.operations.casewhen import casewhen, casewhen_dbt_sql
-from dbt_automation.operations.aggregate import aggregate, aggregate_dbt_sql
-from dbt_automation.operations.pivot import pivot, pivot_dbt_sql
-from dbt_automation.operations.unpivot import unpivot, unpivot_dbt_sql
-from dbt_automation.operations.generic import generic_function, generic_function_dbt_sql
-from dbt_automation.operations.rawsql import generic_sql_function, raw_generic_dbt_sql
+from ddpui.dbt_automation.operations.joins import join, joins_sql
+from ddpui.dbt_automation.operations.groupby import groupby, groupby_dbt_sql
+from ddpui.dbt_automation.operations.wherefilter import where_filter, where_filter_sql
+from ddpui.dbt_automation.operations.mergetables import union_tables, union_tables_sql
+from ddpui.dbt_automation.utils.warehouseclient import get_client
+from ddpui.dbt_automation.utils.dbtproject import dbtProject
+from ddpui.dbt_automation.utils.dbtsources import read_sources
+from ddpui.dbt_automation.operations.replace import replace, replace_dbt_sql
+from ddpui.dbt_automation.operations.casewhen import casewhen, casewhen_dbt_sql
+from ddpui.dbt_automation.operations.aggregate import aggregate, aggregate_dbt_sql
+from ddpui.dbt_automation.operations.pivot import pivot, pivot_dbt_sql
+from ddpui.dbt_automation.operations.unpivot import unpivot, unpivot_dbt_sql
+from ddpui.dbt_automation.operations.generic import generic_function, generic_function_dbt_sql
+from ddpui.dbt_automation.operations.rawsql import generic_sql_function, raw_generic_dbt_sql
 
 from ddpui.schemas.dbt_workflow_schema import CompleteDbtModelPayload
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
