@@ -4,6 +4,7 @@ functions which work with airbyte and with the dalgo database
 
 import json
 import os
+from uuid import uuid4
 from pathlib import Path
 import yaml
 from ninja.errors import HttpError
@@ -16,7 +17,7 @@ from django.forms.models import model_to_dict
 
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import AirbyteConnectionSchemaUpdate, AirbyteWorkspace
-from ddpui.ddpprefect import prefect_service
+from ddpui.ddpprefect import prefect_service, schema, DBTCORE
 from ddpui.models.org import (
     Org,
     OrgPrefectBlockv1,
@@ -846,8 +847,31 @@ def update_destination(org: Org, destination_id: str, payload: AirbyteDestinatio
 
     secretsmanager.update_warehouse_credentials(warehouse, dbt_credentials)
 
-    create_or_update_org_cli_block(org, warehouse, dbt_credentials)
+    (cli_profile_block, dbt_project_params), error = create_or_update_org_cli_block(
+        org, warehouse, dbt_credentials
+    )
+    if error:
+        return None, error
 
+    # get prefect-dbt to create a new profiles.yml by running "dbt debug"
+    dbtdebugtask = schema.PrefectDbtTaskSetup(
+        seq=1,
+        slug="dbt-debug",
+        commands=[f"{dbt_project_params.dbt_binary} debug"],
+        type=DBTCORE,
+        env={},
+        working_dir=dbt_project_params.project_dir,
+        profiles_dir=f"{dbt_project_params.project_dir}/profiles/",
+        project_dir=dbt_project_params.project_dir,
+        cli_profile_block=cli_profile_block.block_name,
+        cli_args=[],
+        orgtask_uuid=str(uuid4()),
+    )
+
+    logger.info("running dbt debug to generate new profiles/profiles.yml")
+    prefect_service.run_dbt_task_sync(dbtdebugtask)
+
+    logger.info("recreating elementary_profiles/profiles.yml")
     create_elementary_profile(org)
 
     return destination, None

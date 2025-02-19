@@ -1,4 +1,4 @@
-from unittest.mock import patch, Mock
+from unittest.mock import patch, Mock, ANY
 import os
 from datetime import datetime
 from pathlib import Path
@@ -40,7 +40,7 @@ from ddpui.models.org import (
 from ddpui.models.org_user import OrgUser, OrgUserRole, User
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.models.tasks import Task, OrgTask, OrgDataFlowv1, DataflowOrgTask
-from ddpui.ddpprefect import DBTCLIPROFILE
+from ddpui.ddpprefect import DBTCLIPROFILE, schema, DBTCORE
 from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTECLEAR
 
 
@@ -831,7 +831,17 @@ def test_update_destination_snowflake_config(
     "ddpui.ddpairbyte.airbytehelpers.create_elementary_profile",
     mock_create_elementary_profile=Mock(),
 )
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.prefect_service.run_dbt_task_sync",
+    mock_run_dbt_task_sync=Mock(),
+)
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.uuid4",
+    mock_uuid4=Mock(),
+)
 def test_update_destination_cliprofile(
+    mock_uuid4: Mock,
+    mock_run_dbt_task_sync: Mock,
     mock_create_elementary_profile: Mock,
     mock_create_or_update_org_cli_block: Mock,
     mock_update_warehouse_credentials: Mock,
@@ -859,12 +869,37 @@ def test_update_destination_cliprofile(
 
     OrgPrefectBlockv1.objects.create(org=org, block_type=DBTCLIPROFILE, block_name="cliblockname")
 
+    mock_cli_profile_block = Mock(block_name="block-name")
+    mock_dbt_project_params = Mock(
+        dbt_binary="dbt-binary", project_dir="dbt-project-dir", working_dir="dbt-project-dir"
+    )
+    mock_create_or_update_org_cli_block.return_value = (
+        (mock_cli_profile_block, mock_dbt_project_params),
+        None,
+    )
+    mock_uuid4.return_value = "fake-uuid"
+
     response, error = update_destination(org, "destination_id", payload)
     assert error is None
     assert response == {"destinationId": "DESTINATION_ID"}
 
     mock_create_or_update_org_cli_block.assert_called_once_with(org, warehouse, payload.config)
     mock_create_elementary_profile.assert_called_once_with(org)
+
+    dbtdebugtask = schema.PrefectDbtTaskSetup(
+        seq=1,
+        slug="dbt-debug",
+        commands=["dbt-binary debug"],
+        type=DBTCORE,
+        env={},
+        working_dir="dbt-project-dir",
+        profiles_dir="dbt-project-dir/profiles/",
+        project_dir="dbt-project-dir",
+        cli_profile_block="block-name",
+        cli_args=[],
+        orgtask_uuid="fake-uuid",
+    )
+    mock_run_dbt_task_sync.assert_called_once_with(dbtdebugtask)
 
 
 @patch("ddpui.ddpairbyte.airbyte_service.get_connections", mock_get_connections=Mock())
