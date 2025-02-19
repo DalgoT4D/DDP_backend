@@ -827,7 +827,12 @@ def test_update_destination_snowflake_config(
     "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
     mock_create_or_update_org_cli_block=Mock(),
 )
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.create_elementary_profile",
+    mock_create_elementary_profile=Mock(),
+)
 def test_update_destination_cliprofile(
+    mock_create_elementary_profile: Mock,
     mock_create_or_update_org_cli_block: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
@@ -859,6 +864,7 @@ def test_update_destination_cliprofile(
     assert response == {"destinationId": "DESTINATION_ID"}
 
     mock_create_or_update_org_cli_block.assert_called_once_with(org, warehouse, payload.config)
+    mock_create_elementary_profile.assert_called_once_with(org)
 
 
 @patch("ddpui.ddpairbyte.airbyte_service.get_connections", mock_get_connections=Mock())

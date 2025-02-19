@@ -1,11 +1,10 @@
 from django.core.management.base import BaseCommand
 
-from ddpui.models.org import Org, OrgPrefectBlockv1
+from ddpui.models.org import Org
 from ddpui.models.org import OrgWarehouse
 from ddpui.utils import secretsmanager
-from ddpui.ddpprefect import DBTCLIPROFILE
-from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte.airbytehelpers import create_or_update_org_cli_block
+from ddpui.ddpdbt.elementary_service import create_elementary_profile
 
 
 class Command(BaseCommand):
@@ -55,5 +54,7 @@ class Command(BaseCommand):
         secretsmanager.update_warehouse_credentials(warehouse, dbt_credentials)
 
         create_or_update_org_cli_block(org, warehouse, dbt_credentials)
+
+        create_elementary_profile(org)
 
         print("dbt cli profile updated")

@@ -68,6 +68,7 @@ from ddpui.core.pipelinefunctions import (
 from ddpui.core.orgtaskfunctions import fetch_orgtask_lock, fetch_orgtask_lock_v1
 from ddpui.models.tasks import TaskLock
 from ddpui.core.orgdbt_manager import DbtProjectManager
+from ddpui.ddpdbt.elementary_service import create_elementary_profile
 
 logger = CustomLogger("airbyte")
 
@@ -847,6 +848,8 @@ def update_destination(org: Org, destination_id: str, payload: AirbyteDestinatio
 
     create_or_update_org_cli_block(org, warehouse, dbt_credentials)
 
+    create_elementary_profile(org)
+
     return destination, None
 
 
@@ -1037,11 +1040,11 @@ def get_warehouses(org: Org):
     return warehouses, None
 
 
-def get_demo_whitelisted_source_config(type: str):
+def get_demo_whitelisted_source_config(type_: str):
     """Returns the config of whitelisted source based on type"""
     ret_src = None
     for src in DEMO_WHITELIST_SOURCES:
-        if src["type"] == type:
+        if src["type"] == type_:
             ret_src = src
             break
 
