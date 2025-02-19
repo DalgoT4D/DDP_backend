@@ -632,7 +632,12 @@ def test_create_connection(
     "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
     mock_create_or_update_org_cli_block=Mock(),
 )
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.prefect_service.run_dbt_task_sync",
+    mock_run_dbt_task_sync=Mock(),
+)
 def test_update_destination_name(
+    mock_run_dbt_task_sync: Mock,
     mock_create_or_update_org_cli_block: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
@@ -647,7 +652,14 @@ def test_update_destination_name(
     }
     mock_retrieve_warehouse_credentials.return_value = {}
     mock_update_warehouse_credentials.return_value = None
-    mock_create_or_update_org_cli_block.return_value = ((None, None), None)
+    mock_cli_profile_block = Mock(block_name="block-name")
+    mock_dbt_project_params = Mock(
+        dbt_binary="dbt-binary", project_dir="dbt-project-dir", working_dir="dbt-project-dir"
+    )
+    mock_create_or_update_org_cli_block.return_value = (
+        (mock_cli_profile_block, mock_dbt_project_params),
+        None,
+    )
 
     payload = AirbyteDestinationUpdate(
         name="new-name", destinationDefId="destinationDefId", config={}
@@ -678,7 +690,12 @@ def test_update_destination_name(
     "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
     mock_create_or_update_org_cli_block=Mock(),
 )
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.prefect_service.run_dbt_task_sync",
+    mock_run_dbt_task_sync=Mock(),
+)
 def test_update_destination_postgres_config(
+    mock_run_dbt_task_sync: Mock,
     mock_create_or_update_org_cli_block: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
@@ -698,6 +715,14 @@ def test_update_destination_postgres_config(
         name="name",
         destinationDefId="destinationDefId",
         config={"host": "new-host", "port": "123", "password": "*****"},
+    )
+    mock_cli_profile_block = Mock(block_name="block-name")
+    mock_dbt_project_params = Mock(
+        dbt_binary="dbt-binary", project_dir="dbt-project-dir", working_dir="dbt-project-dir"
+    )
+    mock_create_or_update_org_cli_block.return_value = (
+        (mock_cli_profile_block, mock_dbt_project_params),
+        None,
     )
     response, error = update_destination(org, "destination_id", payload)
     assert error is None
@@ -729,7 +754,12 @@ def test_update_destination_postgres_config(
     "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
     mock_create_or_update_org_cli_block=Mock(),
 )
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.prefect_service.run_dbt_task_sync",
+    mock_run_dbt_task_sync=Mock(),
+)
 def test_update_destination_bigquery_config(
+    mock_run_dbt_task_sync: Mock,
     mock_create_or_update_org_cli_block: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
@@ -749,6 +779,14 @@ def test_update_destination_bigquery_config(
         name="name",
         destinationDefId="destinationDefId",
         config={"credentials_json": '{"key": "value"}'},
+    )
+    mock_cli_profile_block = Mock(block_name="block-name")
+    mock_dbt_project_params = Mock(
+        dbt_binary="dbt-binary", project_dir="dbt-project-dir", working_dir="dbt-project-dir"
+    )
+    mock_create_or_update_org_cli_block.return_value = (
+        (mock_cli_profile_block, mock_dbt_project_params),
+        None,
     )
     response, error = update_destination(org, "destination_id", payload)
     assert error is None
@@ -779,7 +817,12 @@ def test_update_destination_bigquery_config(
     "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
     mock_create_or_update_org_cli_block=Mock(),
 )
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.prefect_service.run_dbt_task_sync",
+    mock_run_dbt_task_sync=Mock(),
+)
 def test_update_destination_snowflake_config(
+    mock_run_dbt_task_sync: Mock,
     mock_create_or_update_org_cli_block: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
@@ -799,6 +842,14 @@ def test_update_destination_snowflake_config(
         name="name",
         destinationDefId="destinationDefId",
         config={"credentials": {"password": "newpassword"}},
+    )
+    mock_cli_profile_block = Mock(block_name="block-name")
+    mock_dbt_project_params = Mock(
+        dbt_binary="dbt-binary", project_dir="dbt-project-dir", working_dir="dbt-project-dir"
+    )
+    mock_create_or_update_org_cli_block.return_value = (
+        (mock_cli_profile_block, mock_dbt_project_params),
+        None,
     )
     response, error = update_destination(org, "destination_id", payload)
     assert error is None
