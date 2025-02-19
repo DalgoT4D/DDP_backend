@@ -5,6 +5,7 @@ from ddpui.models.org import OrgWarehouse
 from ddpui.utils import secretsmanager
 from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.ddpprefect import prefect_service
+from ddpui.ddpairbyte.airbytehelpers import create_or_update_org_cli_block
 
 
 class Command(BaseCommand):
@@ -53,18 +54,6 @@ class Command(BaseCommand):
 
         secretsmanager.update_warehouse_credentials(warehouse, dbt_credentials)
 
-        cli_profile_block = OrgPrefectBlockv1.objects.filter(
-            org=org, block_type=DBTCLIPROFILE
-        ).first()
+        create_or_update_org_cli_block(org, warehouse, dbt_credentials)
 
-        if cli_profile_block is None:
-            print(f"dbt cli profile block does not exist for org {org.slug}")
-            return
-
-        result = prefect_service.update_dbt_cli_profile_block(
-            block_name=cli_profile_block.block_name,
-            wtype=warehouse.wtype,
-            credentials=dbt_credentials,
-        )
-        print(result)
-        # print("dbt cli profile updated")
+        print("dbt cli profile updated")
