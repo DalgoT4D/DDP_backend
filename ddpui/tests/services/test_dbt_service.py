@@ -13,7 +13,7 @@ from ddpui.ddpdbt.dbt_service import (
 )
 from ddpui.ddpprefect import DBTCLIPROFILE, SECRET
 from ddpui.ddpdbt.schema import DbtProjectParams
-from dbt_automation import assets
+from ddpui.dbt_automation import assets
 
 pytestmark = pytest.mark.django_db
 

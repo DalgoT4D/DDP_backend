@@ -237,12 +237,17 @@ def create_elementary_profile(org: Org):
         logger.info("read dbt profile from %s", dbt_profile_file)
 
     target = elementary_profile["elementary"].get("target", "default")
+    if elementary_profile["elementary"]["outputs"][target]["type"] == "bigquery":
+        elementary_profile["elementary"]["outputs"][target]["schema"] = elementary_profile[
+            "elementary"
+        ]["outputs"][target]["dataset"]
+    elementary_schema = elementary_profile["elementary"]["outputs"][target]["schema"]
     elementary_profile["elementary"]["outputs"][target] = dbt_profile[dbt_profile_name]["outputs"][
         dbt_profiles_target
     ]
 
-    # set schema to elementary
-    elementary_profile["elementary"]["outputs"][target]["schema"] = "elementary"
+    # set schema to what the elementary.generate_elementary_cli_profile macro computed
+    elementary_profile["elementary"]["outputs"][target]["schema"] = elementary_schema
 
     elementary_profile_dir = Path(dbt_project_params.project_dir) / "elementary_profiles"
 

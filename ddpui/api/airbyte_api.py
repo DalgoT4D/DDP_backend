@@ -389,6 +389,17 @@ def get_job_status(request, job_id):
     }
 
 
+@airbyte_router.get("/jobs/{job_id}/status", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_connection"])
+def get_job_status_without_logs(request, job_id):
+    """get the job info from airbyte"""
+    result = airbyte_service.get_job_info_without_logs(job_id)
+    print(result)
+    return {
+        "status": result["job"]["status"],
+    }
+
+
 # ==============================================================================
 # new apis to go away from the block architecture
 

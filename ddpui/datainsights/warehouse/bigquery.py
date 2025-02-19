@@ -40,16 +40,38 @@ class BigqueryClient(Warehouse):
     def get_table_columns(self, db_schema: str, db_table: str) -> dict:
         """Fetch columns of a table; also send the translated col data type"""
         res = []
+        not_supported_cols = []
         for column in self.inspect_obj.get_columns(table_name=db_table, schema=db_schema):
+            data_type = None
+            translated_type = None
+            try:
+                data_type = str(column["type"])
+                translated_type = (
+                    None
+                    if isinstance(column["type"], NullType)
+                    else MAP_TRANSLATE_TYPES[column["type"].python_type]
+                )
+            except (
+                Exception
+            ):  # sqlalchemy doesn't handle bigquery STRUCT type; there is no python_type for STRUCT
+                not_supported_cols.append(column["name"])
+                continue
+
+            # struct (record in bigquery) fields also come as columns; we don't support them
+            # if struct col name is test123; child columns will have names as test123.col1, test123.col3,..
+            # we want these col fields (that start with struct col name) to be ignored too
+            # struct col itself is ignored in the above "continue" statement
+            if any(
+                column["name"].startswith(not_supported_col)
+                for not_supported_col in not_supported_cols
+            ):
+                continue
+
             res.append(
                 {
                     "name": column["name"],
-                    "data_type": str(column["type"]),
-                    "translated_type": (
-                        None
-                        if isinstance(column["type"], NullType)
-                        else MAP_TRANSLATE_TYPES[column["type"].python_type]
-                    ),
+                    "data_type": data_type,
+                    "translated_type": translated_type,
                     "nullable": column["nullable"],
                 }
             )
