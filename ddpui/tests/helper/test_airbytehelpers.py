@@ -890,7 +890,12 @@ def test_update_destination_snowflake_config(
     "ddpui.ddpairbyte.airbytehelpers.uuid4",
     mock_uuid4=Mock(),
 )
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.timezone",
+    mock_uuid4=Mock(),
+)
 def test_update_destination_cliprofile(
+    mock_timezone: Mock,
     mock_uuid4: Mock,
     mock_run_dbt_task_sync: Mock,
     mock_create_elementary_profile: Mock,
@@ -929,6 +934,7 @@ def test_update_destination_cliprofile(
         None,
     )
     mock_uuid4.return_value = "fake-uuid"
+    mock_timezone.as_ist = Mock(return_value=Mock(isoformat=Mock(return_value="isoformatted-time")))
 
     response, error = update_destination(org, "destination_id", payload)
     assert error is None
@@ -949,6 +955,8 @@ def test_update_destination_cliprofile(
         cli_profile_block="block-name",
         cli_args=[],
         orgtask_uuid="fake-uuid",
+        flow_run="org-dbt-debug",
+        flow_run_name="isoformatted-time",
     )
     mock_run_dbt_task_sync.assert_called_once_with(dbtdebugtask)
 
@@ -974,9 +982,9 @@ def test_delete_source(
         ]
     }
 
-    task = Task.objects.create(type="airbyte", slug="airbyte-sync", label="AIRBYTE sync")
-    orgtask = OrgTask.objects.create(org=org, task=task, connection_id="connection_id")
-    OrgTask.objects.create(org=org, task=task, connection_id="connection_id2")
+    synctask = Task.objects.create(type="airbyte", slug="airbyte-sync", label="AIRBYTE sync")
+    orgtask = OrgTask.objects.create(org=org, task=synctask, connection_id="connection_id")
+    OrgTask.objects.create(org=org, task=synctask, connection_id="connection_id2")
 
     dataflow = OrgDataFlowv1.objects.create(
         org=org, dataflow_type="manual", deployment_id="deployment-id"
@@ -992,9 +1000,11 @@ def test_delete_source(
     ).exists()
 
     # this one was deleted
-    assert not OrgTask.objects.filter(org=org, task=task, connection_id="connection_id").exists()
+    assert not OrgTask.objects.filter(
+        org=org, task=synctask, connection_id="connection_id"
+    ).exists()
     # but this one was not deleted
-    assert OrgTask.objects.filter(org=org, task=task, connection_id="connection_id2").exists()
+    assert OrgTask.objects.filter(org=org, task=synctask, connection_id="connection_id2").exists()
 
     mock_delete_source.assert_called_once()
 
