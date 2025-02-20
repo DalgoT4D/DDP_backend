@@ -6,8 +6,8 @@ import json
 import os
 from uuid import uuid4
 from pathlib import Path
+from datetime import datetime
 import yaml
-from datetime import timezone, datetime
 from ninja.errors import HttpError
 from django.utils.text import slugify
 from django.conf import settings
@@ -30,6 +30,7 @@ from ddpui.models.org import (
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils import timezone
 from ddpui.ddpairbyte.schema import (
     AirbyteConnectionCreate,
     AirbyteConnectionUpdate,
