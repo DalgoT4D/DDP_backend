@@ -955,7 +955,7 @@ def test_update_destination_cliprofile(
         cli_profile_block="block-name",
         cli_args=[],
         orgtask_uuid="fake-uuid",
-        flow_run="org-dbt-debug",
+        flow_name="org-dbt-debug",
         flow_run_name="isoformatted-time",
     )
     mock_run_dbt_task_sync.assert_called_once_with(dbtdebugtask)

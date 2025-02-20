@@ -869,7 +869,7 @@ def update_destination(org: Org, destination_id: str, payload: AirbyteDestinatio
         cli_profile_block=cli_profile_block.block_name,
         cli_args=[],
         orgtask_uuid=str(uuid4()),
-        flow_run=f"{org.slug}-dbt-debug",
+        flow_name=f"{org.slug}-dbt-debug",
         flow_run_name=f"{now.isoformat()}",
     )
 
