@@ -7,6 +7,7 @@ import os
 from uuid import uuid4
 from pathlib import Path
 import yaml
+from datetime import timezone, datetime
 from ninja.errors import HttpError
 from django.utils.text import slugify
 from django.conf import settings
@@ -854,6 +855,7 @@ def update_destination(org: Org, destination_id: str, payload: AirbyteDestinatio
         return None, error
 
     # get prefect-dbt to create a new profiles.yml by running "dbt debug"
+    now = timezone.as_ist(datetime.now())
     dbtdebugtask = schema.PrefectDbtTaskSetup(
         seq=1,
         slug="dbt-debug",
@@ -866,6 +868,8 @@ def update_destination(org: Org, destination_id: str, payload: AirbyteDestinatio
         cli_profile_block=cli_profile_block.block_name,
         cli_args=[],
         orgtask_uuid=str(uuid4()),
+        flow_run=f"{org.slug}-dbt-debug",
+        flow_run_name=f"{now.isoformat()}",
     )
 
     logger.info("running dbt debug to generate new profiles/profiles.yml")
