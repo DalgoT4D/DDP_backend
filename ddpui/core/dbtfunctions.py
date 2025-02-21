@@ -1,6 +1,5 @@
 import os
 from typing import Union
-from pathlib import Path
 
 from ddpui.ddpdbt.schema import DbtProjectParams
 
@@ -44,7 +43,7 @@ def map_airbyte_destination_spec_to_dbtcli_profile(
 
         if ca_certificate and dbt_project_params.org_project_dir:
             file_path = os.path.join(dbt_project_params.org_project_dir, "sslrootcert.pem")
-            with open(file_path, "w") as file:
+            with open(file_path, "w", encoding="utf-8") as file:
                 file.write(ca_certificate)
             conn_info["sslrootcert"] = file_path
 

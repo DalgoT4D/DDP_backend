@@ -4,7 +4,9 @@ functions which work with airbyte and with the dalgo database
 
 import json
 import os
+from uuid import uuid4
 from pathlib import Path
+from datetime import datetime
 import yaml
 from ninja.errors import HttpError
 from django.utils.text import slugify
@@ -16,7 +18,7 @@ from django.forms.models import model_to_dict
 
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import AirbyteConnectionSchemaUpdate, AirbyteWorkspace
-from ddpui.ddpprefect import prefect_service
+from ddpui.ddpprefect import prefect_service, schema, DBTCORE
 from ddpui.models.org import (
     Org,
     OrgPrefectBlockv1,
@@ -28,6 +30,7 @@ from ddpui.models.org import (
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils import timezone
 from ddpui.ddpairbyte.schema import (
     AirbyteConnectionCreate,
     AirbyteConnectionUpdate,
@@ -68,6 +71,7 @@ from ddpui.core.pipelinefunctions import (
 from ddpui.core.orgtaskfunctions import fetch_orgtask_lock, fetch_orgtask_lock_v1
 from ddpui.models.tasks import TaskLock
 from ddpui.core.orgdbt_manager import DbtProjectManager
+from ddpui.ddpdbt.elementary_service import create_elementary_profile, elementary_setup_status
 
 logger = CustomLogger("airbyte")
 
@@ -845,7 +849,37 @@ def update_destination(org: Org, destination_id: str, payload: AirbyteDestinatio
 
     secretsmanager.update_warehouse_credentials(warehouse, dbt_credentials)
 
-    create_or_update_org_cli_block(org, warehouse, dbt_credentials)
+    (cli_profile_block, dbt_project_params), error = create_or_update_org_cli_block(
+        org, warehouse, dbt_credentials
+    )
+    if error:
+        return None, error
+
+    # if elementary is set up for this client, we need to update the elemntary_profiles/profiles.yml
+    if elementary_setup_status(org) == "set-up":
+        # get prefect-dbt to create a new profiles.yml by running "dbt debug"
+        now = timezone.as_ist(datetime.now())
+        dbtdebugtask = schema.PrefectDbtTaskSetup(
+            seq=1,
+            slug="dbt-debug",
+            commands=[f"{dbt_project_params.dbt_binary} debug"],
+            type=DBTCORE,
+            env={},
+            working_dir=dbt_project_params.project_dir,
+            profiles_dir=f"{dbt_project_params.project_dir}/profiles/",
+            project_dir=dbt_project_params.project_dir,
+            cli_profile_block=cli_profile_block.block_name,
+            cli_args=[],
+            orgtask_uuid=str(uuid4()),
+            flow_name=f"{org.slug}-dbt-debug",
+            flow_run_name=f"{now.isoformat()}",
+        )
+
+        logger.info("running dbt debug to generate new profiles/profiles.yml")
+        prefect_service.run_dbt_task_sync(dbtdebugtask)
+
+        logger.info("recreating elementary_profiles/profiles.yml")
+        create_elementary_profile(org)
 
     return destination, None
 
@@ -1037,11 +1071,11 @@ def get_warehouses(org: Org):
     return warehouses, None
 
 
-def get_demo_whitelisted_source_config(type: str):
+def get_demo_whitelisted_source_config(type_: str):
     """Returns the config of whitelisted source based on type"""
     ret_src = None
     for src in DEMO_WHITELIST_SOURCES:
-        if src["type"] == type:
+        if src["type"] == type_:
             ret_src = src
             break
 
