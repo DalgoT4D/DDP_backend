@@ -797,5 +797,7 @@ def estimate_time_for_next_queued_run_of_dataflow(dataflow: OrgDataFlowv1):
 
     # for the above flow runs look at their deployment_id and use any of the run_times to compute queue_time
 
+    # save the queue_time and queue_no to the dataflow in check
+
 
 ####################################################################################################
