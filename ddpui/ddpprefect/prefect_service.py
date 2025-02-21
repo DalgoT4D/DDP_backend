@@ -782,4 +782,20 @@ def compute_dataflow_run_times_from_history(
     )
 
 
+def estimate_time_for_next_queued_run_of_dataflow(dataflow: OrgDataFlowv1):
+    """
+    Append two more meta information in dataflow.meta
+    1. Queue no (queue_no) - how many flow runs are scheduled before the dataflow's next flow run
+    2. Queue time (queue_time) - time that user needs to wait before the next scheduled flow run will trigger
+    """
+
+    # fetch the next flow run for this deployment that is under "Late" which means its queued
+
+    # read the queue name and work pool of this flow run
+
+    # fetch flow runs ("Late") that are in the same queue and work pool
+
+    # for the above flow runs look at their deployment_id and use any of the run_times to compute queue_time
+
+
 ####################################################################################################
