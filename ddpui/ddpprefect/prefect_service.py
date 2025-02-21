@@ -746,6 +746,17 @@ def create_or_update_dbt_cloud_creds_block(
     return cloud_creds_block
 
 
+def get_late_flow_runs(
+    deployment_id: str = None,
+    work_pool: str = None,
+    work_pool_queue: str = None,
+    limit: int = 1,
+    before_start_time: datetime = None,
+    after_start_time: datetime = None,
+):
+    pass
+
+
 ############################## Related to estimation of flow run times ##############################
 
 
@@ -786,18 +797,48 @@ def estimate_time_for_next_queued_run_of_dataflow(dataflow: OrgDataFlowv1):
     """
     Append two more meta information in dataflow.meta
     1. Queue no (queue_no) - how many flow runs are scheduled before the dataflow's next flow run
-    2. Queue time (queue_time) - time that user needs to wait before the next scheduled flow run will trigger
+    2. Queue time (queue_time_in_seconds) - time that user needs to wait before the next scheduled flow run will trigger
     """
 
-    # fetch the next flow run for this deployment that is under "Late" which means its queued
+    # get the current late run for the deployment
+    current_queued_flow_run = get_late_flow_runs(deployment_id=dataflow.deployment_id, limit=1)
+
+    if not flow_run:
+        logger.info(f"No late run found for the dataflow {dataflow.deployment_name}")
+        return
 
     # read the queue name and work pool of this flow run
+    queue_name = flow_run["work_queue_name"]
+    work_pool_name = flow_run["work_pool_name"]  # we only have one work pool
 
     # fetch flow runs ("Late") that are in the same queue and work pool
+    queued_late_flow_runs = get_late_flow_runs(
+        work_pool=work_pool_name,
+        work_pool_queue=queue_name,
+        limit=100,
+        before_start_time=current_queued_flow_run["start_time"],
+    )
 
     # for the above flow runs look at their deployment_id and use any of the run_times to compute queue_time
+    queue_no = 0
+    queue_time_in_seconds = 0
+    for flow_run in queued_late_flow_runs:
+        deployment_meta = (
+            OrgDataFlowv1.objects.filter(deplyment_id=flow_run["deployment_id"]).first().meta
+        )
+
+        if deployment_meta:
+            queue_no += 1
+            queue_time_in_seconds += deployment_meta["avg_run_time"]
 
     # save the queue_time and queue_no to the dataflow in check
+    current_deployment_meta = dataflow.meta
+    current_deployment_meta["queue_no"] = queue_no
+    current_deployment_meta["queue_time_in_seconds"] = queue_time_in_seconds
+    dataflow.meta = current_deployment_meta
+    dataflow.save()
+
+    return queue_no, queue_time_in_seconds
 
 
 ####################################################################################################
