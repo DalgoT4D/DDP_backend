@@ -71,7 +71,7 @@ from ddpui.core.pipelinefunctions import (
 from ddpui.core.orgtaskfunctions import fetch_orgtask_lock, fetch_orgtask_lock_v1
 from ddpui.models.tasks import TaskLock
 from ddpui.core.orgdbt_manager import DbtProjectManager
-from ddpui.ddpdbt.elementary_service import create_elementary_profile
+from ddpui.ddpdbt.elementary_service import create_elementary_profile, elementary_setup_status
 
 logger = CustomLogger("airbyte")
 
@@ -855,29 +855,31 @@ def update_destination(org: Org, destination_id: str, payload: AirbyteDestinatio
     if error:
         return None, error
 
-    # get prefect-dbt to create a new profiles.yml by running "dbt debug"
-    now = timezone.as_ist(datetime.now())
-    dbtdebugtask = schema.PrefectDbtTaskSetup(
-        seq=1,
-        slug="dbt-debug",
-        commands=[f"{dbt_project_params.dbt_binary} debug"],
-        type=DBTCORE,
-        env={},
-        working_dir=dbt_project_params.project_dir,
-        profiles_dir=f"{dbt_project_params.project_dir}/profiles/",
-        project_dir=dbt_project_params.project_dir,
-        cli_profile_block=cli_profile_block.block_name,
-        cli_args=[],
-        orgtask_uuid=str(uuid4()),
-        flow_name=f"{org.slug}-dbt-debug",
-        flow_run_name=f"{now.isoformat()}",
-    )
+    # if elementary is set up for this client, we need to update the elemntary_profiles/profiles.yml
+    if elementary_setup_status(org) == "set-up":
+        # get prefect-dbt to create a new profiles.yml by running "dbt debug"
+        now = timezone.as_ist(datetime.now())
+        dbtdebugtask = schema.PrefectDbtTaskSetup(
+            seq=1,
+            slug="dbt-debug",
+            commands=[f"{dbt_project_params.dbt_binary} debug"],
+            type=DBTCORE,
+            env={},
+            working_dir=dbt_project_params.project_dir,
+            profiles_dir=f"{dbt_project_params.project_dir}/profiles/",
+            project_dir=dbt_project_params.project_dir,
+            cli_profile_block=cli_profile_block.block_name,
+            cli_args=[],
+            orgtask_uuid=str(uuid4()),
+            flow_name=f"{org.slug}-dbt-debug",
+            flow_run_name=f"{now.isoformat()}",
+        )
 
-    logger.info("running dbt debug to generate new profiles/profiles.yml")
-    prefect_service.run_dbt_task_sync(dbtdebugtask)
+        logger.info("running dbt debug to generate new profiles/profiles.yml")
+        prefect_service.run_dbt_task_sync(dbtdebugtask)
 
-    logger.info("recreating elementary_profiles/profiles.yml")
-    create_elementary_profile(org)
+        logger.info("recreating elementary_profiles/profiles.yml")
+        create_elementary_profile(org)
 
     return destination, None
 

@@ -894,7 +894,12 @@ def test_update_destination_snowflake_config(
     "ddpui.ddpairbyte.airbytehelpers.timezone",
     mock_uuid4=Mock(),
 )
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.elementary_setup_status",
+    mock_uuid4=Mock(),
+)
 def test_update_destination_cliprofile(
+    mock_elementary_setup_status: Mock,
     mock_timezone: Mock,
     mock_uuid4: Mock,
     mock_run_dbt_task_sync: Mock,
@@ -935,6 +940,8 @@ def test_update_destination_cliprofile(
     )
     mock_uuid4.return_value = "fake-uuid"
     mock_timezone.as_ist = Mock(return_value=Mock(isoformat=Mock(return_value="isoformatted-time")))
+
+    mock_elementary_setup_status.return_value = "set-up"
 
     response, error = update_destination(org, "destination_id", payload)
     assert error is None
