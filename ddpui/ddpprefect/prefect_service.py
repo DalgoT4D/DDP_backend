@@ -1,11 +1,11 @@
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import requests
 
 from ninja.errors import HttpError
 from dotenv import load_dotenv
 from django.db import transaction
-from django.db.models import Window
+from django.db.models import Window, Min, Max, Avg
 from django.db.models.functions import RowNumber
 
 from ddpui.ddpprefect.schema import (
@@ -15,11 +15,12 @@ from ddpui.ddpprefect.schema import (
     PrefectShellTaskSetup,
     PrefectDbtTaskSetup,
     PrefectDataFlowUpdateSchema3,
+    DeploymentRunTimes,
 )
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.tasks import DataflowOrgTask, TaskLock
 from ddpui.models.org_user import OrgUser, Org
-from ddpui.models.org import OrgPrefectBlockv1
+from ddpui.models.org import OrgPrefectBlockv1, OrgDataFlowv1
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.ddpprefect import (
     DDP_WORK_QUEUE,
@@ -31,6 +32,7 @@ from ddpui.ddpprefect import (
 from ddpui.utils.constants import (
     FLOW_RUN_LOGS_OFFSET_LIMIT,
 )
+from ddpui.utils import timezone
 
 load_dotenv()
 
@@ -742,3 +744,42 @@ def create_or_update_dbt_cloud_creds_block(
     cloud_creds_block.save()
 
     return cloud_creds_block
+
+
+############################## Related to estimation of flow run times ##############################
+
+
+def compute_dataflow_run_times_from_history(
+    dataflow: OrgDataFlowv1, days_to_look=7, statuses_to_exclude=[]
+) -> DeploymentRunTimes:
+    """
+    Estimate how much time does a flow run of this deployment might take to run
+    Use the past history (maybe last x days) to compute average, max & min times of the run
+    """
+    look_back_date = datetime.now(timezone.UTC) - timedelta(days=days_to_look)
+
+    flow_runs = PrefectFlowRun.objects.filter(
+        deployment_id=dataflow.deployment_id,
+        start_time__gte=look_back_date,
+    ).exclude(status__in=statuses_to_exclude)
+
+    # in seconds
+    run_times_list = flow_runs.values("deployment_id").annotate(
+        max_run_time=Max("total_run_time"),
+        min_run_time=Min("total_run_time"),
+        avg_run_time=Avg("total_run_time"),
+    )
+    run_times = run_times_list[0] if run_times_list and len(run_times_list) > 0 else None
+
+    del run_times["deployment_id"]  # group by param
+    dataflow.meta = run_times
+    dataflow.save()
+
+    return DeploymentRunTimes(
+        max_run_time=run_times["max_run_time"] if run_times else None,
+        min_run_time=run_times["min_run_time"] if run_times else None,
+        avg_run_time=run_times["avg_run_time"] if run_times else None,
+    )
+
+
+####################################################################################################

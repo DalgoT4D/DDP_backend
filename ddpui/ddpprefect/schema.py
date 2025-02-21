@@ -348,3 +348,11 @@ class PrefectFlowRunSchema(Schema):
     flow_id: str
     state_type: str
     state_name: str
+
+
+class DeploymentRunTimes(Schema):
+    """Schema for run times of a deployment"""
+
+    max_run_time: float = None
+    min_run_time: float = None
+    avg_run_time: float = None
