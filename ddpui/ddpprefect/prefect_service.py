@@ -19,6 +19,7 @@ from ddpui.ddpprefect.schema import (
     PrefectDbtTaskSetup,
     PrefectDataFlowUpdateSchema3,
     DeploymentRunTimes,
+    FilterLateFlowRunsRequest,
 )
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.tasks import DataflowOrgTask, TaskLock
@@ -749,15 +750,10 @@ def create_or_update_dbt_cloud_creds_block(
     return cloud_creds_block
 
 
-def get_late_flow_runs(
-    deployment_id: str = None,
-    work_pool: str = None,
-    work_pool_queue: str = None,
-    limit: int = 1,
-    before_start_time: datetime = None,
-    after_start_time: datetime = None,
-):
-    pass
+def get_late_flow_runs(payload: FilterLateFlowRunsRequest) -> list[dict]:
+    res = prefect_post(f"flow_runs/late", payload.dict())
+
+    return res["flow_runs"]
 
 
 def get_prefect_workers(queue_name: str, work_pool_name: str) -> list[dict]:
@@ -846,11 +842,13 @@ def estimate_time_for_next_queued_run_of_dataflow(dataflow: OrgDataFlowv1):
     """
 
     # get the current late run for the deployment
-    current_queued_flow_run = get_late_flow_runs(deployment_id=dataflow.deployment_id, limit=1)
+    dataflow_late_runs = get_late_flow_runs(deployment_id=dataflow.deployment_id, limit=1)
 
-    if not flow_run:
+    if not current_queued_flow_run:
         logger.info(f"No late run found for the dataflow {dataflow.deployment_name}")
         return
+
+    current_queued_flow_run = dataflow_late_runs[0]
 
     # read the queue name and work pool of this flow run
     queue_name = flow_run["work_queue_name"]

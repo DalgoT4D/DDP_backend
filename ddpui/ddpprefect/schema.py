@@ -1,4 +1,5 @@
 from typing import Optional
+from datetime import datetime
 
 from ninja import Schema
 
@@ -357,3 +358,14 @@ class DeploymentRunTimes(Schema):
     min_run_time: float = None
     avg_run_time: float = None
     wt_avg_run_time: float = None
+
+
+class FilterLateFlowRunsRequest(Schema):
+    """search flow runs"""
+
+    deployment_id: str = None
+    work_pool_name: str = None
+    work_queue_name: str = None
+    limit: int = 1
+    before_start_time: datetime = None
+    after_start_time: datetime = None
