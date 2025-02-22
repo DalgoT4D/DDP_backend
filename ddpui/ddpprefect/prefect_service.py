@@ -760,6 +760,10 @@ def get_late_flow_runs(
     pass
 
 
+def get_prefect_workers(queue_name: str, work_pool_name: str) -> list[dict]:
+    pass
+
+
 ############################## Related to estimation of flow run times ##############################
 
 
@@ -852,7 +856,7 @@ def estimate_time_for_next_queued_run_of_dataflow(dataflow: OrgDataFlowv1):
     queue_name = flow_run["work_queue_name"]
     work_pool_name = flow_run["work_pool_name"]  # we only have one work pool
 
-    # fetch flow runs ("Late") that are in the same queue and work pool
+    # fetch flow runs ("Late") that are in the same queue and work pool before the current run
     queued_late_flow_runs = get_late_flow_runs(
         work_pool=work_pool_name,
         work_pool_queue=queue_name,
@@ -870,12 +874,15 @@ def estimate_time_for_next_queued_run_of_dataflow(dataflow: OrgDataFlowv1):
 
         if deployment_meta:
             queue_no += 1
-            queue_time_in_seconds += deployment_meta["avg_run_time"]
+            queue_time_in_seconds += deployment_meta["wt_avg_run_time"]
+
+    # find no of workers listening to the queue and adjust the queue_no & time accordingly
+    workers = get_prefect_workers(queue_name=queue_name, work_pool_name=work_pool_name)
 
     # save the queue_time and queue_no to the dataflow in check
     current_deployment_meta = dataflow.meta
     current_deployment_meta["queue_no"] = queue_no
-    current_deployment_meta["queue_time_in_seconds"] = queue_time_in_seconds
+    current_deployment_meta["queue_time_in_seconds"] = queue_time_in_seconds / len(workers)
     dataflow.meta = current_deployment_meta
     dataflow.save()
 
