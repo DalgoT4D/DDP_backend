@@ -1,12 +1,15 @@
 import os
 from datetime import datetime, timedelta
 import requests
+from itertools import groupby
+from operator import itemgetter
+from statistics import mean
 
 from ninja.errors import HttpError
 from dotenv import load_dotenv
 from django.db import transaction
 from django.db.models import Window, Min, Max, Avg
-from django.db.models.functions import RowNumber
+from django.db.models.functions import RowNumber, TruncDate
 
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
@@ -769,28 +772,66 @@ def compute_dataflow_run_times_from_history(
     """
     look_back_date = datetime.now(timezone.UTC) - timedelta(days=days_to_look)
 
-    flow_runs = PrefectFlowRun.objects.filter(
-        deployment_id=dataflow.deployment_id,
-        start_time__gte=look_back_date,
-    ).exclude(status__in=statuses_to_exclude)
-
-    # in seconds
-    run_times_list = flow_runs.values("deployment_id").annotate(
-        max_run_time=Max("total_run_time"),
-        min_run_time=Min("total_run_time"),
-        avg_run_time=Avg("total_run_time"),
+    flow_runs = (
+        PrefectFlowRun.objects.filter(
+            deployment_id=dataflow.deployment_id,
+            start_time__gte=look_back_date,
+        )
+        .exclude(status__in=statuses_to_exclude)
+        .order_by("-start_time")
     )
-    run_times = run_times_list[0] if run_times_list and len(run_times_list) > 0 else None
 
-    del run_times["deployment_id"]  # group by param
-    dataflow.meta = run_times
+    flow_runs = flow_runs.annotate(start_date=TruncDate("start_time")).values(
+        "deployment_id", "start_date", "total_run_time"
+    )
+
+    flow_runs_list = list(flow_runs)
+
+    grouped_data = {
+        (deploy_id, st_date): list(item)
+        for (deploy_id, st_date), item in groupby(
+            flow_runs_list, key=itemgetter("deployment_id", "start_date")
+        )
+    }
+
+    # a deployment may have multiple runs during any given day
+    # use the average run time per day to do further processing
+    run_times_per_day = {
+        (deploy_id, st_date): {
+            "run_time_per_day_avg": mean(item["total_run_time"] for item in v),
+        }
+        for (deploy_id, st_date), v in grouped_data.items()
+    }
+
+    max_run_time = float("-inf")
+    min_run_time = float("inf")
+    avg_sum = 0
+    avg_denominator = 0
+    wt_avg_sum = 0
+    wt_avg_denominator = 0
+    for (deploy_id, st_date), run_time in run_times_per_day.items():
+        distance_from_today: timedelta = datetime.now(timezone.UTC).date() - st_date
+
+        max_run_time = max(run_time["run_time_per_day_avg"], max_run_time)
+        min_run_time = min(run_time["run_time_per_day_avg"], min_run_time)
+
+        avg_sum += run_time["run_time_per_day_avg"]
+        avg_denominator += 1
+
+        wt_avg_sum += distance_from_today.days * run_time["run_time_per_day_avg"]
+        wt_avg_denominator += distance_from_today.days
+
+    all_run_times = DeploymentRunTimes(
+        max_run_time=max_run_time,
+        min_run_time=min_run_time,
+        avg_run_time=avg_sum / avg_denominator,
+        wt_avg_run_time=wt_avg_sum / wt_avg_denominator,
+    )
+
+    dataflow.meta = all_run_times.dict()
     dataflow.save()
 
-    return DeploymentRunTimes(
-        max_run_time=run_times["max_run_time"] if run_times else None,
-        min_run_time=run_times["min_run_time"] if run_times else None,
-        avg_run_time=run_times["avg_run_time"] if run_times else None,
-    )
+    return all_run_times
 
 
 def estimate_time_for_next_queued_run_of_dataflow(dataflow: OrgDataFlowv1):

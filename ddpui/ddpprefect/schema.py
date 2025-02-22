@@ -356,3 +356,4 @@ class DeploymentRunTimes(Schema):
     max_run_time: float = None
     min_run_time: float = None
     avg_run_time: float = None
+    wt_avg_run_time: float = None
