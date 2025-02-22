@@ -354,10 +354,10 @@ class PrefectFlowRunSchema(Schema):
 class DeploymentRunTimes(Schema):
     """Schema for run times of a deployment"""
 
-    max_run_time: float = None
-    min_run_time: float = None
-    avg_run_time: float = None
-    wt_avg_run_time: float = None
+    max_run_time: float = 0
+    min_run_time: float = 0
+    avg_run_time: float = 0
+    wt_avg_run_time: float = 0
 
 
 class FilterLateFlowRunsRequest(Schema):
@@ -367,5 +367,6 @@ class FilterLateFlowRunsRequest(Schema):
     work_pool_name: str = None
     work_queue_name: str = None
     limit: int = 1
-    before_start_time: datetime = None
-    after_start_time: datetime = None
+    before_start_time: str = None
+    after_start_time: str = None
+    exclude_flow_run_ids: list[str] = []
