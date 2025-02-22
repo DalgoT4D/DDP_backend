@@ -1,12 +1,15 @@
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import requests
+from itertools import groupby
+from operator import itemgetter
+from statistics import mean
 
 from ninja.errors import HttpError
 from dotenv import load_dotenv
 from django.db import transaction
-from django.db.models import Window
-from django.db.models.functions import RowNumber
+from django.db.models import Window, Min, Max, Avg
+from django.db.models.functions import RowNumber, TruncDate
 
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
@@ -15,11 +18,13 @@ from ddpui.ddpprefect.schema import (
     PrefectShellTaskSetup,
     PrefectDbtTaskSetup,
     PrefectDataFlowUpdateSchema3,
+    DeploymentRunTimes,
+    FilterLateFlowRunsRequest,
 )
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.tasks import DataflowOrgTask, TaskLock
 from ddpui.models.org_user import OrgUser, Org
-from ddpui.models.org import OrgPrefectBlockv1
+from ddpui.models.org import OrgPrefectBlockv1, OrgDataFlowv1
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.ddpprefect import (
     DDP_WORK_QUEUE,
@@ -31,6 +36,7 @@ from ddpui.ddpprefect import (
 from ddpui.utils.constants import (
     FLOW_RUN_LOGS_OFFSET_LIMIT,
 )
+from ddpui.utils import timezone
 
 load_dotenv()
 
@@ -742,3 +748,157 @@ def create_or_update_dbt_cloud_creds_block(
     cloud_creds_block.save()
 
     return cloud_creds_block
+
+
+def get_late_flow_runs(payload: FilterLateFlowRunsRequest) -> list[dict]:
+    res = prefect_post(f"flow_runs/late", payload.dict())
+
+    return res["flow_runs"]
+
+
+def get_prefect_workers(queue_name: str, work_pool_name: str) -> list[dict]:
+    return [1]
+
+
+############################## Related to estimation of flow run times ##############################
+
+
+def compute_dataflow_run_times_from_history(
+    dataflow: OrgDataFlowv1, days_to_look=7, statuses_to_exclude=[]
+) -> DeploymentRunTimes:
+    """
+    Estimate how much time does a flow run of this deployment might take to run
+    Use the past history (maybe last x days) to compute average, max & min times of the run
+    """
+    look_back_date = datetime.now(timezone.UTC) - timedelta(days=days_to_look)
+
+    flow_runs = PrefectFlowRun.objects.filter(
+        deployment_id=dataflow.deployment_id,
+        start_time__gte=look_back_date,
+        status__in=["COMPLETED", "FAILED"],
+    ).order_by("-start_time")
+
+    flow_runs = flow_runs.annotate(start_date=TruncDate("start_time")).values(
+        "deployment_id", "start_date", "total_run_time"
+    )
+
+    flow_runs_list = list(flow_runs)
+
+    grouped_data = {
+        (deploy_id, st_date): list(item)
+        for (deploy_id, st_date), item in groupby(
+            flow_runs_list, key=itemgetter("deployment_id", "start_date")
+        )
+    }
+
+    # a deployment may have multiple runs during any given day
+    # use the average run time per day to do further processing
+    run_times_per_day = {
+        (deploy_id, st_date): {
+            "run_time_per_day_avg": mean(item["total_run_time"] for item in v),
+        }
+        for (deploy_id, st_date), v in grouped_data.items()
+    }
+
+    max_run_time = float("-inf")
+    min_run_time = float("inf")
+    avg_sum = 0
+    avg_denominator = 0
+    wt_avg_sum = 0
+    wt_avg_denominator = 0
+    for (deploy_id, st_date), run_time in run_times_per_day.items():
+        distance_from_today: timedelta = datetime.now(timezone.UTC).date() - st_date
+
+        max_run_time = max(run_time["run_time_per_day_avg"], max_run_time)
+        min_run_time = min(run_time["run_time_per_day_avg"], min_run_time)
+
+        avg_sum += run_time["run_time_per_day_avg"]
+        avg_denominator += 1
+
+        wt_avg_sum += distance_from_today.days * run_time["run_time_per_day_avg"]
+        wt_avg_denominator += max(distance_from_today.days, 1)
+
+    all_run_times = DeploymentRunTimes()
+    if len(run_times_per_day.keys()) > 0:
+        all_run_times = DeploymentRunTimes(
+            max_run_time=max_run_time,
+            min_run_time=min_run_time,
+            avg_run_time=avg_sum / avg_denominator,
+            wt_avg_run_time=wt_avg_sum / wt_avg_denominator,
+        )
+
+        dataflow.meta = all_run_times.dict()
+        dataflow.save()
+
+    return all_run_times
+
+
+def estimate_time_for_next_queued_run_of_dataflow(dataflow: OrgDataFlowv1):
+    """
+    Append two more meta information in dataflow.meta
+    1. Queue no (queue_no) - how many flow runs are scheduled before the dataflow's next flow run
+    2. Queue time (queue_time_in_seconds) - time that user needs to wait before the next scheduled flow run will trigger
+    """
+
+    # get the current late run for the deployment
+    dataflow_late_runs = get_late_flow_runs(
+        payload=FilterLateFlowRunsRequest(deployment_id=dataflow.deployment_id, limit=1)
+    )
+
+    if not dataflow_late_runs:
+        logger.info(f"No late run found for the dataflow {dataflow.deployment_name}")
+        return
+
+    compute_dataflow_run_times_from_history(dataflow)
+
+    current_queued_flow_run = dataflow_late_runs[0]
+
+    logger.info(
+        f"Found the late run for the dataflow with flow run id: {current_queued_flow_run['id']}"
+    )
+
+    # read the queue name and work pool of this flow run
+    queue_name = current_queued_flow_run["workQueueName"]
+    work_pool_name = current_queued_flow_run["workPoolName"]  # we only have one work pool
+
+    # fetch flow runs ("Late") that are in the same queue and work pool before the current run
+    queued_late_flow_runs = get_late_flow_runs(
+        payload=FilterLateFlowRunsRequest(
+            work_pool_name=work_pool_name,
+            work_pool_queue=queue_name,
+            limit=100,
+            before_start_time=current_queued_flow_run["expectedStartTime"],
+            exclude_flow_run_ids=[current_queued_flow_run["id"]],
+        )
+    )
+
+    logger.info(
+        f"No of queued runs before the current late dataflow run : {len(queued_late_flow_runs)}"
+    )
+
+    # for the above flow runs look at their deployment_id and use any of the run_times to compute queue_time
+    queue_no = 1
+    queue_time_in_seconds = dataflow.meta["avg_run_time"] if dataflow.meta else 0
+    for flow_run in queued_late_flow_runs:
+        deployment_meta = (
+            OrgDataFlowv1.objects.filter(deployment_id=flow_run["deployment_id"]).first().meta
+        )
+
+        if deployment_meta:
+            queue_no += 1
+            queue_time_in_seconds += deployment_meta["avg_run_time"]
+
+    # find no of workers listening to the queue and adjust the queue_no & time accordingly
+    workers = get_prefect_workers(queue_name=queue_name, work_pool_name=work_pool_name)
+
+    # save the queue_time and queue_no to the dataflow in check
+    current_deployment_meta = dataflow.meta or {}
+    current_deployment_meta["queue_no"] = queue_no
+    current_deployment_meta["queue_time_in_seconds"] = queue_time_in_seconds / len(workers)
+    dataflow.meta = current_deployment_meta
+    dataflow.save()
+
+    return queue_no, queue_time_in_seconds
+
+
+####################################################################################################
