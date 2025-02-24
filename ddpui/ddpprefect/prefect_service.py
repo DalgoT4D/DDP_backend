@@ -835,7 +835,7 @@ def compute_dataflow_run_times_from_history(
 
 def estimate_time_for_next_queued_run_of_dataflow(dataflow: OrgDataFlowv1):
     """
-    Append two more meta information in dataflow.meta
+    This function computes the following
     1. Queue no (queue_no) - how many flow runs are scheduled before the dataflow's next flow run
     2. Queue time (queue_time_in_seconds) - time that user needs to wait before the next scheduled flow run will trigger
     """
@@ -848,8 +848,6 @@ def estimate_time_for_next_queued_run_of_dataflow(dataflow: OrgDataFlowv1):
     if not dataflow_late_runs:
         logger.info(f"No late run found for the dataflow {dataflow.deployment_name}")
         return
-
-    compute_dataflow_run_times_from_history(dataflow)
 
     current_queued_flow_run = dataflow_late_runs[0]
 
@@ -891,14 +889,7 @@ def estimate_time_for_next_queued_run_of_dataflow(dataflow: OrgDataFlowv1):
     # find no of workers listening to the queue and adjust the queue_no & time accordingly
     workers = get_prefect_workers(queue_name=queue_name, work_pool_name=work_pool_name)
 
-    # save the queue_time and queue_no to the dataflow in check
-    current_deployment_meta = dataflow.meta or {}
-    current_deployment_meta["queue_no"] = queue_no
-    current_deployment_meta["queue_time_in_seconds"] = queue_time_in_seconds / len(workers)
-    dataflow.meta = current_deployment_meta
-    dataflow.save()
-
-    return queue_no, queue_time_in_seconds
+    return queue_no, queue_time_in_seconds / len(workers)
 
 
 ####################################################################################################
