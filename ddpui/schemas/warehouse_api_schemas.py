@@ -66,3 +66,13 @@ class PgVectorCreds(Schema):
     host: str
     port: int
     database: str
+
+
+class FetchSqlqueryResults(Schema):
+    """
+    schema to run a sql query against wareohuse
+    """
+
+    sql: str
+    limit: int = 10
+    offset: int = 0
