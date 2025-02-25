@@ -14,6 +14,8 @@ from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.schemas.warehouse_api_schemas import WarehouseRagTrainConfig, PgVectorCreds
 from ddpui.utils.helpers import generate_hash_id
 from ddpui.core import llm_service
+import sqlparse
+from sqlparse.tokens import Keyword
 
 logger = CustomLogger("ddpui")
 
