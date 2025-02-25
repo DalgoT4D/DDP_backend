@@ -40,7 +40,6 @@ from ddpui.schemas.warehouse_api_schemas import (
     SaveLlmSessionRequest,
     LlmSessionFeedbackRequest,
     AskWarehouseRequestv1,
-    SummarizeResultsFromSqlAndPrompt,
 )
 from ddpui.models.llm import (
     LlmSession,
@@ -594,3 +593,37 @@ def post_train_rag_on_warehouse(request):
         raise HttpError(404, "Please set up your warehouse first")
 
     train_rag_on_warehouse(warehouse=org_warehouse)
+
+
+@warehouse_router.post("/v1/table_data/run_sql", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse_data"])
+def post_warehouse_run_sql_query(request, payload: FetchSqlqueryResults):
+    """
+    Runs a SQL query against the warehouse and returns the results
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+
+    try:
+        wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
+
+        # Parse the SQL query and add LIMIT and OFFSET
+        sql_query_with_limit_offset = parse_sql_query_with_limit_offset(
+            payload.sql, payload.limit, payload.offset
+        )
+
+        results = wclient.execute(text(sql_query_with_limit_offset))
+        columns = []
+        if len(results) > 0:
+            columns = list(results[0].keys())
+
+        return {"rows": results, "columns": columns}
+    except Exception as err:
+        logger.error(err)
+        raise HttpError(500, str(err))
