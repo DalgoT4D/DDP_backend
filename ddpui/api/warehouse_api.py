@@ -29,13 +29,17 @@ from ddpui.auth import has_permission
 
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.datainsights.generate_result import GenerateResult, poll_for_column_insights
-from ddpui.celeryworkers.tasks import summarize_warehouse_results
+from ddpui.celeryworkers.tasks import (
+    summarize_warehouse_results,
+    generate_sql_from_prompt_asked_on_warehouse,
+)
 
 from ddpui.schemas.warehouse_api_schemas import (
     RequestorColumnSchema,
     AskWarehouseRequest,
     SaveLlmSessionRequest,
     LlmSessionFeedbackRequest,
+    AskWarehouseRequestv1,
 )
 from ddpui.models.llm import (
     LlmSession,
@@ -312,6 +316,38 @@ def post_warehouse_prompt(request, payload: AskWarehouseRequest):
                 "orguser_id": orguser.id,
                 "org_warehouse_id": org_warehouse.id,
                 "sql": payload.sql,
+                "user_prompt": payload.user_prompt,
+            },
+        )
+
+        # set progress in redis to poll on
+        SingleTaskProgress(task.id, 60 * 10)
+
+        return {"request_uuid": task.id}
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to summarize warehouse results") from error
+
+
+@warehouse_router.post("v1/ask/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse_data"])
+def post_warehouse_generate_sql(request, payload: AskWarehouseRequestv1):
+    """
+    Ask the warehouse a question/prompt
+    Returns a llm generated "sql" query
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    try:
+        task = generate_sql_from_prompt_asked_on_warehouse.apply_async(
+            kwargs={
+                "orguser_id": orguser.id,
+                "org_warehouse_id": org_warehouse.id,
                 "user_prompt": payload.user_prompt,
             },
         )

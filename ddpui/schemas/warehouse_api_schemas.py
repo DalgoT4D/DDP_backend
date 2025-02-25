@@ -22,6 +22,14 @@ class AskWarehouseRequest(Schema):
     user_prompt: str
 
 
+class AskWarehouseRequestv1(Schema):
+    """
+    Payload to ask warehouse a question to be responded via llm
+    """
+
+    user_prompt: str
+
+
 class SaveLlmSessionRequest(Schema):
     """
     Payload to save the llm analysis session for future reference

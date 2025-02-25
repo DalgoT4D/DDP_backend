@@ -67,6 +67,7 @@ from ddpui.ddpprefect.prefect_service import (
 )
 from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
+from ddpui.core.warehousefunctions import generate_sql_from_warehouse_rag
 from ddpui.core import llm_service
 from ddpui.utils.helpers import (
     convert_sqlalchemy_rows_to_csv_string,
@@ -984,6 +985,68 @@ def summarize_warehouse_results(
         )
         llm_session.session_status = LlmSessionStatus.FAILED
         llm_session.save()
+        return
+
+
+@app.task(bind=True)
+def generate_sql_from_prompt_asked_on_warehouse(
+    self, orguser_id: int, org_warehouse_id: int, user_prompt: str
+):
+    """Generates sql from the warehouse trained rag"""
+    taskprogress = SingleTaskProgress(self.request.id, 60 * 10)
+    taskprogress.add({"message": "Started", "status": "running", "result": {}})
+
+    org_warehouse = OrgWarehouse.objects.filter(id=org_warehouse_id).first()
+
+    if not org_warehouse:
+        logger.error("Warehouse not found")
+        taskprogress.add(
+            {
+                "message": "Warehouse not found",
+                "status": TaskProgressStatus.FAILED,
+                "results": {},
+            }
+        )
+        return
+
+    orguser = OrgUser.objects.filter(id=orguser_id).first()
+    org = orguser.org
+
+    # create a partial session
+    llm_session = LlmSession.objects.create(
+        request_uuid=self.request.id,
+        orguser=orguser,
+        org=org,
+        session_status=LlmSessionStatus.RUNNING,
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+        version="v1",
+    )
+
+    try:
+        sql = generate_sql_from_warehouse_rag(warehouse=org_warehouse, user_prompt=user_prompt)
+
+        llm_session.request_meta = {"sql": sql}
+        llm_session.save()
+
+        logger.info(f"Generated sql successfully {sql}")
+
+        taskprogress.add(
+            {
+                "message": f"Generated the sql",
+                "status": TaskProgressStatus.COMPLETED,
+                "result": llm_session.request_meta,
+            }
+        )
+
+    except Exception as err:
+        logger.error(err)
+        taskprogress.add(
+            {
+                "message": str(err),
+                "status": TaskProgressStatus.FAILED,
+                "result": None,
+            }
+        )
         return
 
 

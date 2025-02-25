@@ -148,7 +148,7 @@ class Command(BaseCommand):
         """
         Use llm service and train the warehouse to generate embeddings for the warehouse training plan
         """
-        train_rag_on_warehouse(warehouse)
+        return train_rag_on_warehouse(warehouse)
 
     def handle(self, *args, **options):
         orgs = Org.objects.all()

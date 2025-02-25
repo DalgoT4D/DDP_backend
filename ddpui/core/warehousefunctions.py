@@ -183,3 +183,45 @@ def scaffold_rag_training(warehouse: OrgWarehouse, config: WarehouseRagTrainConf
     rag_training.training_sql = generate_training_sql(warehouse, config)
 
     rag_training.save()
+
+
+def generate_sql_from_warehouse_rag(warehouse: OrgWarehouse, user_prompt: str) -> dict:
+    """Generates the sql from warehouse trained rag using llm service"""
+    org: Org = warehouse.org
+
+    # fetch the warehouse creds for the org
+    credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
+
+    # fetch the (pg)vector db creds for the org
+    if not org.pgvector_creds:
+        raise Exception("Couldn't fund the pgvector creds for the org")
+
+    pgvector_creds_dict = secretsmanager.retrieve_pgvector_credentials(org)
+
+    if not pgvector_creds_dict:
+        raise Exception("Pg vector creds for the org not created/generated")
+
+    try:
+        PgVectorCreds(**pgvector_creds_dict)
+    except Exception as err:
+        raise Exception("Pg vector creds are not of the right schema" + str(err))
+
+    # check if the rag is trained for the warehouse
+    if not llm_service.check_if_rag_is_trained(
+        pg_vector_creds=pgvector_creds_dict,
+        warehouse_creds=credentials,
+        warehouse_type=warehouse.wtype,
+    ):
+        raise Exception(
+            f"Looks like the vector db for the org {warehouse.org} has no embeddings generated. Please perform the training"
+        )
+
+    # ask the rag
+    sql = llm_service.ask_vanna_for_sql(
+        user_prompt=user_prompt,
+        pg_vector_creds=pgvector_creds_dict,
+        warehouse_creds=credentials,
+        warehouse_type=warehouse.wtype,
+    )
+
+    return sql
