@@ -40,6 +40,7 @@ from ddpui.schemas.warehouse_api_schemas import (
     SaveLlmSessionRequest,
     LlmSessionFeedbackRequest,
     AskWarehouseRequestv1,
+    SummarizeResultsFromSqlAndPrompt,
 )
 from ddpui.models.llm import (
     LlmSession,
@@ -349,6 +350,50 @@ def post_warehouse_generate_sql(request, payload: AskWarehouseRequestv1):
                 "orguser_id": orguser.id,
                 "org_warehouse_id": org_warehouse.id,
                 "user_prompt": payload.user_prompt,
+            },
+        )
+
+        # set progress in redis to poll on
+        SingleTaskProgress(task.id, 60 * 10)
+
+        return {"request_uuid": task.id}
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to summarize warehouse results") from error
+
+
+@warehouse_router.post("v1/ask/{session_id}/summarize", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse_data"])
+def post_summarize_results_from_sql_and_prompt(
+    request, session_id: str, payload: AskWarehouseRequest
+):
+    """
+    Use the llm generated (edited) sql and the user prompt to get a summarized answer using file search
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    session = LlmSession.objects.filter(
+        session_id=session_id,
+        org=org,
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+    ).first()
+
+    if not session:
+        raise HttpError(404, "Session not found")
+
+    try:
+        task = summarize_warehouse_results.apply_async(
+            kwargs={
+                "orguser_id": orguser.id,
+                "org_warehouse_id": org_warehouse.id,
+                "sql": payload.sql,
+                "user_prompt": payload.user_prompt,
+                "llmsession_pk": session.id,
             },
         )
 

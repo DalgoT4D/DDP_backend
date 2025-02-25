@@ -1,5 +1,6 @@
 """these are tasks which we run through celery"""
 
+import uuid
 import os
 import shutil
 from pathlib import Path
@@ -835,6 +836,7 @@ def summarize_warehouse_results(
     org_warehouse_id: int,
     sql: str,
     user_prompt: str,
+    llmsession_pk: int = None,
 ):
     """
     This function will summarize the results of a warehouse query
@@ -863,14 +865,22 @@ def summarize_warehouse_results(
     org = orguser.org
 
     # create a partial session
-    llm_session = LlmSession.objects.create(
-        request_uuid=self.request.id,
-        orguser=orguser,
-        org=org,
-        session_status=LlmSessionStatus.RUNNING,
-        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
-        request_meta={"sql": sql},
-    )
+    if not llmsession_pk:
+        llm_session = LlmSession.objects.create(
+            request_uuid=self.request.id,
+            orguser=orguser,
+            org=org,
+            session_status=LlmSessionStatus.RUNNING,
+            session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+            request_meta={"sql": sql},
+        )
+    else:
+        llm_session = LlmSession.objects.filter(id=llmsession_pk).first()
+        if not llm_session:
+            raise Exception(f"Llm session with primary key {llmsession_pk} not found ")
+        llm_session.session_status = LlmSessionStatus.RUNNING
+        llm_session.session_type = LlmAssistantType.LONG_TEXT_SUMMARIZATION
+        llm_session.save()
 
     credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
 
@@ -1020,6 +1030,7 @@ def generate_sql_from_prompt_asked_on_warehouse(
         session_status=LlmSessionStatus.RUNNING,
         session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
         version="v1",
+        session_id=uuid.uuid4(),
     )
 
     try:
