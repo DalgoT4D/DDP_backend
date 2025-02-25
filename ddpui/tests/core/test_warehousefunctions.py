@@ -10,11 +10,13 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
 
-from ddpui.models.org import Org, OrgWarehouse
+from ddpui.models.org import Org, OrgWarehouse, OrgWarehouseRagTraining
 from ddpui.core.warehousefunctions import (
     parse_sql_query_with_limit_offset,
     generate_sql_from_warehouse_rag,
+    scaffold_rag_training,
 )
+from ddpui.schemas.warehouse_api_schemas import WarehouseRagTrainConfig
 
 pytestmark = pytest.mark.django_db
 
@@ -205,3 +207,34 @@ def test_generate_sql_from_warehouse_rag_success(
         warehouse_creds=mock_retrieve_warehouse_credentials.return_value,
         warehouse_type=dummy_org_warehouse.wtype,
     )
+
+
+@patch("ddpui.core.warehousefunctions.generate_training_sql")
+def test_scaffold_rag_training_create_or_update_test(
+    mock_generate_training_sql: Mock, dummy_org_warehouse: OrgWarehouse
+):
+    """
+    Test whether create or update on OrgWarehouseRagTraining works as expected
+    """
+    mock_generate_training_sql.return_value = "SELECT * FROM INFORMATION_SCHEMA.columns"
+    # create
+    assert OrgWarehouseRagTraining.objects.filter(warehouse=dummy_org_warehouse).count() == 0
+
+    config = WarehouseRagTrainConfig(exclude_schemas=[], exclude_tables=[], exclude_columns=[])
+    scaffold_rag_training(dummy_org_warehouse, config)
+
+    assert OrgWarehouseRagTraining.objects.filter(warehouse=dummy_org_warehouse).count() == 1
+
+    # update
+    config = WarehouseRagTrainConfig(
+        exclude_schemas=["schema1"], exclude_tables=["table1"], exclude_columns=[]
+    )
+    scaffold_rag_training(dummy_org_warehouse, config)
+
+    assert OrgWarehouseRagTraining.objects.filter(warehouse=dummy_org_warehouse).count() == 1
+
+    rag_training = OrgWarehouseRagTraining.objects.filter(warehouse=dummy_org_warehouse).first()
+    assert rag_training.training_sql == mock_generate_training_sql.return_value
+    assert rag_training.exclude.get("schemas") == ["schema1"]
+    assert rag_training.exclude.get("tables") == ["table1"]
+    assert rag_training.exclude.get("columns") == None
