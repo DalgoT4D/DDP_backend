@@ -15,6 +15,7 @@ from ddpui.core.warehousefunctions import (
     parse_sql_query_with_limit_offset,
     generate_sql_from_warehouse_rag,
     scaffold_rag_training,
+    generate_training_sql,
 )
 from ddpui.schemas.warehouse_api_schemas import WarehouseRagTrainConfig
 
@@ -238,3 +239,27 @@ def test_scaffold_rag_training_create_or_update_test(
     assert rag_training.exclude.get("schemas") == ["schema1"]
     assert rag_training.exclude.get("tables") == ["table1"]
     assert rag_training.exclude.get("columns") == None
+
+
+@patch("ddpui.datainsights.warehouse.warehouse_factory.WarehouseFactory.connect")
+@patch(
+    "ddpui.utils.secretsmanager.retrieve_warehouse_credentials",
+)
+def test_generate_training_sql_success(
+    mock_retrieve_warehouse_credentials: Mock,
+    mock_warehouse_factory_connect: Mock,
+    dummy_org_warehouse: OrgWarehouse,
+):
+    """
+    Test the generate training sql function
+    """
+    mock_retrieve_warehouse_credentials.return_value = "creds"
+    mock_warehouse_factory_connect.return_value = Mock(
+        build_rag_training_sql=Mock(return_value="sql-query")
+    )
+
+    config = WarehouseRagTrainConfig(exclude_schemas=[], exclude_tables=[], exclude_columns=[])
+
+    sql = generate_training_sql(dummy_org_warehouse, config)
+
+    assert sql == "sql-query"
