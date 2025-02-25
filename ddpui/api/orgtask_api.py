@@ -42,7 +42,6 @@ from ddpui.core.orgtaskfunctions import (
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
-from ddpui.utils.helpers import map_airbyte_keys_to_postgres_keys
 from ddpui.utils.constants import (
     TASK_GITPULL,
     TRANSFORM_TASKS_SEQ,

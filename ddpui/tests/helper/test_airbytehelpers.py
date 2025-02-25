@@ -40,7 +40,7 @@ from ddpui.models.org import (
 from ddpui.models.org_user import OrgUser, OrgUserRole, User
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.models.tasks import Task, OrgTask, OrgDataFlowv1, DataflowOrgTask
-from ddpui.ddpprefect import DBTCLIPROFILE
+from ddpui.ddpprefect import DBTCLIPROFILE, schema, DBTCORE
 from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTECLEAR
 
 
@@ -632,7 +632,12 @@ def test_create_connection(
     "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
     mock_create_or_update_org_cli_block=Mock(),
 )
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.prefect_service.run_dbt_task_sync",
+    mock_run_dbt_task_sync=Mock(),
+)
 def test_update_destination_name(
+    mock_run_dbt_task_sync: Mock,
     mock_create_or_update_org_cli_block: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
@@ -647,7 +652,14 @@ def test_update_destination_name(
     }
     mock_retrieve_warehouse_credentials.return_value = {}
     mock_update_warehouse_credentials.return_value = None
-    mock_create_or_update_org_cli_block.return_value = ((None, None), None)
+    mock_cli_profile_block = Mock(block_name="block-name")
+    mock_dbt_project_params = Mock(
+        dbt_binary="dbt-binary", project_dir="dbt-project-dir", working_dir="dbt-project-dir"
+    )
+    mock_create_or_update_org_cli_block.return_value = (
+        (mock_cli_profile_block, mock_dbt_project_params),
+        None,
+    )
 
     payload = AirbyteDestinationUpdate(
         name="new-name", destinationDefId="destinationDefId", config={}
@@ -678,7 +690,12 @@ def test_update_destination_name(
     "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
     mock_create_or_update_org_cli_block=Mock(),
 )
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.prefect_service.run_dbt_task_sync",
+    mock_run_dbt_task_sync=Mock(),
+)
 def test_update_destination_postgres_config(
+    mock_run_dbt_task_sync: Mock,
     mock_create_or_update_org_cli_block: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
@@ -698,6 +715,14 @@ def test_update_destination_postgres_config(
         name="name",
         destinationDefId="destinationDefId",
         config={"host": "new-host", "port": "123", "password": "*****"},
+    )
+    mock_cli_profile_block = Mock(block_name="block-name")
+    mock_dbt_project_params = Mock(
+        dbt_binary="dbt-binary", project_dir="dbt-project-dir", working_dir="dbt-project-dir"
+    )
+    mock_create_or_update_org_cli_block.return_value = (
+        (mock_cli_profile_block, mock_dbt_project_params),
+        None,
     )
     response, error = update_destination(org, "destination_id", payload)
     assert error is None
@@ -729,7 +754,12 @@ def test_update_destination_postgres_config(
     "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
     mock_create_or_update_org_cli_block=Mock(),
 )
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.prefect_service.run_dbt_task_sync",
+    mock_run_dbt_task_sync=Mock(),
+)
 def test_update_destination_bigquery_config(
+    mock_run_dbt_task_sync: Mock,
     mock_create_or_update_org_cli_block: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
@@ -749,6 +779,14 @@ def test_update_destination_bigquery_config(
         name="name",
         destinationDefId="destinationDefId",
         config={"credentials_json": '{"key": "value"}'},
+    )
+    mock_cli_profile_block = Mock(block_name="block-name")
+    mock_dbt_project_params = Mock(
+        dbt_binary="dbt-binary", project_dir="dbt-project-dir", working_dir="dbt-project-dir"
+    )
+    mock_create_or_update_org_cli_block.return_value = (
+        (mock_cli_profile_block, mock_dbt_project_params),
+        None,
     )
     response, error = update_destination(org, "destination_id", payload)
     assert error is None
@@ -779,7 +817,12 @@ def test_update_destination_bigquery_config(
     "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
     mock_create_or_update_org_cli_block=Mock(),
 )
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.prefect_service.run_dbt_task_sync",
+    mock_run_dbt_task_sync=Mock(),
+)
 def test_update_destination_snowflake_config(
+    mock_run_dbt_task_sync: Mock,
     mock_create_or_update_org_cli_block: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
@@ -799,6 +842,14 @@ def test_update_destination_snowflake_config(
         name="name",
         destinationDefId="destinationDefId",
         config={"credentials": {"password": "newpassword"}},
+    )
+    mock_cli_profile_block = Mock(block_name="block-name")
+    mock_dbt_project_params = Mock(
+        dbt_binary="dbt-binary", project_dir="dbt-project-dir", working_dir="dbt-project-dir"
+    )
+    mock_create_or_update_org_cli_block.return_value = (
+        (mock_cli_profile_block, mock_dbt_project_params),
+        None,
     )
     response, error = update_destination(org, "destination_id", payload)
     assert error is None
@@ -827,7 +878,32 @@ def test_update_destination_snowflake_config(
     "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
     mock_create_or_update_org_cli_block=Mock(),
 )
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.create_elementary_profile",
+    mock_create_elementary_profile=Mock(),
+)
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.prefect_service.run_dbt_task_sync",
+    mock_run_dbt_task_sync=Mock(),
+)
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.uuid4",
+    mock_uuid4=Mock(),
+)
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.timezone",
+    mock_uuid4=Mock(),
+)
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.elementary_setup_status",
+    mock_uuid4=Mock(),
+)
 def test_update_destination_cliprofile(
+    mock_elementary_setup_status: Mock,
+    mock_timezone: Mock,
+    mock_uuid4: Mock,
+    mock_run_dbt_task_sync: Mock,
+    mock_create_elementary_profile: Mock,
     mock_create_or_update_org_cli_block: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
@@ -854,11 +930,42 @@ def test_update_destination_cliprofile(
 
     OrgPrefectBlockv1.objects.create(org=org, block_type=DBTCLIPROFILE, block_name="cliblockname")
 
+    mock_cli_profile_block = Mock(block_name="block-name")
+    mock_dbt_project_params = Mock(
+        dbt_binary="dbt-binary", project_dir="dbt-project-dir", working_dir="dbt-project-dir"
+    )
+    mock_create_or_update_org_cli_block.return_value = (
+        (mock_cli_profile_block, mock_dbt_project_params),
+        None,
+    )
+    mock_uuid4.return_value = "fake-uuid"
+    mock_timezone.as_ist = Mock(return_value=Mock(isoformat=Mock(return_value="isoformatted-time")))
+
+    mock_elementary_setup_status.return_value = "set-up"
+
     response, error = update_destination(org, "destination_id", payload)
     assert error is None
     assert response == {"destinationId": "DESTINATION_ID"}
 
     mock_create_or_update_org_cli_block.assert_called_once_with(org, warehouse, payload.config)
+    mock_create_elementary_profile.assert_called_once_with(org)
+
+    dbtdebugtask = schema.PrefectDbtTaskSetup(
+        seq=1,
+        slug="dbt-debug",
+        commands=["dbt-binary debug"],
+        type=DBTCORE,
+        env={},
+        working_dir="dbt-project-dir",
+        profiles_dir="dbt-project-dir/profiles/",
+        project_dir="dbt-project-dir",
+        cli_profile_block="block-name",
+        cli_args=[],
+        orgtask_uuid="fake-uuid",
+        flow_name="org-dbt-debug",
+        flow_run_name="isoformatted-time",
+    )
+    mock_run_dbt_task_sync.assert_called_once_with(dbtdebugtask)
 
 
 @patch("ddpui.ddpairbyte.airbyte_service.get_connections", mock_get_connections=Mock())
@@ -882,9 +989,9 @@ def test_delete_source(
         ]
     }
 
-    task = Task.objects.create(type="airbyte", slug="airbyte-sync", label="AIRBYTE sync")
-    orgtask = OrgTask.objects.create(org=org, task=task, connection_id="connection_id")
-    OrgTask.objects.create(org=org, task=task, connection_id="connection_id2")
+    synctask = Task.objects.create(type="airbyte", slug="airbyte-sync", label="AIRBYTE sync")
+    orgtask = OrgTask.objects.create(org=org, task=synctask, connection_id="connection_id")
+    OrgTask.objects.create(org=org, task=synctask, connection_id="connection_id2")
 
     dataflow = OrgDataFlowv1.objects.create(
         org=org, dataflow_type="manual", deployment_id="deployment-id"
@@ -900,9 +1007,11 @@ def test_delete_source(
     ).exists()
 
     # this one was deleted
-    assert not OrgTask.objects.filter(org=org, task=task, connection_id="connection_id").exists()
+    assert not OrgTask.objects.filter(
+        org=org, task=synctask, connection_id="connection_id"
+    ).exists()
     # but this one was not deleted
-    assert OrgTask.objects.filter(org=org, task=task, connection_id="connection_id2").exists()
+    assert OrgTask.objects.filter(org=org, task=synctask, connection_id="connection_id2").exists()
 
     mock_delete_source.assert_called_once()
 
