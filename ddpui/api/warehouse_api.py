@@ -14,7 +14,11 @@ import sqlalchemy.exc
 from django.http import StreamingHttpResponse
 from ddpui import auth
 from ddpui.core import dbtautomation_service
-from ddpui.core.warehousefunctions import get_warehouse_data, fetch_warehouse_tables
+from ddpui.core.warehousefunctions import (
+    get_warehouse_data,
+    fetch_warehouse_tables,
+    train_rag_on_warehouse,
+)
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import TaskProgressHashPrefix
@@ -488,3 +492,24 @@ def get_warehouse_schemas_and_tables(
         raise HttpError(500, "Failed to fetch data from the warehouse") from err
 
     return res
+
+
+@warehouse_router.post(
+    "/rag/train",
+    auth=auth.CustomAuthMiddleware(),
+)
+@has_permission(["can_view_warehouse_data"])
+def post_train_rag_on_warehouse(request):
+    """
+    Train the rag on warehouse schema
+    This will always refresh the training
+    """
+
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    train_rag_on_warehouse(warehouse=org_warehouse)

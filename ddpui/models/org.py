@@ -72,6 +72,7 @@ class Org(models.Model):
     viz_url = models.CharField(max_length=100, null=True)
     viz_login_type = models.CharField(choices=OrgVizLoginType.choices(), max_length=50, null=True)
     ses_whitelisted_email = models.TextField(max_length=100, null=True)
+    pgvector_creds = models.CharField(max_length=1000, null=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -227,3 +228,14 @@ class OrgSchemaChange(models.Model):
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
     schedule_job = models.ForeignKey(ConnectionJob, null=True, on_delete=models.SET_NULL)
+
+
+class OrgWarehouseRagTraining(models.Model):
+    """This contains the latest training plan used to train the rag on warehouse schema"""
+
+    warehouse = models.ForeignKey(OrgWarehouse, on_delete=models.CASCADE)
+    training_sql = models.TextField(null=True)
+    exclude = models.JSONField(null=True)  # exclude schemas, tables, columns (PII)
+    last_trained_at = models.DateTimeField(null=True)
+    last_log = models.JSONField(null=True)
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)

@@ -99,6 +99,11 @@ def generate_warehouse_credentials_name(org: Org):
     return f"warehouseCreds-{org.slug}-{uuid4()}"
 
 
+def generate_pgvector_credentials_name(org: Org):
+    """store the pgvector credentials for the org"""
+    return f"pgvectorCreds-{org.slug}-{uuid4()}"
+
+
 def generate_superset_credentials_name():
     """store the connection credentials to their data warehouse"""
     return f"supersetCreds-{uuid4()}"
@@ -207,3 +212,41 @@ def retrieve_superset_usage_dashboard_credentials(
     aws_sm = get_client()
     response = aws_sm.get_secret_value(SecretId=secret_id)
     return json.loads(response["SecretString"]) if response and "SecretString" in response else None
+
+
+def save_pgvector_credentials(org: Org, credentials: dict):
+    """saves pgvector credentials for an org under a predefined secret name"""
+    aws_sm = get_client()
+    secret_name = generate_pgvector_credentials_name(org)
+    response = aws_sm.create_secret(
+        Name=secret_name,
+        SecretString=json.dumps(credentials),
+    )
+    logger.info("saved pgvector credentials in secrets manager under name=" + response["Name"])
+    return secret_name
+
+
+def update_pgvector_credentials(org: Org, credentials: dict):
+    """udpates pgevector credentials for an org"""
+    aws_sm = get_client()
+    response = aws_sm.update_secret(
+        SecretId=org.pgvector_creds,
+        SecretString=json.dumps(credentials),
+    )
+    logger.info("updated pgvector credentials in secrets manager under name=" + response["Name"])
+
+
+def retrieve_pgvector_credentials(org: Org) -> dict | None:
+    """decodes and returns the saved pgvector credentials for an org"""
+    aws_sm = get_client()
+    response = aws_sm.get_secret_value(SecretId=org.pgvector_creds)
+    return json.loads(response["SecretString"]) if response and "SecretString" in response else None
+
+
+def delete_pgvector_credentials(org: Org) -> None:
+    """deletes the secret from SM corresponding to a pgvector's credentials"""
+    aws_sm = get_client()
+    try:
+        aws_sm.delete_secret(SecretId=org.pgvector_creds)
+    except Exception:  # skipcq PYL-W0703
+        pass

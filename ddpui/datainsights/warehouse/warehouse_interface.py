@@ -27,3 +27,9 @@ class Warehouse(ABC):
     @abstractmethod
     def get_wtype(self):
         pass
+
+    @abstractmethod
+    def build_rag_training_sql(
+        self, exclude_schemas: list[str], exclude_tables: list[str], exclude_columns: list[str]
+    ) -> str:
+        pass

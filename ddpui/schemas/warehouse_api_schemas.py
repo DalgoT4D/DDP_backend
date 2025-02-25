@@ -38,3 +38,23 @@ class LlmSessionFeedbackRequest(Schema):
     """
 
     feedback: str
+
+
+class WarehouseRagTrainConfig(Schema):
+    """
+    Configuration to be used to train rag on warehouse
+    """
+
+    exclude_schemas: list[str] = []
+    exclude_tables: list[str] = []
+    exclude_columns: list[str] = []
+
+
+class PgVectorCreds(Schema):
+    """Pg Vector Creds where the embeddings for the RAG should be stored"""
+
+    username: str
+    password: str
+    host: str
+    port: int
+    database: str

@@ -123,3 +123,28 @@ def close_file_search_session(session_id: str, poll_interval: int = 5) -> None:
         raise Exception("Failed to submit the task")
 
     poll_llm_service_task(task_id, poll_interval)
+
+
+def train_vanna_on_warehouse(
+    training_sql: str, pg_vector_creds: dict, warehouse_creds: dict, warehouse_type: str
+):
+    """
+    Creates embeddings in vanna based on the results of a training plan (sql)
+    """
+    response = dalgo_post(
+        f"{LLM_SERVICE_API_URL}/api/vanna/train",
+        headers=headers,
+        json={
+            "training_sql": training_sql,
+            "warehouse_creds": warehouse_creds,
+            "pg_vector_creds": pg_vector_creds,
+            "warehouse_type": warehouse_type,
+        },
+    )
+
+    task_id = response["task_id"]
+
+    if not task_id:
+        raise Exception("Failed to submit the task")
+
+    return poll_llm_service_task(task_id)

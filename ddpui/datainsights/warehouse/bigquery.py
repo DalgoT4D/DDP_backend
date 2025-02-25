@@ -8,6 +8,7 @@ from sqlalchemy_bigquery._types import _type_map
 from ddpui.datainsights.insights.insight_interface import MAP_TRANSLATE_TYPES
 from ddpui.datainsights.warehouse.warehouse_interface import Warehouse
 from ddpui.datainsights.warehouse.warehouse_interface import WarehouseType
+from sqlalchemy.sql.expression import table, TableClause, select, Select, ColumnClause, column, text
 
 ### CAUTION: workaround for missing datatypes; complex queries on such types using sqlalchemy expression might fail
 _type_map["JSON"] = types.JSON
@@ -87,3 +88,27 @@ class BigqueryClient(Warehouse):
 
     def get_wtype(self):
         return WarehouseType.BIGQUERY
+
+    def build_rag_training_sql(
+        self, exclude_schemas: list[str], exclude_tables: list[str], exclude_columns: list[str]
+    ):
+        """This sql query will be sent to llm service for trainig the rag on warehouse"""
+        tab: TableClause = text("INFORMATION_SCHEMA.columns")
+        stmt: Select = select("*")
+        stmt = stmt.select_from(tab)
+
+        if exclude_schemas:
+            schema_name_col: ColumnClause = column("table_schema")
+            stmt = stmt.where(schema_name_col.not_in(exclude_schemas))
+
+        if exclude_tables:
+            table_name_col: ColumnClause = column("table_name")
+            stmt = stmt.where(table_name_col.not_in(exclude_tables))
+
+        if exclude_columns:
+            column_name_col: ColumnClause = column("column_name")
+            stmt = stmt.where(column_name_col.not_in(exclude_columns))
+
+        stmt = stmt.compile(bind=self.engine, compile_kwargs={"literal_binds": True})
+
+        return str(stmt)
