@@ -82,11 +82,11 @@ def fetch_warehouse_tables(request, org_warehouse, cache_key=None):
 
 def save_pgvector_creds(org: Org, overwrite=False):
     creds = PgVectorCreds(
-        username=org.slug,
+        username=org.slug + "_vector",
         port=os.getenv("PGVECTOR_PORT"),
         host=os.getenv("PGVECTOR_HOST"),
         password=generate_hash_id(10),
-        database=org.slug,
+        database=org.slug + "_vector",
     )
 
     if org.pgvector_creds:
@@ -103,7 +103,7 @@ def save_pgvector_creds(org: Org, overwrite=False):
     return org.pgvector_creds
 
 
-def train_rag_on_warehouse(warehouse: OrgWarehouse):
+def train_rag_on_warehouse(warehouse: OrgWarehouse) -> dict:
     """Trains the rag for the current warehouse by calling llm service"""
     org: Org = warehouse.org
 
@@ -142,6 +142,8 @@ def train_rag_on_warehouse(warehouse: OrgWarehouse):
     rag_training_config.last_log = result
     rag_training_config.save()
 
+    return result
+
 
 def generate_training_sql(warehouse: OrgWarehouse, config: WarehouseRagTrainConfig):
     """Generate or build the training sql (str) that will be used by the rag to generate embeddings"""
@@ -167,7 +169,7 @@ def scaffold_rag_training(warehouse: OrgWarehouse, config: WarehouseRagTrainConf
     """Create/Update the OrgWarehouseRagTraining for the corresponding warehouse"""
     rag_training = OrgWarehouseRagTraining.objects.filter(warehouse=warehouse).first()
     if not rag_training:
-        rag_training = OrgWarehouseRagTraining.objects.create(wareohuse=warehouse)
+        rag_training = OrgWarehouseRagTraining.objects.create(warehouse=warehouse)
 
     exclude = {}
     if config.exclude_schemas:
