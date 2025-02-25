@@ -10,6 +10,7 @@ import sqlalchemy
 from ninja import Router
 from ninja.errors import HttpError
 import sqlalchemy.exc
+from sqlalchemy import text
 
 from django.http import StreamingHttpResponse
 from ddpui import auth
@@ -18,6 +19,7 @@ from ddpui.core.warehousefunctions import (
     get_warehouse_data,
     fetch_warehouse_tables,
     train_rag_on_warehouse,
+    parse_sql_query_with_limit_offset,
 )
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.org_user import OrgUser
@@ -40,6 +42,7 @@ from ddpui.schemas.warehouse_api_schemas import (
     SaveLlmSessionRequest,
     LlmSessionFeedbackRequest,
     AskWarehouseRequestv1,
+    FetchSqlqueryResults,
 )
 from ddpui.models.llm import (
     LlmSession,
