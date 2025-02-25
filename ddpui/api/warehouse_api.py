@@ -478,9 +478,7 @@ def post_feedback_llm_session(request, session_id: str, payload: LlmSessionFeedb
 @warehouse_router.get("/ask/sessions", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def get_warehouse_llm_analysis_sessions(
-    request,
-    limit: int = 10,
-    offset: int = 0,
+    request, limit: int = 10, offset: int = 0, version: int = "v0"
 ):
     """
     Get all saved sessions with a session_name for the user
@@ -493,6 +491,7 @@ def get_warehouse_llm_analysis_sessions(
             org=org,
             session_name__isnull=False,  # fetch only saved sessions
             session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+            version=version,
         )
         .select_related("orguser__user")
         .order_by("-updated_at")[offset : offset + limit]
