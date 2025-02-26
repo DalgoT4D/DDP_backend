@@ -10,11 +10,18 @@ import sqlalchemy
 from ninja import Router
 from ninja.errors import HttpError
 import sqlalchemy.exc
+from sqlalchemy import text
 
 from django.http import StreamingHttpResponse
 from ddpui import auth
 from ddpui.core import dbtautomation_service
-from ddpui.core.warehousefunctions import get_warehouse_data, fetch_warehouse_tables
+from ddpui.core.warehousefunctions import (
+    get_warehouse_data,
+    fetch_warehouse_tables,
+    train_rag_on_warehouse,
+    parse_sql_query_with_limit_offset,
+    run_sql_and_fetch_results_from_warehouse,
+)
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import TaskProgressHashPrefix
@@ -25,13 +32,18 @@ from ddpui.auth import has_permission
 
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.datainsights.generate_result import GenerateResult, poll_for_column_insights
-from ddpui.celeryworkers.tasks import summarize_warehouse_results
+from ddpui.celeryworkers.tasks import (
+    summarize_warehouse_results,
+    generate_sql_from_prompt_asked_on_warehouse,
+)
 
 from ddpui.schemas.warehouse_api_schemas import (
     RequestorColumnSchema,
     AskWarehouseRequest,
     SaveLlmSessionRequest,
     LlmSessionFeedbackRequest,
+    AskWarehouseRequestv1,
+    FetchSqlqueryResults,
 )
 from ddpui.models.llm import (
     LlmSession,
@@ -321,6 +333,82 @@ def post_warehouse_prompt(request, payload: AskWarehouseRequest):
         raise HttpError(400, "failed to summarize warehouse results") from error
 
 
+@warehouse_router.post("v1/ask/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse_data"])
+def post_warehouse_generate_sql(request, payload: AskWarehouseRequestv1):
+    """
+    Ask the warehouse a question/prompt
+    Returns a llm generated "sql" query
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    try:
+        task = generate_sql_from_prompt_asked_on_warehouse.apply_async(
+            kwargs={
+                "orguser_id": orguser.id,
+                "org_warehouse_id": org_warehouse.id,
+                "user_prompt": payload.user_prompt,
+            },
+        )
+
+        # set progress in redis to poll on
+        SingleTaskProgress(task.id, 60 * 10)
+
+        return {"request_uuid": task.id}
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to summarize warehouse results") from error
+
+
+@warehouse_router.post("v1/ask/{session_id}/summarize", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse_data"])
+def post_summarize_results_from_sql_and_prompt(
+    request, session_id: str, payload: AskWarehouseRequest
+):
+    """
+    Use the llm generated (edited) sql and the user prompt to get a summarized answer using file search
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    session = LlmSession.objects.filter(
+        session_id=session_id,
+        org=org,
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+    ).first()
+
+    if not session:
+        raise HttpError(404, "Session not found")
+
+    try:
+        task = summarize_warehouse_results.apply_async(
+            kwargs={
+                "orguser_id": orguser.id,
+                "org_warehouse_id": org_warehouse.id,
+                "sql": payload.sql,
+                "user_prompt": payload.user_prompt,
+                "llmsession_pk": session.id,
+            },
+        )
+
+        # set progress in redis to poll on
+        SingleTaskProgress(task.id, 60 * 10)
+
+        return {"request_uuid": task.id}
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to summarize warehouse results") from error
+
+
 @warehouse_router.post("/ask/{new_session_id}/save", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def post_save_warehouse_prompt_session(
@@ -391,9 +479,7 @@ def post_feedback_llm_session(request, session_id: str, payload: LlmSessionFeedb
 @warehouse_router.get("/ask/sessions", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def get_warehouse_llm_analysis_sessions(
-    request,
-    limit: int = 10,
-    offset: int = 0,
+    request, limit: int = 10, offset: int = 0, version: int = "v0"
 ):
     """
     Get all saved sessions with a session_name for the user
@@ -406,6 +492,7 @@ def get_warehouse_llm_analysis_sessions(
             org=org,
             session_name__isnull=False,  # fetch only saved sessions
             session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+            version=version,
         )
         .select_related("orguser__user")
         .order_by("-updated_at")[offset : offset + limit]
@@ -488,3 +575,56 @@ def get_warehouse_schemas_and_tables(
         raise HttpError(500, "Failed to fetch data from the warehouse") from err
 
     return res
+
+
+@warehouse_router.post(
+    "/rag/train",
+    auth=auth.CustomAuthMiddleware(),
+)
+@has_permission(["can_view_warehouse_data"])
+def post_train_rag_on_warehouse(request):
+    """
+    Train the rag on warehouse schema
+    This will always refresh the training
+    """
+
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    train_rag_on_warehouse(warehouse=org_warehouse)
+
+
+@warehouse_router.post("/table_data/run_sql", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse_data"])
+def post_warehouse_run_sql_query(request, payload: FetchSqlqueryResults):
+    """
+    Runs a SQL query against the warehouse and returns the results
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    try:
+        # Parse the SQL query and add LIMIT and OFFSET
+        sql_query_with_limit_offset = parse_sql_query_with_limit_offset(
+            payload.sql, payload.limit, payload.offset
+        )
+
+        results = run_sql_and_fetch_results_from_warehouse(
+            warehouse=org_warehouse, sql=text(sql_query_with_limit_offset)
+        )
+        columns = []
+        if len(results) > 0:
+            columns = list(results[0].keys())
+
+        return {"rows": results, "columns": columns}
+    except Exception as err:
+        logger.error(err)
+        raise HttpError(500, str(err))

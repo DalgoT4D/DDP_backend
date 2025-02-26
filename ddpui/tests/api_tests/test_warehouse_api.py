@@ -2,7 +2,8 @@ import pytest
 from unittest.mock import Mock, patch
 from ninja.errors import HttpError
 import sqlalchemy
-from unittest.mock import _Call
+from unittest.mock import _Call, ANY
+from sqlalchemy import text
 
 from ddpui.models.org import OrgWarehouse, Org
 from ddpui.models.role_based_access import Role, RolePermission, Permission
@@ -24,11 +25,15 @@ from ddpui.api.warehouse_api import (
     get_warehouse_table_columns_spec,
     post_warehouse_prompt,
     post_save_warehouse_prompt_session,
+    post_warehouse_run_sql_query,
+    post_train_rag_on_warehouse,
+    get_warehouse_schemas_and_tables,
 )
 from ddpui.schemas.warehouse_api_schemas import (
     RequestorColumnSchema,
     AskWarehouseRequest,
     SaveLlmSessionRequest,
+    FetchSqlqueryResults,
 )
 from ddpui.utils.constants import LIMIT_ROWS_TO_SEND_TO_LLM
 from ddpui.models.llm import LlmSession, LlmSessionStatus, LlmAssistantType
@@ -417,3 +422,59 @@ def test_llm_data_analysis_save_and_overwrite_session(orguser):
         ).count()
         == 1
     )
+
+
+def test_post_warehouse_run_sql_query_no_warehouse(orguser):
+    """
+    Test the function when no warehouse found
+    """
+    request = mock_request(orguser)
+    payload = FetchSqlqueryResults(sql="sql-string", limit=10, offset=0)
+    with pytest.raises(HttpError, match="Please set up your warehouse first"):
+        post_warehouse_run_sql_query(request, payload)
+
+
+@patch("ddpui.api.warehouse_api.parse_sql_query_with_limit_offset")
+@patch("ddpui.api.warehouse_api.run_sql_and_fetch_results_from_warehouse")
+def test_post_warehouse_run_sql_query_success(
+    mock_un_sql_and_fetch_results_from_warehouse: Mock,
+    mock_parse_sql: Mock,
+    orguser,
+):
+    """
+    Test the success of the function
+    """
+    request = mock_request(orguser)
+    warehouse = OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    payload = FetchSqlqueryResults(sql="sql-string", limit=10, offset=0)
+
+    mock_parse_sql.return_value = "some-sql"
+    mock_un_sql_and_fetch_results_from_warehouse.return_value = [{"col1": "val1", "col2": "val2"}]
+
+    results = post_warehouse_run_sql_query(request, payload)
+
+    mock_parse_sql.assert_called_once()
+    mock_un_sql_and_fetch_results_from_warehouse.assert_called_once_with(
+        warehouse=warehouse, sql=ANY
+    )
+    assert results == {"columns": ["col1", "col2"], "rows": [{"col1": "val1", "col2": "val2"}]}
+
+
+@patch("ddpui.api.warehouse_api.train_rag_on_warehouse")
+def test_post_train_rag_on_warehouse(mock_train_rag_on_warehose: Mock, orguser):
+    """
+    Test the function post_train_rag_on_warehouse
+    """
+    request = mock_request(orguser)
+
+    with pytest.raises(HttpError, match="Please set up your warehouse first"):
+        post_train_rag_on_warehouse(request)
+
+    warehouse = OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    mock_train_rag_on_warehose.return_value = True
+
+    post_train_rag_on_warehouse(request)
+
+    mock_train_rag_on_warehose.assert_called_once_with(warehouse=warehouse)
