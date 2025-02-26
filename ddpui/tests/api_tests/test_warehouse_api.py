@@ -25,6 +25,8 @@ from ddpui.api.warehouse_api import (
     post_warehouse_prompt,
     post_save_warehouse_prompt_session,
     post_warehouse_run_sql_query,
+    post_train_rag_on_warehouse,
+    get_warehouse_schemas_and_tables,
 )
 from ddpui.schemas.warehouse_api_schemas import (
     RequestorColumnSchema,
@@ -461,3 +463,22 @@ def test_post_warehouse_run_sql_query_success(
     mock_execute_sql.assert_called_once()
     mock_parse_sql.assert_called_once()
     assert results == {"columns": ["col1", "col2"], "rows": [{"col1": "val1", "col2": "val2"}]}
+
+
+@patch("ddpui.api.warehouse_api.train_rag_on_warehouse")
+def test_post_train_rag_on_warehouse(mock_train_rag_on_warehose: Mock, orguser):
+    """
+    Test the function post_train_rag_on_warehouse
+    """
+    request = mock_request(orguser)
+
+    with pytest.raises(HttpError, match="Please set up your warehouse first"):
+        post_train_rag_on_warehouse(request)
+
+    warehouse = OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    mock_train_rag_on_warehose.return_value = True
+
+    post_train_rag_on_warehouse(request)
+
+    mock_train_rag_on_warehose.assert_called_once_with(warehouse=warehouse)
