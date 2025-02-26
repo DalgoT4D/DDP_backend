@@ -26,7 +26,7 @@ pytestmark = pytest.mark.django_db
 
 @pytest.fixture(scope="session", autouse=True)
 def set_env():
-    os.environ["PGVECTOR_PORT"] = 5432
+    os.environ["PGVECTOR_PORT"] = "5432"
     os.environ["PGVECTOR_HOST"] = "some-host"
 
 
