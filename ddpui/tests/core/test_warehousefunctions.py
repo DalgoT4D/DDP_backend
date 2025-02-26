@@ -24,6 +24,12 @@ from ddpui.schemas.warehouse_api_schemas import WarehouseRagTrainConfig
 pytestmark = pytest.mark.django_db
 
 
+@pytest.fixture(scope="session", autouse=True)
+def set_env():
+    os.environ["PGVECTOR_PORT"] = 5432
+    os.environ["PGVECTOR_HOST"] = "some-host"
+
+
 @pytest.fixture()
 def dummy_org_warehouse():
     org = Org.objects.create(name="del", slug="del")
