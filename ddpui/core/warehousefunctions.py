@@ -48,6 +48,8 @@ def get_warehouse_data(request, data_type: str, **kwargs):
                 order_by=kwargs["order_by"],
                 order=kwargs["order"],
             )
+        else:
+            raise ValueError("Data asked for is not available")
     except Exception as error:
         logger.exception(f"Exception occurred in get_{data_type}: {error}")
         raise HttpError(500, f"Failed to get {data_type}")

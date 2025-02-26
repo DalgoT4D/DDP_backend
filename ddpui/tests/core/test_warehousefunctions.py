@@ -10,6 +10,7 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
 
+from ninja.errors import HttpError
 from ddpui.models.org import Org, OrgWarehouse, OrgWarehouseRagTraining
 from ddpui.core.warehousefunctions import (
     parse_sql_query_with_limit_offset,
@@ -18,8 +19,11 @@ from ddpui.core.warehousefunctions import (
     generate_training_sql,
     train_rag_on_warehouse,
     save_pgvector_creds,
+    fetch_warehouse_tables,
+    get_warehouse_data,
 )
 from ddpui.schemas.warehouse_api_schemas import WarehouseRagTrainConfig
+from ddpui.tests.api_tests.test_user_org_api import mock_request
 
 pytestmark = pytest.mark.django_db
 
@@ -496,3 +500,107 @@ def test_save_pgvector_creds_updation(
         args_list[0].kwargs["credentials"]["database"] == dummy_org_warehouse.org.slug + "_vector"
     )
     assert args_list[0].kwargs["credentials"]["password"] == "new-password"
+
+
+@patch("ddpui.core.warehousefunctions.RedisClient")
+@patch("ddpui.core.warehousefunctions.get_warehouse_data")
+def test_fetch_warehouse_tables(
+    mock_get_warehouse_data: Mock, mock_redis_client: Mock, dummy_org_warehouse: OrgWarehouse
+):
+    """
+    Test the tables being fetched
+    Test if the data is being stored in redis
+    """
+    mock_get_warehouse_data.return_value = ["table1"]
+    mock_get_warehouse_data.side_effect = (item for item in [["schema1"], ["table11", "table12"]])
+
+    result = fetch_warehouse_tables({}, dummy_org_warehouse, cache_key=None)
+
+    assert mock_get_warehouse_data.call_count == 2
+    assert len(result) == 2
+    assert_with_result = []
+    for schema in ["schema1"]:
+        for table in ["table11", "table12"]:
+            assert_with_result.append(
+                {
+                    "schema": schema,
+                    "input_name": table,
+                    "type": "src_model_node",
+                    "id": schema + "-" + table,
+                }
+            )
+    assert result == assert_with_result
+
+    mock_get_warehouse_data.side_effect = (item for item in [["schema1"], ["table11", "table12"]])
+    mock_redis_client.return_value = Mock(get_instance=Mock(set=True))
+
+    result = fetch_warehouse_tables({}, dummy_org_warehouse, cache_key="some-cache-key")
+
+    assert result == assert_with_result
+
+
+@patch("ddpui.core.dbtautomation_service._get_wclient")
+def test_get_warehouse_data(mock_get_wclient: Mock, dummy_org_warehouse: OrgWarehouse):
+    """
+    Test the function against various kwargs
+    """
+    mock_get_tables = Mock()
+    mock_get_wclient.return_value = Mock(get_tables=mock_get_tables)
+    kwargs = {"org_warehouse": dummy_org_warehouse}
+
+    # tables
+    with pytest.raises(HttpError):
+        get_warehouse_data(Mock(), "tables", **kwargs)
+
+    mock_get_wclient.assert_called_once()
+
+    kwargs["schema_name"] = "some-schema"
+
+    get_warehouse_data(Mock(), "tables", **kwargs)
+
+    mock_get_tables.assert_called_once_with("some-schema")
+
+    # schemas
+    mock_get_schemas = Mock()
+    mock_get_wclient.return_value = Mock(get_schemas=mock_get_schemas)
+
+    get_warehouse_data(Mock(), "schemas", **kwargs)
+
+    mock_get_schemas.assert_called_once()
+
+    # table_columns
+    mock_get_table_columns = Mock()
+    mock_get_wclient.return_value = Mock(get_table_columns=mock_get_table_columns)
+
+    with pytest.raises(HttpError):
+        get_warehouse_data(Mock(), "table_columns", **kwargs)
+
+    kwargs["table_name"] = "some-table"
+
+    get_warehouse_data(Mock(), "table_columns", **kwargs)
+
+    mock_get_table_columns.assert_called_once()
+
+    # table data
+    mock_get_table_data = Mock()
+    mock_get_wclient.return_value = Mock(get_table_data=mock_get_table_data)
+
+    kwargs["limit"] = 10
+    kwargs["page"] = 2
+    kwargs["order_by"] = "some-col"
+    kwargs["order"] = 1
+
+    get_warehouse_data(Mock(), "table_data", **kwargs)
+
+    mock_get_table_data.assert_called_once_with(
+        schema=kwargs["schema_name"],
+        table=kwargs["table_name"],
+        limit=kwargs["limit"],
+        page=kwargs["page"],
+        order_by=kwargs["order_by"],
+        order=kwargs["order"],
+    )
+
+    # some random key of data
+    with pytest.raises(HttpError):
+        get_warehouse_data(Mock(), "some-random-key", **kwargs)
