@@ -68,7 +68,10 @@ from ddpui.ddpprefect.prefect_service import (
 )
 from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
-from ddpui.core.warehousefunctions import generate_sql_from_warehouse_rag
+from ddpui.core.warehousefunctions import (
+    generate_sql_from_warehouse_rag,
+    run_sql_and_fetch_results_from_warehouse,
+)
 from ddpui.core import llm_service
 from ddpui.utils.helpers import (
     convert_sqlalchemy_rows_to_csv_string,
@@ -882,28 +885,11 @@ def summarize_warehouse_results(
         llm_session.session_type = LlmAssistantType.LONG_TEXT_SUMMARIZATION
         llm_session.save()
 
-    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
-
-    try:
-        wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
-    except Exception as err:
-        logger.error("Failed to connect to the warehouse - %s", err)
-        taskprogress.add(
-            {
-                "message": "Failed to connect to the warehouse",
-                "status": TaskProgressStatus.FAILED,
-                "result": None,
-            }
-        )
-        llm_session.session_status = LlmSessionStatus.FAILED
-        llm_session.save()
-        return
-
     # fetch the results of the query
     logger.info(f"Submitting query to warehouse for execution \n '''{sql}'''")
     rows = []
     try:
-        rows = wclient.execute(sql)
+        rows = run_sql_and_fetch_results_from_warehouse(warehouse=org_warehouse, sql=sql)
     except Exception as err:
         logger.error(err)
         taskprogress.add(

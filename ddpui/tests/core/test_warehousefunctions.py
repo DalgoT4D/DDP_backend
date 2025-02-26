@@ -21,6 +21,7 @@ from ddpui.core.warehousefunctions import (
     save_pgvector_creds,
     fetch_warehouse_tables,
     get_warehouse_data,
+    run_sql_and_fetch_results_from_warehouse,
 )
 from ddpui.schemas.warehouse_api_schemas import WarehouseRagTrainConfig
 from ddpui.tests.api_tests.test_user_org_api import mock_request
@@ -604,3 +605,24 @@ def test_get_warehouse_data(mock_get_wclient: Mock, dummy_org_warehouse: OrgWare
     # some random key of data
     with pytest.raises(HttpError):
         get_warehouse_data(Mock(), "some-random-key", **kwargs)
+
+
+@patch("ddpui.datainsights.warehouse.warehouse_factory.WarehouseFactory.connect")
+@patch(
+    "ddpui.utils.secretsmanager.retrieve_warehouse_credentials",
+)
+def test_run_sql_and_fetch_results_from_warehouse(
+    mock_retrieve_warehouse_credentials: Mock,
+    mock_warehouse_connect: Mock,
+    dummy_org_warehouse: OrgWarehouse,
+):
+    mock_retrieve_warehouse_credentials.return_value = "creds"
+
+    mock_execute_sql = Mock()
+    mock_warehouse_connect.return_value = Mock(execute=mock_execute_sql)
+
+    run_sql_and_fetch_results_from_warehouse(warehouse=dummy_org_warehouse, sql="some-sql")
+
+    mock_retrieve_warehouse_credentials.assert_called_once_with(dummy_org_warehouse)
+    mock_warehouse_connect.assert_called_once()
+    mock_execute_sql.assert_called_once()

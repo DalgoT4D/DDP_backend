@@ -255,3 +255,16 @@ def parse_sql_query_with_limit_offset(sql_query, limit, offset):
         statement.tokens.append(sqlparse.sql.Token(Keyword, f" OFFSET {offset}"))
 
     return str(statement)
+
+
+def run_sql_and_fetch_results_from_warehouse(warehouse: OrgWarehouse, sql: str):
+    """
+    - Establishes connection to warehouse
+    - Runs the sql
+    """
+
+    credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
+
+    wclient = WarehouseFactory.connect(credentials, wtype=warehouse.wtype)
+
+    return wclient.execute(sql)

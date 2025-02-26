@@ -20,6 +20,7 @@ from ddpui.core.warehousefunctions import (
     fetch_warehouse_tables,
     train_rag_on_warehouse,
     parse_sql_query_with_limit_offset,
+    run_sql_and_fetch_results_from_warehouse,
 )
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.org_user import OrgUser
@@ -610,17 +611,15 @@ def post_warehouse_run_sql_query(request, payload: FetchSqlqueryResults):
     if not org_warehouse:
         raise HttpError(404, "Please set up your warehouse first")
 
-    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
-
     try:
-        wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
-
         # Parse the SQL query and add LIMIT and OFFSET
         sql_query_with_limit_offset = parse_sql_query_with_limit_offset(
             payload.sql, payload.limit, payload.offset
         )
 
-        results = wclient.execute(text(sql_query_with_limit_offset))
+        results = run_sql_and_fetch_results_from_warehouse(
+            warehouse=org_warehouse, sql=text(sql_query_with_limit_offset)
+        )
         columns = []
         if len(results) > 0:
             columns = list(results[0].keys())

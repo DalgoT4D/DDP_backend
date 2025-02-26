@@ -2,7 +2,8 @@ import pytest
 from unittest.mock import Mock, patch
 from ninja.errors import HttpError
 import sqlalchemy
-from unittest.mock import _Call
+from unittest.mock import _Call, ANY
+from sqlalchemy import text
 
 from ddpui.models.org import OrgWarehouse, Org
 from ddpui.models.role_based_access import Role, RolePermission, Permission
@@ -434,11 +435,9 @@ def test_post_warehouse_run_sql_query_no_warehouse(orguser):
 
 
 @patch("ddpui.api.warehouse_api.parse_sql_query_with_limit_offset")
-@patch("ddpui.datainsights.warehouse.warehouse_factory.WarehouseFactory.connect")
-@patch("ddpui.utils.secretsmanager.retrieve_warehouse_credentials")
+@patch("ddpui.api.warehouse_api.run_sql_and_fetch_results_from_warehouse")
 def test_post_warehouse_run_sql_query_success(
-    mock_retrieve_warehouse_credentials: Mock,
-    mock_warehouse_factory_connect: Mock,
+    mock_un_sql_and_fetch_results_from_warehouse: Mock,
     mock_parse_sql: Mock,
     orguser,
 ):
@@ -450,18 +449,15 @@ def test_post_warehouse_run_sql_query_success(
 
     payload = FetchSqlqueryResults(sql="sql-string", limit=10, offset=0)
 
-    mock_retrieve_warehouse_credentials.return_value = "creds"
     mock_parse_sql.return_value = "some-sql"
-    mock_execute_sql = Mock()
-    mock_execute_sql.return_value = [{"col1": "val1", "col2": "val2"}]
-    mock_warehouse_factory_connect.return_value = Mock(execute=mock_execute_sql)
+    mock_un_sql_and_fetch_results_from_warehouse.return_value = [{"col1": "val1", "col2": "val2"}]
 
     results = post_warehouse_run_sql_query(request, payload)
 
-    mock_retrieve_warehouse_credentials.assert_called_once_with(warehouse)
-    mock_warehouse_factory_connect.assert_called_once_with("creds", wtype=warehouse.wtype)
-    mock_execute_sql.assert_called_once()
     mock_parse_sql.assert_called_once()
+    mock_un_sql_and_fetch_results_from_warehouse.assert_called_once_with(
+        warehouse=warehouse, sql=ANY
+    )
     assert results == {"columns": ["col1", "col2"], "rows": [{"col1": "val1", "col2": "val2"}]}
 
 
