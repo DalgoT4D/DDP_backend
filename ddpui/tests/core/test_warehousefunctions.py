@@ -1,7 +1,7 @@
 import os
 import re
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, _CallList, _Call
 
 import django
 
@@ -16,6 +16,8 @@ from ddpui.core.warehousefunctions import (
     generate_sql_from_warehouse_rag,
     scaffold_rag_training,
     generate_training_sql,
+    train_rag_on_warehouse,
+    save_pgvector_creds,
 )
 from ddpui.schemas.warehouse_api_schemas import WarehouseRagTrainConfig
 
@@ -263,3 +265,228 @@ def test_generate_training_sql_success(
     sql = generate_training_sql(dummy_org_warehouse, config)
 
     assert sql == "sql-query"
+
+
+@patch(
+    "ddpui.utils.secretsmanager.retrieve_warehouse_credentials",
+)
+def test_train_rag_on_warehouse_pgvector_creds_not_found(
+    mock_retrieve_warehouse_credentials: Mock,
+    dummy_org_warehouse: OrgWarehouse,
+):
+    """Failure because pgvector creds not found"""
+
+    with pytest.raises(Exception, match="Couldn't find the pgvector creds for the org"):
+        train_rag_on_warehouse(warehouse=dummy_org_warehouse)
+
+    mock_retrieve_warehouse_credentials.assert_called_once_with(dummy_org_warehouse)
+
+
+@patch(
+    "ddpui.utils.secretsmanager.retrieve_pgvector_credentials",
+)
+@patch(
+    "ddpui.utils.secretsmanager.retrieve_warehouse_credentials",
+)
+def test_train_rag_on_warehouse_pgvector_pgvector_creds_not_saved_in_secrets_manager(
+    mock_retrieve_warehouse_credentials: Mock,
+    mock_retrieve_pgvector_credentials: Mock,
+    dummy_org_warehouse: OrgWarehouse,
+):
+    """Failure because pgvector creds not saved to secrets manager"""
+    mock_retrieve_pgvector_credentials.return_value = None
+
+    dummy_org_warehouse.org.pgvector_creds = "pgvectorCreds-1234"
+
+    with pytest.raises(Exception, match="Pg vector creds for the org not created/generated"):
+        train_rag_on_warehouse(
+            warehouse=dummy_org_warehouse,
+        )
+
+    mock_retrieve_warehouse_credentials.assert_called_once_with(dummy_org_warehouse)
+    mock_retrieve_pgvector_credentials.assert_called_once_with(dummy_org_warehouse.org)
+
+
+@patch(
+    "ddpui.utils.secretsmanager.retrieve_pgvector_credentials",
+)
+@patch(
+    "ddpui.utils.secretsmanager.retrieve_warehouse_credentials",
+)
+def test_train_rag_on_warehouse_pgvector_creds_validation_error(
+    mock_retrieve_warehouse_credentials: Mock,
+    mock_retrieve_pgvector_credentials: Mock,
+    dummy_org_warehouse: OrgWarehouse,
+):
+    """
+    Partial pgvector creds object to check validation error
+    """
+    mock_retrieve_pgvector_credentials.return_value = {
+        "username": "something-suer",
+        "host": "localhost",
+    }
+
+    dummy_org_warehouse.org.pgvector_creds = "pgvectorCreds-1234"
+
+    with pytest.raises(Exception, match="Pg vector creds are not of the right schema"):
+        train_rag_on_warehouse(
+            warehouse=dummy_org_warehouse,
+        )
+
+    mock_retrieve_warehouse_credentials.assert_called_once_with(dummy_org_warehouse)
+    mock_retrieve_pgvector_credentials.assert_called_once_with(dummy_org_warehouse.org)
+
+
+@patch(
+    "ddpui.utils.secretsmanager.retrieve_pgvector_credentials",
+)
+@patch(
+    "ddpui.utils.secretsmanager.retrieve_warehouse_credentials",
+)
+def test_train_rag_on_warehouse_no_training_sql_found(
+    mock_retrieve_warehouse_credentials: Mock,
+    mock_retrieve_pgvector_credentials: Mock,
+    dummy_org_warehouse: OrgWarehouse,
+):
+    mock_retrieve_pgvector_credentials.return_value = {
+        "username": "something-suer",
+        "host": "localhost",
+        "port": 5432,
+        "database": "some-db",
+        "password": "random-pass",
+    }
+
+    dummy_org_warehouse.org.pgvector_creds = "pgvectorCreds-1234"
+
+    with pytest.raises(
+        Exception, match="Rag training sql not found. Please generate to train your warehouse"
+    ):
+        train_rag_on_warehouse(
+            warehouse=dummy_org_warehouse,
+        )
+
+    mock_retrieve_warehouse_credentials.assert_called_once_with(dummy_org_warehouse)
+    mock_retrieve_pgvector_credentials.assert_called_once_with(dummy_org_warehouse.org)
+
+    OrgWarehouseRagTraining.objects.create(warehouse=dummy_org_warehouse, training_sql=None)
+
+    with pytest.raises(
+        Exception, match="Rag training sql not found. Please generate to train your warehouse"
+    ):
+        train_rag_on_warehouse(
+            warehouse=dummy_org_warehouse,
+        )
+
+    mock_retrieve_warehouse_credentials.assert_called_with(dummy_org_warehouse)
+    mock_retrieve_pgvector_credentials.assert_called_with(dummy_org_warehouse.org)
+
+
+@patch("ddpui.core.llm_service.train_vanna_on_warehouse")
+@patch(
+    "ddpui.utils.secretsmanager.retrieve_pgvector_credentials",
+)
+@patch(
+    "ddpui.utils.secretsmanager.retrieve_warehouse_credentials",
+)
+def test_train_rag_on_warehouse_success(
+    mock_retrieve_warehouse_credentials: Mock,
+    mock_retrieve_pgvector_credentials: Mock,
+    mock_train_vanna_on_warehouse: Mock,
+    dummy_org_warehouse: OrgWarehouse,
+):
+    mock_retrieve_pgvector_credentials.return_value = {
+        "username": "something-suer",
+        "host": "localhost",
+        "port": 5432,
+        "database": "some-db",
+        "password": "random-pass",
+    }
+    mock_retrieve_warehouse_credentials.return_value = "warehouse-creds"
+    mock_train_vanna_on_warehouse.return_value = "result"
+
+    OrgWarehouseRagTraining.objects.create(warehouse=dummy_org_warehouse, training_sql="train-sql")
+
+    dummy_org_warehouse.org.pgvector_creds = "pgvectorCreds-1234"
+
+    train_rag_on_warehouse(
+        warehouse=dummy_org_warehouse,
+    )
+
+    mock_train_vanna_on_warehouse.assert_called_once_with(
+        training_sql="train-sql",
+        warehouse_creds=mock_retrieve_warehouse_credentials.return_value,
+        pg_vector_creds=mock_retrieve_pgvector_credentials.return_value,
+        warehouse_type=dummy_org_warehouse.wtype,
+    )
+
+    assert OrgWarehouseRagTraining.objects.filter(warehouse=dummy_org_warehouse).count() == 1
+
+    rag_training = OrgWarehouseRagTraining.objects.filter(warehouse=dummy_org_warehouse).first()
+    assert rag_training.last_log == "result"
+    assert rag_training.last_trained_at is not None
+
+
+@patch("ddpui.core.warehousefunctions.generate_hash_id")
+@patch("ddpui.utils.secretsmanager.save_pgvector_credentials")
+def test_save_pgvector_creds_creation(
+    mock_save_pgvector_creds: Mock,
+    mock_generate_hash_id: Mock,
+    dummy_org_warehouse: OrgWarehouse,
+):
+    """
+    Check if the creds are being created/generated with right username & database names
+    """
+
+    mock_save_pgvector_creds.return_value = "saved-to-secret-name"
+    mock_generate_hash_id.return_value = "password"
+
+    assert dummy_org_warehouse.org.pgvector_creds is None
+
+    save_pgvector_creds(dummy_org_warehouse.org)
+
+    assert dummy_org_warehouse.org.pgvector_creds == "saved-to-secret-name"
+    args_list: _CallList = mock_save_pgvector_creds.call_args_list
+    assert "credentials" in args_list[0].kwargs
+    assert (
+        args_list[0].kwargs["credentials"]["username"] == dummy_org_warehouse.org.slug + "_vector"
+    )
+    assert (
+        args_list[0].kwargs["credentials"]["database"] == dummy_org_warehouse.org.slug + "_vector"
+    )
+    assert args_list[0].kwargs["credentials"]["password"] == "password"
+
+
+@patch("ddpui.core.warehousefunctions.generate_hash_id")
+@patch("ddpui.utils.secretsmanager.update_pgvector_credentials")
+def test_save_pgvector_creds_updation(
+    mock_update_pgvector_credentials: Mock,
+    mock_generate_hash_id: Mock,
+    dummy_org_warehouse: OrgWarehouse,
+):
+    """
+    Check if we are able to reset the creds with new password
+    """
+    dummy_org_warehouse.org.pgvector_creds = "creds-created-already"
+
+    mock_generate_hash_id.return_value = "new-password"
+
+    # without overwrite
+    save_pgvector_creds(dummy_org_warehouse.org)
+
+    mock_update_pgvector_credentials.assert_not_called()
+
+    # with overwrite
+    result = save_pgvector_creds(dummy_org_warehouse.org, overwrite=True)
+
+    mock_update_pgvector_credentials.assert_called_once()
+    assert result == dummy_org_warehouse.org.pgvector_creds
+
+    args_list: _CallList = mock_update_pgvector_credentials.call_args_list
+    assert "credentials" in args_list[0].kwargs
+    assert (
+        args_list[0].kwargs["credentials"]["username"] == dummy_org_warehouse.org.slug + "_vector"
+    )
+    assert (
+        args_list[0].kwargs["credentials"]["database"] == dummy_org_warehouse.org.slug + "_vector"
+    )
+    assert args_list[0].kwargs["credentials"]["password"] == "new-password"

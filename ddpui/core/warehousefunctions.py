@@ -114,7 +114,7 @@ def train_rag_on_warehouse(warehouse: OrgWarehouse) -> dict:
 
     # fetch the (pg)vector db creds for the org
     if not org.pgvector_creds:
-        raise Exception("Couldn't fund the pgvector creds for the org")
+        raise Exception("Couldn't find the pgvector creds for the org")
 
     pgvector_creds_dict = secretsmanager.retrieve_pgvector_credentials(org)
 
