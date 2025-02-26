@@ -24,11 +24,13 @@ from ddpui.api.warehouse_api import (
     get_warehouse_table_columns_spec,
     post_warehouse_prompt,
     post_save_warehouse_prompt_session,
+    post_warehouse_run_sql_query,
 )
 from ddpui.schemas.warehouse_api_schemas import (
     RequestorColumnSchema,
     AskWarehouseRequest,
     SaveLlmSessionRequest,
+    FetchSqlqueryResults,
 )
 from ddpui.utils.constants import LIMIT_ROWS_TO_SEND_TO_LLM
 from ddpui.models.llm import LlmSession, LlmSessionStatus, LlmAssistantType
@@ -417,3 +419,45 @@ def test_llm_data_analysis_save_and_overwrite_session(orguser):
         ).count()
         == 1
     )
+
+
+def test_post_warehouse_run_sql_query_no_warehouse(orguser):
+    """
+    Test the function when no warehouse found
+    """
+    request = mock_request(orguser)
+    payload = FetchSqlqueryResults(sql="sql-string", limit=10, offset=0)
+    with pytest.raises(HttpError, match="Please set up your warehouse first"):
+        post_warehouse_run_sql_query(request, payload)
+
+
+@patch("ddpui.api.warehouse_api.parse_sql_query_with_limit_offset")
+@patch("ddpui.datainsights.warehouse.warehouse_factory.WarehouseFactory.connect")
+@patch("ddpui.utils.secretsmanager.retrieve_warehouse_credentials")
+def test_post_warehouse_run_sql_query_success(
+    mock_retrieve_warehouse_credentials: Mock,
+    mock_warehouse_factory_connect: Mock,
+    mock_parse_sql: Mock,
+    orguser,
+):
+    """
+    Test the success of the function
+    """
+    request = mock_request(orguser)
+    warehouse = OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    payload = FetchSqlqueryResults(sql="sql-string", limit=10, offset=0)
+
+    mock_retrieve_warehouse_credentials.return_value = "creds"
+    mock_parse_sql.return_value = "some-sql"
+    mock_execute_sql = Mock()
+    mock_execute_sql.return_value = [{"col1": "val1", "col2": "val2"}]
+    mock_warehouse_factory_connect.return_value = Mock(execute=mock_execute_sql)
+
+    results = post_warehouse_run_sql_query(request, payload)
+
+    mock_retrieve_warehouse_credentials.assert_called_once_with(warehouse)
+    mock_warehouse_factory_connect.assert_called_once_with("creds", wtype=warehouse.wtype)
+    mock_execute_sql.assert_called_once()
+    mock_parse_sql.assert_called_once()
+    assert results == {"columns": ["col1", "col2"], "rows": [{"col1": "val1", "col2": "val2"}]}
