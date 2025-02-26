@@ -597,7 +597,7 @@ def post_train_rag_on_warehouse(request):
     train_rag_on_warehouse(warehouse=org_warehouse)
 
 
-@warehouse_router.post("/v1/table_data/run_sql", auth=auth.CustomAuthMiddleware())
+@warehouse_router.post("/table_data/run_sql", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def post_warehouse_run_sql_query(request, payload: FetchSqlqueryResults):
     """
