@@ -482,7 +482,7 @@ def post_feedback_llm_session(request, session_id: str, payload: LlmSessionFeedb
 @warehouse_router.get("/ask/sessions", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def get_warehouse_llm_analysis_sessions(
-    request, limit: int = 10, offset: int = 0, version: int = "v0"
+    request, limit: int = 10, offset: int = 0, version: str = "v0"
 ):
     """
     Get all saved sessions with a session_name for the user
