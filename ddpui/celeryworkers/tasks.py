@@ -1009,6 +1009,7 @@ def generate_sql_from_prompt_asked_on_warehouse(
     org = orguser.org
 
     # create a partial session
+    session_id = uuid.uuid4()
     llm_session = LlmSession.objects.create(
         request_uuid=self.request.id,
         orguser=orguser,
@@ -1016,7 +1017,7 @@ def generate_sql_from_prompt_asked_on_warehouse(
         session_status=LlmSessionStatus.RUNNING,
         session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
         version="v1",
-        session_id=uuid.uuid4(),
+        session_id=session_id,
     )
 
     try:
@@ -1031,7 +1032,7 @@ def generate_sql_from_prompt_asked_on_warehouse(
             {
                 "message": f"Generated the sql",
                 "status": TaskProgressStatus.COMPLETED,
-                "result": llm_session.request_meta,
+                "result": {"sql": sql, "session_id": session_id},
             }
         )
 
