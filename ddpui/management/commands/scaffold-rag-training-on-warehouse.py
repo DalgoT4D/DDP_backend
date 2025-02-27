@@ -74,7 +74,7 @@ class Command(BaseCommand):
         }
 
         create_db_stmt = f"""
-            CREATE DATABASE {org_pgvector_creds.database}
+            CREATE DATABASE "{org_pgvector_creds.database}"
             """
 
         create_user_stmt = f"""
@@ -82,9 +82,10 @@ class Command(BaseCommand):
             """
 
         grant_priveleges = f"""
-            GRANT ALL PRIVILEGES ON database {org_pgvector_creds.database} to {org_pgvector_creds.username}
+            GRANT ALL PRIVILEGES ON database "{org_pgvector_creds.database}" to {org_pgvector_creds.username}
             """
 
+        conn = None
         try:
             conn = psycopg2.connect(**master_pgvector_creds)
             conn.set_session(autocommit=True)
@@ -93,7 +94,8 @@ class Command(BaseCommand):
                 curs.execute(create_user_stmt)
                 curs.execute(grant_priveleges)
 
-            conn.close()
+            if conn:
+                conn.close()
             logger.info("Created the db and role with privelges")
         except Exception as err:
             conn.close()
@@ -122,7 +124,8 @@ class Command(BaseCommand):
             conn.close()
             logger.info(f"Created the vector extions in db {org_pgvector_creds.database}")
         except Exception as err:
-            conn.close()
+            if conn:
+                conn.close()
             logger.error("Failed to add extension to db : " + str(err))
 
     def setup_training_config_for_org(
