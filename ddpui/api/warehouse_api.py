@@ -389,6 +389,9 @@ def post_summarize_results_from_sql_and_prompt(
     if not session:
         raise HttpError(404, "Session not found")
 
+    if session.session_status == LlmSessionStatus.RUNNING:
+        raise HttpError(422, "Summarization still in progress")
+
     try:
         task = summarize_warehouse_results.apply_async(
             kwargs={

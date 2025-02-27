@@ -1023,6 +1023,7 @@ def generate_sql_from_prompt_asked_on_warehouse(
     try:
         sql = generate_sql_from_warehouse_rag(warehouse=org_warehouse, user_prompt=user_prompt)
 
+        llm_session.session_status = LlmSessionStatus.COMPLETED
         llm_session.request_meta = {"sql": sql}
         llm_session.save()
 
