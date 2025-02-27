@@ -78,11 +78,11 @@ class Command(BaseCommand):
             """
 
         create_user_stmt = f"""
-            CREATE USER {org_pgvector_creds.username} with encrypted password '{org_pgvector_creds.password}' 
+            CREATE USER "{org_pgvector_creds.username}" with encrypted password '{org_pgvector_creds.password}' 
             """
 
         grant_priveleges = f"""
-            GRANT ALL PRIVILEGES ON database "{org_pgvector_creds.database}" to {org_pgvector_creds.username}
+            GRANT ALL PRIVILEGES ON database "{org_pgvector_creds.database}" to "{org_pgvector_creds.username}"
             """
 
         conn = None
@@ -105,7 +105,7 @@ class Command(BaseCommand):
             CREATE EXTENSION vector
             """
         grant_public_schema_usage = f"""
-            GRANT ALL ON schema public TO {org_pgvector_creds.username};
+            GRANT ALL ON schema public TO "{org_pgvector_creds.username}";
         """
         try:
             master_pgvector_creds = {
