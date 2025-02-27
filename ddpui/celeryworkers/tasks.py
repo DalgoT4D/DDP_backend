@@ -1032,7 +1032,7 @@ def generate_sql_from_prompt_asked_on_warehouse(
             {
                 "message": f"Generated the sql",
                 "status": TaskProgressStatus.COMPLETED,
-                "result": {"sql": sql, "session_id": session_id},
+                "result": {"sql": sql, "session_id": str(session_id)},
             }
         )
 
