@@ -181,7 +181,7 @@ def check_if_rag_is_trained(
     """
     Checks if there any embeddings created
     """
-    response = dalgo_post(
+    result = dalgo_post(
         f"{LLM_SERVICE_API_URL}/api/vanna/train/check",
         headers=headers,
         json={
@@ -190,13 +190,6 @@ def check_if_rag_is_trained(
             "warehouse_type": warehouse_type,
         },
     )
-
-    task_id = response["task_id"]
-
-    if not task_id:
-        raise Exception("Failed to submit the task")
-
-    result = poll_llm_service_task(task_id)
 
     logger.info(f"Is rag trained ? : {result}")
 
