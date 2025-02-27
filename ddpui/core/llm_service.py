@@ -198,4 +198,6 @@ def check_if_rag_is_trained(
 
     result = poll_llm_service_task(task_id)
 
+    logger.info(f"Is rag trained ? : {result}")
+
     return result in ["true", "True", True]
