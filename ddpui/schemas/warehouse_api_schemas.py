@@ -40,6 +40,17 @@ class SaveLlmSessionRequest(Schema):
     old_session_id: str = None  # if overwrite is True, then this is required
 
 
+class SaveLlmSessionRequestv1(Schema):
+    """
+    Payload to save the llm analysis session for future reference
+    """
+
+    session_name: str
+    overwrite: bool = False
+    old_session_id: str = None  # if overwrite is True, then this is required
+    sql: str = None
+
+
 class LlmSessionFeedbackRequest(Schema):
     """
     Payload to give feedback for llm session

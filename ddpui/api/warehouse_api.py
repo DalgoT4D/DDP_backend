@@ -44,6 +44,7 @@ from ddpui.schemas.warehouse_api_schemas import (
     LlmSessionFeedbackRequest,
     AskWarehouseRequestv1,
     FetchSqlqueryResults,
+    SaveLlmSessionRequestv1,
 )
 from ddpui.models.llm import (
     LlmSession,
@@ -453,6 +454,59 @@ def post_save_warehouse_prompt_session(
     new_session.session_name = payload.session_name
     new_session.updated_by = orguser
     new_session.save()
+
+    return {"success": 1}
+
+
+@warehouse_router.post("/v1/ask/{session_id}/save", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse_data"])
+def post_save_warehouse_prompt_session_v1(
+    request, session_id: str, payload: SaveLlmSessionRequestv1
+):
+    """
+    Saving the llm session generated from warehouse prompt.
+    Saving here means attaching it to a name
+    You can also update the sql while saving/overwriting
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    curr_session = LlmSession.objects.filter(
+        session_id=session_id,
+        org=org,
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+    ).first()
+
+    if not curr_session:
+        raise HttpError(404, "Session not found")
+
+    if payload.overwrite and not payload.old_session_id:
+        raise HttpError(400, "session to overwrite is required")
+
+    if curr_session.session_status == LlmSessionStatus.RUNNING:
+        raise HttpError(400, "Session is still in progress")
+
+    # delete the old session if overwrite is true
+    if payload.overwrite:
+        old_session = LlmSession.objects.filter(
+            session_id=payload.old_session_id,
+            org=org,
+            session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+        ).first()
+        # since its overwriting the old session, we need to keep/persist the orguser (created_by)
+        curr_session.orguser = old_session.orguser
+
+        if old_session:
+            old_session.delete()
+            logger.info(f"Deleted the old session llm analysis {payload.old_session_id}")
+
+        if not old_session:
+            if payload.sql:
+                curr_session.request_meta = {"sql": payload.sql}
+
+    curr_session.session_name = payload.session_name
+    curr_session.updated_by = orguser
+    curr_session.save()
 
     return {"success": 1}
 
