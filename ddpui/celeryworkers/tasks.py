@@ -1030,7 +1030,7 @@ def generate_sql_from_prompt_asked_on_warehouse(
 
         taskprogress.add(
             {
-                "message": f"Generated the sql",
+                "message": "Generated the sql",
                 "status": TaskProgressStatus.COMPLETED,
                 "result": {"sql": sql, "session_id": str(session_id)},
             }
@@ -1045,6 +1045,9 @@ def generate_sql_from_prompt_asked_on_warehouse(
                 "result": None,
             }
         )
+        llm_session.session_status = LlmSessionStatus.FAILED
+        # llm_session.response = { "error": str(err) } # where do we put this?
+        llm_session.save()
         return
 
 
