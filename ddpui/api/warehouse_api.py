@@ -361,7 +361,9 @@ def post_warehouse_generate_sql(request, payload: AskWarehouseRequestv1):
         return {"request_uuid": task.id}
     except Exception as error:
         logger.exception(error)
-        raise HttpError(400, "failed to summarize warehouse results") from error
+        raise HttpError(
+            400, "failed to enqueue celery task generate_sql_from_prompt_asked_on_warehouse"
+        ) from error
 
 
 @warehouse_router.post("v1/ask/{session_id}/summarize", auth=auth.CustomAuthMiddleware())
@@ -648,7 +650,11 @@ def post_train_rag_on_warehouse(request):
     if not org_warehouse:
         raise HttpError(404, "Please set up your warehouse first")
 
-    train_rag_on_warehouse(warehouse=org_warehouse)
+    try:
+        train_rag_on_warehouse(warehouse=org_warehouse)
+    except Exception as err:
+        logger.error(err)
+        raise HttpError(500, str(err))
 
 
 @warehouse_router.post("/table_data/run_sql", auth=auth.CustomAuthMiddleware())
