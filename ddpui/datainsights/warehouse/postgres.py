@@ -5,7 +5,7 @@ from sqlalchemy.engine import create_engine
 from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy import inspect
 from sqlalchemy.types import NullType
-from sqlalchemy.sql.expression import table, TableClause, select, Select, ColumnClause, column, text
+from sqlalchemy.sql.expression import TableClause, select, Select, ColumnClause, column, text
 
 from ddpui.datainsights.insights.insight_interface import MAP_TRANSLATE_TYPES
 from ddpui.datainsights.warehouse.warehouse_interface import Warehouse
@@ -13,6 +13,8 @@ from ddpui.datainsights.warehouse.warehouse_interface import WarehouseType
 
 
 class PostgresClient(Warehouse):
+    """PG implementation of the Warehouse interface"""
+
     def __init__(self, creds: dict):
         """
         Establish connection to the postgres database using sqlalchemy engine
@@ -75,17 +77,17 @@ class PostgresClient(Warehouse):
     def get_table_columns(self, db_schema: str, db_table: str) -> dict:
         """Fetch columns of a table; also send the translated col data type"""
         res = []
-        for column in self.inspect_obj.get_columns(table_name=db_table, schema=db_schema):
+        for column_ in self.inspect_obj.get_columns(table_name=db_table, schema=db_schema):
             res.append(
                 {
-                    "name": column["name"],
-                    "data_type": str(column["type"]),
+                    "name": column_["name"],
+                    "data_type": str(column_["type"]),
                     "translated_type": (
                         None
-                        if isinstance(column["type"], NullType)
-                        else MAP_TRANSLATE_TYPES[column["type"].python_type]
+                        if isinstance(column_["type"], NullType)
+                        else MAP_TRANSLATE_TYPES[column_["type"].python_type]
                     ),
-                    "nullable": column["nullable"],
+                    "nullable": column_["nullable"],
                 }
             )
         return res
@@ -93,9 +95,9 @@ class PostgresClient(Warehouse):
     def get_col_python_type(self, db_schema: str, db_table: str, column_name: str):
         """Fetch python type of a column"""
         columns = self.get_table_columns(db_schema, db_table)
-        for column in columns:
-            if column["name"] == column_name:
-                return column["type"].python_type
+        for column_ in columns:
+            if column_["name"] == column_name:
+                return column_["type"].python_type
         return None
 
     def get_wtype(self):

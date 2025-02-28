@@ -32,7 +32,7 @@ def get_warehouse_data(request, data_type: str, **kwargs):
             org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).first()
 
         data = []
-        client = dbtautomation_service._get_wclient(org_warehouse)
+        client = dbtautomation_service.get_wclient(org_warehouse)
         if data_type == "tables":
             data = client.get_tables(kwargs["schema_name"])
         elif data_type == "schemas":
@@ -232,9 +232,7 @@ def generate_sql_from_warehouse_rag(warehouse: OrgWarehouse, user_prompt: str) -
 
 
 def parse_sql_query_with_limit_offset(sql_query, limit, offset):
-    """
-    Parse the SQL query and add LIMIT and OFFSET clauses.
-    """
+    """Parse the SQL query and add LIMIT and OFFSET clauses."""
     parsed = sqlparse.parse(sql_query)
     statement = parsed[0]
 

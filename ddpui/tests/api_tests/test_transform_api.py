@@ -112,13 +112,13 @@ def mock_setup_sync_sources(orgdbt: OrgDbt, warehouse: OrgWarehouse):
     with patch.object(TaskProgress, "__init__", return_value=None), patch.object(
         TaskProgress, "add", return_value=Mock()
     ) as add_progress_mock, patch(
-        "ddpui.core.dbtautomation_service._get_wclient",
+        "ddpui.core.dbtautomation_service.get_wclient",
     ) as get_wclient_mock:
         mock_instance = Mock()
         mock_instance.get_schemas.return_value = SCHEMAS_TABLES.keys()
         mock_instance.get_tables.side_effect = lambda schema: SCHEMAS_TABLES[schema]
 
-        # Make _get_wclient return the mock instance
+        # Make get_wclient return the mock instance
         get_wclient_mock.return_value = mock_instance
 
         assert OrgDbtModel.objects.filter(type="source", orgdbt=orgdbt).count() == 0
@@ -137,7 +137,7 @@ def mock_setup_sync_sources(orgdbt: OrgDbt, warehouse: OrgWarehouse):
 def mock_create_dbt_model_operation(orguser: OrgUser, payload: CreateDbtModelPayload):
     request = mock_request(orguser)
     with patch(
-        "ddpui.core.dbtautomation_service._get_wclient",
+        "ddpui.core.dbtautomation_service.get_wclient",
     ) as get_wclient_mock:
         mock_instance = Mock()
         mock_instance.name = "postgres"
@@ -513,7 +513,7 @@ def test_post_construct_dbt_model_operation_failure_validate_input(orguser: OrgU
     # single input op
     request = mock_request(orguser)
     with patch(
-        "ddpui.core.dbtautomation_service._get_wclient",
+        "ddpui.core.dbtautomation_service.get_wclient",
     ) as get_wclient_mock:
         mock_instance = Mock()
         mock_instance.name = "postgres"
@@ -535,7 +535,7 @@ def test_post_construct_dbt_model_operation_failure_validate_input(orguser: OrgU
     payload.input_uuid = str(source.uuid)
 
     with patch(
-        "ddpui.core.dbtautomation_service._get_wclient",
+        "ddpui.core.dbtautomation_service.get_wclient",
     ) as get_wclient_mock:
         mock_instance = Mock()
         mock_instance.name = "postgres"
@@ -602,7 +602,7 @@ def test_post_construct_dbt_model_operation_success_chain1(orguser: OrgUser, tmp
 
     request = mock_request(orguser)
     with patch(
-        "ddpui.core.dbtautomation_service._get_wclient",
+        "ddpui.core.dbtautomation_service.get_wclient",
     ) as get_wclient_mock:
         mock_instance = Mock()
         mock_instance.name = "postgres"
@@ -713,7 +713,7 @@ def test_post_construct_dbt_model_operation_success_chain2(orguser: OrgUser, tmp
 
     request = mock_request(orguser)
     with patch(
-        "ddpui.core.dbtautomation_service._get_wclient",
+        "ddpui.core.dbtautomation_service.get_wclient",
     ) as get_wclient_mock:
         mock_instance = Mock()
         mock_instance.name = "postgres"
@@ -870,7 +870,7 @@ def test_post_save_model_success_save_chained_model(orguser: OrgUser, tmp_path):
         name="output_model", display_name="Output", dest_schema="intermediate"
     )
     with patch(
-        "ddpui.core.dbtautomation_service._get_wclient",
+        "ddpui.core.dbtautomation_service.get_wclient",
     ) as get_wclient_mock:
         mock_instance = Mock()
         mock_instance.name = "postgres"
@@ -951,7 +951,7 @@ def test_get_dbt_project_DAG(orguser: OrgUser, tmp_path):
     response2 = mock_create_dbt_model_operation(orguser, payload)
 
     with patch(
-        "ddpui.core.dbtautomation_service._get_wclient",
+        "ddpui.core.dbtautomation_service.get_wclient",
     ) as get_wclient_mock:
         mock_instance = Mock()
         mock_instance.name = "postgres"

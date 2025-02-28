@@ -146,13 +146,13 @@ def test_sync_sources_failed_to_connect_to_warehouse(orguser: OrgUser, tmp_path)
     with patch.object(TaskProgress, "__init__", return_value=None), patch.object(
         TaskProgress, "add", return_value=Mock()
     ) as add_progress_mock, patch("os.getenv", return_value=tmp_path), patch(
-        "ddpui.core.dbtautomation_service._get_wclient",
-        Mock(side_effect=Exception("_get_wclient failed")),
+        "ddpui.core.dbtautomation_service.get_wclient",
+        Mock(side_effect=Exception("get_wclient failed")),
     ) as get_wclient_mock:
         with pytest.raises(Exception) as exc:
             sync_sources_for_warehouse(orgdbt.id, warehouse.id, "task-id", "hashkey")
 
-        assert exc.value.args[0] == f"Error syncing sources: _get_wclient failed"
+        assert exc.value.args[0] == f"Error syncing sources: get_wclient failed"
         add_progress_mock.assert_has_calls(
             [
                 call(
@@ -163,7 +163,7 @@ def test_sync_sources_failed_to_connect_to_warehouse(orguser: OrgUser, tmp_path)
                 ),
                 call(
                     {
-                        "message": "Error syncing sources: _get_wclient failed",
+                        "message": "Error syncing sources: get_wclient failed",
                         "status": "failed",
                     }
                 ),
@@ -193,7 +193,7 @@ def test_sync_sources_failed_to_fetch_schemas(orguser: OrgUser, tmp_path):
     with patch.object(TaskProgress, "__init__", return_value=None), patch.object(
         TaskProgress, "add", return_value=Mock()
     ) as add_progress_mock, patch("os.getenv", return_value=tmp_path), patch(
-        "ddpui.core.dbtautomation_service._get_wclient",
+        "ddpui.core.dbtautomation_service.get_wclient",
     ) as get_wclient_mock, patch(
         "os.getenv", return_value=tmp_path
     ):
@@ -202,7 +202,7 @@ def test_sync_sources_failed_to_fetch_schemas(orguser: OrgUser, tmp_path):
         # Make get_schemas raise an exception when it's called
         mock_instance.get_schemas.side_effect = Exception("get_schemas failed")
 
-        # Make _get_wclient return the mock instance
+        # Make get_wclient return the mock instance
         get_wclient_mock.return_value = mock_instance
 
         with pytest.raises(Exception) as exc:
@@ -268,13 +268,13 @@ def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
     with patch.object(TaskProgress, "__init__", return_value=None), patch.object(
         TaskProgress, "add", return_value=Mock()
     ) as add_progress_mock, patch("os.getenv", return_value=tmp_path), patch(
-        "ddpui.core.dbtautomation_service._get_wclient",
+        "ddpui.core.dbtautomation_service.get_wclient",
     ) as get_wclient_mock:
         mock_instance = Mock()
         mock_instance.get_schemas.return_value = SCHEMAS_TABLES.keys()
         mock_instance.get_tables.side_effect = lambda schema: SCHEMAS_TABLES[schema]
 
-        # Make _get_wclient return the mock instance
+        # Make get_wclient return the mock instance
         get_wclient_mock.return_value = mock_instance
 
         assert OrgDbtModel.objects.filter(type="source", orgdbt=orgdbt).count() == 0

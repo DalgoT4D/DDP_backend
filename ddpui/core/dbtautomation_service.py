@@ -109,7 +109,7 @@ OPERATIONS_DICT_SQL = {
 logger = CustomLogger("ddpui")
 
 
-def _get_wclient(org_warehouse: OrgWarehouse):
+def get_wclient(org_warehouse: OrgWarehouse):
     """Connect to a warehouse and return the client"""
     credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
     if org_warehouse.wtype == "postgres":
@@ -150,7 +150,7 @@ def create_or_update_dbt_model_in_project(
     Call the merge operation to create sql model file on disk
     """
 
-    wclient = _get_wclient(org_warehouse)
+    wclient = get_wclient(org_warehouse)
 
     operations = []
     input_models = []
@@ -219,7 +219,7 @@ def sync_sources_in_schema(
     """
     Sync sources from a given schema to dbt.
     """
-    warehouse_client = _get_wclient(org_warehouse)
+    warehouse_client = get_wclient(org_warehouse)
 
     sources_file_path = sync_sources(
         config={"source_schema": schema_name, "source_name": source_name},
@@ -238,7 +238,7 @@ def read_dbt_sources_in_project(orgdbt: OrgDbt):
 
 def get_table_columns(org_warehouse: OrgWarehouse, dbtmodel: OrgDbtModel):
     """Get the columns of a table in a warehouse"""
-    wclient = _get_wclient(org_warehouse)
+    wclient = get_wclient(org_warehouse)
     return wclient.get_table_columns(dbtmodel.schema, dbtmodel.name)
 
 
@@ -248,7 +248,7 @@ def get_output_cols_for_operation(org_warehouse: OrgWarehouse, op_type: str, con
     this only generates the sql and fetches the output col.
     Model is neither being run nor saved to the disk
     """
-    wclient = _get_wclient(org_warehouse)
+    wclient = get_wclient(org_warehouse)
     operations = [{"type": op_type, "config": config}]
     _, output_cols = merge_operations_sql(_get_merge_operation_config(operations), wclient)
     return output_cols
@@ -320,7 +320,7 @@ def sync_sources_for_warehouse(
     dbt_project = dbtProject(Path(DbtProjectManager.get_dbt_project_dir(org_dbt)))
 
     try:
-        wclient = _get_wclient(org_warehouse)
+        wclient = get_wclient(org_warehouse)
 
         for schema in wclient.get_schemas():
             taskprogress.add(
@@ -421,11 +421,11 @@ def sync_sources_for_warehouse(
 
 def warehouse_datatypes(org_warehouse: OrgWarehouse):
     """Get the datatypes of a table in a warehouse"""
-    wclient = _get_wclient(org_warehouse)
+    wclient = get_wclient(org_warehouse)
     return wclient.get_column_data_types()
 
 
 def json_columnspec(warehouse: OrgWarehouse, source_schema, input_name, json_column):
     """Get json keys of a table in warehouse"""
-    wclient = _get_wclient(warehouse)
+    wclient = get_wclient(warehouse)
     return wclient.get_json_columnspec(source_schema, input_name, json_column)

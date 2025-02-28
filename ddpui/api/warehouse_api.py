@@ -1,16 +1,15 @@
 import threading
-from typing import List
 import json
 import csv
 from io import StringIO
-import sqlparse
-from sqlparse.tokens import Keyword, Number, Token
 import uuid
+import sqlparse
+from sqlparse.tokens import Keyword, Token
 import sqlalchemy
-from ninja import Router
-from ninja.errors import HttpError
 import sqlalchemy.exc
 from sqlalchemy import text
+from ninja import Router
+from ninja.errors import HttpError
 
 from django.http import StreamingHttpResponse
 from ddpui import auth
@@ -52,7 +51,6 @@ from ddpui.models.llm import (
     LlmAssistantType,
 )
 from ddpui.utils import secretsmanager
-from ddpui.utils.helpers import convert_to_standard_types
 from ddpui.utils.constants import LIMIT_ROWS_TO_SEND_TO_LLM
 from ddpui.utils.redis_client import RedisClient
 
@@ -115,7 +113,7 @@ def get_table_count(request, schema_name: str, table_name: str):
         org_user = request.orguser
         org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).first()
 
-        client = dbtautomation_service._get_wclient(org_warehouse)
+        client = dbtautomation_service.get_wclient(org_warehouse)
         total_rows = client.get_total_rows(schema_name, table_name)
         return {"total_rows": total_rows}
     except Exception as e:
@@ -538,9 +536,7 @@ def post_feedback_llm_session(request, session_id: str, payload: LlmSessionFeedb
 def get_warehouse_llm_analysis_sessions(
     request, limit: int = 10, offset: int = 0, version: str = "v0"
 ):
-    """
-    Get all saved sessions with a session_name for the user
-    """
+    """Get all saved sessions with a session_name for the user"""
     orguser: OrgUser = request.orguser
     org = orguser.org
 
@@ -658,9 +654,7 @@ def post_train_rag_on_warehouse(request):
 @warehouse_router.post("/table_data/run_sql", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def post_warehouse_run_sql_query(request, payload: FetchSqlqueryResults):
-    """
-    Runs a SQL query against the warehouse and returns the results
-    """
+    """Runs a SQL query against the warehouse and returns the results"""
     orguser: OrgUser = request.orguser
     org = orguser.org
 

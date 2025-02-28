@@ -540,20 +540,20 @@ def test_fetch_warehouse_tables(
     assert result == assert_with_result
 
 
-@patch("ddpui.core.dbtautomation_service._get_wclient")
-def test_get_warehouse_data(mock_get_wclient: Mock, dummy_org_warehouse: OrgWarehouse):
+@patch("ddpui.core.dbtautomation_service.get_wclient")
+def test_get_warehouse_data(mockget_wclient: Mock, dummy_org_warehouse: OrgWarehouse):
     """
     Test the function against various kwargs
     """
     mock_get_tables = Mock()
-    mock_get_wclient.return_value = Mock(get_tables=mock_get_tables)
+    mockget_wclient.return_value = Mock(get_tables=mock_get_tables)
     kwargs = {"org_warehouse": dummy_org_warehouse}
 
     # tables
     with pytest.raises(HttpError):
         get_warehouse_data(Mock(), "tables", **kwargs)
 
-    mock_get_wclient.assert_called_once()
+    mockget_wclient.assert_called_once()
 
     kwargs["schema_name"] = "some-schema"
 
@@ -563,7 +563,7 @@ def test_get_warehouse_data(mock_get_wclient: Mock, dummy_org_warehouse: OrgWare
 
     # schemas
     mock_get_schemas = Mock()
-    mock_get_wclient.return_value = Mock(get_schemas=mock_get_schemas)
+    mockget_wclient.return_value = Mock(get_schemas=mock_get_schemas)
 
     get_warehouse_data(Mock(), "schemas", **kwargs)
 
@@ -571,7 +571,7 @@ def test_get_warehouse_data(mock_get_wclient: Mock, dummy_org_warehouse: OrgWare
 
     # table_columns
     mock_get_table_columns = Mock()
-    mock_get_wclient.return_value = Mock(get_table_columns=mock_get_table_columns)
+    mockget_wclient.return_value = Mock(get_table_columns=mock_get_table_columns)
 
     with pytest.raises(HttpError):
         get_warehouse_data(Mock(), "table_columns", **kwargs)
@@ -584,7 +584,7 @@ def test_get_warehouse_data(mock_get_wclient: Mock, dummy_org_warehouse: OrgWare
 
     # table data
     mock_get_table_data = Mock()
-    mock_get_wclient.return_value = Mock(get_table_data=mock_get_table_data)
+    mockget_wclient.return_value = Mock(get_table_data=mock_get_table_data)
 
     kwargs["limit"] = 10
     kwargs["page"] = 2

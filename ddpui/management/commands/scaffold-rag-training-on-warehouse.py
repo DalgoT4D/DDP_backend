@@ -1,9 +1,10 @@
 import os
 from dotenv import load_dotenv
 from django.core.management.base import BaseCommand
+import psycopg2
 
 from ddpui.models.org import Org
-from ddpui.models.org import OrgWarehouse, OrgWarehouseRagTraining
+from ddpui.models.org import OrgWarehouse
 from ddpui.utils import secretsmanager
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.core.warehousefunctions import (
@@ -11,20 +12,14 @@ from ddpui.core.warehousefunctions import (
     scaffold_rag_training,
     train_rag_on_warehouse,
 )
-from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
-from ddpui.datainsights.warehouse.warehouse_interface import WarehouseType
 from ddpui.schemas.warehouse_api_schemas import WarehouseRagTrainConfig, PgVectorCreds
-from sqlalchemy.sql.expression import text
-import psycopg2
 
 logger = CustomLogger("ddpui")
 load_dotenv()
 
 
 class Command(BaseCommand):
-    """
-    This script lets us scaffold various stuff for orgs to use the rag on warehouse for sql generation
-    """
+    """This script lets us scaffold various stuff for orgs to use the rag on warehouse for sql generation"""
 
     help = "Estimate time for queued runs"
 
@@ -135,9 +130,7 @@ class Command(BaseCommand):
         exclude_schemas: list[str] = [],
         exclude_columns: list[str] = [],
     ):
-        """
-        Creates the OrgWarehouseRagTraining for the org
-        """
+        """Creates the OrgWarehouseRagTraining for the org"""
         scaffold_rag_training(
             warehouse,
             config=WarehouseRagTrainConfig(
@@ -148,9 +141,7 @@ class Command(BaseCommand):
         )
 
     def train_the_warehouse(self, warehouse: OrgWarehouse):
-        """
-        Use llm service and train the warehouse to generate embeddings for the warehouse training plan
-        """
+        """Use llm service and train the warehouse to generate embeddings for the warehouse training plan"""
         return train_rag_on_warehouse(warehouse)
 
     def handle(self, *args, **options):
