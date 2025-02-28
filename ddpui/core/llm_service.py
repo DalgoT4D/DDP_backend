@@ -167,16 +167,21 @@ def check_if_rag_is_trained(
     pg_vector_creds: dict, warehouse_creds: dict, warehouse_type: str
 ) -> bool:
     """Checks if there any embeddings created"""
-    result = dalgo_post(
-        f"{LLM_SERVICE_API_URL}/api/vanna/train/check",
-        headers=headers,
-        json={
-            "warehouse_creds": warehouse_creds,
-            "pg_vector_creds": pg_vector_creds,
-            "warehouse_type": warehouse_type,
-        },
-    )
+    try:
+        result = dalgo_post(
+            f"{LLM_SERVICE_API_URL}/api/vanna/train/check",
+            headers=headers,
+            json={
+                "warehouse_creds": warehouse_creds,
+                "pg_vector_creds": pg_vector_creds,
+                "warehouse_type": warehouse_type,
+            },
+        )
 
-    logger.info(f"Is rag trained ? : {result}")
+        logger.info(f"Is rag trained ? : {result}")
 
-    return result in ["true", "True", True]
+        return result in ["true", "True", True]
+
+    except Exception as error:
+        logger.error(error)
+        return False
