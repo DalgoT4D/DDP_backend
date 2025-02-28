@@ -251,7 +251,7 @@ def test_scaffold_rag_training_create_or_update_test(
     assert rag_training.training_sql == mock_generate_training_sql.return_value
     assert rag_training.exclude.get("schemas") == ["schema1"]
     assert rag_training.exclude.get("tables") == ["table1"]
-    assert rag_training.exclude.get("columns") == None
+    assert rag_training.exclude.get("columns") is None
 
 
 @patch("ddpui.datainsights.warehouse.warehouse_factory.WarehouseFactory.connect")

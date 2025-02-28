@@ -67,7 +67,6 @@ from ddpui.ddpprefect.prefect_service import (
     get_long_running_flow_runs,
 )
 from ddpui.ddpprefect import DBTCLIPROFILE
-from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.core.warehousefunctions import (
     generate_sql_from_warehouse_rag,
     run_sql_and_fetch_results_from_warehouse,
