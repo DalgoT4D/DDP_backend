@@ -685,3 +685,24 @@ def post_warehouse_run_sql_query(request, payload: FetchSqlqueryResults):
     except Exception as err:
         logger.error(err)
         raise HttpError(500, str(err))
+
+
+@warehouse_router.post("/row_count/sql/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_warehouse_data"])
+def post_row_count_sql(request, payload: FetchSqlqueryResults):
+    """Returns the row count of the result of the given SQL query"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    try:
+        subquery = f"({payload.sql}) AS subquery"
+        count_query = text(f"SELECT COUNT(1) AS c FROM {subquery}")
+        results = run_sql_and_fetch_results_from_warehouse(warehouse=org_warehouse, sql=count_query)
+        return {"row_count": results[0]["c"]}
+    except Exception as err:
+        logger.error(err)
+        raise HttpError(500, str(err))
