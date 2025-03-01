@@ -235,6 +235,9 @@ def generate_sql_from_warehouse_rag(warehouse: OrgWarehouse, user_prompt: str) -
 
 def parse_sql_query_with_limit_offset(sql_query, limit, offset):
     """Parse the SQL query and add LIMIT and OFFSET clauses."""
+    if sql_query.strip().endswith(";"):
+        sql_query = sql_query.strip()[:-1]
+
     parsed = sqlparse.parse(sql_query)
     statement = parsed[0]
 
