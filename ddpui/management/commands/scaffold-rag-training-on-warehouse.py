@@ -18,6 +18,34 @@ logger = CustomLogger("ddpui")
 load_dotenv()
 
 
+def run_postgres_commands(commands: list, database: str):
+    """Runs a list of postgres commands on the given database"""
+    try:
+        conn = psycopg2.connect(
+            user=os.getenv("PGVECTOR_MASTER_USER"),
+            password=os.getenv("PGVECTOR_MASTER_PASSWORD"),
+            host=os.getenv("PGVECTOR_HOST"),
+            port=os.getenv("PGVECTOR_PORT"),
+            database=database,
+        )
+        conn.set_session(autocommit=True)
+        with conn.cursor() as curs:
+            for command in commands:
+                curs.execute(command)
+        conn.close()
+    except Exception as err:
+        conn.close()
+        logger.error(f"Error while running the command: {str(err)}")
+        raise err
+
+
+def get_pgvector_creds(org: Org):
+    """Returns the pgvector creds for the org"""
+    save_pgvector_creds(org, overwrite=True)
+    org_pgvector_creds_dict = secretsmanager.retrieve_pgvector_credentials(org)
+    return PgVectorCreds(**org_pgvector_creds_dict)
+
+
 class Command(BaseCommand):
     """This script lets us scaffold various stuff for orgs to use the rag on warehouse for sql generation"""
 
@@ -47,102 +75,9 @@ class Command(BaseCommand):
             help="Schemas to exclude while training",
             default=[],
         )
-
-    def create_vector_db_for_org(self, org: Org):
-        """
-        Creates postgres db (with pgvector extension) for the org and stores the credentials in secrets manager
-        Update the reference in Org for the secret name
-        """
-        load_dotenv()
-
-        logger.info("Creating vector db for the org")
-        save_pgvector_creds(org, overwrite=True)
-        org_pgvector_creds_dict = secretsmanager.retrieve_pgvector_credentials(org)
-        org_pgvector_creds = PgVectorCreds(**org_pgvector_creds_dict)
-
-        master_pgvector_creds = {
-            "user": os.getenv("PGVECTOR_MASTER_USER"),
-            "password": os.getenv("PGVECTOR_MASTER_PASSWORD"),
-            "host": os.getenv("PGVECTOR_HOST"),
-            "port": os.getenv("PGVECTOR_PORT"),
-            "database": "postgres",
-        }
-
-        create_db_stmt = f"""
-            CREATE DATABASE "{org_pgvector_creds.database}"
-            """
-
-        create_user_stmt = f"""
-            CREATE USER "{org_pgvector_creds.username}" with encrypted password '{org_pgvector_creds.password}' 
-            """
-
-        grant_priveleges = f"""
-            GRANT ALL PRIVILEGES ON database "{org_pgvector_creds.database}" to "{org_pgvector_creds.username}"
-            """
-
-        conn = None
-        try:
-            conn = psycopg2.connect(**master_pgvector_creds)
-            conn.set_session(autocommit=True)
-            with conn.cursor() as curs:
-                curs.execute(create_db_stmt)
-                curs.execute(create_user_stmt)
-                curs.execute(grant_priveleges)
-
-            if conn:
-                conn.close()
-            logger.info("Created the db and role with privelges")
-        except Exception as err:
-            conn.close()
-            logger.error("Failed to create or role or priveleges : " + str(err))
-
-        create_vector_ext_statement = f"""
-            CREATE EXTENSION vector
-            """
-        grant_public_schema_usage = f"""
-            GRANT ALL ON schema public TO "{org_pgvector_creds.username}";
-        """
-        try:
-            master_pgvector_creds = {
-                "user": os.getenv("PGVECTOR_MASTER_USER"),
-                "password": os.getenv("PGVECTOR_MASTER_PASSWORD"),
-                "host": os.getenv("PGVECTOR_HOST"),
-                "port": os.getenv("PGVECTOR_PORT"),
-                "database": org_pgvector_creds.database,
-            }
-            conn = psycopg2.connect(**master_pgvector_creds)
-            conn.set_session(autocommit=True)
-            with conn.cursor() as curs:
-                curs.execute(create_vector_ext_statement)
-                curs.execute(grant_public_schema_usage)
-
-            conn.close()
-            logger.info(f"Created the vector extions in db {org_pgvector_creds.database}")
-        except Exception as err:
-            if conn:
-                conn.close()
-            logger.error("Failed to add extension to db : " + str(err))
-
-    def setup_training_config_for_org(
-        self,
-        warehouse: OrgWarehouse,
-        exclude_tables: list[str] = [],
-        exclude_schemas: list[str] = [],
-        exclude_columns: list[str] = [],
-    ):
-        """Creates the OrgWarehouseRagTraining for the org"""
-        scaffold_rag_training(
-            warehouse,
-            config=WarehouseRagTrainConfig(
-                exclude_schemas=exclude_schemas,
-                exclude_columns=exclude_columns,
-                exclude_tables=exclude_tables,
-            ),
+        parser.add_argument(
+            "--reset", action="store_true", help="Drops the pgvector database and deletes the user"
         )
-
-    def train_the_warehouse(self, warehouse: OrgWarehouse):
-        """Use llm service and train the warehouse to generate embeddings for the warehouse training plan"""
-        return train_rag_on_warehouse(warehouse)
 
     def handle(self, *args, **options):
         orgs = Org.objects.all()
@@ -151,30 +86,112 @@ class Command(BaseCommand):
 
         # create training plan of the warehouse
         for org in orgs:
-            warehouse = OrgWarehouse.objects.filter(org=org).first()
 
+            warehouse = OrgWarehouse.objects.filter(org=org).first()
             if not warehouse:
                 logger.error("Looks like warehouse is not setup for the org; skipping")
                 continue
 
-            self.create_vector_db_for_org(org)
+            # ========== step 1 ==========
+            logger.info("***************** fetching pgvector creds for the org *****************")
+            org_pgvector_creds = get_pgvector_creds(org)
 
+            if options["reset"]:
+                logger.info(
+                    "***************** Dropping the vector db and deleting the user *****************"
+                )
+                try:
+                    run_postgres_commands(
+                        [
+                            f"""
+                            REVOKE ALL PRIVILEGES ON SCHEMA public FROM "{org_pgvector_creds.username}"
+                            """,
+                            f"""
+                            REVOKE ALL PRIVILEGES ON DATABASE "{org_pgvector_creds.database}" FROM "{org_pgvector_creds.username}"
+                            """,
+                            f"""
+                            DROP DATABASE IF EXISTS "{org_pgvector_creds.database}"
+                            """,
+                            f"""
+                            DROP USER IF EXISTS "{org_pgvector_creds.username}"
+                            """,
+                        ],
+                        database="postgres",
+                    )
+                except Exception:
+                    pass
+
+                continue
+
+            # ========== step 2 ==========
             logger.info(
-                f"Setting up training plan with & excluding schemas: {options['exclude_schemas']} , tables: {options['exclude_tables']}, columns: {options['exclude_columns']}"
+                "***************** Creating vector db with user for the org *****************"
             )
+            try:
+                run_postgres_commands(
+                    [
+                        f"""
+                        CREATE DATABASE "{org_pgvector_creds.database}"
+                        """,
+                        f"""
+                        CREATE USER "{org_pgvector_creds.username}" 
+                        WITH ENCRYPTED PASSWORD '{org_pgvector_creds.password}' 
+                        """,
+                        f"""
+                        GRANT ALL PRIVILEGES 
+                        ON DATABASE "{org_pgvector_creds.database}" 
+                        TO "{org_pgvector_creds.username}"
+                        """,
+                    ],
+                    database="postgres",
+                )
+            except Exception:
+                return
 
-            self.setup_training_config_for_org(
+            # ========== step 3 ==========
+            logger.info(
+                "***************** installing the VECTOR extension on the db *****************"
+            )
+            try:
+                run_postgres_commands(
+                    [
+                        """
+                        CREATE EXTENSION vector
+                        """,
+                        f"""
+                        GRANT ALL ON SCHEMA public TO "{org_pgvector_creds.username}";
+                        """,
+                    ],
+                    database=org_pgvector_creds.database,
+                )
+            except Exception:
+                return
+
+            # ========== step 4 ==========
+            logger.info(
+                f"""***************** Setting up training plan with & excluding *****************
+                    ***************** schemas: {options['exclude_schemas']}     ***************** 
+                    ***************** tables: {options['exclude_tables']}       *****************
+                    ***************** columns: {options['exclude_columns']}     *****************
+                """
+            )
+            scaffold_rag_training(
                 warehouse,
-                exclude_columns=options["exclude_columns"],
-                exclude_schemas=options["exclude_schemas"],
-                exclude_tables=options["exclude_tables"],
+                config=WarehouseRagTrainConfig(
+                    exclude_schemas=options["exclude_schemas"],
+                    exclude_tables=options["exclude_tables"],
+                    exclude_columns=options["exclude_columns"],
+                ),
+            )
+            logger.info(
+                f"***************** Finished setting up training config and traning sql for org {org.slug} *****************"
             )
 
-            logger.info(f"Finished setting up training config and traning sql for org {org.slug}")
+            # ========== step 5 ==========
+            logger.info(
+                "***************** Starting training according to the plan created above *****************"
+            )
+            result = train_rag_on_warehouse(warehouse)
 
-            logger.info("Starting training according to the plan created above")
-
-            result = self.train_the_warehouse(warehouse=warehouse)
-
-            logger.info("Finished training")
+            logger.info("***************** Finished training *****************")
             logger.info(result)
