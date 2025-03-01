@@ -5,6 +5,7 @@ from sqlalchemy.engine import create_engine
 from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy import inspect
 from sqlalchemy.types import NullType
+from sqlalchemy.sql.expression import TableClause, select, Select, ColumnClause, column, text
 
 from ddpui.datainsights.insights.insight_interface import MAP_TRANSLATE_TYPES
 from ddpui.datainsights.warehouse.warehouse_interface import Warehouse
@@ -12,6 +13,8 @@ from ddpui.datainsights.warehouse.warehouse_interface import WarehouseType
 
 
 class PostgresClient(Warehouse):
+    """PG implementation of the Warehouse interface"""
+
     def __init__(self, creds: dict):
         """
         Establish connection to the postgres database using sqlalchemy engine
@@ -74,17 +77,17 @@ class PostgresClient(Warehouse):
     def get_table_columns(self, db_schema: str, db_table: str) -> dict:
         """Fetch columns of a table; also send the translated col data type"""
         res = []
-        for column in self.inspect_obj.get_columns(table_name=db_table, schema=db_schema):
+        for column_ in self.inspect_obj.get_columns(table_name=db_table, schema=db_schema):
             res.append(
                 {
-                    "name": column["name"],
-                    "data_type": str(column["type"]),
+                    "name": column_["name"],
+                    "data_type": str(column_["type"]),
                     "translated_type": (
                         None
-                        if isinstance(column["type"], NullType)
-                        else MAP_TRANSLATE_TYPES[column["type"].python_type]
+                        if isinstance(column_["type"], NullType)
+                        else MAP_TRANSLATE_TYPES[column_["type"].python_type]
                     ),
-                    "nullable": column["nullable"],
+                    "nullable": column_["nullable"],
                 }
             )
         return res
@@ -92,10 +95,38 @@ class PostgresClient(Warehouse):
     def get_col_python_type(self, db_schema: str, db_table: str, column_name: str):
         """Fetch python type of a column"""
         columns = self.get_table_columns(db_schema, db_table)
-        for column in columns:
-            if column["name"] == column_name:
-                return column["type"].python_type
+        for column_ in columns:
+            if column_["name"] == column_name:
+                return column_["type"].python_type
         return None
 
     def get_wtype(self):
         return WarehouseType.POSTGRES
+
+    def build_rag_training_sql(
+        self,
+        exclude_schemas: list[str],
+        exclude_tables: list[str],
+        exclude_columns: list[str],
+        **kwargs,
+    ):
+        """This sql query will be sent to llm service for trainig the rag on warehouse"""
+        tab: TableClause = text("INFORMATION_SCHEMA.columns")
+        stmt: Select = select("*")
+        stmt = stmt.select_from(tab)
+
+        if exclude_schemas:
+            schema_name_col: ColumnClause = column("table_schema")
+            stmt = stmt.where(schema_name_col.not_in(exclude_schemas))
+
+        if exclude_tables:
+            table_name_col: ColumnClause = column("table_name")
+            stmt = stmt.where(table_name_col.not_in(exclude_tables))
+
+        if exclude_columns:
+            column_name_col: ColumnClause = column("column_name")
+            stmt = stmt.where(column_name_col.not_in(exclude_columns))
+
+        stmt = stmt.compile(bind=self.engine, compile_kwargs={"literal_binds": True})
+
+        return str(stmt)

@@ -74,7 +74,7 @@ def cleaned_name_for_prefectblock(blockname):
 
 
 def map_airbyte_keys_to_postgres_keys(conn_info: dict):
-    """called by `post_system_transformation_tasks` and `_get_wclient`"""
+    """called by `post_system_transformation_tasks` and `get_wclient`"""
     if "tunnel_method" in conn_info:
         method = conn_info["tunnel_method"]
 
