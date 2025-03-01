@@ -158,9 +158,11 @@ def generate_training_sql(warehouse: OrgWarehouse, config: WarehouseRagTrainConf
 
     # look at the exclude json and build a select query of information schema excluding all schemas, tables & columns
     sql = wclient.build_rag_training_sql(
-        exclude_schemas=config.exclude_schemas,
-        exclude_tables=config.exclude_tables,
-        exclude_columns=config.exclude_columns,
+        config.exclude_schemas,
+        config.exclude_tables,
+        config.exclude_columns,
+        bq_project_id=credentials["project_id"] if warehouse.wtype == "bigquery" else None,
+        bq_location=warehouse.bq_location if warehouse.wtype == "bigquery" else None,
     )
 
     # return the sql

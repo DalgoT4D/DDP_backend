@@ -104,7 +104,11 @@ class PostgresClient(Warehouse):
         return WarehouseType.POSTGRES
 
     def build_rag_training_sql(
-        self, exclude_schemas: list[str], exclude_tables: list[str], exclude_columns: list[str]
+        self,
+        exclude_schemas: list[str],
+        exclude_tables: list[str],
+        exclude_columns: list[str],
+        **kwargs,
     ):
         """This sql query will be sent to llm service for trainig the rag on warehouse"""
         tab: TableClause = text("INFORMATION_SCHEMA.columns")

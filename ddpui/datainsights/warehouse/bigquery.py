@@ -92,10 +92,18 @@ class BigqueryClient(Warehouse):
         return WarehouseType.BIGQUERY
 
     def build_rag_training_sql(
-        self, exclude_schemas: list[str], exclude_tables: list[str], exclude_columns: list[str]
+        self,
+        exclude_schemas: list[str],
+        exclude_tables: list[str],
+        exclude_columns: list[str],
+        **kwargs,
     ):
         """This sql query will be sent to llm service for trainig the rag on warehouse"""
-        tab: TableClause = text("INFORMATION_SCHEMA.columns")
+        bq_project_id = kwargs.get("bq_project_id")
+        bq_location = kwargs.get("bq_location")
+        tab: TableClause = text(
+            f"`{bq_project_id}`.`region-{bq_location}`.INFORMATION_SCHEMA.COLUMNS"
+        )
         stmt: Select = select("*")
         stmt = stmt.select_from(tab)
 
