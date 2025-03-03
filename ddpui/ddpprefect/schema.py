@@ -1,4 +1,5 @@
 from typing import Optional
+from datetime import datetime
 
 from ninja import Schema
 
@@ -348,3 +349,32 @@ class PrefectFlowRunSchema(Schema):
     flow_id: str
     state_type: str
     state_name: str
+
+
+class DeploymentRunTimes(Schema):
+    """Schema for run times of a deployment"""
+
+    max_run_time: float = 0
+    min_run_time: float = 0
+    avg_run_time: float = 0
+    wt_avg_run_time: float = 0
+
+
+class FilterLateFlowRunsRequest(Schema):
+    """search flow runs"""
+
+    deployment_id: str = None
+    work_pool_name: str = None
+    work_queue_name: str = None
+    limit: int = 1
+    before_start_time: str = None
+    after_start_time: str = None
+    exclude_flow_run_ids: list[str] = []
+
+
+class DeploymentCurrentQueueTime(Schema):
+    """Queue time"""
+
+    queue_no: int
+    max_wait_time: float
+    min_wait_time: float
