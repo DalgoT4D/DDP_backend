@@ -493,14 +493,15 @@ def post_save_warehouse_prompt_session_v1(
             org=org,
             session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
         ).first()
-        # since its overwriting the old session, we need to keep/persist the orguser (created_by)
-        curr_session.orguser = old_session.orguser
 
         if old_session:
+            # since its overwriting the old session, we need to keep/persist the orguser (created_by)
+            curr_session.orguser = old_session.orguser
+
             old_session.delete()
             logger.info(f"Deleted the old session llm analysis {payload.old_session_id}")
-
-        if not old_session:
+        else:
+            # update the sql or any other meta information
             if payload.sql:
                 curr_session.request_meta = {"sql": payload.sql}
 
