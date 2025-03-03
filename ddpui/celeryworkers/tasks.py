@@ -880,6 +880,9 @@ def summarize_warehouse_results(
         llm_session = LlmSession.objects.filter(id=llmsession_pk).first()
         if not llm_session:
             raise Exception(f"Llm session with primary key {llmsession_pk} not found ")
+        if llm_session.session_status == LlmSessionStatus.RUNNING:
+            raise Exception(f"LLm session (mostly probably sql generation step) is already running")
+
         llm_session.session_status = LlmSessionStatus.RUNNING
         llm_session.session_type = LlmAssistantType.LONG_TEXT_SUMMARIZATION
         llm_session.save()
