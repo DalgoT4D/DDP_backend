@@ -86,7 +86,6 @@ class Command(BaseCommand):
 
         # create training plan of the warehouse
         for org in orgs:
-
             warehouse = OrgWarehouse.objects.filter(org=org).first()
             if not warehouse:
                 logger.error("Looks like warehouse is not setup for the org; skipping")
