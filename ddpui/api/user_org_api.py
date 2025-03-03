@@ -635,6 +635,4 @@ def get_organization_wren(request):
 
     return {
         "wren_url": org_wren.wren_url,
-        "created_at": org_wren.created_at,
-        "updated_at": org_wren.updated_at,
     }
