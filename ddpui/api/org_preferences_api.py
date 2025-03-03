@@ -2,6 +2,7 @@ import os
 from ninja import Router
 from ninja.errors import HttpError
 from django.utils import timezone
+from django.db import transaction
 from ddpui import auth
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_supersets import OrgSupersets
@@ -11,11 +12,9 @@ from ddpui.schemas.org_preferences_schema import (
     CreateOrgPreferencesSchema,
     UpdateLLMOptinSchema,
     UpdateDiscordNotificationsSchema,
-    CreateOrgSupersetDetailsSchema,
 )
 from ddpui.core.notifications_service import create_notification
 from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
-from django.db import transaction
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
 from ddpui.ddpdbt import elementary_service
