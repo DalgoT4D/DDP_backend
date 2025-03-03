@@ -366,7 +366,7 @@ def post_warehouse_generate_sql(request, payload: AskWarehouseRequestv1):
         ) from error
 
 
-@warehouse_router.post("v1/ask/{session_id}/summarize", auth=auth.CustomAuthMiddleware())
+@warehouse_router.post("v1/ask/{session_id}/summarize/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def post_summarize_results_from_sql_and_prompt(
     request, session_id: str, payload: AskWarehouseRequest
@@ -413,7 +413,7 @@ def post_summarize_results_from_sql_and_prompt(
         raise HttpError(400, "failed to summarize warehouse results") from error
 
 
-@warehouse_router.post("/ask/{new_session_id}/save", auth=auth.CustomAuthMiddleware())
+@warehouse_router.post("/ask/{new_session_id}/save/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def post_save_warehouse_prompt_session(
     request, new_session_id: str, payload: SaveLlmSessionRequest
@@ -458,7 +458,7 @@ def post_save_warehouse_prompt_session(
     return {"success": 1}
 
 
-@warehouse_router.post("/v1/ask/{session_id}/save", auth=auth.CustomAuthMiddleware())
+@warehouse_router.post("/v1/ask/{session_id}/save/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def post_save_warehouse_prompt_session_v1(
     request, session_id: str, payload: SaveLlmSessionRequestv1
@@ -511,7 +511,7 @@ def post_save_warehouse_prompt_session_v1(
     return {"success": 1}
 
 
-@warehouse_router.post("/ask/{session_id}/feedback", auth=auth.CustomAuthMiddleware())
+@warehouse_router.post("/ask/{session_id}/feedback/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def post_feedback_llm_session(request, session_id: str, payload: LlmSessionFeedbackRequest):
     """Feedback"""
@@ -633,7 +633,7 @@ def get_warehouse_schemas_and_tables(
 
 
 @warehouse_router.post(
-    "/rag/train",
+    "/rag/train/",
     auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_view_warehouse_data"])
@@ -657,7 +657,7 @@ def post_train_rag_on_warehouse(request):
         raise HttpError(500, str(err))
 
 
-@warehouse_router.post("/table_data/run_sql", auth=auth.CustomAuthMiddleware())
+@warehouse_router.post("/table_data/run_sql/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def post_warehouse_run_sql_query(request, payload: FetchSqlqueryResults):
     """Runs a SQL query against the warehouse and returns the results"""
@@ -687,7 +687,7 @@ def post_warehouse_run_sql_query(request, payload: FetchSqlqueryResults):
         raise HttpError(500, str(err))
 
 
-@warehouse_router.post("/row_count/sql", auth=auth.CustomAuthMiddleware())
+@warehouse_router.post("/row_count/sql/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def post_row_count_sql(request, payload: FetchSqlqueryResults):
     """Returns the row count of the result of the given SQL query"""
