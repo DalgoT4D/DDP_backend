@@ -370,3 +370,11 @@ class FilterLateFlowRunsRequest(Schema):
     before_start_time: str = None
     after_start_time: str = None
     exclude_flow_run_ids: list[str] = []
+
+
+class DeploymentCurrentQueueTime(Schema):
+    """Queue time"""
+
+    queue_no: int
+    max_wait_time: float
+    min_wait_time: float

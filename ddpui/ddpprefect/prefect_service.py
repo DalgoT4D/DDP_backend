@@ -20,6 +20,7 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowUpdateSchema3,
     DeploymentRunTimes,
     FilterLateFlowRunsRequest,
+    DeploymentCurrentQueueTime,
 )
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.tasks import DataflowOrgTask, TaskLock
@@ -756,8 +757,13 @@ def get_late_flow_runs(payload: FilterLateFlowRunsRequest) -> list[dict]:
     return res["flow_runs"]
 
 
-def get_prefect_workers(queue_name: str, work_pool_name: str) -> list[dict]:
-    return [1]
+def post_prefect_workers_count(work_queue_name: str, work_pool_name: str) -> list[dict]:
+    res = prefect_post(
+        f"workers/filter/",
+        {"work_queue_names": [work_queue_name], "work_pool_names": [work_pool_name]},
+    )
+
+    return res["count"]
 
 
 ############################## Related to estimation of flow run times ##############################
@@ -775,7 +781,9 @@ def compute_dataflow_run_times_from_history(
     flow_runs = PrefectFlowRun.objects.filter(
         deployment_id=dataflow.deployment_id,
         start_time__gte=look_back_date,
-        status__in=["COMPLETED", "FAILED"],
+        status__in=[
+            "COMPLETED"
+        ],  # failed runs mostly have a time close to 0 or very high, which could skew the averages
     ).order_by("-start_time")
 
     flow_runs = flow_runs.annotate(start_date=TruncDate("start_time")).values(
@@ -833,9 +841,11 @@ def compute_dataflow_run_times_from_history(
     return all_run_times
 
 
-def estimate_time_for_next_queued_run_of_dataflow(dataflow: OrgDataFlowv1):
+def estimate_time_for_next_queued_run_of_dataflow(
+    dataflow: OrgDataFlowv1,
+) -> DeploymentCurrentQueueTime:
     """
-    This function computes the following
+    This function worst case and best case scenarios. For each scenario, we will get
     1. Queue no (queue_no) - how many flow runs are scheduled before the dataflow's next flow run
     2. Queue time (queue_time_in_seconds) - time that user needs to wait before the next scheduled flow run will trigger
     """
@@ -858,6 +868,8 @@ def estimate_time_for_next_queued_run_of_dataflow(dataflow: OrgDataFlowv1):
     # read the queue name and work pool of this flow run
     queue_name = current_queued_flow_run["workQueueName"]
     work_pool_name = current_queued_flow_run["workPoolName"]  # we only have one work pool
+
+    logger.info(f"Current late run is on the pool: {work_pool_name} and queue: {queue_name}")
 
     # fetch flow runs ("Late") that are in the same queue and work pool before the current run
     queued_late_flow_runs = get_late_flow_runs(
@@ -887,9 +899,18 @@ def estimate_time_for_next_queued_run_of_dataflow(dataflow: OrgDataFlowv1):
             queue_time_in_seconds += deployment_meta["avg_run_time"]
 
     # find no of workers listening to the queue and adjust the queue_no & time accordingly
-    workers = get_prefect_workers(queue_name=queue_name, work_pool_name=work_pool_name)
+    min_workers = 1
+    max_workers = post_prefect_workers_count(
+        work_queue_name=queue_name, work_pool_name=work_pool_name
+    )
 
-    return queue_no, queue_time_in_seconds / len(workers)
+    logger.info(f"Max workers for the queue {queue_name} : {max_workers}")
+
+    return DeploymentCurrentQueueTime(
+        queue_no=queue_no,
+        min_wait_time=queue_time_in_seconds / max_workers,
+        max_wait_time=queue_time_in_seconds / min_workers,
+    )
 
 
 ####################################################################################################
