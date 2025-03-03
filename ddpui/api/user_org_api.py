@@ -634,8 +634,7 @@ def get_organization_wren(request):
         raise HttpError(404, "org_wren not found")
 
     return {
-        "hostname": org_wren.hostname,
-        "port": org_wren.port,
+        "wren_url": org_wren.wren_url,
         "created_at": org_wren.created_at,
         "updated_at": org_wren.updated_at,
     }
