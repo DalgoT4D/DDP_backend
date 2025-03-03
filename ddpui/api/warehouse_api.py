@@ -687,7 +687,7 @@ def post_warehouse_run_sql_query(request, payload: FetchSqlqueryResults):
         raise HttpError(500, str(err))
 
 
-@warehouse_router.post("/row_count/sql/", auth=auth.CustomAuthMiddleware())
+@warehouse_router.post("/row_count/sql", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse_data"])
 def post_row_count_sql(request, payload: FetchSqlqueryResults):
     """Returns the row count of the result of the given SQL query"""
