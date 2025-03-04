@@ -27,13 +27,14 @@ from ddpui.api.warehouse_api import (
     post_save_warehouse_prompt_session,
     post_warehouse_run_sql_query,
     post_train_rag_on_warehouse,
-    get_warehouse_schemas_and_tables,
+    post_summarize_results_from_sql_and_prompt,
 )
 from ddpui.schemas.warehouse_api_schemas import (
     RequestorColumnSchema,
     AskWarehouseRequest,
     SaveLlmSessionRequest,
     FetchSqlqueryResults,
+    AskWarehouseRequest,
 )
 from ddpui.utils.constants import LIMIT_ROWS_TO_SEND_TO_LLM
 from ddpui.models.llm import LlmSession, LlmSessionStatus, LlmAssistantType
@@ -478,3 +479,66 @@ def test_post_train_rag_on_warehouse(mock_train_rag_on_warehose: Mock, orguser):
     post_train_rag_on_warehouse(request)
 
     mock_train_rag_on_warehose.assert_called_once_with(warehouse=warehouse)
+
+
+def test_post_summarize_results_from_sql_and_prompt_validation_failure_checks(orguser):
+    """Check for no warehouse, no session found, summarization is still in progress"""
+
+    request = mock_request(orguser)
+    payload = AskWarehouseRequest(
+        sql="select * from tab", user_prompt="what is average number of user count ?"
+    )
+
+    with pytest.raises(HttpError, match="Please set up your warehouse first"):
+        post_summarize_results_from_sql_and_prompt(request, "session-id", payload)
+
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    with pytest.raises(HttpError, match="Session not found"):
+        post_summarize_results_from_sql_and_prompt(request, "random-session-id", payload)
+
+    llm_session = LlmSession.objects.create(
+        session_id="random-session-id",
+        org=orguser.org,
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+        session_status=LlmSessionStatus.RUNNING,
+    )
+
+    with pytest.raises(HttpError, match="Summarization still in progress"):
+        post_summarize_results_from_sql_and_prompt(request, "random-session-id", payload)
+
+    llm_session.session_status = LlmSessionStatus.COMPLETED
+
+
+@patch("ddpui.celeryworkers.tasks.summarize_warehouse_results.apply_async")
+def test_post_summarize_results_from_sql_and_prompt_validation_success(
+    mock_apply_async: Mock, orguser
+):
+    request = mock_request(orguser)
+    payload = AskWarehouseRequest(
+        sql="select * from tab", user_prompt="what is average number of user count ?"
+    )
+
+    warehouse = OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    sess = LlmSession.objects.create(
+        session_id="random-session-id",
+        org=orguser.org,
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+        session_status=LlmSessionStatus.COMPLETED,
+    )
+
+    mock_apply_async.return_value = Mock(id="poll-task-id")
+
+    result = post_summarize_results_from_sql_and_prompt(request, "random-session-id", payload)
+
+    mock_apply_async.assert_called_once_with(
+        kwargs={
+            "orguser_id": orguser.id,
+            "org_warehouse_id": warehouse.id,
+            "sql": payload.sql,
+            "user_prompt": payload.user_prompt,
+            "llmsession_pk": sess.id,
+        }
+    )
+    assert result["request_uuid"] == "poll-task-id"
