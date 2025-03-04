@@ -2,7 +2,8 @@ import pytest
 from unittest.mock import Mock, patch
 from ninja.errors import HttpError
 import sqlalchemy
-from unittest.mock import _Call
+from unittest.mock import _Call, ANY
+from sqlalchemy import text
 
 from ddpui.models.org import OrgWarehouse, Org
 from ddpui.models.role_based_access import Role, RolePermission, Permission
@@ -24,11 +25,18 @@ from ddpui.api.warehouse_api import (
     get_warehouse_table_columns_spec,
     post_warehouse_prompt,
     post_save_warehouse_prompt_session,
+    post_warehouse_run_sql_query,
+    post_train_rag_on_warehouse,
+    post_summarize_results_from_sql_and_prompt,
+    post_warehouse_generate_sql,
 )
 from ddpui.schemas.warehouse_api_schemas import (
     RequestorColumnSchema,
     AskWarehouseRequest,
     SaveLlmSessionRequest,
+    FetchSqlqueryResults,
+    AskWarehouseRequest,
+    AskWarehouseRequestv1,
 )
 from ddpui.utils.constants import LIMIT_ROWS_TO_SEND_TO_LLM
 from ddpui.models.llm import LlmSession, LlmSessionStatus, LlmAssistantType
@@ -417,3 +425,160 @@ def test_llm_data_analysis_save_and_overwrite_session(orguser):
         ).count()
         == 1
     )
+
+
+def test_post_warehouse_run_sql_query_no_warehouse(orguser):
+    """
+    Test the function when no warehouse found
+    """
+    request = mock_request(orguser)
+    payload = FetchSqlqueryResults(sql="sql-string", limit=10, offset=0)
+    with pytest.raises(HttpError, match="Please set up your warehouse first"):
+        post_warehouse_run_sql_query(request, payload)
+
+
+@patch("ddpui.api.warehouse_api.parse_sql_query_with_limit_offset")
+@patch("ddpui.api.warehouse_api.run_sql_and_fetch_results_from_warehouse")
+def test_post_warehouse_run_sql_query_success(
+    mock_un_sql_and_fetch_results_from_warehouse: Mock,
+    mock_parse_sql: Mock,
+    orguser,
+):
+    """
+    Test the success of the function
+    """
+    request = mock_request(orguser)
+    warehouse = OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    payload = FetchSqlqueryResults(sql="sql-string", limit=10, offset=0)
+
+    mock_parse_sql.return_value = "some-sql"
+    mock_un_sql_and_fetch_results_from_warehouse.return_value = [{"col1": "val1", "col2": "val2"}]
+
+    results = post_warehouse_run_sql_query(request, payload)
+
+    mock_parse_sql.assert_called_once()
+    mock_un_sql_and_fetch_results_from_warehouse.assert_called_once_with(
+        warehouse=warehouse, sql=ANY
+    )
+    assert results == {"columns": ["col1", "col2"], "rows": [{"col1": "val1", "col2": "val2"}]}
+
+
+@patch("ddpui.api.warehouse_api.train_rag_on_warehouse")
+def test_post_train_rag_on_warehouse(mock_train_rag_on_warehose: Mock, orguser):
+    """
+    Test the function post_train_rag_on_warehouse
+    """
+    request = mock_request(orguser)
+
+    with pytest.raises(HttpError, match="Please set up your warehouse first"):
+        post_train_rag_on_warehouse(request)
+
+    warehouse = OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    mock_train_rag_on_warehose.return_value = True
+
+    post_train_rag_on_warehouse(request)
+
+    mock_train_rag_on_warehose.assert_called_once_with(warehouse=warehouse)
+
+
+def test_post_summarize_results_from_sql_and_prompt_validation_failure_checks(orguser):
+    """Check for no warehouse, no session found, summarization is still in progress"""
+
+    request = mock_request(orguser)
+    payload = AskWarehouseRequest(
+        sql="select * from tab", user_prompt="what is average number of user count ?"
+    )
+
+    with pytest.raises(HttpError, match="Please set up your warehouse first"):
+        post_summarize_results_from_sql_and_prompt(request, "session-id", payload)
+
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    with pytest.raises(HttpError, match="Session not found"):
+        post_summarize_results_from_sql_and_prompt(request, "random-session-id", payload)
+
+    llm_session = LlmSession.objects.create(
+        session_id="random-session-id",
+        org=orguser.org,
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+        session_status=LlmSessionStatus.RUNNING,
+    )
+
+    with pytest.raises(HttpError, match="Summarization still in progress"):
+        post_summarize_results_from_sql_and_prompt(request, "random-session-id", payload)
+
+    llm_session.session_status = LlmSessionStatus.COMPLETED
+
+
+@patch("ddpui.celeryworkers.tasks.summarize_warehouse_results.apply_async")
+def test_post_summarize_results_from_sql_and_prompt_validation_success(
+    mock_apply_async: Mock, orguser
+):
+    request = mock_request(orguser)
+    payload = AskWarehouseRequest(
+        sql="select * from tab", user_prompt="what is average number of user count ?"
+    )
+
+    warehouse = OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    sess = LlmSession.objects.create(
+        session_id="random-session-id",
+        org=orguser.org,
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+        session_status=LlmSessionStatus.COMPLETED,
+    )
+
+    mock_apply_async.return_value = Mock(id="poll-task-id")
+
+    result = post_summarize_results_from_sql_and_prompt(request, "random-session-id", payload)
+
+    mock_apply_async.assert_called_once_with(
+        kwargs={
+            "orguser_id": orguser.id,
+            "org_warehouse_id": warehouse.id,
+            "sql": payload.sql,
+            "user_prompt": payload.user_prompt,
+            "llmsession_pk": sess.id,
+        }
+    )
+    assert result["request_uuid"] == "poll-task-id"
+
+
+@patch("ddpui.celeryworkers.tasks.generate_sql_from_prompt_asked_on_warehouse.apply_async")
+def test_post_warehouse_generate_sql_failures(mock_generate_sql_async: Mock, orguser):
+    request = mock_request(orguser)
+    payload = AskWarehouseRequestv1(user_prompt="what is average number of user count ?")
+
+    with pytest.raises(HttpError, match="Please set up your warehouse first"):
+        post_warehouse_generate_sql(request, payload)
+
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    # async celery task throws error
+    mock_generate_sql_async.return_value = ValueError("Some error")
+
+    with pytest.raises(
+        HttpError,
+        match="failed to enqueue celery task generate_sql_from_prompt_asked_on_warehouse",
+    ):
+        post_warehouse_generate_sql(request, payload)
+
+    mock_generate_sql_async.assert_called_once()
+
+
+@patch("ddpui.celeryworkers.tasks.generate_sql_from_prompt_asked_on_warehouse.apply_async")
+def test_post_warehouse_generate_sql_success(mock_generate_sql_async: Mock, orguser):
+    request = mock_request(orguser)
+    payload = AskWarehouseRequestv1(user_prompt="what is average number of user count ?")
+
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    # async celery task throws error
+    mock_generate_sql_async.return_value = Mock(id="task-id")
+
+    result = post_warehouse_generate_sql(request, payload)
+
+    mock_generate_sql_async.assert_called_once()
+    assert result["request_uuid"] == "task-id"

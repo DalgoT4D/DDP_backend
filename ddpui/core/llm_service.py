@@ -5,10 +5,10 @@ This module talks to the llm service
 import time
 import os
 from io import BytesIO
+from celery.states import SUCCESS, FAILURE, REVOKED, REJECTED, IGNORED
 
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.http import dalgo_post, dalgo_get, dalgo_delete
-from celery.states import SUCCESS, FAILURE, REVOKED, REJECTED, IGNORED
 
 LLM_SERVICE_API_URL = os.getenv("LLM_SERVICE_API_URL")
 LLM_SERVICE_API_KEY = os.getenv("LLM_SERVICE_API_KEY")
@@ -20,9 +20,7 @@ logger = CustomLogger("ddpui")
 
 
 def poll_llm_service_task(task_id: str, poll_interval: int = 5) -> dict:
-    """
-    Polls the llm service task and returns the result
-    """
+    """Polls the llm service task and returns the result"""
     # poll this task
     while True:
         response = dalgo_get(f"{LLM_SERVICE_API_URL}/api/task/{task_id}", headers=headers)
@@ -39,9 +37,7 @@ def poll_llm_service_task(task_id: str, poll_interval: int = 5) -> dict:
 
 
 def upload_text_as_file(file_text: str, file_name: str) -> str:
-    """
-    returns the relative file_path
-    """
+    """returns the relative file_path"""
 
     files = {"file": (f"{file_name}.txt", BytesIO(file_text.encode("utf-8")))}
     response = dalgo_post(
@@ -54,9 +50,7 @@ def upload_text_as_file(file_text: str, file_name: str) -> str:
 
 
 def upload_json_as_file(json_string: str, file_name: str) -> str:
-    """
-    returns the relative file_path
-    """
+    """returns the relative file_path"""
 
     files = {
         "file": (
@@ -108,9 +102,7 @@ def file_search_query_and_poll(
 
 
 def close_file_search_session(session_id: str, poll_interval: int = 5) -> None:
-    """
-    Closes the file search session
-    """
+    """Closes the file search session"""
 
     response = dalgo_delete(
         f"{LLM_SERVICE_API_URL}/api/file/search/session/{session_id}",
@@ -123,3 +115,73 @@ def close_file_search_session(session_id: str, poll_interval: int = 5) -> None:
         raise Exception("Failed to submit the task")
 
     poll_llm_service_task(task_id, poll_interval)
+
+
+def train_vanna_on_warehouse(
+    training_sql: str, pg_vector_creds: dict, warehouse_creds: dict, warehouse_type: str
+):
+    """Creates embeddings in vanna based on the results of a training plan (sql)"""
+    response = dalgo_post(
+        f"{LLM_SERVICE_API_URL}/api/vanna/train",
+        headers=headers,
+        json={
+            "training_sql": training_sql,
+            "warehouse_creds": warehouse_creds,
+            "pg_vector_creds": pg_vector_creds,
+            "warehouse_type": warehouse_type,
+        },
+    )
+
+    task_id = response["task_id"]
+
+    if not task_id:
+        raise Exception("Failed to submit the task")
+
+    return poll_llm_service_task(task_id)
+
+
+def ask_vanna_for_sql(
+    user_prompt: str, pg_vector_creds: dict, warehouse_creds: dict, warehouse_type: str
+):
+    """Creates embeddings in vanna based on the results of a training plan (sql)"""
+    response = dalgo_post(
+        f"{LLM_SERVICE_API_URL}/api/vanna/ask",
+        headers=headers,
+        json={
+            "user_prompt": user_prompt,
+            "warehouse_creds": warehouse_creds,
+            "pg_vector_creds": pg_vector_creds,
+            "warehouse_type": warehouse_type,
+        },
+    )
+
+    task_id = response["task_id"]
+
+    if not task_id:
+        raise Exception("Failed to submit the task")
+
+    return poll_llm_service_task(task_id)
+
+
+def check_if_rag_is_trained(
+    pg_vector_creds: dict, warehouse_creds: dict, warehouse_type: str
+) -> bool:
+    """Checks if there any embeddings created"""
+    try:
+        result = dalgo_post(
+            f"{LLM_SERVICE_API_URL}/api/vanna/train/check",
+            headers=headers,
+            json={
+                "warehouse_creds": warehouse_creds,
+                "pg_vector_creds": pg_vector_creds,
+                "warehouse_type": warehouse_type,
+            },
+        )
+
+        logger.info(f"Is rag trained ? : {result}")
+
+        return result in ["true", "True", True]
+
+    except Exception as error:
+        logger.error(error)
+        return False

@@ -7,8 +7,6 @@ class CreateOrgPreferencesSchema(Schema):
     """Schema for creating organization preferences."""
 
     org: Optional[int]
-    trial_start_date: Optional[datetime]
-    trial_end_date: Optional[datetime]
     llm_optin: Optional[bool] = False
     llm_optin_approved_by: Optional[int]
     llm_optin_date: Optional[datetime]

@@ -1,7 +1,7 @@
 from django.db import models
+from django.utils import timezone
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
-from django.utils import timezone
 
 
 class OrgPreferences(models.Model):

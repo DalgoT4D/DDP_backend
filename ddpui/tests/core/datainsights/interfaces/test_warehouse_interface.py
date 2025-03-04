@@ -36,6 +36,9 @@ class DummyWarehouse(Warehouse):
     def get_wtype(self):
         pass
 
+    def build_rag_training_sql(self, exclude_schemas, exclude_tables, exclude_columns):
+        pass
+
 
 def test_unimplemented_methods_warehouse_interface():
     """Each warehouse client should implement all abstract methods in Warehouse interface"""

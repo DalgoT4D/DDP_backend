@@ -1,5 +1,6 @@
 """these are tasks which we run through celery"""
 
+import uuid
 import os
 import shutil
 from pathlib import Path
@@ -66,7 +67,10 @@ from ddpui.ddpprefect.prefect_service import (
     get_long_running_flow_runs,
 )
 from ddpui.ddpprefect import DBTCLIPROFILE
-from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
+from ddpui.core.warehousefunctions import (
+    generate_sql_from_warehouse_rag,
+    run_sql_and_fetch_results_from_warehouse,
+)
 from ddpui.core import llm_service
 from ddpui.utils.helpers import (
     convert_sqlalchemy_rows_to_csv_string,
@@ -834,6 +838,7 @@ def summarize_warehouse_results(
     org_warehouse_id: int,
     sql: str,
     user_prompt: str,
+    llmsession_pk: int = None,
 ):
     """
     This function will summarize the results of a warehouse query
@@ -862,37 +867,31 @@ def summarize_warehouse_results(
     org = orguser.org
 
     # create a partial session
-    llm_session = LlmSession.objects.create(
-        request_uuid=self.request.id,
-        orguser=orguser,
-        org=org,
-        session_status=LlmSessionStatus.RUNNING,
-        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
-        request_meta={"sql": sql},
-    )
-
-    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
-
-    try:
-        wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
-    except Exception as err:
-        logger.error("Failed to connect to the warehouse - %s", err)
-        taskprogress.add(
-            {
-                "message": "Failed to connect to the warehouse",
-                "status": TaskProgressStatus.FAILED,
-                "result": None,
-            }
+    if not llmsession_pk:
+        llm_session = LlmSession.objects.create(
+            request_uuid=self.request.id,
+            orguser=orguser,
+            org=org,
+            session_status=LlmSessionStatus.RUNNING,
+            session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+            request_meta={"sql": sql},
         )
-        llm_session.session_status = LlmSessionStatus.FAILED
+    else:
+        llm_session = LlmSession.objects.filter(id=llmsession_pk).first()
+        if not llm_session:
+            raise Exception(f"Llm session with primary key {llmsession_pk} not found ")
+        if llm_session.session_status == LlmSessionStatus.RUNNING:
+            raise Exception(f"LLm session (mostly probably sql generation step) is already running")
+
+        llm_session.session_status = LlmSessionStatus.RUNNING
+        llm_session.session_type = LlmAssistantType.LONG_TEXT_SUMMARIZATION
         llm_session.save()
-        return
 
     # fetch the results of the query
     logger.info(f"Submitting query to warehouse for execution \n '''{sql}'''")
     rows = []
     try:
-        rows = wclient.execute(sql)
+        rows = run_sql_and_fetch_results_from_warehouse(warehouse=org_warehouse, sql=sql)
     except Exception as err:
         logger.error(err)
         taskprogress.add(
@@ -983,6 +982,74 @@ def summarize_warehouse_results(
             }
         )
         llm_session.session_status = LlmSessionStatus.FAILED
+        llm_session.save()
+        return
+
+
+@app.task(bind=True)
+def generate_sql_from_prompt_asked_on_warehouse(
+    self, orguser_id: int, org_warehouse_id: int, user_prompt: str
+):
+    """Generates sql from the warehouse trained rag"""
+    taskprogress = SingleTaskProgress(self.request.id, 60 * 10)
+    taskprogress.add({"message": "Started", "status": "running", "result": {}})
+
+    org_warehouse = OrgWarehouse.objects.filter(id=org_warehouse_id).first()
+
+    if not org_warehouse:
+        logger.error("Warehouse not found")
+        taskprogress.add(
+            {
+                "message": "Warehouse not found",
+                "status": TaskProgressStatus.FAILED,
+                "results": {},
+            }
+        )
+        return
+
+    orguser = OrgUser.objects.filter(id=orguser_id).first()
+    org = orguser.org
+
+    # create a partial session
+    session_id = uuid.uuid4()
+    llm_session = LlmSession.objects.create(
+        request_uuid=self.request.id,
+        orguser=orguser,
+        org=org,
+        session_status=LlmSessionStatus.RUNNING,
+        session_type=LlmAssistantType.LONG_TEXT_SUMMARIZATION,
+        version="v1",
+        session_id=session_id,
+    )
+
+    try:
+        sql = generate_sql_from_warehouse_rag(warehouse=org_warehouse, user_prompt=user_prompt)
+
+        llm_session.session_status = LlmSessionStatus.COMPLETED
+        llm_session.request_meta = {"sql": sql}
+        llm_session.save()
+
+        logger.info(f"Generated sql successfully {sql}")
+
+        taskprogress.add(
+            {
+                "message": "Generated the sql",
+                "status": TaskProgressStatus.COMPLETED,
+                "result": {"sql": sql, "session_id": str(session_id)},
+            }
+        )
+
+    except Exception as err:
+        logger.error(err)
+        taskprogress.add(
+            {
+                "message": str(err),
+                "status": TaskProgressStatus.FAILED,
+                "result": None,
+            }
+        )
+        llm_session.session_status = LlmSessionStatus.FAILED
+        # llm_session.response = { "error": str(err) } # where do we put this?
         llm_session.save()
         return
 
