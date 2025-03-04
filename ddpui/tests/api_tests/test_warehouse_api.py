@@ -28,6 +28,7 @@ from ddpui.api.warehouse_api import (
     post_warehouse_run_sql_query,
     post_train_rag_on_warehouse,
     post_summarize_results_from_sql_and_prompt,
+    post_warehouse_generate_sql,
 )
 from ddpui.schemas.warehouse_api_schemas import (
     RequestorColumnSchema,
@@ -35,6 +36,7 @@ from ddpui.schemas.warehouse_api_schemas import (
     SaveLlmSessionRequest,
     FetchSqlqueryResults,
     AskWarehouseRequest,
+    AskWarehouseRequestv1,
 )
 from ddpui.utils.constants import LIMIT_ROWS_TO_SEND_TO_LLM
 from ddpui.models.llm import LlmSession, LlmSessionStatus, LlmAssistantType
@@ -542,3 +544,41 @@ def test_post_summarize_results_from_sql_and_prompt_validation_success(
         }
     )
     assert result["request_uuid"] == "poll-task-id"
+
+
+@patch("ddpui.celeryworkers.tasks.generate_sql_from_prompt_asked_on_warehouse.apply_async")
+def test_post_warehouse_generate_sql_failures(mock_generate_sql_async: Mock, orguser):
+    request = mock_request(orguser)
+    payload = AskWarehouseRequestv1(user_prompt="what is average number of user count ?")
+
+    with pytest.raises(HttpError, match="Please set up your warehouse first"):
+        post_warehouse_generate_sql(request, payload)
+
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    # async celery task throws error
+    mock_generate_sql_async.return_value = ValueError("Some error")
+
+    with pytest.raises(
+        HttpError,
+        match="failed to enqueue celery task generate_sql_from_prompt_asked_on_warehouse",
+    ):
+        post_warehouse_generate_sql(request, payload)
+
+    mock_generate_sql_async.assert_called_once()
+
+
+@patch("ddpui.celeryworkers.tasks.generate_sql_from_prompt_asked_on_warehouse.apply_async")
+def test_post_warehouse_generate_sql_success(mock_generate_sql_async: Mock, orguser):
+    request = mock_request(orguser)
+    payload = AskWarehouseRequestv1(user_prompt="what is average number of user count ?")
+
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    # async celery task throws error
+    mock_generate_sql_async.return_value = Mock(id="task-id")
+
+    result = post_warehouse_generate_sql(request, payload)
+
+    mock_generate_sql_async.assert_called_once()
+    assert result["request_uuid"] == "task-id"
