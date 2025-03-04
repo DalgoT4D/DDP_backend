@@ -34,6 +34,7 @@ from ddpui.models.org_user import (
     UserAttributes,
     VerifyEmailSchema,
 )
+from ddpui.models.org_wren import OrgWren
 from ddpui.models.role_based_access import Role, RolePermission
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.deleteorg import delete_warehouse_v1
@@ -619,3 +620,19 @@ def post_organization_accept_tnc(request):
 def get_organization_feature_flags(request):
     """get"""
     return {"allowLogsSummary": True}
+
+
+@user_org_router.get("/organizations/wren", auth=auth.CustomAuthMiddleware())
+def get_organization_wren(request):
+    """Fetch org_wren from the database and send to frontend"""
+    orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "no associated org")
+
+    org_wren = OrgWren.objects.filter(org=orguser.org).first()
+    if org_wren is None:
+        raise HttpError(404, "org_wren not found")
+
+    return {
+        "wren_url": org_wren.wren_url,
+    }

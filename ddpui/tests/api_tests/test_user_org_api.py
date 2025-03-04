@@ -37,6 +37,7 @@ from ddpui.api.user_org_api import (
     post_resend_invitation,
     delete_invitation,
     post_organization_accept_tnc,
+    get_organization_wren,
 )
 from ddpui.models.org import Org, OrgWarehouseSchema, OrgWarehouse
 from ddpui.models.role_based_access import Role, RolePermission, Permission
@@ -1584,3 +1585,30 @@ def test_post_organization_accept_tnc(orguser: OrgUser, org_without_workspace: O
 
     currentuserv2response = get_current_user_v2(request)
     assert currentuserv2response[0].org.tnc_accepted is True
+
+
+def test_get_organization_wren_not_found(orguser):
+    """failure - org_wren not found"""
+    request = mock_request(orguser)
+
+    # Mocking OrgWren.objects.filter to return an empty queryset
+    mock_queryset = Mock()
+    mock_queryset.first.return_value = None
+    with patch("ddpui.models.OrgWren.objects.filter", return_value=mock_queryset):
+        with pytest.raises(HttpError) as excinfo:
+            get_organization_wren(request)
+        assert str(excinfo.value) == "org_wren not found"
+
+
+def test_get_organization_wren_success(orguser):
+    """success - org_wren found"""
+    request = mock_request(orguser)
+
+    # Mocking OrgWren.objects.filter to return a mock OrgWren object
+    mock_org_wren = Mock()
+    mock_org_wren.wren_url = "http://example.com/wren"
+    mock_queryset = Mock()
+    mock_queryset.first.return_value = mock_org_wren
+    with patch("ddpui.models.OrgWren.objects.filter", return_value=mock_queryset):
+        response = get_organization_wren(request)
+        assert response == {"wren_url": "http://example.com/wren"}
