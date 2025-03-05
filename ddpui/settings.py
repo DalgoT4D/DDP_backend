@@ -52,9 +52,7 @@ DEBUG = os.getenv("DEBUG", "") == "True"
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
-    "staging-api.dalgo.in",
     "api.dalgo.in",
-    "staging.dalgo.in",
     "dashboard.dalgo.in",
     "staging-api.dalgo.org",
     "api.dalgo.org",
@@ -74,7 +72,6 @@ CORS_ORIGIN_WHITELIST = (
     "http://localhost:3000",
     "http://host.docker.internal:3000",
     "http://127.0.0.1:3000",
-    "https://staging.dalgo.in",
     "https://dashboard.dalgo.in",
     "https://staging.dalgo.org",
     "https://dashboard.dalgo.org",
