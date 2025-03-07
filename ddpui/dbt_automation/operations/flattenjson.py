@@ -15,7 +15,7 @@ logger = getLogger()
 
 # pylint:disable=unused-argument,logging-fstring-interpolation
 def flattenjson_dbt_sql(
-    config: dict,  ## has source_schema.
+    config: dict,
     warehouse: WarehouseInterface,
 ):
     """
@@ -30,7 +30,6 @@ def flattenjson_dbt_sql(
     source_columns = config["source_columns"]
     json_column = config["json_column"]
     json_columns_to_copy = config["json_columns_to_copy"]
-    source_schema = config["source_schema"]
 
     # Determine the source columns to be selected
     if config["source_columns"] == "*":

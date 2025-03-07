@@ -118,9 +118,7 @@ def _get_wclient(org_warehouse: OrgWarehouse):
 
 
 def _get_merge_operation_config(
-    operations: list[
-        dict
-    ],  ## operations = [{"type": op_type, "config": config}] ##config still has sourceschema
+    operations: list[dict],
     input: dict = {
         "input_type": "source",
         "input_name": "dummy",
@@ -134,7 +132,7 @@ def _get_merge_operation_config(
         "output_name": output_name,
         "dest_schema": dest_schema,
         "input": input,
-        "operations": operations,  ## operations = [{"type": op_type, "config": config}] ##config still has sourceschema
+        "operations": operations,
     }
 
 
@@ -244,16 +242,14 @@ def get_table_columns(org_warehouse: OrgWarehouse, dbtmodel: OrgDbtModel):
     return wclient.get_table_columns(dbtmodel.schema, dbtmodel.name)
 
 
-def get_output_cols_for_operation(
-    org_warehouse: OrgWarehouse, op_type: str, config: dict
-):  ## config["config"]["schema"]
+def get_output_cols_for_operation(org_warehouse: OrgWarehouse, op_type: str, config: dict):
     """
     Get the output columns from a merge operation;
     this only generates the sql and fetches the output col.
     Model is neither being run nor saved to the disk
     """
     wclient = _get_wclient(org_warehouse)
-    operations = [{"type": op_type, "config": config}]  ##config still has sourceschema
+    operations = [{"type": op_type, "config": config}]
     _, output_cols = merge_operations_sql(_get_merge_operation_config(operations), wclient)
     return output_cols
 

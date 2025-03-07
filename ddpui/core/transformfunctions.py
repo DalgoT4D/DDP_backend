@@ -17,7 +17,7 @@ logger = CustomLogger("ddpui")
 
 
 def validate_operation_config(
-    payload: Union[CreateDbtModelPayload, EditDbtOperationPayload],  # source_schema inside config
+    payload: Union[CreateDbtModelPayload, EditDbtOperationPayload],
     target_model: OrgDbtModel,
     is_multi_input_op: bool,
     operation_chained_before: int = 0,
@@ -91,7 +91,7 @@ def validate_operation_config(
         )
 
     input_config = {
-        "config": OP_CONFIG,  # still inside Opconfig, there is a config which as schema.
+        "config": OP_CONFIG,
         "type": payload.op_type,
         "input_models": [
             {
@@ -106,7 +106,7 @@ def validate_operation_config(
         ],
     }
 
-    return (input_config, all_input_models)  ##input_config["config"]["config"]["sourceschema"]
+    return (input_config, all_input_models)
 
 
 def check_canvas_locked(requestor_orguser: OrgUser, lock_id: str):

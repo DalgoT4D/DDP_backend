@@ -29,7 +29,7 @@ from ddpui.dbt_automation.operations.rawsql import raw_generic_dbt_sql
 
 
 def merge_operations_sql(
-    config: dict,  ## and object with operations key  ## operations = [{"type": op_type, "config": config}] ##config still has sourceschema
+    config: dict,
     warehouse: WarehouseInterface,
 ):
     """
@@ -57,9 +57,7 @@ def merge_operations_sql(
     output_cols = []  # return the last operations output columns
 
     # push select statements into the queue
-    for cte_counter, operation in enumerate(
-        operations
-    ):  ### single operation will have config which has source schmea
+    for cte_counter, operation in enumerate(operations):
         if operation["type"] == "castdatatypes":
             op_select_statement, out_cols = cast_datatypes_sql(operation["config"], warehouse)
         elif operation["type"] == "arithmetic":
