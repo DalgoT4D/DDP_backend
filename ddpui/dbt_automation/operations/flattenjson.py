@@ -14,7 +14,7 @@ logger = getLogger()
 
 # pylint:disable=unused-argument,logging-fstring-interpolation
 def flattenjson_dbt_sql(
-    config: dict,
+    config: dict,  ## has source_schema.
     warehouse: WarehouseInterface,
 ):
     """
@@ -29,13 +29,21 @@ def flattenjson_dbt_sql(
     source_columns = config["source_columns"]
     json_column = config["json_column"]
     json_columns_to_copy = config["json_columns_to_copy"]
+    source_schema = config["source_schema"]
 
-    if source_columns != "*":
-        source_columns = [col for col in source_columns if col != json_column]
-    if source_columns == "*":
-        dbt_code = "SELECT *\n"
+    all_columns = warehouse.get_table_columns(
+        source_schema,
+    )
+
+    # Determine the source columns to be selected
+    if config["source_columns"] == "*":
+        source_columns = [col for col in all_columns if col != json_column]
     else:
-        dbt_code = f"SELECT {', '.join([quote_columnname(col, warehouse.name) for col in source_columns])}\n"
+        source_columns = [col for col in source_columns if col != json_column]
+
+    dbt_code = (
+        f"SELECT {', '.join([quote_columnname(col, warehouse.name) for col in source_columns])}\n"
+    )
 
     sql_columns = make_cleaned_column_names(json_columns_to_copy)
 

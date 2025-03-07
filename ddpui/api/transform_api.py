@@ -142,7 +142,9 @@ def sync_sources(request):
 
 @transform_router.post("/dbt_project/model/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_dbt_model"])
-def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
+def post_construct_dbt_model_operation(
+    request, payload: CreateDbtModelPayload
+):  # inside config source schmea
     """
     Construct a model or chain operations on a under construction target model
     """
@@ -197,7 +199,11 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
             )
 
     output_cols = dbtautomation_service.get_output_cols_for_operation(
-        org_warehouse, payload.op_type, final_config["config"].copy()
+        org_warehouse,
+        payload.op_type,
+        final_config[
+            "config"
+        ].copy(),  ##final_config["config"] = ["config"] which has["sourceschema"]
     )
     logger.info("creating operation")
 
