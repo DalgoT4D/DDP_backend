@@ -64,6 +64,7 @@ from ddpui.ddpprefect.prefect_service import (
     prefect_get,
     recurse_flow_run_logs,
     get_long_running_flow_runs,
+    compute_dataflow_run_times_from_history,
 )
 from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
@@ -1059,6 +1060,20 @@ def check_for_long_running_flow_runs():
             "Long Running Flow Runs",
             email_body,
         )
+
+
+@app.task()
+def compute_dataflow_run_times(org: Org = None):
+    """
+    Computes run times for all dataflows
+    """
+    dataflows = OrgDataFlowv1.objects
+
+    if org:
+        dataflows.filter(org=org)
+
+    for dataflow in dataflows.all():
+        compute_dataflow_run_times_from_history(dataflow)
 
 
 @app.on_after_finalize.connect
