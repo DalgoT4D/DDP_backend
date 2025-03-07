@@ -7,6 +7,7 @@ from ddpui.dbt_automation.utils.columnutils import quote_columnname
 from ddpui.dbt_automation.utils.columnutils import make_cleaned_column_names, dedup_list
 from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
 from ddpui.dbt_automation.utils.tableutils import source_or_ref
+from ninja.errors import HttpError
 
 basicConfig(level=INFO)
 logger = getLogger()
@@ -31,15 +32,14 @@ def flattenjson_dbt_sql(
     json_columns_to_copy = config["json_columns_to_copy"]
     source_schema = config["source_schema"]
 
-    all_columns = warehouse.get_table_columns(
-        source_schema,
-    )
-
     # Determine the source columns to be selected
     if config["source_columns"] == "*":
-        source_columns = [col for col in all_columns if col != json_column]
-    else:
-        source_columns = [col for col in source_columns if col != json_column]
+        raise HttpError(
+            400,
+            "Invalid column selection: Please specify column names explicitly instead of using '*'.",
+        )
+
+    source_columns = [col for col in source_columns if col != json_column]
 
     dbt_code = (
         f"SELECT {', '.join([quote_columnname(col, warehouse.name) for col in source_columns])}\n"
