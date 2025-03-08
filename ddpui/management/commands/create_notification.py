@@ -3,7 +3,6 @@ from django.core.management.base import BaseCommand
 from django.utils.dateparse import parse_datetime
 from ddpui.core import notifications_service
 from ddpui.schemas.notifications_api_schemas import (
-    CreateNotificationPayloadSchema,
     SentToEnum,
     NotificationDataSchema,
 )
