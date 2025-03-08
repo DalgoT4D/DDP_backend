@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 from ddpui.models.org_user import OrgUser
 
 
@@ -12,6 +13,8 @@ class Notification(models.Model):
     urgent = models.BooleanField(default=False)
     scheduled_time = models.DateTimeField(null=True, blank=True)
     sent_time = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
 
 
 class NotificationRecipient(models.Model):
