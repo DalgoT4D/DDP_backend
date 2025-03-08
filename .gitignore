@@ -152,3 +152,6 @@ cloudbuild.yaml
 
 # ignore docker related
 Docker/.env*
+
+# ignore platform notification messages
+notifications/
