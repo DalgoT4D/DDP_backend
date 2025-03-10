@@ -1527,7 +1527,7 @@ def test_parse_job_info():
 def test_get_logs_for_job():
     with patch(
         "ddpui.ddpairbyte.airbyte_service.abreq",
-        return_value={"connectionId": "connection-id"},
+        return_value={"logs": {"logLines": ["log-line-1", "log-line-2"]}},
     ) as mock_abreq_:
         get_logs_for_job(1)
         mock_abreq_.assert_called_once_with("attempt/get_for_job", {"jobId": 1, "attemptNumber": 0})
@@ -1536,7 +1536,7 @@ def test_get_logs_for_job():
 def test_get_logs_for_job_1():
     with patch(
         "ddpui.ddpairbyte.airbyte_service.abreq",
-        return_value={"connectionId": "connection-id"},
+        return_value={"logs": {"logLines": ["log-line-1", "log-line-2"]}},
     ) as mock_abreq_:
         get_logs_for_job(1, 1)
         mock_abreq_.assert_called_once_with("attempt/get_for_job", {"jobId": 1, "attemptNumber": 1})
@@ -1546,6 +1546,36 @@ def test_get_logs_for_job_raise():
     with pytest.raises(HttpError) as excinfo:
         get_logs_for_job("str")
     assert str(excinfo.value) == "job_id must be an integer"
+
+
+def test_get_logs_for_job_success():
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
+        mock_abreq.return_value = {"logs": {"logLines": ["log-line-1", "log-line-2"]}}
+        result = get_logs_for_job(1, 0)
+        assert result == ["log-line-1", "log-line-2"]
+
+
+def test_get_logs_for_job_with_logType_formatted():
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
+        mock_abreq.return_value = {
+            "logs": {"logLines": ["log-line-1", "log-line-2"]},
+            "logType": "formatted",
+        }
+        result = get_logs_for_job(1, 0)
+        assert result == ["log-line-1", "log-line-2"]
+
+
+def test_get_logs_for_job_with_logType_structured():
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
+        mock_abreq.return_value = {
+            "logs": {
+                "logLines": ["log-line-1", "log-line-2"],
+                "events": [{"message": "log-line-3"}, {"message": "log-line-4"}],
+            },
+            "logType": "structured",
+        }
+        result = get_logs_for_job(1, 0)
+        assert result == ["log-line-3", "log-line-4"]
 
 
 def test_get_connection_catalog_success():
