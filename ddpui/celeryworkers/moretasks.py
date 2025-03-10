@@ -14,7 +14,7 @@ logger = CustomLogger("ddpui")
 def schedule_notification_task(self, notification_id, recipient_id):  # skipcq: PYL-W0613
     """send scheduled notifications"""
     notification = Notification.objects.get(id=notification_id)
-    recipient = OrgUser.objects.get(user_id=recipient_id)
+    recipient = OrgUser.objects.get(id=recipient_id)
     user_preference, _ = UserPreferences.objects.get_or_create(orguser=recipient)
 
     notification.sent_time = timezone.as_utc(datetime.now())
