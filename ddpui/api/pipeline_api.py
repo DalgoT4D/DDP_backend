@@ -729,3 +729,14 @@ def get_flow_runs_logsummary_v1(
     except Exception as error:
         logger.exception(error)
         raise HttpError(400, "failed to retrieve logs") from error
+
+
+@pipeline_router.get("flow_runs/{flow_run_id}/set_state", auth=auth.CustomAuthMiddleware)
+def cancel_queued_manual_job(request, flow_run_id):
+    """canel a queued manual job"""
+    try:
+        res = prefect_service.cancel_queued_manual_job(flow_run_id)
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(400, "failed to retrieve logs") from error
+    return res
