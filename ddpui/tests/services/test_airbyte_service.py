@@ -1555,6 +1555,29 @@ def test_get_logs_for_job_success():
         assert result == ["log-line-1", "log-line-2"]
 
 
+def test_get_logs_for_job_with_logType_formatted():
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
+        mock_abreq.return_value = {
+            "logs": {"logLines": ["log-line-1", "log-line-2"]},
+            "logType": "formatted",
+        }
+        result = get_logs_for_job(1, 0)
+        assert result == ["log-line-1", "log-line-2"]
+
+
+def test_get_logs_for_job_with_logType_structured():
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
+        mock_abreq.return_value = {
+            "logs": {
+                "logLines": ["log-line-1", "log-line-2"],
+                "events": [{"message": "log-line-3"}, {"message": "log-line-4"}],
+            },
+            "logType": "structured",
+        }
+        result = get_logs_for_job(1, 0)
+        assert result == ["log-line-3", "log-line-4"]
+
+
 def test_get_connection_catalog_success():
     org = Mock()
     with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
