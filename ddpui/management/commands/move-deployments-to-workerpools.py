@@ -44,7 +44,7 @@ class Command(BaseCommand):
                     f"Setting the work_queue_name to {work_queue_name} and worker pool to {work_pool_name} for deployment {dataflow.deployment_name}"
                 )
                 try:
-                    prefect_deployment = prefect_get(f"v1/deployments/{dataflow.deployment_id}")
+                    prefect_deployment = prefect_get(f"deployments/{dataflow.deployment_id}")
                     deployment_params = prefect_deployment["parameters"]
 
                     res = prefect_put(
