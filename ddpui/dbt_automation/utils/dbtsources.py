@@ -92,6 +92,7 @@ def read_sources_from_yaml(project_dir, sources_yml_rel_path) -> list[dict]:
     sources_yml_full_path = Path(project_dir) / sources_yml_rel_path
     with open(sources_yml_full_path, "r") as f:
         yaml_data = yaml.safe_load(f)
+        temp_sources = []
         if "sources" in yaml_data:
             temp_sources = yaml_data["sources"]
 
