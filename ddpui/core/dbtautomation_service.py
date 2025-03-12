@@ -1,6 +1,8 @@
 import os, uuid, time
 from pathlib import Path
+from collections import deque
 
+from django.db.models import Q
 from ddpui.dbt_automation.operations.arithmetic import arithmetic, arithmetic_dbt_sql
 from ddpui.dbt_automation.operations.castdatatypes import cast_datatypes, cast_datatypes_sql
 from ddpui.dbt_automation.operations.coalescecolumns import (
@@ -51,8 +53,7 @@ from ddpui.dbt_automation.operations.rawsql import generic_sql_function, raw_gen
 
 from ddpui.schemas.dbt_workflow_schema import CompleteDbtModelPayload
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
-from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation
-from ddpui.models.tasks import TaskProgressHashPrefix
+from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation, DbtEdge
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils.helpers import map_airbyte_keys_to_postgres_keys
@@ -255,10 +256,64 @@ def get_output_cols_for_operation(org_warehouse: OrgWarehouse, op_type: str, con
 
 
 def delete_dbt_model_in_project(orgdbt_model: OrgDbtModel):
-    """Delete a dbt model in the project"""
+    """Deletes a dbt model's sql file on disk"""
     dbt_project = dbtProject(Path(DbtProjectManager.get_dbt_project_dir(orgdbt_model.orgdbt)))
     dbt_project.delete_model(orgdbt_model.sql_path)
     return True
+
+
+def delete_dbt_source_in_project(orgdbt_model: OrgDbtModel):
+    """Deletes a dbt model's sql file on disk"""
+    dbt_project = dbtProject(Path(DbtProjectManager.get_dbt_project_dir(orgdbt_model.orgdbt)))
+
+    # delete the source from schema.yml
+
+    return True
+
+
+def delete_org_dbt_model(orgdbt_model: OrgDbtModel, cascade: bool = False):
+    """Delete the org dbt model"""
+    operations = OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).count()
+
+    if orgdbt_model.type == "model":
+        if operations > 0:
+            orgdbt_model.under_construction = True
+            orgdbt_model.save()
+
+            # delete the model file is present
+            delete_dbt_model_in_project(orgdbt_model)
+        else:
+            # make sure this is not linked to any other model
+            # delete if there are no edges coming or going out of this model
+            if (
+                DbtEdge.objects.filter(Q(from_node=orgdbt_model) | Q(to_node=orgdbt_model)).count()
+                == 0
+            ):
+                orgdbt_model.delete()
+
+    if orgdbt_model.type == "source":
+        # delete the source from db
+
+        # delete the source entry from schema.yml file
+        delete_dbt_source_in_project(orgdbt_model)
+
+    if cascade:
+        # delete all children of this model (operations & models)
+        q = deque()
+        children: list[OrgDbtModel] = []
+
+        q.append(orgdbt_model)
+        while len(q) > 0:
+            curr_node = q.popleft()
+            children.append(curr_node)
+
+            for edge in DbtEdge.objects.filter(from_node=curr_node):
+                q.append(edge.to_node)
+
+        for child_orgdbt_model in reversed(
+            children
+        ):  # just to be clean, delete from leaf nodes first
+            child_orgdbt_model.delete()
 
 
 def propagate_changes_to_downstream_operations(

@@ -13,7 +13,7 @@ from django.utils.text import slugify
 from ddpui import auth
 from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
 from ddpui.models.org_user import OrgUser
-from ddpui.models.org import OrgDbt, OrgWarehouse
+from ddpui.models.org import OrgDbt, OrgWarehouse, TransformType
 from ddpui.models.dbt_workflow import OrgDbtModel, DbtEdge, OrgDbtOperation
 from ddpui.models.canvaslock import CanvasLock
 
@@ -571,6 +571,39 @@ def delete_model(request, model_uuid, canvas_lock_id: str = None):
         raise HttpError(404, "please setup your warehouse first")
 
     # make sure the orgdbt here is the one we create locally
+    orgdbt = OrgDbt.objects.filter(org=org, transform_type=TransformType.UI).first()
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    check_canvas_locked(orguser, canvas_lock_id)
+
+    orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid).first()
+    if not orgdbt_model:
+        raise HttpError(404, "model not found")
+
+    dbtautomation_service.delete_org_dbt_model(orgdbt_model)
+
+    return {"success": 1}
+
+
+@transform_router.delete(
+    "/dbt_project/model/{model_uuid}/cascade", auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_delete_dbt_model"])
+def delete_model_cascade(request, model_uuid, canvas_lock_id: str = None):
+    """
+    Delete a model & all the operations/models downstream
+    Also all the operations leading to this model will be deleted
+    Hence the chain will be reset till the previous model
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    # make sure the orgdbt here is the one we create locally
     orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
@@ -581,22 +614,7 @@ def delete_model(request, model_uuid, canvas_lock_id: str = None):
     if not orgdbt_model:
         raise HttpError(404, "model not found")
 
-    if orgdbt_model.type == "source":
-        return {"success": 1}
-
-    operations = OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).count()
-
-    if operations > 0:
-        orgdbt_model.under_construction = True
-        orgdbt_model.save()
-
-        # delete the model file is present
-        dbtautomation_service.delete_dbt_model_in_project(orgdbt_model)
-    else:
-        # make sure this is not linked to any other model
-        # delete if there are no edges coming or going out of this model
-        if DbtEdge.objects.filter(Q(from_node=orgdbt_model) | Q(to_node=orgdbt_model)).count() == 0:
-            orgdbt_model.delete()
+    dbtautomation_service.delete_org_dbt_model(orgdbt_model, cascade=True)
 
     return {"success": 1}
 
