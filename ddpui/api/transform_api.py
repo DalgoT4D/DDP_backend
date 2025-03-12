@@ -613,6 +613,9 @@ def delete_source(request, model_uuid, canvas_lock_id: str = None, cascade: bool
     if not orgdbt_model:
         raise HttpError(404, "model not found")
 
+    if DbtEdge.objects.filter(Q(from_node=orgdbt_model) | Q(to_node=orgdbt_model)).count() > 0:
+        raise HttpError(422, "Cannot delete source model as it is connected to other models")
+
     dbtautomation_service.delete_org_dbt_source(orgdbt_model, cascade)
 
     return {"success": 1}
