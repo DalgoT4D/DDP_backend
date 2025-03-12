@@ -8,6 +8,7 @@ from ddpui.dbt_automation.utils.columnutils import make_cleaned_column_names, de
 from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
 from ddpui.dbt_automation.utils.tableutils import source_or_ref
 
+
 basicConfig(level=INFO)
 logger = getLogger()
 
@@ -30,10 +31,17 @@ def flattenjson_dbt_sql(
     json_column = config["json_column"]
     json_columns_to_copy = config["json_columns_to_copy"]
 
-    if source_columns == "*":
-        dbt_code = "SELECT *\n"
-    else:
-        dbt_code = f"SELECT {', '.join([quote_columnname(col, warehouse.name) for col in source_columns])}\n"
+    # Determine the source columns to be selected
+    if config["source_columns"] == "*":
+        raise ValueError(
+            "Invalid column selection: Please specify column names explicitly instead of using '*'."
+        )
+
+    source_columns = [col for col in source_columns if col != json_column]
+
+    dbt_code = (
+        f"SELECT {', '.join([quote_columnname(col, warehouse.name) for col in source_columns])}\n"
+    )
 
     sql_columns = make_cleaned_column_names(json_columns_to_copy)
 
