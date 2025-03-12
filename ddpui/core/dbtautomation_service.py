@@ -311,12 +311,12 @@ def delete_org_dbt_model(orgdbt_model: OrgDbtModel, cascade: bool = False):
         if cnt_edges_to_models == 0:
             orgdbt_model.delete()
 
-    # delete the model file is present
-    delete_dbt_model_in_project(orgdbt_model)
-
     if cascade:
         # delete all children of this model (operations & models)
         cascade_delete_org_dbt_model(orgdbt_model)
+    else:
+        # delete the model file is present
+        delete_dbt_model_in_project(orgdbt_model)
 
 
 def delete_org_dbt_source(orgdbt_model: OrgDbtModel, cascade: bool = False):
@@ -328,12 +328,13 @@ def delete_org_dbt_source(orgdbt_model: OrgDbtModel, cascade: bool = False):
         raise ValueError("Cannot delete a model as a source")
 
     # delete entry in sources.yml on disk; & recreate the sources.yml
-    if delete_dbt_source_in_project(orgdbt_model):
-        orgdbt_model.delete()
+    delete_dbt_source_in_project(orgdbt_model)
 
     if cascade:
         # delete all children of this model (operations & models)
         cascade_delete_org_dbt_model(orgdbt_model)
+    else:
+        orgdbt_model.delete()
 
 
 def cascade_delete_org_dbt_model(orgdbt_model: OrgDbtModel):
