@@ -540,7 +540,13 @@ def get_dbt_project_DAG(request):
 
     res_nodes = []
     for node in model_nodes:
-        if not node.under_construction:
+        if (
+            not node.under_construction
+            and DbtEdge.objects.filter(
+                (Q(from_node=node) & Q(to_node__under_construction=False)) | (Q(to_node=node))
+            ).count()
+            > 0
+        ):  # we dont want dangling node with edges to under_construction nodes to appear on cavas
             res_nodes.append(from_orgdbtmodel(node))
 
     for node in operation_nodes:

@@ -275,27 +275,33 @@ def delete_org_dbt_model(orgdbt_model: OrgDbtModel, cascade: bool = False):
     """Delete the org dbt model"""
     operations = OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).count()
 
-    if orgdbt_model.type == "model":
-        if operations > 0:
+    if operations > 0:
+        if orgdbt_model.type == "model":
             orgdbt_model.under_construction = True
             orgdbt_model.save()
-
-            # delete the model file is present
-            delete_dbt_model_in_project(orgdbt_model)
-        else:
+    else:
+        if orgdbt_model.type == "model":
             # make sure this is not linked to any other model
             # delete if there are no edges coming or going out of this model
-            if (
-                DbtEdge.objects.filter(Q(from_node=orgdbt_model) | Q(to_node=orgdbt_model)).count()
-                == 0
-            ):
+
+            cnt_edges_to_models = DbtEdge.objects.filter(
+                Q(from_node=orgdbt_model) | Q(to_node=orgdbt_model)
+            ).count()
+            if cnt_edges_to_models == 0:
                 orgdbt_model.delete()
 
+        if orgdbt_model.type == "source":
+            pass
+
+    # delete stuff from disk
     if orgdbt_model.type == "source":
         # delete the source from db
 
         # delete the source entry from schema.yml file
         delete_dbt_source_in_project(orgdbt_model)
+    else:
+        # delete the model file is present
+        delete_dbt_model_in_project(orgdbt_model)
 
     if cascade:
         # delete all children of this model (operations & models)
