@@ -53,7 +53,7 @@ from ddpui.dbt_automation.operations.rawsql import generic_sql_function, raw_gen
 
 from ddpui.schemas.dbt_workflow_schema import CompleteDbtModelPayload
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
-from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation, DbtEdge
+from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation, DbtEdge, OrgDbtModelType
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils.helpers import map_airbyte_keys_to_postgres_keys
@@ -272,54 +272,74 @@ def delete_dbt_source_in_project(orgdbt_model: OrgDbtModel):
 
 
 def delete_org_dbt_model(orgdbt_model: OrgDbtModel, cascade: bool = False):
-    """Delete the org dbt model"""
+    """
+    Delete the org dbt model
+    Only delete org dbt model of type "model"
+    """
+    if orgdbt_model.type == OrgDbtModelType.SOURCE:
+        raise ValueError("Cannot delete a source as a model")
+
     operations = OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).count()
 
     if operations > 0:
-        if orgdbt_model.type == "model":
-            orgdbt_model.under_construction = True
-            orgdbt_model.save()
+        orgdbt_model.under_construction = True
+        orgdbt_model.save()
     else:
-        if orgdbt_model.type == "model":
-            # make sure this is not linked to any other model
-            # delete if there are no edges coming or going out of this model
+        # make sure this is not linked to any other model
+        # delete if there are no edges coming or going out of this model
 
-            cnt_edges_to_models = DbtEdge.objects.filter(
-                Q(from_node=orgdbt_model) | Q(to_node=orgdbt_model)
-            ).count()
-            if cnt_edges_to_models == 0:
-                orgdbt_model.delete()
+        cnt_edges_to_models = DbtEdge.objects.filter(
+            Q(from_node=orgdbt_model) | Q(to_node=orgdbt_model)
+        ).count()
+        if cnt_edges_to_models == 0:
+            orgdbt_model.delete()
 
-        if orgdbt_model.type == "source":
-            pass
-
-    # delete stuff from disk
-    if orgdbt_model.type == "source":
-        # delete the source from db
-
-        # delete the source entry from schema.yml file
-        delete_dbt_source_in_project(orgdbt_model)
-    else:
-        # delete the model file is present
-        delete_dbt_model_in_project(orgdbt_model)
+    # delete the model file is present
+    delete_dbt_model_in_project(orgdbt_model)
 
     if cascade:
         # delete all children of this model (operations & models)
-        q = deque()
-        children: list[OrgDbtModel] = []
+        cascade_delete_org_dbt_model(orgdbt_model)
 
-        q.append(orgdbt_model)
-        while len(q) > 0:
-            curr_node = q.popleft()
-            children.append(curr_node)
 
-            for edge in DbtEdge.objects.filter(from_node=curr_node):
-                q.append(edge.to_node)
+def delete_org_dbt_source(orgdbt_model: OrgDbtModel, cascade: bool = False):
+    """
+    Delete the org dbt model
+    Only delete org dbt model of type "source"
+    """
+    if orgdbt_model.type == OrgDbtModelType.MODEL:
+        raise ValueError("Cannot delete a model as a source")
 
-        for child_orgdbt_model in reversed(
-            children
-        ):  # just to be clean, delete from leaf nodes first
-            child_orgdbt_model.delete()
+    # delete entry in sources.yml on disk
+    delete_dbt_source_in_project(orgdbt_model)
+
+    # delete the source from db
+    orgdbt_model.delete()
+
+    if cascade:
+        # delete all children of this model (operations & models)
+        cascade_delete_org_dbt_model(orgdbt_model)
+
+
+def cascade_delete_org_dbt_model(orgdbt_model: OrgDbtModel):
+    """
+    Cascade delete the org dbt model
+    Delete the model and all its children (operations & models)
+    """
+    # delete all children of this model (operations & models)
+    q = deque()
+    children: list[OrgDbtModel] = []
+
+    q.append(orgdbt_model)
+    while len(q) > 0:
+        curr_node = q.popleft()
+        children.append(curr_node)
+
+        for edge in DbtEdge.objects.filter(from_node=curr_node):
+            q.append(edge.to_node)
+
+    for child_orgdbt_model in reversed(children):  # just to be clean, delete from leaf nodes first
+        child_orgdbt_model.delete()
 
 
 def propagate_changes_to_downstream_operations(
@@ -394,7 +414,7 @@ def sync_sources_for_warehouse(
             sync_tables = []
             for table in wclient.get_tables(schema):
                 if not OrgDbtModel.objects.filter(
-                    orgdbt=org_dbt, schema=schema, name=table, type="model"
+                    orgdbt=org_dbt, schema=schema, name=table, type=OrgDbtModelType.MODEL
                 ).first():
                     sync_tables.append(table)
 
@@ -444,7 +464,7 @@ def sync_sources_for_warehouse(
         orgdbt_source = OrgDbtModel.objects.filter(
             source_name=source["source_name"],
             name=source["input_name"],
-            type="source",
+            type=OrgDbtModelType.SOURCE,
             orgdbt=org_dbt,
         ).first()
         if not orgdbt_source:
@@ -454,7 +474,7 @@ def sync_sources_for_warehouse(
                 source_name=source["source_name"],
                 name=source["input_name"],
                 display_name=source["input_name"],
-                type="source",
+                type=OrgDbtModelType.SOURCE,
             )
             taskprogress.add(
                 {

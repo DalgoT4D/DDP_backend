@@ -14,7 +14,7 @@ from ddpui import auth
 from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgDbt, OrgWarehouse, TransformType
-from ddpui.models.dbt_workflow import OrgDbtModel, DbtEdge, OrgDbtOperation
+from ddpui.models.dbt_workflow import OrgDbtModel, DbtEdge, OrgDbtOperation, OrgDbtModelType
 from ddpui.models.canvaslock import CanvasLock
 
 from ddpui.schemas.org_task_schema import DbtProjectSchema
@@ -587,20 +587,19 @@ def delete_model(request, model_uuid, canvas_lock_id: str = None):
     if not orgdbt_model:
         raise HttpError(404, "model not found")
 
+    if orgdbt_model.type == OrgDbtModelType.SOURCE:
+        raise HttpError(422, "Cannot delete source model")
+
     dbtautomation_service.delete_org_dbt_model(orgdbt_model)
 
     return {"success": 1}
 
 
-@transform_router.delete(
-    "/dbt_project/model/{model_uuid}/cascade", auth=auth.CustomAuthMiddleware()
-)
+@transform_router.delete("/dbt_project/source/{model_uuid}/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_delete_dbt_model"])
-def delete_model_cascade(request, model_uuid, canvas_lock_id: str = None):
+def delete_source(request, model_uuid, canvas_lock_id: str = None, cascade: bool = False):
     """
-    Delete a model & all the operations/models downstream
-    Also all the operations leading to this model will be deleted
-    Hence the chain will be reset till the previous model
+    Delete a source from dbt project
     """
     orguser: OrgUser = request.orguser
     org = orguser.org
@@ -620,7 +619,7 @@ def delete_model_cascade(request, model_uuid, canvas_lock_id: str = None):
     if not orgdbt_model:
         raise HttpError(404, "model not found")
 
-    dbtautomation_service.delete_org_dbt_model(orgdbt_model, cascade=True)
+    dbtautomation_service.delete_org_dbt_source(orgdbt_model, cascade)
 
     return {"success": 1}
 
