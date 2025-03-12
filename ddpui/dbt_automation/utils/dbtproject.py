@@ -75,3 +75,13 @@ class dbtProject:  # pylint:disable=invalid-name
             return True
 
         return False
+
+    def delete_source(self, source_yml_relative_path: Path):
+        """Delete a source; relative path will look like models/intermediate/sources.yml"""
+
+        source_yml_path = Path(self.project_dir) / source_yml_relative_path
+        if source_yml_path.exists():
+            source_yml_path.unlink()
+            return True
+
+        return False

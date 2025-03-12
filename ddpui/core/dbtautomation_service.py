@@ -42,7 +42,7 @@ from ddpui.dbt_automation.operations.wherefilter import where_filter, where_filt
 from ddpui.dbt_automation.operations.mergetables import union_tables, union_tables_sql
 from ddpui.dbt_automation.utils.warehouseclient import get_client
 from ddpui.dbt_automation.utils.dbtproject import dbtProject
-from ddpui.dbt_automation.utils.dbtsources import read_sources
+from ddpui.dbt_automation.utils.dbtsources import read_sources, read_sources_from_yaml
 from ddpui.dbt_automation.operations.replace import replace, replace_dbt_sql
 from ddpui.dbt_automation.operations.casewhen import casewhen, casewhen_dbt_sql
 from ddpui.dbt_automation.operations.aggregate import aggregate, aggregate_dbt_sql
@@ -264,9 +264,26 @@ def delete_dbt_model_in_project(orgdbt_model: OrgDbtModel):
 
 def delete_dbt_source_in_project(orgdbt_model: OrgDbtModel):
     """Deletes a dbt model's sql file on disk"""
-    dbt_project = dbtProject(Path(DbtProjectManager.get_dbt_project_dir(orgdbt_model.orgdbt)))
 
-    # delete the source from schema.yml
+    # read all sources in the same yml file
+    src_tables: list[dict] = read_sources_from_yaml(
+        DbtProjectManager.get_dbt_project_dir(orgdbt_model.orgdbt), orgdbt_model.sql_path
+    )
+
+    filtered_src_tables: list[dict] = [
+        src_table for src_table in src_tables if src_table["input_name"] != orgdbt_model.name
+    ]
+
+    # if there are sources & there is diff; update the sources.yml
+    if len(src_tables) > 0 and len(src_tables) != len(filtered_src_tables):
+        src_yml_path = generate_source_definitions_yaml(
+            orgdbt_model.schema,
+            orgdbt_model.source_name,
+            [src["input_name"] for src in filtered_src_tables],
+            dbtProject(Path(DbtProjectManager.get_dbt_project_dir(orgdbt_model.orgdbt))),
+        )
+
+        logger.info(f"Deleted & Updated the source tables in yml {src_yml_path}")
 
     return True
 
@@ -310,11 +327,9 @@ def delete_org_dbt_source(orgdbt_model: OrgDbtModel, cascade: bool = False):
     if orgdbt_model.type == OrgDbtModelType.MODEL:
         raise ValueError("Cannot delete a model as a source")
 
-    # delete entry in sources.yml on disk
-    delete_dbt_source_in_project(orgdbt_model)
-
-    # delete the source from db
-    orgdbt_model.delete()
+    # delete entry in sources.yml on disk; & recreate the sources.yml
+    if delete_dbt_source_in_project(orgdbt_model):
+        orgdbt_model.delete()
 
     if cascade:
         # delete all children of this model (operations & models)

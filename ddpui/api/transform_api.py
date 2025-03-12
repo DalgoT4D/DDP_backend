@@ -540,13 +540,7 @@ def get_dbt_project_DAG(request):
 
     res_nodes = []
     for node in model_nodes:
-        if (
-            not node.under_construction
-            and DbtEdge.objects.filter(
-                (Q(from_node=node) & Q(to_node__under_construction=False)) | (Q(to_node=node))
-            ).count()
-            > 0
-        ):  # we dont want dangling node with edges to under_construction nodes to appear on cavas
+        if not node.under_construction:
             res_nodes.append(from_orgdbtmodel(node))
 
     for node in operation_nodes:
@@ -564,7 +558,7 @@ def get_dbt_project_DAG(request):
 
 @transform_router.delete("/dbt_project/model/{model_uuid}/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_delete_dbt_model"])
-def delete_model(request, model_uuid, canvas_lock_id: str = None):
+def delete_model(request, model_uuid, canvas_lock_id: str = None, cascade: bool = False):
     """
     Delete a model if it does not have any operations chained
     Convert the model to "under_construction if its has atleast 1 operation chained"
@@ -590,7 +584,7 @@ def delete_model(request, model_uuid, canvas_lock_id: str = None):
     if orgdbt_model.type == OrgDbtModelType.SOURCE:
         raise HttpError(422, "Cannot delete source model")
 
-    dbtautomation_service.delete_org_dbt_model(orgdbt_model)
+    dbtautomation_service.delete_org_dbt_model(orgdbt_model, cascade)
 
     return {"success": 1}
 
