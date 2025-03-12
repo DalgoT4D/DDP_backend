@@ -30,8 +30,6 @@ def flattenjson_dbt_sql(
     json_column = config["json_column"]
     json_columns_to_copy = config["json_columns_to_copy"]
 
-    if source_columns != "*":
-        source_columns = [col for col in source_columns if col != json_column]
     if source_columns == "*":
         dbt_code = "SELECT *\n"
     else:
