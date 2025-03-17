@@ -577,7 +577,7 @@ def delete_model(request, model_uuid, canvas_lock_id: str = None, cascade: bool 
 
     check_canvas_locked(orguser, canvas_lock_id)
 
-    orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid).first()
+    orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid, type=OrgDbtModelType.MODEL).first()
     if not orgdbt_model:
         raise HttpError(404, "model not found")
 
@@ -603,15 +603,15 @@ def delete_source(request, model_uuid, canvas_lock_id: str = None, cascade: bool
         raise HttpError(404, "please setup your warehouse first")
 
     # make sure the orgdbt here is the one we create locally
-    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    orgdbt = OrgDbt.objects.filter(org=org, transform_type=TransformType.UI).first()
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
     check_canvas_locked(orguser, canvas_lock_id)
 
-    orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid).first()
+    orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid, type=OrgDbtModelType.SOURCE).first()
     if not orgdbt_model:
-        raise HttpError(404, "model not found")
+        raise HttpError(404, "source not found")
 
     if DbtEdge.objects.filter(Q(from_node=orgdbt_model) | Q(to_node=orgdbt_model)).count() > 0:
         raise HttpError(422, "Cannot delete source model as it is connected to other models")
