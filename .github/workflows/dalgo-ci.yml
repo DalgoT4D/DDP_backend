@@ -81,6 +81,12 @@ jobs:
           coverage xml
           coverage report --fail-under=70
 
+      - name: Upload coverage reports to codecov
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
+
       - name: Check coverage percentage
         run: |
           coverage_percentage=$(coverage report --show-missing | tail -n 1 | awk '{print $4}')
@@ -88,8 +94,3 @@ jobs:
             echo "Coverage percentage is below 70%"
             exit 1
           fi
-      - name: Upload coverage reports to codecov
-        uses: codecov/codecov-action@v3
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: true
