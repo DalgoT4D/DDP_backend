@@ -71,7 +71,7 @@ def orgdbt_model(orgdbt):
 
 @pytest.fixture
 def orgdbt_source(orgdbt):
-    """a pytest fixture which creates an Org with a dbt model"""
+    """a pytest fixture which creates an Org with a dbt source"""
     orgdbt_source = OrgDbtModel.objects.create(
         uuid=uuid.uuid4(),
         orgdbt=orgdbt,
