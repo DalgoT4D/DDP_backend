@@ -811,6 +811,7 @@ class TestPostgresOperations:
         assert "_airbyte_data_NGO" in cols
         assert "_airbyte_data_Month" in cols
         assert "_airbyte_ab_id" in cols
+        assert "_airbyte_data" not in cols
 
     def test_merge_operation(self):
         """test merge_operation"""

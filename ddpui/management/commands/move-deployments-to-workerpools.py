@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 from ninja.errors import HttpError
-from ddpui.ddpprefect.prefect_service import prefect_put
+from ddpui.ddpprefect.prefect_service import prefect_put, prefect_get
 from ddpui.models.org import OrgDataFlowv1, Org
 from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE, DDP_WORK_QUEUE
 
@@ -44,9 +44,13 @@ class Command(BaseCommand):
                     f"Setting the work_queue_name to {work_queue_name} and worker pool to {work_pool_name} for deployment {dataflow.deployment_name}"
                 )
                 try:
+                    prefect_deployment = prefect_get(f"deployments/{dataflow.deployment_id}")
+                    deployment_params = prefect_deployment["parameters"]
+
                     res = prefect_put(
                         f"v1/deployments/{dataflow.deployment_id}",
                         {
+                            "deployment_params": deployment_params,
                             "work_pool_name": work_pool_name,
                             "work_queue_name": work_queue_name,
                         },
