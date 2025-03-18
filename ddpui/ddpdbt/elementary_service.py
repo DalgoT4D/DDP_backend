@@ -161,7 +161,6 @@ def create_elementary_tracking_tables(org: Org):
     taskprogress.add({"message": "Added dbt commands in queue", "status": "queued"})
 
     # executes clean, deps, run
-
     run_dbt_commands.delay(
         org.id,
         task_id,
