@@ -1,4 +1,4 @@
-""" tests for bigquery operations """
+"""tests for bigquery operations"""
 
 import os
 from pathlib import Path
@@ -1013,6 +1013,7 @@ class TestBigqueryOperations:
         assert "_airbyte_data_NGO" in cols
         assert "_airbyte_data_Month" in cols
         assert "_airbyte_ab_id" in cols
+        assert "_airbyte_data" not in cols
 
     def test_generic(self):
         """test generic function"""
