@@ -17,6 +17,7 @@ from ddpui.ddpprefect.schema import (
     PrefectFlowRunSchema,
     PrefectDataFlowUpdateSchema3,
     PrefectDataFlowCreateSchema4,
+    TaskStateSchema,
 )
 from ddpui.utils.constants import TASK_DBTRUN, TASK_AIRBYTESYNC
 from ddpui.utils.custom_logger import CustomLogger
@@ -731,15 +732,16 @@ def get_flow_runs_logsummary_v1(
         raise HttpError(400, "failed to retrieve logs") from error
 
 
-@pipeline_router.get("flow_runs/{flow_run_id}/set_state", auth=auth.CustomAuthMiddleware())
-def cancel_queued_manual_job(request, flow_run_id):
+@pipeline_router.post("flow_runs/{flow_run_id}/set_state", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_edit_pipeline"])
+def cancel_queued_manual_job(request, flow_run_id, payload: TaskStateSchema):
     """canel a queued manual job"""
     try:
         orguser: OrgUser = request.orguser
         if orguser.org is None:
             raise HttpError(400, "register an organization first")
 
-        res = prefect_service.cancel_queued_manual_job(flow_run_id)
+        res = prefect_service.cancel_queued_manual_job(flow_run_id, payload.dict())
     except Exception as error:
         logger.exception(error)
         raise HttpError(400, "failed to cancel the queued manual job") from error

@@ -26,6 +26,7 @@ from ddpui.api.pipeline_api import (
     put_prefect_dataflow_v1,
     post_deployment_set_schedule,
     get_prefect_flow_runs_log_history_v1,
+    cancel_queued_manual_job,
 )
 from ddpui.ddpprefect import (
     DBTCLIPROFILE,
@@ -40,6 +41,7 @@ from ddpui.ddpprefect.schema import (
     PrefectFlowAirbyteConnection2,
     PrefectDataFlowUpdateSchema3,
     PrefectDataFlowOrgTasks,
+    TaskStateSchema,
 )
 from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
@@ -958,3 +960,42 @@ def test_get_prefect_flow_runs_log_history_v1_org_not_found(orguser_transform_ta
         get_prefect_flow_runs_log_history_v1(request, "deployment_id", limit=2, offset=0)
     assert excinfo.value.status_code == 404
     assert str(excinfo.value) == "organization not found"
+
+
+@patch("ddpui.ddpprefect.prefect_service.cancel_queued_manual_job")
+def test_cancel_queued_manual_job_success(mock_cancel_job, orguser_transform_tasks):
+    """Test successful cancellation of queued manual job"""
+    request = mock_request(orguser_transform_tasks)
+    request.permissions = ["can_edit_pipeline"]
+    flow_run_id = "test-flow-run-id"
+    mock_cancel_job.return_value = {"success": True}
+
+    response = cancel_queued_manual_job(
+        request,
+        flow_run_id,
+        TaskStateSchema(state={"name": "Cancelling", "type": "CANCELLING"}, force=True),
+    )
+
+    assert response == {"success": True}
+    mock_cancel_job.assert_called_once_with(
+        flow_run_id, {"state": {"name": "Cancelling", "type": "CANCELLING"}, "force": True}
+    )
+
+
+@patch("ddpui.ddpprefect.prefect_service.cancel_queued_manual_job")
+def test_cancel_queued_manual_job_prefect_error(mock_cancel_job, orguser_transform_tasks):
+    """Test handling of prefect service errors"""
+    request = mock_request(orguser_transform_tasks)
+    request.permissions = ["can_edit_pipeline"]
+    flow_run_id = "test-flow-run-id"
+    mock_cancel_job.side_effect = Exception("Prefect service error")
+
+    with pytest.raises(HttpError) as exc:
+        cancel_queued_manual_job(
+            request,
+            flow_run_id,
+            TaskStateSchema(state={"name": "Cancelling", "type": "CANCELLING"}, force=True),
+        )
+
+    assert exc.value.status_code == 400
+    assert "failed to cancel the queued manual job" in str(exc.value)

@@ -744,10 +744,10 @@ def create_or_update_dbt_cloud_creds_block(
     return cloud_creds_block
 
 
-def cancel_queued_manual_job(flow_run_id: str):
+def cancel_queued_manual_job(flow_run_id: str, payload):
     """Cancels a queued manual sync"""
     res = prefect_post(
         f"flow_runs/{flow_run_id}/set_state",
-        {"state": {"name": "Cancelling", "type": "CANCELLING"}, "force": "TRUE"},
+        payload,
     )
     return res
