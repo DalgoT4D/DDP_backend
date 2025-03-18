@@ -18,6 +18,7 @@ from ddpui.models.tasks import OrgTask, DataflowOrgTask
 from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.constants import TASK_GENERATE_EDR
+from ddpui.celeryworkers.tasks import run_dbt_commands
 from ddpui.core.pipelinefunctions import setup_edr_send_report_task_config
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.core.orgdbt_manager import DbtProjectManager
@@ -160,7 +161,6 @@ def create_elementary_tracking_tables(org: Org):
     taskprogress.add({"message": "Added dbt commands in queue", "status": "queued"})
 
     # executes clean, deps, run
-    from ddpui.celeryworkers.tasks import run_dbt_commands
 
     run_dbt_commands.delay(
         org.id,
@@ -202,8 +202,6 @@ def create_elementary_profile(org: Org):
         return {"error": "dbt is not configured for this client"}
 
     dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
-
-    from ddpui.celeryworkers.tasks import run_dbt_commands
 
     r = subprocess.check_output(
         [
