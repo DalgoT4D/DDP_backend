@@ -76,20 +76,29 @@ def read_sources(project_dir) -> list[dict]:
     models_dir = Path(project_dir) / "models"
 
     # {"models/example/sources.yml": [{"name": "source1", "tables": [{"identifier": "table1"}]}
-    sources = {}
+    src_tables = []
     for root, dirs, files in os.walk(models_dir):
         for file in files:
             if file.endswith(".yml") or file.endswith(".yaml"):
                 file_path = os.path.join(root, file)
-                temp_sources = []
-                with open(file_path, "r") as f:
-                    yaml_data = yaml.safe_load(f)
-                    if "sources" in yaml_data:
-                        temp_sources = yaml_data["sources"]
+                src_tables += read_sources_from_yaml(project_dir, file_path)
 
-                if len(temp_sources) > 0:
-                    src_yml_path = Path(file_path).relative_to(project_dir)
-                    sources[str(src_yml_path)] = temp_sources
+    return src_tables
+
+
+def read_sources_from_yaml(project_dir, sources_yml_rel_path) -> list[dict]:
+    """Read sources from a sources.yaml file"""
+    sources = {}
+    sources_yml_full_path = Path(project_dir) / sources_yml_rel_path
+    with open(sources_yml_full_path, "r") as f:
+        yaml_data = yaml.safe_load(f)
+        temp_sources = []
+        if "sources" in yaml_data:
+            temp_sources = yaml_data["sources"]
+
+        if len(temp_sources) > 0:
+            src_yml_path = Path(sources_yml_full_path).relative_to(project_dir)
+            sources[str(src_yml_path)] = temp_sources
 
     src_tables = []
     for src_yml_rel_path, srcs_yml in sources.items():
