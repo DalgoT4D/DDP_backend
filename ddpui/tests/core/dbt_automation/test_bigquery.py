@@ -12,9 +12,10 @@ def mock_bigquery_client():
 
 @pytest.fixture
 def mock_open_env():
-    with patch("builtins.open", mock_open(read_data='{"project_id": "test_project"}')):
-        with patch.dict(os.environ, {"GOOGLE_APPLICATION_CREDENTIALS": "fake_path"}):
-            yield
+    with patch("builtins.open", mock_open(read_data='{"project_id": "test_project"}')), patch.dict(
+        os.environ, {"GOOGLE_APPLICATION_CREDENTIALS": "fake_path"}
+    ):
+        yield
 
 
 @pytest.fixture
