@@ -292,6 +292,7 @@ def delete_org_dbt_model(orgdbt_model: OrgDbtModel, cascade: bool = False):
     """
     Delete the org dbt model
     Only delete org dbt model of type "model"
+    Casacde will be implemented when we re-haul the ui4t architecture
     """
     if orgdbt_model.type == OrgDbtModelType.SOURCE:
         raise ValueError("Cannot delete a source as a model")
@@ -311,18 +312,15 @@ def delete_org_dbt_model(orgdbt_model: OrgDbtModel, cascade: bool = False):
         if cnt_edges_to_models == 0:
             orgdbt_model.delete()
 
-    if cascade:
-        # delete all children of this model (operations & models)
-        cascade_delete_org_dbt_model(orgdbt_model)
-    else:
-        # delete the model file is present
-        delete_dbt_model_in_project(orgdbt_model)
+    # delete the model file is present
+    delete_dbt_model_in_project(orgdbt_model)
 
 
 def delete_org_dbt_source(orgdbt_model: OrgDbtModel, cascade: bool = False):
     """
     Delete the org dbt model
     Only delete org dbt model of type "source"
+    Cascade will be implemented when we re-haul the ui4t architecture
     """
     if orgdbt_model.type == OrgDbtModelType.MODEL:
         raise ValueError("Cannot delete a model as a source")
@@ -330,17 +328,14 @@ def delete_org_dbt_source(orgdbt_model: OrgDbtModel, cascade: bool = False):
     # delete entry in sources.yml on disk; & recreate the sources.yml
     delete_dbt_source_in_project(orgdbt_model)
 
-    if cascade:
-        # delete all children of this model (operations & models)
-        cascade_delete_org_dbt_model(orgdbt_model)
-    else:
-        orgdbt_model.delete()
+    orgdbt_model.delete()
 
 
 def cascade_delete_org_dbt_model(orgdbt_model: OrgDbtModel):
     """
     Cascade delete the org dbt model
     Delete the model and all its children (operations & models)
+    THIS iS UNUSED. Cascade will be implemented when we re-haul the ui4t architecture
     """
     # delete all children of this model (operations & models)
     q = deque()

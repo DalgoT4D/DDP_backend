@@ -562,7 +562,11 @@ def delete_model(request, model_uuid, canvas_lock_id: str = None, cascade: bool 
     """
     Delete a model if it does not have any operations chained
     Convert the model to "under_construction if its has atleast 1 operation chained"
+    Cascade will be implemented when we re-haul the ui4t architecture
     """
+    if cascade:
+        raise NotImplementedError()
+
     orguser: OrgUser = request.orguser
     org = orguser.org
 
@@ -594,7 +598,11 @@ def delete_model(request, model_uuid, canvas_lock_id: str = None, cascade: bool 
 def delete_source(request, model_uuid, canvas_lock_id: str = None, cascade: bool = False):
     """
     Delete a source from dbt project
+    Cascade will be implemented when we re-haul the ui4t architecture
     """
+    if cascade:
+        raise NotImplementedError()
+
     orguser: OrgUser = request.orguser
     org = orguser.org
 
