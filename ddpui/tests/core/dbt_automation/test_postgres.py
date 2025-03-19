@@ -111,3 +111,132 @@ def test_get_connection_7():
         )
         mock_connect.assert_called_once()
         mock_connect.assert_called_with(sslmode="disable", sslrootcert=ANY)
+
+
+def test_drop_table():
+    """tests PostgresClient.drop_table"""
+    with patch.object(PostgresClient, "runcmd") as mock_runcmd, patch(
+        "ddpui.dbt_automation.utils.postgres.psycopg2.connect"
+    ):
+        client = PostgresClient(
+            {"host": "HOST", "port": 1234, "user": "USER", "password": "PASSWORD"}
+        )
+        client.drop_table("schema", "table")
+        mock_runcmd.assert_called_once_with("DROP TABLE IF EXISTS schema.table;")
+
+
+def test_insert_row():
+    """tests PostgresClient.insert_row"""
+    with patch.object(PostgresClient, "runcmd") as mock_runcmd, patch(
+        "ddpui.dbt_automation.utils.postgres.psycopg2.connect"
+    ):
+        client = PostgresClient(
+            {"host": "HOST", "port": 1234, "user": "USER", "password": "PASSWORD"}
+        )
+        client.insert_row("schema", "table", {"col1": "val1", "col2": "val2"})
+        mock_runcmd.assert_called_once_with(
+            """
+            INSERT INTO schema.table (col1,col2)
+            VALUES ('val1','val2');
+            """
+        )
+
+
+def test_json_extract_op():
+    """tests PostgresClient.json_extract_op"""
+    with patch("ddpui.dbt_automation.utils.postgres.psycopg2.connect"):
+        client = PostgresClient(
+            {"host": "HOST", "port": 1234, "user": "USER", "password": "PASSWORD"}
+        )
+        result = client.json_extract_op("json_column", "json_field", "sql_column")
+        assert result == """"json_column"::json->>'json_field' as \"sql_column\""""
+
+
+def test_close():
+    """tests PostgresClient.close"""
+    with patch.object(PostgresClient, "close") as mock_close, patch(
+        "ddpui.dbt_automation.utils.postgres.psycopg2.connect"
+    ):
+        client = PostgresClient(
+            {"host": "HOST", "port": 1234, "user": "USER", "password": "PASSWORD"}
+        )
+        client.close()
+        mock_close.assert_called_once()
+
+
+def test_generate_profiles_yaml_dbt():
+    """tests PostgresClient.generate_profiles_yaml_dbt"""
+    with patch("ddpui.dbt_automation.utils.postgres.psycopg2.connect"):
+        client = PostgresClient(
+            {
+                "host": "HOST",
+                "port": 1234,
+                "user": "USER",
+                "password": "PASSWORD",
+                "database": "DB",
+            }
+        )
+        result = client.generate_profiles_yaml_dbt("project_name", "default_schema")
+        expected = {
+            "project_name": {
+                "outputs": {
+                    "prod": {
+                        "dbname": "DB",
+                        "host": "HOST",
+                        "password": "PASSWORD",
+                        "port": 1234,
+                        "user": "USER",
+                        "schema": "default_schema",
+                        "threads": 4,
+                        "type": "postgres",
+                    }
+                },
+                "target": "prod",
+            }
+        }
+        assert result == expected
+
+
+def test_get_total_rows():
+    """tests PostgresClient.get_total_rows"""
+    with patch.object(PostgresClient, "execute", return_value=[[10]]) as mock_execute, patch(
+        "ddpui.dbt_automation.utils.postgres.psycopg2.connect"
+    ):
+        client = PostgresClient(
+            {"host": "HOST", "port": 1234, "user": "USER", "password": "PASSWORD"}
+        )
+        result = client.get_total_rows("schema", "table")
+        mock_execute.assert_called_once_with(
+            """
+                SELECT COUNT(*) 
+                FROM "schema"."table";
+                """
+        )
+        assert result == 10
+
+
+def test_get_column_data_types():
+    """tests PostgresClient.get_column_data_types"""
+    with patch("ddpui.dbt_automation.utils.postgres.psycopg2.connect"):
+        client = PostgresClient(
+            {"host": "HOST", "port": 1234, "user": "USER", "password": "PASSWORD"}
+        )
+        result = client.get_column_data_types()
+        expected = [
+            "boolean",
+            "char",
+            "character varying",
+            "date",
+            "double precision",
+            "float",
+            "integer",
+            "jsonb",
+            "numeric",
+            "text",
+            "time",
+            "timestamp",
+            "timestamp with time zone",
+            "uuid",
+            "varchar",
+        ]
+        assert result == expected
