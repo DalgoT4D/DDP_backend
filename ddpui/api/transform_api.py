@@ -196,7 +196,9 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
             )
 
     output_cols = dbtautomation_service.get_output_cols_for_operation(
-        org_warehouse, payload.op_type, final_config["config"].copy()
+        org_warehouse,
+        payload.op_type,
+        final_config["config"].copy(),
     )
     logger.info("creating operation")
 
