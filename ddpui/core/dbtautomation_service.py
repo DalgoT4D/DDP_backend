@@ -355,6 +355,7 @@ def cascade_delete_org_dbt_model(orgdbt_model: OrgDbtModel):
             q.append(edge.to_node)
 
     for child_orgdbt_model in reversed(children):  # just to be clean, delete from leaf nodes first
+        delete_dbt_model_in_project(child_orgdbt_model)
         child_orgdbt_model.delete()
 
 
