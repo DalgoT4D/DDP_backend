@@ -41,6 +41,17 @@ def test_get_table_data_default(
     assert len(result) == 2
     assert result[0]["column1"] == "value1"
     assert result[1]["column1"] == "value3"
+    assert result[0]["column2"] == "value2"
+    assert result[1]["column2"] == "value4"
+
+    # Verify SQL construction
+    expected_sql = """
+            SELECT * 
+            FROM `test_schema`.`test_table`
+            
+            LIMIT 10 OFFSET 0
+            """
+    mock_client_instance.query.assert_called_once_with(expected_sql, location="asia-south1")
 
 
 def test_get_table_data_with_order(
@@ -60,6 +71,19 @@ def test_get_table_data_with_order(
     assert len(result) == 2
     assert result[0]["column1"] == "value1"
     assert result[1]["column1"] == "value3"
+    assert result[0]["column2"] == "value2"
+    assert result[1]["column2"] == "value4"
+
+    # Verify SQL construction with ORDER BY
+    expected_sql = """
+            SELECT * 
+            FROM `test_schema`.`test_table`
+            
+            ORDER BY `column1` ASC
+            
+            LIMIT 10 OFFSET 0
+            """
+    mock_client_instance.query.assert_called_once_with(expected_sql, location="asia-south1")
 
 
 def test_get_table_data_with_pagination(
@@ -79,3 +103,14 @@ def test_get_table_data_with_pagination(
     assert len(result) == 2
     assert result[0]["column1"] == "value1"
     assert result[1]["column1"] == "value3"
+    assert result[0]["column2"] == "value2"
+    assert result[1]["column2"] == "value4"
+
+    # Verify SQL construction with pagination
+    expected_sql = """
+            SELECT * 
+            FROM `test_schema`.`test_table`
+            
+            LIMIT 10 OFFSET 10
+            """
+    mock_client_instance.query.assert_called_once_with(expected_sql, location="asia-south1")
