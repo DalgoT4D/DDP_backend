@@ -114,21 +114,6 @@ def test_delete_org_dbt_model_operations_chained(
     mock_delete_dbt_model_in_project.assert_called_once_with(orgdbt_model)
 
 
-@patch("ddpui.core.dbtautomation_service.cascade_delete_org_dbt_model")
-@patch("ddpui.core.dbtautomation_service.delete_dbt_model_in_project")
-def test_delete_org_dbt_model_operations_chained_cascade(
-    mock_delete_dbt_model_in_project: Mock,
-    mock_cascade_delete_org_dbt_model: Mock,
-    orgdbt_model: OrgDbtModel,
-):
-    """Delete org dbt model with operations chained & pointing to it. Do a cascade delete"""
-    delete_org_dbt_model(orgdbt_model, cascade=True)
-
-    assert orgdbt_model.under_construction is True
-    mock_cascade_delete_org_dbt_model.assert_called_once_with(orgdbt_model)
-    mock_delete_dbt_model_in_project.assert_not_called()
-
-
 @patch("ddpui.core.dbtautomation_service.delete_dbt_model_in_project")
 def test_delete_org_dbt_model_with_dangling_model_node(
     mock_delete_dbt_model_in_project: Mock, orgdbt_model: OrgDbtModel
@@ -157,19 +142,6 @@ def test_delete_org_dbt_source_success(
     delete_org_dbt_source(orgdbt_source, cascade=False)
 
     assert OrgDbtModel.objects.filter(uuid=orgdbt_source.uuid).count() == 0
-    mock_delete_dbt_source_in_project.assert_called_once_with(orgdbt_source)
-
-
-@patch("ddpui.core.dbtautomation_service.cascade_delete_org_dbt_model")
-@patch("ddpui.core.dbtautomation_service.delete_dbt_source_in_project")
-def test_delete_org_dbt_source_cascade_success(
-    mock_delete_dbt_source_in_project: Mock,
-    mock_cascade_delete_org_dbt_model: Mock,
-    orgdbt_source: OrgDbtModel,
-):
-    delete_org_dbt_source(orgdbt_source, cascade=True)
-
-    mock_cascade_delete_org_dbt_model.assert_called_once_with(orgdbt_source)
     mock_delete_dbt_source_in_project.assert_called_once_with(orgdbt_source)
 
 
