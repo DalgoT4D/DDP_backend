@@ -1,4 +1,4 @@
-from unittest.mock import patch, ANY
+from unittest.mock import patch, ANY, Mock
 from ddpui.dbt_automation.utils.postgres import PostgresClient
 
 
@@ -154,14 +154,25 @@ def test_json_extract_op():
 
 def test_close():
     """tests PostgresClient.close"""
-    with patch.object(PostgresClient, "close") as mock_close, patch(
-        "ddpui.dbt_automation.utils.postgres.psycopg2.connect"
-    ):
+    with patch("ddpui.dbt_automation.utils.postgres.psycopg2.connect"):
         client = PostgresClient(
             {"host": "HOST", "port": 1234, "user": "USER", "password": "PASSWORD"}
         )
-        client.close()
-        mock_close.assert_called_once()
+        mock_cursor = Mock(close=Mock())
+        client.cursor = mock_cursor
+        mock_tunnel = Mock(stop=Mock())
+        client.tunnel = mock_tunnel
+        mock_connection = Mock(close=Mock())
+        client.connection = mock_connection
+
+        assert client.close() is True
+
+        mock_cursor.close.assert_called_once()
+        assert client.cursor is None
+        mock_tunnel.stop.assert_called_once()
+        assert client.tunnel is None
+        mock_connection.close.assert_called_once()
+        assert client.connection is None
 
 
 def test_generate_profiles_yaml_dbt():
