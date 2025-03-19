@@ -123,7 +123,7 @@ class Command(BaseCommand):
                 jobinfo = job["job"]
                 attempts = job["attempts"]
                 job_id = jobinfo["id"]
-                logs = {"logLines": []}
+                log_lines = []
                 if jobinfo["status"] == "succeeded":
                     for attempt in attempts:
                         if attempt["status"] == "succeeded":
@@ -131,8 +131,7 @@ class Command(BaseCommand):
                                 f"Found success logs for connection id : {connection_id} job_id : {job_id}"
                             )
                             status = self.SUCCESS_LOGS
-                            logs = airbyte_service.get_logs_for_job(job_id, attempt["id"])
-                            logs = logs["logs"]
+                            log_lines = airbyte_service.get_logs_for_job(job_id, attempt["id"])
                             break
                 elif jobinfo["status"] == "failed":
                     for attempt in attempts:
@@ -141,11 +140,10 @@ class Command(BaseCommand):
                                 f"Found failure logs for connection id : {connection_id} job_id : {job_id}"
                             )
                             status = self.FAILURE_LOGS
-                            logs = airbyte_service.get_logs_for_job(job_id, attempt["id"])
-                            logs = logs["logs"]
+                            log_lines = airbyte_service.get_logs_for_job(job_id, attempt["id"])
                             break
 
-                if len(logs["logLines"]) > 0 and status is not None:
+                if len(log_lines) > 0 and status is not None:
                     s3key = f"logs/airbyte/{org}/{job_id}/{status}.json"
                     if status == self.SUCCESS_LOGS:
                         cnt_success += 1
@@ -154,7 +152,7 @@ class Command(BaseCommand):
                     s3.put_object(
                         Bucket="dalgo-t4dai",
                         Key=s3key,
-                        Body=json.dumps(logs),
+                        Body=json.dumps(log_lines),
                     )
                     print(f"Saved s3://dalgo-t4dai/{s3key}")
 

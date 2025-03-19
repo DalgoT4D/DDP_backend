@@ -1006,8 +1006,8 @@ def parse_job_info(jobinfo: dict) -> dict:
     return retval
 
 
-def get_logs_for_job(job_id: int, attempt_number: int = 0) -> list:
-    """get logs for an airbyte job. do not make an API for this!"""
+def get_logs_for_job(job_id: int, attempt_number: int = 0) -> list[str]:
+    """get logs for an airbyte job. do not make an API for this! returns an array of log messages in correct order"""
     if not isinstance(job_id, int):
         raise HttpError(400, "job_id must be an integer")
 
@@ -1015,7 +1015,17 @@ def get_logs_for_job(job_id: int, attempt_number: int = 0) -> list:
         "attempt/get_for_job",
         {"jobId": job_id, "attemptNumber": attempt_number},
     )
-    return res
+
+    # logType field is present in the newer version of airbyte (1.4.1)
+    # the old logs come as logType == formatted
+    # the new logs will comes as logType == structured; as events
+    if "logType" not in res or res["logType"] == "formatted":
+        return res["logs"]["logLines"]
+
+    if res["logType"] == "structured":
+        return [x["message"] for x in res["logs"]["events"]]
+
+    return []
 
 
 def get_connection_catalog(connection_id: str, **kwargs) -> dict:
