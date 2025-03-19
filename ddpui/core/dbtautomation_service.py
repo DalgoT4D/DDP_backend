@@ -1,6 +1,8 @@
 import os, uuid, time
 from pathlib import Path
+from collections import deque
 
+from django.db.models import Q
 from ddpui.dbt_automation.operations.arithmetic import arithmetic, arithmetic_dbt_sql
 from ddpui.dbt_automation.operations.castdatatypes import cast_datatypes, cast_datatypes_sql
 from ddpui.dbt_automation.operations.coalescecolumns import (
@@ -40,7 +42,7 @@ from ddpui.dbt_automation.operations.wherefilter import where_filter, where_filt
 from ddpui.dbt_automation.operations.mergetables import union_tables, union_tables_sql
 from ddpui.dbt_automation.utils.warehouseclient import get_client
 from ddpui.dbt_automation.utils.dbtproject import dbtProject
-from ddpui.dbt_automation.utils.dbtsources import read_sources
+from ddpui.dbt_automation.utils.dbtsources import read_sources, read_sources_from_yaml
 from ddpui.dbt_automation.operations.replace import replace, replace_dbt_sql
 from ddpui.dbt_automation.operations.casewhen import casewhen, casewhen_dbt_sql
 from ddpui.dbt_automation.operations.aggregate import aggregate, aggregate_dbt_sql
@@ -51,8 +53,7 @@ from ddpui.dbt_automation.operations.rawsql import generic_sql_function, raw_gen
 
 from ddpui.schemas.dbt_workflow_schema import CompleteDbtModelPayload
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
-from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation
-from ddpui.models.tasks import TaskProgressHashPrefix
+from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation, DbtEdge, OrgDbtModelType
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils.helpers import map_airbyte_keys_to_postgres_keys
@@ -255,10 +256,102 @@ def get_output_cols_for_operation(org_warehouse: OrgWarehouse, op_type: str, con
 
 
 def delete_dbt_model_in_project(orgdbt_model: OrgDbtModel):
-    """Delete a dbt model in the project"""
+    """Deletes a dbt model's sql file on disk"""
     dbt_project = dbtProject(Path(DbtProjectManager.get_dbt_project_dir(orgdbt_model.orgdbt)))
     dbt_project.delete_model(orgdbt_model.sql_path)
     return True
+
+
+def delete_dbt_source_in_project(orgdbt_model: OrgDbtModel):
+    """Deletes a dbt model's sql file on disk"""
+
+    # read all sources in the same yml file
+    src_tables: list[dict] = read_sources_from_yaml(
+        DbtProjectManager.get_dbt_project_dir(orgdbt_model.orgdbt), orgdbt_model.sql_path
+    )
+
+    filtered_src_tables: list[dict] = [
+        src_table for src_table in src_tables if src_table["input_name"] != orgdbt_model.name
+    ]
+
+    # if there are sources & there is diff; update the sources.yml
+    if len(src_tables) > 0 and len(src_tables) != len(filtered_src_tables):
+        src_yml_path = generate_source_definitions_yaml(
+            orgdbt_model.schema,
+            orgdbt_model.source_name,
+            [src["input_name"] for src in filtered_src_tables],
+            dbtProject(Path(DbtProjectManager.get_dbt_project_dir(orgdbt_model.orgdbt))),
+        )
+
+        logger.info(f"Deleted & Updated the source tables in yml {src_yml_path}")
+
+    return True
+
+
+def delete_org_dbt_model(orgdbt_model: OrgDbtModel, cascade: bool = False):
+    """
+    Delete the org dbt model
+    Only delete org dbt model of type "model"
+    Casacde will be implemented when we re-haul the ui4t architecture
+    """
+    if orgdbt_model.type == OrgDbtModelType.SOURCE:
+        raise ValueError("Cannot delete a source as a model")
+
+    operations = OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).count()
+
+    if operations > 0:
+        orgdbt_model.under_construction = True
+        orgdbt_model.save()
+    else:
+        # make sure this is not linked to any other model
+        # delete if there are no edges coming or going out of this model
+
+        cnt_edges_to_models = DbtEdge.objects.filter(
+            Q(from_node=orgdbt_model) | Q(to_node=orgdbt_model)
+        ).count()
+        if cnt_edges_to_models == 0:
+            orgdbt_model.delete()
+
+    # delete the model file is present
+    delete_dbt_model_in_project(orgdbt_model)
+
+
+def delete_org_dbt_source(orgdbt_model: OrgDbtModel, cascade: bool = False):
+    """
+    Delete the org dbt model
+    Only delete org dbt model of type "source"
+    Cascade will be implemented when we re-haul the ui4t architecture
+    """
+    if orgdbt_model.type == OrgDbtModelType.MODEL:
+        raise ValueError("Cannot delete a model as a source")
+
+    # delete entry in sources.yml on disk; & recreate the sources.yml
+    delete_dbt_source_in_project(orgdbt_model)
+
+    orgdbt_model.delete()
+
+
+def cascade_delete_org_dbt_model(orgdbt_model: OrgDbtModel):
+    """
+    Cascade delete the org dbt model
+    Delete the model and all its children (operations & models)
+    THIS iS UNUSED. Cascade will be implemented when we re-haul the ui4t architecture
+    """
+    # delete all children of this model (operations & models)
+    q = deque()
+    children: list[OrgDbtModel] = []
+
+    q.append(orgdbt_model)
+    while len(q) > 0:
+        curr_node = q.popleft()
+        children.append(curr_node)
+
+        for edge in DbtEdge.objects.filter(from_node=curr_node):
+            q.append(edge.to_node)
+
+    for child_orgdbt_model in reversed(children):  # just to be clean, delete from leaf nodes first
+        delete_dbt_model_in_project(child_orgdbt_model)
+        child_orgdbt_model.delete()
 
 
 def propagate_changes_to_downstream_operations(
@@ -333,7 +426,7 @@ def sync_sources_for_warehouse(
             sync_tables = []
             for table in wclient.get_tables(schema):
                 if not OrgDbtModel.objects.filter(
-                    orgdbt=org_dbt, schema=schema, name=table, type="model"
+                    orgdbt=org_dbt, schema=schema, name=table, type=OrgDbtModelType.MODEL
                 ).first():
                     sync_tables.append(table)
 
@@ -383,7 +476,7 @@ def sync_sources_for_warehouse(
         orgdbt_source = OrgDbtModel.objects.filter(
             source_name=source["source_name"],
             name=source["input_name"],
-            type="source",
+            type=OrgDbtModelType.SOURCE,
             orgdbt=org_dbt,
         ).first()
         if not orgdbt_source:
@@ -393,7 +486,7 @@ def sync_sources_for_warehouse(
                 source_name=source["source_name"],
                 name=source["input_name"],
                 display_name=source["input_name"],
-                type="source",
+                type=OrgDbtModelType.SOURCE,
             )
             taskprogress.add(
                 {
