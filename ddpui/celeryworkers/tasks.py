@@ -239,7 +239,9 @@ def run_dbt_commands(self, org_id: int, task_id: str, dbt_run_params: dict = Non
 
         logger.info("found org %s", org.name)
 
-        taskprogress = TaskProgress(task_id, f"{TaskProgressHashPrefix.RUNDBTCMDS}-{org.slug}")
+        taskprogress = TaskProgress(
+            task_id, f"{TaskProgressHashPrefix.RUNDBTCMDS.value}-{org.slug}"
+        )
 
         taskprogress.add(
             {
