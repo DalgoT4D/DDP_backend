@@ -745,6 +745,9 @@ def cancel_queued_manual_job(request, flow_run_id, payload: TaskStateSchema):
         if flow_run is None:
             raise HttpError(400, "Please provide a valid flow_run_id")
 
+        if "deployment_id" not in flow_run:
+            raise HttpError(400, "Can only cancel flow_runs with deployment_id")
+
         dataflow = OrgDataFlowv1.objects.filter(
             org=orguser.org, deployment_id=flow_run["deployment_id"]
         ).first()
