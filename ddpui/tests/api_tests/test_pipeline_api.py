@@ -964,7 +964,7 @@ def test_get_prefect_flow_runs_log_history_v1_org_not_found(orguser_transform_ta
 
 @patch("ddpui.ddpprefect.prefect_service.get_flow_run")
 @patch("ddpui.ddpprefect.prefect_service.cancel_queued_manual_job")
-@patch("ddpui.ddpprefect.OrgDataFlowv1.objects.filter")
+@patch("ddpui.models.tasks.OrgDataFlowv1.objects.filter")
 def test_cancel_queued_manual_job_success(
     mock_filter, mock_cancel_job, mock_get_flow_run, orguser_transform_tasks
 ):
@@ -993,7 +993,7 @@ def test_cancel_queued_manual_job_success(
 
 @patch("ddpui.ddpprefect.prefect_service.get_flow_run")
 @patch("ddpui.ddpprefect.prefect_service.cancel_queued_manual_job")
-@patch("ddpui.ddpprefect.OrgDataFlowv1.objects.filter")
+@patch("ddpui.models.tasks.OrgDataFlowv1.objects.filter")
 def test_cancel_queued_manual_job_org_missing(
     mock_filter, mock_cancel_job, mock_get_flow_run, orguser_transform_tasks
 ):
@@ -1017,7 +1017,7 @@ def test_cancel_queued_manual_job_org_missing(
 
 @patch("ddpui.ddpprefect.prefect_service.get_flow_run")
 @patch("ddpui.ddpprefect.prefect_service.cancel_queued_manual_job")
-@patch("ddpui.ddpprefect.OrgDataFlowv1.objects.filter")
+@patch("ddpui.models.tasks.OrgDataFlowv1.objects.filter")
 def test_cancel_queued_manual_job_flow_run_invalid(
     mock_filter, mock_cancel_job, mock_get_flow_run, orguser_transform_tasks
 ):
@@ -1025,9 +1025,10 @@ def test_cancel_queued_manual_job_flow_run_invalid(
     # Set up mocks
     request = mock_request(orguser_transform_tasks)
     request.permissions = ["can_edit_pipeline"]
-    request.orguser.org = MagicMock()  # Simulate a valid organization
     flow_run_id = "test-flow-run-id"
-    mock_get_flow_run.return_value = None  # Simulate invalid flow run
+
+    # Mock get_flow_run to return None to simulate invalid flow run
+    mock_get_flow_run.return_value = None
 
     with pytest.raises(HttpError) as exc:
         cancel_queued_manual_job(
@@ -1042,7 +1043,7 @@ def test_cancel_queued_manual_job_flow_run_invalid(
 
 @patch("ddpui.ddpprefect.prefect_service.get_flow_run")
 @patch("ddpui.ddpprefect.prefect_service.cancel_queued_manual_job")
-@patch("ddpui.ddpprefect.OrgDataFlowv1.objects.filter")
+@patch("ddpui.models.tasks.OrgDataFlowv1.objects.filter")
 def test_cancel_queued_manual_job_access_denied(
     mock_filter, mock_cancel_job, mock_get_flow_run, orguser_transform_tasks
 ):
@@ -1050,6 +1051,20 @@ def test_cancel_queued_manual_job_access_denied(
     # Set up mocks
     request = mock_request(orguser_transform_tasks)
     request.permissions = ["can_edit_pipeline"]
-    request.orguser.org = MagicMock()  # Simulate a valid organization
     flow_run_id = "test-flow-run-id"
-    mock_get_flow_run.return_value = {"deployment_id": "test-deployment"}
+
+    # Mock get_flow_run to return a valid deployment_id
+    mock_get_flow_run.return_value = {"deployment_id": "test-deployment-id"}
+
+    # Mock filter().first() to return None to simulate no matching dataflow found
+    mock_filter.return_value.first.return_value = None
+
+    with pytest.raises(HttpError) as exc:
+        cancel_queued_manual_job(
+            request,
+            flow_run_id,
+            TaskStateSchema(state={"name": "Cancelling", "type": "CANCELLING"}, force=True),
+        )
+
+    assert exc.value.status_code == 403
+    assert "You don't have access to this flow run" in str(exc.value)
