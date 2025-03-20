@@ -13,7 +13,7 @@ from ddpui.dbt_automation import assets
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgWarehouse, OrgDbt, TransformType
-from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation, DbtEdge
+from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation, DbtEdge, OrgDbtModelType
 from ddpui.auth import (
     GUEST_ROLE,
     SUPER_ADMIN_ROLE,
@@ -23,7 +23,7 @@ from ddpui.auth import (
 )
 from ddpui.schemas.org_task_schema import DbtProjectSchema
 from ddpui.ddpprefect.schema import DbtProfile, OrgDbtSchema
-from ddpui.celeryworkers.tasks import setup_dbtworkspace, TaskProgressHashPrefix
+from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.tests.api_tests.test_user_org_api import (
     seed_db,
     orguser,
@@ -49,6 +49,7 @@ from ddpui.api.transform_api import (
     LockCanvasRequestSchema,
     CanvasLock,
     post_unlock_canvas,
+    delete_source,
 )
 from ddpui.schemas.dbt_workflow_schema import (
     CreateDbtModelPayload,
@@ -976,3 +977,92 @@ def test_get_dbt_project_DAG(orguser: OrgUser, tmp_path):
         assert final_response is not None
         assert len(final_response["nodes"]) == 3
         assert len(final_response["edges"]) == 2
+
+
+def test_delete_source_warehouse_not_found(orguser: OrgUser):
+    """a failure test for deleting a source due to warehouse not found"""
+    request = mock_request(orguser)
+    model_uuid = uuid.uuid4()
+    with pytest.raises(HttpError, match="please setup your warehouse first"):
+        delete_source(request, model_uuid)
+
+
+def test_delete_source_dbt_workspace_not_setup(orguser: OrgUser):
+    """a failure test for deleting a source due to dbt workspace not setup"""
+    OrgWarehouse.objects.create(org=orguser.org, wtype="postgres")
+    request = mock_request(orguser)
+    model_uuid = uuid.uuid4()
+    with pytest.raises(HttpError, match="dbt workspace not setup"):
+        delete_source(request, model_uuid)
+
+
+def test_delete_source_invalid_source_id(orguser: OrgUser):
+    """a failure test where the source cannot be deleted because the source id is not found"""
+    model_uuid = uuid.uuid4()
+    OrgWarehouse.objects.create(org=orguser.org, wtype="postgres")
+    orgdbt = OrgDbt.objects.create(transform_type=TransformType.UI)
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+    orgdbt_source = OrgDbtModel.objects.create(
+        uuid=model_uuid,
+        orgdbt=orgdbt,
+        type=OrgDbtModelType.SOURCE,
+        name="test-model",
+        schema="staging",
+        sql_path="src/path",
+    )
+
+    # just a dummy edge for the test, although we wont have this kind of edge in the real world
+    DbtEdge.objects.create(from_node=orgdbt_source, to_node=orgdbt_source)
+
+    request = mock_request(orguser)
+    with pytest.raises(HttpError, match="source not found"):
+        delete_source(request, uuid.uuid4())
+
+
+def test_delete_source_failure_edges_found(orguser: OrgUser):
+    """a failure test where the source cannot be deleted because some models are dependent on it"""
+    model_uuid = uuid.uuid4()
+    OrgWarehouse.objects.create(org=orguser.org, wtype="postgres")
+    orgdbt = OrgDbt.objects.create(transform_type=TransformType.UI)
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+    orgdbt_source = OrgDbtModel.objects.create(
+        uuid=model_uuid,
+        orgdbt=orgdbt,
+        type=OrgDbtModelType.SOURCE,
+        name="test-model",
+        schema="staging",
+        sql_path="src/path",
+    )
+
+    # just a dummy edge for the test, although we wont have this kind of edge in the real world
+    DbtEdge.objects.create(from_node=orgdbt_source, to_node=orgdbt_source)
+
+    request = mock_request(orguser)
+    with pytest.raises(
+        HttpError, match="Cannot delete source model as it is connected to other models"
+    ):
+        delete_source(request, model_uuid)
+
+
+@patch("ddpui.core.dbtautomation_service.delete_org_dbt_source")
+def test_delete_source_success(mock_delete_org_dbt_source: Mock, orguser: OrgUser):
+    model_uuid = uuid.uuid4()
+    OrgWarehouse.objects.create(org=orguser.org, wtype="postgres")
+    orgdbt = OrgDbt.objects.create(transform_type=TransformType.UI)
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+    orgdbt_source = OrgDbtModel.objects.create(
+        uuid=model_uuid,
+        orgdbt=orgdbt,
+        type=OrgDbtModelType.SOURCE,
+        name="test-model",
+        schema="staging",
+        sql_path="src/path",
+    )
+
+    request = mock_request(orguser)
+    delete_source(request, model_uuid)
+
+    mock_delete_org_dbt_source.assert_called_once_with(orgdbt_source, False)
