@@ -1,5 +1,5 @@
 import os, uuid
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, MagicMock
 
 import django
 import pytest
@@ -962,12 +962,21 @@ def test_get_prefect_flow_runs_log_history_v1_org_not_found(orguser_transform_ta
     assert str(excinfo.value) == "organization not found"
 
 
+@patch("ddpui.ddpprefect.prefect_service.get_flow_run")
 @patch("ddpui.ddpprefect.prefect_service.cancel_queued_manual_job")
-def test_cancel_queued_manual_job_success(mock_cancel_job, orguser_transform_tasks):
+@patch("ddpui.ddpprefect.OrgDataFlowv1.objects.filter")
+def test_cancel_queued_manual_job_success(
+    mock_filter, mock_cancel_job, mock_get_flow_run, orguser_transform_tasks
+):
     """Test successful cancellation of queued manual job"""
+    # Set up mocks
     request = mock_request(orguser_transform_tasks)
     request.permissions = ["can_edit_pipeline"]
     flow_run_id = "test-flow-run-id"
+    mock_get_flow_run.return_value = {"deployment_id": "test-deployment-id"}
+    mock_filter.return_value.first.return_value = (
+        MagicMock()
+    )  # Simulate a valid OrgDataFlowv1 object
     mock_cancel_job.return_value = {"success": True}
 
     response = cancel_queued_manual_job(
@@ -982,13 +991,18 @@ def test_cancel_queued_manual_job_success(mock_cancel_job, orguser_transform_tas
     )
 
 
+@patch("ddpui.ddpprefect.prefect_service.get_flow_run")
 @patch("ddpui.ddpprefect.prefect_service.cancel_queued_manual_job")
-def test_cancel_queued_manual_job_prefect_error(mock_cancel_job, orguser_transform_tasks):
-    """Test handling of prefect service errors"""
+@patch("ddpui.ddpprefect.OrgDataFlowv1.objects.filter")
+def test_cancel_queued_manual_job_org_missing(
+    mock_filter, mock_cancel_job, mock_get_flow_run, orguser_transform_tasks
+):
+    """Test handling when the organization is missing"""
+    # Set up mocks
     request = mock_request(orguser_transform_tasks)
     request.permissions = ["can_edit_pipeline"]
+    request.orguser.org = None  # Simulate no organization for the user
     flow_run_id = "test-flow-run-id"
-    mock_cancel_job.side_effect = Exception("Prefect service error")
 
     with pytest.raises(HttpError) as exc:
         cancel_queued_manual_job(
@@ -998,4 +1012,44 @@ def test_cancel_queued_manual_job_prefect_error(mock_cancel_job, orguser_transfo
         )
 
     assert exc.value.status_code == 400
-    assert "failed to cancel the queued manual job" in str(exc.value)
+    assert "register an organization first" in str(exc.value)
+
+
+@patch("ddpui.ddpprefect.prefect_service.get_flow_run")
+@patch("ddpui.ddpprefect.prefect_service.cancel_queued_manual_job")
+@patch("ddpui.ddpprefect.OrgDataFlowv1.objects.filter")
+def test_cancel_queued_manual_job_flow_run_invalid(
+    mock_filter, mock_cancel_job, mock_get_flow_run, orguser_transform_tasks
+):
+    """Test handling when the flow run is invalid"""
+    # Set up mocks
+    request = mock_request(orguser_transform_tasks)
+    request.permissions = ["can_edit_pipeline"]
+    request.orguser.org = MagicMock()  # Simulate a valid organization
+    flow_run_id = "test-flow-run-id"
+    mock_get_flow_run.return_value = None  # Simulate invalid flow run
+
+    with pytest.raises(HttpError) as exc:
+        cancel_queued_manual_job(
+            request,
+            flow_run_id,
+            TaskStateSchema(state={"name": "Cancelling", "type": "CANCELLING"}, force=True),
+        )
+
+    assert exc.value.status_code == 400
+    assert "Please provide a valid flow_run_id" in str(exc.value)
+
+
+@patch("ddpui.ddpprefect.prefect_service.get_flow_run")
+@patch("ddpui.ddpprefect.prefect_service.cancel_queued_manual_job")
+@patch("ddpui.ddpprefect.OrgDataFlowv1.objects.filter")
+def test_cancel_queued_manual_job_access_denied(
+    mock_filter, mock_cancel_job, mock_get_flow_run, orguser_transform_tasks
+):
+    """Test handling of access denied due to OrgDataFlowv1 lookup failure"""
+    # Set up mocks
+    request = mock_request(orguser_transform_tasks)
+    request.permissions = ["can_edit_pipeline"]
+    request.orguser.org = MagicMock()  # Simulate a valid organization
+    flow_run_id = "test-flow-run-id"
+    mock_get_flow_run.return_value = {"deployment_id": "test-deployment"}
