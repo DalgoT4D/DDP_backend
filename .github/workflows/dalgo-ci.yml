@@ -43,7 +43,7 @@ jobs:
           uv sync
 
       - name: Run pre-commit
-        run: pre-commit run --all-files
+        run: uv run pre-commit run --all-files
 
       - name: Start Redis
         uses: supercharge/redis-github-action@1.5.0
