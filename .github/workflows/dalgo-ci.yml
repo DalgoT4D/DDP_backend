@@ -81,8 +81,8 @@ jobs:
           DEV_SECRETS_DIR: /tmp/
           CLIENTDBT_ROOT: /tmp
         run: |
-          coverage run -m uv run pytest --ignore=ddpui/tests/integration_tests --durations=20
-          coverage xml
+          uv run coverage run -m pytest --ignore=ddpui/tests/integration_tests --durations=20
+          uv run coverage xml
           
       - name: Upload coverage reports to codecov
         uses: codecov/codecov-action@v5
@@ -92,4 +92,4 @@ jobs:
 
       - name: Check coverage percentage
         run: |
-          coverage report --fail-under=70
+          uv run coverage report --fail-under=70
