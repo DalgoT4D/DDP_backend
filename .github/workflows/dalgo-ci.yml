@@ -42,11 +42,8 @@ jobs:
         run: |
           uv sync
 
-      - name: Activate the environment
-        run: source .venv/bin/activate
-
       - name: Run pre-commit
-        run: pre-commit run --all-files
+        run: uv run pre-commit run --all-files
 
       - name: Start Redis
         uses: supercharge/redis-github-action@1.5.0
@@ -67,7 +64,7 @@ jobs:
           DBUSER: ddp
           DBPASSWORD: ${{ secrets.CI_DBPASSWORD }}
         run: |
-          python manage.py migrate
+          uv run python manage.py migrate
 
       - name: Test with pytest
         env:
@@ -84,7 +81,7 @@ jobs:
           DEV_SECRETS_DIR: /tmp/
           CLIENTDBT_ROOT: /tmp
         run: |
-          coverage run -m pytest --ignore=ddpui/tests/integration_tests --durations=20
+          coverage run -m uv run pytest --ignore=ddpui/tests/integration_tests --durations=20
           coverage xml
           
       - name: Upload coverage reports to codecov

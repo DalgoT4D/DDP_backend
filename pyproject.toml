@@ -277,6 +277,7 @@ target-version = ["py38", "py39", "py310", "py311"]
 include = 'ddpui\/.*\.pyi?$'
 
 [tool.pytest.ini_options]
+pythonpath = ["."]
 DJANGO_SETTINGS_MODULE="ddpui.settings"
 testpaths = [
   "ddpui/tests"
