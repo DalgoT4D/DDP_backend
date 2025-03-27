@@ -355,14 +355,12 @@ def test_get_job_info_for_connection_job_dne(
     OrgTask.objects.create(org=org, task=task, connection_id="connection_id")
 
     mock_get_jobs_for_connection.return_value = {"jobs": []}
-    mock_get_logs_for_job.return_value = {
-        "logs": {
-            "logLines": [
-                "line1",
-                "line2",
-            ],
-        },
-    }
+    mock_get_logs_for_job.return_value = (
+        [
+            "line1",
+            "line2",
+        ],
+    )
 
     result, error = get_job_info_for_connection(org, "connection_id")
     assert error is None
@@ -417,14 +415,10 @@ def test_get_job_info_for_connection(
         ],
         "totalJobCount": 1,
     }
-    mock_get_logs_for_job.return_value = {
-        "logs": {
-            "logLines": [
-                "line1",
-                "line2",
-            ],
-        },
-    }
+    mock_get_logs_for_job.return_value = [
+        "line1",
+        "line2",
+    ]
 
     result, error = get_job_info_for_connection(org, "connection_id")
     assert error is None
@@ -509,14 +503,10 @@ def test_get_sync_history_for_connection_success(
     OrgTask.objects.create(org=org, task=task, connection_id="connection_id")
 
     mock_get_jobs_for_connection.return_value = {"jobs": [], "totalJobCount": 0}
-    mock_get_logs_for_job.return_value = {
-        "logs": {
-            "logLines": [
-                "line1",
-                "line2",
-            ],
-        },
-    }
+    mock_get_logs_for_job.return_value = [
+        "line1",
+        "line2",
+    ]
 
     result, error = get_sync_job_history_for_connection(org, "connection_id")
     assert error is None

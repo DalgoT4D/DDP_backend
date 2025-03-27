@@ -767,8 +767,7 @@ def get_job_info_for_connection(org: Org, connection_id: str):
 
     latest_job = result["jobs"][0]
     job_info = airbyte_service.parse_job_info(latest_job)
-    logs = airbyte_service.get_logs_for_job(job_info["job_id"])
-    job_info["logs"] = logs["logs"]["logLines"]
+    job_info["logs"] = airbyte_service.get_logs_for_job(job_info["job_id"])
 
     return job_info, None
 

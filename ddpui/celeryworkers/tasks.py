@@ -742,8 +742,10 @@ def summarize_logs(
 
             logs_text = "\n".join([log["message"] for log in task["logs"]])
         elif type == LogsSummarizationType.AIRBYTE_SYNC:
-            logs = airbyte_service.get_logs_for_job(job_id=job_id, attempt_number=attempt_number)
-            logs_text = "\n".join(logs["logs"]["logLines"])
+            log_lines = airbyte_service.get_logs_for_job(
+                job_id=job_id, attempt_number=attempt_number
+            )
+            logs_text = "\n".join(log_lines)
     except Exception as err:
         logger.error(err)
         taskprogress.add(

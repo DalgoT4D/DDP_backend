@@ -740,10 +740,9 @@ def get_job_logs(
 ):
     """get the log info from airbyte for a job attempt"""
     try:
-        logs = airbyte_service.get_logs_for_job(job_id, attempt_number)
-        log_details = logs["logs"]["logLines"]
+        log_lines = airbyte_service.get_logs_for_job(job_id, attempt_number)
     except Exception as error:
         logger.exception(error)
-        log_details = ["An error occured while fetching logs!"]
+        log_lines = ["An error occured while fetching logs!"]
 
-    return log_details
+    return log_lines
