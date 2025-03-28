@@ -1078,7 +1078,7 @@ def setup_periodic_tasks(sender, **kwargs):
             name="check for long-running flow-runs",
         )
     sender.add_periodic_task(
-        crontab(minute=0, hour="*/12"),
+        crontab(minute=0, hour=0),
         check_org_plan_expiry_notify_people.s(),
         name="check org plan expiry and notify the right people",
     )
