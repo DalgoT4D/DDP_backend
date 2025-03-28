@@ -547,13 +547,6 @@ def update_dbt_core_block_schema_task(block_name, default_schema):
 
 
 @app.task()
-def delete_old_tasklocks():
-    """delete task locks which were created over 24 hours ago"""
-    onehourago = UTC.localize(datetime.now() - timedelta(seconds=24 * 3600))
-    TaskLock.objects.filter(locked_at__lt=onehourago).delete()
-
-
-@app.task()
 def delete_old_canvaslocks():
     """delete canvas locks which were created over 10 minutes ago"""
     tenminutesago = UTC.localize(datetime.now() - timedelta(seconds=600))
@@ -1073,7 +1066,6 @@ def setup_periodic_tasks(sender, **kwargs):
         schema_change_detection.s(),
         name="schema change detection",
     )
-    sender.add_periodic_task(60 * 1.0, delete_old_tasklocks.s(), name="remove old tasklocks")
     sender.add_periodic_task(60 * 1.0, delete_old_canvaslocks.s(), name="remove old canvaslocks")
     sender.add_periodic_task(
         crontab(minute=0, hour="*/6"),
