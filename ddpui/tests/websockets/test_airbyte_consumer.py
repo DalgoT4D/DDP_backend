@@ -59,7 +59,7 @@ def test_polling_celery_failed():
     polling_celery(consumer, task_key)
     consumer.respond.assert_called_once_with(
         WebsocketResponse(
-            data={}, message="Invalid credentials", status=WebsocketResponseStatus.ERROR
+            data={}, message="Failed to get schema catalog", status=WebsocketResponseStatus.ERROR
         )
     )
 
