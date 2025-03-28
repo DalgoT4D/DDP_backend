@@ -521,7 +521,7 @@ def get_schema_catalog_task(task_key, workspace_id, source_id):
         res = airbyte_service.get_source_schema_catalog(workspace_id, source_id)
         taskprogress.add(
             {
-                "message": "fetched catalog data",
+                "message": "Fetched catalog data",
                 "status": TaskProgressStatus.COMPLETED,
                 "result": res,
             }
@@ -531,12 +531,11 @@ def get_schema_catalog_task(task_key, workspace_id, source_id):
         logger.error(err)
         taskprogress.add(
             {
-                "message": "invalid error",
+                "message": "Failed to get schema catalog",
                 "status": TaskProgressStatus.FAILED,
-                "result": None,
+                "result": str(err),
             }
         )
-        return err
 
 
 @app.task(bind=False)
