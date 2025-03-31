@@ -239,7 +239,9 @@ def run_dbt_commands(self, org_id: int, task_id: str, dbt_run_params: dict = Non
 
         logger.info("found org %s", org.name)
 
-        taskprogress = TaskProgress(task_id, f"{TaskProgressHashPrefix.RUNDBTCMDS}-{org.slug}")
+        taskprogress = TaskProgress(
+            task_id, f"{TaskProgressHashPrefix.RUNDBTCMDS.value}-{org.slug}"
+        )
 
         taskprogress.add(
             {
@@ -519,7 +521,7 @@ def get_schema_catalog_task(task_key, workspace_id, source_id):
         res = airbyte_service.get_source_schema_catalog(workspace_id, source_id)
         taskprogress.add(
             {
-                "message": "fetched catalog data",
+                "message": "Fetched catalog data",
                 "status": TaskProgressStatus.COMPLETED,
                 "result": res,
             }
@@ -529,12 +531,11 @@ def get_schema_catalog_task(task_key, workspace_id, source_id):
         logger.error(err)
         taskprogress.add(
             {
-                "message": "invalid error",
+                "message": "Failed to get schema catalog",
                 "status": TaskProgressStatus.FAILED,
-                "result": None,
+                "result": str(err),
             }
         )
-        return err
 
 
 @app.task(bind=False)
@@ -542,13 +543,6 @@ def update_dbt_core_block_schema_task(block_name, default_schema):
     """single http PUT request to the prefect-proxy"""
     logger.info("updating default_schema of %s to %s", block_name, default_schema)
     update_dbt_core_block_schema(block_name, default_schema)
-
-
-@app.task()
-def delete_old_tasklocks():
-    """delete task locks which were created over 24 hours ago"""
-    onehourago = UTC.localize(datetime.now() - timedelta(seconds=24 * 3600))
-    TaskLock.objects.filter(locked_at__lt=onehourago).delete()
 
 
 @app.task()
@@ -740,8 +734,10 @@ def summarize_logs(
 
             logs_text = "\n".join([log["message"] for log in task["logs"]])
         elif type == LogsSummarizationType.AIRBYTE_SYNC:
-            logs = airbyte_service.get_logs_for_job(job_id=job_id, attempt_number=attempt_number)
-            logs_text = "\n".join(logs["logs"]["logLines"])
+            log_lines = airbyte_service.get_logs_for_job(
+                job_id=job_id, attempt_number=attempt_number
+            )
+            logs_text = "\n".join(log_lines)
     except Exception as err:
         logger.error(err)
         taskprogress.add(
@@ -1007,7 +1003,7 @@ def check_org_plan_expiry_notify_people():
                     org=org,
                     new_role__slug__in=roles_to_notify,
                 )
-                message = f"""This email is to let you know that your Dalgo plan for {org.name} is about to expire. Please renew it to continue using the services."""
+                message = f"""Your Dalgo plan for {org.name} will expire on {org_plan.end_date.strftime("%b %d, %Y")}. Please reach out to the Dalgo team at support@dalgo.org and renew your subscription to continue using the platform's services."""
                 subject = "Dalgo plan expiry"
                 for orguser in org_users:
                     send_text_message(orguser.user.email, subject, message)
@@ -1069,7 +1065,6 @@ def setup_periodic_tasks(sender, **kwargs):
         schema_change_detection.s(),
         name="schema change detection",
     )
-    sender.add_periodic_task(60 * 1.0, delete_old_tasklocks.s(), name="remove old tasklocks")
     sender.add_periodic_task(60 * 1.0, delete_old_canvaslocks.s(), name="remove old canvaslocks")
     sender.add_periodic_task(
         crontab(minute=0, hour="*/6"),
@@ -1083,7 +1078,7 @@ def setup_periodic_tasks(sender, **kwargs):
             name="check for long-running flow-runs",
         )
     sender.add_periodic_task(
-        crontab(minute=0, hour="*/12"),
+        crontab(minute=0, hour=0),
         check_org_plan_expiry_notify_people.s(),
         name="check org plan expiry and notify the right people",
     )

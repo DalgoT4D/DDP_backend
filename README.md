@@ -51,33 +51,40 @@ Django application for the DDP platform's management backend. Exposes API endpoi
 "editor.formatOnSave": true
 }`
 
-### Setup pre-commit and run hooks
+### UV package manager
 
--  Run "pre-commit install" after activating your virtual env
-- Run "pre-commit run --all-files" to run the formatter
+The project uses `uv` as its package manager. You will need to install it on your machine
 
-### Running celery
+UV can be installed system-wide using cURL on macOS and Linux:
 
-- In your virtual environment run:<br>
- `celery -A ddpui worker -n ddpui`
-- For windows run:<br>
-`celery -A ddpui worker -n ddpui -P solo`
-- To start celery beat run:<br>
-`celery -A ddpui beat`
+```sh
+curl -LsSf https://astral.sh/uv/install.sh | sudo sh
+```
+
+And with Powershell on Windows (make sure you run Powershell with administrator privileges):
+
+```sh
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+UV is available via Homebrew as well:
+
+```sh
+brew install uv
+```
 
 ## Setup instructions
 
 ### Step 1: Create a Python Virtual Environment
 
--   `pyenv local 3.10`
+```sh
+uv sync
+```
 
--   `pyenv exec python -m venv venv`
+## Setup pre-commit and run hooks
 
--   `source venv/bin/activate`
-
--   `pip install --upgrade pip`
-
--   `pip install -r requirements.txt`
+- Run "pre-commit install" after activating your virtual env created in above step
+- Run "pre-commit run --all-files" to run the formatter
 
 ### Step 2: Create the .env file
 
@@ -182,6 +189,15 @@ DJANGOSECRET=
 ### Step 10: Create first org and user
 -   Run `python manage.py createorganduser <Org Name> <Email address> --role super-admin`
 -   The above command creates a user with super admin role. If we don't provide any role, the default role is of account manager.
+
+### Step11: Running celery
+
+- In your virtual environment run:<br>
+ `celery -A ddpui worker -n ddpui`
+- For windows run:<br>
+`celery -A ddpui worker -n ddpui -P solo`
+- To start celery beat run:<br>
+`celery -A ddpui beat`
 
 ## Using Docker
 Follow the steps below:

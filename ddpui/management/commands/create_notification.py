@@ -66,7 +66,10 @@ class Command(BaseCommand):
                 print(f"Error parsing scheduled_time: {e}")
                 sys.exit(1)
 
-        if not Org.objects.filter(slug=options["org"]).exists():
+        if (
+            SentToEnum(options["audience"]) == SentToEnum.ALL_ORG_USERS
+            and not Org.objects.filter(slug=options["org"]).exists()
+        ):
             print(f"Organization with slug {options['org']} does not exist.")
             sys.exit(1)
 

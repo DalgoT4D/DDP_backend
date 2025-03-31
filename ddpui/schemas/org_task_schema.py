@@ -1,4 +1,4 @@
-from ninja import Field, Schema
+from ninja import Schema
 
 
 class TaskParameters(Schema):
