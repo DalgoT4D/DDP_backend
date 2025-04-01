@@ -1,4 +1,5 @@
 import os
+import math
 from datetime import datetime, timedelta
 import requests
 from itertools import groupby
@@ -779,25 +780,32 @@ def post_prefect_workers_count(work_queue_name: str, work_pool_name: str) -> lis
 
 
 def compute_dataflow_run_times_from_history(
-    dataflow: OrgDataFlowv1, days_to_look=7, statuses_to_include=["COMPLETED"]
+    dataflow: OrgDataFlowv1, limit=20, statuses_to_include=["COMPLETED"]
 ) -> DeploymentRunTimes:
     """
     Estimate how much time does a flow run of this deployment might take to run
-    Use the past history (maybe last x days) to compute average, max & min times of the run
+    Use the past history (last "limit" flow runs) to compute average, max & min times of the run
+    Save the estimates to db
     """
-    look_back_date = datetime.now(timezone.UTC) - timedelta(days=days_to_look)
 
     flow_runs = PrefectFlowRun.objects.filter(
         deployment_id=dataflow.deployment_id,
-        start_time__gte=look_back_date,
         status__in=statuses_to_include,  # failed runs mostly have a time close to 0 or very high, which could skew the averages
-    ).order_by("-start_time")
+    ).order_by("-start_time")[:limit]
 
     flow_runs = flow_runs.annotate(start_date=TruncDate("start_time")).values(
         "deployment_id", "start_date", "total_run_time"
     )
 
     flow_runs_list = list(flow_runs)
+
+    if not flow_runs_list:
+        return DeploymentRunTimes(
+            max_run_time=-1,
+            min_run_time=-1,
+            avg_run_time=-1,
+            wt_avg_run_time=-1,
+        )
 
     grouped_data = {
         (deploy_id, st_date): list(item)
@@ -836,10 +844,10 @@ def compute_dataflow_run_times_from_history(
     all_run_times = DeploymentRunTimes()
     if len(run_times_per_day.keys()) > 0:
         all_run_times = DeploymentRunTimes(
-            max_run_time=max_run_time,
-            min_run_time=min_run_time,
-            avg_run_time=avg_sum / avg_denominator,
-            wt_avg_run_time=wt_avg_sum / wt_avg_denominator,
+            max_run_time=math.ceil(max_run_time),
+            min_run_time=math.ceil(min_run_time),
+            avg_run_time=math.ceil(avg_sum / avg_denominator),
+            wt_avg_run_time=math.ceil(wt_avg_sum / wt_avg_denominator),
         )
 
         dataflow.meta = all_run_times.dict()
@@ -854,7 +862,7 @@ def estimate_time_for_next_queued_run_of_dataflow(
     """
     This function worst case and best case scenarios. For each scenario, we will get
     1. Queue no (queue_no) - how many flow runs are scheduled before the dataflow's next flow run
-    2. Queue time (queue_time_in_seconds) - time that user needs to wait before the next scheduled flow run will trigger
+    2. Queue time (min max queue times) - time that user needs to wait before the next scheduled flow run will trigger
     """
 
     # get the current late run for the deployment
@@ -899,14 +907,24 @@ def estimate_time_for_next_queued_run_of_dataflow(
 
     # for the above flow runs look at their deployment_id and use any of the run_times to compute queue_time
     queue_no = 1
-    queue_time_in_seconds = dataflow.meta["avg_run_time"] if dataflow.meta else 0
+    queue_time_in_seconds = (
+        dataflow.meta["avg_run_time"]
+        if dataflow.meta
+        and "avg_run_time" in dataflow.meta
+        and dataflow.meta["avg_run_time"] > 0  # we should have a positive time
+        else 0
+    )
     for flow_run in queued_late_flow_runs:
         deployment_meta = (
             OrgDataFlowv1.objects.filter(deployment_id=flow_run["deployment_id"]).first().meta
         )
 
-        if deployment_meta:
-            queue_no += 1
+        queue_no += 1  # even if we dont have the time we can atleast give them the right queue no
+        if (
+            deployment_meta
+            and "avg_run_time" in deployment_meta
+            and deployment_meta["avg_run_time"] > 0
+        ):  # we should have a positive time
             queue_time_in_seconds += deployment_meta["avg_run_time"]
 
     # find no of workers listening to the queue and adjust the queue_no & time accordingly
@@ -919,8 +937,8 @@ def estimate_time_for_next_queued_run_of_dataflow(
 
     return DeploymentCurrentQueueTime(
         queue_no=queue_no,
-        min_wait_time=queue_time_in_seconds / max_workers,
-        max_wait_time=queue_time_in_seconds / min_workers,
+        min_wait_time=math.ceil(queue_time_in_seconds / max_workers),
+        max_wait_time=math.ceil(queue_time_in_seconds / min_workers),
     )
 
 

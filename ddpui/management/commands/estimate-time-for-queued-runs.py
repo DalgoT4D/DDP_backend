@@ -21,7 +21,10 @@ class Command(BaseCommand):
             "--deployment_id", type=str, help="Dataflows's deployment id", required=False
         )
         parser.add_argument(
-            "--look_back", type=int, help="No of days to look for computing run times", default=7
+            "--limit",
+            type=int,
+            help="No of last x flow runs to look for computing run times",
+            default=20,
         )
 
     def handle(self, *args, **options):
@@ -34,14 +37,15 @@ class Command(BaseCommand):
         if "deployment_id" in options and options["deployment_id"]:
             dataflows = dataflows.filter(deployment_id=options["deployment_id"])
 
-        days_to_look_back = options["look_back"] or 7
+        limit = options["limit"] or 20
 
         for dataflow in dataflows:
             print(
-                f"Computing the runs times for last {days_to_look_back} days for dataflow {dataflow.name}"
+                f"Computing the runs times over last {limit} flow runs for dataflow {dataflow.name}"
             )
+
             run_times: DeploymentRunTimes = compute_dataflow_run_times_from_history(
-                dataflow, days_to_look=days_to_look_back
+                dataflow, limit=limit
             )
 
             print(

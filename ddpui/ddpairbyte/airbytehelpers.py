@@ -4,6 +4,7 @@ functions which work with airbyte and with the dalgo database
 
 import json
 import os
+from typing import List
 from uuid import uuid4
 from pathlib import Path
 from datetime import datetime
@@ -36,6 +37,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteConnectionUpdate,
     AirbyteDestinationUpdate,
     AirbyteConnectionSchemaUpdateSchedule,
+    AirbyteGetConnectionsResponse,
 )
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpprefect.schema import (
@@ -46,11 +48,7 @@ from ddpui.ddpprefect import AIRBYTESERVER
 from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.core.dbtfunctions import map_airbyte_destination_spec_to_dbtcli_profile
 from ddpui.models.org import OrgDataFlowv1, OrgWarehouse
-from ddpui.models.tasks import (
-    Task,
-    OrgTask,
-    DataflowOrgTask,
-)
+from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskLockStatus
 from ddpui.utils.constants import (
     TASK_AIRBYTESYNC,
     TASK_AIRBYTERESET,
@@ -306,7 +304,7 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
     return res, None
 
 
-def get_connections(org: Org):
+def get_connections(org: Org) -> List[AirbyteGetConnectionsResponse]:
     """return connections with last run details"""
 
     sync_dataflows = (
@@ -443,6 +441,11 @@ def get_connections(org: Org):
                 "resetConnDeploymentId": None,
                 "clearConnDeploymentId": clear_dataflow.deployment_id if clear_dataflow else None,
                 "look_up_last_run_deployment_ids": look_up_last_run_deployment_ids,
+                "queuedFlowRunWaitTime": (
+                    prefect_service.estimate_time_for_next_queued_run_of_dataflow(sync_dataflow)
+                    if lock and lock["status"] == TaskLockStatus.QUEUED
+                    else None
+                ),
             }
         )
 

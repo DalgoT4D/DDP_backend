@@ -366,12 +366,12 @@ class TaskStateSchema(Schema):
 
 
 class DeploymentRunTimes(Schema):
-    """Schema for run times of a deployment"""
+    """Schema for run times (seconds) of a deployment"""
 
-    max_run_time: float = 0
-    min_run_time: float = 0
-    avg_run_time: float = 0
-    wt_avg_run_time: float = 0
+    max_run_time: int = 0
+    min_run_time: int = 0
+    avg_run_time: int = 0
+    wt_avg_run_time: int = 0
 
 
 class FilterLateFlowRunsRequest(Schema):
@@ -387,8 +387,8 @@ class FilterLateFlowRunsRequest(Schema):
 
 
 class DeploymentCurrentQueueTime(Schema):
-    """Queue time"""
+    """Queue time (seconds)"""
 
     queue_no: int
-    max_wait_time: float
-    min_wait_time: float
+    max_wait_time: int
+    min_wait_time: int

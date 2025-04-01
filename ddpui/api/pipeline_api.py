@@ -18,6 +18,7 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowUpdateSchema3,
     PrefectDataFlowCreateSchema4,
     TaskStateSchema,
+    DeploymentCurrentQueueTime,
 )
 from ddpui.utils.constants import TASK_DBTRUN, TASK_AIRBYTESYNC
 from ddpui.utils.custom_logger import CustomLogger
@@ -764,3 +765,28 @@ def cancel_queued_manual_job(request, flow_run_id, payload: TaskStateSchema):
         logger.exception(error)
         raise HttpError(400, "failed to cancel the queued manual job") from error
     return res
+
+
+@pipeline_router.get(
+    "v1/flows/{deployment_id}/estimate_queue_time",
+    auth=auth.CustomAuthMiddleware(),
+    response=DeploymentCurrentQueueTime,
+)
+@has_permission(["can_view_pipeline"])
+def get_estimate_queue_time_for_deployment_flow_run(request, deployment_id):
+    """Estimate the wait deployment's queued run"""
+    orguser: OrgUser = request.orguser
+
+    if orguser.org is None:
+        raise HttpError(400, "register an organization first")
+
+    dataflow = OrgDataFlowv1.objects.filter(org=orguser.org, deployment_id=deployment_id).first()
+
+    dataflow_orgtasks = (
+        DataflowOrgTask.objects.filter(dataflow=dataflow).order_by("seq").select_related("orgtask")
+    )
+
+    if dataflow_orgtasks.count() == 0:
+        raise HttpError(400, "no org task mapped to the deployment")
+
+    return prefect_service.estimate_time_for_next_queued_run_of_dataflow(dataflow)
