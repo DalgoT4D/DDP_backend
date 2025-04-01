@@ -27,7 +27,7 @@ jobs:
               exit 1
             fi
             git pull
-            /home/ddp/DDP_backend/venv/bin/python manage.py migrate
-            /home/ddp/DDP_backend/venv/bin/python manage.py loaddata seed/*.json
+            /home/ddp/.local/bin/uv run python manage.py migrate
+            /home/ddp/.local/bin/uv run python manage.py loaddata seed/*.json
             /home/ddp/.yarn/bin/pm2 restart django-celery-worker django-backend-asgi
             

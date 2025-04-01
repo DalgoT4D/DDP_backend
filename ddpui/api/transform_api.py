@@ -1,4 +1,3 @@
-import os
 import uuid
 import shutil
 from pathlib import Path
@@ -14,8 +13,8 @@ from django.utils.text import slugify
 from ddpui import auth
 from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
 from ddpui.models.org_user import OrgUser
-from ddpui.models.org import OrgDbt, OrgWarehouse
-from ddpui.models.dbt_workflow import OrgDbtModel, DbtEdge, OrgDbtOperation
+from ddpui.models.org import OrgDbt, OrgWarehouse, TransformType
+from ddpui.models.dbt_workflow import OrgDbtModel, DbtEdge, OrgDbtOperation, OrgDbtModelType
 from ddpui.models.canvaslock import CanvasLock
 
 from ddpui.schemas.org_task_schema import DbtProjectSchema
@@ -197,7 +196,9 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
             )
 
     output_cols = dbtautomation_service.get_output_cols_for_operation(
-        org_warehouse, payload.op_type, final_config["config"].copy()
+        org_warehouse,
+        payload.op_type,
+        final_config["config"].copy(),
     )
     logger.info("creating operation")
 
@@ -559,11 +560,15 @@ def get_dbt_project_DAG(request):
 
 @transform_router.delete("/dbt_project/model/{model_uuid}/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_delete_dbt_model"])
-def delete_model(request, model_uuid, canvas_lock_id: str = None):
+def delete_model(request, model_uuid, canvas_lock_id: str = None, cascade: bool = False):
     """
     Delete a model if it does not have any operations chained
     Convert the model to "under_construction if its has atleast 1 operation chained"
+    Cascade will be implemented when we re-haul the ui4t architecture
     """
+    if cascade:
+        raise NotImplementedError()
+
     orguser: OrgUser = request.orguser
     org = orguser.org
 
@@ -572,32 +577,56 @@ def delete_model(request, model_uuid, canvas_lock_id: str = None):
         raise HttpError(404, "please setup your warehouse first")
 
     # make sure the orgdbt here is the one we create locally
-    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    orgdbt = OrgDbt.objects.filter(org=org, transform_type=TransformType.UI).first()
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
     check_canvas_locked(orguser, canvas_lock_id)
 
-    orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid).first()
+    orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid, type=OrgDbtModelType.MODEL).first()
     if not orgdbt_model:
         raise HttpError(404, "model not found")
 
-    if orgdbt_model.type == "source":
-        return {"success": 1}
+    if orgdbt_model.type == OrgDbtModelType.SOURCE:
+        raise HttpError(422, "Cannot delete source model")
 
-    operations = OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).count()
+    dbtautomation_service.delete_org_dbt_model(orgdbt_model, cascade)
 
-    if operations > 0:
-        orgdbt_model.under_construction = True
-        orgdbt_model.save()
+    return {"success": 1}
 
-        # delete the model file is present
-        dbtautomation_service.delete_dbt_model_in_project(orgdbt_model)
-    else:
-        # make sure this is not linked to any other model
-        # delete if there are no edges coming or going out of this model
-        if DbtEdge.objects.filter(Q(from_node=orgdbt_model) | Q(to_node=orgdbt_model)).count() == 0:
-            orgdbt_model.delete()
+
+@transform_router.delete("/dbt_project/source/{model_uuid}/", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_delete_dbt_model"])
+def delete_source(request, model_uuid, canvas_lock_id: str = None, cascade: bool = False):
+    """
+    Delete a source from dbt project
+    Cascade will be implemented when we re-haul the ui4t architecture
+    """
+    if cascade:
+        raise NotImplementedError()
+
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    # make sure the orgdbt here is the one we create locally
+    orgdbt = OrgDbt.objects.filter(org=org, transform_type=TransformType.UI).first()
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    check_canvas_locked(orguser, canvas_lock_id)
+
+    orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid, type=OrgDbtModelType.SOURCE).first()
+    if not orgdbt_model:
+        raise HttpError(404, "source not found")
+
+    if DbtEdge.objects.filter(Q(from_node=orgdbt_model) | Q(to_node=orgdbt_model)).count() > 0:
+        raise HttpError(422, "Cannot delete source model as it is connected to other models")
+
+    dbtautomation_service.delete_org_dbt_source(orgdbt_model, cascade)
 
     return {"success": 1}
 

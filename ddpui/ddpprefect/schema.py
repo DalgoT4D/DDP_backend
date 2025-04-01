@@ -1,7 +1,7 @@
 from typing import Optional
 from datetime import datetime
 
-from ninja import Schema
+from ninja import Field, Schema
 
 
 class PrefectAirbyteSync(Schema):
@@ -349,6 +349,20 @@ class PrefectFlowRunSchema(Schema):
     flow_id: str
     state_type: str
     state_name: str
+
+
+class StateSchema(Schema):
+    """Schema to define the structure of the state field"""
+
+    name: str = Field(..., description="The name of the state")
+    type: str = Field(..., description="The type of the state")
+
+
+class TaskStateSchema(Schema):
+    """Schema to represent the state and force parameters"""
+
+    state: StateSchema = Field(..., description="State with name and type")
+    force: bool = Field(..., description="Force action flag")
 
 
 class DeploymentRunTimes(Schema):

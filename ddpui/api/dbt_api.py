@@ -272,7 +272,7 @@ def post_run_dbt_commands(request, payload: TaskParameters = None):
 
     task_id = str(uuid4())
 
-    taskprogress = TaskProgress(task_id, f"{TaskProgressHashPrefix.RUNDBTCMDS}-{org.slug}")
+    taskprogress = TaskProgress(task_id, f"{TaskProgressHashPrefix.RUNDBTCMDS.value}-{org.slug}")
 
     taskprogress.add({"message": "Added dbt commands in queue", "status": "queued"})
 

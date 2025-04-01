@@ -166,12 +166,19 @@ class SchemaCatalogConsumer(BaseConsumer):
         task_progress = SingleTaskProgress.fetch(task_key)
 
         if task_progress is not None:
+            logger.info(
+                f"Looks like a schema change task {task_key} is already under way, lets poll it"
+            )
             polling_celery(self, task_key)
             return
 
         # This gives the task to celery
+        logger.info(f"Starting a new catalog read celery task {task_key}")
+        taskprogress = SingleTaskProgress(task_key, 600)
+        taskprogress.add(
+            {"message": "started", "status": TaskProgressStatus.RUNNING, "result": None}
+        )
         get_schema_catalog_task.delay(task_key, str(orguser.org.airbyte_workspace_id), source_id)
-        time.sleep(2)
         polling_celery(self, task_key)
 
 
@@ -192,16 +199,17 @@ def polling_celery(consumer, task_key):
 
     # Loop to check task progress every two seconds.
     while last_status == TaskProgressStatus.RUNNING:
+        logger.info(f"Polling {task_key}")
         time.sleep(2)
         task_progress = SingleTaskProgress.fetch(task_key)
         last_status = None if task_progress is None else task_progress[-1]["status"]
-        logger.info(f"{last_status}")
+        logger.info(f"Last status: {last_status}")
 
     if last_status == TaskProgressStatus.FAILED:
         consumer.respond(
             WebsocketResponse(
                 data={},
-                message="Invalid credentials",
+                message="Failed to get schema catalog",
                 status=WebsocketResponseStatus.ERROR,
             )
         )
@@ -220,7 +228,7 @@ def polling_celery(consumer, task_key):
         consumer.respond(
             WebsocketResponse(
                 data={},
-                message="No task found",
+                message="Invalid task progress status",
                 status=WebsocketResponseStatus.ERROR,
             )
         )

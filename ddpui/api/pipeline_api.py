@@ -17,6 +17,7 @@ from ddpui.ddpprefect.schema import (
     PrefectFlowRunSchema,
     PrefectDataFlowUpdateSchema3,
     PrefectDataFlowCreateSchema4,
+    TaskStateSchema,
 )
 from ddpui.utils.constants import TASK_DBTRUN, TASK_AIRBYTESYNC
 from ddpui.utils.custom_logger import CustomLogger
@@ -729,3 +730,37 @@ def get_flow_runs_logsummary_v1(
     except Exception as error:
         logger.exception(error)
         raise HttpError(400, "failed to retrieve logs") from error
+
+
+@pipeline_router.post("flow_runs/{flow_run_id}/set_state", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_edit_pipeline"])
+def cancel_queued_manual_job(request, flow_run_id, payload: TaskStateSchema):
+    """cancel a queued manual job"""
+    try:
+        orguser: OrgUser = request.orguser
+        if orguser.org is None:
+            raise HttpError(400, "register an organization first")
+
+        flow_run = prefect_service.get_flow_run(flow_run_id)
+        if flow_run is None:
+            raise HttpError(400, "Please provide a valid flow_run_id")
+
+        if "deployment_id" not in flow_run:
+            raise HttpError(400, "Can only cancel flow_runs with deployment_id")
+
+        dataflow = OrgDataFlowv1.objects.filter(
+            org=orguser.org, deployment_id=flow_run["deployment_id"]
+        ).first()
+        if dataflow is None:
+            raise HttpError(403, "You don't have access to this flow run")
+
+        res = prefect_service.cancel_queued_manual_job(flow_run_id, payload.dict())
+    except HttpError as http_error:
+        # We handle HttpError separately to ensure the correct message is raised
+        logger.exception(http_error)
+        raise http_error
+    except Exception as error:
+        # For other exceptions,
+        logger.exception(error)
+        raise HttpError(400, "failed to cancel the queued manual job") from error
+    return res

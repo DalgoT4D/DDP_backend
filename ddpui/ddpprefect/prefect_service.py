@@ -751,6 +751,15 @@ def create_or_update_dbt_cloud_creds_block(
     return cloud_creds_block
 
 
+def cancel_queued_manual_job(flow_run_id: str, payload):
+    """Cancels a queued manual sync"""
+    res = prefect_post(
+        f"flow_runs/{flow_run_id}/set_state",
+        payload,
+    )
+    return res
+
+
 def get_late_flow_runs(payload: FilterLateFlowRunsRequest) -> list[dict]:
     res = prefect_post(f"flow_runs/late", payload.dict())
 
