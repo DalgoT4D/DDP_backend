@@ -392,3 +392,16 @@ class DeploymentCurrentQueueTime(Schema):
     queue_no: int
     max_wait_time: int
     min_wait_time: int
+
+
+class PrefectGetDataflowsResponse(Schema):
+    """Response schema for fetching dataflows"""
+
+    name: str
+    status: bool
+    deploymentName: str
+    deploymentId: str
+    cron: Optional[str]
+    lastRun: Optional[dict] = None
+    lock: Optional[dict] = None
+    queuedFlowRunWaitTime: DeploymentCurrentQueueTime = None
