@@ -1066,7 +1066,7 @@ def compute_dataflow_run_times(org: Org = None):
     dataflows = OrgDataFlowv1.objects
 
     if org:
-        dataflows.filter(org=org)
+        dataflows = dataflows.filter(org=org)
 
     for dataflow in dataflows.all():
         compute_dataflow_run_times_from_history(dataflow)

@@ -779,7 +779,7 @@ def post_prefect_workers_count(work_queue_name: str, work_pool_name: str) -> lis
 
 
 def compute_dataflow_run_times_from_history(
-    dataflow: OrgDataFlowv1, days_to_look=7, statuses_to_exclude=[]
+    dataflow: OrgDataFlowv1, days_to_look=7, statuses_to_include=["COMPLETED"]
 ) -> DeploymentRunTimes:
     """
     Estimate how much time does a flow run of this deployment might take to run
@@ -790,9 +790,7 @@ def compute_dataflow_run_times_from_history(
     flow_runs = PrefectFlowRun.objects.filter(
         deployment_id=dataflow.deployment_id,
         start_time__gte=look_back_date,
-        status__in=[
-            "COMPLETED"
-        ],  # failed runs mostly have a time close to 0 or very high, which could skew the averages
+        status__in=statuses_to_include,  # failed runs mostly have a time close to 0 or very high, which could skew the averages
     ).order_by("-start_time")
 
     flow_runs = flow_runs.annotate(start_date=TruncDate("start_time")).values(
@@ -866,7 +864,11 @@ def estimate_time_for_next_queued_run_of_dataflow(
 
     if not dataflow_late_runs:
         logger.info(f"No late run found for the dataflow {dataflow.deployment_name}")
-        return
+        return DeploymentCurrentQueueTime(
+            queue_no=-1,
+            min_wait_time=-1,
+            max_wait_time=-1,
+        )
 
     current_queued_flow_run = dataflow_late_runs[0]
 
@@ -884,7 +886,7 @@ def estimate_time_for_next_queued_run_of_dataflow(
     queued_late_flow_runs = get_late_flow_runs(
         payload=FilterLateFlowRunsRequest(
             work_pool_name=work_pool_name,
-            work_pool_queue=queue_name,
+            work_queue_name=queue_name,
             limit=100,
             before_start_time=current_queued_flow_run["expectedStartTime"],
             exclude_flow_run_ids=[current_queued_flow_run["id"]],
