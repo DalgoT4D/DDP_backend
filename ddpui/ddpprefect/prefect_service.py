@@ -891,6 +891,16 @@ def estimate_time_for_next_queued_run_of_dataflow(
     queue_name = current_queued_flow_run["workQueueName"]
     work_pool_name = current_queued_flow_run["workPoolName"]  # we only have one work pool
 
+    if not queue_name or not work_pool_name:
+        logger.info(
+            f"Couldn't map the late run to a work pool or a queue. work pool : {work_pool_name} queue: {queue_name}"
+        )
+        return DeploymentCurrentQueueTime(
+            queue_no=-1,
+            min_wait_time=-1,
+            max_wait_time=-1,
+        )
+
     logger.info(f"Current late run is on the pool: {work_pool_name} and queue: {queue_name}")
 
     # fetch flow runs ("Late") that are in the same queue and work pool before the current run
