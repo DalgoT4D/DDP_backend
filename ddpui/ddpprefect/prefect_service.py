@@ -769,7 +769,7 @@ def get_late_flow_runs(payload: FilterLateFlowRunsRequest) -> list[dict]:
 
 def post_prefect_workers_count(work_queue_name: str, work_pool_name: str) -> int:
     res = prefect_post(
-        f"workers/filter/",
+        "workers/filter/",
         {"work_queue_names": [work_queue_name], "work_pool_names": [work_pool_name]},
     )
 
