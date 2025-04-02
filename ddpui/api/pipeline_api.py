@@ -254,8 +254,6 @@ def get_prefect_dataflows_v1(request):
         if lock:
             lock = fetch_pipeline_lock_v1(flow, lock)
 
-        print(lock == TaskLockStatus.QUEUED)
-
         res.append(
             {
                 "name": flow.name,
