@@ -9,7 +9,7 @@ from statistics import mean
 from ninja.errors import HttpError
 from dotenv import load_dotenv
 from django.db import transaction
-from django.db.models import Window, Min, Max, Avg
+from django.db.models import Window
 from django.db.models.functions import RowNumber, TruncDate
 
 from ddpui.ddpprefect.schema import (
@@ -829,17 +829,20 @@ def compute_dataflow_run_times_from_history(
     avg_denominator = 0
     wt_avg_sum = 0
     wt_avg_denominator = 0
+    cnt = len(run_times_per_day.keys())
     for (deploy_id, st_date), run_time in run_times_per_day.items():
-        distance_from_today: timedelta = datetime.now(timezone.UTC).date() - st_date
-
         max_run_time = max(run_time["run_time_per_day_avg"], max_run_time)
         min_run_time = min(run_time["run_time_per_day_avg"], min_run_time)
 
         avg_sum += run_time["run_time_per_day_avg"]
         avg_denominator += 1
 
-        wt_avg_sum += distance_from_today.days * run_time["run_time_per_day_avg"]
-        wt_avg_denominator += max(distance_from_today.days, 1)
+        wt_avg_sum += (
+            cnt * run_time["run_time_per_day_avg"]
+        )  # give the most recent run; the max weight
+        wt_avg_denominator += cnt
+
+        cnt -= 1
 
     all_run_times = DeploymentRunTimes()
     if len(run_times_per_day.keys()) > 0:
@@ -906,12 +909,13 @@ def estimate_time_for_next_queued_run_of_dataflow(
     )
 
     # for the above flow runs look at their deployment_id and use any of the run_times to compute queue_time
+    run_time_type = "wt_avg_run_time"
     queue_no = 1
     queue_time_in_seconds = (
-        dataflow.meta["avg_run_time"]
+        dataflow.meta[run_time_type]
         if dataflow.meta
-        and "avg_run_time" in dataflow.meta
-        and dataflow.meta["avg_run_time"] > 0  # we should have a positive time
+        and run_time_type in dataflow.meta
+        and dataflow.meta[run_time_type] > 0  # we should have a positive time
         else 0
     )
     for flow_run in queued_late_flow_runs:
@@ -922,10 +926,10 @@ def estimate_time_for_next_queued_run_of_dataflow(
         queue_no += 1  # even if we dont have the time we can atleast give them the right queue no
         if (
             deployment_meta
-            and "avg_run_time" in deployment_meta
-            and deployment_meta["avg_run_time"] > 0
+            and run_time_type in deployment_meta
+            and deployment_meta[run_time_type] > 0
         ):  # we should have a positive time
-            queue_time_in_seconds += deployment_meta["avg_run_time"]
+            queue_time_in_seconds += deployment_meta[run_time_type]
 
     # find no of workers listening to the queue and adjust the queue_no & time accordingly
     min_workers = 1
