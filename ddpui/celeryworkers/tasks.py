@@ -18,7 +18,7 @@ from ddpui.utils import timezone, awsses, constants
 from ddpui.utils.helpers import find_key_in_dictionary
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.awsses import send_text_message
-from ddpui.models.org_plans import OrgPlans
+from ddpui.models.org_plans import OrgPlans, OrgPlanType
 from ddpui.models.org import (
     Org,
     OrgDbt,
@@ -52,7 +52,6 @@ from ddpui.utils.singletaskprogress import SingleTaskProgress
 from ddpui.utils.webhook_helpers import notify_org_managers
 from ddpui.utils.constants import (
     TASK_AIRBYTESYNC,
-    ORG_BASE_PLANS,
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.ddpdbt.schema import DbtProjectParams
@@ -994,7 +993,7 @@ def check_org_plan_expiry_notify_people():
         org_plan = OrgPlans.objects.filter(org=org).first()
         if not org_plan or not org_plan.end_date:
             continue
-        if org_plan.base_plan != ORG_BASE_PLANS["FREE_TRIAL"]:
+        if org_plan.base_plan != OrgPlanType.FREE_TRIAL:
             continue
         # send a notification 7 days before the plan expires
         if (org_plan.end_date - datetime.now(pytz.utc)).days in [first_reminder, second_reminder]:

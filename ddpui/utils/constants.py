@@ -78,4 +78,4 @@ FREE_TRIAL = {
     "superset": ["Superset dashboards", "Superset Usage dashboards"],
 }
 
-ORG_BASE_PLANS = {"FREE_TRIAL": "Free Trial", "INTERNAL": "Internal", "DALGO": "Dalgo"}
+# ORG_BASE_PLANS = {"FREE_TRIAL": "Free Trial", "INTERNAL": "Internal", "DALGO": "Dalgo"}

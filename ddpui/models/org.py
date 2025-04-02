@@ -113,6 +113,12 @@ class CreateOrgSchema(Schema):
     end_date: Optional[str]
 
 
+class CreateFreeTrailOrgSchema(CreateOrgSchema):
+    """payload for org creation specifically for free trial account"""
+
+    email: str
+
+
 class OrgWarehouse(models.Model):
     """A data warehouse for an org. Typically we expect exactly one"""
 

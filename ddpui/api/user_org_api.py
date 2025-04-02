@@ -13,7 +13,12 @@ from django.db.models import F
 from ddpui import auth
 from ddpui.auth import has_permission
 from ddpui.core import orgfunctions, orguserfunctions
-from ddpui.models.org import OrgSchema, OrgWarehouseSchema, CreateOrgSchema
+from ddpui.models.org import (
+    OrgSchema,
+    OrgWarehouseSchema,
+    CreateOrgSchema,
+    CreateFreeTrailOrgSchema,
+)
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
     DeleteOrgUserPayload,
@@ -34,6 +39,7 @@ from ddpui.models.org_user import (
     UserAttributes,
     VerifyEmailSchema,
 )
+from ddpui.models.org_plans import OrgPlanType
 from ddpui.models.org_wren import OrgWren
 from ddpui.models.role_based_access import Role, RolePermission
 from ddpui.utils.custom_logger import CustomLogger
@@ -41,6 +47,7 @@ from ddpui.utils.deleteorg import delete_warehouse_v1
 from ddpui.models.org import OrgWarehouse, Org, OrgType
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.models.org_preferences import OrgPreferences
+from ddpui.celeryworkers.moretasks import create_free_trail_org_account
 from django.db import transaction
 
 user_org_router = Router()
@@ -586,6 +593,24 @@ def post_organization_v1(request, payload: CreateOrgSchema):
 
     logger.info(f"{orguser.user.email} created new org {org.name}")
     return OrgSchema(name=org.name, airbyte_workspace_id=org.airbyte_workspace_id, slug=org.slug)
+
+
+@user_org_router.post("/v1/organizations/free_trail", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_create_org"])
+def post_organization_free_trail(request, payload: CreateFreeTrailOrgSchema):
+    """create a new org with free trial plan and a warehouse/superset with it"""
+    orguser: OrgUser = request.orguser
+
+    userattributes = UserAttributes.objects.filter(user=orguser.user).first()
+    if userattributes is None or userattributes.can_create_orgs is False:
+        raise HttpError(403, "Insufficient permissions for this operation")
+
+    if payload.base_plan != OrgPlanType.FREE_TRIAL:
+        raise HttpError(403, "Only free trial orgs can be created")
+
+    task = create_free_trail_org_account.delay(payload.dict())
+
+    return {"task_id": task.id}
 
 
 @user_org_router.delete("/v1/organizations/warehouses/", auth=auth.CustomAuthMiddleware())
