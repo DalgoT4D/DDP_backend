@@ -65,7 +65,9 @@ def create_superset_instance(poll_interval: int = 5) -> dict:
     """
     Creates a superset instance with basic auth
     Returns
-    - superset_url (eg: https://superset3.dalgo.in/)
+    - url (eg: https://superset3.dalgo.in/)
+    - admin_user
+    - admin_password
     """
     response = dalgo_post(f"{INFRA_SERVICE_API_URL}/api/infra/superset", headers=headers)
 
