@@ -595,9 +595,9 @@ def post_organization_v1(request, payload: CreateOrgSchema):
     return OrgSchema(name=org.name, airbyte_workspace_id=org.airbyte_workspace_id, slug=org.slug)
 
 
-@user_org_router.post("/v1/organizations/free_trail", auth=auth.CustomAuthMiddleware())
+@user_org_router.post("/v1/organizations/free_trial", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_org"])
-def post_organization_free_trail(request, payload: CreateFreeTrialOrgSchema):
+def post_organization_free_trial(request, payload: CreateFreeTrialOrgSchema):
     """create a new org with free trial plan and a warehouse/superset with it"""
     orguser: OrgUser = request.orguser
 
