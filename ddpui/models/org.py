@@ -193,6 +193,7 @@ class OrgDataFlowv1(models.Model):
     clear_conn_dataflow = models.ForeignKey(
         "self", on_delete=models.SET_NULL, null=True, related_name="clear_connection_dataflow"
     )
+    meta = models.JSONField(null=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
