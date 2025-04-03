@@ -11,7 +11,7 @@ import yaml
 from celery.schedules import crontab
 from django.utils.text import slugify
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.celery import app
+from ddpui.celery import app, Celery
 
 
 from ddpui.utils import timezone, awsses, constants
@@ -64,6 +64,7 @@ from ddpui.ddpprefect.prefect_service import (
     prefect_get,
     recurse_flow_run_logs,
     get_long_running_flow_runs,
+    compute_dataflow_run_times_from_history,
 )
 from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
@@ -1057,28 +1058,56 @@ def check_for_long_running_flow_runs():
         )
 
 
+@app.task()
+def compute_dataflow_run_times(org: Org = None):
+    """Computes run times for all dataflows"""
+    dataflows = OrgDataFlowv1.objects
+
+    if org:
+        dataflows = dataflows.filter(org=org)
+
+    for dataflow in dataflows.all():
+        compute_dataflow_run_times_from_history(dataflow)
+
+
 @app.on_after_finalize.connect
-def setup_periodic_tasks(sender, **kwargs):
-    """check for old locks every minute"""
+def setup_periodic_tasks(sender: Celery, **kwargs):
+    """periodic celery tasks"""
+    # schema change detection; once a day
     sender.add_periodic_task(
         crontab(hour=18, minute=30),
         schema_change_detection.s(),
         name="schema change detection",
     )
+
+    # clear canvas locks every; every 60 seconds or 1 minute
     sender.add_periodic_task(60 * 1.0, delete_old_canvaslocks.s(), name="remove old canvaslocks")
+
+    # sync flow runs of deployment; every 6 hours
     sender.add_periodic_task(
         crontab(minute=0, hour="*/6"),
         sync_flow_runs_of_deployments.s(),
         name="sync flow runs of deployments into our db",
     )
+
     if os.getenv("ADMIN_EMAIL"):
+        # check for long running flow runs; every 3600 seconds or 1 hour
         sender.add_periodic_task(
             3600 * 1.0,
             check_for_long_running_flow_runs.s(),
             name="check for long-running flow-runs",
         )
+
+    # check org plan expiry & notify users; daily at midnight
     sender.add_periodic_task(
         crontab(minute=0, hour=0),
         check_org_plan_expiry_notify_people.s(),
         name="check org plan expiry and notify the right people",
+    )
+
+    # compute run times for each deployment; every 3 hours
+    sender.add_periodic_task(
+        crontab(minute=0, hour="*/3"),
+        compute_dataflow_run_times.s(),
+        name="compute run times of each deployment based on its past flow runs",
     )

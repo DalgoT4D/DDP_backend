@@ -1,4 +1,5 @@
 import os
+from typing import List
 
 from ninja import Router
 from ninja.errors import HttpError
@@ -10,7 +11,7 @@ from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect import DBTCLIPROFILE, AIRBYTESERVER, DBTCLOUDCREDS
 from ddpui.models.org import OrgDataFlowv1, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import DataflowOrgTask, OrgTask
+from ddpui.models.tasks import DataflowOrgTask, OrgTask, TaskLockStatus
 from ddpui.models.llm import LogsSummarizationType
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
@@ -18,6 +19,7 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowUpdateSchema3,
     PrefectDataFlowCreateSchema4,
     TaskStateSchema,
+    PrefectGetDataflowsResponse,
 )
 from ddpui.utils.constants import TASK_DBTRUN, TASK_AIRBYTESYNC
 from ddpui.utils.custom_logger import CustomLogger
@@ -196,7 +198,9 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
     }
 
 
-@pipeline_router.get("v1/flows/", auth=auth.CustomAuthMiddleware())
+@pipeline_router.get(
+    "v1/flows/", auth=auth.CustomAuthMiddleware(), response=List[PrefectGetDataflowsResponse]
+)
 @has_permission(["can_view_pipelines"])
 def get_prefect_dataflows_v1(request):
     """Fetch all flows/pipelines created in an organization"""
@@ -246,6 +250,9 @@ def get_prefect_dataflows_v1(request):
 
         runs = [run for run in all_last_runs if run["deployment_id"] == flow.deployment_id]
 
+        if lock:
+            lock = fetch_pipeline_lock_v1(flow, lock)
+
         res.append(
             {
                 "name": flow.name,
@@ -258,7 +265,12 @@ def get_prefect_dataflows_v1(request):
                     if flow.deployment_id in is_deployment_active
                     else False
                 ),
-                "lock": fetch_pipeline_lock_v1(flow, lock),
+                "lock": lock,
+                "queuedFlowRunWaitTime": (
+                    prefect_service.estimate_time_for_next_queued_run_of_dataflow(flow)
+                    if lock and (lock["status"] == TaskLockStatus.QUEUED)
+                    else None
+                ),
             }
         )
 

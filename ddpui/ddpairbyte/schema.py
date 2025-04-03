@@ -1,5 +1,6 @@
 from typing import Optional
 from ninja import Schema
+from ddpui.ddpprefect.schema import DeploymentCurrentQueueTime
 
 
 # request schemas
@@ -98,6 +99,7 @@ class AirbyteGetConnectionsResponse(Schema):
     isRunning: bool = False
     resetConnDeploymentId: str = None
     clearConnDeploymentId: str = None
+    queuedFlowRunWaitTime: DeploymentCurrentQueueTime = None
 
 
 class AirbyteConnectionUpdate(Schema):
