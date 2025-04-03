@@ -721,7 +721,7 @@ def test_compute_dataflow_run_times_from_history_with_limit():
     assert result.min_run_time == 100  # 100 + 0
     assert result.avg_run_time == 110  # Average of 100 to 119 is 109.5 & we take the ceil of it
     weighted_avg = sum([i * j for i, j in zip(range(20, 0, -1), range(100, 120))]) / sum(
-        [i for i in range(1, 21)]
+        list(range(1, 21))
     )  # (20(100) + 19(101) + .... + 1(119)) / (1+2+....+20)
     assert result.wt_avg_run_time == math.ceil(weighted_avg)
     assert dataflow.meta == {

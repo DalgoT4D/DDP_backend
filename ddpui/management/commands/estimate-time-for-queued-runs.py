@@ -9,9 +9,7 @@ from ddpui.ddpprefect.schema import DeploymentRunTimes, DeploymentCurrentQueueTi
 
 
 class Command(BaseCommand):
-    """
-    This script lets us edit the dbt cli profile for a Postgres warehouse
-    """
+    """This script lets us compute estimated time for queued runs. It also does the computation of run times"""
 
     help = "Estimate time for queued runs"
 

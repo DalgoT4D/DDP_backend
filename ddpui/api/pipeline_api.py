@@ -19,7 +19,6 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowUpdateSchema3,
     PrefectDataFlowCreateSchema4,
     TaskStateSchema,
-    DeploymentCurrentQueueTime,
     PrefectGetDataflowsResponse,
 )
 from ddpui.utils.constants import TASK_DBTRUN, TASK_AIRBYTESYNC

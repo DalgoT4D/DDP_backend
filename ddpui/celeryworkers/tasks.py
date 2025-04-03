@@ -1060,9 +1060,7 @@ def check_for_long_running_flow_runs():
 
 @app.task()
 def compute_dataflow_run_times(org: Org = None):
-    """
-    Computes run times for all dataflows
-    """
+    """Computes run times for all dataflows"""
     dataflows = OrgDataFlowv1.objects
 
     if org:
@@ -1075,7 +1073,6 @@ def compute_dataflow_run_times(org: Org = None):
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender: Celery, **kwargs):
     """periodic celery tasks"""
-
     # schema change detection; once a day
     sender.add_periodic_task(
         crontab(hour=18, minute=30),

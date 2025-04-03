@@ -1,6 +1,6 @@
 import os
 import math
-from datetime import datetime, timedelta
+from datetime import datetime
 import requests
 from itertools import groupby
 from operator import itemgetter
@@ -38,7 +38,6 @@ from ddpui.ddpprefect import (
 from ddpui.utils.constants import (
     FLOW_RUN_LOGS_OFFSET_LIMIT,
 )
-from ddpui.utils import timezone
 
 load_dotenv()
 
@@ -762,7 +761,7 @@ def cancel_queued_manual_job(flow_run_id: str, payload):
 
 
 def get_late_flow_runs(payload: FilterLateFlowRunsRequest) -> list[dict]:
-    res = prefect_post(f"flow_runs/late", payload.dict())
+    res = prefect_post("flow_runs/late", payload.dict())
 
     return res["flow_runs"]
 
@@ -780,13 +779,15 @@ def post_prefect_workers_count(work_queue_name: str, work_pool_name: str) -> int
 
 
 def compute_dataflow_run_times_from_history(
-    dataflow: OrgDataFlowv1, limit=20, statuses_to_include=["COMPLETED"]
+    dataflow: OrgDataFlowv1, limit=20, statuses_to_include: list[str] = None
 ) -> DeploymentRunTimes:
     """
     Estimate how much time does a flow run of this deployment might take to run
     Use the past history (last "limit" flow runs) to compute average, max & min times of the run
     Save the estimates to db
     """
+    if statuses_to_include is None:
+        statuses_to_include = ["COMPLETED"]
 
     flow_runs = PrefectFlowRun.objects.filter(
         deployment_id=dataflow.deployment_id,
