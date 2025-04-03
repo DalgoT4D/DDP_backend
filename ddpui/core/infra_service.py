@@ -61,7 +61,7 @@ def create_warehouse_in_rds(dbname: str, poll_interval: int = 5) -> dict:
     return poll_llm_infra_service_task(task_id, poll_interval)
 
 
-def create_superset_instance(poll_interval: int = 5) -> dict:
+def create_superset_instance(client_name: str, poll_interval: int = 5) -> dict:
     """
     Creates a superset instance with basic auth
     Returns
@@ -69,7 +69,11 @@ def create_superset_instance(poll_interval: int = 5) -> dict:
     - admin_user
     - admin_password
     """
-    response = dalgo_post(f"{INFRA_SERVICE_API_URL}/api/infra/superset", headers=headers)
+    response = dalgo_post(
+        f"{INFRA_SERVICE_API_URL}/api/infra/superset",
+        headers=headers,
+        json={"client_name": client_name.replace("_", "-")},
+    )
 
     task_id = response["task_id"]
 

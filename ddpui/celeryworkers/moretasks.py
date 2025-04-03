@@ -87,7 +87,7 @@ def create_free_trail_org_account(self, payload: dict):
     logger.info("Emailed warehouse creds to platform admin")
 
     # provision superset
-    superset_res = infra_service.create_superset_instance()
+    superset_res = infra_service.create_superset_instance(org.slug)
     if not all(key in superset_res for key in ["url", "admin_user", "admin_password"]):
         raise KeyError("Superset creation didn't send back all the information needed")
 
