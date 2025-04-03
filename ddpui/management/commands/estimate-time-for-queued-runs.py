@@ -14,7 +14,7 @@ class Command(BaseCommand):
     help = "Estimate time for queued runs"
 
     def add_arguments(self, parser):
-        parser.add_argument("org", type=str, help="Org slug")
+        parser.add_argument("org", type=str, help="Org slug; use 'all' to run for all orgs at once")
         parser.add_argument(
             "--deployment_id", type=str, help="Dataflows's deployment id", required=False
         )
@@ -24,39 +24,44 @@ class Command(BaseCommand):
             help="No of last x flow runs to look for computing run times",
             default=20,
         )
+        parser.add_argument("--compute-runtimes", action="store_true")
 
     def handle(self, *args, **options):
-        org = Org.objects.filter(slug=options["org"]).first()
-        if org is None:
-            print(f"Org with slug {options['org']} does not exist")
-            return
+        orgs = Org.objects.all()
+        if options["org"] != "all":
+            orgs = orgs.filter(slug=options["org"])
 
-        dataflows = OrgDataFlowv1.objects.filter(org=org)
-        if "deployment_id" in options and options["deployment_id"]:
-            dataflows = dataflows.filter(deployment_id=options["deployment_id"])
+        for org in orgs:
+            print("=" * 40 + org.slug + "=" * 40)
 
-        limit = options["limit"] or 20
+            dataflows = OrgDataFlowv1.objects.filter(org=org)
+            if "deployment_id" in options and options["deployment_id"]:
+                dataflows = dataflows.filter(deployment_id=options["deployment_id"])
 
-        for dataflow in dataflows:
-            print(
-                f"Computing the runs times over last {limit} flow runs for dataflow {dataflow.name}"
-            )
+            limit = options["limit"] or 20
 
-            run_times: DeploymentRunTimes = compute_dataflow_run_times_from_history(
-                dataflow, limit=limit
-            )
+            if options["compute_runtimes"]:
+                print("Compute run times is set to true")
+                for dataflow in dataflows:
+                    print(
+                        f"Computing the runs times over last {limit} flow runs for dataflow {dataflow.name}"
+                    )
 
-            print(
-                f"Run times for {dataflow.name} for last seven days in seconds : {run_times.dict()} "
-            )
+                    run_times: DeploymentRunTimes = compute_dataflow_run_times_from_history(
+                        dataflow, limit=limit
+                    )
 
-        print("Computing the current queue position and time for each dataflow")
-        for dataflow in dataflows:
-            try:
-                current_queue: DeploymentCurrentQueueTime = (
-                    estimate_time_for_next_queued_run_of_dataflow(dataflow)
-                )
+                    print(
+                        f"Run times for {dataflow.name} for last seven days in seconds : {run_times.dict()} "
+                    )
 
-                print(f"Current queue time for {dataflow.name} : {current_queue}")
-            except Exception as err:
-                print("Failed to compute current queue time " + str(err))
+            print("Computing the current queue position and time for each dataflow")
+            for dataflow in dataflows:
+                try:
+                    current_queue: DeploymentCurrentQueueTime = (
+                        estimate_time_for_next_queued_run_of_dataflow(dataflow)
+                    )
+
+                    print(f"Current queue time for {dataflow.name} : {current_queue}")
+                except Exception as err:
+                    print("Failed to compute current queue time " + str(err))

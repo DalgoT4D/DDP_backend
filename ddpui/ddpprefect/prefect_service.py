@@ -923,11 +923,7 @@ def estimate_time_for_next_queued_run_of_dataflow(
     run_time_type = "wt_avg_run_time"
     queue_no = 1
     queue_time_in_seconds = (
-        dataflow.meta[run_time_type]
-        if dataflow.meta
-        and run_time_type in dataflow.meta
-        and dataflow.meta[run_time_type] > 0  # we should have a positive time
-        else 0
+        5  # 5 secs of approx latency of the flow run going from pos no 1 to the prefect worker
     )
     for flow_run in queued_late_flow_runs:
         deployment_meta = (
