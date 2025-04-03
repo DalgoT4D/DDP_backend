@@ -1,13 +1,10 @@
-"""
-This module talks to the infra service for creation various infrastructure blocks
-"""
+"""This module talks to the infra service for creation various infrastructure blocks"""
 
 import time
 import os
-from io import BytesIO
 
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.http import dalgo_post, dalgo_get, dalgo_delete
+from ddpui.utils.http import dalgo_post, dalgo_get
 from celery.states import SUCCESS, FAILURE, REVOKED, REJECTED, IGNORED
 
 INFRA_SERVICE_API_URL = os.getenv("INFRA_SERVICE_API_URL")
@@ -22,9 +19,7 @@ logger = CustomLogger("ddpui")
 def poll_llm_infra_service_task(
     task_id: str, poll_interval: int = 5, timeout_seconds: int = 3600
 ) -> dict:
-    """
-    Polls the llm service task and returns the result
-    """
+    """Polls the llm service task and returns the result"""
     # poll this task
     attempts = -1
     while True:

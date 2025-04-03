@@ -6,7 +6,7 @@ from ddpui.celery import app
 from ddpui.core.orguserfunctions import create_orguser
 from ddpui.models.notifications import Notification
 from ddpui.models.org_user import OrgUser, OrgUserCreate
-from ddpui.models.org import Org, CreateFreeTrialOrgSchema, OrgVizLoginType
+from ddpui.models.org import CreateFreeTrialOrgSchema, OrgVizLoginType
 from ddpui.models.userpreferences import UserPreferences
 
 from ddpui.utils.awsses import send_text_message
