@@ -113,7 +113,7 @@ class CreateOrgSchema(Schema):
     end_date: Optional[str]
 
 
-class CreateFreeTrailOrgSchema(CreateOrgSchema):
+class CreateFreeTrialOrgSchema(CreateOrgSchema):
     """payload for org creation specifically for free trial account"""
 
     email: str

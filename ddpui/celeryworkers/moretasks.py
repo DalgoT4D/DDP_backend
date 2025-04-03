@@ -6,7 +6,7 @@ from ddpui.celery import app
 from ddpui.core.orguserfunctions import create_orguser
 from ddpui.models.notifications import Notification
 from ddpui.models.org_user import OrgUser, OrgUserCreate
-from ddpui.models.org import Org, CreateFreeTrailOrgSchema, OrgVizLoginType
+from ddpui.models.org import Org, CreateFreeTrialOrgSchema, OrgVizLoginType
 from ddpui.models.userpreferences import UserPreferences
 
 from ddpui.utils.awsses import send_text_message
@@ -39,7 +39,7 @@ def schedule_notification_task(self, notification_id, recipient_id):  # skipcq: 
 
 
 @app.task(bind=True)
-def create_free_trail_org_account(self, payload: dict):
+def create_free_trial_org_account(self, payload: dict):
     """
     1. Create org
     2. Create the account manage orguser
@@ -52,7 +52,7 @@ def create_free_trail_org_account(self, payload: dict):
     """
     from ddpui.core.orgfunctions import create_organization
 
-    create_org_payload = CreateFreeTrailOrgSchema(**payload)
+    create_org_payload = CreateFreeTrialOrgSchema(**payload)
 
     # create org
     org, error = create_organization(create_org_payload)

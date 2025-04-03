@@ -17,7 +17,7 @@ from ddpui.models.org import (
     OrgSchema,
     OrgWarehouseSchema,
     CreateOrgSchema,
-    CreateFreeTrailOrgSchema,
+    CreateFreeTrialOrgSchema,
 )
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
@@ -47,7 +47,7 @@ from ddpui.utils.deleteorg import delete_warehouse_v1
 from ddpui.models.org import OrgWarehouse, Org, OrgType
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.models.org_preferences import OrgPreferences
-from ddpui.celeryworkers.moretasks import create_free_trail_org_account
+from ddpui.celeryworkers.moretasks import create_free_trial_org_account
 from django.db import transaction
 
 user_org_router = Router()
@@ -597,7 +597,7 @@ def post_organization_v1(request, payload: CreateOrgSchema):
 
 @user_org_router.post("/v1/organizations/free_trail", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_org"])
-def post_organization_free_trail(request, payload: CreateFreeTrailOrgSchema):
+def post_organization_free_trail(request, payload: CreateFreeTrialOrgSchema):
     """create a new org with free trial plan and a warehouse/superset with it"""
     orguser: OrgUser = request.orguser
 
@@ -608,7 +608,7 @@ def post_organization_free_trail(request, payload: CreateFreeTrailOrgSchema):
     if payload.base_plan != OrgPlanType.FREE_TRIAL:
         raise HttpError(403, "Only free trial orgs can be created")
 
-    task = create_free_trail_org_account.delay(payload.dict())
+    task = create_free_trial_org_account.delay(payload.dict())
 
     return {"task_id": task.id}
 
