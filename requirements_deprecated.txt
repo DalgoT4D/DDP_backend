@@ -64,7 +64,7 @@ dbt-semantic-interfaces==0.5.1
 debugpy==1.8.0
 decorator==5.1.1
 deepdiff==7.0.1
-dill==0.3.6
+dill
 distlib==0.3.8
 Django==4.2
 django-cors-headers==3.14.0
@@ -151,7 +151,7 @@ narwhals==1.13.2
 nest-asyncio==1.5.7
 networkx==2.8.8
 nodeenv==1.9.1
-numpy==1.25.2
+numpy
 oauthlib==3.2.2
 ordered-set==4.1.0
 orjson==3.8.8

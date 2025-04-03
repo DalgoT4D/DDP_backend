@@ -11,7 +11,7 @@ import yaml
 from celery.schedules import crontab
 from django.utils.text import slugify
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.celery import app
+from ddpui.celery import app, Celery
 
 
 from ddpui.utils import timezone, awsses, constants
@@ -64,6 +64,7 @@ from ddpui.ddpprefect.prefect_service import (
     prefect_get,
     recurse_flow_run_logs,
     get_long_running_flow_runs,
+    compute_dataflow_run_times_from_history,
 )
 from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
@@ -521,7 +522,7 @@ def get_schema_catalog_task(task_key, workspace_id, source_id):
         res = airbyte_service.get_source_schema_catalog(workspace_id, source_id)
         taskprogress.add(
             {
-                "message": "fetched catalog data",
+                "message": "Fetched catalog data",
                 "status": TaskProgressStatus.COMPLETED,
                 "result": res,
             }
@@ -531,12 +532,11 @@ def get_schema_catalog_task(task_key, workspace_id, source_id):
         logger.error(err)
         taskprogress.add(
             {
-                "message": "invalid error",
+                "message": "Failed to get schema catalog",
                 "status": TaskProgressStatus.FAILED,
-                "result": None,
+                "result": str(err),
             }
         )
-        return err
 
 
 @app.task(bind=False)
@@ -544,13 +544,6 @@ def update_dbt_core_block_schema_task(block_name, default_schema):
     """single http PUT request to the prefect-proxy"""
     logger.info("updating default_schema of %s to %s", block_name, default_schema)
     update_dbt_core_block_schema(block_name, default_schema)
-
-
-@app.task()
-def delete_old_tasklocks():
-    """delete task locks which were created over 24 hours ago"""
-    onehourago = UTC.localize(datetime.now() - timedelta(seconds=24 * 3600))
-    TaskLock.objects.filter(locked_at__lt=onehourago).delete()
 
 
 @app.task()
@@ -742,8 +735,10 @@ def summarize_logs(
 
             logs_text = "\n".join([log["message"] for log in task["logs"]])
         elif type == LogsSummarizationType.AIRBYTE_SYNC:
-            logs = airbyte_service.get_logs_for_job(job_id=job_id, attempt_number=attempt_number)
-            logs_text = "\n".join(logs["logs"]["logLines"])
+            log_lines = airbyte_service.get_logs_for_job(
+                job_id=job_id, attempt_number=attempt_number
+            )
+            logs_text = "\n".join(log_lines)
     except Exception as err:
         logger.error(err)
         taskprogress.add(
@@ -1009,7 +1004,7 @@ def check_org_plan_expiry_notify_people():
                     org=org,
                     new_role__slug__in=roles_to_notify,
                 )
-                message = f"""This email is to let you know that your Dalgo plan for {org.name} is about to expire. Please renew it to continue using the services."""
+                message = f"""Your Dalgo plan for {org.name} will expire on {org_plan.end_date.strftime("%b %d, %Y")}. Please reach out to the Dalgo team at support@dalgo.org and renew your subscription to continue using the platform's services."""
                 subject = "Dalgo plan expiry"
                 for orguser in org_users:
                     send_text_message(orguser.user.email, subject, message)
@@ -1063,29 +1058,56 @@ def check_for_long_running_flow_runs():
         )
 
 
+@app.task()
+def compute_dataflow_run_times(org: Org = None):
+    """Computes run times for all dataflows"""
+    dataflows = OrgDataFlowv1.objects
+
+    if org:
+        dataflows = dataflows.filter(org=org)
+
+    for dataflow in dataflows.all():
+        compute_dataflow_run_times_from_history(dataflow)
+
+
 @app.on_after_finalize.connect
-def setup_periodic_tasks(sender, **kwargs):
-    """check for old locks every minute"""
+def setup_periodic_tasks(sender: Celery, **kwargs):
+    """periodic celery tasks"""
+    # schema change detection; once a day
     sender.add_periodic_task(
         crontab(hour=18, minute=30),
         schema_change_detection.s(),
         name="schema change detection",
     )
-    sender.add_periodic_task(60 * 1.0, delete_old_tasklocks.s(), name="remove old tasklocks")
+
+    # clear canvas locks every; every 60 seconds or 1 minute
     sender.add_periodic_task(60 * 1.0, delete_old_canvaslocks.s(), name="remove old canvaslocks")
+
+    # sync flow runs of deployment; every 6 hours
     sender.add_periodic_task(
         crontab(minute=0, hour="*/6"),
         sync_flow_runs_of_deployments.s(),
         name="sync flow runs of deployments into our db",
     )
+
     if os.getenv("ADMIN_EMAIL"):
+        # check for long running flow runs; every 3600 seconds or 1 hour
         sender.add_periodic_task(
             3600 * 1.0,
             check_for_long_running_flow_runs.s(),
             name="check for long-running flow-runs",
         )
+
+    # check org plan expiry & notify users; daily at midnight
     sender.add_periodic_task(
-        crontab(minute=0, hour="*/12"),
+        crontab(minute=0, hour=0),
         check_org_plan_expiry_notify_people.s(),
         name="check org plan expiry and notify the right people",
+    )
+
+    # compute run times for each deployment; every 3 hours
+    sender.add_periodic_task(
+        crontab(minute=0, hour="*/3"),
+        compute_dataflow_run_times.s(),
+        name="compute run times of each deployment based on its past flow runs",
     )
