@@ -64,7 +64,7 @@ def create_warehouse_in_rds(dbname: str, poll_interval: int = 5) -> dict:
         )
     except Exception as e:
         logger.error(f"Failed to create postgres warehouse: {str(e)}")
-        raise Exception(f"Failed to create postgres warehouse: {str(e)}")
+        raise Exception(f"Failed to create postgres warehouse: {str(e)}") from e
 
     task_id = response.get("task_id")
 
@@ -95,7 +95,7 @@ def create_superset_instance(client_name: str, poll_interval: int = 5) -> dict:
         )
     except Exception as e:
         logger.error(f"Failed to create Superset instance: {str(e)}")
-        raise Exception(f"Failed to create Superset instance: {str(e)}")
+        raise Exception(f"Failed to create Superset instance: {str(e)}") from e
 
     task_id = response.get("task_id")
 
