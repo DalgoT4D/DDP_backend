@@ -49,7 +49,7 @@ logger = CustomLogger("airbyte")
 
 @airbyte_router.get("/source_definitions", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_sources"])
-def get_airbyte_source_definitions(request):
+def get_airbyte_source_definitions(request) -> list:
     """Fetch airbyte source definitions in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -74,7 +74,7 @@ def get_airbyte_source_definitions(request):
     auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_view_sources"])
-def get_airbyte_source_definition_specifications(request, sourcedef_id):
+def get_airbyte_source_definition_specifications(request, sourcedef_id: str) -> dict:
     """
     Fetch definition specifications for a particular
     source definition in the user organization workspace
@@ -92,7 +92,7 @@ def get_airbyte_source_definition_specifications(request, sourcedef_id):
 
 @airbyte_router.post("/sources/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_source"])
-def post_airbyte_source(request, payload: AirbyteSourceCreate):
+def post_airbyte_source(request, payload: AirbyteSourceCreate) -> dict:
     """Create airbyte source in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -125,7 +125,7 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
 
 @airbyte_router.put("/sources/{source_id}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_source"])
-def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
+def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate) -> dict:
     """Update airbyte source in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org is None:
@@ -135,7 +135,9 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
 
     if orguser.org.base_plan() == OrgType.DEMO:
         logger.info("Demo account user")
-        source = airbyte_service.get_source(orguser.org.airbyte_workspace_id, source_id)
+        source = airbyte_service.get_source(
+            orguser.org.airbyte_workspace_id, source_id
+        )
 
         # replace the payload config with the correct whitelisted source config
         whitelisted_config, error = airbytehelpers.get_demo_whitelisted_source_config(
@@ -156,7 +158,7 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
 
 @airbyte_router.post("/sources/check_connection/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_source"])
-def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
+def post_airbyte_check_source(request, payload: AirbyteSourceCreate) -> dict:
     """Test the source connection in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -189,7 +191,7 @@ def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
     auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_edit_source"])
-def post_airbyte_check_source_for_update(
+def post_airbyte_check_source_for_update(  # pylint: disable=too-many-arguments
     request, source_id: str, payload: AirbyteSourceUpdateCheckConnection
 ):
     """Test the source connection in the user organization workspace"""
@@ -220,7 +222,7 @@ def post_airbyte_check_source_for_update(
 
 @airbyte_router.get("/sources", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_sources"])
-def get_airbyte_sources(request):
+def get_airbyte_sources(request) -> list:
     """Fetch all airbyte sources in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -233,7 +235,7 @@ def get_airbyte_sources(request):
 
 @airbyte_router.get("/sources/{source_id}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_source"])
-def get_airbyte_source(request, source_id):
+def get_airbyte_source(request, source_id: str) -> dict:
     """Fetch a single airbyte source in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -246,7 +248,7 @@ def get_airbyte_source(request, source_id):
 
 @airbyte_router.get("/sources/{source_id}/schema_catalog", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_source"])
-def get_airbyte_source_schema_catalog(request, source_id):
+def get_airbyte_source_schema_catalog(request, source_id: str) -> dict:
     """Fetch schema catalog for a source in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -259,7 +261,7 @@ def get_airbyte_source_schema_catalog(request, source_id):
 
 @airbyte_router.get("/destination_definitions", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouses"])
-def get_airbyte_destination_definitions(request):
+def get_airbyte_destination_definitions(request) -> list:
     """Fetch destination definitions in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -280,7 +282,9 @@ def get_airbyte_destination_definitions(request):
     auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_view_warehouse"])
-def get_airbyte_destination_definition_specifications(request, destinationdef_id):
+def get_airbyte_destination_definition_specifications(
+    request, destinationdef_id: str
+) -> dict:
     """
     Fetch specifications for a destination
     definition in the user organization workspace
@@ -298,7 +302,7 @@ def get_airbyte_destination_definition_specifications(request, destinationdef_id
 
 @airbyte_router.post("/destinations/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_warehouse"])
-def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
+def post_airbyte_destination(request, payload: AirbyteDestinationCreate) -> dict:
     """Create an airbyte destination in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -316,7 +320,9 @@ def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
 
 @airbyte_router.post("/destinations/check_connection/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_warehouse"])
-def post_airbyte_check_destination(request, payload: AirbyteDestinationCreate):
+def post_airbyte_check_destination(
+    request, payload: AirbyteDestinationCreate
+) -> dict:
     """Test connection to destination in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -336,7 +342,7 @@ def post_airbyte_check_destination(request, payload: AirbyteDestinationCreate):
     auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_edit_warehouse"])
-def post_airbyte_check_destination_for_update(
+def post_airbyte_check_destination_for_update(  # pylint: disable=too-many-arguments
     request, destination_id: str, payload: AirbyteDestinationUpdateCheckConnection
 ):
     """Test connection to destination in the user organization workspace"""
@@ -353,7 +359,7 @@ def post_airbyte_check_destination_for_update(
 
 @airbyte_router.get("/destinations", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouses"])
-def get_airbyte_destinations(request):
+def get_airbyte_destinations(request) -> list:
     """Fetch all airbyte destinations in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -366,7 +372,7 @@ def get_airbyte_destinations(request):
 
 @airbyte_router.get("/destinations/{destination_id}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse"])
-def get_airbyte_destination(request, destination_id):
+def get_airbyte_destination(request, destination_id: str) -> dict:
     """Fetch an airbyte destination in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -379,7 +385,7 @@ def get_airbyte_destination(request, destination_id):
 
 @airbyte_router.get("/jobs/{job_id}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_connection"])
-def get_job_status(request, job_id):
+def get_job_status(_request, job_id: int) -> dict:
     """get the job info from airbyte"""
     result = airbyte_service.get_job_info(job_id)
     logs = result["attempts"][-1]["logs"]["logLines"]
@@ -391,7 +397,7 @@ def get_job_status(request, job_id):
 
 @airbyte_router.get("/jobs/{job_id}/status", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_connection"])
-def get_job_status_without_logs(request, job_id):
+def get_job_status_without_logs(_request, job_id: int) -> dict:
     """get the job info from airbyte"""
     result = airbyte_service.get_job_info_without_logs(job_id)
     print(result)
@@ -406,7 +412,9 @@ def get_job_status_without_logs(request, job_id):
 
 @airbyte_router.post("/v1/workspace/", response=AirbyteWorkspace, auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_org"])
-def post_airbyte_workspace_v1(request, payload: AirbyteWorkspaceCreate):
+def post_airbyte_workspace_v1(
+    request, payload: AirbyteWorkspaceCreate
+) -> AirbyteWorkspace:
     """Create an airbyte workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is not None:
@@ -427,7 +435,9 @@ def post_airbyte_workspace_v1(request, payload: AirbyteWorkspaceCreate):
     response=AirbyteConnectionCreateResponse,
 )
 @has_permission(["can_create_connection"])
-def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
+def post_airbyte_connection_v1(
+    request, payload: AirbyteConnectionCreate
+) -> AirbyteConnectionCreateResponse:
     """Create an airbyte connection in the user organization workspace"""
     orguser: OrgUser = request.orguser
     org = orguser.org
@@ -451,7 +461,7 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
     response=List[AirbyteGetConnectionsResponse],
 )
 @has_permission(["can_view_connections"])
-def get_airbyte_connections_v1(request):
+def get_airbyte_connections_v1(request) -> List[AirbyteGetConnectionsResponse]:
     """Fetch all airbyte connections in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -471,7 +481,9 @@ def get_airbyte_connections_v1(request):
     response=AirbyteConnectionCreateResponse,
 )
 @has_permission(["can_view_connection"])
-def get_airbyte_connection_v1(request, connection_id):
+def get_airbyte_connection_v1(
+    request, connection_id: str
+) -> AirbyteConnectionCreateResponse:
     """Fetch a connection in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -486,7 +498,7 @@ def get_airbyte_connection_v1(request, connection_id):
 
 @airbyte_router.post("/v1/connections/{connection_id}/reset", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_reset_connection"])
-def post_airbyte_connection_reset_v1(request, connection_id):
+def post_airbyte_connection_reset_v1(request, connection_id: str) -> None:
     """Reset the data for connection at destination"""
     orguser: OrgUser = request.orguser
     org = orguser.org
@@ -506,7 +518,7 @@ def post_airbyte_connection_reset_v1(request, connection_id):
 
 @airbyte_router.put("/v1/connections/{connection_id}/update", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_connection"])
-def put_airbyte_connection_v1(
+def put_airbyte_connection_v1(  # pylint: disable=too-many-arguments
     request, connection_id, payload: AirbyteConnectionUpdate
 ):  # pylint: disable=unused-argument
     """Update an airbyte connection in the user organization workspace"""
@@ -524,7 +536,7 @@ def put_airbyte_connection_v1(
 
 @airbyte_router.delete("/v1/connections/{connection_id}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_delete_connection"])
-def delete_airbyte_connection_v1(request, connection_id):
+def delete_airbyte_connection_v1(request, connection_id: str) -> None:
     """Update an airbyte connection in the user organization workspace"""
     orguser: OrgUser = request.orguser
     org = orguser.org
@@ -542,7 +554,7 @@ def delete_airbyte_connection_v1(request, connection_id):
 
 @airbyte_router.get("/v1/connections/{connection_id}/jobs", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_connection"])
-def get_latest_job_for_connection(request, connection_id):
+def get_latest_job_for_connection(request, connection_id: str) -> dict:
     """get the job info from airbyte for a connection"""
     orguser: OrgUser = request.orguser
     org = orguser.org
@@ -559,7 +571,9 @@ def get_latest_job_for_connection(request, connection_id):
     "/v1/connections/{connection_id}/sync/history", auth=auth.CustomAuthMiddleware()
 )
 @has_permission(["can_view_connection"])
-def get_sync_history_for_connection(request, connection_id, limit: int = 10, offset: int = 0):
+def get_sync_history_for_connection(
+    request, connection_id: str, limit: int = 10, offset: int = 0
+) -> dict:
     """get the job info from airbyte for a connection"""
     orguser: OrgUser = request.orguser
     org = orguser.org
@@ -576,7 +590,9 @@ def get_sync_history_for_connection(request, connection_id, limit: int = 10, off
 
 @airbyte_router.put("/v1/destinations/{destination_id}/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_warehouse"])
-def put_airbyte_destination_v1(request, destination_id: str, payload: AirbyteDestinationUpdate):
+def put_airbyte_destination_v1(
+    request, destination_id: str, payload: AirbyteDestinationUpdate
+) -> dict:
     """Update an airbyte destination in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org is None:
@@ -593,7 +609,7 @@ def put_airbyte_destination_v1(request, destination_id: str, payload: AirbyteDes
 
 @airbyte_router.delete("/sources/{source_id}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_delete_source"])
-def delete_airbyte_source_v1(request, source_id):
+def delete_airbyte_source_v1(request, source_id: str) -> None:
     """Delete a single airbyte source in the user organization workspace"""
     logger.info("deleting source started")
 
@@ -613,7 +629,7 @@ def delete_airbyte_source_v1(request, source_id):
     auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_view_connection"])
-def get_connection_catalog_v1(request, connection_id):
+def get_connection_catalog_v1(request, connection_id: str) -> dict:
     """Fetch a connection in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -641,7 +657,9 @@ def get_connection_catalog_v1(request, connection_id):
     "/v1/connections/{connection_id}/schema_update", auth=auth.CustomAuthMiddleware()
 )
 @has_permission(["can_edit_connection"])
-def update_connection_schema(request, connection_id, payload: AirbyteConnectionSchemaUpdate):
+def update_connection_schema(
+    request, connection_id: str, payload: AirbyteConnectionSchemaUpdate
+) -> dict:
     """update schema change in a connection"""
     orguser: OrgUser = request.orguser
     org = orguser.org
@@ -659,7 +677,7 @@ def update_connection_schema(request, connection_id, payload: AirbyteConnectionS
     auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_edit_connection"])
-def schedule_update_connection_schema(
+def schedule_update_connection_schema(  # pylint: disable=too-many-arguments
     request, connection_id, payload: AirbyteConnectionSchemaUpdateSchedule
 ):
     """
@@ -683,7 +701,7 @@ def schedule_update_connection_schema(
     auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_view_connection"])
-def get_schema_changes_for_connection(request):
+def get_schema_changes_for_connection(request) -> dict:
     """Get schema changes for an org"""
     orguser: OrgUser = request.orguser
     org = orguser.org
@@ -698,7 +716,7 @@ def get_schema_changes_for_connection(request):
 
 @airbyte_router.get("/v1/connections/{connection_id}/logsummary", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_pipeline"])
-def get_flow_runs_logsummary_v1(
+def get_flow_runs_logsummary_v1(  # pylint: disable=too-many-arguments
     request, connection_id: str, job_id: int, attempt_number: int, regenerate: int = 0
 ):  # pylint: disable=unused-argument
     """
@@ -733,8 +751,8 @@ def get_flow_runs_logsummary_v1(
 
 @airbyte_router.get("v1/logs", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_connection"])
-def get_job_logs(
-    request,
+def get_job_logs(  # pylint: disable=too-many-arguments
+    _request,
     job_id: int,
     attempt_number: int,
 ):
