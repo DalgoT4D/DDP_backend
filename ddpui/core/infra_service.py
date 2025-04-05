@@ -16,10 +16,10 @@ headers = {"Authorization": INFRA_SERVICE_API_KEY}
 logger = CustomLogger("ddpui")
 
 
-def poll_llm_infra_service_task(
+def poll_infra_service_task(
     task_id: str, poll_interval: int = 5, timeout_seconds: int = 3600
 ) -> dict:
-    """Polls the llm service task and returns the result"""
+    """Polls the  service task and returns the result"""
     # poll this task
     attempts = -1
     while True:
@@ -39,8 +39,8 @@ def poll_llm_infra_service_task(
         time.sleep(poll_interval)
 
     if response["status"] in CELERY_ERROR_STATES:
-        logger.error(f"Error occured while polling llm service job {str(response['error'])}")
-        raise Exception(response["error"] if response["error"] else "error occured in llm service")
+        logger.error(f"Error occured while polling infra service job {str(response['error'])}")
+        raise Exception(response["error"] if response["error"] else "error occured in  service")
 
     return response["result"]
 
@@ -71,10 +71,12 @@ def create_warehouse_in_rds(dbname: str, poll_interval: int = 5) -> dict:
     if not task_id:
         raise Exception("Failed to submit the task for creating postgres warehouse")
 
-    return poll_llm_infra_service_task(task_id, poll_interval)
+    return poll_infra_service_task(task_id, poll_interval)
 
 
-def create_superset_instance(client_name: str, poll_interval: int = 5) -> dict:
+def create_superset_instance(
+    client_name: str, ec2_machine_id: str, port: int, poll_interval: int = 5
+) -> dict:
     """
     Creates a superset instance with basic auth
     Returns
@@ -82,16 +84,16 @@ def create_superset_instance(client_name: str, poll_interval: int = 5) -> dict:
     - admin_user
     - admin_password
     """
-    response = dalgo_post(
-        f"{INFRA_SERVICE_API_URL}/api/infra/superset",
-        headers=headers,
-        json={"client_name": client_name.replace("_", "-")},
-    )
+
     try:
         response = dalgo_post(
             f"{INFRA_SERVICE_API_URL}/api/infra/superset",
             headers=headers,
-            json={"client_name": client_name.replace("_", "-")},
+            json={
+                "client_name": client_name.replace("_", "-"),
+                "ec2_machine_id": ec2_machine_id,
+                "port": port,
+            },
         )
     except Exception as e:
         logger.error(f"Failed to create Superset instance: {str(e)}")
@@ -102,4 +104,4 @@ def create_superset_instance(client_name: str, poll_interval: int = 5) -> dict:
     if not task_id:
         raise Exception("Failed to submit the task for creating Superset instance")
 
-    return poll_llm_infra_service_task(task_id, poll_interval)
+    return poll_infra_service_task(task_id, poll_interval)

@@ -87,7 +87,9 @@ def create_free_trial_org_account(self, payload: dict):
     logger.info("Emailed warehouse creds to platform admin")
 
     # provision superset
-    superset_res = infra_service.create_superset_instance(org.slug)
+    superset_res = infra_service.create_superset_instance(
+        org.slug, create_org_payload.superset_ec2_machine_id, create_org_payload.superset_port
+    )
     if not all(key in superset_res for key in ["url", "admin_user", "admin_password"]):
         raise KeyError("Superset creation didn't send back all the information needed")
 

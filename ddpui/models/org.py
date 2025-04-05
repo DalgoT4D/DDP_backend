@@ -117,6 +117,8 @@ class CreateFreeTrialOrgSchema(CreateOrgSchema):
     """payload for org creation specifically for free trial account"""
 
     email: str
+    superset_ec2_machine_id: str
+    superset_port: int
 
 
 class OrgWarehouse(models.Model):
