@@ -1,5 +1,8 @@
 import os
+import math
 import django
+from datetime import datetime, timedelta
+
 from unittest.mock import patch, Mock, call
 import pytest
 
@@ -9,7 +12,9 @@ django.setup()
 
 pytestmark = pytest.mark.django_db
 
-
+from ddpui.models.flow_runs import PrefectFlowRun
+from ddpui.models.org import OrgDataFlowv1, Org
+from ddpui.utils import timezone
 from ddpui.ddpprefect.prefect_service import (
     prefect_get,
     prefect_put,
@@ -39,6 +44,7 @@ from ddpui.ddpprefect.prefect_service import (
     create_deployment_flow_run,
     create_dbt_cli_profile_block,
     recurse_flow_run_logs,
+    compute_dataflow_run_times_from_history,
 )
 
 PREFECT_PROXY_API_URL = os.getenv("PREFECT_PROXY_API_URL")
@@ -527,3 +533,254 @@ def test_recurse_flow_run_logs():
             call("flowrunid", None, 3, 6),
         ]
         mock_get_logs.assert_has_calls(expected_calls)
+
+
+def test_compute_dataflow_run_times_from_history_empty_flow_runs():
+    """Test when there are no flow runs for the dataflow"""
+    dataflow = OrgDataFlowv1.objects.create(
+        deployment_id="test-deployment",
+        deployment_name="test-flow",
+        org=Org.objects.create(slug="test-org"),
+    )
+
+    result = compute_dataflow_run_times_from_history(dataflow)
+
+    assert result.max_run_time == -1
+    assert result.min_run_time == -1
+    assert result.avg_run_time == -1
+    assert result.wt_avg_run_time == -1
+    assert dataflow.meta is None
+
+
+def test_compute_dataflow_run_times_from_history_single_run():
+    """Test when there is only one flow run"""
+    dataflow = OrgDataFlowv1.objects.create(
+        deployment_id="test-deployment",
+        deployment_name="test-flow",
+        org=Org.objects.create(slug="test-org"),
+    )
+
+    # Create a single flow run
+    PrefectFlowRun.objects.create(
+        deployment_id="test-deployment",
+        flow_run_id="test-flow-run",
+        name="test-run",
+        start_time=datetime.now(timezone.UTC),
+        expected_start_time=datetime.now(timezone.UTC),
+        total_run_time=100,  # 100 seconds
+        status="COMPLETED",
+        state_name="Completed",
+    )
+
+    result = compute_dataflow_run_times_from_history(dataflow)
+
+    assert result.max_run_time == 100
+    assert result.min_run_time == 100
+    assert result.avg_run_time == 100
+    assert result.wt_avg_run_time == 100
+    assert dataflow.meta == {
+        "max_run_time": 100,
+        "min_run_time": 100,
+        "avg_run_time": 100,
+        "wt_avg_run_time": 100,
+    }
+
+
+def test_compute_dataflow_run_times_from_history_multiple_runs_same_day():
+    """Test when there are multiple flow runs on the same day"""
+    dataflow = OrgDataFlowv1.objects.create(
+        deployment_id="test-deployment",
+        deployment_name="test-flow",
+        org=Org.objects.create(slug="test-org"),
+    )
+
+    today = datetime.now(timezone.UTC).date()
+
+    # Create multiple flow runs on the same day
+    PrefectFlowRun.objects.create(
+        deployment_id="test-deployment",
+        flow_run_id="test-flow-run-1",
+        name="test-run-1",
+        start_time=datetime.combine(today, datetime.min.time(), tzinfo=timezone.UTC),
+        expected_start_time=datetime.combine(today, datetime.min.time(), tzinfo=timezone.UTC),
+        total_run_time=100,  # 100 seconds
+        status="COMPLETED",
+        state_name="Completed",
+    )
+
+    PrefectFlowRun.objects.create(
+        deployment_id="test-deployment",
+        flow_run_id="test-flow-run-2",
+        name="test-run-2",
+        start_time=datetime.combine(today, datetime.min.time(), tzinfo=timezone.UTC),
+        expected_start_time=datetime.combine(today, datetime.min.time(), tzinfo=timezone.UTC),
+        total_run_time=200,  # 200 seconds
+        status="COMPLETED",
+        state_name="Completed",
+    )
+
+    result = compute_dataflow_run_times_from_history(dataflow)
+
+    # Average of 100 and 200 is 150
+    assert result.max_run_time == 150
+    assert result.min_run_time == 150
+    assert result.avg_run_time == 150
+    assert result.wt_avg_run_time == 150
+    assert dataflow.meta == {
+        "max_run_time": 150,
+        "min_run_time": 150,
+        "avg_run_time": 150,
+        "wt_avg_run_time": 150,
+    }
+
+
+def test_compute_dataflow_run_times_from_history_multiple_days():
+    """Test when there are flow runs across multiple days"""
+    dataflow = OrgDataFlowv1.objects.create(
+        deployment_id="test-deployment",
+        deployment_name="test-flow",
+        org=Org.objects.create(slug="test-org"),
+    )
+
+    today = datetime.now(timezone.UTC).date()
+    yesterday = today - timedelta(days=1)
+
+    # Create flow runs on different days
+    PrefectFlowRun.objects.create(
+        deployment_id="test-deployment",
+        flow_run_id="test-flow-run-1",
+        name="test-run-1",
+        start_time=datetime.combine(today, datetime.min.time(), tzinfo=timezone.UTC),
+        expected_start_time=datetime.combine(today, datetime.min.time(), tzinfo=timezone.UTC),
+        total_run_time=100,  # 100 seconds
+        status="COMPLETED",
+        state_name="Completed",
+    )
+
+    PrefectFlowRun.objects.create(
+        deployment_id="test-deployment",
+        flow_run_id="test-flow-run-2",
+        name="test-run-2",
+        start_time=datetime.combine(yesterday, datetime.min.time(), tzinfo=timezone.UTC),
+        expected_start_time=datetime.combine(yesterday, datetime.min.time(), tzinfo=timezone.UTC),
+        total_run_time=200,  # 200 seconds
+        status="COMPLETED",
+        state_name="Completed",
+    )
+
+    result = compute_dataflow_run_times_from_history(dataflow)
+
+    # For weighted average:
+    # Total days : 2
+    # Today's run (100s) * (2/3) (this should get max weightage due to recency)
+    # Yesterday's run (200s) * (1/3)
+    # Weighted average = (2/3)100 + (1/3)200 = (4/3)100 = 133.33 = 134 (ceil)
+    assert result.max_run_time == 200
+    assert result.min_run_time == 100
+    assert result.avg_run_time == 150
+    assert result.wt_avg_run_time == 134
+    assert dataflow.meta == {
+        "max_run_time": 200,
+        "min_run_time": 100,
+        "avg_run_time": 150,
+        "wt_avg_run_time": 134,
+    }
+
+
+def test_compute_dataflow_run_times_from_history_with_limit():
+    """Test when there are more flow runs than the limit"""
+    dataflow = OrgDataFlowv1.objects.create(
+        deployment_id="test-deployment",
+        deployment_name="test-flow",
+        org=Org.objects.create(slug="test-org"),
+    )
+
+    today = datetime.now(timezone.UTC).date()
+
+    # Create 30 flow runs (more than default limit of 20)
+    for i in range(30):
+        PrefectFlowRun.objects.create(
+            deployment_id="test-deployment",
+            flow_run_id=f"test-flow-run-{i}",
+            name=f"test-run-{i}",
+            start_time=datetime.combine(
+                today - timedelta(days=i), datetime.min.time(), tzinfo=timezone.UTC
+            ),
+            expected_start_time=datetime.combine(
+                today - timedelta(days=i), datetime.min.time(), tzinfo=timezone.UTC
+            ),
+            total_run_time=100 + i,  # Different run times
+            status="COMPLETED",
+            state_name="Completed",
+        )
+
+    result = compute_dataflow_run_times_from_history(dataflow, limit=20)
+
+    # Should only consider the most recent 20 runs
+    assert result.max_run_time == 119  # 100 + 19
+    assert result.min_run_time == 100  # 100 + 0
+    assert result.avg_run_time == 110  # Average of 100 to 119 is 109.5 & we take the ceil of it
+    weighted_avg = sum([i * j for i, j in zip(range(20, 0, -1), range(100, 120))]) / sum(
+        list(range(1, 21))
+    )  # (20(100) + 19(101) + .... + 1(119)) / (1+2+....+20)
+    assert result.wt_avg_run_time == math.ceil(weighted_avg)
+    assert dataflow.meta == {
+        "max_run_time": 119,
+        "min_run_time": 100,
+        "avg_run_time": 110,
+        "wt_avg_run_time": math.ceil(weighted_avg),
+    }
+
+
+def test_compute_dataflow_run_times_from_history_with_different_statuses():
+    """Test when using different statuses to include"""
+    dataflow = OrgDataFlowv1.objects.create(
+        deployment_id="test-deployment",
+        deployment_name="test-flow",
+        org=Org.objects.create(slug="test-org"),
+    )
+
+    today = datetime.now(timezone.UTC).date()
+
+    # Create flow runs with different statuses
+    PrefectFlowRun.objects.create(
+        deployment_id="test-deployment",
+        flow_run_id="test-flow-run-1",
+        name="test-run-1",
+        start_time=datetime.combine(today, datetime.min.time(), tzinfo=timezone.UTC),
+        expected_start_time=datetime.combine(today, datetime.min.time(), tzinfo=timezone.UTC),
+        total_run_time=100,
+        status="COMPLETED",
+        state_name="Completed",
+    )
+
+    PrefectFlowRun.objects.create(
+        deployment_id="test-deployment",
+        flow_run_id="test-flow-run-2",
+        name="test-run-2",
+        start_time=datetime.combine(
+            today - timedelta(days=1), datetime.min.time(), tzinfo=timezone.UTC
+        ),
+        expected_start_time=datetime.combine(
+            today - timedelta(days=1), datetime.min.time(), tzinfo=timezone.UTC
+        ),
+        total_run_time=200,
+        status="FAILED",
+        state_name="Failed",
+    )
+
+    # Test with only COMPLETED status
+    result1 = compute_dataflow_run_times_from_history(dataflow, statuses_to_include=["COMPLETED"])
+    assert result1.max_run_time == 100
+    assert result1.min_run_time == 100
+    assert result1.avg_run_time == 100
+    assert result1.wt_avg_run_time == 100
+
+    # Test with both COMPLETED and FAILED statuses
+    result2 = compute_dataflow_run_times_from_history(
+        dataflow, statuses_to_include=["COMPLETED", "FAILED"]
+    )
+    assert result2.max_run_time == 200
+    assert result2.min_run_time == 100
+    assert result2.avg_run_time == 150
+    assert result2.wt_avg_run_time == 134  # (2/3)100 + (1/3)200 = (4/3)100

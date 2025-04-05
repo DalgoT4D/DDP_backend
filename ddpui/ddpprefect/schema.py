@@ -1,4 +1,5 @@
 from typing import Optional
+from datetime import datetime
 
 from ninja import Field, Schema
 
@@ -362,3 +363,45 @@ class TaskStateSchema(Schema):
 
     state: StateSchema = Field(..., description="State with name and type")
     force: bool = Field(..., description="Force action flag")
+
+
+class DeploymentRunTimes(Schema):
+    """Schema for run times (seconds) of a deployment"""
+
+    max_run_time: int = 0
+    min_run_time: int = 0
+    avg_run_time: int = 0
+    wt_avg_run_time: int = 0
+
+
+class FilterLateFlowRunsRequest(Schema):
+    """search flow runs"""
+
+    deployment_id: str = None
+    work_pool_name: str = None
+    work_queue_name: str = None
+    limit: int = 1
+    before_start_time: str = None
+    after_start_time: str = None
+    exclude_flow_run_ids: list[str] = []
+
+
+class DeploymentCurrentQueueTime(Schema):
+    """Queue time (seconds)"""
+
+    queue_no: int
+    max_wait_time: int
+    min_wait_time: int
+
+
+class PrefectGetDataflowsResponse(Schema):
+    """Response schema for fetching dataflows"""
+
+    name: str
+    status: bool
+    deploymentName: str
+    deploymentId: str
+    cron: Optional[str]
+    lastRun: Optional[dict] = None
+    lock: Optional[dict] = None
+    queuedFlowRunWaitTime: DeploymentCurrentQueueTime = None
