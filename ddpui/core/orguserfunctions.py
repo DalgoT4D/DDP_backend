@@ -72,9 +72,8 @@ def lookup_user(email: str):
     }
 
 
-def signup_orguser(payload: OrgUserCreate):
-    """create an orguser and send an email"""
-
+def create_orguser(payload: OrgUserCreate, email_verified: bool = False) -> OrgUser:
+    """create the user and orguser"""
     signupcode = payload.signupcode
     if signupcode not in [os.getenv("SIGNUPCODE"), os.getenv("DEMO_SIGNUPCODE")]:
         return None, "That is not the right signup code"
@@ -98,7 +97,7 @@ def signup_orguser(payload: OrgUserCreate):
     user = User.objects.create_user(
         username=payload.email, email=payload.email, password=payload.password
     )
-    UserAttributes.objects.create(user=user)
+    UserAttributes.objects.create(user=user, email_verified=email_verified)
     orguser = OrgUser.objects.create(
         user=user,
         role=OrgUserRole.ACCOUNT_MANAGER,
@@ -108,12 +107,22 @@ def signup_orguser(payload: OrgUserCreate):
             if is_demo
             else Role.objects.filter(slug=GUEST_ROLE).first()
         ),
+        email_verified=email_verified,
     )
     orguser.save()
     UserPreferences.objects.create(orguser=orguser, enable_email_notifications=True)
     logger.info(
         f"created user [account-manager] " f"{orguser.user.email} having userid {orguser.user.id}"
     )
+
+    return orguser
+
+
+def signup_orguser(payload: OrgUserCreate):
+    """create an orguser and send an email"""
+
+    orguser = create_orguser(payload)
+
     redis = RedisClient.get_instance()
     token = uuid4()
 

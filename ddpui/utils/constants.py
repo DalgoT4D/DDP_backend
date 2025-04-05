@@ -77,5 +77,3 @@ FREE_TRIAL = {
     "dataQuality": ["Data quality dashboards"],
     "superset": ["Superset dashboards", "Superset Usage dashboards"],
 }
-
-ORG_BASE_PLANS = {"FREE_TRIAL": "Free Trial", "INTERNAL": "Internal", "DALGO": "Dalgo"}
