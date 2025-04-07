@@ -1,748 +1,352 @@
-"""Dalgo API for Airbyte"""
+from typing import List, Dict, Any, Optional, Union, Tuple, cast
+from pydantic import BaseModel, Field
+from django.http import JsonResponse
+from rest_framework.request import Request
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 
-import os
-from typing import List
-from ninja.errors import HttpError
-from ninja import Router
-from flags.state import flag_enabled
-
-from ddpui import auth
-from ddpui import settings
-from ddpui.ddpairbyte import airbyte_service
-from ddpui.ddpairbyte.schema import (
-    AirbyteConnectionCreate,
-    AirbyteConnectionCreateResponse,
-    AirbyteGetConnectionsResponse,
-    AirbyteConnectionSchemaUpdate,
-    AirbyteConnectionSchemaUpdateSchedule,
-    AirbyteDestinationCreate,
-    AirbyteDestinationUpdate,
-    AirbyteSourceCreate,
-    AirbyteSourceUpdate,
-    AirbyteWorkspace,
-    AirbyteWorkspaceCreate,
-    AirbyteSourceUpdateCheckConnection,
-    AirbyteDestinationUpdateCheckConnection,
-    AirbyteConnectionUpdate,
-)
-from ddpui.auth import has_permission
-
-from ddpui.models.org_user import OrgUser
-from ddpui.models.org import OrgType
-from ddpui.models.llm import LogsSummarizationType, LlmSession, LlmSessionStatus
-from ddpui.ddpairbyte import airbytehelpers
+from ddpui.models.org import Org
+from ddpui.models.airbyte_sync import AirbyteSync, AirbyteSyncRun
+from ddpui.models.warehouse import WarehouseCredential
+from ddpui.models.credentials import DataSourceCredential
+from ddpui.ddpairbyte.airbyte_service import AirbyteService
+from ddpui.utils.custom_permissions import HasOrgPermission
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.celeryworkers.tasks import (
-    get_connection_catalog_task,
-    add_custom_connectors_to_workspace,
-    summarize_logs,
-)
-from ddpui.models.tasks import (
-    TaskProgressHashPrefix,
-    TaskProgressStatus,
-)
-from ddpui.utils.singletaskprogress import SingleTaskProgress
 
-airbyte_router = Router()
-logger = CustomLogger("airbyte")
+logger = CustomLogger("airbyte_api")
 
+# Pydantic models for request and response payloads
+class SourceDefinitionResponse(BaseModel):
+    sourceDefinitionId: str
+    name: str
+    dockerRepository: str
+    dockerImageTag: str
+    documentationUrl: Optional[str] = None
+    icon: Optional[str] = None
 
-@airbyte_router.get("/source_definitions", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_view_sources"])
-def get_airbyte_source_definitions(request):
-    """Fetch airbyte source definitions in the user organization workspace"""
-    orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
+class WorkspaceResponse(BaseModel):
+    workspaceId: str
+    name: str
+    
+class SourceResponse(BaseModel):
+    sourceId: str
+    name: str
+    sourceDefinitionId: str
+    workspaceId: str
+    connectionConfiguration: Dict[str, Any]
+    
+class DestinationResponse(BaseModel):
+    destinationId: str
+    name: str
+    destinationDefinitionId: str
+    workspaceId: str
+    connectionConfiguration: Dict[str, Any]
 
-    res = airbyte_service.get_source_definitions(orguser.org.airbyte_workspace_id)
+class StreamConfig(BaseModel):
+    aliasName: str
+    destinationSyncMode: str
+    selected: bool
+    syncMode: str
 
-    # filter source definitions for demo account
-    allowed_sources = os.getenv("DEMO_AIRBYTE_SOURCE_TYPES")
-    if orguser.org.base_plan() == OrgType.DEMO and allowed_sources:
-        res["sourceDefinitions"] = [
-            source_def
-            for source_def in res["sourceDefinitions"]
-            if source_def["name"] in allowed_sources.split("|")
-        ]
-    logger.debug(res)
-    return res["sourceDefinitions"]
+class StreamObject(BaseModel):
+    name: str
+    namespace: Optional[str] = None
+    json_schema: Optional[Dict[str, Any]] = None
+    supported_sync_modes: Optional[List[str]] = None
+    source_defined_cursor: Optional[bool] = None
+    default_cursor_field: Optional[List[str]] = None
+    source_defined_primary_key: Optional[List[List[str]]] = None
 
+class Stream(BaseModel):
+    stream: StreamObject
+    config: StreamConfig
 
-@airbyte_router.get(
-    "/source_definitions/{sourcedef_id}/specifications",
-    auth=auth.CustomAuthMiddleware(),
-)
-@has_permission(["can_view_sources"])
-def get_airbyte_source_definition_specifications(request, sourcedef_id):
+class SyncCatalog(BaseModel):
+    streams: List[Stream]
+
+class ScheduleData(BaseModel):
+    basic_schedule: Dict[str, Any] = Field(..., alias="basicSchedule")
+    
+class Schedule(BaseModel):
+    scheduleType: str
+    scheduleData: Optional[ScheduleData] = None
+
+class ConnectionResponse(BaseModel):
+    connectionId: str
+    name: str
+    sourceId: str
+    destinationId: str
+    status: str
+    syncCatalog: SyncCatalog
+    schedule: Optional[Schedule] = None
+    
+class SourceSchemaResponse(BaseModel):
+    catalog: Dict[str, Any]
+    
+class ConnectionCreateRequest(BaseModel):
+    name: str
+    sourceId: str
+    destinationId: str
+    streams: List[Dict[str, Any]]
+    schedule: Optional[Dict[str, Any]] = None
+    
+class ConnectionUpdateRequest(BaseModel):
+    connectionId: str
+    syncCatalog: Dict[str, Any]
+    
+class ConnectionSyncRequest(BaseModel):
+    connectionId: str
+    
+class SourceCreateRequest(BaseModel):
+    sourceDefId: str
+    name: str
+    config: Dict[str, Any]
+    
+class JobStatusResponse(BaseModel):
+    jobId: str
+    status: str
+    logs: Optional[Dict[str, Any]] = None
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, HasOrgPermission])
+def get_source_definitions(request: Request, orgid: str) -> JsonResponse:
     """
-    Fetch definition specifications for a particular
-    source definition in the user organization workspace
-    """
-    orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    res = airbyte_service.get_source_definition_specification(
-        orguser.org.airbyte_workspace_id, sourcedef_id
-    )
-    logger.debug(res)
-    return res["connectionSpecification"]
-
-
-@airbyte_router.post("/sources/", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_create_source"])
-def post_airbyte_source(request, payload: AirbyteSourceCreate):
-    """Create airbyte source in the user organization workspace"""
-    orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    if orguser.org.base_plan() == OrgType.DEMO:
-        logger.info("Demo account user")
-        source_def = airbyte_service.get_source_definition(
-            orguser.org.airbyte_workspace_id, payload.sourceDefId
-        )
-        # replace the payload config with the correct whitelisted source config
-        whitelisted_config, error = airbytehelpers.get_demo_whitelisted_source_config(
-            source_def["name"]
-        )
-        if error:
-            raise HttpError(400, error)
-
-        payload.config = whitelisted_config
-        logger.info("whitelisted the source config")
-
-    source = airbyte_service.create_source(
-        orguser.org.airbyte_workspace_id,
-        payload.name,
-        payload.sourceDefId,
-        payload.config,
-    )
-    logger.info("created source having id " + source["sourceId"])
-    return {"sourceId": source["sourceId"]}
-
-
-@airbyte_router.put("/sources/{source_id}", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_edit_source"])
-def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
-    """Update airbyte source in the user organization workspace"""
-    orguser: OrgUser = request.orguser
-    if orguser.org is None:
-        raise HttpError(400, "create an organization first")
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    if orguser.org.base_plan() == OrgType.DEMO:
-        logger.info("Demo account user")
-        source = airbyte_service.get_source(orguser.org.airbyte_workspace_id, source_id)
-
-        # replace the payload config with the correct whitelisted source config
-        whitelisted_config, error = airbytehelpers.get_demo_whitelisted_source_config(
-            source["sourceName"]
-        )
-        if error:
-            raise HttpError(400, error)
-
-        payload.config = whitelisted_config
-        logger.info("whitelisted the source config for update")
-
-    source = airbyte_service.update_source(
-        source_id, payload.name, payload.config, payload.sourceDefId
-    )
-    logger.info("updated source having id " + source["sourceId"])
-    return {"sourceId": source["sourceId"]}
-
-
-@airbyte_router.post("/sources/check_connection/", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_create_source"])
-def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
-    """Test the source connection in the user organization workspace"""
-    orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    if orguser.org.base_plan() == OrgType.DEMO:
-        logger.info("Demo account user")
-        source_def = airbyte_service.get_source_definition(
-            orguser.org.airbyte_workspace_id, payload.sourceDefId
-        )
-        # replace the payload config with the correct whitelisted source config
-        whitelisted_config, error = airbytehelpers.get_demo_whitelisted_source_config(
-            source_def["name"]
-        )
-        if error:
-            raise HttpError(400, error)
-
-        payload.config = whitelisted_config
-        logger.info("whitelisted the source config")
-
-    response = airbyte_service.check_source_connection(orguser.org.airbyte_workspace_id, payload)
-    return {
-        "status": "succeeded" if response["jobInfo"]["succeeded"] else "failed",
-        "logs": response["jobInfo"]["logs"]["logLines"],
-    }
-
-
-@airbyte_router.post(
-    "/sources/{source_id}/check_connection_for_update/",
-    auth=auth.CustomAuthMiddleware(),
-)
-@has_permission(["can_edit_source"])
-def post_airbyte_check_source_for_update(
-    request, source_id: str, payload: AirbyteSourceUpdateCheckConnection
-):
-    """Test the source connection in the user organization workspace"""
-    orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    if orguser.org.base_plan() == OrgType.DEMO:
-        logger.info("Demo account user")
-        source = airbyte_service.get_source(orguser.org.airbyte_workspace_id, source_id)
-
-        # replace the payload config with the correct whitelisted source config
-        whitelisted_config, error = airbytehelpers.get_demo_whitelisted_source_config(
-            source["sourceName"]
-        )
-        if error:
-            raise HttpError(400, error)
-
-        payload.config = whitelisted_config
-        logger.info("whitelisted the source config for update")
-
-    response = airbyte_service.check_source_connection_for_update(source_id, payload)
-    return {
-        "status": "succeeded" if response["jobInfo"]["succeeded"] else "failed",
-        "logs": response["jobInfo"]["logs"]["logLines"],
-    }
-
-
-@airbyte_router.get("/sources", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_view_sources"])
-def get_airbyte_sources(request):
-    """Fetch all airbyte sources in the user organization workspace"""
-    orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    res = airbyte_service.get_sources(orguser.org.airbyte_workspace_id)["sources"]
-    logger.debug(res)
-    return res
-
-
-@airbyte_router.get("/sources/{source_id}", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_view_source"])
-def get_airbyte_source(request, source_id):
-    """Fetch a single airbyte source in the user organization workspace"""
-    orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    res = airbyte_service.get_source(orguser.org.airbyte_workspace_id, source_id)
-    logger.debug(res)
-    return res
-
-
-@airbyte_router.get("/sources/{source_id}/schema_catalog", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_view_source"])
-def get_airbyte_source_schema_catalog(request, source_id):
-    """Fetch schema catalog for a source in the user organization workspace"""
-    orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    res = airbyte_service.get_source_schema_catalog(orguser.org.airbyte_workspace_id, source_id)
-    logger.debug(res)
-    return res
-
-
-@airbyte_router.get("/destination_definitions", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_view_warehouses"])
-def get_airbyte_destination_definitions(request):
-    """Fetch destination definitions in the user organization workspace"""
-    orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    res = airbyte_service.get_destination_definitions(orguser.org.airbyte_workspace_id)[
-        "destinationDefinitions"
-    ]
-    allowed_destinations = os.getenv("AIRBYTE_DESTINATION_TYPES")
-    if allowed_destinations:
-        res = [destdef for destdef in res if destdef["name"] in allowed_destinations.split(",")]
-    logger.debug(res)
-    return res
-
-
-@airbyte_router.get(
-    "/destination_definitions/{destinationdef_id}/specifications",
-    auth=auth.CustomAuthMiddleware(),
-)
-@has_permission(["can_view_warehouse"])
-def get_airbyte_destination_definition_specifications(request, destinationdef_id):
-    """
-    Fetch specifications for a destination
-    definition in the user organization workspace
-    """
-    orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    res = airbyte_service.get_destination_definition_specification(
-        orguser.org.airbyte_workspace_id, destinationdef_id
-    )["connectionSpecification"]
-    logger.debug(res)
-    return res
-
-
-@airbyte_router.post("/destinations/", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_create_warehouse"])
-def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
-    """Create an airbyte destination in the user organization workspace"""
-    orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    destination = airbyte_service.create_destination(
-        orguser.org.airbyte_workspace_id,
-        payload.name,
-        payload.destinationDefId,
-        payload.config,
-    )
-    logger.info("created destination having id " + destination["destinationId"])
-    return {"destinationId": destination["destinationId"]}
-
-
-@airbyte_router.post("/destinations/check_connection/", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_create_warehouse"])
-def post_airbyte_check_destination(request, payload: AirbyteDestinationCreate):
-    """Test connection to destination in the user organization workspace"""
-    orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    response = airbyte_service.check_destination_connection(
-        orguser.org.airbyte_workspace_id, payload
-    )
-    return {
-        "status": "succeeded" if response["jobInfo"]["succeeded"] else "failed",
-        "logs": response["jobInfo"]["logs"]["logLines"],
-    }
-
-
-@airbyte_router.post(
-    "/destinations/{destination_id}/check_connection_for_update/",
-    auth=auth.CustomAuthMiddleware(),
-)
-@has_permission(["can_edit_warehouse"])
-def post_airbyte_check_destination_for_update(
-    request, destination_id: str, payload: AirbyteDestinationUpdateCheckConnection
-):
-    """Test connection to destination in the user organization workspace"""
-    orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    response = airbyte_service.check_destination_connection_for_update(destination_id, payload)
-    return {
-        "status": "succeeded" if response["jobInfo"]["succeeded"] else "failed",
-        "logs": response["jobInfo"]["logs"]["logLines"],
-    }
-
-
-@airbyte_router.get("/destinations", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_view_warehouses"])
-def get_airbyte_destinations(request):
-    """Fetch all airbyte destinations in the user organization workspace"""
-    orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    res = airbyte_service.get_destinations(orguser.org.airbyte_workspace_id)["destinations"]
-    logger.debug(res)
-    return res
-
-
-@airbyte_router.get("/destinations/{destination_id}", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_view_warehouse"])
-def get_airbyte_destination(request, destination_id):
-    """Fetch an airbyte destination in the user organization workspace"""
-    orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    res = airbyte_service.get_destination(orguser.org.airbyte_workspace_id, destination_id)
-    logger.debug(res)
-    return res
-
-
-@airbyte_router.get("/jobs/{job_id}", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_view_connection"])
-def get_job_status(request, job_id):
-    """get the job info from airbyte"""
-    result = airbyte_service.get_job_info(job_id)
-    logs = result["attempts"][-1]["logs"]["logLines"]
-    return {
-        "status": result["job"]["status"],
-        "logs": logs,
-    }
-
-
-@airbyte_router.get("/jobs/{job_id}/status", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_view_connection"])
-def get_job_status_without_logs(request, job_id):
-    """get the job info from airbyte"""
-    result = airbyte_service.get_job_info_without_logs(job_id)
-    print(result)
-    return {
-        "status": result["job"]["status"],
-    }
-
-
-# ==============================================================================
-# new apis to go away from the block architecture
-
-
-@airbyte_router.post("/v1/workspace/", response=AirbyteWorkspace, auth=auth.CustomAuthMiddleware())
-@has_permission(["can_create_org"])
-def post_airbyte_workspace_v1(request, payload: AirbyteWorkspaceCreate):
-    """Create an airbyte workspace"""
-    orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is not None:
-        raise HttpError(400, "org already has a workspace")
-
-    workspace = airbytehelpers.setup_airbyte_workspace_v1(payload.name, orguser.org)
-    # add custom sources to this workspace
-    add_custom_connectors_to_workspace.delay(
-        workspace.workspaceId, list(settings.AIRBYTE_CUSTOM_SOURCES.values())
-    )
-
-    return workspace
-
-
-@airbyte_router.post(
-    "/v1/connections/",
-    auth=auth.CustomAuthMiddleware(),
-    response=AirbyteConnectionCreateResponse,
-)
-@has_permission(["can_create_connection"])
-def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
-    """Create an airbyte connection in the user organization workspace"""
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-    if org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    if len(payload.streams) == 0:
-        raise HttpError(400, "must specify stream names")
-
-    res, error = airbytehelpers.create_connection(org, payload)
-    if error:
-        raise HttpError(400, error)
-
-    logger.debug(res)
-    return res
-
-
-@airbyte_router.get(
-    "/v1/connections",
-    auth=auth.CustomAuthMiddleware(),
-    response=List[AirbyteGetConnectionsResponse],
-)
-@has_permission(["can_view_connections"])
-def get_airbyte_connections_v1(request):
-    """Fetch all airbyte connections in the user organization workspace"""
-    orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    res, error = airbytehelpers.get_connections(orguser.org)
-    if error:
-        raise HttpError(400, error)
-    logger.debug(res)
-
-    return res
-
-
-@airbyte_router.get(
-    "/v1/connections/{connection_id}",
-    auth=auth.CustomAuthMiddleware(),
-    response=AirbyteConnectionCreateResponse,
-)
-@has_permission(["can_view_connection"])
-def get_airbyte_connection_v1(request, connection_id):
-    """Fetch a connection in the user organization workspace"""
-    orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    res, error = airbytehelpers.get_one_connection(orguser.org, connection_id)
-    if error:
-        raise HttpError(400, error)
-    logger.debug(res)
-    return res
-
-
-@airbyte_router.post("/v1/connections/{connection_id}/reset", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_reset_connection"])
-def post_airbyte_connection_reset_v1(request, connection_id):
-    """Reset the data for connection at destination"""
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-    if org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    if not flag_enabled("AIRBYTE_RESET_JOB", request_org_slug=org.slug):
-        raise HttpError(
-            400, "Reset job is disabled. Please contact the dalgo support team at support@dalgo.in"
-        )
-
-    _, error = airbytehelpers.reset_connection(org, connection_id)
-    if error:
-        raise HttpError(400, error)
-    return {"success": 1}
-
-
-@airbyte_router.put("/v1/connections/{connection_id}/update", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_edit_connection"])
-def put_airbyte_connection_v1(
-    request, connection_id, payload: AirbyteConnectionUpdate
-):  # pylint: disable=unused-argument
-    """Update an airbyte connection in the user organization workspace"""
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-    if org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    res, error = airbytehelpers.update_connection(org, connection_id, payload)
-    if error:
-        raise HttpError(400, error)
-
-    return res
-
-
-@airbyte_router.delete("/v1/connections/{connection_id}", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_delete_connection"])
-def delete_airbyte_connection_v1(request, connection_id):
-    """Update an airbyte connection in the user organization workspace"""
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-    if org is None:
-        raise HttpError(400, "create an organization first")
-    if org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    _, error = airbytehelpers.delete_connection(org, connection_id)
-    if error:
-        raise HttpError(400, error)
-
-    return {"success": 1}
-
-
-@airbyte_router.get("/v1/connections/{connection_id}/jobs", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_view_connection"])
-def get_latest_job_for_connection(request, connection_id):
-    """get the job info from airbyte for a connection"""
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-    if org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    job_info, error = airbytehelpers.get_job_info_for_connection(org, connection_id)
-    if error:
-        raise HttpError(400, error)
-    return job_info
-
-
-@airbyte_router.get(
-    "/v1/connections/{connection_id}/sync/history", auth=auth.CustomAuthMiddleware()
-)
-@has_permission(["can_view_connection"])
-def get_sync_history_for_connection(request, connection_id, limit: int = 10, offset: int = 0):
-    """get the job info from airbyte for a connection"""
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-    if org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    job_info, error = airbytehelpers.get_sync_job_history_for_connection(
-        org, connection_id, limit=limit, offset=offset
-    )
-    if error:
-        raise HttpError(400, error)
-    return job_info
-
-
-@airbyte_router.put("/v1/destinations/{destination_id}/", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_edit_warehouse"])
-def put_airbyte_destination_v1(request, destination_id: str, payload: AirbyteDestinationUpdate):
-    """Update an airbyte destination in the user organization workspace"""
-    orguser: OrgUser = request.orguser
-    if orguser.org is None:
-        raise HttpError(400, "create an organization first")
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    destination, error = airbytehelpers.update_destination(orguser.org, destination_id, payload)
-    if error:
-        raise HttpError(400, error)
-
-    return {"destinationId": destination["destinationId"]}
-
-
-@airbyte_router.delete("/sources/{source_id}", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_delete_source"])
-def delete_airbyte_source_v1(request, source_id):
-    """Delete a single airbyte source in the user organization workspace"""
-    logger.info("deleting source started")
-
-    orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    _, error = airbytehelpers.delete_source(orguser.org, source_id)
-    if error:
-        raise HttpError(400, error)
-
-    return {"success": 1}
-
-
-@airbyte_router.get(
-    "/v1/connections/{connection_id}/catalog",
-    auth=auth.CustomAuthMiddleware(),
-)
-@has_permission(["can_view_connection"])
-def get_connection_catalog_v1(request, connection_id):
-    """Fetch a connection in the user organization workspace"""
-    orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    task_key = f"{TaskProgressHashPrefix.SCHEMA_CHANGE}-{orguser.org.slug}-{connection_id}"
-    current_task_progress = SingleTaskProgress.fetch(task_key)
-    if current_task_progress is not None:
-        if "progress" in current_task_progress and len(current_task_progress["progress"]) > 0:
-            if current_task_progress["progress"][-1]["status"] == [
-                TaskProgressStatus.RUNNING,
-            ]:
-                return {"task_id": task_key, "message": "already running"}
-
-    taskprogress = SingleTaskProgress(task_key, int(os.getenv("SCHEMA_REFRESH_TTL", "180")))
-
-    taskprogress.add({"message": "queued", "status": "queued", "result": None})
-    # ignore the returned celery task id
-    get_connection_catalog_task.delay(task_key, orguser.org.id, connection_id)
-
-    return {"task_id": task_key}
-
-
-@airbyte_router.put(
-    "/v1/connections/{connection_id}/schema_update", auth=auth.CustomAuthMiddleware()
-)
-@has_permission(["can_edit_connection"])
-def update_connection_schema(request, connection_id, payload: AirbyteConnectionSchemaUpdate):
-    """update schema change in a connection"""
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-    if org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    res, error = airbytehelpers.update_connection_schema(org, connection_id, payload)
-    if error:
-        raise HttpError(400, error)
-    return res
-
-
-@airbyte_router.post(
-    "/v1/connections/{connection_id}/schema_update/schedule",
-    auth=auth.CustomAuthMiddleware(),
-)
-@has_permission(["can_edit_connection"])
-def schedule_update_connection_schema(
-    request, connection_id, payload: AirbyteConnectionSchemaUpdateSchedule
-):
-    """
-    schedule a schema change flow for a connection. this would include
-    1. updating the connection with the correct catalog
-    2. resetting affecting streams
-    3. syncing the connection again
-    """
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-    if org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    airbytehelpers.schedule_update_connection_schema(orguser, connection_id, payload)
-
-    return {"success": 1}
-
-
-@airbyte_router.get(
-    "/v1/connection/schema_change",
-    auth=auth.CustomAuthMiddleware(),
-)
-@has_permission(["can_view_connection"])
-def get_schema_changes_for_connection(request):
-    """Get schema changes for an org"""
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-    if org.airbyte_workspace_id is None:
-        raise HttpError(400, "Create an Airbyte workspace first")
-
-    res, error = airbytehelpers.get_schema_changes(org)
-    if error:
-        raise HttpError(400, error)
-    return res
-
-
-@airbyte_router.get("/v1/connections/{connection_id}/logsummary", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_view_pipeline"])
-def get_flow_runs_logsummary_v1(
-    request, connection_id: str, job_id: int, attempt_number: int, regenerate: int = 0
-):  # pylint: disable=unused-argument
-    """
-    Use llms to summarize logs
+    Get all source definitions from Airbyte.
+    
+    Args:
+        request: The HTTP request object
+        orgid: The organization ID
+        
+    Returns:
+        JsonResponse containing list of source definitions
     """
     try:
-        orguser: OrgUser = request.orguser
+        org: Org = Org.objects.get(id=orgid)
+        airbyte_service: AirbyteService = AirbyteService(org)
+        source_definitions: List[Dict[str, Any]] = airbyte_service.list_source_definitions()
+        return JsonResponse({"source_definitions": source_definitions})
+    except Exception as e:
+        logger.error(f"get_source_definitions: {str(e)}")
+        return JsonResponse({"error": str(e)}, status=500)
 
-        llm_session = (
-            LlmSession.objects.filter(orguser=orguser, airbyte_job_id=job_id)
-            .order_by("-created_at")
-            .first()
-        )
-        if llm_session and llm_session.session_status == LlmSessionStatus.RUNNING:
-            return {"task_id": llm_session.request_uuid}
-
-        task = summarize_logs.apply_async(
-            kwargs={
-                "orguser_id": orguser.id,
-                "type": LogsSummarizationType.AIRBYTE_SYNC,
-                "job_id": job_id,
-                "connection_id": connection_id,
-                "attempt_number": attempt_number,
-                "regenerate": regenerate == 1,
-            },
-        )
-        return {"task_id": task.id}
-    except Exception as error:
-        logger.exception(error)
-        raise HttpError(400, "failed to retrieve logs") from error
-
-
-@airbyte_router.get("v1/logs", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_view_connection"])
-def get_job_logs(
-    request,
-    job_id: int,
-    attempt_number: int,
-):
-    """get the log info from airbyte for a job attempt"""
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, HasOrgPermission])
+def get_source_definition_specifications(request: Request, orgid: str, source_definition_id: str) -> JsonResponse:
+    """
+    Get specifications for a specific source definition.
+    
+    Args:
+        request: The HTTP request object
+        orgid: The organization ID
+        source_definition_id: The source definition ID
+        
+    Returns:
+        JsonResponse containing source definition specifications
+    """
     try:
-        log_lines = airbyte_service.get_logs_for_job(job_id, attempt_number)
-    except Exception as error:
-        logger.exception(error)
-        log_lines = ["An error occured while fetching logs!"]
+        org: Org = Org.objects.get(id=orgid)
+        airbyte_service: AirbyteService = AirbyteService(org)
+        specs: Dict[str, Any] = airbyte_service.get_source_definition_specifications(source_definition_id)
+        return JsonResponse({"specifications": specs})
+    except Exception as e:
+        logger.error(f"get_source_definition_specifications: {str(e)}")
+        return JsonResponse({"error": str(e)}, status=500)
 
-    return log_lines
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, HasOrgPermission])
+def create_source(request: Request, orgid: str) -> JsonResponse:
+    """
+    Create a new source in Airbyte.
+    
+    Args:
+        request: The HTTP request object containing source details
+        orgid: The organization ID
+        
+    Returns:
+        JsonResponse containing the created source information
+    """
+    try:
+        source_create_request: SourceCreateRequest = SourceCreateRequest(**request.data)
+        org: Org = Org.objects.get(id=orgid)
+        airbyte_service: AirbyteService = AirbyteService(org)
+        source: Dict[str, Any] = airbyte_service.create_source(
+            source_definition_id=source_create_request.sourceDefId,
+            source_name=source_create_request.name,
+            connection_configuration=source_create_request.config
+        )
+        return JsonResponse({"source": source})
+    except Exception as e:
+        logger.error(f"create_source: {str(e)}")
+        return JsonResponse({"error": str(e)}, status=500)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, HasOrgPermission])
+def get_sources(request: Request, orgid: str) -> JsonResponse:
+    """
+    Get all sources for an organization.
+    
+    Args:
+        request: The HTTP request object
+        orgid: The organization ID
+        
+    Returns:
+        JsonResponse containing list of sources
+    """
+    try:
+        org: Org = Org.objects.get(id=orgid)
+        airbyte_service: AirbyteService = AirbyteService(org)
+        sources: List[Dict[str, Any]] = airbyte_service.list_sources()
+        return JsonResponse({"sources": sources})
+    except Exception as e:
+        logger.error(f"get_sources: {str(e)}")
+        return JsonResponse({"error": str(e)}, status=500)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, HasOrgPermission])
+def get_source_schema(request: Request, orgid: str, source_id: str) -> JsonResponse:
+    """
+    Get schema for a specific source.
+    
+    Args:
+        request: The HTTP request object
+        orgid: The organization ID
+        source_id: The source ID
+        
+    Returns:
+        JsonResponse containing source schema
+    """
+    try:
+        org: Org = Org.objects.get(id=orgid)
+        airbyte_service: AirbyteService = AirbyteService(org)
+        schema: Dict[str, Any] = airbyte_service.discover_source_schema(source_id)
+        return JsonResponse({"schema": schema})
+    except Exception as e:
+        logger.error(f"get_source_schema: {str(e)}")
+        return JsonResponse({"error": str(e)}, status=500)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, HasOrgPermission])
+def get_destination_definition_specifications(request: Request, orgid: str, destination_definition_id: str) -> JsonResponse:
+    """
+    Get specifications for a specific destination definition.
+    
+    Args:
+        request: The HTTP request object
+        orgid: The organization ID
+        destination_definition_id: The destination definition ID
+        
+    Returns:
+        JsonResponse containing destination definition specifications
+    """
+    try:
+        org: Org = Org.objects.get(id=orgid)
+        airbyte_service: AirbyteService = AirbyteService(org)
+        specs: Dict[str, Any] = airbyte_service.get_destination_definition_specifications(destination_definition_id)
+        return JsonResponse({"specifications": specs})
+    except Exception as e:
+        logger.error(f"get_destination_definition_specifications: {str(e)}")
+        return JsonResponse({"error": str(e)}, status=500)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, HasOrgPermission])
+def create_connection(request: Request, orgid: str) -> JsonResponse:
+    """
+    Create a new connection between source and destination.
+    
+    Args:
+        request: The HTTP request object containing connection details
+        orgid: The organization ID
+        
+    Returns:
+        JsonResponse containing the created connection information
+    """
+    try:
+        connection_request: ConnectionCreateRequest = ConnectionCreateRequest(**request.data)
+        org: Org = Org.objects.get(id=orgid)
+        airbyte_service: AirbyteService = AirbyteService(org)
+        
+        connection: Dict[str, Any] = airbyte_service.create_connection(
+            source_id=connection_request.sourceId,
+            destination_id=connection_request.destinationId,
+            connection_name=connection_request.name,
+            streams=connection_request.streams,
+            schedule=connection_request.schedule
+        )
+        return JsonResponse({"connection": connection})
+    except Exception as e:
+        logger.error(f"create_connection: {str(e)}")
+        return JsonResponse({"error": str(e)}, status=500)
+
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated, HasOrgPermission])
+def update_connection(request: Request, orgid: str) -> JsonResponse:
+    """
+    Update an existing connection.
+    
+    Args:
+        request: The HTTP request object containing updated connection details
+        orgid: The organization ID
+        
+    Returns:
+        JsonResponse containing the updated connection information
+    """
+    try:
+        connection_update: ConnectionUpdateRequest = ConnectionUpdateRequest(**request.data)
+        org: Org = Org.objects.get(id=orgid)
+        airbyte_service: AirbyteService = AirbyteService(org)
+        
+        result: Dict[str, Any] = airbyte_service.update_connection(
+            connection_id=connection_update.connectionId,
+            sync_catalog=connection_update.syncCatalog
+        )
+        return JsonResponse({"result": result})
+    except Exception as e:
+        logger.error(f"update_connection: {str(e)}")
+        return JsonResponse({"error": str(e)}, status=500)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, HasOrgPermission])
+def trigger_sync(request: Request, orgid: str) -> JsonResponse:
+    """
+    Trigger a sync for a specific connection.
+    
+    Args:
+        request: The HTTP request object containing connection ID
+        orgid: The organization ID
+        
+    Returns:
+        JsonResponse containing the sync job information
+    """
+    try:
+        sync_request: ConnectionSyncRequest = ConnectionSyncRequest(**request.data)
+        org: Org = Org.objects.get(id=orgid)
+        airbyte_service: AirbyteService = AirbyteService(org)
+        
+        job: Dict[str, Any] = airbyte_service.trigger_sync(sync_request.connectionId)
+        return JsonResponse({"job": job})
+    except Exception as e:
+        logger.error(f"trigger_sync: {str(e)}")
+        return JsonResponse({"error": str(e)}, status=500)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, HasOrgPermission])
+def get_job_status(request: Request, orgid: str, job_id: str) -> JsonResponse:
+    """
+    Get status of a specific job.
+    
+    Args:
+        request: The HTTP request object
+        orgid: The organization ID
+        job_id: The job ID
+        
+    Returns:
+        JsonResponse containing the job status information
+    """
+    try:
+        org: Org = Org.objects.get(id=orgid)
+        airbyte_service: AirbyteService = AirbyteService(org)
+        status: Dict[str, Any] = airbyte_service.get_job_status(job_id)
+        return JsonResponse({"status": status})
+    except Exception as e:
+        logger.error(f"get_job_status: {str(e)}")
+        return JsonResponse({"error": str(e)}, status=500)
