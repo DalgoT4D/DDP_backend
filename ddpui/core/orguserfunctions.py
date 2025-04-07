@@ -76,23 +76,23 @@ def create_orguser(payload: OrgUserCreate, email_verified: bool = False) -> OrgU
     """create the user and orguser"""
     signupcode = payload.signupcode
     if signupcode not in [os.getenv("SIGNUPCODE"), os.getenv("DEMO_SIGNUPCODE")]:
-        return None, "That is not the right signup code"
+        raise Exception("That is not the right signup code")
 
     if User.objects.filter(email=payload.email).exists():
-        return None, f"user having email {payload.email} exists"
+        raise Exception(f"user having email {payload.email} exists")
 
     if User.objects.filter(username=payload.email).exists():
-        return None, f"user having email {payload.email} exists"
+        raise Exception(f"user having email {payload.email} exists")
 
     if not helpers.isvalid_email(payload.email):
-        return None, "that is not a valid email address"
+        raise Exception("that is not a valid email address")
 
     is_demo = True if (signupcode == os.getenv("DEMO_SIGNUPCODE")) else False
     demo_org = None  # common demo org
     if is_demo:
         demo_org = Org.objects.filter(type=OrgType.DEMO).first()
         if demo_org is None:
-            return None, "demo org has not been setup"
+            raise Exception("demo org has not been setup")
 
     user = User.objects.create_user(
         username=payload.email, email=payload.email, password=payload.password
@@ -121,7 +121,11 @@ def create_orguser(payload: OrgUserCreate, email_verified: bool = False) -> OrgU
 def signup_orguser(payload: OrgUserCreate):
     """create an orguser and send an email"""
 
-    orguser = create_orguser(payload)
+    try:
+        orguser = create_orguser(payload)
+    except Exception as err:
+        logger.exception(err)
+        return None, str(err)
 
     redis = RedisClient.get_instance()
     token = uuid4()
