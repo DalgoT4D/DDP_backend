@@ -22,7 +22,6 @@ from ddpui.api.airbyte_api import (
     post_airbyte_check_source,
     post_airbyte_check_source_for_update,
     get_airbyte_sources,
-    get_airbyte_source,
     get_airbyte_source_schema_catalog,
     get_airbyte_destination_definitions,
     get_airbyte_destination_definition_specifications,
