@@ -66,8 +66,8 @@ def test_connect_args_1():
                     "host": "host",
                     "port": 1234,
                     "dbname": "db",
-                    "user": "user%20name",
-                    "password": "pass%20word",
+                    "user": "user name",
+                    "password": "pass word",
                     "sslrootcert": "sslrootcert",
                     "sslmode": "require",
                 },
@@ -97,8 +97,8 @@ def test_connect_args_2():
                     "host": "host",
                     "port": 1234,
                     "dbname": "db",
-                    "user": "user%20name",
-                    "password": "pass%20word",
+                    "user": "user name",
+                    "password": "pass word",
                     "sslrootcert": "sslrootcert",
                     "sslmode": "require",
                 },
@@ -128,37 +128,10 @@ def test_connect_args_3():
                     "host": "host",
                     "port": 1234,
                     "dbname": "db",
-                    "user": "user%20name",
-                    "password": "pass%20word",
+                    "user": "user name",
+                    "password": "pass word",
                     "sslrootcert": "sslrootcert",
                     "sslmode": "disable",
-                },
-                pool_size=5,
-                pool_timeout=30,
-            )
-
-
-def test_url_encoding():
-    """tests url encoding of username and password"""
-    with patch("ddpui.datainsights.warehouse.postgres.inspect"):
-        with patch("ddpui.datainsights.warehouse.postgres.create_engine") as mock_create_engine:
-            PostgresClient(
-                {
-                    "username": "user name",
-                    "password": "pass word",
-                    "host": "host",
-                    "port": 1234,
-                    "database": "db",
-                }
-            )
-            mock_create_engine.assert_called_with(
-                "postgresql+psycopg2://",
-                connect_args={
-                    "host": "host",
-                    "port": 1234,
-                    "dbname": "db",
-                    "user": "user%20name",
-                    "password": "pass%20word",
                 },
                 pool_size=5,
                 pool_timeout=30,
