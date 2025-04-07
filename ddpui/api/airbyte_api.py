@@ -234,8 +234,18 @@ def get_airbyte_sources(request):
 @airbyte_router.get("/v1/sources", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_sources"])
 def get_airbyte_sources_v1(request, limit: int = 20, offset: int = 0, search: str = ""):
-    print("Endpoint hit!")
-    """Fetch paginated and searchable airbyte sources in the user organization workspace"""
+    """
+    Fetch paginated and searchable Airbyte sources in the user organization workspace.
+
+    Args:
+        request: The incoming API request object with orguser.
+        limit (int): Number of sources to return. Default is 20.
+        offset (int): Pagination offset. Default is 0.
+        search (str): Optional search query.
+
+    Returns:
+        A list of Airbyte sources filtered by the organization and search parameters.
+    """
     orguser: OrgUser = request.orguser
 
     if orguser.org.airbyte_workspace_id is None:
