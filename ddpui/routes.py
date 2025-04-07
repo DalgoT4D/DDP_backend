@@ -82,6 +82,7 @@ src_api.add_router("/api/dashboard/", dashboard_router)
 src_api.add_router("/api/data/", data_router)
 src_api.add_router("/api/dbt/", dbt_router)
 src_api.add_router("/api/notifications/", notification_router)
+
 src_api.add_router("/api/prefect/tasks/", orgtask_router)
 src_api.add_router("/api/prefect/", pipeline_router)
 src_api.add_router("/api/superset/", superset_router)

@@ -301,6 +301,26 @@ def get_sources(workspace_id: str) -> List[Dict]:
     return res
 
 
+def get_sources_v1(workspace_id: str, limit: int, offset: int, search: str = "") -> List[Dict]:
+    """Fetch paginated sources from airbyte workspace with optional search"""
+    if not isinstance(workspace_id, str):
+        raise HttpError(400, "Invalid workspace ID")
+
+    payload = {
+        "workspaceId": workspace_id,
+        "pagination": {"pageSize": limit, "rowOffset": offset},
+    }
+
+    if search and len(search) > 0:
+        payload["nameContains"] = search
+
+    res = abreq("sources/list_paginated", payload)
+    if "sources" not in res:
+        logger.error("Paginated sources not found for workspace: %s", workspace_id)
+        raise HttpError(404, "sources not found for workspace")
+    return res
+
+
 def get_source(workspace_id: str, source_id: str) -> dict:
     """Fetch a source in an airbyte workspace"""
     if not isinstance(workspace_id, str):

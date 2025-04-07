@@ -17,6 +17,8 @@ from ddpui.api.airbyte_api import (
     get_airbyte_source_definition_specifications,
     post_airbyte_source,
     put_airbyte_source,
+    get_airbyte_source,
+    get_airbyte_sources_v1,
     post_airbyte_check_source,
     post_airbyte_check_source_for_update,
     get_airbyte_sources,
@@ -31,6 +33,7 @@ from ddpui.api.airbyte_api import (
     get_airbyte_destination,
     get_job_status,
 )
+
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
@@ -351,6 +354,33 @@ def test_get_airbyte_sources_success(orguser_workspace):
     )
 
     assert len(result) == 3
+
+
+# ================================================================================
+
+
+def test_get_airbyte_sources_v1_without_workspace(orguser):
+    request = mock_request(orguser)
+
+    with pytest.raises(HttpError) as excinfo:
+        get_airbyte_sources_v1(request)
+
+    assert excinfo.value.status_code == 400
+    assert str(excinfo.value) == "Create an Airbyte workspace first"
+
+
+@patch(
+    "ddpui.api.airbyte_api.airbyte_service.get_sources_v1",
+    return_value={"sources": [{"name": "source1"}], "total": 1},
+)
+def test_get_airbyte_sources_v1_success(mock_get_sources_v1, orguser_workspace):
+    request = mock_request(orguser_workspace)
+
+    response = get_airbyte_sources_v1(request, limit=10, offset=0, search="source")
+
+    assert response["total"] == 1
+    assert len(response["sources"]) == 1
+    assert response["sources"][0]["name"] == "source1"
 
 
 # ================================================================================

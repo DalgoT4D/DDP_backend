@@ -231,6 +231,23 @@ def get_airbyte_sources(request):
     return res
 
 
+@airbyte_router.get("/v1/sources", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_sources"])
+def get_airbyte_sources_v1(request, limit: int = 20, offset: int = 0, search: str = ""):
+    print("Endpoint hit!")
+    """Fetch paginated and searchable airbyte sources in the user organization workspace"""
+    orguser: OrgUser = request.orguser
+
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "Create an Airbyte workspace first")
+
+    res = airbyte_service.get_sources_v1(
+        orguser.org.airbyte_workspace_id, limit=limit, offset=offset, search=search
+    )
+    logger.debug(res)
+    return res
+
+
 @airbyte_router.get("/sources/{source_id}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_source"])
 def get_airbyte_source(request, source_id):
