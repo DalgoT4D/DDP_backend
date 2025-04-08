@@ -281,6 +281,7 @@ def create_custom_source_definition(
                 "documentationUrl": documentation_url,
             },
         },
+        timeout=100,
     )
     if "sourceDefinitionId" not in res:
         error_message = f"Source definition not created: {name}"

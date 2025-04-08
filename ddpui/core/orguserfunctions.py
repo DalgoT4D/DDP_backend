@@ -72,33 +72,32 @@ def lookup_user(email: str):
     }
 
 
-def signup_orguser(payload: OrgUserCreate):
-    """create an orguser and send an email"""
-
+def create_orguser(payload: OrgUserCreate, email_verified: bool = False) -> OrgUser:
+    """create the user and orguser"""
     signupcode = payload.signupcode
     if signupcode not in [os.getenv("SIGNUPCODE"), os.getenv("DEMO_SIGNUPCODE")]:
-        return None, "That is not the right signup code"
+        raise Exception("That is not the right signup code")
 
     if User.objects.filter(email=payload.email).exists():
-        return None, f"user having email {payload.email} exists"
+        raise Exception(f"user having email {payload.email} exists")
 
     if User.objects.filter(username=payload.email).exists():
-        return None, f"user having email {payload.email} exists"
+        raise Exception(f"user having email {payload.email} exists")
 
     if not helpers.isvalid_email(payload.email):
-        return None, "that is not a valid email address"
+        raise Exception("that is not a valid email address")
 
     is_demo = True if (signupcode == os.getenv("DEMO_SIGNUPCODE")) else False
     demo_org = None  # common demo org
     if is_demo:
         demo_org = Org.objects.filter(type=OrgType.DEMO).first()
         if demo_org is None:
-            return None, "demo org has not been setup"
+            raise Exception("demo org has not been setup")
 
     user = User.objects.create_user(
         username=payload.email, email=payload.email, password=payload.password
     )
-    UserAttributes.objects.create(user=user)
+    UserAttributes.objects.create(user=user, email_verified=email_verified)
     orguser = OrgUser.objects.create(
         user=user,
         role=OrgUserRole.ACCOUNT_MANAGER,
@@ -108,12 +107,26 @@ def signup_orguser(payload: OrgUserCreate):
             if is_demo
             else Role.objects.filter(slug=GUEST_ROLE).first()
         ),
+        email_verified=email_verified,
     )
     orguser.save()
     UserPreferences.objects.create(orguser=orguser, enable_email_notifications=True)
     logger.info(
         f"created user [account-manager] " f"{orguser.user.email} having userid {orguser.user.id}"
     )
+
+    return orguser
+
+
+def signup_orguser(payload: OrgUserCreate):
+    """create an orguser and send an email"""
+
+    try:
+        orguser = create_orguser(payload)
+    except Exception as err:
+        logger.exception(err)
+        return None, str(err)
+
     redis = RedisClient.get_instance()
     token = uuid4()
 
