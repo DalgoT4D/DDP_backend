@@ -81,7 +81,7 @@ def create_free_trial_org_account(self, payload: dict):
     awsses.send_text_message(
         os.getenv("ADMIN_EMAIL"),
         f"Warehouse creds for trial account of org {org.slug}",
-        "\n".join([f"{key}: {value}" for key, value in creds]),
+        "\n".join([f"{key}: {value}" for key, value in creds.items()]),
     )
 
     logger.info("Emailed warehouse creds to platform admin")
@@ -102,7 +102,7 @@ def create_free_trial_org_account(self, payload: dict):
     awsses.send_text_message(
         os.getenv("ADMIN_EMAIL"),
         f"Superset admin user creds for trial account of org {org.slug}",
-        "\n".join([f"{key}: {value}" for key, value in superset_res]),
+        "\n".join([f"{key}: {value}" for key, value in superset_res.items()]),
     )
 
     logger.info("Emailed superset admin user creds to platform admin")
