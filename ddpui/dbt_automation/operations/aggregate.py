@@ -8,6 +8,7 @@ from ddpui.dbt_automation.utils.dbtproject import dbtProject
 from ddpui.dbt_automation.utils.columnutils import quote_columnname
 from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
 from ddpui.dbt_automation.utils.tableutils import source_or_ref
+from ddpui.dbt_automation.schemas import AggregateOperationInputSchema
 
 basicConfig(level=INFO)
 logger = getLogger()
@@ -52,6 +53,17 @@ def select_from(input_table: dict):
     if input_table["input_type"] == "cte":
         return f"FROM {selectfrom}\n"
     return f"FROM {{{{{selectfrom}}}}}\n"
+
+
+def aggregate_simulate_output(config: AggregateOperationInputSchema) -> list[str]:
+    """
+    Simulate the output of the aggregate operation.
+    This is used to determine the output columns.
+    """
+    source_columns = config["source_columns"]
+    output_cols = [col.output_column_name for col in config.aggregate_on]
+
+    return source_columns + output_cols
 
 
 # pylint:disable=unused-argument,logging-fstring-interpolation

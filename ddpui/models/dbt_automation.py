@@ -12,9 +12,15 @@ from ddpui.models.org import OrgDbt
 from ddpui.models.dbt_workflow import OrgDbtModelType
 
 
+class EdgeConfig(Schema):
+    source_columns: list[str]
+    seq: int = 0
+
+
 class OrgDbtModelv1(models.Model):
     """Model to store dbt models/sources in a project"""
 
+    orgdbt = models.ForeignKey(OrgDbt, on_delete=models.CASCADE)
     uuid = models.UUIDField(editable=False, unique=True)
     name = models.CharField(max_length=300, null=True)
     display_name = models.CharField(max_length=300, null=True)
@@ -22,7 +28,6 @@ class OrgDbtModelv1(models.Model):
     sql_path = models.CharField(max_length=300, null=True)
     type = models.CharField(choices=OrgDbtModelType.choices(), max_length=50)
     source_name = models.CharField(max_length=300, null=True)
-    output_cols = models.JSONField(default=list)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -30,12 +35,11 @@ class OrgDbtModelv1(models.Model):
         return f"DbtModel[{self.type} | {self.schema}.{self.name}]"
 
 
-class OrgDbtOperationv1(models.Model):
+class DbtOperation(models.Model):
     """Model to store dbt operations for a model. Basically steps to create/reach a OrgDbtModel"""
 
     uuid = models.UUIDField(editable=False, unique=True)
     op_type = models.CharField(max_length=100)
-    output_cols = models.JSONField(default=list)
     config = models.JSONField(null=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -51,7 +55,7 @@ class DbtNode(models.Model):
     uuid = models.UUIDField(editable=False, unique=True)
     # only one of these will be set
     dbtoperation = models.ForeignKey(
-        OrgDbtOperationv1,
+        DbtOperation,
         on_delete=models.CASCADE,
         null=True,
         related_name="operation",
@@ -62,6 +66,7 @@ class DbtNode(models.Model):
         null=True,
         related_name="model",
     )
+    output_cols = models.JSONField(default=list)
 
 
 class DbtEdgev1(models.Model):
@@ -78,10 +83,9 @@ class DbtEdgev1(models.Model):
         on_delete=models.CASCADE,
         related_name="to_node",
     )
-    config = models.JSONField(null=True)  # this will be of type EdgeConfig
 
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
-        return f"DbtEdge[{self.from_node.operation.op_type or self.from_node.model.name} -> {self.to_node.operation.op_type or self.to_node.model.name}]"
+        return f"DbtEdge[{self.from_node.dbtoperation.op_type or self.from_node.dbtmodel.name} -> {self.to_node.dbtoperation.op_type or self.to_node.dbtmodel.name}]"

@@ -3,25 +3,41 @@ from pathlib import Path
 from collections import deque
 
 from django.db.models import Q
-from ddpui.dbt_automation.operations.arithmetic import arithmetic, arithmetic_dbt_sql
-from ddpui.dbt_automation.operations.castdatatypes import cast_datatypes, cast_datatypes_sql
+from ddpui.dbt_automation.operations.arithmetic import (
+    arithmetic,
+    arithmetic_dbt_sql,
+    arithmetic_simulate_output,
+)
+from ddpui.dbt_automation.operations.castdatatypes import (
+    cast_datatypes,
+    cast_datatypes_sql,
+    cast_datatypes_simulate_output,
+)
 from ddpui.dbt_automation.operations.coalescecolumns import (
     coalesce_columns,
     coalesce_columns_dbt_sql,
+    coalesce_columns_simulate_output,
 )
 from ddpui.dbt_automation.operations.concatcolumns import (
     concat_columns,
     concat_columns_dbt_sql,
+    concat_columns_simulate_output,
 )
 from ddpui.dbt_automation.operations.droprenamecolumns import (
     drop_columns,
+    drop_columns_dbt_sql,
+    drop_columns_simulate_output,
     rename_columns,
     rename_columns_dbt_sql,
-    drop_columns_dbt_sql,
+    rename_columns_simulate_output,
 )
 from ddpui.dbt_automation.operations.flattenairbyte import flatten_operation
 
-from ddpui.dbt_automation.operations.flattenjson import flattenjson, flattenjson_dbt_sql
+from ddpui.dbt_automation.operations.flattenjson import (
+    flattenjson,
+    flattenjson_dbt_sql,
+    flattenjson_simulate_output,
+)
 
 # from ddpui.dbt_automation.operations.mergetables import union_tables, union_tables_sql
 from ddpui.dbt_automation.operations.regexextraction import (
@@ -36,24 +52,56 @@ from ddpui.dbt_automation.operations.syncsources import (
     sync_sources,
     generate_source_definitions_yaml,
 )
-from ddpui.dbt_automation.operations.joins import join, joins_sql
-from ddpui.dbt_automation.operations.groupby import groupby, groupby_dbt_sql
+from ddpui.dbt_automation.operations.joins import join, joins_sql, join_operation_simulate_output
+from ddpui.dbt_automation.operations.groupby import (
+    groupby,
+    groupby_dbt_sql,
+    groupby_simulate_output,
+)
 from ddpui.dbt_automation.operations.wherefilter import where_filter, where_filter_sql
 from ddpui.dbt_automation.operations.mergetables import union_tables, union_tables_sql
 from ddpui.dbt_automation.utils.warehouseclient import get_client
 from ddpui.dbt_automation.utils.dbtproject import dbtProject
 from ddpui.dbt_automation.utils.dbtsources import read_sources, read_sources_from_yaml
 from ddpui.dbt_automation.operations.replace import replace, replace_dbt_sql
-from ddpui.dbt_automation.operations.casewhen import casewhen, casewhen_dbt_sql
-from ddpui.dbt_automation.operations.aggregate import aggregate, aggregate_dbt_sql
+from ddpui.dbt_automation.operations.casewhen import (
+    casewhen,
+    casewhen_dbt_sql,
+    casewhen_simulate_output,
+)
+from ddpui.dbt_automation.operations.aggregate import (
+    aggregate,
+    aggregate_dbt_sql,
+    aggregate_simulate_output,
+)
 from ddpui.dbt_automation.operations.pivot import pivot, pivot_dbt_sql
 from ddpui.dbt_automation.operations.unpivot import unpivot, unpivot_dbt_sql
-from ddpui.dbt_automation.operations.generic import generic_function, generic_function_dbt_sql
+from ddpui.dbt_automation.operations.generic import (
+    generic_function,
+    generic_function_dbt_sql,
+    generic_function_simulate_output,
+)
 from ddpui.dbt_automation.operations.rawsql import generic_sql_function, raw_generic_dbt_sql
+from ddpui.dbt_automation.schemas import (
+    DropOperationInputSchema,
+    OperationInputSchema,
+    RenameOperationInputSchema,
+    ConcatOperationInputSchema,
+    CoalesceOperationInputSchema,
+    CastDataTypeOperationInputSchema,
+    CaseWhenOperationInputSchema,
+    ArithmeticOperationInputSchema,
+    AggregateOperationInputSchema,
+    FlattenJsonOperationInputSchema,
+    GenericOperationInputSchema,
+    GroupByOperationInputSchema,
+    JoinOperationInputSchema,
+)
 
 from ddpui.schemas.dbt_workflow_schema import CompleteDbtModelPayload
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation, DbtEdge, OrgDbtModelType
+from ddpui.models.dbt_automation import OrgDbtModelv1
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils.helpers import map_airbyte_keys_to_postgres_keys
@@ -104,6 +152,36 @@ OPERATIONS_DICT_SQL = {
     "unpivot": unpivot_dbt_sql,
     "generic": generic_function_dbt_sql,
     "rawsql": raw_generic_dbt_sql,
+}
+
+OPERATIONS_DICT_VALIDATIONS = {
+    "dropcolumns": DropOperationInputSchema,
+    "renamecolumns": RenameOperationInputSchema,
+    "concat": ConcatOperationInputSchema,
+    "coalescecolumns": CoalesceOperationInputSchema,
+    "castdatatypes": CastDataTypeOperationInputSchema,
+    "casewhen": CaseWhenOperationInputSchema,
+    "arithmetic": ArithmeticOperationInputSchema,
+    "aggregate": AggregateOperationInputSchema,
+    "flattenjson": FlattenJsonOperationInputSchema,
+    "generic": GenericOperationInputSchema,
+    "groupby": GroupByOperationInputSchema,
+    "join": JoinOperationInputSchema,
+}
+
+OPERATION_DICT_SIMULATE_OUTPUT = {
+    "dropcolumns": drop_columns_simulate_output,
+    "renamecolumns": rename_columns_simulate_output,
+    "concat": concat_columns_simulate_output,
+    "coalescecolumns": coalesce_columns_simulate_output,
+    "castdatatypes": cast_datatypes_simulate_output,
+    "casewhen": casewhen_simulate_output,
+    "arithmetic": arithmetic_simulate_output,
+    "aggregate": aggregate_simulate_output,
+    "flattenjson": flattenjson_simulate_output,
+    "generic": generic_function_simulate_output,
+    "groupby": groupby_simulate_output,
+    "join": join_operation_simulate_output,
 }
 
 
@@ -253,6 +331,17 @@ def get_output_cols_for_operation(org_warehouse: OrgWarehouse, op_type: str, con
     operations = [{"type": op_type, "config": config}]
     _, output_cols = merge_operations_sql(_get_merge_operation_config(operations), wclient)
     return output_cols
+
+
+def generate_simulated_output(op_config: OperationInputSchema, op_type: str):
+    """
+    Generate simulated output for a given operation config.
+    As off now this generates the output columns
+    """
+    if op_type not in OPERATION_DICT_SIMULATE_OUTPUT:
+        raise ValueError(f"Operation {op_config['type']} is not supported for simulation")
+
+    return OPERATION_DICT_SIMULATE_OUTPUT[op_type](op_config)
 
 
 def delete_dbt_model_in_project(orgdbt_model: OrgDbtModel):
@@ -481,6 +570,132 @@ def sync_sources_for_warehouse(
         ).first()
         if not orgdbt_source:
             orgdbt_source = OrgDbtModel.objects.create(
+                uuid=uuid.uuid4(),
+                orgdbt=org_dbt,
+                source_name=source["source_name"],
+                name=source["input_name"],
+                display_name=source["input_name"],
+                type=OrgDbtModelType.SOURCE,
+            )
+            taskprogress.add(
+                {
+                    "message": "Added " + source["source_name"] + "." + source["input_name"],
+                    "status": "running",
+                }
+            )
+
+        orgdbt_source.schema = source["schema"]
+        orgdbt_source.sql_path = source["sql_path"]
+
+        orgdbt_source.save()
+
+    taskprogress.add(
+        {
+            "message": "Sync finished",
+            "status": "completed",
+        }
+    )
+
+    logger.info("saved sources to db")
+
+    return True
+
+
+@app.task(bind=True)
+def sync_sources_for_warehouse_v1(
+    self, org_dbt_id: str, org_warehouse_id: str, task_id: str, hashkey: str
+):
+    """
+    Sync all tables in all schemas in the warehouse.
+    Dbt source name will be the same as the schema name.
+    """
+    taskprogress = TaskProgress(
+        task_id=task_id,
+        hashkey=hashkey,
+        expire_in_seconds=10 * 60,  # max 10 minutes
+    )
+
+    org_dbt: OrgDbt = OrgDbt.objects.filter(id=org_dbt_id).first()
+    org_warehouse: OrgWarehouse = OrgWarehouse.objects.filter(id=org_warehouse_id).first()
+
+    taskprogress.add(
+        {
+            "message": "Started syncing sources",
+            "status": "runnning",
+        }
+    )
+
+    dbt_project = dbtProject(Path(DbtProjectManager.get_dbt_project_dir(org_dbt)))
+
+    try:
+        wclient = _get_wclient(org_warehouse)
+
+        for schema in wclient.get_schemas():
+            taskprogress.add(
+                {
+                    "message": f"Reading sources for schema {schema} from warehouse",
+                    "status": "running",
+                }
+            )
+            logger.info(f"reading sources for schema {schema} for warehouse")
+            sync_tables = []
+            for table in wclient.get_tables(schema):
+                if not OrgDbtModelv1.objects.filter(
+                    orgdbt=org_dbt, schema=schema, name=table, type=OrgDbtModelType.MODEL
+                ).first():
+                    sync_tables.append(table)
+
+            taskprogress.add(
+                {
+                    "message": f"Finished reading sources for schema {schema}",
+                    "status": "running",
+                }
+            )
+
+            if len(sync_tables) == 0:
+                logger.info(f"No new tables in schema '{schema}' to be synced as sources.")
+                continue
+
+            # in dbt automation, it will overwrite the sources (if name is same which it will be = "schema") and the file
+            source_yml_path = generate_source_definitions_yaml(
+                schema, schema, sync_tables, dbt_project
+            )
+
+            logger.info(
+                f"Generated yaml for {len(sync_tables)} tables for schema '{schema}' as sources; yaml at {source_yml_path}"
+            )
+
+    except Exception as e:
+        logger.error(f"Error syncing sources: {e}")
+        taskprogress.add(
+            {
+                "message": f"Error syncing sources: {e}",
+                "status": "failed",
+            }
+        )
+        raise Exception(f"Error syncing sources: {e}")
+    # sync sources to django db; create if not present
+    # its okay if we have dnagling sources that they deleted from their warehouse but are still in our db;
+    # we can clear them up or give them an option to delete
+    # because deleting the dnagling sources might delete their workflow nodes & edges. They should see a warning for this on the UI
+    logger.info("synced sources in dbt, saving to db now")
+    sources = read_dbt_sources_in_project(org_dbt)
+    logger.info("read fresh source from all yaml files")
+    taskprogress.add(
+        {
+            "message": "Creating sources in dbt",
+            "status": "running",
+        }
+    )
+    for source in sources:
+        orgdbt_source = OrgDbtModelv1.objects.filter(
+            source_name=source["source_name"],
+            name=source["input_name"],
+            type=OrgDbtModelType.SOURCE,
+            orgdbt=org_dbt,
+        ).first()
+        if not orgdbt_source:
+            orgdbt_source = OrgDbtModelv1.objects.create(
                 uuid=uuid.uuid4(),
                 orgdbt=org_dbt,
                 source_name=source["source_name"],
