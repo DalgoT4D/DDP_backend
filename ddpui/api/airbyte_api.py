@@ -2,15 +2,12 @@ from typing import List, Dict, Any, Optional, Union, Tuple, cast
 from pydantic import BaseModel, Field
 from django.http import JsonResponse
 from rest_framework.request import Request
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
 
 from ddpui.models.org import Org
 from ddpui.models.airbyte_sync import AirbyteSync, AirbyteSyncRun
 from ddpui.models.warehouse import WarehouseCredential
 from ddpui.models.credentials import DataSourceCredential
 from ddpui.ddpairbyte.airbyte_service import AirbyteService
-from ddpui.utils.custom_permissions import HasOrgPermission
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("airbyte_api")
@@ -107,8 +104,6 @@ class JobStatusResponse(BaseModel):
     status: str
     logs: Optional[Dict[str, Any]] = None
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated, HasOrgPermission])
 def get_source_definitions(request: Request, orgid: str) -> JsonResponse:
     """
     Get all source definitions from Airbyte.
@@ -129,8 +124,6 @@ def get_source_definitions(request: Request, orgid: str) -> JsonResponse:
         logger.error(f"get_source_definitions: {str(e)}")
         return JsonResponse({"error": str(e)}, status=500)
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated, HasOrgPermission])
 def get_source_definition_specifications(request: Request, orgid: str, source_definition_id: str) -> JsonResponse:
     """
     Get specifications for a specific source definition.
@@ -152,8 +145,6 @@ def get_source_definition_specifications(request: Request, orgid: str, source_de
         logger.error(f"get_source_definition_specifications: {str(e)}")
         return JsonResponse({"error": str(e)}, status=500)
 
-@api_view(['POST'])
-@permission_classes([IsAuthenticated, HasOrgPermission])
 def create_source(request: Request, orgid: str) -> JsonResponse:
     """
     Create a new source in Airbyte.
@@ -179,8 +170,6 @@ def create_source(request: Request, orgid: str) -> JsonResponse:
         logger.error(f"create_source: {str(e)}")
         return JsonResponse({"error": str(e)}, status=500)
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated, HasOrgPermission])
 def get_sources(request: Request, orgid: str) -> JsonResponse:
     """
     Get all sources for an organization.
@@ -201,8 +190,6 @@ def get_sources(request: Request, orgid: str) -> JsonResponse:
         logger.error(f"get_sources: {str(e)}")
         return JsonResponse({"error": str(e)}, status=500)
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated, HasOrgPermission])
 def get_source_schema(request: Request, orgid: str, source_id: str) -> JsonResponse:
     """
     Get schema for a specific source.
@@ -224,8 +211,6 @@ def get_source_schema(request: Request, orgid: str, source_id: str) -> JsonRespo
         logger.error(f"get_source_schema: {str(e)}")
         return JsonResponse({"error": str(e)}, status=500)
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated, HasOrgPermission])
 def get_destination_definition_specifications(request: Request, orgid: str, destination_definition_id: str) -> JsonResponse:
     """
     Get specifications for a specific destination definition.
@@ -247,8 +232,6 @@ def get_destination_definition_specifications(request: Request, orgid: str, dest
         logger.error(f"get_destination_definition_specifications: {str(e)}")
         return JsonResponse({"error": str(e)}, status=500)
 
-@api_view(['POST'])
-@permission_classes([IsAuthenticated, HasOrgPermission])
 def create_connection(request: Request, orgid: str) -> JsonResponse:
     """
     Create a new connection between source and destination.
@@ -277,8 +260,6 @@ def create_connection(request: Request, orgid: str) -> JsonResponse:
         logger.error(f"create_connection: {str(e)}")
         return JsonResponse({"error": str(e)}, status=500)
 
-@api_view(['PUT'])
-@permission_classes([IsAuthenticated, HasOrgPermission])
 def update_connection(request: Request, orgid: str) -> JsonResponse:
     """
     Update an existing connection.
@@ -304,8 +285,6 @@ def update_connection(request: Request, orgid: str) -> JsonResponse:
         logger.error(f"update_connection: {str(e)}")
         return JsonResponse({"error": str(e)}, status=500)
 
-@api_view(['POST'])
-@permission_classes([IsAuthenticated, HasOrgPermission])
 def trigger_sync(request: Request, orgid: str) -> JsonResponse:
     """
     Trigger a sync for a specific connection.
@@ -328,8 +307,6 @@ def trigger_sync(request: Request, orgid: str) -> JsonResponse:
         logger.error(f"trigger_sync: {str(e)}")
         return JsonResponse({"error": str(e)}, status=500)
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated, HasOrgPermission])
 def get_job_status(request: Request, orgid: str, job_id: str) -> JsonResponse:
     """
     Get status of a specific job.
