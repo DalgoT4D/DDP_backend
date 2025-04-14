@@ -880,7 +880,7 @@ def get_job_info_without_logs(job_id: str) -> Dict[str, Any]:
 
 
 def get_jobs_for_connection(
-    connection_id: str, limit: int = 1, offset: int = 0, job_types: list[str] = ["sync"]
+    connection_id: str, limit: int = 1, offset: int = 0, job_types: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """Fetch jobs for a connection in airbyte"""
     if not isinstance(connection_id, str):
@@ -892,7 +892,9 @@ def get_jobs_for_connection(
     if not isinstance(offset, int):
         raise HttpError(400, "Invalid offset")
 
-    if not isinstance(job_types, list):
+    if job_types is None:
+        job_types = ["sync"]
+    elif not isinstance(job_types, list):
         raise HttpError(400, "Invalid job types")
 
     res = abreq(
