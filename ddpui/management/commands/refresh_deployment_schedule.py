@@ -12,6 +12,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         """Docstring"""
         parser.add_argument("--org")
+        parser.add_argument("--time_in_secs", type=int, default=5)
 
     def handle(self, *args, **options):
         """Docstring"""
@@ -20,27 +21,33 @@ class Command(BaseCommand):
             q_dataflows = q_dataflows.filter(org__slug=options["org"])
 
         for dataflow in q_dataflows:
-            # deactivate the deployment (schedule)
-            try:
-                prefect_service.set_deployment_schedule(dataflow.deployment_id, "inactive")
-                print(
-                    f"Deactivated the schedule(s) for dataflow {dataflow.name}|{dataflow.deployment_id}"
-                )
-            except Exception as e:
-                print(
-                    f"Failed to deactive the schedule(s) for dataflow {dataflow.name}|{dataflow.deployment_id}: {e}"
-                )
-                continue
+            # only those deployments with active schedules should be refreshed
+            deployment = prefect_service.get_deployment(dataflow.deployment_id)
 
-            time.sleep(1)
+            sleep_time = options["time_in_secs"]
 
-            # activate the deployment (schedule)
-            try:
-                prefect_service.set_deployment_schedule(dataflow.deployment_id, "active")
-                print(
-                    f"Activated the schedule(s) back again for dataflow {dataflow.name}|{dataflow.deployment_id}"
-                )
-            except Exception as e:
-                print(
-                    f"Failed to activate the schedule(s) for dataflow {dataflow.name}|{dataflow.deployment_id}: {e}"
-                )
+            if deployment["isScheduleActive"]:
+                # deactivate the deployment (schedule)
+                try:
+                    prefect_service.set_deployment_schedule(dataflow.deployment_id, "inactive")
+                    print(
+                        f"Deactivated the schedule(s) for dataflow {dataflow.name}|{dataflow.deployment_id}"
+                    )
+                except Exception as e:
+                    print(
+                        f"Failed to deactive the schedule(s) for dataflow {dataflow.name}|{dataflow.deployment_id}: {e}"
+                    )
+                    continue
+
+                time.sleep(sleep_time)
+
+                # activate the deployment (schedule)
+                try:
+                    prefect_service.set_deployment_schedule(dataflow.deployment_id, "active")
+                    print(
+                        f"Activated the schedule(s) back again for dataflow {dataflow.name}|{dataflow.deployment_id}"
+                    )
+                except Exception as e:
+                    print(
+                        f"Failed to activate the schedule(s) for dataflow {dataflow.name}|{dataflow.deployment_id}: {e}"
+                    )
