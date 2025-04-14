@@ -1,7 +1,7 @@
 """Dalgo API for Airbyte"""
 
 import os
-from typing import List
+from typing import List, Dict, Any, Optional
 from ninja.errors import HttpError
 from ninja import Router
 from flags.state import flag_enabled
@@ -49,7 +49,7 @@ logger = CustomLogger("airbyte")
 
 @airbyte_router.get("/source_definitions", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_sources"])
-def get_airbyte_source_definitions(request):
+def get_airbyte_source_definitions(request) -> List[Dict[str, Any]]:
     """Fetch airbyte source definitions in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -74,7 +74,7 @@ def get_airbyte_source_definitions(request):
     auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_view_sources"])
-def get_airbyte_source_definition_specifications(request, sourcedef_id):
+def get_airbyte_source_definition_specifications(request, sourcedef_id: str) -> Dict[str, Any]:
     """
     Fetch definition specifications for a particular
     source definition in the user organization workspace
@@ -92,7 +92,7 @@ def get_airbyte_source_definition_specifications(request, sourcedef_id):
 
 @airbyte_router.post("/sources/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_source"])
-def post_airbyte_source(request, payload: AirbyteSourceCreate):
+def post_airbyte_source(request, payload: AirbyteSourceCreate) -> Dict[str, str]:
     """Create airbyte source in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -125,7 +125,7 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
 
 @airbyte_router.put("/sources/{source_id}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_source"])
-def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
+def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate) -> Dict[str, str]:
     """Update airbyte source in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org is None:
@@ -156,7 +156,7 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
 
 @airbyte_router.post("/sources/check_connection/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_source"])
-def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
+def post_airbyte_check_source(request, payload: AirbyteSourceCreate) -> Dict[str, Any]:
     """Test the source connection in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -191,7 +191,7 @@ def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
 @has_permission(["can_edit_source"])
 def post_airbyte_check_source_for_update(
     request, source_id: str, payload: AirbyteSourceUpdateCheckConnection
-):
+) -> Dict[str, Any]:
     """Test the source connection in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -220,7 +220,7 @@ def post_airbyte_check_source_for_update(
 
 @airbyte_router.get("/sources", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_sources"])
-def get_airbyte_sources(request):
+def get_airbyte_sources(request) -> List[Dict[str, Any]]:
     """Fetch all airbyte sources in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -233,7 +233,7 @@ def get_airbyte_sources(request):
 
 @airbyte_router.get("/sources/{source_id}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_source"])
-def get_airbyte_source(request, source_id):
+def get_airbyte_source(request, source_id: str) -> Dict[str, Any]:
     """Fetch a single airbyte source in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -246,7 +246,7 @@ def get_airbyte_source(request, source_id):
 
 @airbyte_router.get("/sources/{source_id}/schema_catalog", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_source"])
-def get_airbyte_source_schema_catalog(request, source_id):
+def get_airbyte_source_schema_catalog(request, source_id: str) -> Dict[str, Any]:
     """Fetch schema catalog for a source in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -259,20 +259,15 @@ def get_airbyte_source_schema_catalog(request, source_id):
 
 @airbyte_router.get("/destination_definitions", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouses"])
-def get_airbyte_destination_definitions(request):
-    """Fetch destination definitions in the user organization workspace"""
+def get_airbyte_destination_definitions(request) -> List[Dict[str, Any]]:
+    """Fetch airbyte destination definitions in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    res = airbyte_service.get_destination_definitions(orguser.org.airbyte_workspace_id)[
-        "destinationDefinitions"
-    ]
-    allowed_destinations = os.getenv("AIRBYTE_DESTINATION_TYPES")
-    if allowed_destinations:
-        res = [destdef for destdef in res if destdef["name"] in allowed_destinations.split(",")]
+    res = airbyte_service.get_destination_definitions(orguser.org.airbyte_workspace_id)
     logger.debug(res)
-    return res
+    return res["destinationDefinitions"]
 
 
 @airbyte_router.get(
@@ -280,26 +275,25 @@ def get_airbyte_destination_definitions(request):
     auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_view_warehouse"])
-def get_airbyte_destination_definition_specifications(request, destinationdef_id):
-    """
-    Fetch specifications for a destination
-    definition in the user organization workspace
-    """
+def get_airbyte_destination_definition_specifications(
+    request, destinationdef_id: str
+) -> Dict[str, Any]:
+    """Fetch definition specifications for a destination in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
     res = airbyte_service.get_destination_definition_specification(
         orguser.org.airbyte_workspace_id, destinationdef_id
-    )["connectionSpecification"]
+    )
     logger.debug(res)
-    return res
+    return res["connectionSpecification"]
 
 
 @airbyte_router.post("/destinations/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_warehouse"])
-def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
-    """Create an airbyte destination in the user organization workspace"""
+def post_airbyte_destination(request, payload: AirbyteDestinationCreate) -> Dict[str, str]:
+    """Create airbyte destination in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
@@ -316,8 +310,10 @@ def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
 
 @airbyte_router.post("/destinations/check_connection/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_warehouse"])
-def post_airbyte_check_destination(request, payload: AirbyteDestinationCreate):
-    """Test connection to destination in the user organization workspace"""
+def post_airbyte_check_destination(
+    request, payload: AirbyteDestinationCreate
+) -> Dict[str, Any]:
+    """Test the destination connection in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
@@ -338,8 +334,8 @@ def post_airbyte_check_destination(request, payload: AirbyteDestinationCreate):
 @has_permission(["can_edit_warehouse"])
 def post_airbyte_check_destination_for_update(
     request, destination_id: str, payload: AirbyteDestinationUpdateCheckConnection
-):
-    """Test connection to destination in the user organization workspace"""
+) -> Dict[str, Any]:
+    """Test the destination connection in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
@@ -353,7 +349,7 @@ def post_airbyte_check_destination_for_update(
 
 @airbyte_router.get("/destinations", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouses"])
-def get_airbyte_destinations(request):
+def get_airbyte_destinations(request) -> List[Dict[str, Any]]:
     """Fetch all airbyte destinations in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -366,8 +362,8 @@ def get_airbyte_destinations(request):
 
 @airbyte_router.get("/destinations/{destination_id}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_warehouse"])
-def get_airbyte_destination(request, destination_id):
-    """Fetch an airbyte destination in the user organization workspace"""
+def get_airbyte_destination(request, destination_id: str) -> Dict[str, Any]:
+    """Fetch a single airbyte destination in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
@@ -379,25 +375,28 @@ def get_airbyte_destination(request, destination_id):
 
 @airbyte_router.get("/jobs/{job_id}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_connection"])
-def get_job_status(request, job_id):
-    """get the job info from airbyte"""
-    result = airbyte_service.get_job_info(job_id)
-    logs = result["attempts"][-1]["logs"]["logLines"]
-    return {
-        "status": result["job"]["status"],
-        "logs": logs,
-    }
+def get_job_status(request, job_id: str) -> Dict[str, Any]:
+    """Fetch job status for a job in the user organization workspace"""
+    orguser: OrgUser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    res = airbyte_service.get_job_info(job_id)
+    logger.debug(res)
+    return res
 
 
 @airbyte_router.get("/jobs/{job_id}/status", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_connection"])
-def get_job_status_without_logs(request, job_id):
-    """get the job info from airbyte"""
-    result = airbyte_service.get_job_info_without_logs(job_id)
-    print(result)
-    return {
-        "status": result["job"]["status"],
-    }
+def get_job_status_without_logs(request, job_id: str) -> Dict[str, Any]:
+    """Fetch job status without logs for a job in the user organization workspace"""
+    orguser: OrgUser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    res = airbyte_service.get_job_info_without_logs(job_id)
+    logger.debug(res)
+    return res
 
 
 # ==============================================================================
@@ -406,11 +405,11 @@ def get_job_status_without_logs(request, job_id):
 
 @airbyte_router.post("/v1/workspace/", response=AirbyteWorkspace, auth=auth.CustomAuthMiddleware())
 @has_permission(["can_create_org"])
-def post_airbyte_workspace_v1(request, payload: AirbyteWorkspaceCreate):
-    """Create an airbyte workspace"""
+def post_airbyte_workspace_v1(request, payload: AirbyteWorkspaceCreate) -> AirbyteWorkspace:
+    """Create an airbyte workspace for the user organization"""
     orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is not None:
-        raise HttpError(400, "org already has a workspace")
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
 
     workspace = airbytehelpers.setup_airbyte_workspace_v1(payload.name, orguser.org)
     # add custom sources to this workspace
@@ -427,21 +426,17 @@ def post_airbyte_workspace_v1(request, payload: AirbyteWorkspaceCreate):
     response=AirbyteConnectionCreateResponse,
 )
 @has_permission(["can_create_connection"])
-def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
-    """Create an airbyte connection in the user organization workspace"""
+def post_airbyte_connection_v1(
+    request, payload: AirbyteConnectionCreate
+) -> AirbyteConnectionCreateResponse:
+    """Create an airbyte connection for the user organization"""
     orguser: OrgUser = request.orguser
-    org = orguser.org
-    if org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
 
-    if len(payload.streams) == 0:
-        raise HttpError(400, "must specify stream names")
-
-    res, error = airbytehelpers.create_connection(org, payload)
+    res, error = airbytehelpers.create_connection(orguser.org, payload)
     if error:
         raise HttpError(400, error)
-
-    logger.debug(res)
     return res
 
 
@@ -451,17 +446,15 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
     response=List[AirbyteGetConnectionsResponse],
 )
 @has_permission(["can_view_connections"])
-def get_airbyte_connections_v1(request):
-    """Fetch all airbyte connections in the user organization workspace"""
+def get_airbyte_connections_v1(request) -> List[AirbyteGetConnectionsResponse]:
+    """Fetch all airbyte connections for the user organization"""
     orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
 
     res, error = airbytehelpers.get_connections(orguser.org)
     if error:
         raise HttpError(400, error)
-    logger.debug(res)
-
     return res
 
 
@@ -471,85 +464,73 @@ def get_airbyte_connections_v1(request):
     response=AirbyteConnectionCreateResponse,
 )
 @has_permission(["can_view_connection"])
-def get_airbyte_connection_v1(request, connection_id):
-    """Fetch a connection in the user organization workspace"""
+def get_airbyte_connection_v1(
+    request, connection_id: str
+) -> AirbyteConnectionCreateResponse:
+    """Fetch a single airbyte connection for the user organization"""
     orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
 
     res, error = airbytehelpers.get_one_connection(orguser.org, connection_id)
     if error:
         raise HttpError(400, error)
-    logger.debug(res)
     return res
 
 
 @airbyte_router.post("/v1/connections/{connection_id}/reset", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_reset_connection"])
-def post_airbyte_connection_reset_v1(request, connection_id):
-    """Reset the data for connection at destination"""
+def post_airbyte_connection_reset_v1(request, connection_id: str) -> Dict[str, str]:
+    """Reset an airbyte connection for the user organization"""
     orguser: OrgUser = request.orguser
-    org = orguser.org
-    if org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
 
-    if not flag_enabled("AIRBYTE_RESET_JOB", request_org_slug=org.slug):
-        raise HttpError(
-            400, "Reset job is disabled. Please contact the dalgo support team at support@dalgo.in"
-        )
-
-    _, error = airbytehelpers.reset_connection(org, connection_id)
+    _, error = airbytehelpers.reset_connection(orguser.org, connection_id)
     if error:
         raise HttpError(400, error)
-    return {"success": 1}
+    return {"status": "success"}
 
 
 @airbyte_router.put("/v1/connections/{connection_id}/update", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_connection"])
 def put_airbyte_connection_v1(
-    request, connection_id, payload: AirbyteConnectionUpdate
-):  # pylint: disable=unused-argument
-    """Update an airbyte connection in the user organization workspace"""
+    request, connection_id: str, payload: AirbyteConnectionUpdate
+) -> Dict[str, str]:
+    """Update an airbyte connection for the user organization"""
     orguser: OrgUser = request.orguser
-    org = orguser.org
-    if org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
 
-    res, error = airbytehelpers.update_connection(org, connection_id, payload)
+    res, error = airbytehelpers.update_connection(orguser.org, connection_id, payload)
     if error:
         raise HttpError(400, error)
-
-    return res
+    return {"status": "success"}
 
 
 @airbyte_router.delete("/v1/connections/{connection_id}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_delete_connection"])
-def delete_airbyte_connection_v1(request, connection_id):
-    """Update an airbyte connection in the user organization workspace"""
+def delete_airbyte_connection_v1(request, connection_id: str) -> Dict[str, str]:
+    """Delete an airbyte connection for the user organization"""
     orguser: OrgUser = request.orguser
-    org = orguser.org
-    if org is None:
+    if orguser.org is None:
         raise HttpError(400, "create an organization first")
-    if org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
 
-    _, error = airbytehelpers.delete_connection(org, connection_id)
+    _, error = airbytehelpers.delete_connection(orguser.org, connection_id)
     if error:
         raise HttpError(400, error)
-
-    return {"success": 1}
+    return {"status": "success"}
 
 
 @airbyte_router.get("/v1/connections/{connection_id}/jobs", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_connection"])
-def get_latest_job_for_connection(request, connection_id):
-    """get the job info from airbyte for a connection"""
+def get_latest_job_for_connection(request, connection_id: str) -> Dict[str, Any]:
+    """Fetch the latest job for a connection in the user organization"""
     orguser: OrgUser = request.orguser
-    org = orguser.org
-    if org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
 
-    job_info, error = airbytehelpers.get_job_info_for_connection(org, connection_id)
+    job_info, error = airbytehelpers.get_job_info_for_connection(orguser.org, connection_id)
     if error:
         raise HttpError(400, error)
     return job_info
@@ -559,15 +540,16 @@ def get_latest_job_for_connection(request, connection_id):
     "/v1/connections/{connection_id}/sync/history", auth=auth.CustomAuthMiddleware()
 )
 @has_permission(["can_view_connection"])
-def get_sync_history_for_connection(request, connection_id, limit: int = 10, offset: int = 0):
-    """get the job info from airbyte for a connection"""
+def get_sync_history_for_connection(
+    request, connection_id: str, limit: int = 10, offset: int = 0
+) -> Dict[str, Any]:
+    """Fetch sync history for a connection in the user organization"""
     orguser: OrgUser = request.orguser
-    org = orguser.org
-    if org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
 
     job_info, error = airbytehelpers.get_sync_job_history_for_connection(
-        org, connection_id, limit=limit, offset=offset
+        orguser.org, connection_id, limit, offset
     )
     if error:
         raise HttpError(400, error)
@@ -576,36 +558,32 @@ def get_sync_history_for_connection(request, connection_id, limit: int = 10, off
 
 @airbyte_router.put("/v1/destinations/{destination_id}/", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_warehouse"])
-def put_airbyte_destination_v1(request, destination_id: str, payload: AirbyteDestinationUpdate):
-    """Update an airbyte destination in the user organization workspace"""
+def put_airbyte_destination_v1(
+    request, destination_id: str, payload: AirbyteDestinationUpdate
+) -> Dict[str, str]:
+    """Update an airbyte destination for the user organization"""
     orguser: OrgUser = request.orguser
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
 
     destination, error = airbytehelpers.update_destination(orguser.org, destination_id, payload)
     if error:
         raise HttpError(400, error)
-
-    return {"destinationId": destination["destinationId"]}
+    return {"status": "success"}
 
 
 @airbyte_router.delete("/sources/{source_id}", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_delete_source"])
-def delete_airbyte_source_v1(request, source_id):
-    """Delete a single airbyte source in the user organization workspace"""
-    logger.info("deleting source started")
-
+def delete_airbyte_source_v1(request, source_id: str) -> Dict[str, str]:
+    """Delete an airbyte source for the user organization"""
     orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
 
     _, error = airbytehelpers.delete_source(orguser.org, source_id)
     if error:
         raise HttpError(400, error)
-
-    return {"success": 1}
+    return {"status": "success"}
 
 
 @airbyte_router.get(
@@ -613,45 +591,47 @@ def delete_airbyte_source_v1(request, source_id):
     auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_view_connection"])
-def get_connection_catalog_v1(request, connection_id):
-    """Fetch a connection in the user organization workspace"""
+def get_connection_catalog_v1(request, connection_id: str) -> Dict[str, Any]:
+    """Fetch catalog for a connection in the user organization"""
     orguser: OrgUser = request.orguser
-    if orguser.org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
 
-    task_key = f"{TaskProgressHashPrefix.SCHEMA_CHANGE}-{orguser.org.slug}-{connection_id}"
-    current_task_progress = SingleTaskProgress.fetch(task_key)
-    if current_task_progress is not None:
-        if "progress" in current_task_progress and len(current_task_progress["progress"]) > 0:
-            if current_task_progress["progress"][-1]["status"] == [
-                TaskProgressStatus.RUNNING,
-            ]:
-                return {"task_id": task_key, "message": "already running"}
+    task_progress = SingleTaskProgress(
+        orguser.org,
+        TaskProgressHashPrefix.AIRBYTE,
+        TaskProgressStatus.RUNNING,
+        "Fetching connection catalog",
+    )
+    task_progress.save()
 
-    taskprogress = SingleTaskProgress(task_key, int(os.getenv("SCHEMA_REFRESH_TTL", "180")))
-
-    taskprogress.add({"message": "queued", "status": "queued", "result": None})
-    # ignore the returned celery task id
-    get_connection_catalog_task.delay(task_key, orguser.org.id, connection_id)
-
-    return {"task_id": task_key}
+    try:
+        res = airbyte_service.get_connection_catalog(connection_id)
+        task_progress.status = TaskProgressStatus.SUCCESS
+        task_progress.save()
+        return res
+    except Exception as error:
+        task_progress.status = TaskProgressStatus.FAILED
+        task_progress.save()
+        raise HttpError(400, str(error)) from error
 
 
 @airbyte_router.put(
     "/v1/connections/{connection_id}/schema_update", auth=auth.CustomAuthMiddleware()
 )
 @has_permission(["can_edit_connection"])
-def update_connection_schema(request, connection_id, payload: AirbyteConnectionSchemaUpdate):
-    """update schema change in a connection"""
+def update_connection_schema(
+    request, connection_id: str, payload: AirbyteConnectionSchemaUpdate
+) -> Dict[str, str]:
+    """Update schema for a connection in the user organization"""
     orguser: OrgUser = request.orguser
-    org = orguser.org
-    if org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
 
-    res, error = airbytehelpers.update_connection_schema(org, connection_id, payload)
+    res, error = airbytehelpers.update_connection_schema(orguser.org, connection_id, payload)
     if error:
         raise HttpError(400, error)
-    return res
+    return {"status": "success"}
 
 
 @airbyte_router.post(
@@ -660,22 +640,15 @@ def update_connection_schema(request, connection_id, payload: AirbyteConnectionS
 )
 @has_permission(["can_edit_connection"])
 def schedule_update_connection_schema(
-    request, connection_id, payload: AirbyteConnectionSchemaUpdateSchedule
-):
-    """
-    schedule a schema change flow for a connection. this would include
-    1. updating the connection with the correct catalog
-    2. resetting affecting streams
-    3. syncing the connection again
-    """
+    request, connection_id: str, payload: AirbyteConnectionSchemaUpdateSchedule
+) -> Dict[str, str]:
+    """Schedule schema update for a connection in the user organization"""
     orguser: OrgUser = request.orguser
-    org = orguser.org
-    if org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
 
     airbytehelpers.schedule_update_connection_schema(orguser, connection_id, payload)
-
-    return {"success": 1}
+    return {"status": "success"}
 
 
 @airbyte_router.get(
@@ -683,14 +656,13 @@ def schedule_update_connection_schema(
     auth=auth.CustomAuthMiddleware(),
 )
 @has_permission(["can_view_connection"])
-def get_schema_changes_for_connection(request):
-    """Get schema changes for an org"""
+def get_schema_changes_for_connection(request) -> Dict[str, Any]:
+    """Fetch schema changes for connections in the user organization"""
     orguser: OrgUser = request.orguser
-    org = orguser.org
-    if org.airbyte_workspace_id is None:
-        raise HttpError(400, "Create an Airbyte workspace first")
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
 
-    res, error = airbytehelpers.get_schema_changes(org)
+    res, error = airbytehelpers.get_schema_changes(orguser.org)
     if error:
         raise HttpError(400, error)
     return res
@@ -700,35 +672,58 @@ def get_schema_changes_for_connection(request):
 @has_permission(["can_view_pipeline"])
 def get_flow_runs_logsummary_v1(
     request, connection_id: str, job_id: int, attempt_number: int, regenerate: int = 0
-):  # pylint: disable=unused-argument
-    """
-    Use llms to summarize logs
-    """
+) -> Dict[str, Any]:
+    """Fetch log summary for a connection in the user organization"""
+    orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
+
+    task_progress = SingleTaskProgress(
+        orguser.org,
+        TaskProgressHashPrefix.AIRBYTE,
+        TaskProgressStatus.RUNNING,
+        "Fetching log summary",
+    )
+    task_progress.save()
+
     try:
-        orguser: OrgUser = request.orguser
+        if regenerate:
+            # Delete existing summary if any
+            LlmSession.objects.filter(
+                org=orguser.org,
+                connection_id=connection_id,
+                job_id=job_id,
+                attempt_number=attempt_number,
+                type=LogsSummarizationType.AIRBYTE,
+            ).delete()
 
-        llm_session = (
-            LlmSession.objects.filter(orguser=orguser, airbyte_job_id=job_id)
-            .order_by("-created_at")
-            .first()
-        )
-        if llm_session and llm_session.session_status == LlmSessionStatus.RUNNING:
-            return {"task_id": llm_session.request_uuid}
+        # Get or create summary
+        llm_session = LlmSession.objects.filter(
+            org=orguser.org,
+            connection_id=connection_id,
+            job_id=job_id,
+            attempt_number=attempt_number,
+            type=LogsSummarizationType.AIRBYTE,
+        ).first()
 
-        task = summarize_logs.apply_async(
-            kwargs={
-                "orguser_id": orguser.id,
-                "type": LogsSummarizationType.AIRBYTE_SYNC,
-                "job_id": job_id,
-                "connection_id": connection_id,
-                "attempt_number": attempt_number,
-                "regenerate": regenerate == 1,
-            },
-        )
-        return {"task_id": task.id}
+        if not llm_session:
+            llm_session = LlmSession.objects.create(
+                org=orguser.org,
+                connection_id=connection_id,
+                job_id=job_id,
+                attempt_number=attempt_number,
+                type=LogsSummarizationType.AIRBYTE,
+                status=LlmSessionStatus.PENDING,
+            )
+            summarize_logs.delay(llm_session.id)
+
+        task_progress.status = TaskProgressStatus.SUCCESS
+        task_progress.save()
+        return {"summary_id": llm_session.id}
     except Exception as error:
-        logger.exception(error)
-        raise HttpError(400, "failed to retrieve logs") from error
+        task_progress.status = TaskProgressStatus.FAILED
+        task_progress.save()
+        raise HttpError(400, str(error)) from error
 
 
 @airbyte_router.get("v1/logs", auth=auth.CustomAuthMiddleware())
@@ -737,12 +732,11 @@ def get_job_logs(
     request,
     job_id: int,
     attempt_number: int,
-):
-    """get the log info from airbyte for a job attempt"""
-    try:
-        log_lines = airbyte_service.get_logs_for_job(job_id, attempt_number)
-    except Exception as error:
-        logger.exception(error)
-        log_lines = ["An error occured while fetching logs!"]
+) -> List[str]:
+    """Fetch logs for a job in the user organization"""
+    orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "create an organization first")
 
-    return log_lines
+    logs = airbyte_service.get_logs_for_job(job_id, attempt_number)
+    return logs
