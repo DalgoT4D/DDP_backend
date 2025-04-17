@@ -869,6 +869,15 @@ def estimate_time_for_next_queued_run_of_dataflow(
     2. Queue time (min max queue times) - time that user needs to wait before the next scheduled flow run will trigger
     """
 
+    # Check if the flag is set and is true
+    if not os.getenv("ESTIMATE_TIME_FOR_QUEUE_RUNS", "false").lower() == "true":
+        logger.info("ESTIMATE_TIME_FOR_QUEUE_RUNS flag is not set or is false. Returning early.")
+        return DeploymentCurrentQueueTime(
+            queue_no=-1,
+            min_wait_time=-1,
+            max_wait_time=-1,
+        )
+
     # get the current late run for the deployment
     dataflow_late_runs = get_late_flow_runs(
         payload=FilterLateFlowRunsRequest(deployment_id=dataflow.deployment_id, limit=1)
