@@ -989,7 +989,7 @@ def summarize_warehouse_results(
 
 
 @app.task(bind=True)
-def handle_prefect_webhook(self, flow_run_id: str, state: str):
+def handle_prefect_webhook(self, flow_run_id: str, state: str):  # skipcq: PYL-W0613
     """this is the webhook handler for prefect flow runs"""
     do_handle_prefect_webhook(flow_run_id, state)
 
