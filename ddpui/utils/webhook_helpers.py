@@ -1,6 +1,5 @@
 import os
 import re
-from distutils.util import strtobool
 from ninja.errors import HttpError
 from django.db.models import F
 from ddpui.utils.custom_logger import CustomLogger
@@ -241,9 +240,11 @@ def update_flow_run_for_deployment(deployment_id: str, state: str, flow_run: dic
         # retry flow run if infra went down
         if state == FLOW_RUN_CRASHED_STATE_NAME:
             prefect_flow_run = PrefectFlowRun.objects.filter(flow_run_id=flow_run_id).first()
-            retry_crashed_flow_runs = bool(
-                strtobool(os.getenv("PREFECT_RETRY_CRASHED_FLOW_RUNS", "0"))
-            )
+            retry_crashed_flow_runs = os.getenv("PREFECT_RETRY_CRASHED_FLOW_RUNS", "0").lower() in [
+                "1",
+                "true",
+            ]
+
             if (
                 retry_crashed_flow_runs
                 and prefect_flow_run
