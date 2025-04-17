@@ -2,6 +2,7 @@ import os
 import re
 from ninja.errors import HttpError
 from django.db.models import F
+from django.utils.dateparse import parse_datetime
 from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.models.org import Org, OrgDataFlowv1
@@ -186,12 +187,9 @@ def create_or_update_flowrun(flow_run, deployment_id, state_name=""):
         defaults={
             **({"deployment_id": deployment_id} if deployment_id else {}),
             "name": flow_run["name"],
-            "start_time": (
-                flow_run["start_time"]
-                if flow_run["start_time"] not in ["", None]
-                else flow_run["expected_start_time"]
-            ),
-            "expected_start_time": flow_run["expected_start_time"],
+            "start_time": parse_datetime(flow_run.get("start_time"))
+            or parse_datetime(flow_run.get("expected_start_time")),
+            "expected_start_time": parse_datetime(flow_run["expected_start_time"]),
             "total_run_time": flow_run["total_run_time"],
             "status": MAP_FLOW_RUN_STATE_NAME_TO_TYPE.get(
                 state_name,
