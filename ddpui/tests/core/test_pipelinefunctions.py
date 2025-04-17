@@ -8,7 +8,12 @@ from ninja.errors import HttpError
 
 from ddpui.models.org import Org, OrgPrefectBlockv1, OrgDataFlowv1
 from ddpui.models.tasks import Task, OrgTask, TaskLock, TaskLockStatus, DataflowOrgTask
-from ddpui.ddpprefect import AIRBYTESERVER
+from ddpui.models.flow_runs import PrefectFlowRun
+from ddpui.ddpprefect import (
+    AIRBYTESERVER,
+    FLOW_RUN_RUNNING_STATE_TYPE,
+    FLOW_RUN_COMPLETED_STATE_TYPE,
+)
 from ddpui.models.org_user import OrgUser, OrgUserRole, Role
 from ddpui.core.pipelinefunctions import fetch_pipeline_lock_v1, lock_tasks_for_dataflow
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
@@ -166,79 +171,97 @@ def test_fetch_pipeline_lock_v1_flow_run_pending(test_dataflow: OrgDataFlowv1, o
 
 
 def test_fetch_pipeline_lock_v1_flow_run_running(test_dataflow: OrgDataFlowv1, orguser: OrgUser):
-    with patch("ddpui.ddpprefect.prefect_service.get_flow_run") as mock_get_flow_run:
-        lock = TaskLock.objects.create(
-            orgtask=OrgTask.objects.filter(org=test_dataflow.org).first(),
-            flow_run_id="some_flow_run_id",
-            locked_by=orguser,
-            locking_dataflow=test_dataflow,
-        )
-        mock_get_flow_run.return_value = {
-            "state_type": "RUNNING",
-            "id": lock.flow_run_id,
-        }
-        result = fetch_pipeline_lock_v1(test_dataflow, lock)
-        assert result == {
-            "lockedBy": lock.locked_by.user.email,
-            "lockedAt": lock.locked_at,
-            "flowRunId": lock.flow_run_id,
-            "status": TaskLockStatus.RUNNING,
-        }
-        assert result["flowRunId"] == "some_flow_run_id"
+    flow_run_id = "some_flow_run_id"
+    lock = TaskLock.objects.create(
+        orgtask=OrgTask.objects.filter(org=test_dataflow.org).first(),
+        flow_run_id=flow_run_id,
+        locked_by=orguser,
+        locking_dataflow=test_dataflow,
+    )
+    PrefectFlowRun.objects.create(
+        deployment_id="fake-deployment-id",
+        flow_run_id=flow_run_id,
+        name="airbyte-sync-run",
+        start_time="2022-01-01",
+        expected_start_time="2022-01-01",
+        total_run_time=12,
+        status=FLOW_RUN_RUNNING_STATE_TYPE,
+        state_name="Running",
+    )
+    result = fetch_pipeline_lock_v1(test_dataflow, lock)
+    assert result == {
+        "lockedBy": lock.locked_by.user.email,
+        "lockedAt": lock.locked_at,
+        "flowRunId": lock.flow_run_id,
+        "status": TaskLockStatus.RUNNING,
+    }
+    assert result["flowRunId"] == "some_flow_run_id"
 
 
 def test_fetch_pipeline_lock_v1_flow_run_completed(test_dataflow: OrgDataFlowv1, orguser: OrgUser):
-    with patch("ddpui.ddpprefect.prefect_service.get_flow_run") as mock_get_flow_run:
-        lock = TaskLock.objects.create(
-            orgtask=OrgTask.objects.filter(org=test_dataflow.org).first(),
-            flow_run_id="some_flow_run_id",
-            locked_by=orguser,
-            locking_dataflow=test_dataflow,
-        )
-        mock_get_flow_run.return_value = {
-            "state_type": "COMPLETED",
-            "id": lock.flow_run_id,
-        }
-        result = fetch_pipeline_lock_v1(test_dataflow, lock)
-        assert result == {
-            "lockedBy": lock.locked_by.user.email,
-            "lockedAt": lock.locked_at,
-            "flowRunId": lock.flow_run_id,
-            "status": TaskLockStatus.COMPLETED,
-        }
-        assert result["flowRunId"] == "some_flow_run_id"
+    flow_run_id = "some_flow_run_id"
+    lock = TaskLock.objects.create(
+        orgtask=OrgTask.objects.filter(org=test_dataflow.org).first(),
+        flow_run_id=flow_run_id,
+        locked_by=orguser,
+        locking_dataflow=test_dataflow,
+    )
+    PrefectFlowRun.objects.create(
+        deployment_id="fake-deployment-id",
+        flow_run_id=flow_run_id,
+        name="airbyte-sync-run",
+        start_time="2022-01-01",
+        expected_start_time="2022-01-01",
+        total_run_time=12,
+        status=FLOW_RUN_COMPLETED_STATE_TYPE,
+        state_name="Completed",
+    )
+    result = fetch_pipeline_lock_v1(test_dataflow, lock)
+    assert result == {
+        "lockedBy": lock.locked_by.user.email,
+        "lockedAt": lock.locked_at,
+        "flowRunId": lock.flow_run_id,
+        "status": TaskLockStatus.COMPLETED,
+    }
+    assert result["flowRunId"] == "some_flow_run_id"
 
 
 def test_fetch_pipeline_lock_v1_locking_dataflow_not_equal(
     test_dataflow: OrgDataFlowv1, orguser: OrgUser
 ):
-    with patch("ddpui.ddpprefect.prefect_service.get_flow_run") as mock_get_flow_run:
-        other_dataflow = OrgDataFlowv1.objects.create(
-            org=test_dataflow.org,
-            name="other-dataflow-name",
-            deployment_id="other-deployment-id",
-            deployment_name="other-deployment-name",
-            cron=None,
-            dataflow_type="orchestrate",
-        )
-        lock = TaskLock.objects.create(
-            orgtask=OrgTask.objects.filter(org=test_dataflow.org).first(),
-            flow_run_id="some_flow_run_id",
-            locked_by=orguser,
-            locking_dataflow=other_dataflow,
-        )
-        mock_get_flow_run.return_value = {
-            "state_type": "COMPLETED",
-            "id": lock.flow_run_id,
-        }
-        result = fetch_pipeline_lock_v1(test_dataflow, lock)
-        assert result == {
-            "lockedBy": lock.locked_by.user.email,
-            "lockedAt": lock.locked_at,
-            "flowRunId": lock.flow_run_id,
-            "status": TaskLockStatus.LOCKED,
-        }
-        assert result["flowRunId"] == "some_flow_run_id"
+    flow_run_id = "some_flow_run_id"
+    other_dataflow = OrgDataFlowv1.objects.create(
+        org=test_dataflow.org,
+        name="other-dataflow-name",
+        deployment_id="other-deployment-id",
+        deployment_name="other-deployment-name",
+        cron=None,
+        dataflow_type="orchestrate",
+    )
+    lock = TaskLock.objects.create(
+        orgtask=OrgTask.objects.filter(org=test_dataflow.org).first(),
+        flow_run_id=flow_run_id,
+        locked_by=orguser,
+        locking_dataflow=other_dataflow,
+    )
+    PrefectFlowRun.objects.create(
+        deployment_id="fake-deployment-id",
+        flow_run_id=flow_run_id,
+        name="airbyte-sync-run",
+        start_time="2022-01-01",
+        expected_start_time="2022-01-01",
+        total_run_time=12,
+        status=FLOW_RUN_COMPLETED_STATE_TYPE,
+        state_name="Completed",
+    )
+    result = fetch_pipeline_lock_v1(test_dataflow, lock)
+    assert result == {
+        "lockedBy": lock.locked_by.user.email,
+        "lockedAt": lock.locked_at,
+        "flowRunId": lock.flow_run_id,
+        "status": TaskLockStatus.LOCKED,
+    }
+    assert result["flowRunId"] == "some_flow_run_id"
 
 
 def test_lock_tasks_for_dataflow(test_dataflow: OrgDataFlowv1, orguser: OrgUser):
