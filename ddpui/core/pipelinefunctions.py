@@ -9,6 +9,7 @@ from django.db import transaction
 from ninja.errors import HttpError
 
 from ddpui.models.tasks import OrgTask, DataflowOrgTask, TaskLock, TaskLockStatus
+from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.models.org import Org, OrgPrefectBlockv1, OrgDataFlowv1
 from ddpui.models.org_user import OrgUser
 from ddpui.utils.custom_logger import CustomLogger
@@ -30,6 +31,7 @@ from ddpui.ddpprefect import (
     FLOW_RUN_PENDING_STATE_TYPE,
     FLOW_RUN_RUNNING_STATE_TYPE,
     FLOW_RUN_SCHEDULED_STATE_TYPE,
+    FLOW_RUN_COMPLETED_STATE_TYPE,
 )
 from ddpui.utils.constants import (
     AIRBYTE_SYNC_TIMEOUT,
@@ -255,16 +257,17 @@ def fetch_pipeline_lock_v1(dataflow: OrgDataFlowv1, lock: Union[TaskLock, None])
     if lock:
         lock_status = TaskLockStatus.QUEUED
         if lock.flow_run_id:
-            flow_run = prefect_service.get_flow_run(lock.flow_run_id)  # can taken from db now
-            if flow_run and flow_run["state_type"] in [
-                FLOW_RUN_SCHEDULED_STATE_TYPE,
-                FLOW_RUN_PENDING_STATE_TYPE,
-            ]:
-                lock_status = TaskLockStatus.QUEUED
-            elif flow_run and flow_run["state_type"] == FLOW_RUN_RUNNING_STATE_TYPE:
-                lock_status = TaskLockStatus.RUNNING
-            else:
-                lock_status = TaskLockStatus.COMPLETED
+            flow_run = PrefectFlowRun.objects.filter(flow_run_id=lock.flow_run_id).first()
+            if flow_run:
+                if flow_run.status in [
+                    FLOW_RUN_SCHEDULED_STATE_TYPE,
+                    FLOW_RUN_PENDING_STATE_TYPE,
+                ]:
+                    lock_status = TaskLockStatus.QUEUED
+                elif flow_run.status == FLOW_RUN_RUNNING_STATE_TYPE:
+                    lock_status = TaskLockStatus.RUNNING
+                elif flow_run.status == FLOW_RUN_COMPLETED_STATE_TYPE:
+                    lock_status = TaskLockStatus.COMPLETED
 
         return {
             "lockedBy": lock.locked_by.user.email,
