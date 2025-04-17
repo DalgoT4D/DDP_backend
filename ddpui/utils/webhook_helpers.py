@@ -1,6 +1,8 @@
 import os
 import re
+from distutils.util import strtobool
 from ninja.errors import HttpError
+from django.db.models import F
 from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.models.org import Org, OrgDataFlowv1
@@ -192,7 +194,10 @@ def create_or_update_flowrun(flow_run, deployment_id, state_name=""):
             ),
             "expected_start_time": flow_run["expected_start_time"],
             "total_run_time": flow_run["total_run_time"],
-            "status": MAP_FLOW_RUN_STATE_NAME_TO_TYPE[state_name],
+            "status": MAP_FLOW_RUN_STATE_NAME_TO_TYPE.get(
+                state_name,
+                MAP_FLOW_RUN_STATE_NAME_TO_TYPE.get("UNKNOWN", "unknown"),
+            ),
             "state_name": state_name,
         },
     )
@@ -236,16 +241,20 @@ def update_flow_run_for_deployment(deployment_id: str, state: str, flow_run: dic
         # retry flow run if infra went down
         if state == FLOW_RUN_CRASHED_STATE_NAME:
             prefect_flow_run = PrefectFlowRun.objects.filter(flow_run_id=flow_run_id).first()
+            retry_crashed_flow_runs = bool(
+                strtobool(os.getenv("PREFECT_RETRY_CRASHED_FLOW_RUNS", "0"))
+            )
             if (
-                os.getenv("PREFECT_RETRY_CRASHED_FLOW_RUNS") in ["True", "true", True]
+                retry_crashed_flow_runs
                 and prefect_flow_run
                 and prefect_flow_run.retries < MAX_RETRIES_FOR_CRASHED_FLOW_RUNS
             ):
                 # dont send notification right now, retry first
                 try:
                     prefect_service.retry_flow_run(flow_run_id, 5)
-                    prefect_flow_run.retries += 1
-                    prefect_flow_run.save()
+                    PrefectFlowRun.objects.filter(flow_run_id=flow_run_id).update(
+                        retries=F("retries") + 1
+                    )
                     send_failure_notifications = False
                 except Exception as err:
                     logger.error(
