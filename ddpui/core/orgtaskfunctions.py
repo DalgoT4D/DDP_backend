@@ -248,7 +248,7 @@ def fetch_orgtask_lock_v1(org_task: OrgTask, lock: Union[TaskLock, None]):
                     lock_status = TaskLockStatus.QUEUED
                 elif flow_run.status == FLOW_RUN_RUNNING_STATE_TYPE:
                     lock_status = TaskLockStatus.RUNNING
-                elif flow_run.status == FLOW_RUN_COMPLETED_STATE_TYPE:
+                else:
                     lock_status = TaskLockStatus.COMPLETED
 
         return {
