@@ -1,11 +1,26 @@
 import os
 import re
+from ninja.errors import HttpError
 from ddpui.utils.custom_logger import CustomLogger
 
-from ddpui.models.org import Org
+from ddpui.models.org import Org, OrgDataFlowv1
 from ddpui.models.org_user import OrgUser
+from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.awsses import send_text_message
-from ddpui.ddpprefect import prefect_service
+from ddpui.models.tasks import (
+    TaskLock,
+)
+from ddpui.ddpprefect import (
+    prefect_service,
+    MAP_FLOW_RUN_STATE_NAME_TO_TYPE,
+    FLOW_RUN_CANCELLED_STATE_NAME,
+    FLOW_RUN_CRASHED_STATE_NAME,
+    FLOW_RUN_FAILED_STATE_NAME,
+    FLOW_RUN_COMPLETED_STATE_NAME,
+    FLOW_RUN_RUNNING_STATE_NAME,
+    FLOW_RUN_PENDING_STATE_NAME,
+)
+
 from ddpui.settings import PRODUCTION
 from ddpui.auth import SUPER_ADMIN_ROLE
 from ddpui.core.notifications_service import (
@@ -14,6 +29,7 @@ from ddpui.core.notifications_service import (
     SentToEnum,
     NotificationDataSchema,
 )
+from ddpui.utils.constants import SYSTEM_USER_EMAIL
 from ddpui.utils.discord import send_discord_notification
 
 logger = CustomLogger("ddpui")
@@ -157,3 +173,149 @@ def notify_platform_admins(org: Org, flow_run_id: str, state: str):
         )
     if os.getenv("ADMIN_DISCORD_WEBHOOK"):
         send_discord_notification(os.getenv("ADMIN_DISCORD_WEBHOOK"), message)
+
+
+def create_or_update_flowrun(flow_run, deployment_id, state_name=""):
+    """Create or update the flow run entry in database"""
+    state_name = state_name if state_name else flow_run["state_name"]
+    deployment_id = deployment_id if deployment_id else flow_run.get("deployment_id")
+
+    PrefectFlowRun.objects.update_or_create(
+        flow_run_id=flow_run["id"],
+        defaults={
+            **({"deployment_id": deployment_id} if deployment_id else {}),
+            "name": flow_run["name"],
+            "start_time": (
+                flow_run["start_time"]
+                if flow_run["start_time"] not in ["", None]
+                else flow_run["expected_start_time"]
+            ),
+            "expected_start_time": flow_run["expected_start_time"],
+            "total_run_time": flow_run["total_run_time"],
+            "status": MAP_FLOW_RUN_STATE_NAME_TO_TYPE[state_name],
+            "state_name": state_name,
+        },
+    )
+
+
+def lock_tasks_for_pending_deployment(deployment_id):
+    """lock tasks for pending deployment"""
+    system_user = OrgUser.objects.filter(user__email=SYSTEM_USER_EMAIL).first()
+    if not system_user:
+        logger.error(
+            f"System User not found, ignoring creating locks for the deployment {deployment_id}"
+        )
+        return []
+    locks = []
+    try:
+        locks = prefect_service.lock_tasks_for_deployment(deployment_id, system_user)
+    except HttpError:
+        logger.info("unable to lock tasks for deployment %s, ignoring", deployment_id)
+
+    return locks
+
+
+MAX_RETRIES_FOR_CRASHED_FLOW_RUNS = 1
+
+
+def update_flow_run_for_deployment(deployment_id: str, state: str, flow_run: dict):
+    """update flow run for deployment"""
+    send_failure_notifications = True
+    flow_run_id = flow_run["id"]
+
+    if state in [
+        FLOW_RUN_COMPLETED_STATE_NAME,
+        FLOW_RUN_CANCELLED_STATE_NAME,
+        FLOW_RUN_FAILED_STATE_NAME,
+        FLOW_RUN_CRASHED_STATE_NAME,
+    ]:  # terminal states
+        TaskLock.objects.filter(flow_run_id=flow_run_id).delete()
+        logger.info("updating the flow run in db")
+        create_or_update_flowrun(flow_run, deployment_id, state)
+
+        # retry flow run if infra went down
+        if state == FLOW_RUN_CRASHED_STATE_NAME:
+            prefect_flow_run = PrefectFlowRun.objects.filter(flow_run_id=flow_run_id).first()
+            if (
+                os.getenv("PREFECT_RETRY_CRASHED_FLOW_RUNS") in ["True", "true", True]
+                and prefect_flow_run
+                and prefect_flow_run.retries < MAX_RETRIES_FOR_CRASHED_FLOW_RUNS
+            ):
+                # dont send notification right now, retry first
+                try:
+                    prefect_service.retry_flow_run(flow_run_id, 5)
+                    prefect_flow_run.retries += 1
+                    prefect_flow_run.save()
+                    send_failure_notifications = False
+                except Exception as err:
+                    logger.error(
+                        f"Something went wrong retrying the flow run {flow_run_id} that just crashed - {str(err)}"
+                    )
+
+    elif state == FLOW_RUN_PENDING_STATE_NAME:  # non-terminal states
+        locks: list[TaskLock] = lock_tasks_for_pending_deployment(deployment_id)
+        for tasklock in locks:
+            logger.info("updating flow run id on locks")
+            tasklock.flow_run_id = flow_run_id
+            tasklock.save()
+
+        create_or_update_flowrun(flow_run, deployment_id, state)
+
+    elif state == FLOW_RUN_RUNNING_STATE_NAME:  # non-terminal states
+        create_or_update_flowrun(flow_run, deployment_id, state)
+
+    return send_failure_notifications
+
+
+def send_failure_emails(org: Org, odf: OrgDataFlowv1 | None, flow_run_id: str, state: str):
+    """send notification emails to org users"""
+    name_of_deployment = odf.name if odf else "[no deployment name]"
+    type_of_deployment = odf.dataflow_type if odf else "[no deployment type]"
+    email_flowrun_logs_to_superadmins(org, flow_run_id)
+    notify_platform_admins(org, flow_run_id, state)
+    notify_org_managers(
+        org,
+        f"To the admins of {org.name},\n\nA job for \"{name_of_deployment}\" of type \"{type_of_deployment}\" has failed, please visit {os.getenv('FRONTEND_URL')} for more details",
+        f"{org.name}: Job failure for {name_of_deployment}",
+    )
+    email_orgusers_ses_whitelisted(
+        org,
+        f'There is a problem with the pipeline "{name_of_deployment}"; we are working on a fix',
+    )
+
+
+def do_handle_prefect_webhook(flow_run_id: str, state: str):
+    """
+    this is the webhook handler for prefect flow runs
+    we don't really care about the subflows inside our main flows which
+    might have no deployment_id
+    """
+    send_failure_notifications = True
+    flow_run = prefect_service.get_flow_run(flow_run_id)
+    logger.info("flow_run: %s", flow_run)
+
+    deployment_id = flow_run.get("deployment_id")
+    if deployment_id:
+        send_failure_notifications = update_flow_run_for_deployment(deployment_id, state, flow_run)
+
+    if state in [
+        FLOW_RUN_FAILED_STATE_NAME,
+        FLOW_RUN_CRASHED_STATE_NAME,
+        FLOW_RUN_COMPLETED_STATE_NAME,
+    ]:
+        org = get_org_from_flow_run(flow_run)
+        if org:
+            if (
+                state
+                in [
+                    FLOW_RUN_FAILED_STATE_NAME,
+                    FLOW_RUN_CRASHED_STATE_NAME,
+                ]
+                and send_failure_notifications
+            ):
+                # odf might be None!
+                odf = OrgDataFlowv1.objects.filter(org=org, deployment_id=deployment_id).first()
+                send_failure_emails(org, odf, flow_run_id, state)
+
+            elif state in [FLOW_RUN_COMPLETED_STATE_NAME]:
+                email_orgusers_ses_whitelisted(org, "Your pipeline completed successfully")
