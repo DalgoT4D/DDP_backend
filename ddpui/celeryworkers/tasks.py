@@ -16,6 +16,11 @@ from ddpui.celery import app, Celery
 
 from ddpui.utils import timezone, awsses, constants
 from ddpui.utils.helpers import find_key_in_dictionary
+from ddpui.utils.webhook_helpers import (
+    notify_org_managers,
+    do_handle_prefect_webhook,
+)
+
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.awsses import send_text_message
 from ddpui.models.org_plans import OrgPlans
@@ -49,7 +54,6 @@ from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.singletaskprogress import SingleTaskProgress
-from ddpui.utils.webhook_helpers import notify_org_managers
 from ddpui.utils.constants import (
     TASK_AIRBYTESYNC,
     ORG_BASE_PLANS,
@@ -982,6 +986,12 @@ def summarize_warehouse_results(
         llm_session.session_status = LlmSessionStatus.FAILED
         llm_session.save()
         return
+
+
+@app.task(bind=True)
+def handle_prefect_webhook(self, flow_run_id: str, state: str):  # skipcq: PYL-W0613
+    """this is the webhook handler for prefect flow runs"""
+    do_handle_prefect_webhook(flow_run_id, state)
 
 
 @app.task()
