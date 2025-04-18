@@ -4,7 +4,7 @@ functions which work with airbyte and with the dalgo database
 
 import json
 import os
-from typing import List
+from typing import List, Dict, Any, Optional, Tuple, Union
 from uuid import uuid4
 from pathlib import Path
 from datetime import datetime
@@ -79,7 +79,7 @@ def add_custom_airbyte_connector(
     connector_name: str,
     connector_docker_repository: str,
     connector_docker_image_tag: str,
-    connector_documentation_url,
+    connector_documentation_url: str,
 ) -> None:
     """creates a custom source definition in airbyte"""
     airbyte_service.create_custom_source_definition(
@@ -190,7 +190,7 @@ def setup_airbyte_workspace_v1(wsname: str, org: Org) -> AirbyteWorkspace:
     )
 
 
-def create_airbyte_deployment(org: Org, org_task: OrgTask, server_block: OrgPrefectBlockv1):
+def create_airbyte_deployment(org: Org, org_task: OrgTask, server_block: OrgPrefectBlockv1) -> OrgDataFlowv1:
     """Creates OrgDataFlowv1 & the prefect deployment based on the airbyte OrgTask"""
     hash_code = generate_hash_id(8)
     logger.info(f"using the hash code {hash_code} for the deployment name")
@@ -231,7 +231,7 @@ def create_airbyte_deployment(org: Org, org_task: OrgTask, server_block: OrgPref
     return org_dataflow
 
 
-def create_connection(org: Org, payload: AirbyteConnectionCreate):
+def create_connection(org: Org, payload: AirbyteConnectionCreate) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """creates an airbyte connection and tracking objects in the database"""
     warehouse = OrgWarehouse.objects.filter(org=org).first()
     if warehouse is None:
@@ -304,7 +304,7 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
     return res, None
 
 
-def get_connections(org: Org) -> List[AirbyteGetConnectionsResponse]:
+def get_connections(org: Org) -> Tuple[List[AirbyteGetConnectionsResponse], Optional[str]]:
     """return connections with last run details"""
 
     sync_dataflows = (
@@ -482,7 +482,7 @@ def get_connections(org: Org) -> List[AirbyteGetConnectionsResponse]:
     return res, None
 
 
-def get_one_connection(org: Org, connection_id: str):
+def get_one_connection(org: Org, connection_id: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """retrieve details of a single connection"""
     org_task = OrgTask.objects.filter(
         org=org, connection_id=connection_id, task__slug=TASK_AIRBYTESYNC
@@ -540,7 +540,7 @@ def get_one_connection(org: Org, connection_id: str):
     return res, None
 
 
-def reset_connection(org: Org, connection_id: str):
+def reset_connection(org: Org, connection_id: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """
     reset the connection via the sync deployment
     this will run a full reset + sync
@@ -640,7 +640,7 @@ def reset_connection(org: Org, connection_id: str):
     return None, None
 
 
-def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUpdate):
+def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUpdate) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """updates an airbyte connection"""
 
     if not OrgTask.objects.filter(
@@ -677,7 +677,7 @@ def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUp
     return res, None
 
 
-def delete_connection(org: Org, connection_id: str):
+def delete_connection(org: Org, connection_id: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """deletes an airbyte connection"""
 
     dataflows_to_delete: list[OrgDataFlowv1] = []
@@ -751,7 +751,7 @@ def delete_connection(org: Org, connection_id: str):
     return None, None
 
 
-def get_job_info_for_connection(org: Org, connection_id: str):
+def get_job_info_for_connection(org: Org, connection_id: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """get the info for the latest airbyte job for a connection"""
     org_task = OrgTask.objects.filter(
         org=org,
@@ -777,7 +777,7 @@ def get_job_info_for_connection(org: Org, connection_id: str):
 
 def get_sync_job_history_for_connection(
     org: Org, connection_id: str, limit: int = 10, offset: int = 0
-):
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """
     Get all sync jobs (paginated) for a connection
     Returns
@@ -815,7 +815,7 @@ def get_sync_job_history_for_connection(
     return res, None
 
 
-def update_destination(org: Org, destination_id: str, payload: AirbyteDestinationUpdate):
+def update_destination(org: Org, destination_id: str, payload: AirbyteDestinationUpdate) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """updates an airbyte destination and dbt cli profile if credentials changed"""
     destination = airbyte_service.update_destination(
         destination_id, payload.name, payload.config, payload.destinationDefId
@@ -886,7 +886,7 @@ def update_destination(org: Org, destination_id: str, payload: AirbyteDestinatio
     return destination, None
 
 
-def create_warehouse(org: Org, payload: OrgWarehouseSchema):
+def create_warehouse(org: Org, payload: OrgWarehouseSchema) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """creates a warehouse for an org"""
 
     if payload.wtype not in ["postgres", "bigquery", "snowflake"]:
@@ -948,7 +948,7 @@ def create_warehouse(org: Org, payload: OrgWarehouseSchema):
     return None, None
 
 
-def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_creds: dict):
+def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_creds: Dict[str, Any]) -> Tuple[Tuple[Optional[OrgPrefectBlockv1], Optional[DbtProjectParams]], Optional[str]]:
     """
     Create/update the block in db and also in prefect
     """
@@ -1055,7 +1055,7 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
     return (cli_profile_block, dbt_project_params), None
 
 
-def get_warehouses(org: Org):
+def get_warehouses(org: Org) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     """return list of warehouses for an Org"""
     warehouses = [
         {
@@ -1073,7 +1073,7 @@ def get_warehouses(org: Org):
     return warehouses, None
 
 
-def get_demo_whitelisted_source_config(type_: str):
+def get_demo_whitelisted_source_config(type_: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Returns the config of whitelisted source based on type"""
     ret_src = None
     for src in DEMO_WHITELIST_SOURCES:
@@ -1087,7 +1087,7 @@ def get_demo_whitelisted_source_config(type_: str):
     return ret_src["config"], None
 
 
-def delete_source(org: Org, source_id: str):
+def delete_source(org: Org, source_id: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """deletes an airbyte source and related connections"""
     connections = airbyte_service.get_connections(org.airbyte_workspace_id)["connections"]
     connections_of_source = [
@@ -1130,7 +1130,7 @@ def delete_source(org: Org, source_id: str):
     return None, None
 
 
-def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
+def fetch_and_update_org_schema_changes(org: Org, connection_id: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """
     Fetches the schema change catalog from airbyte and updates OrgSchemaChnage in our db
     """
@@ -1188,7 +1188,7 @@ def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
     return connection_catalog, None
 
 
-def update_connection_schema(org: Org, connection_id: str, payload: AirbyteConnectionSchemaUpdate):
+def update_connection_schema(org: Org, connection_id: str, payload: AirbyteConnectionSchemaUpdate) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """
     Update the schema changes of a connection.
     """
@@ -1213,7 +1213,7 @@ def update_connection_schema(org: Org, connection_id: str, payload: AirbyteConne
     return res, None
 
 
-def get_schema_changes(org: Org):
+def get_schema_changes(org: Org) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
     """
     Get the schema changes of a connection in an org.
     """
@@ -1280,7 +1280,7 @@ def schedule_update_connection_schema(
     orguser: OrgUser,
     connection_id: str,
     payload: AirbyteConnectionSchemaUpdateSchedule,
-):
+) -> Dict[str, Any]:
     """Submits a flow run that will execute the schema update flow"""
     server_block = OrgPrefectBlockv1.objects.filter(
         org=orguser.org,
