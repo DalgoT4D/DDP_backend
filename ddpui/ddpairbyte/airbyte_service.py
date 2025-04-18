@@ -1,1090 +1,418 @@
-"""
-Airbyte service module
-Functions which communicate with Airbyte
-These functions do not access the Dalgo database
-"""
-
-from typing import Dict, List
-import os
-from datetime import datetime
+from typing import List, Dict, Any, Optional, Union, Tuple, cast, TypedDict
 import requests
-from dotenv import load_dotenv
-from ninja.errors import HttpError
-from flags.state import flag_enabled
-from ddpui import settings
-from ddpui.ddpairbyte import schema
-from ddpui.ddpprefect import prefect_service, AIRBYTESERVER
+import json
+import time
+import os
+import uuid
+from datetime import datetime
+from pydantic import BaseModel, Field
+
+from django.conf import settings
 from ddpui.models.org import Org
-from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.deploymentblocks import trigger_reset_and_sync_workflow
-from ddpui.utils.helpers import remove_nested_attribute, nice_bytes
-from ddpui.ddpairbyte.schema import (
-    AirbyteSourceCreate,
-    AirbyteDestinationCreate,
-    AirbyteSourceUpdateCheckConnection,
-    AirbyteDestinationUpdateCheckConnection,
+from ddpui.models.warehouse import WarehouseCredential
+from ddpui.models.credentials import DataSourceCredential
+from ddpui.models.airbyte_sync import AirbyteSync
+from ddpui.ddpairbyte.airbyte_helpers import (
+    get_user_workspace,
+    create_customer_destination,
+    normalize_simple_configs,
+    find_source_definition_id_by_name,
+    find_destination_definition_id_by_name,
 )
-from ddpui.utils import thread
-from ddpui.models.org import OrgPrefectBlockv1
-
-load_dotenv()
-
-
-logger = CustomLogger("airbyte")
-
-
-def abreq(endpoint, req=None, **kwargs):
-    """Request to the airbyte server"""
-    method = kwargs.get("method", "POST")
-    if method not in ["GET", "POST"]:
-        raise HttpError(500, "method not supported")
-
-    request = thread.get_current_request()
-
-    abhost = os.getenv("AIRBYTE_SERVER_HOST")
-    abport = os.getenv("AIRBYTE_SERVER_PORT")
-    abver = os.getenv("AIRBYTE_SERVER_APIVER")
-    token = os.getenv("AIRBYTE_API_TOKEN")
-
-    if request is not None:
-        org_user = request.orguser
-        org_slug = org_user.org.slug
-        if flag_enabled("AIRBYTE_PROFILE", request_org_slug=org_slug):
-            org_server_block = OrgPrefectBlockv1.objects.filter(
-                org=org_user.org, block_type=AIRBYTESERVER
-            ).first()
-
-            if not org_server_block:
-                raise HttpError(400, "airbyte server block not found")
-
-            block_name = org_server_block.block_name
-
-            try:
-                airbyte_server_block = prefect_service.get_airbyte_server_block(block_name)
-            except Exception as exc:
-                raise Exception("could not connect to prefect-proxy") from exc
-
-            logger.info("Making request to Airbyte server through prefect block: %s", endpoint)
-            abhost = airbyte_server_block["host"]
-            abport = airbyte_server_block["port"]
-            abver = airbyte_server_block["version"]
-            token = airbyte_server_block["token"]
-
-    logger.info("Making request to Airbyte server: %s", endpoint)
-    try:
-        res = {}
-        if method == "POST":
-            res = requests.post(
-                f"http://{abhost}:{abport}/api/{abver}/{endpoint}",
-                headers={"Authorization": f"Basic {token}"},
-                json=req,
-                timeout=kwargs.get("timeout", 30),
-            )
-        elif method == "GET":
-            res = requests.get(
-                f"http://{abhost}:{abport}/api/{abver}/{endpoint}",
-                headers={"Authorization": f"Basic {token}"},
-                json=req,
-                timeout=kwargs.get("timeout", 30),
-            )
-    except requests.exceptions.ConnectionError as conn_error:
-        logger.exception(conn_error)
-        raise HttpError(500, str(conn_error)) from conn_error
-
-    try:
-        result_obj = remove_nested_attribute(res.json(), "icon")
-        logger.debug("Response from Airbyte server:")
-        logger.debug(result_obj)
-    except ValueError:
-        logger.debug("Response from Airbyte server: %s", res.text)
-
-    try:
-        res.raise_for_status()
-    except Exception as error:
-        logger.exception(error.args)
-        raise HttpError(res.status_code, res.text) from error
-
-    if "application/json" in res.headers.get("Content-Type", ""):
-        return res.json()
-
-    logger.error(
-        "abreq result has content-type %s while hitting %s",
-        res.headers.get("Content-Type", ""),
-        endpoint,
-    )
-    return {}
-
-
-def get_workspaces():
-    """Fetch all workspaces in airbyte server"""
-    logger.info("Fetching workspaces from Airbyte server")
-
-    res = abreq("workspaces/list")
-    if "workspaces" not in res:
-        logger.error("No workspaces found")
-        raise HttpError(404, "no workspaces found")
-    return res
-
-
-def get_workspace(workspace_id: str) -> dict:
-    """Fetch a workspace from the airbyte server"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "workspace_id must be a string")
-
-    res = abreq("workspaces/get", {"workspaceId": workspace_id})
-    if "workspaceId" not in res:
-        logger.info("Workspace not found: %s", workspace_id)
-        raise HttpError(404, "workspace not found")
-    return res
-
-
-def set_workspace_name(workspace_id: str, name: str) -> dict:
-    """Set workspace name in the airbyte server"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "Workspace ID must be a string")
-
-    if not isinstance(name, str):
-        raise HttpError(400, "Name must be a string")
-
-    res = abreq("workspaces/update_name", {"workspaceId": workspace_id, "name": name})
-    if "workspaceId" not in res:
-        logger.info("Workspace not found: %s", workspace_id)
-        raise HttpError(404, "workspace not found")
-    return res
-
-
-def create_workspace(name: str) -> dict:
-    """Create a workspace in the airbyte server"""
-    if not isinstance(name, str):
-        raise HttpError(400, "Name must be a string")
-
-    res = abreq(
-        "workspaces/create",
-        {"name": name, "organizationId": "00000000-0000-0000-0000-000000000000"},
-    )
-    if "workspaceId" not in res:
-        logger.info("Workspace not created: %s", name)
-        raise HttpError(400, "workspace not created")
-    return res
-
-
-def delete_workspace(workspace_id: str):
-    """Deletes an airbyte workspace"""
-    res = abreq("workspaces/delete", {"workspaceId": workspace_id})
-    return res
-
-
-def get_source_definition(workspace_id: str, sourcedef_id: str) -> dict:
-    """Fetch source definition for an airbtye workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "Invalid workspace ID")
-
-    if not isinstance(sourcedef_id, str):
-        raise HttpError(400, "Invalid source definition ID")
-
-    res = abreq(
-        "source_definitions/get_for_workspace",
-        {"sourceDefinitionId": sourcedef_id, "workspaceId": workspace_id},
-    )
-    if "sourceDefinitionId" not in res:
-        error_message = (
-            f"Source definition : {sourcedef_id} not found for workspace: {workspace_id}"
-        )
-        logger.error(error_message)
-        raise HttpError(404, error_message)
-
-    return res
-
-
-def get_source_definitions(workspace_id: str) -> List[Dict]:
-    """Fetch source definitions for an airbyte workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "Invalid workspace ID")
-
-    res = abreq("source_definitions/list_for_workspace", {"workspaceId": workspace_id})
-    if "sourceDefinitions" not in res:
-        error_message = f"Source definitions not found for workspace: {workspace_id}"
-        logger.error(error_message)
-        raise HttpError(404, error_message)
-
-    # filter out sources we don't want to show
-    indices = []
-    blacklist = settings.AIRBYTE_SOURCE_BLACKLIST
-    for idx, sdef in enumerate(res["sourceDefinitions"]):
-        if sdef["dockerRepository"] in blacklist:
-            indices.append(idx)
-
-    # delete from the end so we don't have index shifting confusion
-    for idx in reversed(indices):
-        del res["sourceDefinitions"][idx]
-
-    return res
-
-
-def get_source_definition_specification(workspace_id: str, sourcedef_id: str) -> dict:
-    """Fetch source definition specification for a source in an airbyte workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "Invalid workspace ID")
-
-    if not isinstance(sourcedef_id, str):
-        raise HttpError(400, "Invalid source definition ID")
-
-    res = abreq(
-        "source_definition_specifications/get",
-        {"sourceDefinitionId": sourcedef_id, "workspaceId": workspace_id},
-    )
-
-    if "connectionSpecification" not in res:
-        error_message = (
-            f"specification not found for source definition {sourcedef_id} "
-            f"in workspace {workspace_id}"
-        )
-        logger.error(error_message)
-        raise HttpError(404, error_message)
-
-    if "properties" in res["connectionSpecification"] and (
-        "__injected_declarative_manifest" in res["connectionSpecification"]["properties"]
-    ):
-        # remove the injected manifest
-        del res["connectionSpecification"]["properties"]["__injected_declarative_manifest"]
-
-    return res
-
-
-def create_custom_source_definition(
-    workspace_id: str,
-    name: str,
-    docker_repository: str,
-    docker_image_tag: str,
-    documentation_url: str,
-):
-    """Create a custom source definition in Airbyte."""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "Invalid workspace ID")
-    if not isinstance(name, str):
-        raise HttpError(400, "Invalid name")
-    if not isinstance(docker_repository, str):
-        raise HttpError(400, "Invalid docker repository")
-    if not isinstance(docker_image_tag, str):
-        raise HttpError(400, "Invalid docker image tag")
-    if not isinstance(documentation_url, str):
-        raise HttpError(400, "Invalid documentation URL")
-
-    res = abreq(
-        "source_definitions/create_custom",
-        {
-            "workspaceId": workspace_id,
-            "sourceDefinition": {
-                "name": name,
-                "dockerRepository": docker_repository,
-                "dockerImageTag": docker_image_tag,
-                "documentationUrl": documentation_url,
-            },
-        },
-    )
-    if "sourceDefinitionId" not in res:
-        error_message = f"Source definition not created: {name}"
-        logger.error("Source definition not created: %s", name)
-        raise HttpError(400, error_message)
-    return res
-
-
-def get_sources(workspace_id: str) -> List[Dict]:
-    """Fetch all sources in an airbyte workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "Invalid workspace ID")
-
-    res = abreq("sources/list", {"workspaceId": workspace_id})
-    if "sources" not in res:
-        logger.error("Sources not found for workspace: %s", workspace_id)
-        raise HttpError(404, "sources not found for workspace")
-    return res
-
-
-def get_source(workspace_id: str, source_id: str) -> dict:
-    """Fetch a source in an airbyte workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "Invalid workspace ID")
-
-    if not isinstance(source_id, str):
-        raise HttpError(400, "Invalid source ID")
-
-    res = abreq("sources/get", {"sourceId": source_id})
-    if "sourceId" not in res:
-        logger.error("Source not found: %s", source_id)
-        raise HttpError(404, "source not found")
-    return res
-
-
-def delete_source(workspace_id: str, source_id: str) -> dict:
-    """Deletes a source in an airbyte workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "Invalid workspace ID")
-
-    if not isinstance(source_id, str):
-        raise HttpError(400, "Invalid source ID")
-
-    res = abreq("sources/delete", {"sourceId": source_id})
-    return res
-
-
-def create_source(workspace_id: str, name: str, sourcedef_id: str, config: dict) -> dict:
-    """Create source in an airbyte workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "workspace_id must be a string")
-    if not isinstance(name, str):
-        raise HttpError(400, "name must be a string")
-    if not isinstance(sourcedef_id, str):
-        raise HttpError(400, "sourcedef_id must be a string")
-    if not isinstance(config, dict):
-        raise HttpError(400, "config must be a dictionary")
-
-    res = abreq(
-        "source_definition_specifications/get",
-        {"sourceDefinitionId": sourcedef_id, "workspaceId": workspace_id},
-    )
-    if "connectionSpecification" not in res:
-        raise HttpError(500, "could not find spec for this source type")
-
-    source_definition_spec = res["connectionSpecification"]
-    for prop, prop_def in source_definition_spec["properties"].items():
-        if prop_def.get("const"):
-            config[prop] = prop_def["const"]
-
-    res = abreq(
-        "sources/create",
-        {
-            "workspaceId": workspace_id,
-            "name": name,
-            "sourceDefinitionId": sourcedef_id,
-            "connectionConfiguration": config,
-        },
-    )
-    if "sourceId" not in res:
-        logger.error("Failed to create source: %s", res)
-        raise HttpError(500, "failed to create source")
-    return res
-
-
-def update_source(source_id: str, name: str, config: dict, sourcedef_id: str) -> dict:
-    """Update source in an airbyte workspace"""
-    if not isinstance(source_id, str):
-        raise HttpError(400, "source_id must be a string")
-    if not isinstance(name, str):
-        raise HttpError(400, "name must be a string")
-    if not isinstance(config, dict):
-        raise HttpError(400, "config must be a dictionary")
-    if not isinstance(sourcedef_id, str):
-        raise HttpError(400, "sourcedef_id must be a string")
-
-    res = abreq(
-        "sources/update",
-        {
+from ddpui.utils.custom_logger import CustomLogger
+
+logger = CustomLogger("airbyte_service")
+
+# Pydantic models for API payloads and responses
+class StreamConfig(BaseModel):
+    aliasName: str
+    destinationSyncMode: str
+    selected: bool
+    syncMode: str
+
+class StreamObject(BaseModel):
+    name: str
+    namespace: Optional[str] = None
+    json_schema: Optional[Dict[str, Any]] = None
+    supported_sync_modes: Optional[List[str]] = None
+    source_defined_cursor: Optional[bool] = None
+    default_cursor_field: Optional[List[str]] = None
+    source_defined_primary_key: Optional[List[List[str]]] = None
+    
+class Stream(BaseModel):
+    stream: StreamObject
+    config: StreamConfig
+
+class SyncCatalog(BaseModel):
+    streams: List[Stream]
+
+class ScheduleData(BaseModel):
+    basic_schedule: Dict[str, Any] = Field(..., alias="basicSchedule")
+    
+class Schedule(BaseModel):
+    scheduleType: str
+    scheduleData: Optional[ScheduleData] = None
+
+class SourceDefinition(BaseModel):
+    sourceDefinitionId: str
+    name: str
+    dockerRepository: str
+    dockerImageTag: str
+    documentationUrl: Optional[str] = None
+    icon: Optional[str] = None
+
+class SourceSpecification(BaseModel):
+    connectionSpecification: Dict[str, Any]
+    
+class Source(BaseModel):
+    sourceId: str
+    name: str
+    sourceDefinitionId: str
+    workspaceId: str
+    connectionConfiguration: Dict[str, Any]
+    
+class Destination(BaseModel):
+    destinationId: str
+    name: str
+    destinationDefinitionId: str
+    workspaceId: str
+    connectionConfiguration: Dict[str, Any]
+
+class Connection(BaseModel):
+    connectionId: str
+    name: str
+    sourceId: str
+    destinationId: str
+    status: str
+    syncCatalog: SyncCatalog
+    
+class Job(BaseModel):
+    jobId: str
+    status: str
+    createdAt: int
+    updatedAt: int
+
+class AirbyteService:
+    """Service class for interacting with Airbyte API."""
+    
+    def __init__(self, org: Org) -> None:
+        """
+        Initialize the Airbyte service.
+        
+        Args:
+            org: The organization object
+        """
+        self.org: Org = org
+        self.airbyte_url: str = os.getenv("AIRBYTE_URL", "http://localhost:8006")
+        self.workspaceId: str = get_user_workspace(self.org)
+        self.headers: Dict[str, str] = {"Content-Type": "application/json", "Accept": "application/json"}
+        
+    def _post(self, endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Make a POST request to the Airbyte API.
+        
+        Args:
+            endpoint: API endpoint path
+            data: Request payload
+            
+        Returns:
+            Dict containing the response data
+            
+        Raises:
+            Exception: If the request fails
+        """
+        url: str = f"{self.airbyte_url}/api/v1/{endpoint}"
+        response: requests.Response = requests.post(url, json=data, headers=self.headers)
+        
+        if response.status_code != 200:
+            raise Exception(f"Error in Airbyte API call: {response.text}")
+            
+        return response.json()
+        
+    def list_source_definitions(self) -> List[Dict[str, Any]]:
+        """
+        List all available source definitions.
+        
+        Returns:
+            List of source definitions
+        """
+        data: Dict[str, str] = {"workspaceId": self.workspaceId}
+        response: Dict[str, Any] = self._post("source_definitions/list", data)
+        return response.get("sourceDefinitions", [])
+        
+    def get_source_definition_specifications(self, source_definition_id: str) -> Dict[str, Any]:
+        """
+        Get specifications for a source definition.
+        
+        Args:
+            source_definition_id: ID of the source definition
+            
+        Returns:
+            Source definition specifications
+        """
+        data: Dict[str, str] = {"sourceDefinitionId": source_definition_id, "workspaceId": self.workspaceId}
+        response: Dict[str, Any] = self._post("source_definition_specifications/get", data)
+        return response.get("connectionSpecification", {})
+        
+    def create_source(
+        self, 
+        source_definition_id: str, 
+        source_name: str, 
+        connection_configuration: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Create a new source.
+        
+        Args:
+            source_definition_id: ID of the source definition
+            source_name: Name for the new source
+            connection_configuration: Configuration for the source connection
+            
+        Returns:
+            Created source information
+        """
+        data: Dict[str, Any] = {
+            "sourceDefinitionId": source_definition_id,
+            "connectionConfiguration": connection_configuration,
+            "workspaceId": self.workspaceId,
+            "name": source_name
+        }
+        response: Dict[str, Any] = self._post("sources/create", data)
+        return response
+        
+    def list_sources(self) -> List[Dict[str, Any]]:
+        """
+        List all sources in the workspace.
+        
+        Returns:
+            List of sources
+        """
+        data: Dict[str, str] = {"workspaceId": self.workspaceId}
+        response: Dict[str, Any] = self._post("sources/list", data)
+        return response.get("sources", [])
+        
+    def discover_source_schema(self, source_id: str) -> Dict[str, Any]:
+        """
+        Discover schema for a source.
+        
+        Args:
+            source_id: ID of the source
+            
+        Returns:
+            Source schema
+        """
+        data: Dict[str, str] = {"sourceId": source_id}
+        response: Dict[str, Any] = self._post("sources/discover_schema", data)
+        return response.get("catalog", {})
+        
+    def get_destination_definition_specifications(self, destination_definition_id: str) -> Dict[str, Any]:
+        """
+        Get specifications for a destination definition.
+        
+        Args:
+            destination_definition_id: ID of the destination definition
+            
+        Returns:
+            Destination definition specifications
+        """
+        data: Dict[str, str] = {"destinationDefinitionId": destination_definition_id, "workspaceId": self.workspaceId}
+        response: Dict[str, Any] = self._post("destination_definition_specifications/get", data)
+        return response.get("connectionSpecification", {})
+        
+    def list_destinations(self) -> List[Dict[str, Any]]:
+        """
+        List all destinations in the workspace.
+        
+        Returns:
+            List of destinations
+        """
+        data: Dict[str, str] = {"workspaceId": self.workspaceId}
+        response: Dict[str, Any] = self._post("destinations/list", data)
+        return response.get("destinations", [])
+        
+    def create_connection(
+        self, 
+        source_id: str, 
+        destination_id: str, 
+        connection_name: str, 
+        streams: List[Dict[str, Any]], 
+        schedule: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Create a new connection between source and destination.
+        
+        Args:
+            source_id: ID of the source
+            destination_id: ID of the destination
+            connection_name: Name for the new connection
+            streams: List of streams to sync
+            schedule: Optional schedule configuration
+            
+        Returns:
+            Created connection information
+        """
+        sync_catalog: Dict[str, List[Dict[str, Any]]] = {"streams": streams}
+        
+        connection_data: Dict[str, Any] = {
             "sourceId": source_id,
-            "name": name,
-            "connectionConfiguration": config,
-            "sourceDefinitionId": sourcedef_id,
-        },
-    )
-    if "sourceId" not in res:
-        logger.error("Failed to update source: %s", res)
-        raise HttpError(500, "failed to update source")
-    return res
-
-
-def check_source_connection(workspace_id: str, data: AirbyteSourceCreate) -> dict:
-    """Test a potential source's connection in an airbyte workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "workspace_id must be a string")
-
-    res = abreq(
-        "source_definition_specifications/get",
-        {"sourceDefinitionId": data.sourceDefId, "workspaceId": workspace_id},
-    )
-    if "connectionSpecification" not in res:
-        raise HttpError(500, "could not find spec for this source type")
-
-    source_definition_spec = res["connectionSpecification"]
-    for prop, prop_def in source_definition_spec["properties"].items():
-        if prop_def.get("const"):
-            data.config[prop] = prop_def["const"]
-
-    res = abreq(
-        "scheduler/sources/check_connection",
-        {
-            "sourceDefinitionId": data.sourceDefId,
-            "connectionConfiguration": data.config,
-            "workspaceId": workspace_id,
-        },
-        timeout=60,
-    )
-    if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get("message", "Something went wrong, please check your credentials")
-        logger.error("Failed to check the source connection: %s", res)
-        raise HttpError(500, failure_reason)
-    return res
-
-
-def check_source_connection_for_update(source_id: str, data: AirbyteSourceUpdateCheckConnection):
-    """Test connection on a potential edit on source"""
-    res = abreq(
-        "sources/check_connection_for_update",
-        {
-            "sourceId": source_id,
-            "connectionConfiguration": data.config,
-            "name": data.name,
-        },
-        timeout=60,
-    )
-    if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get("message", "Something went wrong, please check your credentials")
-        logger.error("Failed to check the source connection: %s", res)
-        raise HttpError(500, failure_reason)
-    # {
-    #   'status': 'succeeded',
-    #   'jobInfo': {
-    #     'id': 'ecd78210-5eaa-4a70-89ad-af1d9bc7c7f2',
-    #     'configType': 'check_connection_source',
-    #     'configId': 'Optional[decd338e-5647-4c0b-adf4-da0e75f5a750]',
-    #     'createdAt': 1678891375849,
-    #     'endedAt': 1678891403356,
-    #     'succeeded': True,
-    #     'connectorConfigurationUpdated': False,
-    #     'logs': {'logLines': [str]}
-    #   }
-    # }
-    return res
-
-
-def get_source_schema_catalog(
-    workspace_id: str, source_id: str
-) -> dict:  # pylint: disable=unused-argument
-    """Fetch source schema catalog for a source in an airbyte workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "workspace_id must be a string")
-    if not isinstance(source_id, str):
-        raise HttpError(400, "source_id must be a string")
-
-    res = abreq(
-        "sources/discover_schema", {"sourceId": source_id, "disable_cache": True}, timeout=600
-    )  # timeout of 10 mins
-    # is it not possible that the job is long-running
-    # and we need to check its status later?
-    if "catalog" not in res and "jobInfo" in res:
-        # special handling for errors we know
-        if "failureReason" in res["jobInfo"]:
-            if (
-                res["jobInfo"]["failureReason"]["externalMessage"]
-                == "Something went wrong in the connector. See the logs for more details."
-            ):
-                raise HttpError(
-                    400,
-                    res["jobInfo"]["failureReason"]["stacktrace"],
-                )
-            raise HttpError(
-                400,
-                res["jobInfo"]["failureReason"]["externalMessage"],
-            )
-        else:
-            # for errors unknown to airbyte we might not have "failureReason"
-            message = "Failed to discover schema"
-            error = message + f" for source: {source_id}"
-            if "logs" in res["jobInfo"]:
-                error += "\n".join(res["jobInfo"]["logs"]["logLines"])
-            logger.error(error)
-            raise HttpError(400, message)
-    if "catalog" not in res and "jobInfo" not in res:
-        raise HttpError(400, res["message"])
-    return res
-
-
-def get_destination_definitions(workspace_id: str) -> dict:
-    """Fetch destination definitions in an airbyte workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "workspace_id must be a string")
-
-    res = abreq("destination_definitions/list_for_workspace", {"workspaceId": workspace_id})
-    if "destinationDefinitions" not in res:
-        logger.error("Destination definitions not found for workspace: %s", workspace_id)
-        raise HttpError(404, "destination definitions not found")
-    return res
-
-
-def get_destination_definition(workspace_id: str, destinationdef_id: str) -> dict:
-    """get the destination definition"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "workspace_id must be a string")
-    if not isinstance(destinationdef_id, str):
-        raise HttpError(400, "destinationdef_id must be a string")
-
-    res = abreq(
-        "destination_definitions/get",
-        {"destinationDefinitionId": destinationdef_id},
-    )
-    if "destinationDefinitionId" not in res:
-        logger.error("Destination definition not found for workspace: %s", workspace_id)
-        raise HttpError(404, "destination definition not found")
-    return res
-
-
-def get_destination_definition_specification(workspace_id: str, destinationdef_id: str) -> dict:
-    """Fetch destination definition specification for a destination in a workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "workspace_id must be a string")
-    if not isinstance(destinationdef_id, str):
-        raise HttpError(400, "destinationdef_id must be a string")
-
-    res = abreq(
-        "destination_definition_specifications/get",
-        {"destinationDefinitionId": destinationdef_id, "workspaceId": workspace_id},
-    )
-    if "connectionSpecification" not in res:
-        logger.error("Specification not found for destination definition: %s", destinationdef_id)
-        raise HttpError(404, "Failed to get destination definition specification")
-    if res["connectionSpecification"]["title"] == "Postgres Destination Spec":
-        res["connectionSpecification"]["properties"]["ssl_mode"][
-            "title"
-        ] = "SSL modes* (select 'disable' if you don't know)"
-        res["connectionSpecification"]["properties"]["tunnel_method"][
-            "title"
-        ] = "SSH Tunnel Method* (select 'No Tunnel' if you don't know)"
-    return res
-
-
-def get_destinations(workspace_id: str) -> dict:
-    """Fetch all desintations in an airbyte workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "workspace_id must be a string")
-
-    res = abreq("destinations/list", {"workspaceId": workspace_id})
-    if "destinations" not in res:
-        logger.error("Destinations not found for workspace: %s", workspace_id)
-        raise HttpError(404, "destinations not found for this workspace")
-    return res
-
-
-def get_destination(workspace_id: str, destination_id: str) -> dict:
-    """Fetch a destination in an airbyte workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "workspace_id must be a string")
-    if not isinstance(destination_id, str):
-        raise HttpError(400, "destination_id must be a string")
-
-    res = abreq("destinations/get", {"destinationId": destination_id})
-    if "destinationId" not in res:
-        logger.error("Destination not found: %s", destination_id)
-        raise HttpError(404, "destination not found")
-    return res
-
-
-def delete_destination(
-    workspace_id: str, destination_id: str  # skipcq PYL-W0613
-) -> dict:  # pylint: disable=unused-argument
-    """Fetch a destination in an airbyte workspace"""
-    res = abreq("destinations/delete", {"destinationId": destination_id})
-    return res
-
-
-def create_destination(workspace_id: str, name: str, destinationdef_id: str, config: dict) -> dict:
-    """Create destination in an airbyte workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "workspace_id must be a string")
-    if not isinstance(name, str):
-        raise HttpError(400, "name must be a string")
-    if not isinstance(destinationdef_id, str):
-        raise HttpError(400, "destinationdef_id must be a string")
-    if not isinstance(config, dict):
-        raise HttpError(400, "config must be a dict")
-
-    res = abreq(
-        "destinations/create",
-        {
-            "workspaceId": workspace_id,
-            "name": name,
-            "destinationDefinitionId": destinationdef_id,
-            "connectionConfiguration": config,
-        },
-    )
-    if "destinationId" not in res:
-        logger.error("Failed to create destination: %s", res)
-        raise HttpError(500, "failed to create destination")
-    return res
-
-
-def update_destination(
-    destination_id: str, name: str, config: dict, destinationdef_id: str
-) -> dict:
-    """Update a destination in an airbyte workspace"""
-    if not isinstance(destination_id, str):
-        raise HttpError(400, "destination_id must be a string")
-    if not isinstance(name, str):
-        raise HttpError(400, "name must be a string")
-    if not isinstance(config, dict):
-        raise HttpError(400, "config must be a dict")
-    if not isinstance(destinationdef_id, str):
-        raise HttpError(400, "destinationdef_id must be a string")
-
-    res = abreq(
-        "destinations/update",
-        {
             "destinationId": destination_id,
-            "name": name,
-            "connectionConfiguration": config,
-            "destinationDefinitionId": destinationdef_id,
-        },
-    )
-    if "destinationId" not in res:
-        logger.error("Failed to update destination: %s", res)
-        raise HttpError(500, "failed to update destination")
-    return res
-
-
-def check_destination_connection(workspace_id: str, data: AirbyteDestinationCreate) -> dict:
-    """Test a potential destination's connection in an airbyte workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "workspace_id must be a string")
-
-    res = abreq(
-        "scheduler/destinations/check_connection",
-        {
-            "destinationDefinitionId": data.destinationDefId,
-            "connectionConfiguration": data.config,
-            "workspaceId": workspace_id,
-        },
-        timeout=60,
-    )
-    if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get("message", "Something went wrong, please check your credentials")
-        logger.error("Failed to check the destination connection: %s", res)
-        raise HttpError(500, failure_reason)
-    return res
-
-
-def check_destination_connection_for_update(
-    destination_id: str, data: AirbyteDestinationUpdateCheckConnection
-):
-    """Test a potential destination's connection in an airbyte workspace"""
-    if not isinstance(destination_id, str):
-        raise HttpError(400, "destination_id must be a string")
-
-    res = abreq(
-        "destinations/check_connection_for_update",
-        {
-            "destinationId": destination_id,
-            "connectionConfiguration": data.config,
-            "name": data.name,
-        },
-        timeout=60,
-    )
-    if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get("message", "Something went wrong, please check your credentials")
-        logger.error("Failed to check the destination connection: %s", res)
-        raise HttpError(500, failure_reason)
-    return res
-
-
-def get_connections(workspace_id: str) -> dict:
-    """Fetch all connections of an airbyte workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "workspace_id must be a string")
-
-    res = abreq("connections/list", {"workspaceId": workspace_id})
-    if "connections" not in res:
-        error_message = f"connections not found for workspace: {workspace_id}"
-        logger.error(error_message)
-        raise HttpError(404, error_message)
-    return res
-
-
-def get_webbackend_connections(workspace_id: str) -> dict:
-    """Fetch all connections of an airbyte workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "workspace_id must be a string")
-
-    res = abreq("web_backend/connections/list", {"workspaceId": workspace_id})
-    if "connections" not in res:
-        error_message = f"connections not found for workspace: {workspace_id}"
-        logger.error(error_message)
-        raise HttpError(404, error_message)
-    return res["connections"]
-
-
-def get_connection(workspace_id: str, connection_id: str) -> dict:
-    """Fetch a connection of an airbyte workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "workspace_id must be a string")
-
-    res = abreq("web_backend/connections/get", {"connectionId": connection_id})
-    if "connectionId" not in res:
-        error_message = f"Connection not found: {connection_id}"
-        logger.error(error_message)
-        raise HttpError(404, error_message)
-    return res
-
-
-def create_connection(
-    workspace_id: str,
-    connection_info: schema.AirbyteConnectionCreate,
-) -> dict:
-    """Create a connection in an airbyte workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "workspace_id must be a string")
-
-    if len(connection_info.streams) == 0:
-        error_message = f"must specify at least one stream workspace_id={workspace_id}"
-        logger.error(error_message)
-        raise HttpError(400, error_message)
-
-    sourceschemacatalog = get_source_schema_catalog(workspace_id, connection_info.sourceId)
-    payload = {
-        "sourceId": connection_info.sourceId,
-        "destinationId": connection_info.destinationId,
-        "sourceCatalogId": sourceschemacatalog["catalogId"],
-        "syncCatalog": {
-            "streams": [
-                # we're going to put the stream
-                # configs in here in the next step below
-            ]
-        },
-        "status": "active",
-        "prefix": "",
-        "namespaceDefinition": "destination",
-        "namespaceFormat": "${SOURCE_NAMESPACE}",
-        "nonBreakingChangesPreference": "ignore",
-        "scheduleType": "manual",
-        "geography": "auto",
-        "name": connection_info.name,
-    }
-    if connection_info.destinationSchema:
-        payload["namespaceDefinition"] = "customformat"
-        payload["namespaceFormat"] = connection_info.destinationSchema
-
-    # one stream per table
-    selected_streams = {x["name"]: x for x in connection_info.streams}
-    for schema_cat in sourceschemacatalog["catalog"]["streams"]:
-        stream_name = schema_cat["stream"]["name"]
-        if stream_name in selected_streams and selected_streams[stream_name]["selected"]:
-            schema_cat["config"]["selected"] = True
-            schema_cat["config"]["syncMode"] = selected_streams[stream_name]["syncMode"]
-            schema_cat["config"]["destinationSyncMode"] = selected_streams[stream_name][
-                "destinationSyncMode"
-            ]
-            # update the cursorField when the mode is incremental
-            # weirdly the cursor field is an array of single element eg ["created_on"] or []; same behaviour for pk
-            if (
-                schema_cat["config"]["syncMode"] == "incremental"
-                and schema_cat["config"]["destinationSyncMode"] == "append_dedup"
-            ):
-                if "primaryKey" not in selected_streams[stream_name]:
-                    raise HttpError(
-                        400,
-                        f"primaryKey is required for stream '{stream_name}' when syncMode is 'incremental' and destinationSyncMode is 'append_dedup'",
-                    )
-
-                if "cursorField" not in selected_streams[stream_name]:
-                    raise HttpError(
-                        400,
-                        f"cursor is required for stream '{stream_name}' when syncMode is 'incremental' and destinationSyncMode is 'append_dedup'",
-                    )
-
-                schema_cat["config"]["primaryKey"] = [
-                    [pk] for pk in selected_streams[stream_name]["primaryKey"]
-                ]
-                schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
-
-            elif schema_cat["config"]["syncMode"] == "incremental":
-                if "cursorField" not in selected_streams[stream_name]:
-                    raise HttpError(
-                        400,
-                        f"cursor is required for stream '{stream_name}' when syncMode is 'incremental'",
-                    )
-                schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
-
-            else:
-                schema_cat["config"]["cursorField"] = []
-                schema_cat["config"]["primaryKey"] = []
-
-            payload["syncCatalog"]["streams"].append(schema_cat)
-
-    res = abreq("connections/create", payload)
-    if "connectionId" not in res:
-        logger.error("Failed to create connection: %s", res)
-        raise HttpError(500, "failed to create connection")
-    return res
-
-
-def update_connection(
-    workspace_id: str,
-    connection_info: schema.AirbyteConnectionUpdate,
-    current_connection: dict,
-) -> dict:
-    """Update a connection of an airbyte workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "workspace_id must be a string")
-    if len(connection_info.streams) == 0:
-        error_message = f"must specify at least one stream workspace_id={workspace_id}"
-        logger.error(error_message)
-        raise HttpError(400, error_message)
-
-    sourceschemacatalog = get_source_schema_catalog(workspace_id, current_connection["sourceId"])
-
-    # update the name
-    if connection_info.name:
-        current_connection["name"] = connection_info.name
-
-    # update the destination schema
-    if connection_info.destinationSchema:
-        current_connection["namespaceDefinition"] = "customformat"
-        current_connection["namespaceFormat"] = connection_info.destinationSchema
-
-    current_connection["syncCatalog"]["streams"] = []
-
-    # one stream per table
-    selected_streams = {x["name"]: x for x in connection_info.streams}
-    for schema_cat in sourceschemacatalog["catalog"]["streams"]:
-        stream_name = schema_cat["stream"]["name"]
-        if stream_name in selected_streams and selected_streams[stream_name]["selected"]:
-            # set schema_cat['config']['syncMode']
-            # from schema_cat['stream']['supportedSyncModes'] here
-            schema_cat["config"]["selected"] = True
-            schema_cat["config"]["syncMode"] = selected_streams[stream_name]["syncMode"]
-            schema_cat["config"]["destinationSyncMode"] = selected_streams[stream_name][
-                "destinationSyncMode"
-            ]
-            # update the cursorField when the mode is incremental
-            # weirdly the cursor field is an array of single element eg ["created_on"] or []; same behaviour for pk
-            if (
-                schema_cat["config"]["syncMode"] == "incremental"
-                and schema_cat["config"]["destinationSyncMode"] == "append_dedup"
-            ):
-                if "primaryKey" not in selected_streams[stream_name]:
-                    raise HttpError(
-                        400,
-                        f"primaryKey is required for stream '{stream_name}' when syncMode is 'incremental' and destinationSyncMode is 'append_dedup'",
-                    )
-
-                if "cursorField" not in selected_streams[stream_name]:
-                    raise HttpError(
-                        400,
-                        f"cursor is required for stream '{stream_name}' when syncMode is 'incremental' and destinationSyncMode is 'append_dedup'",
-                    )
-
-                schema_cat["config"]["primaryKey"] = [
-                    [pk] for pk in selected_streams[stream_name]["primaryKey"]
-                ]
-                schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
-
-            elif schema_cat["config"]["syncMode"] == "incremental":
-                if "cursorField" not in selected_streams[stream_name]:
-                    raise HttpError(
-                        400,
-                        f"cursor is required for stream '{stream_name}' when syncMode is 'incremental'",
-                    )
-                schema_cat["config"]["cursorField"] = [selected_streams[stream_name]["cursorField"]]
-
-            else:
-                schema_cat["config"]["cursorField"] = []
-                schema_cat["config"]["primaryKey"] = []
-
-            current_connection["syncCatalog"]["streams"].append(schema_cat)
-
-    res = abreq("connections/update", current_connection)
-    if "connectionId" not in res:
-        logger.error("Failed to update connection: %s", res)
-        raise HttpError(500, "failed to update connection")
-    return res
-
-
-def reset_connection(connection_id: str) -> dict:
-    """Reset data of a connection at the destination"""
-    if not isinstance(connection_id, str):
-        raise HttpError(400, "connection_id must be a string")
-
-    res = abreq("connections/reset", {"connectionId": connection_id})
-    logger.info("Reseting the connection: %s", connection_id)
-    return res
-
-
-def delete_connection(workspace_id: str, connection_id: str) -> dict:
-    """Delete a connection of an airbyte workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "workspace_id must be a string")
-    if not isinstance(connection_id, str):
-        raise HttpError(400, "connection_id must be a string")
-
-    res = abreq("connections/delete", {"connectionId": connection_id})
-    logger.info("Deleting connection: %s", connection_id)
-    return res
-
-
-def sync_connection(workspace_id: str, connection_id: str) -> dict:
-    """Sync a connection in an airbyte workspace"""
-    if not isinstance(workspace_id, str):
-        raise HttpError(400, "workspace_id must be a string")
-    if not isinstance(connection_id, str):
-        raise HttpError(400, "connection_id must be a string")
-
-    res = abreq("connections/sync", {"connectionId": connection_id})
-    logger.info("Syncing connection: %s", connection_id)
-    return res
-
-
-def get_job_info(job_id: str) -> dict:
-    """get debug info for an airbyte job"""
-    if not isinstance(job_id, str):
-        raise HttpError(400, "job_id must be a string")
-
-    res = abreq("jobs/get_debug_info", {"id": job_id})
-    return res
-
-
-def get_job_info_without_logs(job_id: str) -> dict:
-    """get job info without logs for an airbyte job"""
-    if not isinstance(job_id, str):
-        raise HttpError(400, "job_id must be a string")
-
-    res = abreq("jobs/get_without_logs", {"id": job_id})
-    return res
-
-
-def get_jobs_for_connection(
-    connection_id: str, limit: int = 1, offset: int = 0, job_types: list[str] = ["sync"]
-) -> int | None:
-    """
-    returns most recent job for a connection
-    possible configTypes are
-    - check_connection_source
-    - check_connection_destination
-    - discover_schema
-    - get_spec
-    - sync
-    - reset_connection
-
-    by default this function fetches the last job
-    """
-    if not isinstance(connection_id, str):
-        raise HttpError(400, "connection_id must be a string")
-
-    result = abreq(
-        "jobs/list",
-        {
-            "configTypes": job_types,
-            "configId": connection_id,
-            "pagination": {"rowOffset": offset, "pageSize": limit},
-        },
-    )
-    return result
-
-
-def parse_job_info(jobinfo: dict) -> dict:
-    """extract summary info from job and successfull attempt"""
-    retval = {
-        "job_type": jobinfo["job"]["configType"],
-        "job_id": jobinfo["job"]["id"],
-        "status": jobinfo["job"]["status"],
-        "date": None,
-        "recordsSynced": 0,
-        "bytesSynced": nice_bytes(0),
-        "recordsEmitted": 0,
-        "bytesEmitted": nice_bytes(0),
-        "recordsCommitted": 0,
-        "totalTimeInSeconds": 0,
-        "resetConfig": jobinfo["job"].get("resetConfig", None),
-    }
-    retval["attempt_no"] = 0
-    for attempt in jobinfo["attempts"]:
-        if attempt["status"] == "succeeded":
-            retval["attempt_no"] = attempt["id"]
-            retval["recordsSynced"] = attempt.get("recordsSynced", 0)
-            retval["bytesSynced"] = nice_bytes(attempt.get("bytesSynced", 0))
-            retval["recordsEmitted"] = attempt["totalStats"]["recordsEmitted"]
-            retval["bytesEmitted"] = nice_bytes(attempt["totalStats"]["bytesEmitted"])
-            retval["recordsCommitted"] = attempt["totalStats"]["recordsCommitted"]
-            retval["totalTimeInSeconds"] = attempt["endedAt"] - attempt["createdAt"]
-            retval["date"] = datetime.fromtimestamp(attempt["endedAt"]).date()
-            break
-    return retval
-
-
-def get_logs_for_job(job_id: int, attempt_number: int = 0) -> list[str]:
-    """get logs for an airbyte job. do not make an API for this! returns an array of log messages in correct order"""
-    if not isinstance(job_id, int):
-        raise HttpError(400, "job_id must be an integer")
-
-    res = abreq(
-        "attempt/get_for_job",
-        {"jobId": job_id, "attemptNumber": attempt_number},
-    )
-
-    # logType field is present in the newer version of airbyte (1.4.1)
-    # the old logs come as logType == formatted
-    # the new logs will comes as logType == structured; as events
-    if "logType" not in res or res["logType"] == "formatted":
-        return res["logs"]["logLines"]
-
-    if res["logType"] == "structured":
-        return [x["message"] for x in res["logs"]["events"]]
-
-    return []
-
-
-def get_connection_catalog(connection_id: str, **kwargs) -> dict:
-    """get the catalog for a connection to check/refresh for schema changes"""
-    if not isinstance(connection_id, str):
-        raise HttpError(400, "connection_id must be a string")
-    res = abreq(
-        "web_backend/connections/get",
-        {"connectionId": connection_id, "withRefreshedCatalog": True},
-        **kwargs,
-    )
-    return res
-
-
-def update_schema_change(
-    org: Org,
-    connection_info: schema.AirbyteConnectionSchemaUpdate,
-    current_connection: dict,
-) -> dict:
-    """Update the schema change for a connection."""
-    if not isinstance(connection_info, schema.AirbyteConnectionSchemaUpdate):
-        raise HttpError(400, "connection_info must be an instance of AirbyteConnectionSchemaUpdate")
-    if not isinstance(current_connection, dict):
-        raise HttpError(400, "current_connection must be a dictionary")
-
-    # check syncCatalog is present in current_connection
-    if "syncCatalog" not in current_connection:
-        current_connection["syncCatalog"] = {}
-
-    current_connection["sourceCatalogId"] = connection_info.sourceCatalogId
-    # replace the syncCatalog with the new one from connection_info
-    if hasattr(connection_info, "syncCatalog") and connection_info.syncCatalog:
-        current_connection["syncCatalog"] = connection_info.syncCatalog
-        logger.info("Updated syncCatalog")
-
-    res = abreq("web_backend/connections/update", current_connection)
-
-    if "connectionId" not in res:
-        logger.error("Failed to update schema in connection: %s", res)
-        raise HttpError(500, "failed to update schema in connection")
-
-    logger.info("Successfully updated schema in connection")
-
-    # Call helper function to trigger Prefect flow run
-    try:
-        trigger_reset_and_sync_workflow(org, res["connectionId"])
-    except Exception as error:
-        logger.error("Failed to trigger Prefect flow run: %s", error)
-        raise HttpError(500, "failed to trigger Prefect flow run") from error
-
-    return res
-
-
-def get_current_airbyte_version():
-    """Fetch airbyte version"""
-
-    res = abreq("instance_configuration", method="GET")
-    print(res, "AIRBYTE RESPONSE")
-    if "version" not in res:
-        logger.error("No version found")
-        return None
-    return res["version"]
+            "name": connection_name,
+            "syncCatalog": sync_catalog,
+            "status": "active",
+        }
+        
+        if schedule:
+            connection_data["scheduleType"] = schedule.get("scheduleType", "manual")
+            if schedule.get("scheduleData"):
+                connection_data["scheduleData"] = schedule.get("scheduleData")
+        
+        response: Dict[str, Any] = self._post("connections/create", connection_data)
+        return response
+        
+    def update_connection(
+        self, 
+        connection_id: str, 
+        sync_catalog: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Update an existing connection.
+        
+        Args:
+            connection_id: ID of the connection to update
+            sync_catalog: New sync catalog configuration
+            
+        Returns:
+            Updated connection information
+        """
+        data: Dict[str, Any] = {
+            "connectionId": connection_id,
+            "syncCatalog": sync_catalog
+        }
+        
+        response: Dict[str, Any] = self._post("connections/update", data)
+        return response
+        
+    def trigger_sync(self, connection_id: str) -> Dict[str, Any]:
+        """
+        Trigger a sync for a connection.
+        
+        Args:
+            connection_id: ID of the connection to sync
+            
+        Returns:
+            Job information
+        """
+        data: Dict[str, str] = {"connectionId": connection_id}
+        response: Dict[str, Any] = self._post("connections/sync", data)
+        return response
+        
+    def get_job_status(self, job_id: str) -> Dict[str, Any]:
+        """
+        Get status of a job.
+        
+        Args:
+            job_id: ID of the job
+            
+        Returns:
+            Job status information
+        """
+        data: Dict[str, str] = {"id": job_id}
+        response: Dict[str, Any] = self._post("jobs/get", data)
+        return response
+        
+    def create_customer_credential_source(
+        self, 
+        source_def_name: str, 
+        source_name: str, 
+        config: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Create a source for customer credentials.
+        
+        Args:
+            source_def_name: Name of the source definition
+            source_name: Name for the new source
+            config: Source configuration
+            
+        Returns:
+            Created source information
+        """
+        source_def_id: Optional[str] = find_source_definition_id_by_name(self, source_def_name)
+        if source_def_id is None:
+            raise Exception(f"Source definition {source_def_name} not found")
+            
+        normalized_config: Dict[str, Any] = normalize_simple_configs(config)
+        return self.create_source(source_def_id, source_name, normalized_config)
+        
+    def create_and_sync_customer_credential_source(
+        self, 
+        dbt_target: str, 
+        warehouse_credentials: WarehouseCredential,
+        source_def_name: str, 
+        source_name: str, 
+        config: Dict[str, Any]
+    ) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+        """
+        Create a source and sync it with a destination.
+        
+        Args:
+            dbt_target: DBT target
+            warehouse_credentials: Warehouse credentials
+            source_def_name: Name of the source definition
+            source_name: Name for the new source
+            config: Source configuration
+            
+        Returns:
+            Tuple of (source information, connection information, job information)
+        """
+        # Create the source
+        source: Dict[str, Any] = self.create_customer_credential_source(
+            source_def_name, source_name, config
+        )
+        
+        # Create the destination if needed, or find an existing one
+        destination: Dict[str, Any] = create_customer_destination(self, dbt_target, warehouse_credentials)
+        
+        # Ensure sourceId is a string
+        source_id: Any = source.get("sourceId")
+        if not isinstance(source_id, str):
+            raise ValueError("sourceId must be a string")
+        
+        # Discover schema for source
+        schema: Dict[str, Any] = self.discover_source_schema(source_id)
+        
+        # Prepare streams for connection with explicit type
+        streams: List[Dict[str, Any]] = []
+        for stream in schema.get("streams", []):
+            stream_name: str = stream.get("stream", {}).get("name", "")  # Default to "" if None
+            stream_config: Dict[str, Any] = {
+                "stream": stream.get("stream", {}),
+                "config": {
+                    "aliasName": stream_name,
+                    "destinationSyncMode": "append_dedup",
+                    "selected": True,
+                    "syncMode": "incremental"
+                }
+            }
+            streams.append(stream_config)
+        
+        # Ensure destinationId and connectionId are strings
+        destination_id: Any = destination.get("destinationId")
+        if not isinstance(destination_id, str):
+            raise ValueError("destinationId must be a string")
+        
+        # Create the connection
+        connection: Dict[str, Any] = self.create_connection(
+            source_id=source_id,
+            destination_id=destination_id,
+            connection_name=f"{source_name} to {dbt_target}",
+            streams=streams
+        )
+        
+        # Trigger the sync
+        connection_id: Any = connection.get("connectionId")
+        if not isinstance(connection_id, str):
+            raise ValueError("connectionId must be a string")
+        job: Dict[str, Any] = self.trigger_sync(connection_id)
+        
+        return source, connection, job
