@@ -187,9 +187,9 @@ def create_or_update_flowrun(flow_run, deployment_id, state_name=""):
         defaults={
             **({"deployment_id": deployment_id} if deployment_id else {}),
             "name": flow_run["name"],
-            "start_time": parse_datetime(flow_run.get("start_time"))
-            or parse_datetime(flow_run.get("expected_start_time")),
-            "expected_start_time": parse_datetime(flow_run["expected_start_time"]),
+            "start_time": parse_datetime(flow_run.get("start_time", ""))
+            or parse_datetime(flow_run.get("expected_start_time", "")),
+            "expected_start_time": parse_datetime(flow_run.get("expected_start_time", "")),
             "total_run_time": flow_run["total_run_time"],
             "status": MAP_FLOW_RUN_STATE_NAME_TO_TYPE.get(
                 state_name,
