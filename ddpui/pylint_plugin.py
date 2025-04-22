@@ -4,9 +4,8 @@ This helps pylint understand Django's runtime-added attributes.
 """
 
 from pylint.checkers import BaseChecker
-from astroid import MANAGER, nodes, inference_tip
+from astroid import MANAGER, nodes
 from astroid.builder import AstroidBuilder
-import astroid
 
 
 def register(linter):
