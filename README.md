@@ -231,3 +231,42 @@ If using M1-based MacBook  run this before building image
 
 -  `docker compose -p dalgo_backend -f Docker/docker-compose.yml --env-file Docker/.env.docker up -d`
 -  `docker compose -p dalgo_backend -f Docker/docker-compose.yml --env-file Docker/.env.docker down`
+
+## Running Airbyte Integration Tests
+
+The project includes a comprehensive integration test suite for Airbyte that tests end-to-end operations including creating workspaces, sources, destinations, connections, and running syncs.
+
+### Prerequisites
+
+1. A running Airbyte server (as described in Setup Step 4)
+2. Configure the test settings by creating a `.env.airbyte_integration_test` file or adding the settings to your existing `.env` file.
+
+### Configuration
+
+The Airbyte integration tests are configured through environment variables. A template file `.env.airbyte_integration_test` is provided with all the available options.
+
+Key settings:
+- `AIRBYTE_TEST_ENABLED=true` - Set to true to enable tests (they are skipped by default)
+- `AIRBYTE_TEST_DESTINATIONS` - Comma-separated list of destination types to test
+- `AIRBYTE_TEST_SOURCES` - Comma-separated list of source types to test
+
+### Running the Tests
+
+To run only the Airbyte integration tests:
+
+```sh
+python -m pytest ddpui/tests/integration_tests/test_airbyte_full_integration.py -v
+```
+
+To run a specific test:
+
+```sh
+python -m pytest ddpui/tests/integration_tests/test_airbyte_full_integration.py::TestAirbyteFullIntegration::test_01_create_destinations -v
+```
+
+### Notes
+
+- These tests create real Airbyte resources (workspaces, sources, destinations, connections) and clean them up afterward.
+- Test execution might take several minutes, especially when running syncs.
+- The tests require proper Airbyte server access as configured in your `.env` file.
+- For production environments, consider keeping these tests disabled to avoid unintended resource creation.
