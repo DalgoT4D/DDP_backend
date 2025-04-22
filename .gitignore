@@ -114,7 +114,6 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-run-ab-platform.sh
 
 # Spyder project settings
 .spyderproject
