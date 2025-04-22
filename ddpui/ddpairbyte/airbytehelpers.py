@@ -66,7 +66,7 @@ from ddpui.core.pipelinefunctions import (
     setup_airbyte_sync_task_config,
     setup_airbyte_update_schema_task_config,
 )
-from ddpui.core.orgtaskfunctions import fetch_orgtask_lock, fetch_orgtask_lock_v1
+from ddpui.core.orgtaskfunctions import fetch_orgtask_lock_v1
 from ddpui.models.tasks import TaskLock
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.ddpdbt.elementary_service import create_elementary_profile, elementary_setup_status

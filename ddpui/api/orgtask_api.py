@@ -36,7 +36,6 @@ from ddpui.core.orgtaskfunctions import (
     create_default_transform_tasks,
     create_prefect_deployment_for_dbtcore_task,
     delete_orgtask,
-    fetch_orgtask_lock,
     fetch_orgtask_lock_v1,
 )
 from ddpui.utils.custom_logger import CustomLogger
