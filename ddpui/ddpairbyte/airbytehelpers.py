@@ -509,13 +509,13 @@ def get_one_connection(org: Org, connection_id: str):
 
     destination_name = airbyte_conn["destination"]["name"]
 
-    lock = fetch_orgtask_lock(org_task)
+    lock = fetch_orgtask_lock_v1(org_task)
 
     if not lock and reset_dataflow:
         reset_dataflow_orgtask = DataflowOrgTask.objects.filter(dataflow=reset_dataflow).first()
 
         if reset_dataflow_orgtask.orgtask:
-            lock = fetch_orgtask_lock(reset_dataflow_orgtask.orgtask)
+            lock = fetch_orgtask_lock_v1(reset_dataflow_orgtask.orgtask)
 
     res = {
         "name": airbyte_conn["name"],
