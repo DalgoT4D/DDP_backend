@@ -217,7 +217,8 @@ def get_elemetary_task_lock(request):
     """Check if the elementary report generation task is underway"""
     org: Org = request.orguser.org
     org_task = get_edr_send_report_task(org)
-    return fetch_orgtask_lock_v1(org_task)
+    lock = TaskLock.objects.filter(orgtask=org_task).first()
+    return fetch_orgtask_lock_v1(org_task, lock)
 
 
 @orgtask_router.get("transform/", auth=auth.CustomAuthMiddleware())
