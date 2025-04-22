@@ -247,8 +247,8 @@ The Airbyte integration tests are configured through environment variables. A te
 
 Key settings:
 - `AIRBYTE_TEST_ENABLED=true` - Set to true to enable tests (they are skipped by default)
-- `AIRBYTE_TEST_DESTINATIONS` - Comma-separated list of destination types to test
-- `AIRBYTE_TEST_SOURCES` - Comma-separated list of source types to test
+- `AIRBYTE_TEST_DESTINATIONS` - Comma-separated list of destination types to test (must be lowercase values)
+- `AIRBYTE_TEST_SOURCES` - Comma-separated list of source types to test (must be lowercase values)
 
 ### Running the Tests
 
@@ -270,3 +270,4 @@ python -m pytest ddpui/tests/integration_tests/test_airbyte_full_integration.py:
 - Test execution might take several minutes, especially when running syncs.
 - The tests require proper Airbyte server access as configured in your `.env` file.
 - For production environments, consider keeping these tests disabled to avoid unintended resource creation.
+- **WARNING: DO NOT run these tests against production workspaces!** The tests perform destructive operations such as setting "overwrite" sync modes and deleting workspaces and connections.
