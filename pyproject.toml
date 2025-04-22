@@ -283,16 +283,28 @@ testpaths = [
   "ddpui/tests"
 ]
 
+[tool.pylint.master]
+# Load our custom Django plugin
+load-plugins = "ddpui.pylint_plugin"
+init-hook='import sys; sys.path.append(".")'
+
+[tool.pylint.django]
+django-settings-module = "ddpui.settings"
+
 [tool.pylint.messages_control]
 max-line-length = 200
-fail-under = 6.5
+fail-under = 8.5
 disable = [
   "missing-module-docstring",
+  "missing-class-docstring",
+  "missing-function-docstring",
   "broad-exception-raised",
   "broad-exception-caught",
   "too-few-public-methods",
   "logging-not-lazy",
-  "logging-fstring-interpolation"
+  "logging-fstring-interpolation",
+  "redefined-outer-name",
+  "unused-argument"
 ]
 
 [tool.coverage.run]
