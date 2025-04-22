@@ -299,7 +299,7 @@ def do_handle_prefect_webhook(flow_run_id: str, state: str):
     might have no deployment_id
     """
     send_failure_notifications = True
-    flow_run = prefect_service.get_flow_run(flow_run_id)
+    flow_run = prefect_service.get_flow_run_poll(flow_run_id)
     logger.info("flow_run: %s", flow_run)
 
     deployment_id = flow_run.get("deployment_id")
