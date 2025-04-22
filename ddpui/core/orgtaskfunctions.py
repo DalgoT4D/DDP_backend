@@ -21,10 +21,10 @@ from ddpui.ddpprefect.schema import (
 )
 from ddpui.ddpprefect import (
     MANUL_DBT_WORK_QUEUE,
-    FLOW_RUN_COMPLETED_STATE_TYPE,
     FLOW_RUN_PENDING_STATE_TYPE,
     FLOW_RUN_RUNNING_STATE_TYPE,
     FLOW_RUN_SCHEDULED_STATE_TYPE,
+    FLOW_RUN_TERMINAL_STATE_TYPES,
 )
 from ddpui.ddpdbt.schema import DbtCloudJobParams, DbtProjectParams
 from ddpui.ddpprefect import prefect_service
@@ -225,6 +225,9 @@ def fetch_orgtask_lock_v1(org_task: OrgTask, lock: Union[TaskLock, None]):
                     lock_status = TaskLockStatus.RUNNING
                 else:
                     lock_status = TaskLockStatus.COMPLETED
+                    if flow_run.status in FLOW_RUN_TERMINAL_STATE_TYPES:
+                        TaskLock.objects.filter(orgtask=org_task).delete()
+                        return None
 
         return {
             "lockedBy": lock.locked_by.user.email,
