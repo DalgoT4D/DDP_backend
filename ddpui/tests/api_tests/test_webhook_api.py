@@ -28,6 +28,7 @@ from ddpui.utils.webhook_helpers import (
     email_flowrun_logs_to_superadmins,
     notify_platform_admins,
     do_handle_prefect_webhook,
+    get_flow_run_times,
 )
 from ddpui.auth import SUPER_ADMIN_ROLE, GUEST_ROLE, ACCOUNT_MANAGER_ROLE
 from ddpui.models.org import Org
@@ -435,3 +436,35 @@ def test_notify_platform_admins():
         mock_send_text_message.assert_called_once_with(
             "adminemail", "Dalgo notification for platform admins", message
         )
+
+
+def test_get_flow_run_times():
+    """tests get_flow_run_times"""
+    flow_run = {
+        "start_time": str(datetime.now()),
+        "expected_start_time": str(datetime.now()),
+    }
+    start_time, expected_start_time = get_flow_run_times(flow_run)
+    assert str(start_time) == flow_run["start_time"]
+    assert str(expected_start_time) == flow_run["expected_start_time"]
+
+
+def test_get_flow_run_times_no_start_time():
+    """tests get_flow_run_times with no start time"""
+    flow_run = {
+        "start_time": None,
+        "expected_start_time": str(datetime.now()),
+    }
+    start_time, expected_start_time = get_flow_run_times(flow_run)
+    assert str(start_time) == flow_run["expected_start_time"]
+    assert str(expected_start_time) == flow_run["expected_start_time"]
+
+
+def test_get_flow_run_times_no_expected_start_time():
+    """tests get_flow_run_times with no expected start time"""
+    flow_run = {
+        "start_time": str(datetime.now()),
+    }
+    start_time, expected_start_time = get_flow_run_times(flow_run)
+    assert str(start_time) == flow_run["start_time"]
+    assert expected_start_time is not None
