@@ -21,10 +21,10 @@ from ddpui.ddpprefect.schema import (
 )
 from ddpui.ddpprefect import (
     MANUL_DBT_WORK_QUEUE,
-    FLOW_RUN_COMPLETED_STATE_TYPE,
     FLOW_RUN_PENDING_STATE_TYPE,
     FLOW_RUN_RUNNING_STATE_TYPE,
     FLOW_RUN_SCHEDULED_STATE_TYPE,
+    FLOW_RUN_TERMINAL_STATE_TYPES,
 )
 from ddpui.ddpdbt.schema import DbtCloudJobParams, DbtProjectParams
 from ddpui.ddpprefect import prefect_service
@@ -209,31 +209,6 @@ def delete_orgtask(org_task: OrgTask):
     return None, None
 
 
-def fetch_orgtask_lock(org_task: OrgTask):
-    """fetch the lock status of an orgtask"""
-    lock = TaskLock.objects.filter(orgtask=org_task).first()
-    if lock:
-        lock_status = TaskLockStatus.QUEUED
-        if lock.flow_run_id:
-            flow_run = prefect_service.get_flow_run(lock.flow_run_id)
-            if flow_run and flow_run["state_type"] in ["SCHEDULED", "PENDING"]:
-                lock_status = TaskLockStatus.QUEUED
-            elif flow_run and flow_run["state_type"] == "RUNNING":
-                lock_status = TaskLockStatus.RUNNING
-            else:
-                lock_status = TaskLockStatus.COMPLETED
-
-        return {
-            "lockedBy": lock.locked_by.user.email,
-            "lockedAt": lock.locked_at,
-            "flowRunId": lock.flow_run_id,
-            "status": lock_status,
-            "task_slug": org_task.task.slug,
-        }
-
-    return None
-
-
 def fetch_orgtask_lock_v1(org_task: OrgTask, lock: Union[TaskLock, None]):
     """fetch the lock status of an orgtask"""
     if lock:
@@ -250,6 +225,9 @@ def fetch_orgtask_lock_v1(org_task: OrgTask, lock: Union[TaskLock, None]):
                     lock_status = TaskLockStatus.RUNNING
                 else:
                     lock_status = TaskLockStatus.COMPLETED
+                    if flow_run.status in FLOW_RUN_TERMINAL_STATE_TYPES:
+                        TaskLock.objects.filter(orgtask=org_task).delete()
+                        return None
 
         return {
             "lockedBy": lock.locked_by.user.email,

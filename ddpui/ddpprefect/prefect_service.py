@@ -610,6 +610,12 @@ def get_flow_run(flow_run_id: str) -> dict:
     return res
 
 
+def get_flow_run_poll(flow_run_id: str) -> dict:
+    """retreive the logs from a flow-run from prefect"""
+    res = prefect_get(f"flow_runs/{flow_run_id}/poll")
+    return res
+
+
 def create_deployment_flow_run(
     deployment_id: str,
     flow_run_params: dict = None,

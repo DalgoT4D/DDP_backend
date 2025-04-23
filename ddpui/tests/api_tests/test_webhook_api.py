@@ -207,7 +207,7 @@ def test_post_notification_v1():
         "status": FLOW_RUN_FAILED_STATE_TYPE,
         "state_name": FLOW_RUN_FAILED_STATE_NAME,
     }
-    with patch("ddpui.ddpprefect.prefect_service.get_flow_run") as mock_get_flow_run, patch(
+    with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
         "ddpui.utils.webhook_helpers.email_flowrun_logs_to_superadmins"
     ) as mock_email_flowrun_logs_to_superadmins_2, patch(
         "ddpui.utils.webhook_helpers.email_orgusers_ses_whitelisted"
@@ -262,7 +262,7 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
     call_command("create-system-orguser")
 
     # Pending; first message from prefect; deployment has just been triggered
-    with patch("ddpui.ddpprefect.prefect_service.get_flow_run") as mock_get_flow_run:
+    with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run:
         mock_get_flow_run.return_value = flow_run
         do_handle_prefect_webhook(flow_run["id"], flow_run["state_name"])
         assert (
@@ -278,7 +278,7 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
         )
 
     # Running; second message from prefect; deployment is running
-    with patch("ddpui.ddpprefect.prefect_service.get_flow_run") as mock_get_flow_run:
+    with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run:
         flow_run["status"] = FLOW_RUN_RUNNING_STATE_TYPE
         flow_run["state_name"] = FLOW_RUN_RUNNING_STATE_NAME
         mock_get_flow_run.return_value = flow_run
@@ -291,7 +291,7 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
         )
 
     # Failed (any terminal state); third message from prefect; deployment has failed
-    with patch("ddpui.ddpprefect.prefect_service.get_flow_run") as mock_get_flow_run, patch(
+    with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
         "ddpui.utils.webhook_helpers.email_flowrun_logs_to_superadmins"
     ) as mock_email_flowrun_logs_to_superadmins:
         flow_run["status"] = FLOW_RUN_FAILED_STATE_TYPE
@@ -311,7 +311,7 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
         mock_email_flowrun_logs_to_superadmins.assert_called_once()
 
     # Failed (crashed); with retry logic
-    with patch("ddpui.ddpprefect.prefect_service.get_flow_run") as mock_get_flow_run, patch(
+    with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
         "ddpui.utils.webhook_helpers.email_flowrun_logs_to_superadmins"
     ) as mock_email_flowrun_logs_to_superadmins, patch(
         "ddpui.ddpprefect.prefect_service.retry_flow_run"
@@ -343,7 +343,7 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
     PrefectFlowRun.objects.filter(flow_run_id=flow_run["id"]).update(
         status=FLOW_RUN_PENDING_STATE_TYPE, state_name=FLOW_RUN_PENDING_STATE_NAME
     )
-    with patch("ddpui.ddpprefect.prefect_service.get_flow_run") as mock_get_flow_run:
+    with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run:
         flow_run["status"] = FLOW_RUN_COMPLETED_STATE_TYPE
         flow_run["state_name"] = FLOW_RUN_COMPLETED_STATE_NAME
         mock_get_flow_run.return_value = flow_run
