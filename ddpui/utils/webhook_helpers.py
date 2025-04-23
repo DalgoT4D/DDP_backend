@@ -3,6 +3,7 @@ import re
 from ninja.errors import HttpError
 from django.db.models import F
 from django.utils.dateparse import parse_datetime
+from django.utils.timezone import now as timezone_now
 from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.models.org import Org, OrgDataFlowv1
@@ -177,22 +178,27 @@ def notify_platform_admins(org: Org, flow_run_id: str, state: str):
         send_discord_notification(os.getenv("ADMIN_DISCORD_WEBHOOK"), message)
 
 
-def create_or_update_flowrun(flow_run, deployment_id, state_name=""):
-    """Create or update the flow run entry in database"""
-    state_name = state_name if state_name else flow_run["state_name"]
-    deployment_id = deployment_id if deployment_id else flow_run.get("deployment_id")
-
+def get_flow_run_times(flow_run: dict) -> tuple:
+    """get flow run times"""
     start_time_str = flow_run.get("start_time", "")
     if not start_time_str:
         start_time_str = flow_run.get("expected_start_time", "")
     if not start_time_str:
         start_time_str = ""
-    start_time = parse_datetime(start_time_str)
+    start_time = parse_datetime(start_time_str) or timezone_now()
     expected_start_time_str = flow_run.get("expected_start_time", "")
     if not expected_start_time_str:
         expected_start_time_str = ""
-    expected_start_time = parse_datetime(expected_start_time_str)
+    expected_start_time = parse_datetime(expected_start_time_str) or timezone_now()
+    return start_time, expected_start_time
 
+
+def create_or_update_flowrun(flow_run, deployment_id, state_name=""):
+    """Create or update the flow run entry in database"""
+    state_name = state_name if state_name else flow_run["state_name"]
+    deployment_id = deployment_id if deployment_id else flow_run.get("deployment_id")
+
+    start_time, expected_start_time = get_flow_run_times(flow_run)
     PrefectFlowRun.objects.update_or_create(
         flow_run_id=flow_run["id"],
         defaults={
