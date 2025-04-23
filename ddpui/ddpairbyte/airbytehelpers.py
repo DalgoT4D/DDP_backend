@@ -4,7 +4,7 @@ functions which work with airbyte and with the dalgo database
 
 import json
 import os
-from typing import List
+from typing import List, Optional
 from uuid import uuid4
 from pathlib import Path
 from datetime import datetime
@@ -482,62 +482,28 @@ def get_connections(org: Org) -> List[AirbyteGetConnectionsResponse]:
     return res, None
 
 
-def get_one_connection(org: Org, connection_id: str):
-    """retrieve details of a single connection"""
+class ConnectionResponse(BaseModel):
+    connectionId: str
+    name: str
+    status: str
+
+
+def get_one_connection(org: Org, connection_id: str) -> Optional[ConnectionResponse]:
+    """Retrieve details of a single connection"""
     org_task = OrgTask.objects.filter(
         org=org, connection_id=connection_id, task__slug=TASK_AIRBYTESYNC
     ).first()
 
     if org_task is None or org_task.connection_id is None:
-        return None, "connection not found"
+        return None
 
-    # fetch airbyte connection
     airbyte_conn = airbyte_service.get_connection(org.airbyte_workspace_id, org_task.connection_id)
 
-    dataflow_orgtask = DataflowOrgTask.objects.filter(
-        orgtask=org_task, dataflow__dataflow_type="manual"
-    ).first()
-
-    if dataflow_orgtask is None:
-        return None, "deployment not found"
-
-    reset_dataflow: OrgDataFlowv1 = dataflow_orgtask.dataflow.reset_conn_dataflow
-
-    # fetch the source and destination names
-    # the web_backend/connections/get fetches the source & destination objects also so we dont need to query again
-    source_name = airbyte_conn["source"]["name"]
-
-    destination_name = airbyte_conn["destination"]["name"]
-
-    lock = fetch_orgtask_lock(org_task)
-
-    if not lock and reset_dataflow:
-        reset_dataflow_orgtask = DataflowOrgTask.objects.filter(dataflow=reset_dataflow).first()
-
-        if reset_dataflow_orgtask.orgtask:
-            lock = fetch_orgtask_lock(reset_dataflow_orgtask.orgtask)
-
-    res = {
-        "name": airbyte_conn["name"],
-        "connectionId": airbyte_conn["connectionId"],
-        "source": {"id": airbyte_conn["sourceId"], "name": source_name},
-        "destination": {"id": airbyte_conn["destinationId"], "name": destination_name},
-        "catalogId": airbyte_conn["catalogId"],
-        "syncCatalog": airbyte_conn["syncCatalog"],
-        "destinationSchema": (
-            airbyte_conn["namespaceFormat"]
-            if airbyte_conn["namespaceDefinition"] == "customformat"
-            else ""
-        ),
-        "status": airbyte_conn["status"],
-        "deploymentId": (
-            dataflow_orgtask.dataflow.deployment_id if dataflow_orgtask.dataflow else None
-        ),
-        "lock": lock,
-        "resetConnDeploymentId": (reset_dataflow.deployment_id if reset_dataflow else None),
-    }
-
-    return res, None
+    return ConnectionResponse(
+        connectionId=airbyte_conn["connectionId"],
+        name=airbyte_conn["name"],
+        status=airbyte_conn["status"],
+    )
 
 
 def reset_connection(org: Org, connection_id: str):
