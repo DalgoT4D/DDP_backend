@@ -182,14 +182,24 @@ def create_or_update_flowrun(flow_run, deployment_id, state_name=""):
     state_name = state_name if state_name else flow_run["state_name"]
     deployment_id = deployment_id if deployment_id else flow_run.get("deployment_id")
 
+    start_time_str = flow_run.get("start_time", "")
+    if not start_time_str:
+        start_time_str = flow_run.get("expected_start_time", "")
+    if not start_time_str:
+        start_time_str = ""
+    start_time = parse_datetime(start_time_str)
+    expected_start_time_str = flow_run.get("expected_start_time", "")
+    if not expected_start_time_str:
+        expected_start_time_str = ""
+    expected_start_time = parse_datetime(expected_start_time_str)
+
     PrefectFlowRun.objects.update_or_create(
         flow_run_id=flow_run["id"],
         defaults={
             **({"deployment_id": deployment_id} if deployment_id else {}),
             "name": flow_run["name"],
-            "start_time": parse_datetime(flow_run.get("start_time", ""))
-            or parse_datetime(flow_run.get("expected_start_time", "")),
-            "expected_start_time": parse_datetime(flow_run.get("expected_start_time", "")),
+            "start_time": start_time,
+            "expected_start_time": expected_start_time,
             "total_run_time": flow_run["total_run_time"],
             "status": MAP_FLOW_RUN_STATE_NAME_TO_TYPE.get(
                 state_name,
