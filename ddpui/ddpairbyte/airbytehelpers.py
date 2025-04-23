@@ -66,7 +66,7 @@ from ddpui.core.pipelinefunctions import (
     setup_airbyte_sync_task_config,
     setup_airbyte_update_schema_task_config,
 )
-from ddpui.core.orgtaskfunctions import fetch_orgtask_lock, fetch_orgtask_lock_v1
+from ddpui.core.orgtaskfunctions import fetch_orgtask_lock_v1
 from ddpui.models.tasks import TaskLock
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.ddpdbt.elementary_service import create_elementary_profile, elementary_setup_status
@@ -509,13 +509,15 @@ def get_one_connection(org: Org, connection_id: str):
 
     destination_name = airbyte_conn["destination"]["name"]
 
-    lock = fetch_orgtask_lock(org_task)
+    sync_lock = TaskLock.objects.filter(orgtask=org_task).first()
+    lock = fetch_orgtask_lock_v1(org_task, sync_lock)
 
     if not lock and reset_dataflow:
         reset_dataflow_orgtask = DataflowOrgTask.objects.filter(dataflow=reset_dataflow).first()
 
         if reset_dataflow_orgtask.orgtask:
-            lock = fetch_orgtask_lock(reset_dataflow_orgtask.orgtask)
+            reset_lock = TaskLock.objects.filter(orgtask=reset_dataflow_orgtask.orgtask).first()
+            lock = fetch_orgtask_lock_v1(reset_dataflow_orgtask.orgtask, reset_lock)
 
     res = {
         "name": airbyte_conn["name"],

@@ -668,7 +668,7 @@ def get_flow_run_by_id(request, flow_run_id):
     # pylint: disable=unused-argument
     """fetch a flow run from prefect"""
     try:
-        flow_run = prefect_service.get_flow_run(flow_run_id)
+        flow_run = prefect_service.get_flow_run_poll(flow_run_id)
     except Exception as error:
         logger.exception(error)
         raise HttpError(400, "failed to retrieve logs") from error
