@@ -482,11 +482,8 @@ def get_connections(org: Org) -> List[AirbyteGetConnectionsResponse]:
     return res, None
 
 
-class ConnectionResponse(BaseModel):
-    connectionId: str
-    name: str
-    status: str
-
+from typing import List, Optional
+from pydantic import BaseModel
 
 def get_one_connection(org: Org, connection_id: str) -> Optional[ConnectionResponse]:
     """Retrieve details of a single connection"""
