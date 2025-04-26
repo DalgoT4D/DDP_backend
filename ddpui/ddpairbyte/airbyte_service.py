@@ -26,7 +26,6 @@ from ddpui.ddpairbyte.schema import (
 )
 from ddpui.utils import thread
 from ddpui.models.org import OrgPrefectBlockv1
-from pydantic import BaseModel
 
 load_dotenv()
 
@@ -127,13 +126,7 @@ def get_workspaces():
     return res
 
 
-# Example Pydantic schema for workspace response
-class WorkspaceResponse(BaseModel):
-    workspaceId: str
-    name: str
-
-
-def get_workspace(workspace_id: str) -> WorkspaceResponse:
+def get_workspace(workspace_id: str) -> dict:
     """Fetch a workspace from the airbyte server"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
@@ -142,7 +135,7 @@ def get_workspace(workspace_id: str) -> WorkspaceResponse:
     if "workspaceId" not in res:
         logger.info("Workspace not found: %s", workspace_id)
         raise HttpError(404, "workspace not found")
-    return WorkspaceResponse(**res)
+    return res
 
 
 def set_workspace_name(workspace_id: str, name: str) -> dict:
@@ -304,6 +297,26 @@ def get_sources(workspace_id: str) -> List[Dict]:
     res = abreq("sources/list", {"workspaceId": workspace_id})
     if "sources" not in res:
         logger.error("Sources not found for workspace: %s", workspace_id)
+        raise HttpError(404, "sources not found for workspace")
+    return res
+
+
+def get_sources_v1(workspace_id: str, limit: int, offset: int, search: str = "") -> List[Dict]:
+    """Fetch paginated sources from airbyte workspace with optional search"""
+    if not isinstance(workspace_id, str):
+        raise HttpError(400, "Invalid workspace ID")
+
+    payload = {
+        "workspaceId": workspace_id,
+        "pagination": {"pageSize": limit, "rowOffset": offset},
+    }
+
+    if search and len(search) > 0:
+        payload["nameContains"] = search
+
+    res = abreq("sources/list_paginated", payload)
+    if "sources" not in res:
+        logger.error("Paginated sources not found for workspace: %s", workspace_id)
         raise HttpError(404, "sources not found for workspace")
     return res
 

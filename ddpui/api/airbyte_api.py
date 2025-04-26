@@ -1,8 +1,7 @@
 """Dalgo API for Airbyte"""
 
 import os
-from typing import List, Optional
-from pydantic import BaseModel
+from typing import List
 from ninja.errors import HttpError
 from ninja import Router
 from flags.state import flag_enabled
@@ -47,16 +46,10 @@ from ddpui.utils.singletaskprogress import SingleTaskProgress
 airbyte_router = Router()
 logger = CustomLogger("airbyte")
 
-class AirbyteSourceDefinition(BaseModel):
-    sourceId: str
-    name: str
 
-class AirbyteSourceDefinitionResponse(BaseModel):
-    sourceDefinitions: list[AirbyteSourceDefinition]
-
-@airbyte_router.get("/source_definitions", auth=auth.CustomAuthMiddleware(), response=AirbyteSourceDefinitionResponse)
+@airbyte_router.get("/source_definitions", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_view_sources"])
-def get_airbyte_source_definitions(request) -> AirbyteSourceDefinitionResponse:
+def get_airbyte_source_definitions(request):
     """Fetch airbyte source definitions in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -73,7 +66,7 @@ def get_airbyte_source_definitions(request) -> AirbyteSourceDefinitionResponse:
             if source_def["name"] in allowed_sources.split("|")
         ]
     logger.debug(res)
-    return AirbyteSourceDefinitionResponse(sourceDefinitions=res["sourceDefinitions"])
+    return res["sourceDefinitions"]
 
 
 @airbyte_router.get(
@@ -234,6 +227,33 @@ def get_airbyte_sources(request):
         raise HttpError(400, "create an airbyte workspace first")
 
     res = airbyte_service.get_sources(orguser.org.airbyte_workspace_id)["sources"]
+    logger.debug(res)
+    return res
+
+
+@airbyte_router.get("/v1/sources", auth=auth.CustomAuthMiddleware())
+@has_permission(["can_view_sources"])
+def get_airbyte_sources_v1(request, limit: int = 20, offset: int = 0, search: str = ""):
+    """
+    Fetch paginated and searchable Airbyte sources in the user organization workspace.
+
+    Args:
+        request: The incoming API request object with orguser.
+        limit (int): Number of sources to return. Default is 20.
+        offset (int): Pagination offset. Default is 0.
+        search (str): Optional search query.
+
+    Returns:
+        A list of Airbyte sources filtered by the organization and search parameters.
+    """
+    orguser: OrgUser = request.orguser
+
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "Create an Airbyte workspace first")
+
+    res = airbyte_service.get_sources_v1(
+        orguser.org.airbyte_workspace_id, limit=limit, offset=offset, search=search
+    )
     logger.debug(res)
     return res
 

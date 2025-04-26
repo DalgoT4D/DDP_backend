@@ -74,7 +74,6 @@ def lookup_user(email: str):
 
 def signup_orguser(payload: OrgUserCreate):
     """create an orguser and send an email"""
-
     signupcode = payload.signupcode
     if signupcode not in [os.getenv("SIGNUPCODE"), os.getenv("DEMO_SIGNUPCODE")]:
         return None, "That is not the right signup code"
