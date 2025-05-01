@@ -1,7 +1,8 @@
 """Dalgo API for Airbyte"""
 
 import os
-from typing import List
+from typing import List, Optional
+from pydantic import BaseModel
 from ninja.errors import HttpError
 from ninja import Router
 from flags.state import flag_enabled
@@ -46,10 +47,16 @@ from ddpui.utils.singletaskprogress import SingleTaskProgress
 airbyte_router = Router()
 logger = CustomLogger("airbyte")
 
+class AirbyteSourceDefinition(BaseModel):
+    sourceId: str
+    name: str
 
-@airbyte_router.get("/source_definitions", auth=auth.CustomAuthMiddleware())
+class AirbyteSourceDefinitionResponse(BaseModel):
+    sourceDefinitions: list[AirbyteSourceDefinition]
+
+@airbyte_router.get("/source_definitions", auth=auth.CustomAuthMiddleware(), response=AirbyteSourceDefinitionResponse)
 @has_permission(["can_view_sources"])
-def get_airbyte_source_definitions(request):
+def get_airbyte_source_definitions(request) -> AirbyteSourceDefinitionResponse:
     """Fetch airbyte source definitions in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -66,7 +73,7 @@ def get_airbyte_source_definitions(request):
             if source_def["name"] in allowed_sources.split("|")
         ]
     logger.debug(res)
-    return res["sourceDefinitions"]
+    return AirbyteSourceDefinitionResponse(sourceDefinitions=res["sourceDefinitions"])
 
 
 @airbyte_router.get(
