@@ -1737,7 +1737,7 @@ def test_create_connection_success():
         assert res["connectionId"] == "connection-id"
 
 
-def test_create_connection_success():
+def test_create_connection_success_2():
     """Test successful connection creation with required primaryKey and cursorField"""
     connection_info = schema.AirbyteConnectionCreate(
         sourceId="source-id",
