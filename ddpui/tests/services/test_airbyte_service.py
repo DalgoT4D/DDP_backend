@@ -1699,44 +1699,6 @@ def test_update_schema_change_missing_syncCatalog():
         mock_trigger_reset_and_sync_workflow.assert_called_once_with(org, "test-connection-id")
 
 
-def test_create_connection_success():
-    """Test successful connection creation"""
-    connection_info = schema.AirbyteConnectionCreate(
-        sourceId="source-id",
-        destinationId="destination-id",
-        name="test-connection",
-        destinationSchema=None,
-        streams=[
-            {
-                "name": "stream-1",
-                "selected": True,
-                "syncMode": "incremental",
-                "destinationSyncMode": "append_dedup",
-                "primaryKey": ["id"],
-                "cursorField": ["updated_at"],
-            }
-        ],
-    )
-    workspace_id = "workspace-id"
-
-    with patch(
-        "my_module.get_source_schema_catalog",
-        return_value={
-            "catalogId": "catalog-id",
-            "catalog": {
-                "streams": [
-                    {
-                        "stream": {"name": "stream-1"},
-                        "config": {},
-                    }
-                ]
-            },
-        },
-    ), patch("my_module.abreq", return_value={"connectionId": "connection-id"}):
-        res = create_connection(workspace_id, connection_info)
-        assert res["connectionId"] == "connection-id"
-
-
 def test_create_connection_success_2():
     """Test successful connection creation with required primaryKey and cursorField"""
     connection_info = schema.AirbyteConnectionCreate(
