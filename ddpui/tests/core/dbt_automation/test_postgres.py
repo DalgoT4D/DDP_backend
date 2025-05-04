@@ -8,7 +8,7 @@ from ddpui.dbt_automation.utils.postgres import PostgresClient
 @pytest.fixture
 def mock_tunnel():
     """Mock the SSHTunnelForwarder class."""
-    with patch("mydb.SSHTunnelForwarder") as MockTunnel:
+    with patch("ddpui.dbt_automation.utils.postgres.SSHTunnelForwarder") as MockTunnel:
         instance = MagicMock()
         instance.local_bind_port = 6543
         MockTunnel.return_value = instance
@@ -18,7 +18,9 @@ def mock_tunnel():
 @pytest.fixture
 def mock_connection():
     """Mock the PostgresClient.get_connection method."""
-    with patch("mydb.PostgresClient.get_connection") as mock_get_conn:
+    with patch(
+        "ddpui.dbt_automation.utils.postgres.PostgresClient.get_connection"
+    ) as mock_get_conn:
         mock_get_conn.return_value = "MOCK_CONNECTION"
         yield mock_get_conn
 
