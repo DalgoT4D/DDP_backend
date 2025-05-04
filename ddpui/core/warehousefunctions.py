@@ -67,6 +67,6 @@ def fetch_warehouse_tables(request, org_warehouse, cache_key=None):
             )
 
     if cache_key:
-        RedisClient.get_instance().set(cache_key, json.dumps(res))
+        RedisClient.get_instance().set(cache_key, json.dumps(res), ex=24 * 60 * 60)
 
     return res
