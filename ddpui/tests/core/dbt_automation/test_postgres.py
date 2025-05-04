@@ -1,5 +1,26 @@
-from unittest.mock import patch, ANY, Mock
+import os
+import tempfile
+from unittest.mock import patch, ANY, Mock, MagicMock
+import pytest
 from ddpui.dbt_automation.utils.postgres import PostgresClient
+
+
+@pytest.fixture
+def mock_tunnel():
+    """Mock the SSHTunnelForwarder class."""
+    with patch("mydb.SSHTunnelForwarder") as MockTunnel:
+        instance = MagicMock()
+        instance.local_bind_port = 6543
+        MockTunnel.return_value = instance
+        yield MockTunnel
+
+
+@pytest.fixture
+def mock_connection():
+    """Mock the PostgresClient.get_connection method."""
+    with patch("mydb.PostgresClient.get_connection") as mock_get_conn:
+        mock_get_conn.return_value = "MOCK_CONNECTION"
+        yield mock_get_conn
 
 
 def test_get_connection_1():
@@ -111,6 +132,45 @@ def test_get_connection_7():
         )
         mock_connect.assert_called_once()
         mock_connect.assert_called_with(sslmode="disable", sslrootcert=ANY)
+
+
+def test_init_with_ssh_pkey_writes_tempfile_and_starts_tunnel(mock_tunnel, mock_connection):
+    """tests PostgresClient.__init__ with ssh_pkey"""
+    fake_key_content = "FAKE_PRIVATE_KEY_CONTENT"
+
+    conn_info = {
+        "host": "db.internal",
+        "port": 5432,
+        "user": "testuser",
+        "password": "testpass",
+        "database": "testdb",
+        "ssh_host": "bastion.internal",
+        "ssh_port": 22,
+        "ssh_username": "sshuser",
+        "ssh_pkey": fake_key_content,
+    }
+
+    with patch("tempfile.NamedTemporaryFile", wraps=tempfile.NamedTemporaryFile) as mock_tempfile:
+        client = PostgresClient(conn_info)
+
+        # Ensure temporary file was created
+        assert mock_tempfile.called
+        # Ensure the content of the file matches the ssh_pkey
+        temp_file_path = client.conn_info["ssh_pkey"]
+        with open(temp_file_path, "r", encoding="utf8") as f:
+            assert f.read() == fake_key_content
+
+        # Clean up the tempfile
+        os.remove(temp_file_path)
+
+    # Ensure the SSH tunnel was started
+    mock_tunnel.return_value.start.assert_called_once()
+
+    # Ensure connection was made with correct redirected host/port
+    args = mock_connection.call_args[0][0]
+    assert args["host"] == "localhost"
+    assert args["port"] == 6543
+    assert client.connection == "MOCK_CONNECTION"
 
 
 def test_drop_table():
