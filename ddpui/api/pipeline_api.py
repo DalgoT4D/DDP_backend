@@ -13,6 +13,7 @@ from ddpui.models.org import OrgDataFlowv1, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import DataflowOrgTask, OrgTask, TaskLockStatus
 from ddpui.models.llm import LogsSummarizationType
+from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
     PrefectFlowRunSchema,
@@ -611,6 +612,18 @@ def post_run_prefect_org_deployment_task(request, deployment_id, payload: TaskPa
                 }
 
         res = prefect_service.create_deployment_flow_run(deployment_id, flow_run_params)
+        prefectflowrun = PrefectFlowRun.objects.create(
+            deployment_id=deployment_id,
+            flow_run_id=res["flow_run_id"],
+            name=res["name"],
+            start_time=res["start_time"],
+            expected_start_time=res["expected_start_time"],
+            total_run_time=res["total_run_time"],
+            status=res["status"],
+            state_name=res["state_name"],
+            retries=res["retries"],
+            orguser=orguser,
+        )
     except Exception as error:
         for task_lock in locks:
             logger.info("deleting TaskLock %s", task_lock.orgtask.task.slug)
