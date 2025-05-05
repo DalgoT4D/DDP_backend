@@ -4,7 +4,7 @@ Functions which communicate with Airbyte
 These functions do not access the Dalgo database
 """
 
-from typing import Dict, List
+from typing import Dict, List, Any, Optional, Union, Tuple
 import os
 from datetime import datetime
 import requests
@@ -23,6 +23,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteDestinationCreate,
     AirbyteSourceUpdateCheckConnection,
     AirbyteDestinationUpdateCheckConnection,
+    AirbyteConnectionSchemaUpdate,
 )
 from ddpui.utils import thread
 from ddpui.models.org import OrgPrefectBlockv1
@@ -33,7 +34,7 @@ load_dotenv()
 logger = CustomLogger("airbyte")
 
 
-def abreq(endpoint, req=None, **kwargs):
+def abreq(endpoint: str, req: Optional[Dict[str, Any]] = None, **kwargs) -> Dict[str, Any]:
     """Request to the airbyte server"""
     method = kwargs.get("method", "POST")
     if method not in ["GET", "POST"]:
@@ -72,16 +73,15 @@ def abreq(endpoint, req=None, **kwargs):
 
     logger.info("Making request to Airbyte server: %s", endpoint)
     try:
-        res = {}
         if method == "POST":
-            res = requests.post(
+            response = requests.post(
                 f"http://{abhost}:{abport}/api/{abver}/{endpoint}",
                 headers={"Authorization": f"Basic {token}"},
                 json=req,
                 timeout=kwargs.get("timeout", 30),
             )
-        elif method == "GET":
-            res = requests.get(
+        else:  # method == "GET"
+            response = requests.get(
                 f"http://{abhost}:{abport}/api/{abver}/{endpoint}",
                 headers={"Authorization": f"Basic {token}"},
                 json=req,
@@ -92,30 +92,30 @@ def abreq(endpoint, req=None, **kwargs):
         raise HttpError(500, str(conn_error)) from conn_error
 
     try:
-        result_obj = remove_nested_attribute(res.json(), "icon")
+        result_obj = remove_nested_attribute(response.json(), "icon")
         logger.debug("Response from Airbyte server:")
         logger.debug(result_obj)
     except ValueError:
-        logger.debug("Response from Airbyte server: %s", res.text)
+        logger.debug("Response from Airbyte server: %s", response.text)
 
     try:
-        res.raise_for_status()
+        response.raise_for_status()
     except Exception as error:
         logger.exception(error.args)
-        raise HttpError(res.status_code, res.text) from error
+        raise HttpError(response.status_code, response.text) from error
 
-    if "application/json" in res.headers.get("Content-Type", ""):
-        return res.json()
+    if "application/json" in response.headers.get("Content-Type", ""):
+        return response.json()
 
     logger.error(
         "abreq result has content-type %s while hitting %s",
-        res.headers.get("Content-Type", ""),
+        response.headers.get("Content-Type", ""),
         endpoint,
     )
     return {}
 
 
-def get_workspaces():
+def get_workspaces() -> Dict[str, Any]:
     """Fetch all workspaces in airbyte server"""
     logger.info("Fetching workspaces from Airbyte server")
 
@@ -168,7 +168,7 @@ def create_workspace(name: str) -> dict:
     return res
 
 
-def delete_workspace(workspace_id: str):
+def delete_workspace(workspace_id: str) -> Dict[str, Any]:
     """Deletes an airbyte workspace"""
     res = abreq("workspaces/delete", {"workspaceId": workspace_id})
     return res
@@ -196,7 +196,7 @@ def get_source_definition(workspace_id: str, sourcedef_id: str) -> dict:
     return res
 
 
-def get_source_definitions(workspace_id: str) -> List[Dict]:
+def get_source_definitions(workspace_id: str) -> Dict[str, List[Dict[str, Any]]]:
     """Fetch source definitions for an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "Invalid workspace ID")
@@ -257,7 +257,7 @@ def create_custom_source_definition(
     docker_repository: str,
     docker_image_tag: str,
     documentation_url: str,
-):
+) -> Dict[str, Any]:
     """Create a custom source definition in Airbyte."""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "Invalid workspace ID")
@@ -301,7 +301,7 @@ def get_sources(workspace_id: str) -> List[Dict]:
     return res
 
 
-def get_source(workspace_id: str, source_id: str) -> dict:
+def get_source(workspace_id: str, source_id: str) -> Dict[str, Any]:
     """Fetch a source in an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "Invalid workspace ID")
@@ -316,7 +316,7 @@ def get_source(workspace_id: str, source_id: str) -> dict:
     return res
 
 
-def delete_source(workspace_id: str, source_id: str) -> dict:
+def delete_source(workspace_id: str, source_id: str) -> Dict[str, Any]:
     """Deletes a source in an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "Invalid workspace ID")
@@ -328,7 +328,7 @@ def delete_source(workspace_id: str, source_id: str) -> dict:
     return res
 
 
-def create_source(workspace_id: str, name: str, sourcedef_id: str, config: dict) -> dict:
+def create_source(workspace_id: str, name: str, sourcedef_id: str, config: Dict[str, Any]) -> Dict[str, Any]:
     """Create source in an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
@@ -366,7 +366,7 @@ def create_source(workspace_id: str, name: str, sourcedef_id: str, config: dict)
     return res
 
 
-def update_source(source_id: str, name: str, config: dict, sourcedef_id: str) -> dict:
+def update_source(source_id: str, name: str, config: Dict[str, Any], sourcedef_id: str) -> Dict[str, Any]:
     """Update source in an airbyte workspace"""
     if not isinstance(source_id, str):
         raise HttpError(400, "source_id must be a string")
@@ -425,7 +425,7 @@ def check_source_connection(workspace_id: str, data: AirbyteSourceCreate) -> dic
     return res
 
 
-def check_source_connection_for_update(source_id: str, data: AirbyteSourceUpdateCheckConnection):
+def check_source_connection_for_update(source_id: str, data: AirbyteSourceUpdateCheckConnection) -> Dict[str, Any]:
     """Test connection on a potential edit on source"""
     res = abreq(
         "sources/check_connection_for_update",
@@ -458,7 +458,7 @@ def check_source_connection_for_update(source_id: str, data: AirbyteSourceUpdate
 
 def get_source_schema_catalog(
     workspace_id: str, source_id: str
-) -> dict:  # pylint: disable=unused-argument
+) -> Dict[str, Any]:  # pylint: disable=unused-argument
     """Fetch source schema catalog for a source in an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
@@ -498,7 +498,7 @@ def get_source_schema_catalog(
     return res
 
 
-def get_destination_definitions(workspace_id: str) -> dict:
+def get_destination_definitions(workspace_id: str) -> Dict[str, List[Dict[str, Any]]]:
     """Fetch destination definitions in an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
@@ -510,7 +510,7 @@ def get_destination_definitions(workspace_id: str) -> dict:
     return res
 
 
-def get_destination_definition(workspace_id: str, destinationdef_id: str) -> dict:
+def get_destination_definition(workspace_id: str, destinationdef_id: str) -> Dict[str, Any]:
     """get the destination definition"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
@@ -527,7 +527,7 @@ def get_destination_definition(workspace_id: str, destinationdef_id: str) -> dic
     return res
 
 
-def get_destination_definition_specification(workspace_id: str, destinationdef_id: str) -> dict:
+def get_destination_definition_specification(workspace_id: str, destinationdef_id: str) -> Dict[str, Any]:
     """Fetch destination definition specification for a destination in a workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
@@ -551,7 +551,7 @@ def get_destination_definition_specification(workspace_id: str, destinationdef_i
     return res
 
 
-def get_destinations(workspace_id: str) -> dict:
+def get_destinations(workspace_id: str) -> Dict[str, List[Dict[str, Any]]]:
     """Fetch all desintations in an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
@@ -563,7 +563,7 @@ def get_destinations(workspace_id: str) -> dict:
     return res
 
 
-def get_destination(workspace_id: str, destination_id: str) -> dict:
+def get_destination(workspace_id: str, destination_id: str) -> Dict[str, Any]:
     """Fetch a destination in an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
@@ -585,7 +585,7 @@ def delete_destination(
     return res
 
 
-def create_destination(workspace_id: str, name: str, destinationdef_id: str, config: dict) -> dict:
+def create_destination(workspace_id: str, name: str, destinationdef_id: str, config: Dict[str, Any]) -> Dict[str, Any]:
     """Create destination in an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
@@ -639,7 +639,7 @@ def update_destination(
     return res
 
 
-def check_destination_connection(workspace_id: str, data: AirbyteDestinationCreate) -> dict:
+def check_destination_connection(workspace_id: str, data: AirbyteDestinationCreate) -> Dict[str, Any]:
     """Test a potential destination's connection in an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
@@ -662,7 +662,7 @@ def check_destination_connection(workspace_id: str, data: AirbyteDestinationCrea
 
 def check_destination_connection_for_update(
     destination_id: str, data: AirbyteDestinationUpdateCheckConnection
-):
+) -> Dict[str, Any]:
     """Test a potential destination's connection in an airbyte workspace"""
     if not isinstance(destination_id, str):
         raise HttpError(400, "destination_id must be a string")
@@ -683,7 +683,7 @@ def check_destination_connection_for_update(
     return res
 
 
-def get_connections(workspace_id: str) -> dict:
+def get_connections(workspace_id: str) -> Dict[str, List[Dict[str, Any]]]:
     """Fetch all connections of an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
@@ -709,7 +709,7 @@ def get_webbackend_connections(workspace_id: str) -> dict:
     return res["connections"]
 
 
-def get_connection(workspace_id: str, connection_id: str) -> dict:
+def get_connection(workspace_id: str, connection_id: str) -> Dict[str, Any]:
     """Fetch a connection of an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
@@ -905,7 +905,7 @@ def reset_connection(connection_id: str) -> dict:
     return res
 
 
-def delete_connection(workspace_id: str, connection_id: str) -> dict:
+def delete_connection(workspace_id: str, connection_id: str) -> Dict[str, Any]:
     """Delete a connection of an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
@@ -917,7 +917,7 @@ def delete_connection(workspace_id: str, connection_id: str) -> dict:
     return res
 
 
-def sync_connection(workspace_id: str, connection_id: str) -> dict:
+def sync_connection(workspace_id: str, connection_id: str) -> Dict[str, Any]:
     """Sync a connection in an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
@@ -929,7 +929,7 @@ def sync_connection(workspace_id: str, connection_id: str) -> dict:
     return res
 
 
-def get_job_info(job_id: str) -> dict:
+def get_job_info(job_id: str) -> Dict[str, Any]:
     """get debug info for an airbyte job"""
     if not isinstance(job_id, str):
         raise HttpError(400, "job_id must be a string")
@@ -938,7 +938,7 @@ def get_job_info(job_id: str) -> dict:
     return res
 
 
-def get_job_info_without_logs(job_id: str) -> dict:
+def get_job_info_without_logs(job_id: str) -> Dict[str, Any]:
     """get job info without logs for an airbyte job"""
     if not isinstance(job_id, str):
         raise HttpError(400, "job_id must be a string")
@@ -1028,7 +1028,7 @@ def get_logs_for_job(job_id: int, attempt_number: int = 0) -> list[str]:
     return []
 
 
-def get_connection_catalog(connection_id: str, **kwargs) -> dict:
+def get_connection_catalog(connection_id: str, **kwargs) -> Dict[str, Any]:
     """get the catalog for a connection to check/refresh for schema changes"""
     if not isinstance(connection_id, str):
         raise HttpError(400, "connection_id must be a string")
@@ -1042,9 +1042,9 @@ def get_connection_catalog(connection_id: str, **kwargs) -> dict:
 
 def update_schema_change(
     org: Org,
-    connection_info: schema.AirbyteConnectionSchemaUpdate,
-    current_connection: dict,
-) -> dict:
+    connection_info: AirbyteConnectionSchemaUpdate,
+    current_connection: Dict[str, Any],
+) -> Dict[str, Any]:
     """Update the schema change for a connection."""
     if not isinstance(connection_info, schema.AirbyteConnectionSchemaUpdate):
         raise HttpError(400, "connection_info must be an instance of AirbyteConnectionSchemaUpdate")
