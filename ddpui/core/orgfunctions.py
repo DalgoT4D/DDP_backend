@@ -9,8 +9,8 @@ from ddpui.models.org import (
     Org,
     CreateOrgSchema,
 )
-from ddpui.utils.constants import DALGO_WITH_SUPERSET, DALGO, FREE_TRIAL, ORG_BASE_PLANS
-from ddpui.models.org_plans import OrgPlans
+from ddpui.utils.constants import DALGO_WITH_SUPERSET, DALGO, FREE_TRIAL
+from ddpui.models.org_plans import OrgPlans, OrgPlanType
 from ddpui.celeryworkers.tasks import add_custom_connectors_to_workspace
 
 logger = CustomLogger("ddpui")
@@ -60,13 +60,13 @@ def create_org_plan(payload: CreateOrgSchema, org):
         "features": {},
     }
 
-    if payload.base_plan == ORG_BASE_PLANS["FREE_TRIAL"]:
+    if payload.base_plan == OrgPlanType.FREE_TRIAL:
         plan_payload["features"] = FREE_TRIAL
-    elif payload.base_plan == ORG_BASE_PLANS["INTERNAL"]:
+    elif payload.base_plan == OrgPlanType.INTERNAL:
         plan_payload["features"] = DALGO_WITH_SUPERSET
-    elif payload.base_plan == ORG_BASE_PLANS["DALGO"] and payload.superset_included:
+    elif payload.base_plan == OrgPlanType.DALGO and payload.superset_included:
         plan_payload["features"] = DALGO_WITH_SUPERSET
-    elif payload.base_plan == ORG_BASE_PLANS["DALGO"] and not payload.superset_included:
+    elif payload.base_plan == OrgPlanType.DALGO and not payload.superset_included:
         plan_payload["features"] = DALGO
 
     org_plan = OrgPlans.objects.create(org=org, **plan_payload)
