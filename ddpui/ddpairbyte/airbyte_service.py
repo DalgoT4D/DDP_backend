@@ -736,11 +736,11 @@ def create_connection(
         logger.error(error_message)
         raise HttpError(400, error_message)
 
-    sourceschemacatalog = get_source_schema_catalog(workspace_id, connection_info.sourceId)
+    sourceschemacatalog = connection_info.syncCatalog
     payload = {
         "sourceId": connection_info.sourceId,
         "destinationId": connection_info.destinationId,
-        "sourceCatalogId": sourceschemacatalog["catalogId"],
+        "sourceCatalogId": connection_info.catalogId,
         "syncCatalog": {
             "streams": [
                 # we're going to put the stream
@@ -762,7 +762,7 @@ def create_connection(
 
     # one stream per table
     selected_streams = {x["name"]: x for x in connection_info.streams}
-    for schema_cat in sourceschemacatalog["catalog"]["streams"]:
+    for schema_cat in sourceschemacatalog["streams"]:
         stream_name = schema_cat["stream"]["name"]
         if stream_name in selected_streams and selected_streams[stream_name]["selected"]:
             schema_cat["config"]["selected"] = True
@@ -827,7 +827,7 @@ def update_connection(
         logger.error(error_message)
         raise HttpError(400, error_message)
 
-    sourceschemacatalog = get_source_schema_catalog(workspace_id, current_connection["sourceId"])
+    sourceschemacatalog = connection_info.syncCatalog
 
     # update the name
     if connection_info.name:
@@ -842,7 +842,7 @@ def update_connection(
 
     # one stream per table
     selected_streams = {x["name"]: x for x in connection_info.streams}
-    for schema_cat in sourceschemacatalog["catalog"]["streams"]:
+    for schema_cat in sourceschemacatalog["streams"]:
         stream_name = schema_cat["stream"]["name"]
         if stream_name in selected_streams and selected_streams[stream_name]["selected"]:
             # set schema_cat['config']['syncMode']
