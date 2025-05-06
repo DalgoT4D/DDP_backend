@@ -585,7 +585,12 @@ def test_create_connection(
         "name": "test-connection",
     }
     payload = AirbyteConnectionCreate(
-        name="test-connection", sourceId="source-id", destinationId="destination-id", streams=[]
+        name="test-connection",
+        sourceId="source-id",
+        destinationId="destination-id",
+        streams=[],
+        catalogId="catalog-id",
+        syncCatalog={"streams": []},
     )
 
     new_dataflow = Mock(clear_conn_dataflow=None)
