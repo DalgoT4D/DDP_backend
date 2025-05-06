@@ -610,6 +610,12 @@ def get_flow_run(flow_run_id: str) -> dict:
     return res
 
 
+def get_flow_run_poll(flow_run_id: str) -> dict:
+    """retreive the logs from a flow-run from prefect"""
+    res = prefect_get(f"flow_runs/{flow_run_id}/poll")
+    return res
+
+
 def create_deployment_flow_run(
     deployment_id: str,
     flow_run_params: dict = None,
@@ -868,6 +874,15 @@ def estimate_time_for_next_queued_run_of_dataflow(
     1. Queue no (queue_no) - how many flow runs are scheduled before the dataflow's next flow run
     2. Queue time (min max queue times) - time that user needs to wait before the next scheduled flow run will trigger
     """
+
+    # Check if the flag is set and is true
+    if not os.getenv("ESTIMATE_TIME_FOR_QUEUE_RUNS", "false").lower() == "true":
+        logger.info("ESTIMATE_TIME_FOR_QUEUE_RUNS flag is not set or is false. Returning early.")
+        return DeploymentCurrentQueueTime(
+            queue_no=-1,
+            min_wait_time=-1,
+            max_wait_time=-1,
+        )
 
     # get the current late run for the deployment
     dataflow_late_runs = get_late_flow_runs(

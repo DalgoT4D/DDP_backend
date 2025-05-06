@@ -16,6 +16,11 @@ from ddpui.celery import app, Celery
 
 from ddpui.utils import timezone, awsses, constants
 from ddpui.utils.helpers import find_key_in_dictionary
+from ddpui.utils.webhook_helpers import (
+    notify_org_managers,
+    do_handle_prefect_webhook,
+)
+
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.awsses import send_text_message
 from ddpui.models.org_plans import OrgPlans, OrgPlanType
@@ -49,7 +54,6 @@ from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.singletaskprogress import SingleTaskProgress
-from ddpui.utils.webhook_helpers import notify_org_managers
 from ddpui.utils.constants import (
     TASK_AIRBYTESYNC,
 )
@@ -983,6 +987,12 @@ def summarize_warehouse_results(
         return
 
 
+@app.task(bind=True)
+def handle_prefect_webhook(self, flow_run_id: str, state: str):  # skipcq: PYL-W0613
+    """this is the webhook handler for prefect flow runs"""
+    do_handle_prefect_webhook(flow_run_id, state)
+
+
 @app.task()
 def check_org_plan_expiry_notify_people():
     """sends an email to the org's account manager to notify them that their plan will expire in a week"""
@@ -1105,8 +1115,9 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
     )
 
     # compute run times for each deployment; every 3 hours
-    sender.add_periodic_task(
-        crontab(minute=0, hour="*/3"),
-        compute_dataflow_run_times.s(),
-        name="compute run times of each deployment based on its past flow runs",
-    )
+    if not os.getenv("ESTIMATE_TIME_FOR_QUEUE_RUNS", "false").lower() == "true":
+        sender.add_periodic_task(
+            crontab(minute=0, hour="*/3"),
+            compute_dataflow_run_times.s(),
+            name="compute run times of each deployment based on its past flow runs",
+        )
