@@ -746,3 +746,22 @@ def get_job_logs(
         log_lines = ["An error occured while fetching logs!"]
 
     return log_lines
+
+
+@airbyte_router.post(
+    "/v1/connections/{connection_id}/cancel/{job_type}/", auth=auth.CustomAuthMiddleware()
+)
+@has_permission(["can_edit_connection"])
+def post_cancel_connection_job(
+    request,
+    connection_id: str,
+    job_type: str,
+):
+    """cancels a job for a connection"""
+    orguser: OrgUser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    return airbyte_service.cancel_connection_job(
+        orguser.org.airbyte_workspace_id, connection_id, job_type
+    )
