@@ -4,7 +4,6 @@ import os
 from typing import List
 from ninja.errors import HttpError
 from ninja import Router
-from flags.state import flag_enabled
 
 from ddpui import auth
 from ddpui import settings
@@ -13,7 +12,6 @@ from ddpui.ddpairbyte.schema import (
     AirbyteConnectionCreate,
     AirbyteConnectionCreateResponse,
     AirbyteGetConnectionsResponse,
-    AirbyteConnectionSchemaUpdate,
     AirbyteConnectionSchemaUpdateSchedule,
     AirbyteDestinationCreate,
     AirbyteDestinationUpdate,

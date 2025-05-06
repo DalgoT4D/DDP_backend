@@ -30,7 +30,6 @@ from ddpui.api.airbyte_api import (
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.ddpairbyte.schema import (
     AirbyteConnectionCreate,
-    AirbyteConnectionSchemaUpdate,
     AirbyteConnectionUpdate,
     AirbyteDestinationUpdate,
     AirbyteWorkspace,

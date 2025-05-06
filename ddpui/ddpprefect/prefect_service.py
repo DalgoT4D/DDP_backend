@@ -1,6 +1,5 @@
 import os
 import math
-from datetime import datetime
 import requests
 from itertools import groupby
 from operator import itemgetter
