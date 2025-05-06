@@ -161,14 +161,16 @@ def notify_org_managers(org: Org, message: str, email_subject: str):
 
 def notify_platform_admins(org: Org, flow_run_id: str, state: str):
     """send a notification to platform admins discord webhook"""
+    prefect_url = os.getenv("PREFECT_URL_FOR_NOTIFICATIONS")
+    airbyte_url = os.getenv("AIRBYTE_URL_FOR_NOTIFICATIONS")
     message = (
         f"Flow run for {org.slug} has failed with state {state}"
         "\n"
         f"\nBase plan: {org.base_plan() if org.base_plan() else 'Unknown'}"
         "\n"
-        f"\nhttp://localhost:4200/flow-runs/flow-run/{flow_run_id}"
+        f"\n{prefect_url}/flow-runs/flow-run/{flow_run_id}"
         "\n"
-        f"\nAirbyte workspace URL: http://localhost:8000/workspaces/{org.airbyte_workspace_id}"
+        f"\nAirbyte workspace URL: {airbyte_url}/workspaces/{org.airbyte_workspace_id}"
     )
     if os.getenv("ADMIN_EMAIL"):
         send_text_message(
