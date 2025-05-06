@@ -56,8 +56,10 @@ from ddpui.ddpairbyte.airbyte_service import (
     get_jobs_for_connection,
     parse_job_info,
     get_logs_for_job,
+    cancel_job,
     schema,
     create_connection,
+    cancel_connection_job,
 )
 
 
@@ -1578,6 +1580,14 @@ def test_get_logs_for_job_with_logType_structured():
         assert result == ["log-line-3", "log-line-4"]
 
 
+def test_cancel_job():
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.abreq",
+    ) as mock_abreq_:
+        cancel_job(10000)
+        mock_abreq_.assert_called_once_with("jobs/cancel", {"id": 10000})
+
+
 def test_get_connection_catalog_success():
     org = Mock()
     with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
@@ -1689,45 +1699,7 @@ def test_update_schema_change_missing_syncCatalog():
         mock_trigger_reset_and_sync_workflow.assert_called_once_with(org, "test-connection-id")
 
 
-def test_create_connection_success():
-    """Test successful connection creation"""
-    connection_info = schema.AirbyteConnectionCreate(
-        sourceId="source-id",
-        destinationId="destination-id",
-        name="test-connection",
-        destinationSchema=None,
-        streams=[
-            {
-                "name": "stream-1",
-                "selected": True,
-                "syncMode": "incremental",
-                "destinationSyncMode": "append_dedup",
-                "primaryKey": ["id"],
-                "cursorField": ["updated_at"],
-            }
-        ],
-    )
-    workspace_id = "workspace-id"
-
-    with patch(
-        "my_module.get_source_schema_catalog",
-        return_value={
-            "catalogId": "catalog-id",
-            "catalog": {
-                "streams": [
-                    {
-                        "stream": {"name": "stream-1"},
-                        "config": {},
-                    }
-                ]
-            },
-        },
-    ), patch("my_module.abreq", return_value={"connectionId": "connection-id"}):
-        res = create_connection(workspace_id, connection_info)
-        assert res["connectionId"] == "connection-id"
-
-
-def test_create_connection_success():
+def test_create_connection_success_2():
     """Test successful connection creation with required primaryKey and cursorField"""
     connection_info = schema.AirbyteConnectionCreate(
         sourceId="source-id",
@@ -1928,3 +1900,82 @@ def test_update_connection_missing_primary_key():
         "primaryKey is required for stream 'stream-1' when syncMode is 'incremental' and destinationSyncMode is 'append_dedup'"
         in str(exc_info.value)
     )
+
+
+def test_cancel_connection_job():
+    """tests cancel_connection_job"""
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.get_jobs_for_connection",
+        return_value={
+            "jobs": [
+                {
+                    "job": {
+                        "configType": "sync",
+                        "id": "job-id",
+                        "status": "running",
+                    },
+                    "attempts": [
+                        {
+                            "id": 1,
+                            "status": "failed",
+                            "recordsSynced": 0,
+                        }
+                    ],
+                }
+            ]
+        },
+    ) as mock_get_jobs_for_connection, patch(
+        "ddpui.ddpairbyte.airbyte_service.cancel_job"
+    ) as mock_cancel_job:
+        result = cancel_connection_job("wsid", "connection-id", "sync")
+        mock_get_jobs_for_connection.assert_called_once_with(
+            "connection-id",
+            job_types=["sync"],
+        )
+        mock_cancel_job.assert_called_once_with("job-id")
+        assert result == {"cancelled": True}
+
+
+def test_cancel_connection_job_no_jobs():
+    """tests cancel_connection_job with no jobs"""
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.get_jobs_for_connection",
+        return_value={"jobs": []},
+    ) as mock_get_jobs_for_connection:
+        result = cancel_connection_job("wsid", "connection-id", "sync")
+        mock_get_jobs_for_connection.assert_called_once_with(
+            "connection-id",
+            job_types=["sync"],
+        )
+        assert result == {"cancelled": False}
+
+
+def test_cancel_connection_job_no_running_jobs():
+    """tests cancel_connection_job with no running jobs"""
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.get_jobs_for_connection",
+        return_value={
+            "jobs": [
+                {
+                    "job": {
+                        "configType": "sync",
+                        "id": "job-id",
+                        "status": "succeeded",
+                    },
+                    "attempts": [
+                        {
+                            "id": 1,
+                            "status": "failed",
+                            "recordsSynced": 0,
+                        }
+                    ],
+                }
+            ]
+        },
+    ) as mock_get_jobs_for_connection:
+        result = cancel_connection_job("wsid", "connection-id", "sync")
+        mock_get_jobs_for_connection.assert_called_once_with(
+            "connection-id",
+            job_types=["sync"],
+        )
+        assert result == {"cancelled": False}

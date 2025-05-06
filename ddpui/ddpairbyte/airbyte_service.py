@@ -1029,6 +1029,12 @@ def get_logs_for_job(job_id: int, attempt_number: int = 0) -> list[str]:
     return []
 
 
+def cancel_job(job_id: str) -> dict:
+    """cancel a job"""
+    res = abreq("jobs/cancel", {"id": job_id})
+    return res
+
+
 def get_connection_catalog(connection_id: str, **kwargs) -> dict:
     """get the catalog for a connection to check/refresh for schema changes"""
     if not isinstance(connection_id, str):
@@ -1089,3 +1095,29 @@ def get_current_airbyte_version():
         logger.error("No version found")
         return None
     return res["version"]
+
+
+def cancel_connection_job(
+    workspace_id: str, connection_id: str, job_type: str  # pylint: disable=unused-argument
+) -> dict:
+    """
+    cancel a connection job. job_type is one of the following:
+    - check_connection_destination
+    - discover_schema
+    - get_spec
+    - sync
+    - reset_connection
+    - refresh
+    - clear
+    """
+    cancelled = False
+    res = get_jobs_for_connection(connection_id, job_types=[job_type])
+    for job in res["jobs"]:
+        if job["job"]["status"] == "running":
+            job_id = job["job"]["id"]
+            cancel_job(job_id)
+            logger.info("Cancelled job: %s", job_id)
+            cancelled = True
+            break
+
+    return {"cancelled": cancelled}
