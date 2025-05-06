@@ -292,6 +292,8 @@ def test_post_airbyte_connection_v1_without_workspace(orguser):
     request = mock_request(orguser)
 
     payload = AirbyteConnectionCreate(
+        catalogId="catalog-id",
+        syncCatalog={"streams": []},
         name="conn-name",
         sourceId="source-id",
         destinationId="dest-id",
@@ -309,6 +311,8 @@ def test_post_airbyte_connection_v1_without_stream_names(orguser_workspace):
     request = mock_request(orguser_workspace)
 
     payload = AirbyteConnectionCreate(
+        catalogId="catalog-id",
+        syncCatalog={"streams": []},
         name="conn-name",
         sourceId="source-id",
         destinationId="dest-id",
@@ -326,6 +330,8 @@ def test_post_airbyte_connection_v1_without_warehouse(orguser_workspace):
     request = mock_request(orguser_workspace)
 
     payload = AirbyteConnectionCreate(
+        catalogId="catalog-id",
+        syncCatalog={"streams": []},
         name="conn-name",
         sourceId="source-id",
         destinationId="dest-id",
@@ -361,6 +367,8 @@ def test_post_airbyte_connection_v1_without_destination_id(
     request = mock_request(orguser_workspace)
 
     payload = AirbyteConnectionCreate(
+        catalogId="catalog-id",
+        syncCatalog={"streams": []},
         name="conn-name",
         sourceId="source-id",
         destinationId="dest-id",
@@ -380,6 +388,8 @@ def test_post_airbyte_connection_v1_without_server_block(
     request = mock_request(orguser_workspace)
 
     payload = AirbyteConnectionCreate(
+        catalogId="catalog-id",
+        syncCatalog={"streams": []},
         name="conn-name",
         sourceId="source-id",
         destinationId="dest-id",
@@ -423,6 +433,8 @@ def test_post_airbyte_connection_v1_task_not_supported(
     request = mock_request(orguser_workspace)
 
     payload = AirbyteConnectionCreate(
+        catalogId="catalog-id",
+        syncCatalog={"streams": []},
         name="conn-name",
         sourceId="source-id",
         destinationId="dest-id",
@@ -478,6 +490,8 @@ def test_post_airbyte_connection_v1_success(
         OrgTask.objects.create(org=request.orguser.org, task=task)
 
     payload = AirbyteConnectionCreate(
+        catalogId="catalog-id",
+        syncCatalog={"streams": []},
         name="conn-name",
         sourceId="source-id",
         destinationId="dest-id",
@@ -570,7 +584,9 @@ def test_post_airbyte_connection_reset_v1_success(orguser_workspace, airbyte_ser
 # ================================================================================
 def test_put_airbyte_connection_v1_no_workspace(orguser):
     """tests PUT /v1/connections/{connection_id}/update failure with no workspace"""
-    payload = AirbyteConnectionUpdate(name="connection-name-1", streams=[])
+    payload = AirbyteConnectionUpdate(
+        catalogId="catalog-id", syncCatalog={"streams": []}, name="connection-name-1", streams=[]
+    )
     connection_id = "connection_id"
     request = mock_request(orguser)
 
@@ -581,7 +597,12 @@ def test_put_airbyte_connection_v1_no_workspace(orguser):
 
 def test_put_airbyte_connection_v1_no_warehouse_destination(orguser_workspace):
     """tests PUT /v1/connections/{connection_id}/update failure with warehouse but no destination id"""
-    payload = AirbyteConnectionUpdate(name="connection-block-name", streams=[1])
+    payload = AirbyteConnectionUpdate(
+        catalogId="catalog-id",
+        syncCatalog={"streams": []},
+        name="connection-block-name",
+        streams=[1],
+    )
     connection_id = "connection_id"
     request = mock_request(orguser_workspace)
 
@@ -604,7 +625,9 @@ def test_put_airbyte_connection_v1_no_warehouse_destination(orguser_workspace):
 
 def test_put_airbyte_connection_v1_no_warehouse(orguser_workspace):
     """tests PUT /v1/connections/{connection_id}/update failure with no warehouse"""
-    payload = AirbyteConnectionUpdate(name="connection-name", streams=[1])
+    payload = AirbyteConnectionUpdate(
+        catalogId="catalog-id", syncCatalog={"streams": []}, name="connection-name", streams=[1]
+    )
     connection_id = "connection_id"
     request = mock_request(orguser_workspace)
 
@@ -625,7 +648,9 @@ def test_put_airbyte_connection_v1_no_warehouse(orguser_workspace):
 
 def test_put_airbyte_connection_v1_no_streams(orguser_workspace, warehouse_with_destination):
     """tests PUT /v1/connections/{connection_id}/update failure with no streams"""
-    payload = AirbyteConnectionUpdate(name="connection-name-1", streams=[])
+    payload = AirbyteConnectionUpdate(
+        catalogId="catalog-id", syncCatalog={"streams": []}, name="connection-name-1", streams=[]
+    )
     connection_id = "connection_id"
     request = mock_request(orguser_workspace)
 
@@ -650,7 +675,9 @@ def test_put_airbyte_connection_v1_no_streams(orguser_workspace, warehouse_with_
 )
 def test_put_airbyte_connection_v1(orguser_workspace):
     """tests PUT /v1/connections/{connection_id}/update success"""
-    payload = AirbyteConnectionUpdate(name="connection-name", streams=[1])
+    payload = AirbyteConnectionUpdate(
+        catalogId="catalog-id", syncCatalog={"streams": []}, name="connection-name", streams=[1]
+    )
     connection_id = "connection_id"
     request = mock_request(orguser_workspace)
 
