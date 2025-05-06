@@ -14,9 +14,7 @@ from flags.state import flag_enabled
 from ddpui import settings
 from ddpui.ddpairbyte import schema
 from ddpui.ddpprefect import prefect_service, AIRBYTESERVER
-from ddpui.models.org import Org
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.deploymentblocks import trigger_reset_and_sync_workflow
 from ddpui.utils.helpers import remove_nested_attribute, nice_bytes
 from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
@@ -896,16 +894,6 @@ def update_connection(
     return res
 
 
-def reset_connection(connection_id: str) -> dict:
-    """Reset data of a connection at the destination"""
-    if not isinstance(connection_id, str):
-        raise HttpError(400, "connection_id must be a string")
-
-    res = abreq("connections/reset", {"connectionId": connection_id})
-    logger.info("Reseting the connection: %s", connection_id)
-    return res
-
-
 def delete_connection(workspace_id: str, connection_id: str) -> dict:
     """Delete a connection of an airbyte workspace"""
     if not isinstance(workspace_id, str):
@@ -1044,45 +1032,6 @@ def get_connection_catalog(connection_id: str, **kwargs) -> dict:
         {"connectionId": connection_id, "withRefreshedCatalog": True},
         **kwargs,
     )
-    return res
-
-
-def update_schema_change(
-    org: Org,
-    connection_info: schema.AirbyteConnectionSchemaUpdate,
-    current_connection: dict,
-) -> dict:
-    """Update the schema change for a connection."""
-    if not isinstance(connection_info, schema.AirbyteConnectionSchemaUpdate):
-        raise HttpError(400, "connection_info must be an instance of AirbyteConnectionSchemaUpdate")
-    if not isinstance(current_connection, dict):
-        raise HttpError(400, "current_connection must be a dictionary")
-
-    # check syncCatalog is present in current_connection
-    if "syncCatalog" not in current_connection:
-        current_connection["syncCatalog"] = {}
-
-    current_connection["sourceCatalogId"] = connection_info.sourceCatalogId
-    # replace the syncCatalog with the new one from connection_info
-    if hasattr(connection_info, "syncCatalog") and connection_info.syncCatalog:
-        current_connection["syncCatalog"] = connection_info.syncCatalog
-        logger.info("Updated syncCatalog")
-
-    res = abreq("web_backend/connections/update", current_connection)
-
-    if "connectionId" not in res:
-        logger.error("Failed to update schema in connection: %s", res)
-        raise HttpError(500, "failed to update schema in connection")
-
-    logger.info("Successfully updated schema in connection")
-
-    # Call helper function to trigger Prefect flow run
-    try:
-        trigger_reset_and_sync_workflow(org, res["connectionId"])
-    except Exception as error:
-        logger.error("Failed to trigger Prefect flow run: %s", error)
-        raise HttpError(500, "failed to trigger Prefect flow run") from error
-
     return res
 
 

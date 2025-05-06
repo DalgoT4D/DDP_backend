@@ -1,5 +1,4 @@
 import shlex
-import calendar
 import subprocess
 import re
 import string
@@ -7,8 +6,7 @@ import secrets
 import hashlib
 import json
 from decimal import Decimal
-from datetime import datetime, date, time, timedelta
-import pytz
+from datetime import datetime, date
 
 
 def runcmd(cmd: str, cwd: str):
@@ -182,35 +180,6 @@ def convert_sqlalchemy_rows_to_csv_string(rows: list[dict]):
 def convert_sqlalchemy_rows_to_json_string(rows: list[dict]):
     """converts a list of sqlalchemy rows to a csv string"""
     return json.dumps(convert_to_standard_types(rows), indent=4)
-
-
-def get_schedule_time_for_large_jobs(
-    curr: datetime = datetime.now(pytz.utc),
-    time_of_day: time = time(10, 0),
-    weekday: int = calendar.SUNDAY,
-) -> datetime:
-    """By default scheduled time will be Sunday 10am UTC"""
-    # Calculate the number of days until weekday
-    days_until_sunday = (weekday - curr.weekday() + 7) % 7
-
-    # If today is that weekday (param), we want to use some future time
-    extra_delta = timedelta(hours=0)
-    if days_until_sunday == 0:
-        extra_delta = timedelta(hours=1)
-        time_of_day = None  # ignore time_of_day on sundays; set it for now + extra delta instead
-
-    # Calculate the next weekday datetime
-    next_slot = curr + timedelta(days=days_until_sunday) + extra_delta
-
-    # set the time
-    if time_of_day:
-        next_slot = datetime.combine(next_slot, time_of_day, tzinfo=pytz.utc)
-
-    # check if timezone is utc
-    if next_slot.tzinfo != pytz.utc:
-        next_slot = next_slot.astimezone(pytz.utc)
-
-    return next_slot
 
 
 def find_key_in_dictionary(dictionary: dict, key):

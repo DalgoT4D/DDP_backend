@@ -1,6 +1,5 @@
 import os
 import math
-from datetime import datetime
 import requests
 from itertools import groupby
 from operator import itemgetter
@@ -624,22 +623,6 @@ def create_deployment_flow_run(
     res = prefect_post(
         f"deployments/{deployment_id}/flow_run",
         flow_run_params if flow_run_params else {},
-    )
-    return res
-
-
-def schedule_deployment_flow_run(
-    deployment_id: str, flow_run_params: dict = None, scheduled_time: datetime = None
-) -> dict:  # pragma: no cover
-    """
-    Proxy call to create a flow run for deployment.
-    """
-    res = prefect_post(
-        f"deployments/{deployment_id}/flow_run/schedule",
-        {
-            "runParams": flow_run_params,
-            "scheduledTime": str(scheduled_time) if scheduled_time else None,
-        },
     )
     return res
 

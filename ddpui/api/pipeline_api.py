@@ -595,7 +595,7 @@ def post_run_prefect_org_deployment_task(request, deployment_id, payload: TaskPa
             )
 
             # dont set any parameters if cli block is not present or there is an error
-            if cli_profile_block and not error:
+            if cli_profile_block:
                 logger.info("found cli profile block")
                 flow_run_params = {
                     "config": {
