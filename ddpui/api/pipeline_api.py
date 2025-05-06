@@ -4,6 +4,8 @@ from typing import List
 from ninja import Router
 from ninja.errors import HttpError
 
+from django.utils import timezone
+
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service
@@ -596,7 +598,7 @@ def post_run_prefect_org_deployment_task(request, deployment_id, payload: TaskPa
             )
 
             # dont set any parameters if cli block is not present or there is an error
-            if cli_profile_block and not error:
+            if cli_profile_block:
                 logger.info("found cli profile block")
                 flow_run_params = {
                     "config": {
@@ -612,16 +614,16 @@ def post_run_prefect_org_deployment_task(request, deployment_id, payload: TaskPa
                 }
 
         res = prefect_service.create_deployment_flow_run(deployment_id, flow_run_params)
-        prefectflowrun = PrefectFlowRun.objects.create(
+        PrefectFlowRun.objects.create(
             deployment_id=deployment_id,
             flow_run_id=res["flow_run_id"],
             name=res["name"],
-            start_time=res["start_time"],
-            expected_start_time=res["expected_start_time"],
-            total_run_time=res["total_run_time"],
-            status=res["status"],
-            state_name=res["state_name"],
-            retries=res["retries"],
+            start_time=None,
+            expected_start_time=timezone.now(),
+            total_run_time=-1,
+            status="Scheduled",
+            state_name="Scheduled",
+            retries=0,
             orguser=orguser,
         )
     except Exception as error:

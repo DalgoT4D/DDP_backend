@@ -484,26 +484,6 @@ def get_airbyte_connection_v1(request, connection_id):
     return res
 
 
-@airbyte_router.post("/v1/connections/{connection_id}/reset", auth=auth.CustomAuthMiddleware())
-@has_permission(["can_reset_connection"])
-def post_airbyte_connection_reset_v1(request, connection_id):
-    """Reset the data for connection at destination"""
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-    if org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    if not flag_enabled("AIRBYTE_RESET_JOB", request_org_slug=org.slug):
-        raise HttpError(
-            400, "Reset job is disabled. Please contact the dalgo support team at support@dalgo.in"
-        )
-
-    _, error = airbytehelpers.reset_connection(org, connection_id)
-    if error:
-        raise HttpError(400, error)
-    return {"success": 1}
-
-
 @airbyte_router.put("/v1/connections/{connection_id}/update", auth=auth.CustomAuthMiddleware())
 @has_permission(["can_edit_connection"])
 def put_airbyte_connection_v1(
@@ -635,23 +615,6 @@ def get_connection_catalog_v1(request, connection_id):
     get_connection_catalog_task.delay(task_key, orguser.org.id, connection_id)
 
     return {"task_id": task_key}
-
-
-@airbyte_router.put(
-    "/v1/connections/{connection_id}/schema_update", auth=auth.CustomAuthMiddleware()
-)
-@has_permission(["can_edit_connection"])
-def update_connection_schema(request, connection_id, payload: AirbyteConnectionSchemaUpdate):
-    """update schema change in a connection"""
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-    if org.airbyte_workspace_id is None:
-        raise HttpError(400, "create an airbyte workspace first")
-
-    res, error = airbytehelpers.update_connection_schema(org, connection_id, payload)
-    if error:
-        raise HttpError(400, error)
-    return res
 
 
 @airbyte_router.post(

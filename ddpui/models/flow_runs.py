@@ -11,7 +11,7 @@ class PrefectFlowRun(models.Model):
     deployment_id = models.CharField(max_length=36, null=True)
     flow_run_id = models.CharField(max_length=36, null=False, blank=False)
     name = models.CharField(max_length=255, null=False, blank=False)
-    start_time = models.DateTimeField(null=False, blank=False)
+    start_time = models.DateTimeField(null=True, blank=False)
     expected_start_time = models.DateTimeField(null=False, blank=False)
     total_run_time = models.FloatField(null=False, blank=False)
     status = models.CharField(max_length=20, null=False, blank=False)
