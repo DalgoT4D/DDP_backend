@@ -281,6 +281,7 @@ def create_custom_source_definition(
                 "documentationUrl": documentation_url,
             },
         },
+        timeout=100,
     )
     if "sourceDefinitionId" not in res:
         error_message = f"Source definition not created: {name}"
@@ -735,11 +736,11 @@ def create_connection(
         logger.error(error_message)
         raise HttpError(400, error_message)
 
-    sourceschemacatalog = get_source_schema_catalog(workspace_id, connection_info.sourceId)
+    sourceschemacatalog = connection_info.syncCatalog
     payload = {
         "sourceId": connection_info.sourceId,
         "destinationId": connection_info.destinationId,
-        "sourceCatalogId": sourceschemacatalog["catalogId"],
+        "sourceCatalogId": connection_info.catalogId,
         "syncCatalog": {
             "streams": [
                 # we're going to put the stream
@@ -761,7 +762,7 @@ def create_connection(
 
     # one stream per table
     selected_streams = {x["name"]: x for x in connection_info.streams}
-    for schema_cat in sourceschemacatalog["catalog"]["streams"]:
+    for schema_cat in sourceschemacatalog["streams"]:
         stream_name = schema_cat["stream"]["name"]
         if stream_name in selected_streams and selected_streams[stream_name]["selected"]:
             schema_cat["config"]["selected"] = True
@@ -826,7 +827,7 @@ def update_connection(
         logger.error(error_message)
         raise HttpError(400, error_message)
 
-    sourceschemacatalog = get_source_schema_catalog(workspace_id, current_connection["sourceId"])
+    sourceschemacatalog = connection_info.syncCatalog
 
     # update the name
     if connection_info.name:
@@ -841,7 +842,7 @@ def update_connection(
 
     # one stream per table
     selected_streams = {x["name"]: x for x in connection_info.streams}
-    for schema_cat in sourceschemacatalog["catalog"]["streams"]:
+    for schema_cat in sourceschemacatalog["streams"]:
         stream_name = schema_cat["stream"]["name"]
         if stream_name in selected_streams and selected_streams[stream_name]["selected"]:
             # set schema_cat['config']['syncMode']
@@ -1028,6 +1029,12 @@ def get_logs_for_job(job_id: int, attempt_number: int = 0) -> list[str]:
     return []
 
 
+def cancel_job(job_id: str) -> dict:
+    """cancel a job"""
+    res = abreq("jobs/cancel", {"id": job_id})
+    return res
+
+
 def get_connection_catalog(connection_id: str, **kwargs) -> dict:
     """get the catalog for a connection to check/refresh for schema changes"""
     if not isinstance(connection_id, str):
@@ -1088,3 +1095,29 @@ def get_current_airbyte_version():
         logger.error("No version found")
         return None
     return res["version"]
+
+
+def cancel_connection_job(
+    workspace_id: str, connection_id: str, job_type: str  # pylint: disable=unused-argument
+) -> dict:
+    """
+    cancel a connection job. job_type is one of the following:
+    - check_connection_destination
+    - discover_schema
+    - get_spec
+    - sync
+    - reset_connection
+    - refresh
+    - clear
+    """
+    cancelled = False
+    res = get_jobs_for_connection(connection_id, job_types=[job_type])
+    for job in res["jobs"]:
+        if job["job"]["status"] == "running":
+            job_id = job["job"]["id"]
+            cancel_job(job_id)
+            logger.info("Cancelled job: %s", job_id)
+            cancelled = True
+            break
+
+    return {"cancelled": cancelled}

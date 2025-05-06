@@ -56,8 +56,10 @@ from ddpui.ddpairbyte.airbyte_service import (
     get_jobs_for_connection,
     parse_job_info,
     get_logs_for_job,
+    cancel_job,
     schema,
     create_connection,
+    cancel_connection_job,
 )
 
 
@@ -1330,14 +1332,18 @@ def test_get_connection_success():
 
 
 def test_update_connection_bad_workspace_id():
-    conninfo = schema.AirbyteConnectionUpdate(name="connection-name", streams=[])
+    conninfo = schema.AirbyteConnectionUpdate(
+        catalogId="catalog-id", syncCatalog={"streams": []}, name="connection-name", streams=[]
+    )
     with pytest.raises(HttpError) as excinfo:
         update_connection(1, conninfo, {})
     assert str(excinfo.value) == "workspace_id must be a string"
 
 
 def test_update_connection_no_streams():
-    conninfo = schema.AirbyteConnectionUpdate(name="connection-name", streams=[])
+    conninfo = schema.AirbyteConnectionUpdate(
+        catalogId="catalog-id", syncCatalog={"streams": []}, name="connection-name", streams=[]
+    )
     workspace_id = "workspace-id"
     with pytest.raises(HttpError) as excinfo:
         update_connection(workspace_id, conninfo, {})
@@ -1363,6 +1369,8 @@ def test_update_connection_no_streams():
 )
 def test_update_connection_failed_to_update():
     connection_info = schema.AirbyteConnectionUpdate(
+        catalogId="catalog-id",
+        syncCatalog={"streams": []},
         name="connection-name",
         streams=[
             {
@@ -1404,6 +1412,8 @@ def test_update_connection_failed_to_update():
 )
 def test_update_connection_success():
     connection_info = schema.AirbyteConnectionUpdate(
+        catalogId="catalog-id",
+        syncCatalog={"streams": []},
         name="connection-name",
         streams=[
             {
@@ -1578,6 +1588,14 @@ def test_get_logs_for_job_with_logType_structured():
         assert result == ["log-line-3", "log-line-4"]
 
 
+def test_cancel_job():
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.abreq",
+    ) as mock_abreq_:
+        cancel_job(10000)
+        mock_abreq_.assert_called_once_with("jobs/cancel", {"id": 10000})
+
+
 def test_get_connection_catalog_success():
     org = Mock()
     with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
@@ -1690,46 +1708,10 @@ def test_update_schema_change_missing_syncCatalog():
 
 
 def test_create_connection_success():
-    """Test successful connection creation"""
-    connection_info = schema.AirbyteConnectionCreate(
-        sourceId="source-id",
-        destinationId="destination-id",
-        name="test-connection",
-        destinationSchema=None,
-        streams=[
-            {
-                "name": "stream-1",
-                "selected": True,
-                "syncMode": "incremental",
-                "destinationSyncMode": "append_dedup",
-                "primaryKey": ["id"],
-                "cursorField": ["updated_at"],
-            }
-        ],
-    )
-    workspace_id = "workspace-id"
-
-    with patch(
-        "my_module.get_source_schema_catalog",
-        return_value={
-            "catalogId": "catalog-id",
-            "catalog": {
-                "streams": [
-                    {
-                        "stream": {"name": "stream-1"},
-                        "config": {},
-                    }
-                ]
-            },
-        },
-    ), patch("my_module.abreq", return_value={"connectionId": "connection-id"}):
-        res = create_connection(workspace_id, connection_info)
-        assert res["connectionId"] == "connection-id"
-
-
-def test_create_connection_success():
     """Test successful connection creation with required primaryKey and cursorField"""
     connection_info = schema.AirbyteConnectionCreate(
+        catalogId="catalog-id",
+        syncCatalog={"streams": []},
         sourceId="source-id",
         destinationId="destination-id",
         name="test-connection",
@@ -1771,6 +1753,15 @@ def test_create_connection_success():
 def test_create_connection_missing_primary_key():
     """Test that primaryKey is required when syncMode is 'incremental' and destinationSyncMode is 'append_dedup'"""
     connection_info = schema.AirbyteConnectionCreate(
+        catalogId="catalog-id",
+        syncCatalog={
+            "streams": [
+                {
+                    "stream": {"name": "stream-1"},
+                    "config": {},
+                }
+            ]
+        },
         sourceId="source-id",
         destinationId="destination-id",
         name="test-connection",
@@ -1787,22 +1778,8 @@ def test_create_connection_missing_primary_key():
     )
     workspace_id = "workspace-id"
 
-    with patch(
-        "ddpui.ddpairbyte.airbyte_service.get_source_schema_catalog",
-        return_value={
-            "catalogId": "catalog-id",
-            "catalog": {
-                "streams": [
-                    {
-                        "stream": {"name": "stream-1"},
-                        "config": {},
-                    }
-                ]
-            },
-        },
-    ):
-        with pytest.raises(HttpError) as exc_info:
-            create_connection(workspace_id, connection_info)
+    with pytest.raises(HttpError) as exc_info:
+        create_connection(workspace_id, connection_info)
 
     assert exc_info.value.status_code == 400
     assert (
@@ -1814,6 +1791,15 @@ def test_create_connection_missing_primary_key():
 def test_create_connection_missing_cursor_field():
     """Test that cursorField is required when syncMode is 'incremental'"""
     connection_info = schema.AirbyteConnectionCreate(
+        catalogId="catalog-id",
+        syncCatalog={
+            "streams": [
+                {
+                    "stream": {"name": "stream-1"},
+                    "config": {},
+                }
+            ]
+        },
         sourceId="source-id",
         destinationId="destination-id",
         name="test-connection",
@@ -1830,22 +1816,8 @@ def test_create_connection_missing_cursor_field():
     )
     workspace_id = "workspace-id"
 
-    with patch(
-        "ddpui.ddpairbyte.airbyte_service.get_source_schema_catalog",
-        return_value={
-            "catalogId": "catalog-id",
-            "catalog": {
-                "streams": [
-                    {
-                        "stream": {"name": "stream-1"},
-                        "config": {},
-                    }
-                ]
-            },
-        },
-    ):
-        with pytest.raises(HttpError) as exc_info:
-            create_connection(workspace_id, connection_info)
+    with pytest.raises(HttpError) as exc_info:
+        create_connection(workspace_id, connection_info)
 
     assert exc_info.value.status_code == 400
     assert (
@@ -1857,6 +1829,8 @@ def test_create_connection_missing_cursor_field():
 def test_update_connection_missing_cursor_field():
     """Test that cursorField is required when syncMode is 'incremental'"""
     connection_info = schema.AirbyteConnectionUpdate(
+        catalogId="catalog-id",
+        syncCatalog={"streams": [{"stream": {"name": "stream-1"}, "config": {}}]},
         name="test-connection",
         streams=[
             {
@@ -1872,18 +1846,8 @@ def test_update_connection_missing_cursor_field():
     workspace_id = "workspace-id"
     current_connection = {"sourceId": "source-id", "syncCatalog": {"streams": []}}
 
-    with patch(
-        "ddpui.ddpairbyte.airbyte_service.get_source_schema_catalog",
-        return_value={
-            "catalogId": "catalog-id",
-            "catalog": {"streams": [{"stream": {"name": "stream-1"}, "config": {}}]},
-        },
-    ), patch(
-        "ddpui.ddpairbyte.airbyte_service.abreq",
-        return_value={"connectionId": "test-connection-id"},
-    ):
-        with pytest.raises(HttpError) as exc_info:
-            update_connection(workspace_id, connection_info, current_connection)
+    with pytest.raises(HttpError) as exc_info:
+        update_connection(workspace_id, connection_info, current_connection)
 
     assert exc_info.value.status_code == 400
     assert (
@@ -1895,6 +1859,8 @@ def test_update_connection_missing_cursor_field():
 def test_update_connection_missing_primary_key():
     """Test that primaryKey is required when syncMode is 'incremental' and destinationSyncMode is 'append_dedup'"""
     connection_info = schema.AirbyteConnectionUpdate(
+        catalogId="catalog-id",
+        syncCatalog={"streams": [{"stream": {"name": "stream-1"}, "config": {}}]},
         name="test-connection",
         streams=[
             {
@@ -1910,21 +1876,90 @@ def test_update_connection_missing_primary_key():
     workspace_id = "workspace-id"
     current_connection = {"sourceId": "source-id", "syncCatalog": {"streams": []}}
 
-    with patch(
-        "ddpui.ddpairbyte.airbyte_service.get_source_schema_catalog",
-        return_value={
-            "catalogId": "catalog-id",
-            "catalog": {"streams": [{"stream": {"name": "stream-1"}, "config": {}}]},
-        },
-    ), patch(
-        "ddpui.ddpairbyte.airbyte_service.abreq",
-        return_value={"connectionId": "test-connection-id"},
-    ):
-        with pytest.raises(HttpError) as exc_info:
-            update_connection(workspace_id, connection_info, current_connection)
+    with pytest.raises(HttpError) as exc_info:
+        update_connection(workspace_id, connection_info, current_connection)
 
     assert exc_info.value.status_code == 400
     assert (
         "primaryKey is required for stream 'stream-1' when syncMode is 'incremental' and destinationSyncMode is 'append_dedup'"
         in str(exc_info.value)
     )
+
+
+def test_cancel_connection_job():
+    """tests cancel_connection_job"""
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.get_jobs_for_connection",
+        return_value={
+            "jobs": [
+                {
+                    "job": {
+                        "configType": "sync",
+                        "id": "job-id",
+                        "status": "running",
+                    },
+                    "attempts": [
+                        {
+                            "id": 1,
+                            "status": "failed",
+                            "recordsSynced": 0,
+                        }
+                    ],
+                }
+            ]
+        },
+    ) as mock_get_jobs_for_connection, patch(
+        "ddpui.ddpairbyte.airbyte_service.cancel_job"
+    ) as mock_cancel_job:
+        result = cancel_connection_job("wsid", "connection-id", "sync")
+        mock_get_jobs_for_connection.assert_called_once_with(
+            "connection-id",
+            job_types=["sync"],
+        )
+        mock_cancel_job.assert_called_once_with("job-id")
+        assert result == {"cancelled": True}
+
+
+def test_cancel_connection_job_no_jobs():
+    """tests cancel_connection_job with no jobs"""
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.get_jobs_for_connection",
+        return_value={"jobs": []},
+    ) as mock_get_jobs_for_connection:
+        result = cancel_connection_job("wsid", "connection-id", "sync")
+        mock_get_jobs_for_connection.assert_called_once_with(
+            "connection-id",
+            job_types=["sync"],
+        )
+        assert result == {"cancelled": False}
+
+
+def test_cancel_connection_job_no_running_jobs():
+    """tests cancel_connection_job with no running jobs"""
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.get_jobs_for_connection",
+        return_value={
+            "jobs": [
+                {
+                    "job": {
+                        "configType": "sync",
+                        "id": "job-id",
+                        "status": "succeeded",
+                    },
+                    "attempts": [
+                        {
+                            "id": 1,
+                            "status": "failed",
+                            "recordsSynced": 0,
+                        }
+                    ],
+                }
+            ]
+        },
+    ) as mock_get_jobs_for_connection:
+        result = cancel_connection_job("wsid", "connection-id", "sync")
+        mock_get_jobs_for_connection.assert_called_once_with(
+            "connection-id",
+            job_types=["sync"],
+        )
+        assert result == {"cancelled": False}

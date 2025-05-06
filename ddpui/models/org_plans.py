@@ -1,6 +1,19 @@
+from enum import Enum
+
 from django.db import models
 from django.utils import timezone
 from ddpui.models.org import Org
+
+
+class OrgPlanType(str, Enum):
+    FREE_TRIAL = "Free Trial"
+    DALGO = "Dalgo"
+    INTERNAL = "Internal"
+
+    @classmethod
+    def choices(cls):
+        """django model definition needs an iterable for `choices`"""
+        return [(key.value, key.name) for key in cls]
 
 
 class OrgPlans(models.Model):
@@ -8,8 +21,10 @@ class OrgPlans(models.Model):
 
     org = models.OneToOneField(Org, on_delete=models.CASCADE, related_name="org_plans")
     base_plan = models.CharField(
-        null=True, max_length=255, default=None
-    )  # plan DALGO or FREE TRAIL
+        null=True,
+        max_length=255,
+        default=None,
+    )  # OrgPlanType.choices()
     superset_included = models.BooleanField(null=True, default=False)
     subscription_duration = models.CharField(
         null=True, max_length=255, default=None
