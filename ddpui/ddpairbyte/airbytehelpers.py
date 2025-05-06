@@ -542,106 +542,6 @@ def get_one_connection(org: Org, connection_id: str):
     return res, None
 
 
-def reset_connection(org: Org, connection_id: str):
-    """
-    reset the connection via the sync deployment
-    this will run a full reset + sync
-    """
-    org_server_block = OrgPrefectBlockv1.objects.filter(org=org, block_type=AIRBYTESERVER).first()
-
-    if not org_server_block:
-        logger.error("Airbyte server block not found")
-        return None, "airbyte server block not found"
-
-    sync_org_task = OrgTask.objects.filter(
-        org=org,
-        connection_id=connection_id,
-        task__slug=TASK_AIRBYTESYNC,
-    ).first()
-    if not sync_org_task:
-        return None, "connection not found"
-
-    sync_dataflow_orgtask = DataflowOrgTask.objects.filter(
-        orgtask=sync_org_task, dataflow__dataflow_type="manual"
-    ).first()
-
-    if sync_dataflow_orgtask is None:
-        logger.error("Sync dataflow not found")
-        return None, "sync dataflow not found"
-
-    reset_org_task = OrgTask.objects.filter(
-        org=org, connection_id=connection_id, task__slug=TASK_AIRBYTERESET
-    ).first()
-
-    if not reset_org_task:
-        logger.error("Reset OrgTask not found")
-        return None, "reset OrgTask not found"
-
-    # full reset + sync; run via the manual sync deployment
-    params = {
-        "config": {
-            "tasks": [
-                setup_airbyte_sync_task_config(reset_org_task, org_server_block, seq=1).to_json(),
-                setup_airbyte_sync_task_config(sync_org_task, org_server_block, seq=2).to_json(),
-            ],
-            "org_slug": org.slug,
-        }
-    }
-
-    # check if the connection is "large" for scheduling
-    connection_meta = ConnectionMeta.objects.filter(connection_id=connection_id).first()
-    is_connection_large_enough = (
-        True == connection_meta.schedule_large_jobs if connection_meta else False
-    )
-
-    schedule_at = None
-    job: ConnectionJob = None
-    if is_connection_large_enough:
-        schedule_at = get_schedule_time_for_large_jobs()
-    # if there is a flow run scheduled , delete it
-    # if the connection is large enough, we will schedule a new flow run
-    # if the connection is not larged enough, we run it now
-    # either way we need to delete this job
-    job = ConnectionJob.objects.filter(
-        connection_id=connection_id, job_type=TASK_AIRBYTERESET
-    ).first()
-    if job:
-        try:
-            prefect_service.delete_flow_run(job.flow_run_id)
-            job.delete()
-            job = None
-        except Exception as err:
-            logger.exception(err)
-            raise HttpError(400, "failed to remove the previous flow run") from err
-
-    try:
-        res = prefect_service.schedule_deployment_flow_run(
-            sync_dataflow_orgtask.dataflow.deployment_id,
-            params,
-            scheduled_time=schedule_at,
-        )
-        # save the new flow run scheduled to our db
-        if is_connection_large_enough:
-            if not job:
-                job = ConnectionJob.objects.create(
-                    connection_id=connection_id,
-                    job_type=TASK_AIRBYTERESET,
-                    flow_run_id=res["flow_run_id"],
-                    scheduled_at=schedule_at,
-                )
-            else:
-                job.flow_run_id = res["flow_run_id"]
-                job.scheduled_at = schedule_at
-                job.save()
-
-        logger.info("Successfully triggered Prefect flow run for reset")
-    except Exception as error:
-        logger.error("Failed to trigger Prefect flow run for reset: %s", error)
-        return None, "failed to trigger Prefect flow run for reset"
-
-    return None, None
-
-
 def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUpdate):
     """updates an airbyte connection"""
 
@@ -1188,31 +1088,6 @@ def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
         )
 
     return connection_catalog, None
-
-
-def update_connection_schema(org: Org, connection_id: str, payload: AirbyteConnectionSchemaUpdate):
-    """
-    Update the schema changes of a connection.
-    """
-    if not OrgTask.objects.filter(
-        org=org,
-        connection_id=connection_id,
-    ).exists():
-        return None, "connection not found"
-
-    warehouse = OrgWarehouse.objects.filter(org=org).first()
-    if warehouse is None:
-        return None, "need to set up a warehouse first"
-
-    connection = airbyte_service.get_connection(org.airbyte_workspace_id, connection_id)
-
-    connection["skipReset"] = True
-
-    res = airbyte_service.update_schema_change(org, payload, connection)
-    if res:
-        OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
-
-    return res, None
 
 
 def get_schema_changes(org: Org):

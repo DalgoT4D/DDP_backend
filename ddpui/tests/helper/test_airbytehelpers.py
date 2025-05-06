@@ -8,7 +8,6 @@ import pytz
 from ninja.errors import HttpError
 from ddpui.ddpairbyte.airbytehelpers import (
     add_custom_airbyte_connector,
-    update_connection_schema,
     upgrade_custom_sources,
     setup_airbyte_workspace_v1,
     AIRBYTESERVER,
@@ -22,7 +21,6 @@ from ddpui.ddpairbyte.airbytehelpers import (
     schedule_update_connection_schema,
 )
 from ddpui.ddpairbyte.schema import (
-    AirbyteConnectionSchemaUpdate,
     AirbyteDestinationUpdate,
     AirbyteConnectionSchemaUpdateSchedule,
     AirbyteConnectionCreate,
@@ -1009,64 +1007,6 @@ def test_delete_source(
     assert OrgTask.objects.filter(org=org, task=synctask, connection_id="connection_id2").exists()
 
     mock_delete_source.assert_called_once()
-
-
-@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection")
-@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.update_schema_change")
-def test_update_schema_changes_connection(mock_update_schema_change, mock_get_connection, db):
-    """
-    Test the update_connection_schema function.
-    """
-    # Create a test org
-    org = Org.objects.create(name="Test Org", slug="test-org")
-
-    # Create a test task
-    task = Task.objects.create(
-        type="test-type",
-        slug="test-slug",
-        label="test-task",
-        command="test-command",
-        is_system=True,
-    )
-
-    # Create a test OrgTask
-    org_task = OrgTask.objects.create(
-        org=org,
-        task=task,
-        connection_id="test-connection-id",
-        parameters={},
-        generated_by="system",
-    )
-
-    # Create a test OrgWarehouse
-    org_warehouse = OrgWarehouse.objects.create(
-        wtype="bigquery",
-        name="Test Warehouse",
-        credentials='{"key": "value"}',
-        org=org,
-        airbyte_destination_id="test-airbyte-destination-id",
-        bq_location="us-central1",
-    )
-
-    # Set up mock responses
-    mock_get_connection.return_value = {"name": "Test Connection"}
-    mock_update_schema_change.return_value = {"updated": True}, None
-
-    # Call the function
-    payload = AirbyteConnectionSchemaUpdate(
-        name="Updated Connection",
-        syncCatalog={},
-        connectionId="test-connection-id",
-        sourceCatalogId="test-source-catalog-id",
-    )
-    response, error = update_connection_schema(org, "test-connection-id", payload)
-
-    # Assert the response
-    assert response == ({"updated": True}, None)
-    assert error is None
-
-    # Assert the mock functions were called with the expected arguments
-    mock_get_connection.assert_called_once_with(org.airbyte_workspace_id, "test-connection-id")
 
 
 @patch(
