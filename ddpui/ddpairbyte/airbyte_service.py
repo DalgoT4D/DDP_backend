@@ -26,6 +26,7 @@ from ddpui.ddpairbyte.schema import (
 )
 from ddpui.utils import thread
 from ddpui.models.org import OrgPrefectBlockv1
+from pydantic import BaseModel
 
 load_dotenv()
 
@@ -126,7 +127,13 @@ def get_workspaces():
     return res
 
 
-def get_workspace(workspace_id: str) -> dict:
+# Example Pydantic schema for workspace response
+class WorkspaceResponse(BaseModel):
+    workspaceId: str
+    name: str
+
+
+def get_workspace(workspace_id: str) -> WorkspaceResponse:
     """Fetch a workspace from the airbyte server"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
@@ -135,7 +142,7 @@ def get_workspace(workspace_id: str) -> dict:
     if "workspaceId" not in res:
         logger.info("Workspace not found: %s", workspace_id)
         raise HttpError(404, "workspace not found")
-    return res
+    return WorkspaceResponse(**res)
 
 
 def set_workspace_name(workspace_id: str, name: str) -> dict:
