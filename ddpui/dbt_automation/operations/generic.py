@@ -8,9 +8,27 @@ from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseI
 from ddpui.dbt_automation.utils.columnutils import quote_columnname, quote_constvalue
 
 from ddpui.dbt_automation.utils.tableutils import source_or_ref
+from ddpui.dbt_automation.schemas import GenericOperationInputSchema
 
 basicConfig(level=INFO)
 logger = getLogger()
+
+
+def generic_function_simulate_output(config: GenericOperationInputSchema) -> list[str]:
+    """
+    Simulate the output of the generic function operation.
+    This is used to determine the output columns.
+    """
+
+    source_columns = config.source_columns
+    computed_columns = config.computed_columns
+
+    # Determine the output columns based on computed columns
+    output_columns = []
+    for computed_column in computed_columns:
+        output_columns.append(computed_column.output_column_name)
+
+    return source_columns + output_columns
 
 
 def generic_function_dbt_sql(
@@ -20,9 +38,6 @@ def generic_function_dbt_sql(
     """
     source_columns: list of columns to copy from the input model
     computed_columns: list of computed columns with function_name, operands, and output_column_name
-    function_name: name of the function to be used
-    operands: list of operands to be passed to the function
-    output_column_name: name of the output column
     """
     source_columns = config["source_columns"]
     computed_columns = config["computed_columns"]

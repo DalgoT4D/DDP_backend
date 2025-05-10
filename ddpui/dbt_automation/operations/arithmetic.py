@@ -6,11 +6,19 @@ from logging import basicConfig, getLogger, INFO
 from ddpui.dbt_automation.utils.dbtproject import dbtProject
 from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
 from ddpui.dbt_automation.utils.columnutils import quote_columnname, quote_constvalue
-
 from ddpui.dbt_automation.utils.tableutils import source_or_ref
+from ddpui.dbt_automation.schemas import ArithmeticOperationInputSchema
 
 basicConfig(level=INFO)
 logger = getLogger()
+
+
+def arithmetic_simulate_output(config: ArithmeticOperationInputSchema) -> list[str]:
+    """
+    Simulate the output of the arithmetic operation.
+    This is used to determine the output columns.
+    """
+    return config.source_columns + [config.output_column_name]
 
 
 # pylint:disable=unused-argument,logging-fstring-interpolation
