@@ -166,9 +166,9 @@ def notify_platform_admins(org: Org, flow_run_id: str, state: str):
         "\n"
         f"\nBase plan: {org.base_plan() if org.base_plan() else 'Unknown'}"
         "\n"
-        f"\nhttp://localhost:4200/flow-runs/flow-run/{flow_run_id}"
+        f"\nhttps://prefect.dalgo.org/flow-runs/flow-run/{flow_run_id}"
         "\n"
-        f"\nAirbyte workspace URL: http://localhost:8000/workspaces/{org.airbyte_workspace_id}"
+        f"\nAirbyte workspace URL: https://airbyte.dalgo.org/workspaces/{org.airbyte_workspace_id}"
     )
     if os.getenv("ADMIN_EMAIL"):
         send_text_message(

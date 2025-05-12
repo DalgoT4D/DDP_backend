@@ -19,7 +19,7 @@ def show_workspaces():
     org_to_workspace = Org.objects.order_by("name").values("name", "airbyte_workspace_id", "slug")
     streamlit.title("Airbyte workspace URLs")
     for org in org_to_workspace:
-        org["airbyte_url"] = f"http://localhost:8000/workspaces/{org['airbyte_workspace_id']}"
+        org["airbyte_url"] = f"https://airbyte.dalgo.org/workspaces/{org['airbyte_workspace_id']}"
         streamlit.markdown(f"[{org['name']}]({org['airbyte_url']}) {org['slug']}")
 
 
@@ -33,7 +33,7 @@ def main():
     for flow_run in flow_runs:
         streamlit.write(flow_run["state_name"])
 
-        flow_run_url = "http://localhost:4200/flow-runs/flow-run/" + flow_run["id"]
+        flow_run_url = "https://prefect.dalgo.org/flow-runs/flow-run/" + flow_run["id"]
         streamlit.markdown(f"[Prefect flow run {flow_run['id']}]({flow_run_url})")
 
         org_slug = find_key_in_dictionary(flow_run["parameters"], "org_slug")
@@ -53,7 +53,7 @@ def main():
             orgtask = OrgTask.objects.filter(connection_id=connection_id).first()
             if orgtask:
                 streamlit.write(orgtask.org.slug)
-                connection_url = f"http://localhost:8000/workspaces/{orgtask.org.airbyte_workspace_id}/connections/{connection_id}"
+                connection_url = f"https://airbyte.dalgo.org/workspaces/{orgtask.org.airbyte_workspace_id}/connections/{connection_id}"
                 streamlit.markdown(f"[Airbyte connection {connection_id}]({connection_url})")
             else:
                 streamlit.write(connection_id)

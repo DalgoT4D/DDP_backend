@@ -426,9 +426,9 @@ def test_notify_platform_admins():
             "\n"
             "\nBase plan: baseplan"
             "\n"
-            "\nhttp://localhost:4200/flow-runs/flow-run/flow-run-id"
+            "\nhttps://prefect.dalgo.org/flow-runs/flow-run/flow-run-id"
             "\n"
-            "\nAirbyte workspace URL: http://localhost:8000/workspaces/airbyte_workspace_id"
+            "\nAirbyte workspace URL: https://airbyte.dalgo.org/workspaces/airbyte_workspace_id"
         )
 
         notify_platform_admins(org, "flow-run-id", "FAILED")
