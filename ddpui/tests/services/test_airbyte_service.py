@@ -4,8 +4,6 @@ import requests
 import django
 import pytest
 
-from ddpui.ddpairbyte.schema import AirbyteConnectionSchemaUpdate
-
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
@@ -27,7 +25,6 @@ from ddpui.ddpairbyte.airbyte_service import (
     get_source,
     delete_source,
     create_source,
-    update_schema_change,
     update_source,
     AirbyteSourceCreate,
     check_source_connection,
@@ -48,7 +45,6 @@ from ddpui.ddpairbyte.airbyte_service import (
     get_connections,
     get_connection,
     update_connection,
-    reset_connection,
     delete_connection,
     sync_connection,
     get_job_info,
@@ -1438,15 +1434,6 @@ def test_update_connection_success():
         assert res["connectionId"] == "connection-id"
 
 
-def test_reset_connection():
-    with patch(
-        "ddpui.ddpairbyte.airbyte_service.abreq",
-        return_value={"connectionId": "connection-id"},
-    ) as mock_abreq_:
-        reset_connection("connection-id")
-        mock_abreq_.assert_called_once_with("connections/reset", {"connectionId": "connection-id"})
-
-
 def test_delete_connection():
     with patch(
         "ddpui.ddpairbyte.airbyte_service.abreq",
@@ -1629,82 +1616,6 @@ def test_get_connection_catalog_invalid_connection_id():
     with pytest.raises(HttpError) as excinfo:
         get_connection_catalog(123)
     assert str(excinfo.value) == "connection_id must be a string"
-
-
-def test_update_schema_change_valid_input():
-    org = Mock()
-    connection_info = AirbyteConnectionSchemaUpdate(
-        name="test-connection",
-        connectionId="connection_id",
-        sourceCatalogId="source_id",
-        syncCatalog={"streams": []},
-    )
-    current_connection = {"connectionId": "test-connection-id", "syncCatalog": {}}
-
-    with patch(
-        "ddpui.ddpairbyte.airbyte_service.trigger_reset_and_sync_workflow"
-    ) as mock_trigger_reset_and_sync_workflow:
-        mock_trigger_reset_and_sync_workflow.side_effect = (
-            lambda org, connection_id: None
-        )  # Mock the function to do nothing
-
-        with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
-            mock_abreq.return_value = {"connectionId": "test-connection-id"}
-
-            result = update_schema_change(org, connection_info, current_connection)
-
-            assert result["connectionId"] == "test-connection-id"
-            mock_abreq.assert_called_once_with("web_backend/connections/update", current_connection)
-
-
-def test_update_schema_change_invalid_connection_info():
-    org = Mock()
-    connection_info = {}
-    current_connection = {"connectionId": "test-connection-id", "syncCatalog": {}}
-
-    with pytest.raises(HttpError) as excinfo:
-        update_schema_change(org, connection_info, current_connection)
-    assert (
-        str(excinfo.value) == "connection_info must be an instance of AirbyteConnectionSchemaUpdate"
-    )
-
-
-def test_update_schema_change_invalid_current_connection():
-    org = Mock()
-    connection_info = AirbyteConnectionSchemaUpdate(
-        name="test-connection",
-        connectionId="connection_id",
-        sourceCatalogId="source_id",
-        syncCatalog={"streams": []},
-    )
-    current_connection = "invalid"
-
-    with pytest.raises(HttpError) as excinfo:
-        update_schema_change(org, connection_info, current_connection)
-    assert str(excinfo.value) == "current_connection must be a dictionary"
-
-
-def test_update_schema_change_missing_syncCatalog():
-    org = Mock()
-    connection_info = AirbyteConnectionSchemaUpdate(
-        name="test-connection",
-        connectionId="connection_id",
-        sourceCatalogId="source_id",
-        syncCatalog={"streams": []},
-    )
-    current_connection = {"connectionId": "test-connection-id"}
-
-    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq, patch(
-        "ddpui.ddpairbyte.airbyte_service.trigger_reset_and_sync_workflow"
-    ) as mock_trigger_reset_and_sync_workflow:
-        mock_abreq.return_value = {"connectionId": "test-connection-id"}
-
-        result = update_schema_change(org, connection_info, current_connection)
-
-        assert result["connectionId"] == "test-connection-id"
-        assert "syncCatalog" not in result
-        mock_abreq.assert_called_once_with("web_backend/connections/update", current_connection)
-        mock_trigger_reset_and_sync_workflow.assert_called_once_with(org, "test-connection-id")
 
 
 def test_create_connection_success():

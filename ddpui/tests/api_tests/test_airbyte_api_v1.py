@@ -20,19 +20,16 @@ from ddpui.api.airbyte_api import (
     get_airbyte_connections_v1,
     get_connection_catalog_v1,
     get_latest_job_for_connection,
-    post_airbyte_connection_reset_v1,
     post_airbyte_connection_v1,
     post_airbyte_workspace_v1,
     put_airbyte_connection_v1,
     put_airbyte_destination_v1,
-    update_connection_schema,
     get_sync_history_for_connection,
     schedule_update_connection_schema,
 )
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.ddpairbyte.schema import (
     AirbyteConnectionCreate,
-    AirbyteConnectionSchemaUpdate,
     AirbyteConnectionUpdate,
     AirbyteDestinationUpdate,
     AirbyteWorkspace,
@@ -527,61 +524,6 @@ def test_post_airbyte_connection_v1_success(
 
 
 # ================================================================================
-def test_post_airbyte_connection_reset_v1_no_workspace(orguser):
-    """tests POST /v1/connections/{connection_id}/reset failure with no workspace"""
-    request = mock_request(orguser)
-
-    with pytest.raises(HttpError) as excinfo:
-        post_airbyte_connection_reset_v1(request, "connection_id")
-    assert str(excinfo.value) == "create an airbyte workspace first"
-
-
-def test_post_airbyte_connection_reset_v1_no_connection_task(
-    orguser_workspace, airbyte_server_block
-):
-    """tests POST /v1/connections/{connection_id}/reset failure with connection task created"""
-    request = mock_request(orguser_workspace)
-
-    with pytest.raises(HttpError) as excinfo:
-        post_airbyte_connection_reset_v1(request, "connection_id")
-    assert (
-        str(excinfo.value)
-        == "Reset job is disabled. Please contact the dalgo support team at support@dalgo.in"
-    )
-
-
-def test_post_airbyte_connection_reset_v1_success(orguser_workspace, airbyte_server_block):
-    """tests POST /v1/connections/{connection_id}/reset success"""
-    request = mock_request(orguser_workspace)
-
-    connection_id = "connection_id"
-
-    airbyte_task_config = {
-        "type": "airbyte",
-        "slug": "airbyte-sync",
-        "label": "AIRBYTE sync",
-        "command": None,
-    }
-    task = Task.objects.create(**airbyte_task_config)
-
-    OrgTask.objects.create(task=task, org=request.orguser.org, connection_id=connection_id)
-
-    with pytest.raises(HttpError) as excinfo:
-        post_airbyte_connection_reset_v1(request, connection_id)
-    assert (
-        str(excinfo.value)
-        == "Reset job is disabled. Please contact the dalgo support team at support@dalgo.in"
-    )
-
-    enable_flag("AIRBYTE_RESET_JOB")
-    with patch("ddpui.ddpairbyte.airbytehelpers.reset_connection") as reset_helper_mock:
-        reset_helper_mock.return_value = (None, None)
-        post_airbyte_connection_reset_v1(request, connection_id)
-
-        reset_helper_mock.assert_called_once()
-
-
-# ================================================================================
 def test_put_airbyte_connection_v1_no_workspace(orguser):
     """tests PUT /v1/connections/{connection_id}/update failure with no workspace"""
     payload = AirbyteConnectionUpdate(
@@ -1030,66 +972,6 @@ def test_get_connection_catalog_v1_no_workspace(orguser):
 
     assert excinfo.value.status_code == 400
     assert str(excinfo.value) == "create an airbyte workspace first"
-
-
-def test_update_schema_changes_connection_with_no_workspace(orguser):
-    """Tests update_schema_changes_connection_v1 when organization has no workspace"""
-    request = mock_request(orguser)
-
-    connection_id = "connection_123"
-    payload = {"schemaChange": "true"}
-
-    with pytest.raises(HttpError) as excinfo:
-        update_connection_schema(request, connection_id, payload)
-
-    assert excinfo.value.status_code == 400
-    assert str(excinfo.value) == "create an airbyte workspace first"
-
-
-# write success test case for update_connection_schema
-
-
-def test_update_schema_changes_connection_success(orguser_workspace):
-    """Tests update_connection_schema when updating schema changes is successful"""
-    request = mock_request(orguser_workspace)
-
-    OrgPrefectBlockv1.objects.create(
-        org=request.orguser.org,
-        block_type=ddpprefect.AIRBYTESERVER,
-        block_id="fake-serverblock-id",
-        block_name="fake ab server block",
-    )
-
-    connection_id = "connection_123"
-    payload = AirbyteConnectionSchemaUpdate(
-        name="Updated Connection",
-        connectionId="connection_123",
-        syncCatalog={},
-        sourceCatalogId="source_catalog_id",
-    )
-
-    with patch(
-        "ddpui.ddpairbyte.airbytehelpers.update_connection_schema"
-    ) as update_schema_changes_connection_mock:
-        updated_connection = {
-            "connectionId": connection_id,
-            "name": "Updated Connection",
-            "syncCatalog": {},
-            "catalogId": "source_catalog_id",
-            "schemaChange": "no_change",
-        }
-        update_schema_changes_connection_mock.return_value = (updated_connection, None)
-
-        response = update_connection_schema(request, connection_id, payload)
-
-    update_schema_changes_connection_mock.assert_called_once_with(
-        request.orguser.org, connection_id, payload
-    )
-
-    assert "connectionId" in response
-    assert "syncCatalog" in response
-    assert "catalogId" in response
-    assert "schemaChange" in response
 
 
 def test_schedule_update_connection_schema_workspace_not_found(orguser):
