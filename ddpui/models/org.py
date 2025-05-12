@@ -113,6 +113,14 @@ class CreateOrgSchema(Schema):
     end_date: Optional[str]
 
 
+class CreateFreeTrialOrgSchema(CreateOrgSchema):
+    """payload for org creation specifically for free trial account"""
+
+    email: str
+    superset_ec2_machine_id: str
+    superset_port: int
+
+
 class OrgWarehouse(models.Model):
     """A data warehouse for an org. Typically we expect exactly one"""
 
@@ -201,7 +209,6 @@ class ConnectionMeta(models.Model):
     whether the reset is big enough for scheduling it later"""
 
     connection_id = models.CharField(max_length=36, null=False)
-    schedule_large_jobs = models.BooleanField(default=True)
 
 
 class ConnectionJob(models.Model):

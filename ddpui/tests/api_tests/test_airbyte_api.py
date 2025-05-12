@@ -30,6 +30,7 @@ from ddpui.api.airbyte_api import (
     get_airbyte_destinations,
     get_airbyte_destination,
     get_job_status,
+    post_cancel_connection_job,
 )
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.ddpairbyte.schema import (
@@ -689,3 +690,16 @@ def test_get_job_status(orguser):
     result = get_job_status(request, "fake-job-id")
     assert result["status"] == "completed"
     assert len(result["logs"]) == 3
+
+
+def test_post_cancel_connection_job(orguser_workspace):
+    """tests POST /cancel_connection_job"""
+    request = mock_request(orguser_workspace)
+
+    with patch(
+        "ddpui.ddpairbyte.airbyte_service.cancel_connection_job"
+    ) as mock_cancel_connection_job:
+        post_cancel_connection_job(request, "fake-connection-id", "sync")
+        mock_cancel_connection_job.assert_called_once_with(
+            "FAKE-WORKSPACE-ID", "fake-connection-id", "sync"
+        )

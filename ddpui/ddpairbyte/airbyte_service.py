@@ -14,9 +14,7 @@ from flags.state import flag_enabled
 from ddpui import settings
 from ddpui.ddpairbyte import schema
 from ddpui.ddpprefect import prefect_service, AIRBYTESERVER
-from ddpui.models.org import Org
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.deploymentblocks import trigger_reset_and_sync_workflow
 from ddpui.utils.helpers import remove_nested_attribute, nice_bytes
 from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
@@ -281,6 +279,7 @@ def create_custom_source_definition(
                 "documentationUrl": documentation_url,
             },
         },
+        timeout=100,
     )
     if "sourceDefinitionId" not in res:
         error_message = f"Source definition not created: {name}"
@@ -735,11 +734,11 @@ def create_connection(
         logger.error(error_message)
         raise HttpError(400, error_message)
 
-    sourceschemacatalog = get_source_schema_catalog(workspace_id, connection_info.sourceId)
+    sourceschemacatalog = connection_info.syncCatalog
     payload = {
         "sourceId": connection_info.sourceId,
         "destinationId": connection_info.destinationId,
-        "sourceCatalogId": sourceschemacatalog["catalogId"],
+        "sourceCatalogId": connection_info.catalogId,
         "syncCatalog": {
             "streams": [
                 # we're going to put the stream
@@ -761,7 +760,7 @@ def create_connection(
 
     # one stream per table
     selected_streams = {x["name"]: x for x in connection_info.streams}
-    for schema_cat in sourceschemacatalog["catalog"]["streams"]:
+    for schema_cat in sourceschemacatalog["streams"]:
         stream_name = schema_cat["stream"]["name"]
         if stream_name in selected_streams and selected_streams[stream_name]["selected"]:
             schema_cat["config"]["selected"] = True
@@ -826,7 +825,7 @@ def update_connection(
         logger.error(error_message)
         raise HttpError(400, error_message)
 
-    sourceschemacatalog = get_source_schema_catalog(workspace_id, current_connection["sourceId"])
+    sourceschemacatalog = connection_info.syncCatalog
 
     # update the name
     if connection_info.name:
@@ -841,7 +840,7 @@ def update_connection(
 
     # one stream per table
     selected_streams = {x["name"]: x for x in connection_info.streams}
-    for schema_cat in sourceschemacatalog["catalog"]["streams"]:
+    for schema_cat in sourceschemacatalog["streams"]:
         stream_name = schema_cat["stream"]["name"]
         if stream_name in selected_streams and selected_streams[stream_name]["selected"]:
             # set schema_cat['config']['syncMode']
@@ -892,16 +891,6 @@ def update_connection(
     if "connectionId" not in res:
         logger.error("Failed to update connection: %s", res)
         raise HttpError(500, "failed to update connection")
-    return res
-
-
-def reset_connection(connection_id: str) -> dict:
-    """Reset data of a connection at the destination"""
-    if not isinstance(connection_id, str):
-        raise HttpError(400, "connection_id must be a string")
-
-    res = abreq("connections/reset", {"connectionId": connection_id})
-    logger.info("Reseting the connection: %s", connection_id)
     return res
 
 
@@ -1028,6 +1017,12 @@ def get_logs_for_job(job_id: int, attempt_number: int = 0) -> list[str]:
     return []
 
 
+def cancel_job(job_id: str) -> dict:
+    """cancel a job"""
+    res = abreq("jobs/cancel", {"id": job_id})
+    return res
+
+
 def get_connection_catalog(connection_id: str, **kwargs) -> dict:
     """get the catalog for a connection to check/refresh for schema changes"""
     if not isinstance(connection_id, str):
@@ -1040,45 +1035,6 @@ def get_connection_catalog(connection_id: str, **kwargs) -> dict:
     return res
 
 
-def update_schema_change(
-    org: Org,
-    connection_info: schema.AirbyteConnectionSchemaUpdate,
-    current_connection: dict,
-) -> dict:
-    """Update the schema change for a connection."""
-    if not isinstance(connection_info, schema.AirbyteConnectionSchemaUpdate):
-        raise HttpError(400, "connection_info must be an instance of AirbyteConnectionSchemaUpdate")
-    if not isinstance(current_connection, dict):
-        raise HttpError(400, "current_connection must be a dictionary")
-
-    # check syncCatalog is present in current_connection
-    if "syncCatalog" not in current_connection:
-        current_connection["syncCatalog"] = {}
-
-    current_connection["sourceCatalogId"] = connection_info.sourceCatalogId
-    # replace the syncCatalog with the new one from connection_info
-    if hasattr(connection_info, "syncCatalog") and connection_info.syncCatalog:
-        current_connection["syncCatalog"] = connection_info.syncCatalog
-        logger.info("Updated syncCatalog")
-
-    res = abreq("web_backend/connections/update", current_connection)
-
-    if "connectionId" not in res:
-        logger.error("Failed to update schema in connection: %s", res)
-        raise HttpError(500, "failed to update schema in connection")
-
-    logger.info("Successfully updated schema in connection")
-
-    # Call helper function to trigger Prefect flow run
-    try:
-        trigger_reset_and_sync_workflow(org, res["connectionId"])
-    except Exception as error:
-        logger.error("Failed to trigger Prefect flow run: %s", error)
-        raise HttpError(500, "failed to trigger Prefect flow run") from error
-
-    return res
-
-
 def get_current_airbyte_version():
     """Fetch airbyte version"""
 
@@ -1088,3 +1044,29 @@ def get_current_airbyte_version():
         logger.error("No version found")
         return None
     return res["version"]
+
+
+def cancel_connection_job(
+    workspace_id: str, connection_id: str, job_type: str  # pylint: disable=unused-argument
+) -> dict:
+    """
+    cancel a connection job. job_type is one of the following:
+    - check_connection_destination
+    - discover_schema
+    - get_spec
+    - sync
+    - reset_connection
+    - refresh
+    - clear
+    """
+    cancelled = False
+    res = get_jobs_for_connection(connection_id, job_types=[job_type])
+    for job in res["jobs"]:
+        if job["job"]["status"] == "running":
+            job_id = job["job"]["id"]
+            cancel_job(job_id)
+            logger.info("Cancelled job: %s", job_id)
+            cancelled = True
+            break
+
+    return {"cancelled": cancelled}

@@ -987,7 +987,7 @@ def test_cancel_queued_manual_job_success(
 
     assert response == {"success": True}
     mock_cancel_job.assert_called_once_with(
-        flow_run_id, {"state": {"name": "Cancelling", "type": "CANCELLING"}, "force": True}
+        flow_run_id, {"state": {"name": "Cancelling", "type": "CANCELLING"}, "force": "True"}
     )
 
 

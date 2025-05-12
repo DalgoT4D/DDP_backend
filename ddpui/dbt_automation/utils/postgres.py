@@ -87,6 +87,12 @@ class PostgresClient(WarehouseInterface):
             }
 
         if "ssh_host" in conn_info:
+            if "ssh_pkey" in conn_info:
+                # if we have a pkey, we need to write it to disk
+                # and pass the file path
+                with tempfile.NamedTemporaryFile(delete=False) as fp:
+                    fp.write(conn_info["ssh_pkey"].encode())
+                    conn_info["ssh_pkey"] = fp.name
             self.tunnel = SSHTunnelForwarder(
                 (conn_info["ssh_host"], conn_info["ssh_port"]),
                 remote_bind_address=(conn_info["host"], conn_info["port"]),

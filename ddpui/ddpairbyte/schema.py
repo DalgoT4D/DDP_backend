@@ -61,9 +61,11 @@ class AirbyteConnectionCreate(Schema):
 
     name: str
     sourceId: str
+    streams: list
+    catalogId: str
+    syncCatalog: dict
     destinationId: str = None
     destinationSchema: str = None
-    streams: list
 
 
 class AirbyteConnectionCreateResponse(Schema):
@@ -107,6 +109,8 @@ class AirbyteConnectionUpdate(Schema):
 
     name: str
     streams: list
+    syncCatalog: dict
+    catalogId: str
     destinationId: str = None
     destinationSchema: str = None
 

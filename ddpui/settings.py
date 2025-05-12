@@ -231,12 +231,12 @@ AIRBYTE_CUSTOM_SOURCES = {
         "docker_image_tag": "0.2.1",
         "documentation_url": "",
     },
-    # "tech4dev/source-papersurvey": {
-    #     "name": "PaperSurvey",
-    #     "docker_repository": "tech4dev/source-papersurvey",
-    #     "docker_image_tag": "0.1.1",
-    #     "documentation_url": "",
-    # },
+    "tech4dev/source-surveycto": {
+        "name": "SurveyCTO T4D",
+        "docker_repository": "tech4dev/source-surveycto",
+        "docker_image_tag": "0.2.0",
+        "documentation_url": "",
+    },
     "tech4dev/source-glific": {
         "name": "Glific",
         "docker_repository": "tech4dev/source-glific",
