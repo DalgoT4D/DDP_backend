@@ -1027,11 +1027,13 @@ def check_for_long_running_flow_runs():
     flow_runs = get_long_running_flow_runs(2)
 
     email_body = ""
+    prefect_url = os.getenv("PREFECT_URL_FOR_NOTIFICATIONS")
+    airbyte_url = os.getenv("AIRBYTE_URL_FOR_NOTIFICATIONS")
 
     for flow_run in flow_runs:
         logger.info(f"Found long running flow run {flow_run['id']} in prefect")
 
-        flow_run_url = "http://localhost:4200/flow-runs/flow-run/" + flow_run["id"]
+        flow_run_url = f'{prefect_url}/flow-runs/flow-run/{flow_run["id"]}'
         email_body += f"Flow Run ID: {flow_run['id']} \n"
         email_body += f"Flow Run URL: {flow_run_url} \n"
 
@@ -1052,7 +1054,7 @@ def check_for_long_running_flow_runs():
                 email_body += (
                     f"Org: {orgtask.org.slug} \n"  # might appear above as well, we don't care
                 )
-                connection_url = f"http://localhost:8000/workspaces/{orgtask.org.airbyte_workspace_id}/connections/{connection_id}"
+                connection_url = f"{airbyte_url}/workspaces/{orgtask.org.airbyte_workspace_id}/connections/{connection_id}"
                 email_body += f"Connection URL: {connection_url} \n"
             else:
                 email_body += f"Connection ID: {connection_id} \n"
