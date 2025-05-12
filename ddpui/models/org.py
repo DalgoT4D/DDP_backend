@@ -209,7 +209,6 @@ class ConnectionMeta(models.Model):
     whether the reset is big enough for scheduling it later"""
 
     connection_id = models.CharField(max_length=36, null=False)
-    schedule_large_jobs = models.BooleanField(default=True)
 
 
 class ConnectionJob(models.Model):
