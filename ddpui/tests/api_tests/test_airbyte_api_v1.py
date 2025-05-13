@@ -30,7 +30,6 @@ from ddpui.api.airbyte_api import (
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.ddpairbyte.schema import (
     AirbyteConnectionCreate,
-    AirbyteConnectionSchemaUpdate,
     AirbyteConnectionUpdate,
     AirbyteDestinationUpdate,
     AirbyteWorkspace,
@@ -973,9 +972,6 @@ def test_get_connection_catalog_v1_no_workspace(orguser):
 
     assert excinfo.value.status_code == 400
     assert str(excinfo.value) == "create an airbyte workspace first"
-
-
-# write success test case for update_connection_schema
 
 
 def test_schedule_update_connection_schema_workspace_not_found(orguser):
