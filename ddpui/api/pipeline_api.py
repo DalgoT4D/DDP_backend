@@ -4,7 +4,7 @@ from typing import List
 from ninja import Router
 from ninja.errors import HttpError
 
-from django.utils import timezone
+from django.utils import timezone as djantotimezone
 
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
@@ -619,7 +619,7 @@ def post_run_prefect_org_deployment_task(request, deployment_id, payload: TaskPa
             flow_run_id=res["flow_run_id"],
             name=res["name"],
             start_time=None,
-            expected_start_time=timezone.now(),
+            expected_start_time=djantotimezone.now(),
             total_run_time=-1,
             status="Scheduled",
             state_name="Scheduled",

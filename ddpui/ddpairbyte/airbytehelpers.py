@@ -11,6 +11,7 @@ from datetime import datetime
 import yaml
 from ninja.errors import HttpError
 from django.utils.text import slugify
+from django.utils import timezone as djangotimezone
 from django.conf import settings
 from django.db import transaction
 from django.db.models import F, Window, Q
@@ -1151,6 +1152,18 @@ def schedule_update_connection_schema(
                     ],
                 }
             },
+        )
+        PrefectFlowRun.objects.create(
+            deployment_id=dataflow_orgtask.dataflow.deployment_id,
+            flow_run_id=res["flow_run_id"],
+            name=res["name"],
+            start_time=None,
+            expected_start_time=djangotimezone.now(),
+            total_run_time=-1,
+            status="Scheduled",
+            state_name="Scheduled",
+            retries=0,
+            orguser=orguser,
         )
 
         for tasklock in locks:
