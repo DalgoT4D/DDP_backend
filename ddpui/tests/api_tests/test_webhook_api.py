@@ -420,15 +420,17 @@ def test_notify_platform_admins():
         org.base_plan = Mock(return_value="baseplan")
         os.environ["ADMIN_EMAIL"] = "adminemail"
         os.environ["ADMIN_DISCORD_WEBHOOK"] = "admindiscordwebhook"
+        os.environ["PREFECT_URL_FOR_NOTIFICATIONS"] = "prefect-url-for-notifications"
+        os.environ["AIRBYTE_URL_FOR_NOTIFICATIONS"] = "airbyte-url-for-notifications"
 
         message = (
             "Flow run for orgslug has failed with state FAILED"
             "\n"
             "\nBase plan: baseplan"
             "\n"
-            "\nhttp://localhost:4200/flow-runs/flow-run/flow-run-id"
+            "\nprefect-url-for-notifications/flow-runs/flow-run/flow-run-id"
             "\n"
-            "\nAirbyte workspace URL: http://localhost:8000/workspaces/airbyte_workspace_id"
+            "\nAirbyte workspace URL: airbyte-url-for-notifications/workspaces/airbyte_workspace_id"
         )
 
         notify_platform_admins(org, "flow-run-id", "FAILED")
