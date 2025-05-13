@@ -214,6 +214,7 @@ def create_or_update_flowrun(flow_run, deployment_id, state_name=""):
                 MAP_FLOW_RUN_STATE_NAME_TO_TYPE.get("UNKNOWN", "unknown"),
             ),
             "state_name": state_name,
+            # if orguser is None then it is the system user
         },
     )
 

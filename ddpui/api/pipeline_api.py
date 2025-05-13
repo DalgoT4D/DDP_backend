@@ -4,6 +4,8 @@ from typing import List
 from ninja import Router
 from ninja.errors import HttpError
 
+from django.utils import timezone as djantotimezone
+
 from ddpui import auth
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service
@@ -13,6 +15,7 @@ from ddpui.models.org import OrgDataFlowv1, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import DataflowOrgTask, OrgTask, TaskLockStatus
 from ddpui.models.llm import LogsSummarizationType
+from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
     PrefectFlowRunSchema,
@@ -611,6 +614,18 @@ def post_run_prefect_org_deployment_task(request, deployment_id, payload: TaskPa
                 }
 
         res = prefect_service.create_deployment_flow_run(deployment_id, flow_run_params)
+        PrefectFlowRun.objects.create(
+            deployment_id=deployment_id,
+            flow_run_id=res["flow_run_id"],
+            name=res["name"],
+            start_time=None,
+            expected_start_time=djantotimezone.now(),
+            total_run_time=-1,
+            status="Scheduled",
+            state_name="Scheduled",
+            retries=0,
+            orguser=orguser,
+        )
     except Exception as error:
         for task_lock in locks:
             logger.info("deleting TaskLock %s", task_lock.orgtask.task.slug)

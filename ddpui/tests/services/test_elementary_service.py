@@ -521,12 +521,18 @@ def test_refresh_elementary_report_via_prefect(
     )
 
     mock_lock_tasks_for_deployment.return_value = []
-    mock_create_deployment_flow_run.return_value = "return-value"
+    mock_create_deployment_flow_run.return_value = {
+        "flow_run_id": "fake-flow-run-id",
+        "name": "fake-name",
+    }
 
     DataflowOrgTask.objects.create(orgtask=orgtask, dataflow=odf)
 
     response = refresh_elementary_report_via_prefect(orguser)
-    assert response == "return-value"
+    assert response == {
+        "flow_run_id": "fake-flow-run-id",
+        "name": "fake-name",
+    }
 
     mock_lock_tasks_for_deployment.assert_called_once_with("test-deployment-id", orguser)
     mock_create_deployment_flow_run.assert_called_once_with(odf.deployment_id)

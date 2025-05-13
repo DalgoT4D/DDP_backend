@@ -9,6 +9,8 @@ import yaml
 import boto3
 import boto3.exceptions
 from ninja.errors import HttpError
+from django.utils import timezone as djantotimezone
+
 from ddpui import settings
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
@@ -16,6 +18,7 @@ from ddpui.models.tasks import OrgDataFlowv1
 
 from ddpui.models.tasks import OrgTask, DataflowOrgTask
 from ddpui.models.tasks import TaskProgressHashPrefix
+from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.constants import TASK_GENERATE_EDR
 from ddpui.celeryworkers.tasks import run_dbt_commands
@@ -334,6 +337,18 @@ def refresh_elementary_report_via_prefect(orguser: OrgUser) -> dict:
         for tasklock in locks:
             tasklock.flow_run_id = res["flow_run_id"]
             tasklock.save()
+        PrefectFlowRun.objects.create(
+            deployment_id=odf.deployment_id,
+            flow_run_id=res["flow_run_id"],
+            name=res["name"],
+            start_time=None,
+            expected_start_time=djantotimezone.now(),
+            total_run_time=-1,
+            status="Scheduled",
+            state_name="Scheduled",
+            retries=0,
+            orguser=orguser,
+        )
 
     except Exception as error:
         for task_lock in locks:
