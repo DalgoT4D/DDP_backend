@@ -18,15 +18,13 @@ from django.db.models.functions import RowNumber
 from django.forms.models import model_to_dict
 
 from ddpui.ddpairbyte import airbyte_service
-from ddpui.ddpairbyte.schema import AirbyteConnectionSchemaUpdate, AirbyteWorkspace
+from ddpui.ddpairbyte.schema import AirbyteWorkspace
 from ddpui.ddpprefect import prefect_service, schema, DBTCORE
 from ddpui.models.org import (
     Org,
     OrgPrefectBlockv1,
     OrgSchemaChange,
     OrgWarehouseSchema,
-    ConnectionJob,
-    ConnectionMeta,
 )
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
@@ -51,14 +49,11 @@ from ddpui.models.org import OrgDataFlowv1, OrgWarehouse
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskLockStatus
 from ddpui.utils.constants import (
     TASK_AIRBYTESYNC,
-    TASK_AIRBYTERESET,
-    UPDATE_SCHEMA,
     TASK_AIRBYTECLEAR,
 )
 from ddpui.utils.helpers import (
     generate_hash_id,
     update_dict_but_not_stars,
-    get_schedule_time_for_large_jobs,
 )
 from ddpui.utils import secretsmanager
 from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
@@ -66,7 +61,7 @@ from ddpui.core.pipelinefunctions import (
     setup_airbyte_sync_task_config,
     setup_airbyte_update_schema_task_config,
 )
-from ddpui.core.orgtaskfunctions import fetch_orgtask_lock, fetch_orgtask_lock_v1
+from ddpui.core.orgtaskfunctions import fetch_orgtask_lock_v1
 from ddpui.models.tasks import TaskLock
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.ddpdbt.elementary_service import create_elementary_profile, elementary_setup_status
@@ -509,13 +504,15 @@ def get_one_connection(org: Org, connection_id: str):
 
     destination_name = airbyte_conn["destination"]["name"]
 
-    lock = fetch_orgtask_lock(org_task)
+    sync_lock = TaskLock.objects.filter(orgtask=org_task).first()
+    lock = fetch_orgtask_lock_v1(org_task, sync_lock)
 
     if not lock and reset_dataflow:
         reset_dataflow_orgtask = DataflowOrgTask.objects.filter(dataflow=reset_dataflow).first()
 
         if reset_dataflow_orgtask.orgtask:
-            lock = fetch_orgtask_lock(reset_dataflow_orgtask.orgtask)
+            reset_lock = TaskLock.objects.filter(orgtask=reset_dataflow_orgtask.orgtask).first()
+            lock = fetch_orgtask_lock_v1(reset_dataflow_orgtask.orgtask, reset_lock)
 
     res = {
         "name": airbyte_conn["name"],
@@ -538,106 +535,6 @@ def get_one_connection(org: Org, connection_id: str):
     }
 
     return res, None
-
-
-def reset_connection(org: Org, connection_id: str):
-    """
-    reset the connection via the sync deployment
-    this will run a full reset + sync
-    """
-    org_server_block = OrgPrefectBlockv1.objects.filter(org=org, block_type=AIRBYTESERVER).first()
-
-    if not org_server_block:
-        logger.error("Airbyte server block not found")
-        return None, "airbyte server block not found"
-
-    sync_org_task = OrgTask.objects.filter(
-        org=org,
-        connection_id=connection_id,
-        task__slug=TASK_AIRBYTESYNC,
-    ).first()
-    if not sync_org_task:
-        return None, "connection not found"
-
-    sync_dataflow_orgtask = DataflowOrgTask.objects.filter(
-        orgtask=sync_org_task, dataflow__dataflow_type="manual"
-    ).first()
-
-    if sync_dataflow_orgtask is None:
-        logger.error("Sync dataflow not found")
-        return None, "sync dataflow not found"
-
-    reset_org_task = OrgTask.objects.filter(
-        org=org, connection_id=connection_id, task__slug=TASK_AIRBYTERESET
-    ).first()
-
-    if not reset_org_task:
-        logger.error("Reset OrgTask not found")
-        return None, "reset OrgTask not found"
-
-    # full reset + sync; run via the manual sync deployment
-    params = {
-        "config": {
-            "tasks": [
-                setup_airbyte_sync_task_config(reset_org_task, org_server_block, seq=1).to_json(),
-                setup_airbyte_sync_task_config(sync_org_task, org_server_block, seq=2).to_json(),
-            ],
-            "org_slug": org.slug,
-        }
-    }
-
-    # check if the connection is "large" for scheduling
-    connection_meta = ConnectionMeta.objects.filter(connection_id=connection_id).first()
-    is_connection_large_enough = (
-        True == connection_meta.schedule_large_jobs if connection_meta else False
-    )
-
-    schedule_at = None
-    job: ConnectionJob = None
-    if is_connection_large_enough:
-        schedule_at = get_schedule_time_for_large_jobs()
-    # if there is a flow run scheduled , delete it
-    # if the connection is large enough, we will schedule a new flow run
-    # if the connection is not larged enough, we run it now
-    # either way we need to delete this job
-    job = ConnectionJob.objects.filter(
-        connection_id=connection_id, job_type=TASK_AIRBYTERESET
-    ).first()
-    if job:
-        try:
-            prefect_service.delete_flow_run(job.flow_run_id)
-            job.delete()
-            job = None
-        except Exception as err:
-            logger.exception(err)
-            raise HttpError(400, "failed to remove the previous flow run") from err
-
-    try:
-        res = prefect_service.schedule_deployment_flow_run(
-            sync_dataflow_orgtask.dataflow.deployment_id,
-            params,
-            scheduled_time=schedule_at,
-        )
-        # save the new flow run scheduled to our db
-        if is_connection_large_enough:
-            if not job:
-                job = ConnectionJob.objects.create(
-                    connection_id=connection_id,
-                    job_type=TASK_AIRBYTERESET,
-                    flow_run_id=res["flow_run_id"],
-                    scheduled_at=schedule_at,
-                )
-            else:
-                job.flow_run_id = res["flow_run_id"]
-                job.scheduled_at = schedule_at
-                job.save()
-
-        logger.info("Successfully triggered Prefect flow run for reset")
-    except Exception as error:
-        logger.error("Failed to trigger Prefect flow run for reset: %s", error)
-        return None, "failed to trigger Prefect flow run for reset"
-
-    return None, None
 
 
 def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUpdate):
@@ -1188,31 +1085,6 @@ def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
     return connection_catalog, None
 
 
-def update_connection_schema(org: Org, connection_id: str, payload: AirbyteConnectionSchemaUpdate):
-    """
-    Update the schema changes of a connection.
-    """
-    if not OrgTask.objects.filter(
-        org=org,
-        connection_id=connection_id,
-    ).exists():
-        return None, "connection not found"
-
-    warehouse = OrgWarehouse.objects.filter(org=org).first()
-    if warehouse is None:
-        return None, "need to set up a warehouse first"
-
-    connection = airbyte_service.get_connection(org.airbyte_workspace_id, connection_id)
-
-    connection["skipReset"] = True
-
-    res = airbyte_service.update_schema_change(org, payload, connection)
-    if res:
-        OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
-
-    return res, None
-
-
 def get_schema_changes(org: Org):
     """
     Get the schema changes of a connection in an org.
@@ -1222,56 +1094,11 @@ def get_schema_changes(org: Org):
     if org_schema_change is None:
         return None, "No schema change found"
 
-    large_connections = (
-        ConnectionMeta.objects.filter(
-            connection_id__in=[change.connection_id for change in org_schema_change],
-            schedule_large_jobs=True,
-        )
-        .all()
-        .values_list("connection_id", flat=True)
-    )
-
     schema_changes = []
     for change in org_schema_change:
-        schema_changes.append(
-            {
-                **model_to_dict(change, exclude=["org", "id"]),
-                **{
-                    "schedule_job": (
-                        {
-                            "scheduled_at": change.schedule_job.scheduled_at,
-                            "flow_run_id": change.schedule_job.flow_run_id,
-                            "job_type": change.schedule_job.job_type,
-                            "status": None,
-                            "state_name": None,
-                        }
-                        if change.schedule_job
-                        else None
-                    ),
-                    "is_connection_large": change.connection_id in large_connections,
-                    "next_job_at": get_schedule_time_for_large_jobs(),
-                    "run": None,
-                },
-            }
-        )
+        schema_changes.append(model_to_dict(change, exclude=["org", "id"]))
 
-    # check if the flow runs have been executed or not
-    # if the flow run have been executed attach the run object and remove the schedule_job reference
     logger.info(schema_changes)
-    all_flow_run_ids = [
-        change["schedule_job"]["flow_run_id"]
-        for change in schema_changes
-        if change["schedule_job"] and "flow_run_id" in change["schedule_job"]
-    ]
-
-    runs = PrefectFlowRun.objects.filter(flow_run_id__in=all_flow_run_ids).all()
-
-    for change in schema_changes:
-        if change["schedule_job"] and "flow_run_id" in change["schedule_job"]:
-            curr_run: list[PrefectFlowRun] = [
-                run for run in runs if run.flow_run_id == change["schedule_job"]["flow_run_id"]
-            ]
-            change["schedule_job"]["run"] = curr_run[0].to_json() if len(curr_run) >= 1 else None
 
     return schema_changes, None
 
@@ -1304,43 +1131,15 @@ def schedule_update_connection_schema(
     if not dataflow_orgtask:
         raise HttpError(400, "no dataflow mapped")
 
-    # check if the connection is "large" for scheduling
-    connection_meta = ConnectionMeta.objects.filter(connection_id=connection_id).first()
-    is_connection_large_enough = connection_meta and connection_meta.schedule_large_jobs
-
-    logger.info("connection is large enough: %s", is_connection_large_enough)
-
-    locks: list[TaskLock] = []
-    schedule_at = None
-    job: ConnectionJob = None
-    if not is_connection_large_enough:
-        locks = prefect_service.lock_tasks_for_deployment(
-            dataflow_orgtask.dataflow.deployment_id,
-            orguser,
-            dataflow_orgtasks=[dataflow_orgtask],
-        )
-    else:
-        schedule_at = get_schedule_time_for_large_jobs()
-
-    # if there is a flow run scheduled , delete it
-    # if the connection is large enough, we will schedule a new flow run
-    # if the connection is not larged enough, we run it now
-    # either way we need to delete this job
-    job = ConnectionJob.objects.filter(connection_id=connection_id, job_type=UPDATE_SCHEMA).first()
-    if job:
-        try:
-            prefect_service.delete_flow_run(job.flow_run_id)
-            job.delete()
-            job = None
-        except Exception as err:
-            logger.exception(err)
-            raise HttpError(400, "failed to remove the previous flow run") from err
-
-    logger.info("schema change is being scheduled at %s", schedule_at)
+    locks: list[TaskLock] = prefect_service.lock_tasks_for_deployment(
+        dataflow_orgtask.dataflow.deployment_id,
+        orguser,
+        dataflow_orgtasks=[dataflow_orgtask],
+    )
 
     # create the new flow run; schedule now or schedule later for large connections
     try:
-        res = prefect_service.schedule_deployment_flow_run(
+        res = prefect_service.create_deployment_flow_run(
             dataflow_orgtask.dataflow.deployment_id,
             {
                 "config": {
@@ -1352,30 +1151,7 @@ def schedule_update_connection_schema(
                     ],
                 }
             },
-            schedule_at,
         )
-
-        # save the new flow run scheduled to our db
-        if is_connection_large_enough:
-            if not job:
-                job = ConnectionJob.objects.create(
-                    connection_id=connection_id,
-                    job_type=UPDATE_SCHEMA,
-                    flow_run_id=res["flow_run_id"],
-                    scheduled_at=schedule_at,
-                )
-            else:
-                job.flow_run_id = res["flow_run_id"]
-                job.scheduled_at = schedule_at
-                job.save()
-
-            # update the schema change with the scheduled job
-            schema_change = OrgSchemaChange.objects.filter(
-                connection_id=connection_id, org=orguser.org
-            ).first()
-            if schema_change:
-                schema_change.schedule_job = job
-                schema_change.save()
 
         for tasklock in locks:
             tasklock.flow_run_id = res["flow_run_id"]

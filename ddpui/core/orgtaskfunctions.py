@@ -19,12 +19,19 @@ from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
 )
-from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE
+from ddpui.ddpprefect import (
+    MANUL_DBT_WORK_QUEUE,
+    FLOW_RUN_PENDING_STATE_TYPE,
+    FLOW_RUN_RUNNING_STATE_TYPE,
+    FLOW_RUN_SCHEDULED_STATE_TYPE,
+    FLOW_RUN_TERMINAL_STATE_TYPES,
+)
 from ddpui.ddpdbt.schema import DbtCloudJobParams, DbtProjectParams
 from ddpui.ddpprefect import prefect_service
 from ddpui.core.pipelinefunctions import setup_dbt_core_task_config, setup_dbt_cloud_task_config
 from ddpui.utils.constants import TASK_DBTRUN, TASK_GENERATE_EDR
 from ddpui.utils.helpers import generate_hash_id
+from ddpui.models.flow_runs import PrefectFlowRun
 
 logger = CustomLogger("ddpui")
 
@@ -202,43 +209,25 @@ def delete_orgtask(org_task: OrgTask):
     return None, None
 
 
-def fetch_orgtask_lock(org_task: OrgTask):
-    """fetch the lock status of an orgtask"""
-    lock = TaskLock.objects.filter(orgtask=org_task).first()
-    if lock:
-        lock_status = TaskLockStatus.QUEUED
-        if lock.flow_run_id:
-            flow_run = prefect_service.get_flow_run(lock.flow_run_id)
-            if flow_run and flow_run["state_type"] in ["SCHEDULED", "PENDING"]:
-                lock_status = TaskLockStatus.QUEUED
-            elif flow_run and flow_run["state_type"] == "RUNNING":
-                lock_status = TaskLockStatus.RUNNING
-            else:
-                lock_status = TaskLockStatus.COMPLETED
-
-        return {
-            "lockedBy": lock.locked_by.user.email,
-            "lockedAt": lock.locked_at,
-            "flowRunId": lock.flow_run_id,
-            "status": lock_status,
-            "task_slug": org_task.task.slug,
-        }
-
-    return None
-
-
 def fetch_orgtask_lock_v1(org_task: OrgTask, lock: Union[TaskLock, None]):
     """fetch the lock status of an orgtask"""
     if lock:
         lock_status = TaskLockStatus.QUEUED
         if lock.flow_run_id:
-            flow_run = prefect_service.get_flow_run(lock.flow_run_id)  # can taken from db now
-            if flow_run and flow_run["state_type"] in ["SCHEDULED", "PENDING"]:
-                lock_status = TaskLockStatus.QUEUED
-            elif flow_run and flow_run["state_type"] == "RUNNING":
-                lock_status = TaskLockStatus.RUNNING
-            else:
-                lock_status = TaskLockStatus.COMPLETED
+            flow_run = PrefectFlowRun.objects.filter(flow_run_id=lock.flow_run_id).first()
+            if flow_run:
+                if flow_run.status in [
+                    FLOW_RUN_SCHEDULED_STATE_TYPE,
+                    FLOW_RUN_PENDING_STATE_TYPE,
+                ]:
+                    lock_status = TaskLockStatus.QUEUED
+                elif flow_run.status == FLOW_RUN_RUNNING_STATE_TYPE:
+                    lock_status = TaskLockStatus.RUNNING
+                else:
+                    lock_status = TaskLockStatus.COMPLETED
+                    if flow_run.status in FLOW_RUN_TERMINAL_STATE_TYPES:
+                        TaskLock.objects.filter(orgtask=org_task).delete()
+                        return None
 
         return {
             "lockedBy": lock.locked_by.user.email,

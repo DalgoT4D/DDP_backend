@@ -16,9 +16,14 @@ from ddpui.celery import app, Celery
 
 from ddpui.utils import timezone, awsses, constants
 from ddpui.utils.helpers import find_key_in_dictionary
+from ddpui.utils.webhook_helpers import (
+    notify_org_managers,
+    do_handle_prefect_webhook,
+)
+
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.awsses import send_text_message
-from ddpui.models.org_plans import OrgPlans
+from ddpui.models.org_plans import OrgPlans, OrgPlanType
 from ddpui.models.org import (
     Org,
     OrgDbt,
@@ -49,10 +54,8 @@ from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.singletaskprogress import SingleTaskProgress
-from ddpui.utils.webhook_helpers import notify_org_managers
 from ddpui.utils.constants import (
     TASK_AIRBYTESYNC,
-    ORG_BASE_PLANS,
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.ddpdbt.schema import DbtProjectParams
@@ -984,6 +987,12 @@ def summarize_warehouse_results(
         return
 
 
+@app.task(bind=True)
+def handle_prefect_webhook(self, flow_run_id: str, state: str):  # skipcq: PYL-W0613
+    """this is the webhook handler for prefect flow runs"""
+    do_handle_prefect_webhook(flow_run_id, state)
+
+
 @app.task()
 def check_org_plan_expiry_notify_people():
     """sends an email to the org's account manager to notify them that their plan will expire in a week"""
@@ -995,7 +1004,7 @@ def check_org_plan_expiry_notify_people():
         org_plan = OrgPlans.objects.filter(org=org).first()
         if not org_plan or not org_plan.end_date:
             continue
-        if org_plan.base_plan != ORG_BASE_PLANS["FREE_TRIAL"]:
+        if org_plan.base_plan != OrgPlanType.FREE_TRIAL:
             continue
         # send a notification 7 days before the plan expires
         if (org_plan.end_date - datetime.now(pytz.utc)).days in [first_reminder, second_reminder]:
@@ -1018,11 +1027,13 @@ def check_for_long_running_flow_runs():
     flow_runs = get_long_running_flow_runs(2)
 
     email_body = ""
+    prefect_url = os.getenv("PREFECT_URL_FOR_NOTIFICATIONS")
+    airbyte_url = os.getenv("AIRBYTE_URL_FOR_NOTIFICATIONS")
 
     for flow_run in flow_runs:
         logger.info(f"Found long running flow run {flow_run['id']} in prefect")
 
-        flow_run_url = "http://localhost:4200/flow-runs/flow-run/" + flow_run["id"]
+        flow_run_url = f'{prefect_url}/flow-runs/flow-run/{flow_run["id"]}'
         email_body += f"Flow Run ID: {flow_run['id']} \n"
         email_body += f"Flow Run URL: {flow_run_url} \n"
 
@@ -1043,7 +1054,7 @@ def check_for_long_running_flow_runs():
                 email_body += (
                     f"Org: {orgtask.org.slug} \n"  # might appear above as well, we don't care
                 )
-                connection_url = f"http://localhost:8000/workspaces/{orgtask.org.airbyte_workspace_id}/connections/{connection_id}"
+                connection_url = f"{airbyte_url}/workspaces/{orgtask.org.airbyte_workspace_id}/connections/{connection_id}"
                 email_body += f"Connection URL: {connection_url} \n"
             else:
                 email_body += f"Connection ID: {connection_id} \n"
@@ -1106,8 +1117,9 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
     )
 
     # compute run times for each deployment; every 3 hours
-    sender.add_periodic_task(
-        crontab(minute=0, hour="*/3"),
-        compute_dataflow_run_times.s(),
-        name="compute run times of each deployment based on its past flow runs",
-    )
+    if not os.getenv("ESTIMATE_TIME_FOR_QUEUE_RUNS", "false").lower() == "true":
+        sender.add_periodic_task(
+            crontab(minute=0, hour="*/3"),
+            compute_dataflow_run_times.s(),
+            name="compute run times of each deployment based on its past flow runs",
+        )

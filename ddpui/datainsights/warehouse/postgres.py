@@ -24,8 +24,8 @@ class PostgresClient(Warehouse):
             "host": creds["host"],
             "port": creds["port"],
             "dbname": creds["database"],
-            "user": creds["encoded_username"],
-            "password": creds["encoded_password"],
+            "user": creds["username"],
+            "password": creds["password"],
         }
 
         connection_string = "postgresql+psycopg2://"
