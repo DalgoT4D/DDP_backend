@@ -3,7 +3,6 @@ import os
 from pathlib import Path
 import yaml
 import pytest
-from django.utils import timezone as djangotimezone
 from ddpui.ddpairbyte.airbytehelpers import (
     add_custom_airbyte_connector,
     upgrade_custom_sources,
@@ -1155,13 +1154,13 @@ def test_schedule_update_connection_schema_no_dataflow(
 
 @patch("ddpui.core.pipelinefunctions.setup_airbyte_update_schema_task_config", Mock(to_json=Mock()))
 @patch("ddpui.ddpprefect.prefect_service.create_deployment_flow_run")
-def test_schedule_update_connection_schema_n(
+def test_schedule_update_connection_schema_success(
     mock_create_deployment_flow_run: Mock,
     orguser: OrgUser,
     airbyte_server_block: OrgPrefectBlockv1,
     org_sync_task: OrgTask,
 ):
-    """tests schedule_update_connection_schema with no dataflow"""
+    """tests successful flow run creation in schedule_update_connection_schema"""
     org_sync_task.org = orguser.org
     org_sync_task.save()
     odf = OrgDataFlowv1.objects.create(
@@ -1197,6 +1196,8 @@ def test_schedule_update_connection_schema_n(
             }
         },
     )
-    assert PrefectFlowRun.objects.filter(
+    prefect_flow_run = PrefectFlowRun.objects.filter(
         deployment_id="fake-deployment-id", flow_run_id="flow_run_id"
-    ).exists()
+    ).first()
+    assert prefect_flow_run is not None
+    assert prefect_flow_run.orguser == orguser
