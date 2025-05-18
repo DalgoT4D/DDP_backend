@@ -31,7 +31,9 @@ class PrefectFlowRun(models.Model):
             "deployment_id": self.deployment_id,
             "id": self.flow_run_id,
             "name": self.name,
-            "startTime": self.start_time.isoformat(),  # pylint:disable=no-member
+            "startTime": (
+                self.start_time.isoformat() if self.start_time else None  # pylint:disable=no-member
+            ),
             "expectedStartTime": self.expected_start_time.isoformat(),  # pylint:disable=no-member
             "totalRunTime": self.total_run_time,
             "status": self.status,
