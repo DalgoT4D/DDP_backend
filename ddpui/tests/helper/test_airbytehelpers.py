@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import yaml
 import pytest
+from django.utils import timezone as djangotimezone
 from ddpui.ddpairbyte.airbytehelpers import (
     add_custom_airbyte_connector,
     upgrade_custom_sources,
@@ -15,10 +16,12 @@ from ddpui.ddpairbyte.airbytehelpers import (
     create_connection,
     get_sync_job_history_for_connection,
     create_or_update_org_cli_block,
+    schedule_update_connection_schema,
 )
 from ddpui.ddpairbyte.schema import (
     AirbyteDestinationUpdate,
     AirbyteConnectionCreate,
+    AirbyteConnectionSchemaUpdateSchedule,
 )
 from ddpui.models.role_based_access import Role
 from ddpui.models.org import (
@@ -28,6 +31,7 @@ from ddpui.models.org import (
     OrgDbt,
     TransformType,
 )
+from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.models.org_user import OrgUser, OrgUserRole, User
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.models.tasks import Task, OrgTask, OrgDataFlowv1, DataflowOrgTask
@@ -122,6 +126,27 @@ def org_task(org_with_workspace, task):
     )
     yield orgtask
     orgtask.delete()
+
+
+@pytest.fixture
+def org_sync_task(org_with_workspace, sync_task):
+    """a pytest fixture which creates an OrgTask object"""
+    orgtask = OrgTask.objects.create(
+        task=sync_task, org=org_with_workspace, connection_id="connection_id"
+    )
+    yield orgtask
+    orgtask.delete()
+
+
+@pytest.fixture
+def airbyte_server_block(orguser):
+    """an OrgPrefectBlockv1 of type airbyte-server"""
+    block = OrgPrefectBlockv1.objects.create(
+        org=orguser.org,
+        block_type=AIRBYTESERVER,
+    )
+    yield block
+    block.delete()
 
 
 # ================================================================================
@@ -1095,3 +1120,83 @@ def test_create_or_update_org_cli_block_update_case(
         profilename=yml_obj["profile"],
         target="default",
     )
+
+
+def test_schedule_update_connection_schema_no_serverblock(orguser):
+    """tests schedule_update_connection_schema with no server block"""
+    with pytest.raises(Exception) as excinfo:
+        payload = AirbyteConnectionSchemaUpdateSchedule(catalogDiff={})
+        schedule_update_connection_schema(orguser, "fake-connection-id", payload)
+    assert str(excinfo.value) == "airbyte server block not found"
+
+
+def test_schedule_update_connection_schema_no_orgtask(
+    orguser: OrgUser, airbyte_server_block: OrgPrefectBlockv1
+):
+    """tests schedule_update_connection_schema with no server block"""
+    with pytest.raises(Exception) as excinfo:
+        payload = AirbyteConnectionSchemaUpdateSchedule(catalogDiff={})
+        schedule_update_connection_schema(orguser, "fake-connection-id", payload)
+    assert str(excinfo.value) == "Orgtask not found"
+
+
+@patch("ddpui.core.pipelinefunctions.setup_airbyte_update_schema_task_config", Mock(to_json=Mock()))
+def test_schedule_update_connection_schema_no_dataflow(
+    orguser: OrgUser, airbyte_server_block: OrgPrefectBlockv1, org_sync_task: OrgTask
+):
+    """tests schedule_update_connection_schema with no dataflow"""
+    org_sync_task.org = orguser.org
+    org_sync_task.save()
+    with pytest.raises(Exception) as excinfo:
+        payload = AirbyteConnectionSchemaUpdateSchedule(catalogDiff={})
+        schedule_update_connection_schema(orguser, org_sync_task.connection_id, payload)
+    assert str(excinfo.value) == "no dataflow mapped"
+
+
+@patch("ddpui.core.pipelinefunctions.setup_airbyte_update_schema_task_config", Mock(to_json=Mock()))
+@patch("ddpui.ddpprefect.prefect_service.create_deployment_flow_run")
+def test_schedule_update_connection_schema_n(
+    mock_create_deployment_flow_run: Mock,
+    orguser: OrgUser,
+    airbyte_server_block: OrgPrefectBlockv1,
+    org_sync_task: OrgTask,
+):
+    """tests schedule_update_connection_schema with no dataflow"""
+    org_sync_task.org = orguser.org
+    org_sync_task.save()
+    odf = OrgDataFlowv1.objects.create(
+        org=orguser.org, name="odf-name", dataflow_type="manual", deployment_id="fake-deployment-id"
+    )
+    DataflowOrgTask.objects.create(orgtask=org_sync_task, dataflow=odf)
+    payload = AirbyteConnectionSchemaUpdateSchedule(catalogDiff={})
+    mock_create_deployment_flow_run.return_value = {
+        "flow_run_id": "flow_run_id",
+        "name": "name",
+    }
+    schedule_update_connection_schema(orguser, org_sync_task.connection_id, payload)
+
+    mock_create_deployment_flow_run.assert_called_once_with(
+        "fake-deployment-id",
+        {
+            "config": {
+                "org_slug": orguser.org.slug,
+                "tasks": [
+                    {
+                        "slug": "update-schema",
+                        "airbyte_server_block": "",
+                        "connection_id": "connection_id",
+                        "timeout": 15,
+                        "type": "Airbyte Connection",
+                        "orgtask_uuid": "None",
+                        "flow_name": None,
+                        "flow_run_name": None,
+                        "seq": 1,
+                        "catalog_diff": {},
+                    }
+                ],
+            }
+        },
+    )
+    assert PrefectFlowRun.objects.filter(
+        deployment_id="fake-deployment-id", flow_run_id="flow_run_id"
+    ).exists()
