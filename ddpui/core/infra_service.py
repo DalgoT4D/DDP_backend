@@ -80,7 +80,7 @@ def create_superset_instance(
     """
     Creates a superset instance with basic auth
     Returns
-    - url (eg: https://superset3.dalgo.in/)
+    - url (eg: https://superset3.dalgo.org/)
     - admin_user
     - admin_password
     """
