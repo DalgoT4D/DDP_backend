@@ -897,7 +897,12 @@ def test_post_deployment_set_schedule_success(orguser_transform_tasks):
 
 @patch.multiple(
     "ddpui.ddpprefect.prefect_service",
-    create_deployment_flow_run=Mock(return_value={"flow_run_id": "fake-flow-run-id"}),
+    create_deployment_flow_run=Mock(
+        return_value={
+            "flow_run_id": "fake-flow-run-id",
+            "name": "fake-flow-run-name",
+        }
+    ),
     lock_tasks_for_deployment=Mock(return_value=[]),
 )
 def test_post_run_prefect_org_deployment_task_success(orguser_transform_tasks):

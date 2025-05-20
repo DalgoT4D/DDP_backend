@@ -54,9 +54,7 @@ parser.add_argument("--verbose", action="store_true")
 parser.add_argument("--org-name", required=True, help="name of NGO")
 parser.add_argument("--email", required=True, help="login email")
 parser.add_argument("--password", required=True, help="password")
-parser.add_argument(
-    "--file", required=True, help="path of the file containing ngo config details"
-)
+parser.add_argument("--file", required=True, help="path of the file containing ngo config details")
 args = parser.parse_args()
 
 with open(args.file, "r", encoding="utf-8") as json_file:
@@ -65,7 +63,7 @@ with open(args.file, "r", encoding="utf-8") as json_file:
 if args.port:
     ngoClient = TestClient(args.port)
 else:
-    ngoClient = TestClient("443", host="staging-api.dalgo.in")
+    ngoClient = TestClient("443", host="staging-api.dalgo.org")
 
 try:
     ngoClient.login(args.email, args.password)
@@ -103,10 +101,7 @@ if currentuser is None:
             },
             timeout=60,
         )
-        if (
-            createorg_response.get("detail")
-            == "client org with this name already exists"
-        ):
+        if createorg_response.get("detail") == "client org with this name already exists":
             print("please use another --org-name")
             sys.exit(1)
         if createorg_response.get("detail") == "could not create airbyte workspace":
@@ -135,9 +130,7 @@ if len(warehouse_response["warehouses"]) == 0:
     create_warehouse_payload["name"] = spec["warehouse"]["destination"]["name"]
     for destdef in destination_definitions:
         if destdef["name"].lower() == spec["warehouse"]["wtype"].lower():
-            create_warehouse_payload["destinationDefId"] = destdef[
-                "destinationDefinitionId"
-            ]
+            create_warehouse_payload["destinationDefId"] = destdef["destinationDefinitionId"]
             create_warehouse_payload["wtype"] = spec["warehouse"]["wtype"].lower()
             break
 
@@ -152,9 +145,7 @@ if len(warehouse_response["warehouses"]) == 0:
         )
 
     print(json.dumps(create_warehouse_payload, indent=2))
-    destination = ngoClient.clientpost(
-        "organizations/warehouse/", json=create_warehouse_payload
-    )
+    destination = ngoClient.clientpost("organizations/warehouse/", json=create_warehouse_payload)
     print(destination)
     warehouse_response = ngoClient.clientget("organizations/warehouses")
 
@@ -207,9 +198,7 @@ if "sources" in spec:
             "streams": [],
         }
 
-        schemaCatalog = ngoClient.clientget(
-            f'airbyte/sources/{src["sourceId"]}/schema_catalog'
-        )
+        schemaCatalog = ngoClient.clientget(f'airbyte/sources/{src["sourceId"]}/schema_catalog')
         if args.verbose:
             print("source's schema catalog:")
             print(remove_nested_attribute(schemaCatalog, ""))
@@ -226,9 +215,7 @@ if "sources" in spec:
         if args.verbose:
             print("connection creation payload:")
             print(connPayload)
-        new_connection_response = ngoClient.clientpost(
-            "airbyte/connections/", json=connPayload
-        )
+        new_connection_response = ngoClient.clientpost("airbyte/connections/", json=connPayload)
         print("new connection:")
         print(new_connection_response)
 

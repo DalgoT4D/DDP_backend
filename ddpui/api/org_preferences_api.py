@@ -11,7 +11,6 @@ from ddpui.schemas.org_preferences_schema import (
     CreateOrgPreferencesSchema,
     UpdateLLMOptinSchema,
     UpdateDiscordNotificationsSchema,
-    CreateOrgSupersetDetailsSchema,
 )
 from ddpui.core.notifications_service import create_notification
 from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
