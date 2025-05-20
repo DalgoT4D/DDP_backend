@@ -13,14 +13,14 @@ Usage:
 The `ENV_FILE` needs to contain the following variables
 
 ```
-APP_HOST="staging-api.dalgo.in"
+APP_HOST="staging-api.dalgo.org"
 APP_PORT=443
 EMAIL=<your dalgo login email>
 PASSWORD=<your dalgo password>
 ORG=<your org's slug>
 ```
 
-Make sure to change the `APP-HOST` to `api.dalgo.in` if you are doing this in production. The `org slug` is the lowercased version of the Org name, with spaces replaced by `-`.
+Make sure to change the `APP-HOST` to `api.dalgo.org` if you are doing this in production. The `org slug` is the lowercased version of the Org name, with spaces replaced by `-`.
 
 The configuration YAML has the following structure:
 
