@@ -617,7 +617,7 @@ def post_run_prefect_org_deployment_task(request, deployment_id, payload: TaskPa
         PrefectFlowRun.objects.create(
             deployment_id=deployment_id,
             flow_run_id=res["flow_run_id"],
-            name=res["name"],
+            name=res.get("name", "name"),
             start_time=None,
             expected_start_time=djantotimezone.now(),
             total_run_time=-1,
