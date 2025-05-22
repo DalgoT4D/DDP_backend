@@ -677,7 +677,11 @@ def test_post_organization_warehouse_bigquery(orguser):
         wtype="bigquery",
         name="bigquery",
         destinationDefId="destinationDefId",
-        airbyteConfig={"credentials_json": "{}"},
+        airbyteConfig={
+            "credentials_json": "{}",
+            "dataset_location": "us-central1",
+            "transformation_priority": "batch",
+        },
     )
 
     response = post_organization_warehouse(request, payload)
