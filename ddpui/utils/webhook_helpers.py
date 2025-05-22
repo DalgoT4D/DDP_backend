@@ -298,9 +298,9 @@ def send_failure_emails(org: Org, odf: OrgDataFlowv1 | None, flow_run_id: str, s
     """send notification emails to org users"""
     name_of_deployment = odf.name if odf else "[no deployment name]"
     type_of_deployment = odf.dataflow_type if odf else "[no deployment type]"
-    if os.getenv("SEND_FLOWRUN_LOGS_TO_SUPERSADMINS"):
+    if os.getenv("SEND_FLOWRUN_LOGS_TO_SUPERSADMINS", "").lower() in ["true", "1", "yes"]:
         email_flowrun_logs_to_superadmins(org, flow_run_id)
-    if os.getenv("NOTIFY_PLATFORM_ADMINS_OF_ERRORS"):
+    if os.getenv("NOTIFY_PLATFORM_ADMINS_OF_ERRORS", "").lower() in ["true", "1", "yes"]:
         notify_platform_admins(org, flow_run_id, state)
     notify_org_managers(
         org,
