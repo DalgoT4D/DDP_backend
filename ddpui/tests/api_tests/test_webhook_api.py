@@ -375,7 +375,7 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
     # Failed (crashed); with retry logic
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
         "ddpui.utils.webhook_helpers.email_flowrun_logs_to_superadmins"
-    ) as mock_email_flowrun_logs_to_superadmins, patch(
+    ) as mock_email_flowrun_logs_to_superadmins_2, patch(
         "ddpui.ddpprefect.prefect_service.retry_flow_run"
     ) as mock_retry_flow_run:
         flow_run["status"] = FLOW_RUN_CRASHED_STATE_TYPE
