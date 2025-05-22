@@ -319,6 +319,7 @@ def test_create_dbt_cli_profile_block(mock_post: Mock):
         "wtype",
         credentials={"c1": "c2"},
         bqlocation=None,
+        priority=None,
     )
     assert response == "retval"
     mock_post.assert_called_once_with(
@@ -333,6 +334,7 @@ def test_create_dbt_cli_profile_block(mock_post: Mock):
             "wtype": "wtype",
             "credentials": {"c1": "c2"},
             "bqlocation": None,
+            "priority": None,
         },
     )
 
