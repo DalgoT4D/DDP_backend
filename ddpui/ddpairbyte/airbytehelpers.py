@@ -825,6 +825,10 @@ def create_warehouse(org: Org, payload: OrgWarehouseSchema):
     elif payload.wtype == "bigquery":
         credentials_json = json.loads(payload.airbyteConfig["credentials_json"])
         dbt_credentials = credentials_json
+        dbt_credentials["dataset_location"] = payload.airbyteConfig["dataset_location"]
+        dbt_credentials["transformation_priority"] = payload.airbyteConfig[
+            "transformation_priority"
+        ]
     elif payload.wtype == "snowflake":
         dbt_credentials = payload.airbyteConfig
 
@@ -847,7 +851,7 @@ def create_warehouse(org: Org, payload: OrgWarehouseSchema):
         warehouse.bq_location = destination["connectionConfiguration"]["dataset_location"]
     warehouse.save()
 
-    create_or_update_org_cli_block(org, warehouse, payload.airbyteConfig)
+    create_or_update_org_cli_block(org, warehouse, dbt_credentials)
 
     return None, None
 
