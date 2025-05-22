@@ -264,16 +264,21 @@ def test_post_notification_v1_email_supersadmins():
         OrgUser.objects.create(
             org=org, user=user, role=OrgUserRole.ACCOUNT_MANAGER, new_role=new_role
         )
-        os.environ["SEND_FLOWRUN_LOGS_TO_SUPERSADMINS"] = "True"
-        os.environ["NOTIFY_PLATFORM_ADMINS_OF_ERRORS"] = "True"
-        do_handle_prefect_webhook(flow_run["id"], flow_run["state_name"])
-        assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
-        mock_email_flowrun_logs_to_superadmins_2.assert_called_once()
-        mock_notify_platform_admins.assert_called_once()
-        mock_email_orgusers_ses_whitelisted.assert_called_once()
-        mock_notify_org_managers.assert_called_once()
-        os.environ["SEND_FLOWRUN_LOGS_TO_SUPERSADMINS"] = ""
-        os.environ["NOTIFY_PLATFORM_ADMINS_OF_ERRORS"] = ""
+
+        # Use context manager to ensure environment variables are properly reset
+        with patch.dict(
+            os.environ,
+            {
+                "SEND_FLOWRUN_LOGS_TO_SUPERADMINS": "True",
+                "NOTIFY_PLATFORM_ADMINS_OF_ERRORS": "True",
+            },
+        ):
+            do_handle_prefect_webhook(flow_run["id"], flow_run["state_name"])
+            assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
+            mock_email_flowrun_logs_to_superadmins_2.assert_called_once()
+            mock_notify_platform_admins.assert_called_once()
+            mock_email_orgusers_ses_whitelisted.assert_called_once()
+            mock_notify_org_managers.assert_called_once()
 
 
 def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
