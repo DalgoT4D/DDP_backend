@@ -3,6 +3,7 @@ functions which work with airbyte and with the dalgo database
 """
 
 import json
+import re
 import os
 from typing import List
 from uuid import uuid4
@@ -733,7 +734,12 @@ def update_destination(org: Org, destination_id: str, payload: AirbyteDestinatio
             dbt_credentials["database"] = dbt_credentials["dbname"]
 
     elif warehouse.wtype == "bigquery":
-        dbt_credentials = json.loads(payload.config["credentials_json"])
+        if not re.match(r"^\*+$", payload.config["credentials_json"]):
+            dbt_credentials = json.loads(payload.config["credentials_json"])
+
+        dbt_credentials["dataset_location"] = payload.config["dataset_location"]
+        dbt_credentials["transformation_priority"] = payload.config["transformation_priority"]
+
     elif warehouse.wtype == "snowflake":
         dbt_credentials = update_dict_but_not_stars(payload.config)
 
@@ -852,9 +858,15 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
     """
 
     bqlocation = None
+    priority = None  # whether to run in "batch" mode or "interactive" mode for bigquery
     if warehouse.wtype == "bigquery":
         bqlocation = (
             airbyte_creds["dataset_location"] if "dataset_location" in airbyte_creds else None
+        )
+        priority = (
+            airbyte_creds["transformation_priority"]
+            if "transformation_priority" in airbyte_creds
+            else None
         )
     profile_name = None
     target = None
@@ -907,6 +919,7 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
                 bqlocation=bqlocation,
                 profilename=profile_name,
                 target=target,
+                priority=priority,
             )
         except Exception as error:
             logger.error(
@@ -933,6 +946,7 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
                 wtype=warehouse.wtype,
                 bqlocation=bqlocation,
                 credentials=dbt_creds,
+                priority=priority,
             )
         except Exception as error:
             logger.error(

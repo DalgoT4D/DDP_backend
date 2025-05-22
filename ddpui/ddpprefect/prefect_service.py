@@ -298,6 +298,7 @@ def create_dbt_cli_profile_block(
     wtype: str,
     bqlocation: str,
     credentials: dict,
+    priority: str = None,
 ) -> dict:
     """Create a dbt cli profile block in that has the warehouse information"""
     response = prefect_post(
@@ -312,6 +313,7 @@ def create_dbt_cli_profile_block(
             "wtype": wtype,
             "credentials": credentials,
             "bqlocation": bqlocation,
+            "priority": priority,
         },
     )
     return response
@@ -324,6 +326,7 @@ def update_dbt_cli_profile_block(
     target: str = None,
     credentials: dict = None,
     bqlocation: str = None,
+    priority: str = None,
 ):
     """Update the dbt cli profile for an org"""
     response = prefect_put(
@@ -338,6 +341,7 @@ def update_dbt_cli_profile_block(
             },
             "credentials": credentials,
             "bqlocation": bqlocation,
+            "priority": priority,
         },
     )
     return response
