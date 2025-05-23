@@ -603,6 +603,7 @@ def create_destination(workspace_id: str, name: str, destinationdef_id: str, con
             "destinationDefinitionId": destinationdef_id,
             "connectionConfiguration": config,
         },
+        timeout=120,
     )
     if "destinationId" not in res:
         logger.error("Failed to create destination: %s", res)
@@ -631,6 +632,7 @@ def update_destination(
             "connectionConfiguration": config,
             "destinationDefinitionId": destinationdef_id,
         },
+        timeout=120,
     )
     if "destinationId" not in res:
         logger.error("Failed to update destination: %s", res)
