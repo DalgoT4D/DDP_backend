@@ -8,6 +8,7 @@ from ddpui.dbt_automation.utils.dbtproject import dbtProject
 from ddpui.dbt_automation.utils.columnutils import quote_columnname
 from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
 from ddpui.dbt_automation.utils.tableutils import source_or_ref
+from ddpui.dbt_automation.schemas import GroupByOperationInputSchema
 
 basicConfig(level=INFO)
 logger = getLogger()
@@ -48,6 +49,21 @@ logger = getLogger()
 #       SUM("Indicator") AS "sum_of_indicator"
 #       FROM {{source('pytest_intermediate', 'arithmetic_add')}}
 #       GROUP BY "NGO","Month"
+
+
+def groupby_simulate_output(config: GroupByOperationInputSchema) -> list[str]:
+    """
+    Simulate the output of the groupby operation.
+    This is used to determine the output columns.
+    """
+    source_columns = config.source_columns
+
+    # Determine the output columns based on aggregate operations
+    output_columns = []
+    for agg_col in config.aggregate_on:
+        output_columns.append(agg_col.output_column_name)
+
+    return source_columns + output_columns
 
 
 # pylint:disable=unused-argument,logging-fstring-interpolation
