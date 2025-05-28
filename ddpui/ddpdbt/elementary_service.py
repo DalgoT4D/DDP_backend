@@ -340,7 +340,7 @@ def refresh_elementary_report_via_prefect(orguser: OrgUser) -> dict:
         PrefectFlowRun.objects.create(
             deployment_id=odf.deployment_id,
             flow_run_id=res["flow_run_id"],
-            name=res["name"],
+            name=res.get("name", ""),
             start_time=None,
             expected_start_time=djantotimezone.now(),
             total_run_time=-1,
