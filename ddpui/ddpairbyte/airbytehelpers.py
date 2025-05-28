@@ -872,6 +872,9 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
             if "transformation_priority" in airbyte_creds
             else None
         )
+        del airbyte_creds["dataset_location"]
+        del airbyte_creds["transformation_priority"]
+
     profile_name = None
     target = None
     dbt_project_params: DbtProjectParams = None
