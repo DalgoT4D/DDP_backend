@@ -864,16 +864,13 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
     bqlocation = None
     priority = None  # whether to run in "batch" mode or "interactive" mode for bigquery
     if warehouse.wtype == "bigquery":
-        bqlocation = (
-            airbyte_creds["dataset_location"] if "dataset_location" in airbyte_creds else None
-        )
-        priority = (
-            airbyte_creds["transformation_priority"]
-            if "transformation_priority" in airbyte_creds
-            else None
-        )
-        del airbyte_creds["dataset_location"]
-        del airbyte_creds["transformation_priority"]
+        if "dataset_location" in airbyte_creds:
+            bqlocation = airbyte_creds["dataset_location"]
+            del airbyte_creds["dataset_location"]
+
+        if "transformation_priority" in airbyte_creds:
+            priority = airbyte_creds["transformation_priority"]
+            del airbyte_creds["transformation_priority"]
 
     profile_name = None
     target = None
@@ -1177,7 +1174,7 @@ def schedule_update_connection_schema(
         PrefectFlowRun.objects.create(
             deployment_id=dataflow_orgtask.dataflow.deployment_id,
             flow_run_id=res["flow_run_id"],
-            name=res["name"],
+            name=res.get("name", ""),
             start_time=None,
             expected_start_time=djangotimezone.now(),
             total_run_time=-1,
