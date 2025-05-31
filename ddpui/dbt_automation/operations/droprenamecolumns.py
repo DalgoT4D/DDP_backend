@@ -6,9 +6,18 @@ from ddpui.dbt_automation.utils.dbtproject import dbtProject
 from ddpui.dbt_automation.utils.columnutils import quote_columnname
 from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
 from ddpui.dbt_automation.utils.tableutils import source_or_ref
+from ddpui.dbt_automation.schemas import DropOperationInputSchema, RenameOperationInputSchema
 
 basicConfig(level=INFO)
 logger = getLogger()
+
+
+def drop_columns_simulate_output(config: DropOperationInputSchema) -> list[str]:
+    """Generate output columns for drop columns operation."""
+    columns = config.columns
+    source_columns = config.source_columns
+    remaining_cols = [col for col in source_columns if col not in columns]
+    return remaining_cols
 
 
 # pylint:disable=unused-argument,logging-fstring-interpolation
@@ -56,6 +65,15 @@ def drop_columns(config: dict, warehouse: WarehouseInterface, project_dir: str):
     model_sql_path = dbt_project.write_model(dest_schema, output_model_name, dbt_sql)
 
     return model_sql_path, output_cols
+
+
+def rename_columns_simulate_output(config: RenameOperationInputSchema) -> list[str]:
+    """Generate output columns for rename columns operation."""
+    columns = config.columns
+    source_columns = config.source_columns
+    remaining_cols = [col for col in source_columns if col not in columns.keys()]
+    renamed_cols = list(columns.values())
+    return remaining_cols + renamed_cols
 
 
 def rename_columns_dbt_sql(

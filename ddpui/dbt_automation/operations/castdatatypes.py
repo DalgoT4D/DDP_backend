@@ -7,6 +7,7 @@ from ddpui.dbt_automation.utils.columnutils import quote_columnname
 from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
 from ddpui.dbt_automation.utils.postgres import PostgresClient
 from ddpui.dbt_automation.utils.tableutils import source_or_ref
+from ddpui.dbt_automation.schemas import CastDataTypeOperationInputSchema
 
 
 basicConfig(level=INFO)
@@ -16,6 +17,15 @@ WAREHOUSE_COLUMN_TYPES = {
     "postgres": {},
     "bigquery": {},
 }
+
+
+def cast_datatypes_simulate_output(config: CastDataTypeOperationInputSchema):
+    """
+    Simulate the output of the cast_datatypes operation.
+    This is used to determine the output columns.
+    """
+
+    return config.source_columns
 
 
 # pylint:disable=logging-fstring-interpolation
