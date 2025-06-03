@@ -13,7 +13,6 @@ def assign_uuids(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("ddpui", "0121_merge_20250513_1951"),
     ]
