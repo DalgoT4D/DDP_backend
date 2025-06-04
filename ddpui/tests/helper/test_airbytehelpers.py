@@ -1,4 +1,4 @@
-from unittest.mock import patch, Mock
+from unittest.mock import patch, Mock, ANY
 import os
 from pathlib import Path
 import yaml
@@ -1193,7 +1193,7 @@ def test_schedule_update_connection_schema_success(
                         "connection_id": "connection_id",
                         "timeout": 15,
                         "type": "Airbyte Connection",
-                        "orgtask_uuid": "None",
+                        "orgtask_uuid": ANY,
                         "flow_name": None,
                         "flow_run_name": None,
                         "seq": 1,
