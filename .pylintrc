@@ -1,0 +1,18 @@
+[MASTER]
+load-plugins=pylint_django, pylint_django.checkers.migrations
+django-settings-module=ddpui.settings
+init-hook='import sys; sys.path.append(".")'
+
+[DJANGO]
+django-settings-module=ddpui.settings
+
+[TYPECHECK]
+# Generated-members is the setting that addresses the 'no-member' error
+# This tells pylint that certain attributes are dynamically generated
+generated-members=REQUEST,acl_users,aq_parent,objects,DoesNotExist,id,pk,_meta,base_fields,context,slug,email,user,org,command,type,label,schema,project_dir,isoformat,get,orguser
+
+[MESSAGES CONTROL]
+disable=missing-docstring,duplicate-code,C0103,R0903,C0111,C0301,R0913,R0914,R0902,W0511,C0412,invalid-name,too-few-public-methods,logging-not-lazy,logging-fstring-interpolation,broad-exception-raised,broad-exception-caught,too-many-arguments,too-many-locals,too-many-positional-arguments,too-many-branches,too-many-statements,redefined-outer-name,unused-argument
+
+[FORMAT]
+max-line-length=200 
