@@ -7,10 +7,36 @@ from ddpui.dbt_automation.utils.columnutils import quote_columnname
 from ddpui.dbt_automation.utils.columnutils import make_cleaned_column_names, dedup_list
 from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
 from ddpui.dbt_automation.utils.tableutils import source_or_ref
+from ddpui.dbt_automation.schemas import FlattenJsonOperationInputSchema
 
 
 basicConfig(level=INFO)
 logger = getLogger()
+
+
+def flattenjson_simulate_output(config: FlattenJsonOperationInputSchema) -> list[str]:
+    """
+    Simulate the output of the flattenjson operation.
+    """
+    # Simulate the output of the flattenjson operation
+    if config.source_columns == "*":
+        raise ValueError(
+            "Invalid column selection: Please specify column names explicitly instead of using '*'."
+        )
+
+    source_columns = config.source_columns
+    json_column = config.json_column
+    json_columns_to_copy = config.json_columns_to_copy
+
+    # Determine the source columns to be selected
+    source_columns = [col for col in source_columns if col != json_column]
+    sql_columns = make_cleaned_column_names(json_columns_to_copy)
+    sql_columns = [f"{json_column}_{col}" for col in sql_columns]
+
+    # after cleaning we may have duplicates
+    sql_columns = dedup_list(sql_columns)
+
+    return source_columns + sql_columns
 
 
 # pylint:disable=unused-argument,logging-fstring-interpolation

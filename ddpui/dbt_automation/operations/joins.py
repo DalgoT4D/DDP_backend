@@ -6,6 +6,7 @@ from ddpui.dbt_automation.utils.columnutils import quote_columnname
 from ddpui.dbt_automation.utils.dbtproject import dbtProject
 from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
 from ddpui.dbt_automation.utils.tableutils import source_or_ref
+from ddpui.dbt_automation.schemas import JoinOperationInputSchema
 
 # sql, len_output_set = joins.joins_sql({
 #     "input": {
@@ -46,6 +47,15 @@ from ddpui.dbt_automation.utils.tableutils import source_or_ref
 #    ON "t1"."NGO" = "t2"."NGO"
 #
 # and len_output_set = 5 (columns)
+
+
+# TODO: not sure how to implement this yet
+def join_operation_simulate_output(config: JoinOperationInputSchema) -> list[str]:
+    """
+    Simulate the output of the join operation.
+    This is used to determine the output columns.
+    """
+    pass
 
 
 def joins_sql(
