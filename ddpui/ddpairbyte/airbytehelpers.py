@@ -27,6 +27,7 @@ from ddpui.models.org import (
     OrgPrefectBlockv1,
     OrgSchemaChange,
     OrgWarehouseSchema,
+    ConnectionMeta,
 )
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
@@ -283,6 +284,10 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
         airbyte_service.delete_connection(org.airbyte_workspace_id, airbyte_conn["connectionId"])
         logger.error(err)
         return None, "Couldn't create the connection, please try again"
+
+    ConnectionMeta.objects.create(
+        connection_id=airbyte_conn["connectionId"], connection_name=payload.name
+    )
 
     res = {
         "name": payload.name,
