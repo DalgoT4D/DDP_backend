@@ -24,10 +24,10 @@ from ddpui.ddpprefect import (
 )
 from ddpui.utils.awsses import send_text_message
 
-orgpreference_router = Router()
+orgpreference_router = Router(auth=auth.CustomAuthMiddleware())
 
 
-@orgpreference_router.post("/", auth=auth.CustomAuthMiddleware())
+@orgpreference_router.post("/")
 def create_org_preferences(request, payload: CreateOrgPreferencesSchema):
     """Creates preferences for an organization"""
     orguser: OrgUser = request.orguser
@@ -45,7 +45,7 @@ def create_org_preferences(request, payload: CreateOrgPreferencesSchema):
     return {"success": True, "res": org_preferences.to_json()}
 
 
-@orgpreference_router.put("/llm_approval", auth=auth.CustomAuthMiddleware())
+@orgpreference_router.put("/llm_approval")
 @has_permission(["can_edit_llm_settings"])
 @transaction.atomic
 def update_org_preferences(request, payload: UpdateLLMOptinSchema):
@@ -97,7 +97,7 @@ def update_org_preferences(request, payload: UpdateLLMOptinSchema):
     return {"success": True, "res": org_preferences.to_json()}
 
 
-@orgpreference_router.put("/enable-discord-notifications", auth=auth.CustomAuthMiddleware())
+@orgpreference_router.put("/enable-discord-notifications")
 @has_permission(["can_edit_org_notification_settings"])
 def update_discord_notifications(request, payload: UpdateDiscordNotificationsSchema):
     """Updates Discord notifications preferences for the logged-in user's organization."""
@@ -124,7 +124,7 @@ def update_discord_notifications(request, payload: UpdateDiscordNotificationsSch
     return {"success": True, "res": org_preferences.to_json()}
 
 
-@orgpreference_router.get("/", auth=auth.CustomAuthMiddleware())
+@orgpreference_router.get("/")
 def get_org_preferences(request):
     """Gets preferences for an organization based on the logged-in user's organization"""
     orguser: OrgUser = request.orguser
@@ -137,7 +137,7 @@ def get_org_preferences(request):
     return {"success": True, "res": org_preferences.to_json()}
 
 
-@orgpreference_router.get("/toolinfo", auth=auth.CustomAuthMiddleware())
+@orgpreference_router.get("/toolinfo")
 def get_tools_versions(request):
     """get versions of the tools used in the system"""
     orguser: OrgUser = request.orguser
@@ -174,7 +174,7 @@ def get_tools_versions(request):
     return {"success": True, "res": versions}
 
 
-@orgpreference_router.get("/org-plan", auth=auth.CustomAuthMiddleware())
+@orgpreference_router.get("/org-plan")
 def get_org_plans(request):
     """Gets preferences for an organization based on the logged-in user's organization"""
     orguser: OrgUser = request.orguser
@@ -187,7 +187,7 @@ def get_org_plans(request):
     return {"success": True, "res": org_plan.to_json()}
 
 
-@orgpreference_router.post("/org-plan/upgrade", auth=auth.CustomAuthMiddleware())
+@orgpreference_router.post("/org-plan/upgrade")
 @has_permission(["can_initiate_org_plan_upgrade"])
 def initiate_upgrade_dalgo_plan(request):
     """User can click on the upgrade button from the settings panel

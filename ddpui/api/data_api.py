@@ -15,11 +15,11 @@ from ddpui.models.llm import UserPrompt
 
 from ddpui.utils.constants import LIMIT_ROWS_TO_SEND_TO_LLM
 
-data_router = Router()
+data_router = Router(auth=auth.CustomAuthMiddleware())
 logger = CustomLogger("ddpui")
 
 
-@data_router.get("/tasks/", auth=auth.CustomAuthMiddleware())
+@data_router.get("/tasks/")
 @has_permission(["can_view_master_tasks"])
 def get_tasks(request):
     """Fetch master list of tasks related to transformation"""
@@ -30,7 +30,7 @@ def get_tasks(request):
     return tasks
 
 
-@data_router.get("/tasks/{slug}/config/", auth=auth.CustomAuthMiddleware())
+@data_router.get("/tasks/{slug}/config/")
 @has_permission(["can_view_master_task"])
 def get_task_config(request, slug):
     """Get task config which details about the parameters that can be added/used while running it"""
@@ -42,7 +42,7 @@ def get_task_config(request, slug):
     return dbt_service.task_config_params(task)
 
 
-@data_router.get("/roles/", auth=auth.CustomAuthMiddleware())
+@data_router.get("/roles/")
 def get_roles(request):
     """Fetch master list of roles"""
     orguser: OrgUser = request.orguser
@@ -52,13 +52,13 @@ def get_roles(request):
     return [{"uuid": role.uuid, "slug": role.slug, "name": role.name} for role in roles]
 
 
-@data_router.get("/user_prompts/", auth=auth.CustomAuthMiddleware())
+@data_router.get("/user_prompts/")
 def get_user_prompts(request):
     """Fetch master list of roles"""
     return list(map(model_to_dict, UserPrompt.objects.all()))
 
 
-@data_router.get("/llm_data_analysis_query_limit/", auth=auth.CustomAuthMiddleware())
+@data_router.get("/llm_data_analysis_query_limit/")
 def get_row_limit(request):
     """Fetch master list of roles"""
     return LIMIT_ROWS_TO_SEND_TO_LLM

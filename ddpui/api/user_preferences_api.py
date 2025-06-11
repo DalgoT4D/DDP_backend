@@ -13,10 +13,10 @@ from ddpui.core.notifications_service import create_notification
 from ddpui.auth import has_permission
 from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
 
-userpreference_router = Router()
+userpreference_router = Router(auth=auth.CustomAuthMiddleware())
 
 
-@userpreference_router.post("/", auth=auth.CustomAuthMiddleware())
+@userpreference_router.post("/")
 def create_user_preferences(request, payload: CreateUserPreferencesSchema):
     """creates user preferences for the user"""
     orguser: OrgUser = request.orguser
@@ -33,7 +33,7 @@ def create_user_preferences(request, payload: CreateUserPreferencesSchema):
     return {"success": True, "res": user_preferences.to_json()}
 
 
-@userpreference_router.put("/", auth=auth.CustomAuthMiddleware())
+@userpreference_router.put("/")
 def update_user_preferences(request, payload: UpdateUserPreferencesSchema):
     """Updates user preferences for the user"""
     orguser: OrgUser = request.orguser
@@ -49,7 +49,7 @@ def update_user_preferences(request, payload: UpdateUserPreferencesSchema):
     return {"success": True, "res": user_preferences.to_json()}
 
 
-@userpreference_router.get("/", auth=auth.CustomAuthMiddleware())
+@userpreference_router.get("/")
 def get_user_preferences(request):
     """gets user preferences for the user"""
     orguser: OrgUser = request.orguser
@@ -65,7 +65,7 @@ def get_user_preferences(request):
     return {"success": True, "res": res}
 
 
-@userpreference_router.post("/llm_analysis/request", auth=auth.CustomAuthMiddleware())
+@userpreference_router.post("/llm_analysis/request")
 @has_permission(["can_request_llm_analysis_feature"])
 def post_request_llm_analysis_feature_enabled(request):
     """Sends a notification to org's account manager for enabling LLM analysis feature"""

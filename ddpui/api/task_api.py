@@ -7,10 +7,10 @@ from ddpui.auth import has_permission
 from ddpui import auth
 from celery.result import AsyncResult
 
-task_router = Router()
+task_router = Router(auth=auth.CustomAuthMiddleware())
 
 
-@task_router.get("/{task_id}", auth=auth.CustomAuthMiddleware())
+@task_router.get("/{task_id}")
 @has_permission(["can_view_task_progress"])
 def get_task(request, task_id, hashkey: str = "taskprogress"):  # pylint: disable=unused-argument
     """returns the progress for a celery task"""
@@ -20,7 +20,7 @@ def get_task(request, task_id, hashkey: str = "taskprogress"):  # pylint: disabl
     raise HttpError(400, "no such task id")
 
 
-@task_router.get("/stp/{task_key}", auth=auth.CustomAuthMiddleware())
+@task_router.get("/stp/{task_key}")
 @has_permission(["can_view_task_progress"])
 def get_singletask(request, task_key):  # pylint: disable=unused-argument
     """returns the progress for a celery task"""
@@ -30,7 +30,7 @@ def get_singletask(request, task_key):  # pylint: disable=unused-argument
     raise HttpError(400, "no such task id")
 
 
-@task_router.get("/celery/{task_id}", auth=auth.CustomAuthMiddleware())
+@task_router.get("/celery/{task_id}")
 @has_permission(["can_view_task_progress"])
 def get_celerytask(request, task_id):  # pylint: disable=unused-argument
     """Get the celery task progress and not the one we create in redis"""

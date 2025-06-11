@@ -41,12 +41,12 @@ from ddpui.utils.transform_workflow_helpers import (
     from_orgdbtmodel,
 )
 
-transform_router = Router()
+transform_router = Router(auth=auth.CustomAuthMiddleware())
 load_dotenv()
 logger = CustomLogger("ddpui")
 
 
-@transform_router.post("/dbt_project/", auth=auth.CustomAuthMiddleware())
+@transform_router.post("/dbt_project/")
 @has_permission(["can_create_dbt_workspace"])
 def create_dbt_project(request, payload: DbtProjectSchema):
     """
@@ -68,7 +68,7 @@ def create_dbt_project(request, payload: DbtProjectSchema):
     return {"message": f"Project {org.slug} created successfully"}
 
 
-@transform_router.delete("/dbt_project/{project_name}", auth=auth.CustomAuthMiddleware())
+@transform_router.delete("/dbt_project/{project_name}")
 @has_permission(["can_delete_dbt_workspace"])
 def delete_dbt_project(request, project_name: str):
     """
@@ -99,7 +99,7 @@ def delete_dbt_project(request, project_name: str):
     return {"message": f"Project {project_name} deleted successfully"}
 
 
-@transform_router.post("/dbt_project/sync_sources/", auth=auth.CustomAuthMiddleware())
+@transform_router.post("/dbt_project/sync_sources/")
 @has_permission(["can_sync_sources"])
 def sync_sources(request):
     """
@@ -139,7 +139,7 @@ def sync_sources(request):
 ########################## Models & Sources #############################################
 
 
-@transform_router.post("/dbt_project/model/", auth=auth.CustomAuthMiddleware())
+@transform_router.post("/dbt_project/model/")
 @has_permission(["can_create_dbt_model"])
 def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     """
@@ -221,9 +221,7 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     return from_orgdbtoperation(dbt_op, chain_length=dbt_op.seq)
 
 
-@transform_router.put(
-    "/dbt_project/model/operations/{operation_uuid}/", auth=auth.CustomAuthMiddleware()
-)
+@transform_router.put("/dbt_project/model/operations/{operation_uuid}/")
 @has_permission(["can_edit_dbt_operation"])
 def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload):
     """
@@ -311,9 +309,7 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
     return from_orgdbtoperation(dbt_operation, chain_length=len(all_ops))
 
 
-@transform_router.get(
-    "/dbt_project/model/operations/{operation_uuid}/", auth=auth.CustomAuthMiddleware()
-)
+@transform_router.get("/dbt_project/model/operations/{operation_uuid}/")
 @has_permission(["can_view_dbt_operation"])
 def get_operation(request, operation_uuid: str):
     """
@@ -363,7 +359,7 @@ def get_operation(request, operation_uuid: str):
     return from_orgdbtoperation(dbt_operation, prev_source_columns=prev_source_columns)
 
 
-@transform_router.post("/dbt_project/model/{model_uuid}/save/", auth=auth.CustomAuthMiddleware())
+@transform_router.post("/dbt_project/model/{model_uuid}/save/")
 @has_permission(["can_edit_dbt_model"])
 def post_save_model(request, model_uuid: str, payload: CompleteDbtModelPayload):
     """Complete the model; create the dbt model on disk"""
@@ -418,7 +414,7 @@ def post_save_model(request, model_uuid: str, payload: CompleteDbtModelPayload):
     return from_orgdbtmodel(orgdbt_model)
 
 
-@transform_router.get("/dbt_project/sources_models/", auth=auth.CustomAuthMiddleware())
+@transform_router.get("/dbt_project/sources_models/")
 @has_permission(["can_view_dbt_models"])
 def get_input_sources_and_models(request, schema_name: str = None):
     """
@@ -449,7 +445,7 @@ def get_input_sources_and_models(request, schema_name: str = None):
     return res
 
 
-@transform_router.get("/dbt_project/graph/", auth=auth.CustomAuthMiddleware())
+@transform_router.get("/dbt_project/graph/")
 @has_permission(["can_view_dbt_workspace"])
 def get_dbt_project_DAG(request):
     """
@@ -558,7 +554,7 @@ def get_dbt_project_DAG(request):
     return res
 
 
-@transform_router.delete("/dbt_project/model/{model_uuid}/", auth=auth.CustomAuthMiddleware())
+@transform_router.delete("/dbt_project/model/{model_uuid}/")
 @has_permission(["can_delete_dbt_model"])
 def delete_model(request, model_uuid, canvas_lock_id: str = None, cascade: bool = False):
     """
@@ -595,7 +591,7 @@ def delete_model(request, model_uuid, canvas_lock_id: str = None, cascade: bool 
     return {"success": 1}
 
 
-@transform_router.delete("/dbt_project/source/{model_uuid}/", auth=auth.CustomAuthMiddleware())
+@transform_router.delete("/dbt_project/source/{model_uuid}/")
 @has_permission(["can_delete_dbt_model"])
 def delete_source(request, model_uuid, canvas_lock_id: str = None, cascade: bool = False):
     """
@@ -631,9 +627,7 @@ def delete_source(request, model_uuid, canvas_lock_id: str = None, cascade: bool
     return {"success": 1}
 
 
-@transform_router.delete(
-    "/dbt_project/model/operations/{operation_uuid}/", auth=auth.CustomAuthMiddleware()
-)
+@transform_router.delete("/dbt_project/model/operations/{operation_uuid}/")
 @has_permission(["can_delete_dbt_operation"])
 def delete_operation(request, operation_uuid, canvas_lock_id: str = None):
     """
@@ -670,7 +664,7 @@ def delete_operation(request, operation_uuid, canvas_lock_id: str = None):
     return {"success": 1}
 
 
-@transform_router.get("/dbt_project/data_type/", auth=auth.CustomAuthMiddleware())
+@transform_router.get("/dbt_project/data_type/")
 @has_permission(["can_view_warehouse_data"])
 def get_warehouse_datatypes(request):
     """Get the datatypes of a table in a warehouse"""
@@ -687,7 +681,6 @@ def get_warehouse_datatypes(request):
 
 @transform_router.post(
     "/dbt_project/canvas/lock/",
-    auth=auth.CustomAuthMiddleware(),
     response=LockCanvasResponseSchema,
 )
 @has_permission(["can_edit_dbt_model"])
@@ -735,10 +728,7 @@ def post_lock_canvas(request, payload: LockCanvasRequestSchema):
     )
 
 
-@transform_router.post(
-    "/dbt_project/canvas/unlock/",
-    auth=auth.CustomAuthMiddleware(),
-)
+@transform_router.post("/dbt_project/canvas/unlock/")
 @has_permission(["can_edit_dbt_model"])
 def post_unlock_canvas(request, payload: LockCanvasRequestSchema):
     """
