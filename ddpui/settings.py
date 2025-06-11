@@ -100,11 +100,7 @@ INSTALLED_APPS = [
 # AIRBYTE_RESET_JOB: to reset airbyte connection
 FLAGS = {"AIRBYTE_PROFILE": [], "LOG_SUMMARY": [], "AIRBYTE_RESET_JOB": []}
 
-REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": [
-        "ddpui.auth.BearerAuthentication",
-    ]
-}
+REST_FRAMEWORK = {}
 
 MIDDLEWARE = [
     "django_prometheus.middleware.PrometheusBeforeMiddleware",
