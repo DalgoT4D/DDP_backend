@@ -666,7 +666,7 @@ def get_flow_runs_logsummary_v1(
         raise HttpError(400, "failed to retrieve logs") from error
 
 
-@airbyte_router.get("v1/logs")
+@airbyte_router.get("/v1/logs")
 @has_permission(["can_view_connection"])
 def get_job_logs(
     request,

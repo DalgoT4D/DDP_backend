@@ -12,11 +12,25 @@ from celery.states import SUCCESS, FAILURE, REVOKED, REJECTED, IGNORED
 
 LLM_SERVICE_API_URL = os.getenv("LLM_SERVICE_API_URL")
 LLM_SERVICE_API_KEY = os.getenv("LLM_SERVICE_API_KEY")
+LLM_SERVICE_API_VER = os.getenv("LLM_SERVICE_API_VER", "")
 CELERY_TERMINAL_STATES = [SUCCESS, FAILURE, REVOKED, REJECTED, IGNORED]
 CELERY_ERROR_STATES = [FAILURE, REVOKED, REJECTED]
 headers = {"Authorization": LLM_SERVICE_API_KEY}
 
 logger = CustomLogger("ddpui")
+
+
+def llm_endpoint(endpoint: str) -> str:
+    """
+    Returns the full llm service endpoint
+    """
+    if not LLM_SERVICE_API_URL:
+        raise Exception("LLM_SERVICE_API_URL is not set")
+
+    if len(LLM_SERVICE_API_VER) > 0:
+        return f"{LLM_SERVICE_API_URL}/api/{LLM_SERVICE_API_VER}/{endpoint}"
+
+    return f"{LLM_SERVICE_API_URL}/api/{endpoint}"
 
 
 def poll_llm_service_task(task_id: str, poll_interval: int = 5) -> dict:
@@ -45,7 +59,7 @@ def upload_text_as_file(file_text: str, file_name: str) -> str:
 
     files = {"file": (f"{file_name}.txt", BytesIO(file_text.encode("utf-8")))}
     response = dalgo_post(
-        f"{LLM_SERVICE_API_URL}/api/file/upload",
+        llm_endpoint("file/upload"),
         files=files,
         headers=headers,
     )
@@ -66,7 +80,7 @@ def upload_json_as_file(json_string: str, file_name: str) -> str:
         )
     }
     response = dalgo_post(
-        f"{LLM_SERVICE_API_URL}/api/file/upload",
+        llm_endpoint("file/upload"),
         files=files,
         headers=headers,
     )
@@ -90,7 +104,7 @@ def file_search_query_and_poll(
     """
 
     response = dalgo_post(
-        f"{LLM_SERVICE_API_URL}/api/file/query",
+        llm_endpoint("file/query"),
         headers=headers,
         json={
             "assistant_prompt": assistant_prompt,
@@ -113,7 +127,7 @@ def close_file_search_session(session_id: str, poll_interval: int = 5) -> None:
     """
 
     response = dalgo_delete(
-        f"{LLM_SERVICE_API_URL}/api/file/search/session/{session_id}",
+        llm_endpoint(f"file/search/session/{session_id}"),
         headers=headers,
     )
 
