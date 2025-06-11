@@ -27,6 +27,7 @@ from ddpui.models.org import (
     OrgPrefectBlockv1,
     OrgSchemaChange,
     OrgWarehouseSchema,
+    ConnectionMeta,
 )
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
@@ -276,6 +277,10 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
 
             sync_dataflow.clear_conn_dataflow = clear_dataflow
             sync_dataflow.save()
+
+            ConnectionMeta.objects.create(
+                connection_id=airbyte_conn["connectionId"], connection_name=payload.name
+            )
 
     except Exception as err:
         # delete the airbyte connection; since the deployment didn't get created
@@ -572,6 +577,11 @@ def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUp
 
     # update the airbyte connection
     res = airbyte_service.update_connection(org.airbyte_workspace_id, payload, connection)
+
+    if payload.name:
+        ConnectionMeta.objects.filter(connection_id=connection_id).update(
+            connection_name=connection["name"]
+        )
 
     return res, None
 
