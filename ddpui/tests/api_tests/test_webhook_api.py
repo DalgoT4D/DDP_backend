@@ -291,7 +291,7 @@ def test_post_notification_v1_manual_with_connection_id():
         mock_notify_org_managers.assert_called_once_with(org, "\n".join(email_body), email_subject)
 
 
-def test_post_notification_v1_manual_with_orgtask_id():
+def test_post_notification_v1_manual_with_orgtask_id(seed_master_tasks):
     """tests the api endpoint /notifications/ ; fail & if logs are being sent"""
     org = Org.objects.create(name="temp", slug="temp")
     deployment_id = "test-deployment-id"
@@ -342,7 +342,7 @@ def test_post_notification_v1_manual_with_orgtask_id():
         mock_notify_org_managers.assert_called_once_with(org, "\n".join(email_body), email_subject)
 
 
-def test_post_notification_v1_manual_with_orgtask_id_generate_edr():
+def test_post_notification_v1_manual_with_orgtask_id_generate_edr(seed_master_tasks):
     """tests the api endpoint /notifications/ ; fail & if logs are being sent"""
     org = Org.objects.create(name="temp", slug="temp")
     deployment_id = "test-deployment-id"
