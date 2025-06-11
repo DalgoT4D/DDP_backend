@@ -578,6 +578,11 @@ def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUp
     # update the airbyte connection
     res = airbyte_service.update_connection(org.airbyte_workspace_id, payload, connection)
 
+    if payload.name:
+        ConnectionMeta.objects.filter(connection_id=connection_id).update(
+            connection_name=connection["name"]
+        )
+
     return res, None
 
 
