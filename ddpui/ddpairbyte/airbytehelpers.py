@@ -278,16 +278,16 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
             sync_dataflow.clear_conn_dataflow = clear_dataflow
             sync_dataflow.save()
 
+            ConnectionMeta.objects.create(
+                connection_id=airbyte_conn["connectionId"], connection_name=payload.name
+            )
+
     except Exception as err:
         # delete the airbyte connection; since the deployment didn't get created
         logger.info("deleting airbyte connection")
         airbyte_service.delete_connection(org.airbyte_workspace_id, airbyte_conn["connectionId"])
         logger.error(err)
         return None, "Couldn't create the connection, please try again"
-
-    ConnectionMeta.objects.create(
-        connection_id=airbyte_conn["connectionId"], connection_name=payload.name
-    )
 
     res = {
         "name": payload.name,
