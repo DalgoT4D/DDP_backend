@@ -41,7 +41,7 @@ from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.auth import has_permission
 from ddpui.models.tasks import TaskLock
 
-pipeline_router = Router(auth=auth.CustomAuthMiddleware())
+pipeline_router = Router()
 logger = CustomLogger("ddpui")
 
 

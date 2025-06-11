@@ -7,7 +7,7 @@ from ddpui.auth import has_permission
 from ddpui import auth
 from celery.result import AsyncResult
 
-task_router = Router(auth=auth.CustomAuthMiddleware())
+task_router = Router()
 
 
 @task_router.get("/{task_id}")

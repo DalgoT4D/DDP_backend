@@ -56,7 +56,7 @@ from ddpui.core.pipelinefunctions import (
 )
 from ddpui.auth import has_permission
 
-orgtask_router = Router(auth=auth.CustomAuthMiddleware())
+orgtask_router = Router()
 logger = CustomLogger("ddpui")
 
 

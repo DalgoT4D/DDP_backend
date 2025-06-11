@@ -9,7 +9,7 @@ from ddpui.models.tasks import DataflowOrgTask, TaskLock, OrgTask
 from ddpui.auth import has_permission
 from ddpui.ddpprefect import prefect_service
 
-dashboard_router = Router(auth=auth.CustomAuthMiddleware())
+dashboard_router = Router()
 
 
 @dashboard_router.get("/v1")

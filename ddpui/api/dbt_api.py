@@ -37,7 +37,7 @@ from ddpui.utils.orguserhelpers import from_orguser
 from ddpui.utils.redis_client import RedisClient
 from ddpui.schemas.org_task_schema import TaskParameters
 
-dbt_router = Router(auth=auth.CustomAuthMiddleware())
+dbt_router = Router()
 logger = CustomLogger("ddpui")
 
 

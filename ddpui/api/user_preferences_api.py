@@ -13,7 +13,7 @@ from ddpui.core.notifications_service import create_notification
 from ddpui.auth import has_permission
 from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
 
-userpreference_router = Router(auth=auth.CustomAuthMiddleware())
+userpreference_router = Router()
 
 
 @userpreference_router.post("/")

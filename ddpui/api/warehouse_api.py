@@ -43,7 +43,7 @@ from ddpui.utils.helpers import convert_to_standard_types
 from ddpui.utils.constants import LIMIT_ROWS_TO_SEND_TO_LLM
 from ddpui.utils.redis_client import RedisClient
 
-warehouse_router = Router(auth=auth.CustomAuthMiddleware())
+warehouse_router = Router()
 logger = CustomLogger("ddpui")
 
 

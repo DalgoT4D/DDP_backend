@@ -41,7 +41,7 @@ from ddpui.models.tasks import (
 )
 from ddpui.utils.singletaskprogress import SingleTaskProgress
 
-airbyte_router = Router(auth=auth.CustomAuthMiddleware())
+airbyte_router = Router()
 logger = CustomLogger("airbyte")
 
 

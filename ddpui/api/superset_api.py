@@ -11,7 +11,7 @@ from ddpui import auth
 from ddpui.utils import secretsmanager
 from ddpui.auth import has_permission
 
-superset_router = Router(auth=auth.CustomAuthMiddleware())
+superset_router = Router()
 logger = CustomLogger("ddpui")
 
 

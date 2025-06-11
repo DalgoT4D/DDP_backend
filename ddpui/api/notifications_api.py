@@ -9,7 +9,7 @@ from ddpui.schemas.notifications_api_schemas import (
 )
 from ddpui.models.org_user import OrgUser
 
-notification_router = Router(auth=auth.CustomAuthMiddleware())
+notification_router = Router()
 
 
 @notification_router.post("/")

@@ -24,7 +24,7 @@ from ddpui.ddpprefect import (
 )
 from ddpui.utils.awsses import send_text_message
 
-orgpreference_router = Router(auth=auth.CustomAuthMiddleware())
+orgpreference_router = Router()
 
 
 @orgpreference_router.post("/")

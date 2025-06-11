@@ -41,7 +41,7 @@ from ddpui.utils.transform_workflow_helpers import (
     from_orgdbtmodel,
 )
 
-transform_router = Router(auth=auth.CustomAuthMiddleware())
+transform_router = Router()
 load_dotenv()
 logger = CustomLogger("ddpui")
 

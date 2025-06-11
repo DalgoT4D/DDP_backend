@@ -15,7 +15,7 @@ from ddpui.models.llm import UserPrompt
 
 from ddpui.utils.constants import LIMIT_ROWS_TO_SEND_TO_LLM
 
-data_router = Router(auth=auth.CustomAuthMiddleware())
+data_router = Router()
 logger = CustomLogger("ddpui")
 
 

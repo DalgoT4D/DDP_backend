@@ -10,7 +10,7 @@ from django.db.models import Prefetch
 from django.contrib.auth.models import User
 from django.db.models import F
 
-from ddpui.auth import has_permission, CustomAuthMiddleware
+from ddpui.auth import has_permission
 from ddpui.core import orgfunctions, orguserfunctions
 from ddpui.models.org import (
     OrgSchema,
@@ -49,7 +49,7 @@ from ddpui.models.org_preferences import OrgPreferences
 from ddpui.celeryworkers.moretasks import create_free_trial_org_account
 from django.db import transaction
 
-user_org_router = Router(auth=CustomAuthMiddleware())
+user_org_router = Router()
 load_dotenv()
 logger = CustomLogger("ddpui")
 
