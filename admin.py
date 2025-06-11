@@ -13,13 +13,18 @@ from ddpui.models.tasks import OrgTask
 from ddpui.ddpprefect.prefect_service import get_long_running_flow_runs
 from ddpui.utils.helpers import find_key_in_dictionary
 
+PREFECT_URL_FOR_NOTIFICATIONS = os.getenv("PREFECT_URL_FOR_NOTIFICATIONS")
+AIRBYTE_URL_FOR_NOTIFICATIONS = os.getenv("AIRBYTE_URL_FOR_NOTIFICATIONS")
+
 
 def show_workspaces():
     """streamlit function to show workspaces"""
     org_to_workspace = Org.objects.order_by("name").values("name", "airbyte_workspace_id", "slug")
     streamlit.title("Airbyte workspace URLs")
     for org in org_to_workspace:
-        org["airbyte_url"] = f"http://localhost:8000/workspaces/{org['airbyte_workspace_id']}"
+        org["airbyte_url"] = (
+            f"{AIRBYTE_URL_FOR_NOTIFICATIONS}/workspaces/{org['airbyte_workspace_id']}"
+        )
         streamlit.markdown(f"[{org['name']}]({org['airbyte_url']}) {org['slug']}")
 
 
@@ -33,7 +38,7 @@ def main():
     for flow_run in flow_runs:
         streamlit.write(flow_run["state_name"])
 
-        flow_run_url = "http://localhost:4200/flow-runs/flow-run/" + flow_run["id"]
+        flow_run_url = f"{PREFECT_URL_FOR_NOTIFICATIONS}/flow-runs/flow-run/" + flow_run["id"]
         streamlit.markdown(f"[Prefect flow run {flow_run['id']}]({flow_run_url})")
 
         org_slug = find_key_in_dictionary(flow_run["parameters"], "org_slug")
@@ -53,7 +58,7 @@ def main():
             orgtask = OrgTask.objects.filter(connection_id=connection_id).first()
             if orgtask:
                 streamlit.write(orgtask.org.slug)
-                connection_url = f"http://localhost:8000/workspaces/{orgtask.org.airbyte_workspace_id}/connections/{connection_id}"
+                connection_url = f"{AIRBYTE_URL_FOR_NOTIFICATIONS}/workspaces/{orgtask.org.airbyte_workspace_id}/connections/{connection_id}"
                 streamlit.markdown(f"[Airbyte connection {connection_id}]({connection_url})")
             else:
                 streamlit.write(connection_id)

@@ -4,11 +4,12 @@ args to a command are specific to a deployment/flow & will be store as deploymen
 """
 
 from enum import Enum
+import uuid
 from django.db import models
+from django.utils import timezone
 from ddpui.models.org import Org
 from ddpui.models.org import OrgDataFlowv1
 from ddpui.models.org_user import OrgUser
-from django.utils import timezone
 
 
 class TaskProgressStatus(str, Enum):
@@ -76,7 +77,7 @@ class Task(models.Model):
 class OrgTask(models.Model):
     """Docstring"""
 
-    uuid = models.UUIDField(editable=False, unique=True, null=True)
+    uuid = models.UUIDField(editable=False, unique=True, default=uuid.uuid4)
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     task = models.ForeignKey(Task, on_delete=models.CASCADE)
     connection_id = models.CharField(max_length=36, null=True)

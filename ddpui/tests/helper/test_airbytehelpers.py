@@ -1,4 +1,4 @@
-from unittest.mock import patch, Mock
+from unittest.mock import patch, Mock, ANY
 import os
 from pathlib import Path
 import yaml
@@ -788,7 +788,11 @@ def test_update_destination_bigquery_config(
     payload = AirbyteDestinationUpdate(
         name="name",
         destinationDefId="destinationDefId",
-        config={"credentials_json": '{"key": "value"}'},
+        config={
+            "credentials_json": '{"key": "value"}',
+            "dataset_location": "LOCATION",
+            "transformation_priority": "batch",
+        },
     )
     mock_cli_profile_block = Mock(block_name="block-name")
     mock_dbt_project_params = Mock(
@@ -806,6 +810,8 @@ def test_update_destination_bigquery_config(
         warehouse,
         {
             "key": "value",
+            "dataset_location": "LOCATION",
+            "transformation_priority": "batch",
         },
     )
     mock_create_or_update_org_cli_block.assert_called_once()
@@ -1118,6 +1124,7 @@ def test_create_or_update_org_cli_block_update_case(
         bqlocation=None,
         profilename=yml_obj["profile"],
         target="default",
+        priority=None,
     )
 
 
@@ -1186,7 +1193,7 @@ def test_schedule_update_connection_schema_success(
                         "connection_id": "connection_id",
                         "timeout": 15,
                         "type": "Airbyte Connection",
-                        "orgtask_uuid": "None",
+                        "orgtask_uuid": ANY,
                         "flow_name": None,
                         "flow_run_name": None,
                         "seq": 1,
