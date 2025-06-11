@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/4.1/ref/settings/
 import os
 from pathlib import Path
 import sentry_sdk
+from datetime import timedelta
 
 from corsheaders.defaults import default_headers
 from dotenv import load_dotenv
@@ -258,3 +259,12 @@ FIXTURE_DIRS = [
 ]
 
 PRODUCTION = os.getenv("PRODUCTION", "") == "True"
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(days=3),
+    "AUTH_HEADER_TYPES": ("Bearer",),
+    "SIGNING_KEY": os.getenv(
+        "JWT_SECRET_KEY", SECRET_KEY
+    ),  # Use JWT_SECRET_KEY env var if set, else fallback to SECRET_KEY
+    # ...add other SimpleJWT settings as needed...
+}

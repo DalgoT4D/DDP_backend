@@ -9,7 +9,7 @@ from django.db import models
 from django.contrib.auth.models import User
 
 from ninja import Schema
-from pydantic import SecretStr
+from pydantic import SecretStr, BaseModel
 
 from ddpui.models.org import Org, OrgSchema
 from ddpui.models.role_based_access import Role
@@ -204,3 +204,10 @@ class DeleteOrgUserPayload(Schema):
     """payload to delete an org user"""
 
     email: str
+
+
+class LoginPayload(BaseModel):
+    """the payload for the login workflow"""
+
+    username: str
+    password: str

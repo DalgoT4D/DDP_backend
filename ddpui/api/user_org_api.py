@@ -9,8 +9,9 @@ from django.utils.text import slugify
 from django.db.models import Prefetch
 from django.contrib.auth.models import User
 from django.db.models import F
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from ddpui.auth import has_permission
+from ddpui.auth import has_permission, CustomTokenObtainSerializer, CustomJwtAuthMiddleware
 from ddpui.core import orgfunctions, orguserfunctions
 from ddpui.models.org import (
     OrgSchema,
@@ -37,6 +38,7 @@ from ddpui.models.org_user import (
     ChangePasswordSchema,
     UserAttributes,
     VerifyEmailSchema,
+    LoginPayload,
 )
 from ddpui.models.org_plans import OrgPlanType
 from ddpui.models.org_wren import OrgWren
@@ -55,8 +57,7 @@ logger = CustomLogger("ddpui")
 
 
 @user_org_router.get(
-    "/currentuserv2",
-    response=List[OrgUserResponse],
+    "/currentuserv2", response=List[OrgUserResponse], auth=CustomJwtAuthMiddleware()
 )
 @has_permission(["can_view_orgusers"])
 def get_current_user_v2(request, org_slug: str = None):
@@ -137,16 +138,19 @@ def post_organization_user(request, payload: OrgUserCreate):  # pylint: disable=
 
 
 @user_org_router.post("/login/", auth=None)
-def post_login(request):
-    """Uses the username and password in the request to return an auth token"""
-    request_obj = json.loads(request.body)
-    token = views.obtain_auth_token(request)
-    if "token" in token.data:
-        retval = orguserfunctions.lookup_user(request_obj["username"])
-        retval["token"] = token.data["token"]
-        return retval
-
-    return token
+def post_login(request, payload: LoginPayload):
+    """Uses the username and password in the request to return a JWT auth token"""
+    serializer = CustomTokenObtainSerializer(
+        data={
+            "username": payload.username,
+            "password": payload.password,
+        }
+    )
+    serializer.is_valid(raise_exception=True)
+    token_data = serializer.validated_data
+    retval = orguserfunctions.lookup_user(payload.username)
+    retval["token"] = token_data["access"]
+    return retval
 
 
 @user_org_router.get(
