@@ -5,9 +5,9 @@ from ddpui.ddpairbyte import airbyte_service
 
 
 class Command(BaseCommand):
-    """Pause & then resume scheduled deployments. This is a handy script when we see duplicate schedules or when we upgrade prefect"""
+    """Update connection names in ConnectionMeta records by fetching from Airbyte"""
 
-    help = "Pause & then resume scheduled deployments. This is a handy script when we see duplicate schedules or when we upgrade prefect"
+    help = "Update connection names in ConnectionMeta records by fetching from Airbyte"
 
     def add_arguments(self, parser):
         """Docstring"""
