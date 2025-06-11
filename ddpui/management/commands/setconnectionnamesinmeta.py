@@ -9,9 +9,6 @@ class Command(BaseCommand):
 
     help = "Update connection names in ConnectionMeta records by fetching from Airbyte"
 
-    def add_arguments(self, parser):
-        """Docstring"""
-
     def handle(self, *args, **options):
         for orgtask in OrgTask.objects.filter(connection_id__isnull=False):
             cm = ConnectionMeta.objects.filter(connection_id=orgtask.connection_id).first()
