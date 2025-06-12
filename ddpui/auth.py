@@ -97,9 +97,7 @@ class CustomJwtAuthMiddleware(HttpBearer):
                 if orguser.org is None:
                     raise HttpError(400, "register an organization first")
 
-                permission_slugs = role_permissions.get(orguser.new_role.slug, [])
-
-                request.permissions = list(permission_slugs) or []
+                request.permissions = role_permissions.get(orguser.new_role.slug, [])
                 request.orguser = orguser
                 thread.set_current_request(request)
                 return request
