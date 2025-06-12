@@ -211,3 +211,7 @@ class LoginPayload(BaseModel):
 
     username: str
     password: str
+
+
+class TokenRefreshPayload(Schema):
+    refresh: str

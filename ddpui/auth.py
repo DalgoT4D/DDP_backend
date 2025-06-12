@@ -4,12 +4,12 @@ from ninja.errors import HttpError
 
 from rest_framework.authtoken.models import Token
 from django.contrib.auth.models import User
-from ddpui.models.admin_user import AuthJWTToken
 from ddpui.models.org_user import OrgUser
-from ddpui.models.role_based_access import RolePermission
+from ddpui.models.role_based_access import RolePermission, Role
 from ddpui.utils import thread
 from rest_framework_simplejwt.tokens import AccessToken
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
+from ninja import Router, Schema
 
 UNAUTHORIZED = "unauthorized"
 
@@ -82,7 +82,10 @@ class CustomJwtAuthMiddleware(HttpBearer):
         except Exception as err:
             raise HttpError(401, "Invalid or expired token")
 
-        if token_payload and "user_id" in token_payload:
+        user_id = token_payload.get("user_id")
+        role_permissions = token_payload.get("role_permissions", {})
+
+        if token_payload and user_id:
             user_id = token_payload["user_id"]
             request.user = User.objects.filter(id=user_id).first()
             q_orguser = OrgUser.objects.filter(user=request.user)
@@ -94,9 +97,7 @@ class CustomJwtAuthMiddleware(HttpBearer):
                 if orguser.org is None:
                     raise HttpError(400, "register an organization first")
 
-                permission_slugs = RolePermission.objects.filter(role=orguser.new_role).values_list(
-                    "permission__slug", flat=True
-                )
+                permission_slugs = role_permissions.get(orguser.new_role.slug, [])
 
                 request.permissions = list(permission_slugs) or []
                 request.orguser = orguser
@@ -111,21 +112,30 @@ class CustomTokenObtainSerializer(TokenObtainPairSerializer):
     def get_token(cls, user):
         token = super().get_token(user)
         # Add more custom fields as needed in jwt payload
-        # token["email"] = user.email
+        role_permissions = {}
+        for role in Role.objects.all():
+            role_permissions[role.slug] = list(
+                RolePermission.objects.filter(role=role).values_list("permission__slug", flat=True)
+            )
 
-        # # fetch all permissions of each orguser
-        # permissions = {}
-        # for orguser in OrgUser.objects.filter(user=user).all():
-        #     key = (orguser.id, orguser.org.slug)  # composite key
-        #     role_permissions = RolePermission.objects.filter(role=orguser.new_role).values_list(
-        #         "permission__slug", flat=True
-        #     )
-        #     permissions[key] = list(role_permissions)
-
-        # token["permissions"] = permissions
+        token["role_permissions"] = role_permissions
         return token
 
     def validate(self, attrs):
         data = super().validate(attrs)
         access_token = data["access"]
-        return {"access": access_token}
+        return {"access": access_token, "refresh": data["refresh"]}
+
+
+class CustomTokenRefreshSerializer(TokenRefreshSerializer):
+    def validate(self, attrs):
+        data = super().validate(attrs)
+        # Get the user from the refresh token
+        refresh = self.token_class(attrs["refresh"])
+        user_id = refresh.payload.get("user_id")
+        user = User.objects.filter(id=user_id).first()
+        if user:
+            # Generate a new access token with custom claims
+            access_token = CustomTokenObtainSerializer.get_token(user)
+            data["access"] = str(access_token)
+        return data

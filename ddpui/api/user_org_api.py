@@ -11,7 +11,7 @@ from django.contrib.auth.models import User
 from django.db.models import F
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from ddpui.auth import has_permission, CustomTokenObtainSerializer, CustomJwtAuthMiddleware
+from ddpui.auth import has_permission, CustomTokenObtainSerializer, CustomTokenRefreshSerializer
 from ddpui.core import orgfunctions, orguserfunctions
 from ddpui.models.org import (
     OrgSchema,
@@ -39,6 +39,7 @@ from ddpui.models.org_user import (
     UserAttributes,
     VerifyEmailSchema,
     LoginPayload,
+    TokenRefreshPayload,
 )
 from ddpui.models.org_plans import OrgPlanType
 from ddpui.models.org_wren import OrgWren
@@ -56,9 +57,7 @@ load_dotenv()
 logger = CustomLogger("ddpui")
 
 
-@user_org_router.get(
-    "/currentuserv2", response=List[OrgUserResponse], auth=CustomJwtAuthMiddleware()
-)
+@user_org_router.get("/currentuserv2", response=List[OrgUserResponse])
 @has_permission(["can_view_orgusers"])
 def get_current_user_v2(request, org_slug: str = None):
     """return all the OrgUsers for the User making this request"""
@@ -150,7 +149,17 @@ def post_login(request, payload: LoginPayload):
     token_data = serializer.validated_data
     retval = orguserfunctions.lookup_user(payload.username)
     retval["token"] = token_data["access"]
+    retval["refresh_token"] = token_data["refresh"]
     return retval
+
+
+@user_org_router.post("/token/refresh", auth=None)
+def post_token_refresh(request, payload: TokenRefreshPayload):
+    """Refreshes the JWT token using the refresh token"""
+    serializer = CustomTokenRefreshSerializer(data=payload.dict())
+    serializer.is_valid(raise_exception=True)
+    token_data = serializer.validated_data
+    return {"token": token_data["access"]}
 
 
 @user_org_router.get(
