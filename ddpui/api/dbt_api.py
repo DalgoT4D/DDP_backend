@@ -41,7 +41,7 @@ dbt_router = Router()
 logger = CustomLogger("ddpui")
 
 
-@dbt_router.post("/workspace/", auth=auth.CustomAuthMiddleware())
+@dbt_router.post("/workspace/")
 @has_permission(["can_create_dbt_workspace"])
 def post_dbt_workspace(request, payload: OrgDbtSchema):
     """Setup the client git repo and install a virtual env inside it to run dbt"""
@@ -62,7 +62,7 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
     return {"task_id": task.id}
 
 
-@dbt_router.put("/github/", auth=auth.CustomAuthMiddleware())
+@dbt_router.put("/github/")
 @has_permission(["can_edit_dbt_workspace"])
 def put_dbt_github(request, payload: OrgDbtGitHub):
     """Setup the client git repo and install a virtual env inside it to run dbt"""
@@ -130,7 +130,7 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
     return {"task_id": task.id}
 
 
-@dbt_router.delete("/workspace/", response=OrgUserResponse, auth=auth.CustomAuthMiddleware())
+@dbt_router.delete("/workspace/", response=OrgUserResponse)
 @has_permission(["can_delete_dbt_workspace"])
 def dbt_delete(request):
     """Delete the dbt workspace and project repo created"""
@@ -143,7 +143,7 @@ def dbt_delete(request):
     return from_orguser(orguser)
 
 
-@dbt_router.get("/dbt_workspace", auth=auth.CustomAuthMiddleware())
+@dbt_router.get("/dbt_workspace")
 @has_permission(["can_view_dbt_workspace"])
 def get_dbt_workspace(request):
     """return details of the dbt workspace for this org"""
@@ -163,7 +163,7 @@ def get_dbt_workspace(request):
     }
 
 
-@dbt_router.post("/git_pull/", auth=auth.CustomAuthMiddleware())
+@dbt_router.post("/git_pull/")
 @has_permission(["can_run_orgtask"])
 def post_dbt_git_pull(request):
     """Pull the dbt repo from github for the organization"""
@@ -184,7 +184,7 @@ def post_dbt_git_pull(request):
     return {"success": True}
 
 
-@dbt_router.post("/makedocs/", auth=auth.CustomAuthMiddleware())
+@dbt_router.post("/makedocs/")
 @has_permission(["can_create_dbt_docs"])
 def post_dbt_makedocs(request):
     """prepare the dbt docs single html"""
@@ -218,7 +218,7 @@ def post_dbt_makedocs(request):
     return {"token": token.hex}
 
 
-@dbt_router.put("/v1/schema/", auth=auth.CustomAuthMiddleware())
+@dbt_router.put("/v1/schema/")
 @has_permission(["can_edit_dbt_workspace"])
 def put_dbt_schema_v1(request, payload: OrgDbtTarget):
     """Update the target_configs.schema for the dbt cli profile block"""
@@ -248,7 +248,7 @@ def put_dbt_schema_v1(request, payload: OrgDbtTarget):
     return {"success": 1}
 
 
-@dbt_router.get("/dbt_transform/", auth=auth.CustomAuthMiddleware())
+@dbt_router.get("/dbt_transform/")
 @has_permission(["can_view_dbt_workspace"])
 def get_transform_type(request):
     """find the transform type"""
@@ -263,7 +263,7 @@ def get_transform_type(request):
     return {"transform_type": transform_type}
 
 
-@dbt_router.post("/run_dbt_via_celery/", auth=auth.CustomAuthMiddleware())
+@dbt_router.post("/run_dbt_via_celery/")
 @has_permission(["can_edit_dbt_workspace"])
 def post_run_dbt_commands(request, payload: TaskParameters = None):
     """Run dbt commands via celery"""
@@ -302,7 +302,7 @@ def post_run_dbt_commands(request, payload: TaskParameters = None):
     return {"task_id": task_id}
 
 
-@dbt_router.post("/fetch-elementary-report/", auth=auth.CustomAuthMiddleware())
+@dbt_router.post("/fetch-elementary-report/")
 @has_permission(["can_view_dbt_workspace"])
 def post_fetch_elementary_report(request):
     """prepare the dbt docs single html"""
@@ -314,7 +314,7 @@ def post_fetch_elementary_report(request):
     return result
 
 
-@dbt_router.post("/v1/refresh-elementary-report/", auth=auth.CustomAuthMiddleware())
+@dbt_router.post("/v1/refresh-elementary-report/")
 @has_permission(["can_view_dbt_workspace"])
 def post_refresh_elementary_report_via_prefect(request):
     """prepare the dbt docs single html via prefect deployment"""
@@ -322,7 +322,7 @@ def post_refresh_elementary_report_via_prefect(request):
     return elementary_service.refresh_elementary_report_via_prefect(orguser)
 
 
-@dbt_router.get("/elementary-setup-status", auth=auth.CustomAuthMiddleware())
+@dbt_router.get("/elementary-setup-status")
 @has_permission(["can_view_dbt_workspace"])
 def get_elementary_setup_status(request):
     """prepare the dbt docs single html"""
@@ -334,7 +334,7 @@ def get_elementary_setup_status(request):
     return result
 
 
-@dbt_router.get("/check-dbt-files", auth=auth.CustomAuthMiddleware())
+@dbt_router.get("/check-dbt-files")
 @has_permission(["can_view_dbt_workspace"])
 def get_check_dbt_files(request):
     """checks that the dbt project is set up for elementary"""
@@ -346,7 +346,7 @@ def get_check_dbt_files(request):
     return result
 
 
-@dbt_router.post("/create-elementary-tracking-tables/", auth=auth.CustomAuthMiddleware())
+@dbt_router.post("/create-elementary-tracking-tables/")
 @has_permission(["can_view_dbt_workspace"])
 def post_create_elementary_tracking_tables(request):
     """prepare the dbt docs single html via prefect deployment"""
@@ -358,7 +358,7 @@ def post_create_elementary_tracking_tables(request):
     return result
 
 
-@dbt_router.post("/create-elementary-profile/", auth=auth.CustomAuthMiddleware())
+@dbt_router.post("/create-elementary-profile/")
 @has_permission(["can_view_dbt_workspace"])
 def post_create_elementary_profile(request):
     """prepare the dbt docs single html via prefect deployment"""
@@ -370,7 +370,7 @@ def post_create_elementary_profile(request):
     return result
 
 
-@dbt_router.post("/create-edr-deployment/", auth=auth.CustomAuthMiddleware())
+@dbt_router.post("/create-edr-deployment/")
 @has_permission(["can_view_dbt_workspace"])
 def post_create_edr_sendreport_dataflow(request):
     """prepare the dbt docs single html via prefect deployment"""

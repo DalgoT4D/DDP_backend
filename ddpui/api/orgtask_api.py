@@ -60,7 +60,7 @@ orgtask_router = Router()
 logger = CustomLogger("ddpui")
 
 
-@orgtask_router.post("/", auth=auth.CustomAuthMiddleware())
+@orgtask_router.post("/")
 @has_permission(["can_create_orgtask"])
 def post_orgtask(request, payload: CreateOrgTaskPayload):
     """Create a custom client org task (dbt or git). If base task is dbt run create a deployment"""
@@ -141,7 +141,7 @@ def post_orgtask(request, payload: CreateOrgTaskPayload):
     }
 
 
-@orgtask_router.post("transform/", auth=auth.CustomAuthMiddleware())
+@orgtask_router.post("transform/")
 @has_permission(["can_create_orgtask"])
 def post_system_transformation_tasks(request):
     """
@@ -211,7 +211,7 @@ def post_system_transformation_tasks(request):
     return {"success": 1}
 
 
-@orgtask_router.get("elementary-lock/", auth=auth.CustomAuthMiddleware())
+@orgtask_router.get("elementary-lock/")
 @has_permission(["can_view_orgtasks"])
 def get_elemetary_task_lock(request):
     """Check if the elementary report generation task is underway"""
@@ -221,7 +221,7 @@ def get_elemetary_task_lock(request):
     return fetch_orgtask_lock_v1(org_task, lock)
 
 
-@orgtask_router.get("transform/", auth=auth.CustomAuthMiddleware())
+@orgtask_router.get("transform/")
 @has_permission(["can_view_orgtasks"])
 def get_prefect_transformation_tasks(request):
     """Fetch all dbt tasks for an org; client or system"""
@@ -283,7 +283,7 @@ def get_prefect_transformation_tasks(request):
     return sorted(res, key=lambda x: x["seq"])
 
 
-@orgtask_router.delete("transform/", auth=auth.CustomAuthMiddleware())
+@orgtask_router.delete("transform/")
 @has_permission(["can_delete_orgtask"])
 def delete_system_transformation_tasks(request):
     """delete tasks and related objects for an org"""
@@ -317,7 +317,7 @@ def delete_system_transformation_tasks(request):
             continue
 
 
-@orgtask_router.post("{orgtask_uuid}/run/", auth=auth.CustomAuthMiddleware())
+@orgtask_router.post("{orgtask_uuid}/run/")
 @has_permission(["can_run_orgtask"])
 def post_run_prefect_org_task(
     request, orgtask_uuid, payload: TaskParameters = None
@@ -439,7 +439,7 @@ def post_run_prefect_org_task(
     return result
 
 
-@orgtask_router.delete("{orgtask_uuid}/", auth=auth.CustomAuthMiddleware())
+@orgtask_router.delete("{orgtask_uuid}/")
 @has_permission(["can_delete_orgtask"])
 def post_delete_orgtask(request, orgtask_uuid):  # pylint: disable=unused-argument
     """Delete client generated orgtask"""

@@ -65,7 +65,7 @@ def get_notification_recipients(request, notification_id: int):
     return result
 
 
-@notification_router.get("/", auth=auth.CustomAuthMiddleware(), deprecated=True)
+@notification_router.get("/", deprecated=True)
 def get_user_notifications(request, page: int = 1, limit: int = 10):
     """
     Returns all the notifications for a particular user.
@@ -80,7 +80,7 @@ def get_user_notifications(request, page: int = 1, limit: int = 10):
     return result
 
 
-@notification_router.get("/v1", auth=auth.CustomAuthMiddleware())
+@notification_router.get("/v1")
 def get_user_notifications_v1(request, page: int = 1, limit: int = 10, read_status: int = None):
     """
     Returns all the notifications for a particular user.
@@ -97,7 +97,7 @@ def get_user_notifications_v1(request, page: int = 1, limit: int = 10, read_stat
     return result
 
 
-@notification_router.put("/", auth=auth.CustomAuthMiddleware(), deprecated=True)
+@notification_router.put("/", deprecated=True)
 def mark_as_read(request, payload: UpdateReadStatusSchema):
     """
     Handles the task of updating the read_status
@@ -113,7 +113,7 @@ def mark_as_read(request, payload: UpdateReadStatusSchema):
     return result
 
 
-@notification_router.put("/v1", auth=auth.CustomAuthMiddleware())
+@notification_router.put("/v1")
 def mark_as_read_v1(request, payload: UpdateReadStatusSchemav1):
     """
     Bulk update of read status of notifications
@@ -142,7 +142,7 @@ def delete_notification(request, notification_id: int):
     return result
 
 
-@notification_router.get("/unread_count", auth=auth.CustomAuthMiddleware())
+@notification_router.get("/unread_count")
 def get_unread_notifications_count(request):
     """Get count of unread notifications"""
     orguser: OrgUser = request.orguser

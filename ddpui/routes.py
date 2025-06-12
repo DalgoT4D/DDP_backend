@@ -3,6 +3,7 @@ from ninja.errors import ValidationError
 from ninja.responses import Response
 from pydantic.error_wrappers import ValidationError as PydanticValidationError
 
+from ddpui import auth
 from ddpui.api.airbyte_api import airbyte_router
 from ddpui.api.dashboard_api import dashboard_router
 from ddpui.api.data_api import data_router
@@ -25,6 +26,7 @@ src_api = NinjaAPI(
     title="Dalgo backend apis",
     description="Open source ELT orchestrator",
     docs_url="/api/docs",
+    auth=auth.CustomAuthMiddleware(),
 )
 
 

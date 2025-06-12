@@ -47,21 +47,21 @@ warehouse_router = Router()
 logger = CustomLogger("ddpui")
 
 
-@warehouse_router.get("/tables/{schema_name}", auth=auth.CustomAuthMiddleware())
+@warehouse_router.get("/tables/{schema_name}")
 @has_permission(["can_view_warehouse_data"])
 def get_table(request, schema_name: str):
     """Fetches table names from a warehouse"""
     return get_warehouse_data(request, "tables", schema_name=schema_name)
 
 
-@warehouse_router.get("/schemas", auth=auth.CustomAuthMiddleware())
+@warehouse_router.get("/schemas")
 @has_permission(["can_view_warehouse_data"])
 def get_schema(request):
     """Fetches schema names from a warehouse"""
     return get_warehouse_data(request, "schemas")
 
 
-@warehouse_router.get("/table_columns/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware())
+@warehouse_router.get("/table_columns/{schema_name}/{table_name}")
 @has_permission(["can_view_warehouse_data"])
 def get_table_columns(request, schema_name: str, table_name: str):
     """Fetches column names for a specific table from a warehouse"""
@@ -70,7 +70,7 @@ def get_table_columns(request, schema_name: str, table_name: str):
     )
 
 
-@warehouse_router.get("/table_data/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware())
+@warehouse_router.get("/table_data/{schema_name}/{table_name}")
 @has_permission(["can_view_warehouse_data"])
 def get_table_data(
     request,
@@ -94,7 +94,7 @@ def get_table_data(
     )
 
 
-@warehouse_router.get("/table_count/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware())
+@warehouse_router.get("/table_count/{schema_name}/{table_name}")
 @has_permission(["can_view_warehouse_data"])
 def get_table_count(request, schema_name: str, table_name: str):
     """Fetches the total number of rows for a specified table."""
@@ -110,7 +110,7 @@ def get_table_count(request, schema_name: str, table_name: str):
         raise HttpError(500, f"Failed to fetch total rows for {schema_name}.{table_name}")
 
 
-@warehouse_router.get("/dbt_project/json_columnspec/", auth=auth.CustomAuthMiddleware())
+@warehouse_router.get("/dbt_project/json_columnspec/")
 @has_permission(["can_view_warehouse_data"])
 def get_json_column_spec(request, source_schema: str, input_name: str, json_column: str):
     """Get the json column spec of a table in a warehouse"""
@@ -130,7 +130,7 @@ def get_json_column_spec(request, source_schema: str, input_name: str, json_colu
     return json_columnspec
 
 
-@warehouse_router.get("/v1/table_data/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware())
+@warehouse_router.get("/v1/table_data/{schema_name}/{table_name}")
 @has_permission(["can_view_warehouse_data"])
 def get_warehouse_table_columns_spec(request, schema_name: str, table_name: str):
     """
@@ -158,7 +158,7 @@ def get_warehouse_table_columns_spec(request, schema_name: str, table_name: str)
         raise HttpError(500, str(err))
 
 
-@warehouse_router.post("/insights/metrics/", auth=auth.CustomAuthMiddleware())
+@warehouse_router.post("/insights/metrics/")
 @has_permission(["can_view_warehouse_data"])
 def post_data_insights(request, payload: RequestorColumnSchema):
     """
@@ -192,7 +192,7 @@ def post_data_insights(request, payload: RequestorColumnSchema):
         raise HttpError(500, str(err))
 
 
-@warehouse_router.get("/download/{schema_name}/{table_name}", auth=auth.CustomAuthMiddleware())
+@warehouse_router.get("/download/{schema_name}/{table_name}")
 @has_permission(["can_view_warehouse_data"])
 def get_download_warehouse_data(request, schema_name: str, table_name: str):
     """Stream and download data from a table in the warehouse"""
@@ -256,7 +256,7 @@ def get_download_warehouse_data(request, schema_name: str, table_name: str):
     return response
 
 
-@warehouse_router.post("/ask/", auth=auth.CustomAuthMiddleware())
+@warehouse_router.post("/ask/")
 @has_permission(["can_view_warehouse_data"])
 def post_warehouse_prompt(request, payload: AskWarehouseRequest):
     """
@@ -321,7 +321,7 @@ def post_warehouse_prompt(request, payload: AskWarehouseRequest):
         raise HttpError(400, "failed to summarize warehouse results") from error
 
 
-@warehouse_router.post("/ask/{new_session_id}/save", auth=auth.CustomAuthMiddleware())
+@warehouse_router.post("/ask/{new_session_id}/save")
 @has_permission(["can_view_warehouse_data"])
 def post_save_warehouse_prompt_session(
     request, new_session_id: str, payload: SaveLlmSessionRequest
@@ -366,7 +366,7 @@ def post_save_warehouse_prompt_session(
     return {"success": 1}
 
 
-@warehouse_router.post("/ask/{session_id}/feedback", auth=auth.CustomAuthMiddleware())
+@warehouse_router.post("/ask/{session_id}/feedback")
 @has_permission(["can_view_warehouse_data"])
 def post_feedback_llm_session(request, session_id: str, payload: LlmSessionFeedbackRequest):
     """Feedback"""
@@ -388,7 +388,7 @@ def post_feedback_llm_session(request, session_id: str, payload: LlmSessionFeedb
     return {"success": 1}
 
 
-@warehouse_router.get("/ask/sessions", auth=auth.CustomAuthMiddleware())
+@warehouse_router.get("/ask/sessions")
 @has_permission(["can_view_warehouse_data"])
 def get_warehouse_llm_analysis_sessions(
     request,
@@ -449,10 +449,7 @@ def get_warehouse_llm_analysis_sessions(
     }
 
 
-@warehouse_router.get(
-    "/sync_tables",
-    auth=auth.CustomAuthMiddleware(),
-)
+@warehouse_router.get("/sync_tables")
 @has_permission(["can_view_warehouse_data"])
 def get_warehouse_schemas_and_tables(
     request,
