@@ -10,6 +10,11 @@ from ddpui.utils import thread
 from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from ninja import Router, Schema
+import redis
+import uuid
+import json
+import os
+from ddpui.utils.redis_client import RedisClient
 
 UNAUTHORIZED = "unauthorized"
 
@@ -83,10 +88,9 @@ class CustomJwtAuthMiddleware(HttpBearer):
             raise HttpError(401, "Invalid or expired token")
 
         user_id = token_payload.get("user_id")
-        role_permissions = token_payload.get("role_permissions", {})
+        permissions_key = token_payload.get("permissions_key")
 
         if token_payload and user_id:
-            user_id = token_payload["user_id"]
             request.user = User.objects.filter(id=user_id).first()
             q_orguser = OrgUser.objects.filter(user=request.user)
             if request.headers.get("x-dalgo-org"):
@@ -97,7 +101,14 @@ class CustomJwtAuthMiddleware(HttpBearer):
                 if orguser.org is None:
                     raise HttpError(400, "register an organization first")
 
-                request.permissions = role_permissions.get(orguser.new_role.slug, [])
+                # Fetch permissions from Redis using the custom singleton client
+                redis_client = RedisClient.get_instance()
+                permissions_json = redis_client.get(permissions_key or {})
+                if not permissions_json:
+                    raise HttpError(401, "Permissions not found or expired")
+                orguser_permissions: dict = json.loads(permissions_json)
+
+                request.permissions = orguser_permissions.get(orguser.id, [])
                 request.orguser = orguser
                 thread.set_current_request(request)
                 return request
@@ -109,14 +120,21 @@ class CustomTokenObtainSerializer(TokenObtainPairSerializer):
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
-        # Add more custom fields as needed in jwt payload
-        role_permissions = {}
-        for role in Role.objects.all():
-            role_permissions[role.slug] = list(
+        # Generate permissions and store in Redis, put only the key in the token
+        orguser_permissions = {}  # { orguser_id : list[permission_slugs] }
+        for orguser in OrgUser.objects.filter(user=user):
+            role = orguser.new_role
+            orguser_permissions[orguser.id] = list(
                 RolePermission.objects.filter(role=role).values_list("permission__slug", flat=True)
             )
-
-        token["role_permissions"] = role_permissions
+        permissions_key = f"jwt_permissions:{uuid.uuid4()}"
+        redis_client = RedisClient.get_instance()
+        redis_client.setex(
+            permissions_key,
+            60 * 60 * 4,  # 4 hours expiry (should be >= access token lifetime)
+            json.dumps(orguser_permissions),
+        )
+        token["permissions_key"] = permissions_key
         return token
 
     def validate(self, attrs):
