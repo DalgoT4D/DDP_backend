@@ -101,11 +101,10 @@ class CustomJwtAuthMiddleware(HttpBearer):
                 if orguser.org is None:
                     raise HttpError(400, "register an organization first")
 
-                # Fetch permissions from Redis using the custom singleton client
                 redis_client = RedisClient.get_instance()
                 permissions_json = redis_client.get(permissions_key or {})
                 if not permissions_json:
-                    raise HttpError(401, "Permissions not found or expired")
+                    raise HttpError(403, "Permissions not found or expired")
                 orguser_permissions: dict = json.loads(permissions_json)
 
                 request.permissions = orguser_permissions.get(orguser.id, [])

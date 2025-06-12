@@ -263,8 +263,8 @@ FIXTURE_DIRS = [
 PRODUCTION = os.getenv("PRODUCTION", "") == "True"
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(hours=12),  # 12 hours for access token
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=30),  # 30 days for refresh token
+    "ACCESS_TOKEN_LIFETIME": timedelta(hours=os.getenv("JWT_ACCESS_TOKEN_EXPIRY_HOURS", 12)),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=os.getenv("JWT_REFRESH_TOKEN_EXPIRY_DAYS", 30)),
     "AUTH_HEADER_TYPES": ("Bearer",),
     "SIGNING_KEY": os.getenv("JWT_SECRET_KEY", SECRET_KEY),
     # ...add other SimpleJWT settings as needed...
