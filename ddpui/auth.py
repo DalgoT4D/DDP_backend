@@ -88,6 +88,9 @@ class CustomJwtAuthMiddleware(HttpBearer):
         user_id = token_payload.get("user_id")
         permissions_key = token_payload.get("permissions_key")
 
+        if not permissions_key:
+            raise HttpError(403, "Permissions key not found in token")
+
         if token_payload and user_id:
             request.user = User.objects.filter(id=user_id).first()
             q_orguser = OrgUser.objects.filter(user=request.user)
@@ -100,7 +103,7 @@ class CustomJwtAuthMiddleware(HttpBearer):
                     raise HttpError(400, "register an organization first")
 
                 redis_client = RedisClient.get_instance()
-                permissions_json = redis_client.get(permissions_key or {})
+                permissions_json = redis_client.get(permissions_key)
                 if not permissions_json:
                     raise HttpError(403, "Permissions not found or expired")
                 orguser_permissions: dict = json.loads(permissions_json)
