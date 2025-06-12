@@ -1,19 +1,17 @@
+import uuid
+import json
 from functools import wraps
 from ninja.security import HttpBearer
 from ninja.errors import HttpError
 
 from rest_framework.authtoken.models import Token
-from django.contrib.auth.models import User
-from ddpui.models.org_user import OrgUser
-from ddpui.models.role_based_access import RolePermission, Role
-from ddpui.utils import thread
 from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
-from ninja import Router, Schema
-import redis
-import uuid
-import json
-import os
+from django.contrib.auth.models import User
+
+from ddpui.models.org_user import OrgUser
+from ddpui.models.role_based_access import RolePermission
+from ddpui.utils import thread
 from ddpui.utils.redis_client import RedisClient
 
 UNAUTHORIZED = "unauthorized"
