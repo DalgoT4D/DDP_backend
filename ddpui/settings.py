@@ -267,6 +267,6 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=int(os.getenv("JWT_ACCESS_TOKEN_EXPIRY_HOURS", 12))),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=int(os.getenv("JWT_REFRESH_TOKEN_EXPIRY_DAYS", 30))),
     "AUTH_HEADER_TYPES": ("Bearer",),
-    "SIGNING_KEY": os.getenv("JWT_SECRET_KEY"),
+    "SIGNING_KEY": os.getenv("JWT_SECRET_KEY", SECRET_KEY),
     # ...add other SimpleJWT settings as needed...
 }

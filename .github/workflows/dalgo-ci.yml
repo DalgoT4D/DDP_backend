@@ -63,6 +63,7 @@ jobs:
           DBNAME: ${{ secrets.CI_DBNAME }}
           DBUSER: ddp
           DBPASSWORD: ${{ secrets.CI_DBPASSWORD }}
+          DJANGOSECRET: "some-secret-key"
         run: |
           uv run python manage.py migrate
 
