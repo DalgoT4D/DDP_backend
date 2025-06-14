@@ -7,9 +7,18 @@ from ddpui.dbt_automation.utils.dbtproject import dbtProject
 from ddpui.dbt_automation.utils.columnutils import quote_columnname
 from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
 from ddpui.dbt_automation.utils.tableutils import source_or_ref
+from ddpui.dbt_automation.schemas import ConcatOperationInputSchema
 
 basicConfig(level=INFO)
 logger = getLogger()
+
+
+def concat_columns_simulate_output(config: ConcatOperationInputSchema) -> list[str]:
+    """
+    Generate output columns for concat columns operation.
+    """
+
+    return [col.name for col in config.columns if col.is_col] + [config.output_column_name]
 
 
 def concat_columns_dbt_sql(
