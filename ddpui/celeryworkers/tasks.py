@@ -16,7 +16,7 @@ from ddpui.celery import app, Celery
 
 
 from ddpui.utils import timezone, awsses, constants
-from ddpui.utils.helpers import find_key_in_dictionary, from_timestamp
+from ddpui.utils.helpers import find_key_in_dictionary
 from ddpui.utils.webhook_helpers import (
     notify_org_managers,
     do_handle_prefect_webhook,
@@ -1072,54 +1072,46 @@ def check_for_long_running_flow_runs():
 
 
 @app.task(bind=True)
-def fetch_airbyte_job_details(self, job_id: int):
-    """Fetches the details of an Airbyte job and populates in our db.
-    Uses the latest attempt (by id) for stats and failure info.
-    """
-    job_info = airbyte_service.get_job_info_without_logs(job_id)
-    jobs = job_info.get("jobs", [])
-    if not jobs:
-        logger.error(f"No jobs found for job_id={job_id}")
-        return None
+def sync_airbyte_job_stats_for_connections(self, last_n_days: int = 7):
+    # figure out start datetime and end datetime based on now & last_n_days
+    start_time = datetime.now(pytz.utc) - timedelta(days=last_n_days)
+    end_time = datetime.now(pytz.utc)
 
-    job_data: dict = jobs[0].get("job", {})
-    attempts: list[dict] = jobs[0].get("attempts", [])
-    if not attempts:
-        logger.info(f"No attempts found for job_id={job_id}")
-        latest_attempt = None
-    else:
-        # Pick the attempt with the greatest id
-        latest_attempt = max(attempts, key=lambda a: a.get("id", 0))
+    for org_task in OrgTask.objects.filter(connection_id__isnull=False):
+        connection_id = org_task.connection_id
+        try:
+            logger.info("Syncing job history for connection %s", connection_id)
 
-    # Prepare fields for AirbyteJob
-    job_fields = {
-        "job_id": job_data.get("id"),
-        "job_type": job_data.get("configType"),
-        "config_id": job_data.get("configId"),
-        "status": job_data.get("status"),
-        "reset_config": job_data.get("resetConfig"),
-        "refresh_config": job_data.get("refreshConfig"),
-        "stream_stats": job_data.get("streamAggregatedStats"),
-        "records_emitted": job_data.get("aggregatedStats", {}).get("recordsEmitted", 0),
-        "bytes_emitted": job_data.get("aggregatedStats", {}).get("bytesEmitted", 0),
-        "records_committed": job_data.get("aggregatedStats", {}).get("recordsCommitted", 0),
-        "bytes_committed": job_data.get("aggregatedStats", {}).get("bytesCommitted", 0),
-        "started_at": from_timestamp(job_data.get("startedAt", 0)),
-        "ended_at": from_timestamp(job_data.get("endedAt", 0)),
-        "created_at": from_timestamp(job_data.get("createdAt", 0)),
-    }
+            offset = 0
+            limit = 20
+            curr_itr_count = 20
+            while curr_itr_count >= limit:
+                # by default the jobs are ordered by createdAt
+                jobs = airbyte_service.get_jobs_for_connection(
+                    connection_id,
+                    limit=limit,
+                    offset=offset,
+                    job_types=["sync", "reset_connection", "clear", "refresh"],
+                    created_at_start=start_time,
+                    created_at_end=end_time,
+                )
+                for job in jobs:
+                    if len(job["jobs"]) == 0:
+                        logger.info("No jobs found for connection %s", connection_id)
+                        break
 
-    # Create or update the AirbyteJob entry
-    airbyte_job, is_created = AirbyteJob.objects.update_or_create(
-        job_id=job_fields["job_id"],
-        defaults=job_fields,
-    )
+                    latest_job = job["jobs"][0]
+                    airbyte_service.fetch_and_update_airbyte_job_details(latest_job.get("id"))
 
-    if not is_created:
-        logger.error("Failed to create or update AirbyteJob for job_id=%s", job_id)
-        raise Exception(f"Failed to create or update AirbyteJob for job_id={job_id}")
+                offset += limit
+                curr_itr_count = jobs["totalJobCount"]
 
-    return model_to_dict(airbyte_job)
+        except Exception as e:
+            logger.error(
+                "Failed to sync job history for connection %s: %s",
+                org_task.connection_id,
+                str(e),
+            )
 
 
 @app.task()
@@ -1176,3 +1168,10 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
             compute_dataflow_run_times.s(),
             name="compute run times of each deployment based on its past flow runs",
         )
+
+    # sync airbyte job stats for connections; every 24 hours
+    sender.add_periodic_task(
+        crontab(minute=0, hour=0),
+        sync_airbyte_job_stats_for_connections.s(),
+        name="sync airbyte job stats for all connections",
+    )

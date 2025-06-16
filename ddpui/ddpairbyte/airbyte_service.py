@@ -6,16 +6,19 @@ These functions do not access the Dalgo database
 
 from typing import Dict, List
 import os
+import pytz
 from datetime import datetime
 import requests
 from dotenv import load_dotenv
 from ninja.errors import HttpError
+from django.forms.models import model_to_dict
 from flags.state import flag_enabled
 from ddpui import settings
 from ddpui.ddpairbyte import schema
 from ddpui.ddpprefect import prefect_service, AIRBYTESERVER
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.helpers import remove_nested_attribute, nice_bytes
+from ddpui.utils.helpers import from_timestamp
 from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
     AirbyteDestinationCreate,
@@ -24,6 +27,7 @@ from ddpui.ddpairbyte.schema import (
 )
 from ddpui.utils import thread
 from ddpui.models.org import OrgPrefectBlockv1
+from ddpui.models.airbyte import AirbyteJob
 
 load_dotenv()
 
@@ -939,7 +943,12 @@ def get_job_info_without_logs(job_id: str) -> dict:
 
 
 def get_jobs_for_connection(
-    connection_id: str, limit: int = 1, offset: int = 0, job_types: list[str] = ["sync"]
+    connection_id: str,
+    limit: int = 1,
+    offset: int = 0,
+    job_types: list[str] = ["sync"],
+    created_at_start: datetime = None,
+    created_at_end: datetime = None,
 ) -> int | None:
     """
     returns most recent job for a connection
@@ -956,13 +965,25 @@ def get_jobs_for_connection(
     if not isinstance(connection_id, str):
         raise HttpError(400, "connection_id must be a string")
 
+    payload = {
+        "configTypes": job_types,
+        "configId": connection_id,
+        "pagination": {"rowOffset": offset, "pageSize": limit},
+    }
+
+    if created_at_start:
+        payload["createdAtStart"] = (
+            created_at_start.astimezone(pytz.UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        )
+
+    if created_at_end:
+        payload["createdAtEnd"] = (
+            created_at_end.astimezone(pytz.UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        )
+
     result = abreq(
         "jobs/list",
-        {
-            "configTypes": job_types,
-            "configId": connection_id,
-            "pagination": {"rowOffset": offset, "pageSize": limit},
-        },
+        payload,
     )
     return result
 
@@ -1072,3 +1093,48 @@ def cancel_connection_job(
             break
 
     return {"cancelled": cancelled}
+
+
+def fetch_and_update_airbyte_job_details(job_id: str):
+    """Fetches the details of an Airbyte job and populates in our db."""
+    job_info = get_job_info_without_logs(job_id)
+    jobs = job_info.get("jobs", [])
+    if not jobs:
+        logger.error(f"No jobs found for job_id={job_id}")
+        return None
+
+    job_data: dict = jobs[0].get("job", {})
+    attempts: list[dict] = jobs[0].get("attempts", [])
+    if not attempts:
+        logger.info(f"No attempts found for job_id={job_id}")
+        raise Exception(f"No attempts found for job_id={job_id}")
+
+    # Prepare fields for AirbyteJob
+    job_fields = {
+        "job_id": job_data.get("id"),
+        "job_type": job_data.get("configType"),
+        "config_id": job_data.get("configId"),
+        "status": job_data.get("status"),
+        "reset_config": job_data.get("resetConfig"),
+        "refresh_config": job_data.get("refreshConfig"),
+        "stream_stats": job_data.get("streamAggregatedStats"),
+        "records_emitted": job_data.get("aggregatedStats", {}).get("recordsEmitted", 0),
+        "bytes_emitted": job_data.get("aggregatedStats", {}).get("bytesEmitted", 0),
+        "records_committed": job_data.get("aggregatedStats", {}).get("recordsCommitted", 0),
+        "bytes_committed": job_data.get("aggregatedStats", {}).get("bytesCommitted", 0),
+        "started_at": from_timestamp(job_data.get("startedAt", 0)),
+        "ended_at": from_timestamp(job_data.get("endedAt", 0)),
+        "created_at": from_timestamp(job_data.get("createdAt", 0)),
+    }
+
+    # Create or update the AirbyteJob entry
+    airbyte_job, is_created = AirbyteJob.objects.update_or_create(
+        job_id=job_fields["job_id"],
+        defaults=job_fields,
+    )
+
+    if not is_created:
+        logger.error("Failed to create or update AirbyteJob for job_id=%s", job_id)
+        raise Exception(f"Failed to create or update AirbyteJob for job_id={job_id}")
+
+    return model_to_dict(airbyte_job)
