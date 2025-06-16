@@ -26,7 +26,8 @@ src_api = NinjaAPI(
     title="Dalgo backend apis",
     description="Open source ELT orchestrator",
     docs_url="/api/docs",
-    auth=auth.CustomAuthMiddleware(),
+    # auth=auth.CustomAuthMiddleware(),
+    auth=auth.CustomJwtAuthMiddleware(),
 )
 
 
