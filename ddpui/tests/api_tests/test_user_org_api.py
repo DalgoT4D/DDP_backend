@@ -27,7 +27,6 @@ from ddpui.api.user_org_api import (
     get_organizations_warehouses,
     post_organization_user_invite,
     post_organization_user_invite_v1,
-    post_organization_user_accept_invite,
     post_organization_user_accept_invite_v1,
     post_forgot_password,
     post_reset_password,
@@ -1077,15 +1076,6 @@ def test_post_organization_user_invite_v1_user_exists(mock_sendgrid, orguser: Or
 
 
 # ================================================================================
-def test_post_organization_user_accept_invite_fail(orguser):
-    """failing test, invalid invite code"""
-    request = mock_request(orguser)
-    payload = AcceptInvitationSchema(invite_code="invalid-invite_code", password="password")
-
-    with pytest.raises(HttpError) as excinfo:
-        post_organization_user_accept_invite(request, payload)
-
-    assert str(excinfo.value) == "invalid invite code"
 
 
 def test_post_organization_user_accept_invite_v1_fail(orguser):
@@ -1097,35 +1087,6 @@ def test_post_organization_user_accept_invite_v1_fail(orguser):
         post_organization_user_accept_invite_v1(request, payload)
 
     assert str(excinfo.value) == "invalid invite code"
-
-
-def test_post_organization_user_accept_invite(orguser):
-    """success test, accepting an invitation"""
-    request = mock_request(orguser)
-    payload = AcceptInvitationSchema(invite_code="invite_code", password="password")
-
-    Invitation.objects.create(
-        invited_email="invited_email",
-        invited_by=orguser,
-        invited_on=timezone.as_ist(datetime.now()),
-        invite_code="invite_code",
-    )
-
-    assert (
-        OrgUser.objects.filter(
-            user__email="invited_email",
-        ).count()
-        == 0
-    )
-    response = post_organization_user_accept_invite(request, payload)
-    assert response.email == "invited_email"
-    assert (
-        OrgUser.objects.filter(
-            user__email="invited_email",
-        ).count()
-        == 1
-    )
-    assert UserAttributes.objects.filter(user__email="invited_email").exists()
 
 
 def test_post_organization_user_accept_invite_v1(orguser):
@@ -1154,34 +1115,6 @@ def test_post_organization_user_accept_invite_v1(orguser):
     assert UserAttributes.objects.filter(user__email="invited_email").exists()
 
 
-def test_post_organization_user_accept_invite_lowercase_email(orguser):
-    """success test, accepting an invitation"""
-    request = mock_request()
-    payload = AcceptInvitationSchema(invite_code="invite_code", password="password")
-
-    Invitation.objects.create(
-        invited_email="INVITED_EMAIL",
-        invited_by=orguser,
-        invited_on=timezone.as_ist(datetime.now()),
-        invite_code="invite_code",
-    )
-
-    assert (
-        OrgUser.objects.filter(
-            user__email__iexact="invited_email",
-        ).count()
-        == 0
-    )
-    response = post_organization_user_accept_invite(request, payload)
-    assert response.email == "invited_email"
-    assert (
-        OrgUser.objects.filter(
-            user__email="invited_email",
-        ).count()
-        == 1
-    )
-
-
 def test_post_organization_user_accept_invite_v1_lowercase_email(orguser):
     """success test, accepting an invitation"""
     request = mock_request()
@@ -1207,25 +1140,6 @@ def test_post_organization_user_accept_invite_v1_lowercase_email(orguser):
     assert OrgUser.objects.filter(user__email="invited_email", new_role=guest_role).count() == 1
 
 
-def test_post_organization_user_accept_invite_firstaccount_fail(orguser):
-    """failing test, invalid invite code"""
-    request = mock_request(orguser)
-    payload = AcceptInvitationSchema(
-        invite_code="invite_code",
-    )
-    Invitation.objects.create(
-        invited_email="invited_email",
-        invited_by=orguser,
-        invited_on=timezone.as_ist(datetime.now()),
-        invite_code="invite_code",
-    )
-
-    with pytest.raises(HttpError) as excinfo:
-        post_organization_user_accept_invite(request, payload)
-
-    assert str(excinfo.value) == "password is required"
-
-
 def test_post_organization_user_accept_invite_v1_firstaccount_fail(orguser):
     """failing test, invalid invite code"""
     request = mock_request(orguser)
@@ -1245,48 +1159,6 @@ def test_post_organization_user_accept_invite_v1_firstaccount_fail(orguser):
         post_organization_user_accept_invite_v1(request, payload)
 
     assert str(excinfo.value) == "password is required"
-
-
-def test_post_organization_user_accept_invite_secondaccount(orguser):
-    """success test, accepting an invitation"""
-    request = mock_request(orguser)
-    payload = AcceptInvitationSchema(invite_code="invite_code")
-
-    Invitation.objects.create(
-        invited_email="invited_email",
-        invited_by=orguser,
-        invited_on=timezone.as_ist(datetime.now()),
-        invite_code="invite_code",
-    )
-
-    authuser = User.objects.create_user(
-        username="invited_email", email="invited_email", password="oldpassword"
-    )
-    assert User.objects.filter(email="invited_email").count() == 1
-    anotherorg = Org.objects.create(name="anotherorg", slug="anotherorg")
-    OrgUser.objects.create(user=authuser, org=anotherorg)
-
-    assert (
-        OrgUser.objects.filter(
-            user__email="invited_email",
-        ).count()
-        == 1
-    )
-    response = post_organization_user_accept_invite(request, payload)
-    assert response.email == "invited_email"
-    assert (
-        OrgUser.objects.filter(
-            user__email="invited_email",
-        ).count()
-        == 2
-    )
-    assert (
-        OrgUser.objects.filter(user__email="invited_email", org__slug=orguser.org.slug).count() == 1
-    )
-    assert (
-        OrgUser.objects.filter(user__email="invited_email", org__slug=anotherorg.slug).count() == 1
-    )
-    assert User.objects.filter(email="invited_email").count() == 1
 
 
 def test_post_organization_user_accept_invite_v1_secondaccount(orguser):

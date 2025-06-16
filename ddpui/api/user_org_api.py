@@ -394,6 +394,7 @@ def get_organizations_warehouses(request):
 
 @user_org_router.post(
     "/users/forgot_password/",
+    auth=None,
 )
 def post_forgot_password(request, payload: ForgotPasswordSchema):  # pylint: disable=unused-argument
     """step 1 of the forgot-password flow"""
@@ -403,7 +404,7 @@ def post_forgot_password(request, payload: ForgotPasswordSchema):  # pylint: dis
     return {"success": 1}
 
 
-@user_org_router.post("/users/reset_password/")
+@user_org_router.post("/users/reset_password/", auth=None)
 def post_reset_password(request, payload: ResetPasswordSchema):  # pylint: disable=unused-argument
     """step 2 of the forgot-password flow"""
     _, error = orguserfunctions.confirm_reset_password(payload)
@@ -432,7 +433,7 @@ def get_verify_email_resend(request):  # pylint: disable=unused-argument
     return {"success": 1}
 
 
-@user_org_router.post("/users/verify_email/")
+@user_org_router.post("/users/verify_email/", auth=None)
 def post_verify_email(request, payload: VerifyEmailSchema):  # pylint: disable=unused-argument
     """step 2 of the verify-email flow"""
     _, error = orguserfunctions.verify_email(payload)
@@ -472,24 +473,7 @@ def post_organization_user_invite_v1(request, payload: NewInvitationSchema):
     return retval
 
 
-@user_org_router.post(
-    "/organizations/users/invite/accept/",
-    response=OrgUserResponse,
-)
-def post_organization_user_accept_invite(
-    request, payload: AcceptInvitationSchema
-):  # pylint: disable=unused-argument
-    """User accepting the invite sent with a valid invite code"""
-    retval, error = orguserfunctions.accept_invitation(payload)
-    if error:
-        raise HttpError(400, error)
-    return retval
-
-
-@user_org_router.post(
-    "/v1/organizations/users/invite/accept/",
-    response=OrgUserResponse,
-)
+@user_org_router.post("/v1/organizations/users/invite/accept/", response=OrgUserResponse, auth=None)
 def post_organization_user_accept_invite_v1(
     request, payload: AcceptInvitationSchema
 ):  # pylint: disable=unused-argument
