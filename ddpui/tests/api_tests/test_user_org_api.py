@@ -27,7 +27,6 @@ from ddpui.api.user_org_api import (
     get_organizations_warehouses,
     post_organization_user_invite,
     post_organization_user_invite_v1,
-    post_organization_user_accept_invite,
     post_organization_user_accept_invite_v1,
     post_forgot_password,
     post_reset_password,
