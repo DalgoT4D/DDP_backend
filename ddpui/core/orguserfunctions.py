@@ -416,46 +416,6 @@ def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema):
     return payload, None
 
 
-def accept_invitation(payload: AcceptInvitationSchema):
-    """accept an invitation"""
-    invitation = Invitation.objects.filter(invite_code=payload.invite_code).first()
-    if invitation is None:
-        return None, "invalid invite code"
-
-    # we can have one auth user mapped to multiple orguser and hence multiple orgs
-    # but there can only be one orguser per one org
-    orguser = OrgUser.objects.filter(
-        user__email__iexact=invitation.invited_email, org=invitation.invited_by.org
-    ).first()
-
-    if not orguser:
-        user = User.objects.filter(
-            username=invitation.invited_email,
-            email=invitation.invited_email,
-        ).first()
-        if user is None:
-            if payload.password is None:
-                return None, "password is required"
-            logger.info(
-                f"creating invited user {invitation.invited_email} "
-                f"for {invitation.invited_by.org.name}"
-            )
-            user = User.objects.create_user(
-                username=invitation.invited_email.lower().strip(),
-                email=invitation.invited_email.lower().strip(),
-                password=payload.password,
-            )
-            UserAttributes.objects.create(user=user, email_verified=True)
-        orguser = OrgUser.objects.create(
-            user=user,
-            org=invitation.invited_by.org,
-            role=invitation.invited_role,
-            new_role=invitation.invited_new_role,
-        )
-    invitation.delete()
-    return from_orguser(orguser), None
-
-
 def accept_invitation_v1(payload: AcceptInvitationSchema):
     """accept an invitation"""
     invitation = Invitation.objects.filter(invite_code=payload.invite_code).first()
