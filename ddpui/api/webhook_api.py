@@ -8,7 +8,7 @@ from ddpui.utils.webhook_helpers import (
     get_flowrun_id_and_state,
     FLOW_RUN,
 )
-from ddpui.celeryworkers.tasks import handle_prefect_webhook
+from ddpui.celeryworkers.tasks import handle_prefect_webhook, fetch_airbyte_job_details
 
 webhook_router = Router()
 logger = CustomLogger("ddpui")
@@ -66,3 +66,14 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
 # 5. requests.patch(f'http://localhost:4200/api/flow_run_notification_policies/{frnp}', json={
 #      'message_template': 'Flow run {flow_run_name} with id {flow_run_id} entered state {flow_run_state_name}'
 #    })
+
+
+@webhook_router.post("/v1/airbyte_job/{job_id}", auth=None)
+def post_airbyte_job_details(request, job_id: str):
+    """webhook endpoint for Airbyte job details"""
+    if request.headers.get("X-Airbyte-Job-Key") != os.getenv("AIRBYTE_JOB_WEBHOOK_KEY"):
+        raise HttpError(400, "unauthorized")
+
+    fetch_airbyte_job_details.delay(job_id)
+
+    return {"status": "ok"}
