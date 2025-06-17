@@ -10,7 +10,6 @@ import pytz
 import yaml
 from celery.schedules import crontab
 from django.utils.text import slugify
-from django.forms.models import model_to_dict
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.celery import app, Celery
 
@@ -42,7 +41,6 @@ from ddpui.models.tasks import (
     TaskProgressHashPrefix,
     TaskProgressStatus,
 )
-from ddpui.models.airbyte import AirbyteJob
 from ddpui.models.canvaslock import CanvasLock
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.models.llm import (
@@ -1075,53 +1073,13 @@ def check_for_long_running_flow_runs():
 def sync_single_airbyte_job_stats(self, job_id: int):
     """Syncs a single Airbyte job stats"""
     logger.info("Syncing details from airbyte for job %s", job_id)
-    airbyte_service.fetch_and_update_airbyte_job_details(job_id)
+    airbytehelpers.fetch_and_update_airbyte_job_details(job_id)
 
 
 @app.task(bind=True)
 def sync_airbyte_job_stats_for_all_connections(self, last_n_days: int = 7):
-    # figure out start datetime and end datetime based on now & last_n_days
-    start_time = datetime.now(pytz.utc) - timedelta(days=last_n_days)
-    end_time = datetime.now(pytz.utc)
-
-    for connection_id in (
-        OrgTask.objects.filter(connection_id__isnull=False)
-        .values_list("connection_id", flat=True)
-        .distinct()
-    ):
-        try:
-            logger.info("Syncing job history for connection %s", connection_id)
-
-            offset = 0
-            limit = 20
-            curr_itr_count = 20
-            while curr_itr_count >= limit:
-                # by default the jobs are ordered by createdAt
-                jobs = airbyte_service.get_jobs_for_connection(
-                    connection_id,
-                    limit=limit,
-                    offset=offset,
-                    job_types=["sync", "reset_connection", "clear", "refresh"],
-                    created_at_start=start_time,
-                    created_at_end=end_time,
-                )
-                for job in jobs:
-                    if len(job["jobs"]) == 0:
-                        logger.info("No jobs found for connection %s", connection_id)
-                        break
-
-                    latest_job = job["jobs"][0]
-                    airbyte_service.fetch_and_update_airbyte_job_details(latest_job.get("id"))
-
-                offset += limit
-                curr_itr_count = jobs["totalJobCount"]
-
-        except Exception as e:
-            logger.error(
-                "Failed to sync job history for connection %s: %s",
-                connection_id,
-                str(e),
-            )
+    """Syncs Airbyte job stats for all connections in the orgs"""
+    airbytehelpers.fetch_and_update_airbyte_jobs_for_all_connections(last_n_days)
 
 
 @app.task()
@@ -1182,6 +1140,6 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
     # sync airbyte job stats for connections; every 24 hours
     sender.add_periodic_task(
         crontab(minute=0, hour=0),
-        sync_airbyte_job_stats_for_connections.s(),
+        sync_airbyte_job_stats_for_all_connections.s(last_n_days=2),
         name="sync airbyte job stats for all connections",
     )

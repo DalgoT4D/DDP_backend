@@ -72,7 +72,7 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
 @webhook_router.post("/v1/airbyte_job/{job_id}", auth=None)
 def post_airbyte_job_details(request, job_id: str):
     """webhook endpoint for Airbyte job details"""
-    if request.headers.get("X-Airbyte-Job-Key") != os.getenv("AIRBYTE_JOB_WEBHOOK_KEY"):
+    if request.headers.get("X-Notification-Key") != os.getenv("AIRBYTE_NOTIFICATIONS_WEBHOOK_KEY"):
         raise HttpError(400, "unauthorized")
 
     sync_single_airbyte_job_stats.delay(job_id)

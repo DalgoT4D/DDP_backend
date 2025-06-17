@@ -8,7 +8,8 @@ import os
 from typing import List
 from uuid import uuid4
 from pathlib import Path
-from datetime import datetime
+import pytz
+from datetime import datetime, timedelta
 import yaml
 from ninja.errors import HttpError
 from django.utils.text import slugify
@@ -54,10 +55,7 @@ from ddpui.utils.constants import (
     TASK_AIRBYTESYNC,
     TASK_AIRBYTECLEAR,
 )
-from ddpui.utils.helpers import (
-    generate_hash_id,
-    update_dict_but_not_stars,
-)
+from ddpui.utils.helpers import generate_hash_id, update_dict_but_not_stars, from_timestamp
 from ddpui.utils import secretsmanager
 from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
 from ddpui.core.pipelinefunctions import (
@@ -66,6 +64,7 @@ from ddpui.core.pipelinefunctions import (
 )
 from ddpui.core.orgtaskfunctions import fetch_orgtask_lock_v1
 from ddpui.models.tasks import TaskLock
+from ddpui.models.airbyte import AirbyteJob
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.ddpdbt.elementary_service import create_elementary_profile, elementary_setup_status
 
@@ -1206,3 +1205,126 @@ def schedule_update_connection_schema(
         raise HttpError(400, "failed to start the schema update flow run") from error
 
     return res
+
+
+def fetch_and_update_airbyte_job_details(job_id: int):
+    """Fetches the details of an Airbyte job and populates in our db."""
+    job_info = airbyte_service.get_job_info_without_logs(job_id)
+
+    job_data: dict = job_info.get("job", {})
+    attempts_data: list[dict] = job_info.get("attempts", [])
+    if not attempts_data:
+        logger.info(f"No attempts found for job_id={job_id}")
+        raise Exception(f"No attempts found for job_id={job_id}")
+
+    # attempt with the highest id is the latest attempt
+    attempts = list(map(lambda x: x["attempt"], attempts_data))
+    latest_attempt: dict = max(attempts, key=lambda x: x["id"], default=None)
+
+    if not latest_attempt:
+        logger.error("No attempts found for job_id=%s", job_id)
+        raise Exception(f"No attempts found for job_id={job_id}")
+
+    # for started_at ; take the minimum of the startedAt of all attempts
+    started_at = min(
+        attempt.get("createdAt") for attempt in attempts if attempt.get("createdAt") is not None
+    )
+
+    if not started_at:
+        logger.error("No startedAt found for job_id=%s", job_id)
+        raise Exception(f"No startedAt found for job_id={job_id}")
+
+    # Prepare fields for AirbyteJob
+    job_fields = {
+        "job_id": job_data.get("id"),
+        "job_type": job_data.get("configType"),
+        "config_id": job_data.get("configId"),
+        "status": job_data.get("status"),
+        "reset_config": job_data.get("resetConfig"),
+        "refresh_config": job_data.get("refreshConfig"),
+        "stream_stats": job_data.get("streamAggregatedStats"),
+        "records_emitted": job_data.get("aggregatedStats", {}).get("recordsEmitted", 0),
+        "bytes_emitted": job_data.get("aggregatedStats", {}).get("bytesEmitted", 0),
+        "records_committed": job_data.get("aggregatedStats", {}).get("recordsCommitted", 0),
+        "bytes_committed": job_data.get("aggregatedStats", {}).get("bytesCommitted", 0),
+        "started_at": from_timestamp(started_at),
+        "ended_at": from_timestamp(latest_attempt.get("endedAt")),
+        "created_at": from_timestamp(job_data.get("createdAt")),
+        "attempts": attempts_data,
+    }
+
+    # Create or update the AirbyteJob entry
+    airbyte_job, is_created = AirbyteJob.objects.update_or_create(
+        job_id=job_fields["job_id"],
+        defaults=job_fields,
+    )
+
+    if is_created:
+        logger.info(f"Created new AirbyteJob with job_id={job_id}")
+
+    return model_to_dict(airbyte_job)
+
+
+def fetch_and_update_airbyte_jobs_for_all_connections(
+    last_n_days, connection_id: str = None, org: Org = None
+):
+    """
+    Fetches and updates Airbyte job details for all connections in the given org
+    or for a specific connection if provided.
+    Args:
+        last_n_days (int): Number of days to look back for jobs.
+        connection_id (str, optional): Specific connection ID to filter jobs.
+        org (Org, optional): Organization object to filter jobs.
+    Raises:
+        ValueError: If last_n_days is not a positive integer.
+    """
+
+    if not last_n_days or isinstance(last_n_days, int) or last_n_days <= 0:
+        raise ValueError("last_n_days must be a positive integer")
+
+    # figure out start datetime and end datetime based on now & last_n_days
+    start_time = datetime.now(pytz.utc) - timedelta(days=last_n_days)
+    end_time = datetime.now(pytz.utc)
+
+    org_tasks = OrgTask.objects.filter(connection_id__isnull=False)
+
+    if org:
+        org_tasks = org_tasks.filter(org=org)
+
+    if connection_id:
+        org_tasks = org_tasks.filter(connection_id=connection_id)
+
+    for connection_id in org_tasks.values_list("connection_id", flat=True).distinct():
+        try:
+            logger.info("Syncing job history for connection %s", connection_id)
+
+            offset = 0
+            limit = 20
+            curr_itr_count = 20
+            while curr_itr_count >= limit:
+                # by default the jobs are ordered by createdAt
+                jobs = airbyte_service.get_jobs_for_connection(
+                    connection_id,
+                    limit=limit,
+                    offset=offset,
+                    job_types=["sync", "reset_connection", "clear", "refresh"],
+                    created_at_start=start_time,
+                    created_at_end=end_time,
+                )
+                for job in jobs:
+                    if len(job["jobs"]) == 0:
+                        logger.info("No jobs found for connection %s", connection_id)
+                        break
+
+                    latest_job = job["jobs"][0]
+                    fetch_and_update_airbyte_job_details(latest_job.get("id"))
+
+                offset += limit
+                curr_itr_count = jobs["totalJobCount"]
+
+        except Exception as e:
+            logger.error(
+                "Failed to sync job history for connection %s: %s",
+                connection_id,
+                str(e),
+            )

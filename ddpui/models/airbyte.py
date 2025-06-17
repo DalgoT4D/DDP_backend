@@ -64,8 +64,9 @@ class AirbyteJob(models.Model):
     )  # contains information about the attempts made for this job. only populated if the job has attempts.
 
     started_at = models.DateTimeField(null=True)  # because the api spec says this will be optional
-    ended_at = models.DateTimeField()
-    created_at = models.DateTimeField()
+    ended_at = models.DateTimeField()  # when the job ended
+    created_at = models.DateTimeField()  # when the job was created in airbyte
+    updated_at = models.DateTimeField(auto_now=True)  # when the django record was last updated
 
     def __str__(self) -> str:
         return f"AirbyteJob[Job ID: {self.job_id}|Job Type: {self.job_type}|Status: {self.status}]"
