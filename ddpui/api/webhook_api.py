@@ -8,7 +8,8 @@ from ddpui.utils.webhook_helpers import (
     get_flowrun_id_and_state,
     FLOW_RUN,
 )
-from ddpui.celeryworkers.tasks import handle_prefect_webhook, fetch_airbyte_job_details
+from ddpui.celeryworkers.tasks import handle_prefect_webhook, sync_single_airbyte_job_stats
+from ddpui.ddpairbyte import airbyte_service
 
 webhook_router = Router()
 logger = CustomLogger("ddpui")
@@ -74,6 +75,6 @@ def post_airbyte_job_details(request, job_id: str):
     if request.headers.get("X-Airbyte-Job-Key") != os.getenv("AIRBYTE_JOB_WEBHOOK_KEY"):
         raise HttpError(400, "unauthorized")
 
-    fetch_airbyte_job_details.delay(job_id)
+    sync_single_airbyte_job_stats.delay(job_id)
 
     return {"status": "ok"}

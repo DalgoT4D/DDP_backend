@@ -1072,13 +1072,23 @@ def check_for_long_running_flow_runs():
 
 
 @app.task(bind=True)
-def sync_airbyte_job_stats_for_connections(self, last_n_days: int = 7):
+def sync_single_airbyte_job_stats(self, job_id: int):
+    """Syncs a single Airbyte job stats"""
+    logger.info("Syncing details from airbyte for job %s", job_id)
+    airbyte_service.fetch_and_update_airbyte_job_details(job_id)
+
+
+@app.task(bind=True)
+def sync_airbyte_job_stats_for_all_connections(self, last_n_days: int = 7):
     # figure out start datetime and end datetime based on now & last_n_days
     start_time = datetime.now(pytz.utc) - timedelta(days=last_n_days)
     end_time = datetime.now(pytz.utc)
 
-    for org_task in OrgTask.objects.filter(connection_id__isnull=False):
-        connection_id = org_task.connection_id
+    for connection_id in (
+        OrgTask.objects.filter(connection_id__isnull=False)
+        .values_list("connection_id", flat=True)
+        .distinct()
+    ):
         try:
             logger.info("Syncing job history for connection %s", connection_id)
 
@@ -1109,7 +1119,7 @@ def sync_airbyte_job_stats_for_connections(self, last_n_days: int = 7):
         except Exception as e:
             logger.error(
                 "Failed to sync job history for connection %s: %s",
-                org_task.connection_id,
+                connection_id,
                 str(e),
             )
 

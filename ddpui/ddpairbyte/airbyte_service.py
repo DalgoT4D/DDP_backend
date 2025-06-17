@@ -1095,19 +1095,32 @@ def cancel_connection_job(
     return {"cancelled": cancelled}
 
 
-def fetch_and_update_airbyte_job_details(job_id: str):
+def fetch_and_update_airbyte_job_details(job_id: int):
     """Fetches the details of an Airbyte job and populates in our db."""
     job_info = get_job_info_without_logs(job_id)
-    jobs = job_info.get("jobs", [])
-    if not jobs:
-        logger.error(f"No jobs found for job_id={job_id}")
-        return None
 
-    job_data: dict = jobs[0].get("job", {})
-    attempts: list[dict] = jobs[0].get("attempts", [])
-    if not attempts:
+    job_data: dict = job_info.get("job", {})
+    attempts_data: list[dict] = job_info.get("attempts", [])
+    if not attempts_data:
         logger.info(f"No attempts found for job_id={job_id}")
         raise Exception(f"No attempts found for job_id={job_id}")
+
+    # attempt with the highest id is the latest attempt
+    attempts = list(map(lambda x: x["attempt"], attempts_data))
+    latest_attempt = max(attempts, key=lambda x: x["id"], default=None)
+
+    if not latest_attempt:
+        logger.error("No attempts found for job_id=%s", job_id)
+        raise Exception(f"No attempts found for job_id={job_id}")
+
+    # for started_at ; take the minimum of the startedAt of all attempts
+    started_at = min(
+        attempt.get("createdAt") for attempt in attempts if attempt.get("createdAt") is not None
+    )
+
+    if not started_at:
+        logger.error("No startedAt found for job_id=%s", job_id)
+        raise Exception(f"No startedAt found for job_id={job_id}")
 
     # Prepare fields for AirbyteJob
     job_fields = {
@@ -1122,9 +1135,10 @@ def fetch_and_update_airbyte_job_details(job_id: str):
         "bytes_emitted": job_data.get("aggregatedStats", {}).get("bytesEmitted", 0),
         "records_committed": job_data.get("aggregatedStats", {}).get("recordsCommitted", 0),
         "bytes_committed": job_data.get("aggregatedStats", {}).get("bytesCommitted", 0),
-        "started_at": from_timestamp(job_data.get("startedAt", 0)),
-        "ended_at": from_timestamp(job_data.get("endedAt", 0)),
-        "created_at": from_timestamp(job_data.get("createdAt", 0)),
+        "started_at": from_timestamp(started_at),
+        "ended_at": from_timestamp(latest_attempt.get("endedAt")),
+        "created_at": from_timestamp(job_data.get("createdAt")),
+        "attempts": attempts_data,
     }
 
     # Create or update the AirbyteJob entry

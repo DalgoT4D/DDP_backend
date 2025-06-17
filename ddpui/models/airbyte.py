@@ -59,6 +59,10 @@ class AirbyteJob(models.Model):
     records_committed = models.BigIntegerField(default=0)
     bytes_committed = models.BigIntegerField(default=0)
 
+    attempts = models.JSONField(
+        null=True
+    )  # contains information about the attempts made for this job. only populated if the job has attempts.
+
     started_at = models.DateTimeField(null=True)  # because the api spec says this will be optional
     ended_at = models.DateTimeField()
     created_at = models.DateTimeField()
@@ -68,6 +72,14 @@ class AirbyteJob(models.Model):
 
     @property
     def duration(self):
+        """Returns duration in seconds between created_at and ended_at, or None if either is missing."""
+        if self.created_at and self.ended_at:
+            delta = self.ended_at - self.created_at
+            return int(delta.total_seconds())
+        return None
+
+    @property
+    def attempt_duration(self):
         """Returns duration in seconds between started_at and ended_at, or None if either is missing."""
         if self.started_at and self.ended_at:
             delta = self.ended_at - self.started_at
