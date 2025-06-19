@@ -1227,7 +1227,8 @@ def fetch_and_update_airbyte_job_details(job_id: str):
 
     # for started_at ; take the minimum of the startedAt of all attempts
     started_at = min(
-        attempt.get("createdAt") for attempt in attempts if attempt.get("createdAt") is not None
+        [attempt.get("createdAt") for attempt in attempts if attempt.get("createdAt") is not None],
+        default=None,
     )
 
     if not started_at:

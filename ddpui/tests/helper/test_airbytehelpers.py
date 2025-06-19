@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import yaml
 import pytest
+from datetime import datetime
 from ddpui.ddpairbyte.airbytehelpers import (
     add_custom_airbyte_connector,
     upgrade_custom_sources,
@@ -16,6 +17,7 @@ from ddpui.ddpairbyte.airbytehelpers import (
     get_sync_job_history_for_connection,
     create_or_update_org_cli_block,
     schedule_update_connection_schema,
+    fetch_and_update_airbyte_job_details,
 )
 from ddpui.ddpairbyte.schema import (
     AirbyteDestinationUpdate,
@@ -32,6 +34,7 @@ from ddpui.models.org import (
 )
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.models.org_user import OrgUser, OrgUserRole, User
+from ddpui.models.airbyte import AirbyteJob
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.models.tasks import Task, OrgTask, OrgDataFlowv1, DataflowOrgTask
 from ddpui.ddpprefect import DBTCLIPROFILE, schema, DBTCORE
@@ -1208,3 +1211,165 @@ def test_schedule_update_connection_schema_success(
     ).first()
     assert prefect_flow_run is not None
     assert prefect_flow_run.orguser == orguser
+
+
+@patch(
+    "ddpui.ddpairbyte.airbyte_service.get_job_info_without_logs",
+    mock_get_job_info_without_logs=Mock(),
+)
+def test_fetch_and_update_airbyte_job_details_creates_job(mock_get_job_info_without_logs):
+    # Setup mock job info
+    job_id = "123"
+    job_info = {
+        "job": {
+            "id": job_id,
+            "configType": "sync",
+            "configId": "conn-1",
+            "status": "succeeded",
+            "resetConfig": None,
+            "refreshConfig": None,
+            "streamAggregatedStats": {},
+            "aggregatedStats": {
+                "recordsEmitted": 100,
+                "bytesEmitted": 2048,
+                "recordsCommitted": 100,
+                "bytesCommitted": 2048,
+            },
+            "createdAt": 1700000000,
+        },
+        "attempts": [
+            {"attempt": {"id": 1, "createdAt": 1700000000, "endedAt": 1700001000}},
+            {"attempt": {"id": 2, "createdAt": 1700000500, "endedAt": 1700002000}},
+        ],
+    }
+    mock_get_job_info_without_logs.return_value = job_info
+
+    # Patch from_timestamp to just return the int for simplicity
+    result = fetch_and_update_airbyte_job_details(job_id)
+
+    # Check AirbyteJob is created
+    job = AirbyteJob.objects.get(job_id=job_id)
+    assert job.job_type == job_info["job"]["configType"]
+    assert job.status == job_info["job"]["status"]
+    assert job.records_emitted == job_info["job"]["aggregatedStats"]["recordsEmitted"]
+    assert job.bytes_emitted == job_info["job"]["aggregatedStats"]["bytesEmitted"]
+    assert result["job_id"] == job_id
+
+
+@patch(
+    "ddpui.ddpairbyte.airbyte_service.get_job_info_without_logs",
+    mock_get_job_info_without_logs=Mock(),
+)
+def test_fetch_and_update_airbyte_job_details_updates_existing_job(mock_get_job_info_without_logs):
+    # Create initial job
+    job_id = "456"
+    AirbyteJob.objects.create(
+        job_id=job_id,
+        job_type="sync",
+        config_id="conn-2",
+        status="running",
+        reset_config=None,
+        refresh_config=None,
+        stream_stats={},
+        records_emitted=10,
+        bytes_emitted=100,
+        records_committed=10,
+        bytes_committed=100,
+        started_at=datetime.now(),
+        ended_at=datetime.now(),
+        created_at=datetime.now(),
+        attempts=[],
+    )
+
+    # Setup mock job info with updated values
+    job_info = {
+        "job": {
+            "id": job_id,
+            "configType": "sync",
+            "configId": "conn-2",
+            "status": "failed",
+            "resetConfig": None,
+            "refreshConfig": None,
+            "streamAggregatedStats": {},
+            "aggregatedStats": {
+                "recordsEmitted": 20,
+                "bytesEmitted": 200,
+                "recordsCommitted": 20,
+                "bytesCommitted": 200,
+            },
+            "createdAt": datetime.now(),
+        },
+        "attempts": [
+            {
+                "attempt": {
+                    "id": 1,
+                    "createdAt": str(datetime.now()),
+                    "endedAt": str(datetime.now()),
+                }
+            },
+        ],
+    }
+    mock_get_job_info_without_logs.return_value = job_info
+
+    with patch("ddpui.ddpairbyte.airbytehelpers.from_timestamp", side_effect=lambda x: x):
+        result = fetch_and_update_airbyte_job_details(job_id)
+
+    job = AirbyteJob.objects.get(job_id=job_id)
+    assert job.status == job_info["job"]["status"]
+    assert job.records_emitted == job_info["job"]["aggregatedStats"]["recordsEmitted"]
+    assert job.bytes_emitted == job_info["job"]["aggregatedStats"]["bytesEmitted"]
+    assert result["job_id"] == job_id
+
+
+@patch(
+    "ddpui.ddpairbyte.airbyte_service.get_job_info_without_logs",
+    mock_get_job_info_without_logs=Mock(),
+)
+def test_fetch_and_update_airbyte_job_details_no_attempts_raises(mock_get_job_info_without_logs):
+    job_id = "789"
+    job_info = {
+        "job": {
+            "id": job_id,
+            "configType": "sync",
+            "configId": "conn-3",
+            "status": "succeeded",
+            "resetConfig": None,
+            "refreshConfig": None,
+            "streamAggregatedStats": {},
+            "aggregatedStats": {},
+            "createdAt": 1700000000,
+        },
+        "attempts": [],
+    }
+    mock_get_job_info_without_logs.return_value = job_info
+
+    with pytest.raises(Exception, match="No attempts found for job_id=789"):
+        fetch_and_update_airbyte_job_details(job_id)
+
+
+@patch(
+    "ddpui.ddpairbyte.airbyte_service.get_job_info_without_logs",
+    mock_get_job_info_without_logs=Mock(),
+)
+def test_fetch_and_update_airbyte_job_details_no_started_at_raises(mock_get_job_info_without_logs):
+    job_id = "999"
+    job_info = {
+        "job": {
+            "id": job_id,
+            "configType": "sync",
+            "configId": "conn-4",
+            "status": "succeeded",
+            "resetConfig": None,
+            "refreshConfig": None,
+            "streamAggregatedStats": {},
+            "aggregatedStats": {},
+            "createdAt": 1700000000,
+        },
+        "attempts": [
+            {"attempt": {"id": 1, "createdAt": None, "endedAt": 1700001000}},
+        ],
+    }
+    mock_get_job_info_without_logs.return_value = job_info
+
+    with pytest.raises(Exception, match="No startedAt found for job_id=999"):
+        fetch_and_update_airbyte_job_details(job_id)
