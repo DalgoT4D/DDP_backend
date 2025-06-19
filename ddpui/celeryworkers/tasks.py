@@ -1090,7 +1090,7 @@ def sync_airbyte_job_stats_for_all_connections(
             raise Exception(f"Org with id {org_id} not found")
 
     airbytehelpers.fetch_and_update_airbyte_jobs_for_all_connections(
-        last_n_days, last_n_hours=last_n_hours, connection_id=connection_id, org=org
+        last_n_days=last_n_days, last_n_hours=last_n_hours, connection_id=connection_id, org=org
     )
 
 

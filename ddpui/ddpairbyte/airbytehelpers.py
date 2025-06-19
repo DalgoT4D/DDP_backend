@@ -1207,7 +1207,7 @@ def schedule_update_connection_schema(
     return res
 
 
-def fetch_and_update_airbyte_job_details(job_id: int):
+def fetch_and_update_airbyte_job_details(job_id: str):
     """Fetches the details of an Airbyte job and populates in our db."""
     job_info = airbyte_service.get_job_info_without_logs(job_id)
 
@@ -1266,7 +1266,7 @@ def fetch_and_update_airbyte_job_details(job_id: int):
 
 
 def fetch_and_update_airbyte_jobs_for_all_connections(
-    last_n_days, last_n_hours: int = 0, connection_id: str = None, org: Org = None
+    last_n_days: int = 0, last_n_hours: int = 0, connection_id: str = None, org: Org = None
 ):
     """
     Fetches and updates Airbyte job details for all connections in the given org
@@ -1279,8 +1279,8 @@ def fetch_and_update_airbyte_jobs_for_all_connections(
         ValueError: If last_n_days is not a positive integer.
     """
 
-    if not last_n_days or isinstance(last_n_days, int) or last_n_days <= 0:
-        raise ValueError("last_n_days must be a positive integer")
+    if not isinstance(last_n_days, int) or last_n_days < 0:
+        raise ValueError("last_n_days must be a non-negative integer")
 
     # figure out start datetime and end datetime based on now & last_n_days
     start_time = datetime.now(pytz.utc) - timedelta(days=last_n_days, hours=last_n_hours)
@@ -1303,7 +1303,7 @@ def fetch_and_update_airbyte_jobs_for_all_connections(
             curr_itr_count = 20
             while curr_itr_count >= limit:
                 # by default the jobs are ordered by createdAt
-                jobs = airbyte_service.get_jobs_for_connection(
+                jobs_dict = airbyte_service.get_jobs_for_connection(
                     connection_id,
                     limit=limit,
                     offset=offset,
@@ -1311,16 +1311,16 @@ def fetch_and_update_airbyte_jobs_for_all_connections(
                     created_at_start=start_time,
                     created_at_end=end_time,
                 )
-                for job in jobs:
-                    if len(job["jobs"]) == 0:
-                        logger.info("No jobs found for connection %s", connection_id)
-                        break
+                if len(jobs_dict.get("jobs", [])) == 0:
+                    logger.info("No jobs found for connection %s", connection_id)
+                    break
 
-                    latest_job = job["jobs"][0]
-                    fetch_and_update_airbyte_job_details(latest_job.get("id"))
+                for job in jobs_dict.get("jobs", []):
+                    curr_job = job.get("job", {})
+                    fetch_and_update_airbyte_job_details(str(curr_job.get("id")))
 
                 offset += limit
-                curr_itr_count = jobs["totalJobCount"]
+                curr_itr_count = jobs_dict.get("totalJobCount", 0)
 
         except Exception as e:
             logger.error(

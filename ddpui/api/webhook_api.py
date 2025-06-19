@@ -9,7 +9,6 @@ from ddpui.utils.webhook_helpers import (
     FLOW_RUN,
 )
 from ddpui.celeryworkers.tasks import handle_prefect_webhook, sync_single_airbyte_job_stats
-from ddpui.ddpairbyte import airbyte_service
 
 webhook_router = Router()
 logger = CustomLogger("ddpui")
