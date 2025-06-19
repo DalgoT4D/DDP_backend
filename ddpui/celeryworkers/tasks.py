@@ -1077,9 +1077,21 @@ def sync_single_airbyte_job_stats(self, job_id: int):
 
 
 @app.task(bind=True)
-def sync_airbyte_job_stats_for_all_connections(self, last_n_days: int = 7):
+def sync_airbyte_job_stats_for_all_connections(
+    self, last_n_days: int = 7, last_n_hours: int = 0, connection_id: str = None, org_id: int = None
+):
     """Syncs Airbyte job stats for all connections in the orgs"""
-    airbytehelpers.fetch_and_update_airbyte_jobs_for_all_connections(last_n_days)
+
+    org = None
+    if org_id:
+        org = Org.objects.filter(id=org_id).first()
+        if not org:
+            logger.error("Org with id %s not found", org_id)
+            raise Exception(f"Org with id {org_id} not found")
+
+    airbytehelpers.fetch_and_update_airbyte_jobs_for_all_connections(
+        last_n_days, last_n_hours=last_n_hours, connection_id=connection_id, org=org
+    )
 
 
 @app.task()

@@ -1266,7 +1266,7 @@ def fetch_and_update_airbyte_job_details(job_id: int):
 
 
 def fetch_and_update_airbyte_jobs_for_all_connections(
-    last_n_days, connection_id: str = None, org: Org = None
+    last_n_days, last_n_hours: int = 0, connection_id: str = None, org: Org = None
 ):
     """
     Fetches and updates Airbyte job details for all connections in the given org
@@ -1283,7 +1283,7 @@ def fetch_and_update_airbyte_jobs_for_all_connections(
         raise ValueError("last_n_days must be a positive integer")
 
     # figure out start datetime and end datetime based on now & last_n_days
-    start_time = datetime.now(pytz.utc) - timedelta(days=last_n_days)
+    start_time = datetime.now(pytz.utc) - timedelta(days=last_n_days, hours=last_n_hours)
     end_time = datetime.now(pytz.utc)
 
     org_tasks = OrgTask.objects.filter(connection_id__isnull=False)

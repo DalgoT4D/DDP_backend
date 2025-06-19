@@ -33,8 +33,14 @@ from ddpui.core.notifications_service import (
     SentToEnum,
     NotificationDataSchema,
 )
-from ddpui.utils.constants import SYSTEM_USER_EMAIL
+from ddpui.utils.constants import (
+    SYSTEM_USER_EMAIL,
+    TASK_AIRBYTECLEAR,
+    TASK_AIRBYTERESET,
+    TASK_AIRBYTESYNC,
+)
 from ddpui.utils.discord import send_discord_notification
+from ddpui.celeryworkers.tasks import sync_airbyte_job_stats_for_all_connections
 
 logger = CustomLogger("ddpui")
 
@@ -387,6 +393,22 @@ def do_handle_prefect_webhook(flow_run_id: str, state: str):
         FLOW_RUN_CRASHED_STATE_NAME,
         FLOW_RUN_COMPLETED_STATE_NAME,
     ]:
+        # if the flow_run is an airbyte job, sync its history
+        for task in flow_run.get("parameters", {}).get("config", {}).get("tasks", []):
+            if task.get("slug", "") in [TASK_AIRBYTESYNC, TASK_AIRBYTERESET, TASK_AIRBYTECLEAR]:
+                connection_id = task.get("connection_id", None)
+                if connection_id:
+                    # sync all jobs in all 6 hours
+                    sync_airbyte_job_stats_for_all_connections.delay(
+                        0, last_n_hours=6, connection_id=connection_id
+                    )
+
+                    logger.info(
+                        "syncing airbyte job stats for connection %s in flow run %s",
+                        connection_id,
+                        flow_run_id,
+                    )
+
         org = get_org_from_flow_run(flow_run)
         if org:
             if (
