@@ -59,13 +59,14 @@ Click here to accept: invite_url
 
 def test_send_youve_been_added_email():
     """tests send_youve_been_added_email"""
-    with patch("ddpui.utils.awsses.send_text_message") as mock_send_text_message:
+    with patch("ddpui.utils.awsses.send_text_message") as mock_send_text_message, patch.dict(
+        os.environ, {"FRONTEND_URL": "https://test-frontend.com"}
+    ):
         send_youve_been_added_email("to_email", "added_by", "org_name")
-        url = os.getenv("FRONTEND_URL")
-        message = f"""Hello,
+        message = """Hello,
 
 You've been added to org_name by added_by.
 
-Open your dashboard at {url}
+Open your dashboard at https://test-frontend.com
     """
         mock_send_text_message.assert_called_once_with("to_email", "Added to Dalgo Org", message)
