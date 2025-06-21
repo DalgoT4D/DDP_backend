@@ -22,9 +22,9 @@ Please click this link to begin: reset_url.
 If you did not request a password reset you may safely ignore this email.
 
 """
-    mock_send_text_message.assert_called_once_with(
-        "to_email", "You've requested a password reset", message
-    )
+        mock_send_text_message.assert_called_once_with(
+            "to_email", "You've requested a password reset", message
+        )
 
 
 def test_send_signup_email():
@@ -38,7 +38,7 @@ Welcome to Dalgo! Please verify your email address by clicking the link below
 verification_url
 
     """
-    mock_send_text_message.assert_called_once_with("to_email", "Welcome to Dalgo", message)
+        mock_send_text_message.assert_called_once_with("to_email", "Welcome to Dalgo", message)
 
 
 def test_send_invite_user_email():
