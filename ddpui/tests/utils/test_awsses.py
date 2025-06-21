@@ -68,4 +68,4 @@ You've been added to org_name by added_by.
 
 Open your dashboard at {url}
     """
-        mock_send_text_message.assert_called_once_with("to_email", "Welcome to Dalgo", message)
+        mock_send_text_message.assert_called_once_with("to_email", "Added to Dalgo Org", message)
