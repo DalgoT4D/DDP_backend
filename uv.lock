@@ -967,7 +967,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/31/31/ec1943c95ea18eabfcf7d6c882e7265e245f749dc465101343028eac33b8/dbt_semantic_interfaces-0.5.1-py3-none-any.whl", hash = "sha256:b95ff3a6721dc30f6278cb84933d95e0ef27766e67eeb6bb41906242e77f7c9b", size = 119672 },
 ]
 
-
 [[package]]
 name = "ddp-backend"
 version = "0.1.0"
@@ -1197,7 +1196,6 @@ dependencies = [
     { name = "ruamel-yaml" },
     { name = "ruamel-yaml-clib" },
     { name = "s3transfer" },
-    { name = "sendgrid" },
     { name = "sentry-sdk" },
     { name = "sgqlc" },
     { name = "six" },
@@ -1464,7 +1462,6 @@ requires-dist = [
     { name = "ruamel-yaml", specifier = "==0.18.6" },
     { name = "ruamel-yaml-clib", specifier = "==0.2.8" },
     { name = "s3transfer", specifier = "==0.6.0" },
-    { name = "sendgrid", specifier = "==6.10.0" },
     { name = "sentry-sdk", specifier = "==2.10.0" },
     { name = "sgqlc", specifier = "==16.1" },
     { name = "six", specifier = "==1.16.0" },
@@ -3972,19 +3969,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e1/eb/e57c93d5cd5edf8c1d124c831ef916601540db70acd96fa21fe60cef1365/s3transfer-0.6.0.tar.gz", hash = "sha256:2ed07d3866f523cc561bf4a00fc5535827981b117dd7876f036b0c1aca42c947", size = 134871 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5e/c6/af903b5fab3f9b5b1e883f49a770066314c6dcceb589cf938d48c89556c1/s3transfer-0.6.0-py3-none-any.whl", hash = "sha256:06176b74f3a15f61f1b4f25a1fc29a4429040b7647133a463da8fa5bd28d5ecd", size = 79568 },
-]
-
-[[package]]
-name = "sendgrid"
-version = "6.10.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "python-http-client" },
-    { name = "starkbank-ecdsa" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/b7/29/586c9836bc1ea96f50df4368cf5197d25147ef349fd99d3ee10bb3aa7aab/sendgrid-6.10.0.tar.gz", hash = "sha256:9b15050c6f8826ee576f76a786efb15d956639f485478cbddd79ed69e8350ab8", size = 49763 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/22/36/a976cd9b0092e7d45830939e8f3ecbebecf283e753bc2b0173b9d857b071/sendgrid-6.10.0-py3-none-any.whl", hash = "sha256:522b30fc98306496208c5d8bdd5642cd6a2fd65cad487475f57f9098ce880604", size = 101232 },
 ]
 
 [[package]]

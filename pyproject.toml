@@ -229,7 +229,6 @@ dependencies = [
     "ruamel-yaml==0.18.6",
     "ruamel-yaml-clib==0.2.8",
     "s3transfer==0.6.0",
-    "sendgrid==6.10.0",
     "sentry-sdk==2.10.0",
     "sgqlc==16.1",
     "six==1.16.0",
