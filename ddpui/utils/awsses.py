@@ -29,6 +29,7 @@ def send_text_message(to_email, subject, message):
 def send_password_reset_email(to_email: str, reset_url: str) -> None:
     """send a password reset email"""
     message = f"""Hello,
+    
 We received a request to reset your Dalgo password. 
 
 Please click this link to begin: {reset_url}.
@@ -54,6 +55,7 @@ Welcome to Dalgo! Please verify your email address by clicking the link below
 def send_invite_user_email(to_email: str, invited_by_email: str, invite_url: str) -> None:
     """send an invitation email to the user with the invite link through which they will set their password"""
     message = f"""Hello,
+
 Welcome to Dalgo.
 
 You have been invited by {invited_by_email}
@@ -70,6 +72,7 @@ def send_youve_been_added_email(to_email: str, added_by: str, org_name: str) -> 
     """
     url = os.getenv("FRONTEND_URL")
     message = f"""Hello,
+
 You've been added to {org_name} by {added_by}.
 
 Open your dashboard at {url}
