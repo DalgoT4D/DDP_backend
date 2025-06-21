@@ -277,7 +277,7 @@ def test_post_organization_user_invalid_email(orguser):
     assert str(excinfo.value) == "that is not a valid email address"
 
 
-@patch.multiple("ddpui.utils.sendgrid", send_signup_email=Mock(return_value=1))
+@patch.multiple("ddpui.utils.awsses", send_signup_email=Mock(return_value=1))
 def test_post_organization_user_success(orguser):
     """a success test"""
     request = mock_request(orguser)
@@ -302,7 +302,7 @@ def test_post_organization_user_success(orguser):
         the_authuser.delete()
 
 
-@patch.multiple("ddpui.utils.sendgrid", send_signup_email=Mock(return_value=1))
+@patch.multiple("ddpui.utils.awsses", send_signup_email=Mock(return_value=1))
 def test_post_organization_user_success_lowercase_email(orguser):
     """a success test"""
     request = mock_request(orguser)
@@ -753,7 +753,7 @@ def test_get_organizations_warehouses(orguser):
 
 
 # ================================================================================
-@patch("ddpui.utils.sendgrid.send_invite_user_email", Mock())
+@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
 def test_post_organization_user_invite_no_org(orguser):
     """failing test, no org"""
     orguser.org = None
@@ -764,7 +764,7 @@ def test_post_organization_user_invite_no_org(orguser):
     assert str(excinfo.value) == "create an organization first"
 
 
-@patch("ddpui.utils.sendgrid.send_invite_user_email", Mock())
+@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
 def test_post_organization_user_invite_v1_no_org(orguser):
     """failing test, no org"""
     orguser.org = None
@@ -778,7 +778,7 @@ def test_post_organization_user_invite_v1_no_org(orguser):
     assert str(excinfo.value) == "create an organization first"
 
 
-@patch("ddpui.utils.sendgrid.send_invite_user_email", Mock())
+@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
 def test_post_organization_user_invite_nosuchrole(orguser):
     """failing test, no such role"""
     request = mock_request(orguser)
@@ -788,7 +788,7 @@ def test_post_organization_user_invite_nosuchrole(orguser):
     assert str(excinfo.value) == "Invalid role"
 
 
-@patch("ddpui.utils.sendgrid.send_invite_user_email", Mock())
+@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
 def test_post_organization_user_invite_v1_nosuchrole(orguser):
     """failing test, no such role"""
     request = mock_request(orguser)
@@ -798,7 +798,7 @@ def test_post_organization_user_invite_v1_nosuchrole(orguser):
     assert str(excinfo.value) == "Invalid role"
 
 
-@patch("ddpui.utils.sendgrid.send_invite_user_email", Mock())
+@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
 def test_post_organization_user_invite_insufficientrole(orguser):
     """failing test, no such role"""
     orguser.role = 1
@@ -809,7 +809,7 @@ def test_post_organization_user_invite_insufficientrole(orguser):
     assert str(excinfo.value) == "Insufficient permissions for this operation"
 
 
-@patch("ddpui.utils.sendgrid.send_invite_user_email", Mock())
+@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
 def test_post_organization_user_invite_v1_insufficientrole(orguser):
     """failing test, no such role"""
     request = mock_request(orguser)
@@ -822,8 +822,8 @@ def test_post_organization_user_invite_v1_insufficientrole(orguser):
     assert str(excinfo.value) == "Insufficient permissions for this operation"
 
 
-@patch("ddpui.utils.sendgrid.send_invite_user_email", mock_sendgrid=Mock())
-def test_post_organization_user_invite(mock_sendgrid, orguser):
+@patch("ddpui.utils.awsses.send_invite_user_email", mock_awsses=Mock())
+def test_post_organization_user_invite(mock_awsses, orguser):
     """success test, inviting a new user"""
     payload = InvitationSchema(
         invited_email="inivted_email",
@@ -850,11 +850,11 @@ def test_post_organization_user_invite(mock_sendgrid, orguser):
     assert response.invited_role == payload.invited_role
     assert response.invited_on == payload.invited_on
     assert response.invite_code == payload.invite_code
-    mock_sendgrid.assert_called_once()
+    mock_awsses.assert_called_once()
 
 
-@patch("ddpui.utils.sendgrid.send_invite_user_email", mock_sendgrid=Mock())
-def test_post_organization_user_invite_v1(mock_sendgrid, orguser):
+@patch("ddpui.utils.awsses.send_invite_user_email", mock_awsses=Mock())
+def test_post_organization_user_invite_v1(mock_awsses, orguser):
     """success test, inviting a new user"""
     payload = NewInvitationSchema(
         invited_email="inivted_email",
@@ -878,11 +878,11 @@ def test_post_organization_user_invite_v1(mock_sendgrid, orguser):
     assert invitation.invite_code is not None
     assert invitation.invited_on is not None
 
-    mock_sendgrid.assert_called_once()
+    mock_awsses.assert_called_once()
 
 
-@patch("ddpui.utils.sendgrid.send_invite_user_email", mock_sendgrid=Mock())
-def test_post_organization_user_invite_multiple_open_invites(mock_sendgrid, orguser):
+@patch("ddpui.utils.awsses.send_invite_user_email", mock_awsses=Mock())
+def test_post_organization_user_invite_multiple_open_invites(mock_awsses, orguser):
     """success test, inviting a new user"""
     another_org = Org.objects.create(name="anotherorg", slug="anotherorg")
     another_user = User.objects.create(username="anotheruser", email="anotheruser")
@@ -921,11 +921,11 @@ def test_post_organization_user_invite_multiple_open_invites(mock_sendgrid, orgu
     assert response.invited_role == payload.invited_role
     assert response.invited_on == payload.invited_on
     assert response.invite_code == payload.invite_code
-    mock_sendgrid.assert_called_once()
+    mock_awsses.assert_called_once()
 
 
-@patch("ddpui.utils.sendgrid.send_invite_user_email", mock_sendgrid=Mock())
-def test_post_organization_user_invite_v1_multiple_open_invites(mock_sendgrid, orguser):
+@patch("ddpui.utils.awsses.send_invite_user_email", mock_awsses=Mock())
+def test_post_organization_user_invite_v1_multiple_open_invites(mock_awsses, orguser):
     """success test, inviting a new user"""
     another_org = Org.objects.create(name="anotherorg", slug="anotherorg")
     another_user = User.objects.create(username="anotheruser", email="anotheruser")
@@ -962,11 +962,11 @@ def test_post_organization_user_invite_v1_multiple_open_invites(mock_sendgrid, o
     assert invitation.invite_code is not None
     assert invitation.invited_on is not None
 
-    mock_sendgrid.assert_called_once()
+    mock_awsses.assert_called_once()
 
 
-@patch("ddpui.utils.sendgrid.send_invite_user_email", mock_sendgrid=Mock())
-def test_post_organization_user_invite_lowercase_email(mock_sendgrid, orguser: OrgUser):
+@patch("ddpui.utils.awsses.send_invite_user_email", mock_awsses=Mock())
+def test_post_organization_user_invite_lowercase_email(mock_awsses, orguser: OrgUser):
     """success test, inviting a new user"""
     payload = InvitationSchema(
         invited_email="INVITED_EMAIL",
@@ -997,11 +997,11 @@ def test_post_organization_user_invite_lowercase_email(mock_sendgrid, orguser: O
     assert response.invited_role == payload.invited_role
     assert response.invited_on == payload.invited_on
     assert response.invite_code == payload.invite_code
-    mock_sendgrid.assert_called_once()
+    mock_awsses.assert_called_once()
 
 
-@patch("ddpui.utils.sendgrid.send_invite_user_email", mock_sendgrid=Mock())
-def test_post_organization_user_invite_v1_lowercase_email(mock_sendgrid, orguser: OrgUser):
+@patch("ddpui.utils.awsses.send_invite_user_email", mock_awsses=Mock())
+def test_post_organization_user_invite_v1_lowercase_email(mock_awsses, orguser: OrgUser):
     """success test, inviting a new user"""
     payload = NewInvitationSchema(
         invited_email="INVITED_EMAIL",
@@ -1027,11 +1027,11 @@ def test_post_organization_user_invite_v1_lowercase_email(mock_sendgrid, orguser
     assert invitation.invited_new_role.slug == GUEST_ROLE
     assert invitation.invite_code is not None
     assert invitation.invited_on is not None
-    mock_sendgrid.assert_called_once()
+    mock_awsses.assert_called_once()
 
 
-@patch("ddpui.utils.sendgrid.send_youve_been_added_email", mock_sendgrid=Mock())
-def test_post_organization_user_invite_user_exists(mock_sendgrid, orguser: OrgUser):
+@patch("ddpui.utils.awsses.send_youve_been_added_email", mock_awsses=Mock())
+def test_post_organization_user_invite_user_exists(mock_awsses, orguser: OrgUser):
     """success test, inviting an existing user"""
     user = User.objects.create(email="existinguser", username="existinguser")
     assert OrgUser.objects.filter(user=user).count() == 0
@@ -1047,15 +1047,15 @@ def test_post_organization_user_invite_user_exists(mock_sendgrid, orguser: OrgUs
     request = mock_request(orguser)
 
     response = post_organization_user_invite(request, payload)
-    mock_sendgrid.assert_called_once()
+    mock_awsses.assert_called_once()
 
     assert OrgUser.objects.filter(user=user).count() == 1
     assert OrgUser.objects.filter(user=user, org=orguser.org).count() == 1
     assert response.invited_role == payload.invited_role
 
 
-@patch("ddpui.utils.sendgrid.send_youve_been_added_email", mock_sendgrid=Mock())
-def test_post_organization_user_invite_v1_user_exists(mock_sendgrid, orguser: OrgUser):
+@patch("ddpui.utils.awsses.send_youve_been_added_email", mock_awsses=Mock())
+def test_post_organization_user_invite_v1_user_exists(mock_awsses, orguser: OrgUser):
     """success test, inviting an existing user"""
     user = User.objects.create(email="existinguser", username="existinguser")
     assert OrgUser.objects.filter(user=user).count() == 0
@@ -1069,7 +1069,7 @@ def test_post_organization_user_invite_v1_user_exists(mock_sendgrid, orguser: Or
     request = mock_request(orguser)
 
     post_organization_user_invite_v1(request, payload)
-    mock_sendgrid.assert_called_once()
+    mock_awsses.assert_called_once()
 
     assert OrgUser.objects.filter(user=user, new_role=guest_role).count() == 1
     assert OrgUser.objects.filter(user=user, org=orguser.org, new_role=guest_role).count() == 1
@@ -1216,7 +1216,7 @@ def test_post_forgot_password_nosuchuser():
 
 
 @patch.multiple(
-    "ddpui.utils.sendgrid",
+    "ddpui.utils.awsses",
     send_password_reset_email=Mock(side_effect=Exception("error")),
 )
 def test_post_forgot_password_emailfailed():
@@ -1230,7 +1230,7 @@ def test_post_forgot_password_emailfailed():
     assert str(excinfo.value) == "failed to send email"
 
 
-@patch.multiple("ddpui.utils.sendgrid", send_password_reset_email=Mock(return_value=1))
+@patch.multiple("ddpui.utils.awsses", send_password_reset_email=Mock(return_value=1))
 def test_post_forgot_password_success():
     """success test, forgot password email sent"""
     mock_request = Mock()
@@ -1350,8 +1350,8 @@ def test_post_resend_invitation_no_org(orguser):
     assert str(excinfo.value) == "create an organization first"
 
 
-@patch("ddpui.utils.sendgrid.send_invite_user_email", sendgrid=Mock())
-def test_post_resend_invitation(sendgrid: Mock, orguser):
+@patch("ddpui.utils.awsses.send_invite_user_email", mock_awsses=Mock())
+def test_post_resend_invitation(mock_awsses: Mock, orguser):
     """success test"""
     original_invited_on = timezone.as_ist(datetime(2023, 1, 1, 10, 0, 0))
     invitation = Invitation.objects.create(
@@ -1365,7 +1365,7 @@ def test_post_resend_invitation(sendgrid: Mock, orguser):
     invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
     request = mock_request(orguser=orguser)
     post_resend_invitation(request, invitation.id)
-    sendgrid.assert_called_once_with("email", orguser.user.email, invite_url)
+    mock_awsses.assert_called_once_with("email", orguser.user.email, invite_url)
     invitation.refresh_from_db()
     assert invitation.invited_on > original_invited_on
 
