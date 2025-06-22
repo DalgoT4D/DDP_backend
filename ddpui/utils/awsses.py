@@ -29,8 +29,8 @@ def send_text_message(to_email, subject, message):
 def send_password_reset_email(to_email: str, reset_url: str) -> None:
     """send a password reset email"""
     message = f"""Hello,
-    
-We received a request to reset your Dalgo password. 
+
+We received a request to reset your Dalgo password.
 
 Please click this link to begin: {reset_url}.
 
