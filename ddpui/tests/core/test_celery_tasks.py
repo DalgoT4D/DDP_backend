@@ -10,7 +10,7 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse, TransformType, OrgSchemaChange
-from ddpui.models.org_user import OrgUser, Role
+from ddpui.models.org_user import OrgUser
 from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.tests.api_tests.test_user_org_api import (
     seed_db,
