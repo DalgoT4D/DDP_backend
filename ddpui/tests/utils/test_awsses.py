@@ -14,8 +14,8 @@ def test_send_password_reset_email():
     with patch("ddpui.utils.awsses.send_text_message") as mock_send_text_message:
         send_password_reset_email("to_email", "reset_url")
         message = """Hello,
-    
-We received a request to reset your Dalgo password. 
+
+We received a request to reset your Dalgo password.
 
 Please click this link to begin: reset_url.
 
