@@ -94,7 +94,7 @@ def get_org_from_flow_run(flow_run: dict) -> Org | None:
 
 
 def generate_notification_email(orgname: str, flow_run_id: str, logmessages: list) -> str:
-    """until we make a sendgrid template"""
+    """plantext notification email"""
     tag = " [STAGING]" if not PRODUCTION else ""
     email_body = f"""
 To the admins of {orgname}{tag},

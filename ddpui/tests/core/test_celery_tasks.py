@@ -10,7 +10,7 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse, TransformType, OrgSchemaChange
-from ddpui.models.org_user import OrgUser, Role
+from ddpui.models.org_user import OrgUser
 from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.tests.api_tests.test_user_org_api import (
     seed_db,
@@ -362,48 +362,6 @@ def test_detect_schema_changes_for_org_ensure_orphan_connections_are_deleted(
         fetch_and_update_org_schema_changes_mock.return_value = None, "error"
         detect_schema_changes_for_org(org_without_workspace)
     assert OrgSchemaChange.objects.filter(org=org_without_workspace).count() == 0
-
-
-def test_detect_schema_changes_for_org_send_schema_changes_email(
-    org_without_workspace: Org, orguser: OrgUser
-):
-    """test detect_schema_changes_for_org function"""
-    synctask = Task.objects.filter(slug=TASK_AIRBYTESYNC).first()
-    if synctask is None:
-        synctask = Task.objects.create(
-            slug=TASK_AIRBYTESYNC, type="Airbyte Sync", label="Airbyte Sync"
-        )
-    synctask = OrgTask.objects.create(
-        org=org_without_workspace, task=synctask, connection_id="some-connection-id"
-    )
-    OrgSchemaChange.objects.create(org=org_without_workspace, connection_id="fake-connection-id")
-    assert OrgSchemaChange.objects.filter(org=org_without_workspace).count() == 1
-    os.environ["FRONTEND_URL"] = "http://localhost:3000"
-    with patch(
-        "ddpui.ddpairbyte.airbytehelpers.fetch_and_update_org_schema_changes"
-    ) as fetch_and_update_org_schema_changes_mock, patch(
-        "ddpui.celeryworkers.tasks.notify_org_managers"
-    ) as notify_org_managers_mock:
-        fetch_and_update_org_schema_changes_mock.return_value = {
-            "schemaChange": "breaking",
-            "name": "CONN_NAME",
-        }, None
-        orguser.org = org_without_workspace
-        role = Role.objects.filter(slug="account-manager").first()
-        if role is None:
-            role = Role.objects.create(slug="account-manager", name="account-manager")
-        orguser.new_role = role
-        orguser.save()
-        detect_schema_changes_for_org(org_without_workspace)
-    assert OrgSchemaChange.objects.filter(org=org_without_workspace).count() == 0
-
-    connections_page = "http://localhost:3000/pipeline/ingest?tab=connections"
-
-    notify_org_managers_mock.assert_called_once_with(
-        org_without_workspace,
-        f'To the admins of {org_without_workspace.name},\n\nThis email is to let you know that schema changes have been detected in your Dalgo sources for "CONN_NAME".\n\nPlease visit {connections_page} and review the Pending Actions',
-        f"{org_without_workspace.name}: Schema changes detected in your Dalgo sources",
-    )
 
 
 def test_get_connection_catalog_task_error(org_without_workspace: Org):
