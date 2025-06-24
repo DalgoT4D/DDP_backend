@@ -34,7 +34,7 @@ from ddpui.ddpprefect import (
     FLOW_RUN_COMPLETED_STATE_TYPE,
 )
 from ddpui.utils.constants import (
-    AIRBYTE_SYNC_TIMEOUT,
+    PREFECT_AIRBYTE_TASKS_TIMEOUT,
     TASK_GITPULL,
     TASK_AIRBYTESYNC,
     TASK_GENERATE_EDR,
@@ -60,7 +60,7 @@ def setup_airbyte_sync_task_config(
         type=AIRBYTECONNECTION,
         airbyte_server_block=server_block.block_name,
         connection_id=org_task.connection_id,
-        timeout=AIRBYTE_SYNC_TIMEOUT,
+        timeout=PREFECT_AIRBYTE_TASKS_TIMEOUT,
         orgtask_uuid=str(org_task.uuid),
     )
 
@@ -78,7 +78,7 @@ def setup_airbyte_update_schema_task_config(
         type=AIRBYTECONNECTION,
         airbyte_server_block=server_block.block_name,
         connection_id=org_task.connection_id,
-        timeout=AIRBYTE_SYNC_TIMEOUT,
+        timeout=PREFECT_AIRBYTE_TASKS_TIMEOUT,
         orgtask_uuid=str(org_task.uuid),
         catalog_diff=catalog_diff,
     )
