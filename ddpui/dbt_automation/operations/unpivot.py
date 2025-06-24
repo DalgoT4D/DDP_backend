@@ -31,9 +31,8 @@ def unpivot_dbt_sql(
     input_table = config["input"]
     field_name = config.get("unpivot_field_name", "field_name")
     value_name = config.get("unpivot_value_name", "value")
-    cast_datatype_to = config.get("cast_to", "varchar")
-    if warehouse.name == "bigquery":
-        cast_datatype_to = config.get("cast_to", "STRING")
+    default_cast_datatype = "STRING" if warehouse.name == "bigquery" else "varchar"
+    cast_datatype_to = config.get("cast_to", default_cast_datatype)
 
     if len(unpivot_on_columns) == 0:
         raise ValueError("No columns specified for unpivot")
