@@ -44,8 +44,8 @@ LONG_RUNNING_TASKS = [TASK_DBTRUN, TASK_DBTSEED, TASK_DBTTEST, TASK_DBTCLOUD_JOB
 
 # airbyte sync timeout in deployment params
 PREFECT_AIRBYTE_TASKS_TIMEOUT = int(
-    os.getenv("PREFECT_AIRBYTE_TASKS_TIMEOUT_SECS", 15)
-)  # default to 1 hour
+    os.getenv("PREFECT_AIRBYTE_TASKS_TIMEOUT_SECS", "15")
+)  # default to 15 seconds
 
 
 # system user email
