@@ -1,10 +1,7 @@
 """for each org fetch orchestration pipelines for airbyte sync"""
 
-from datetime import datetime
-import pytz
 from django.core.management.base import BaseCommand, CommandParser
 
-from ddpui.models.tasks import DataflowOrgTask
 from ddpui.celeryworkers.tasks import sync_flow_runs_of_deployments
 from ddpui.models.org import OrgDataFlowv1
 
