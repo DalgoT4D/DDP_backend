@@ -61,7 +61,7 @@ class Command(BaseCommand):
                     task["timeout"] = timeout
 
             payload = PrefectDataFlowUpdateSchema3(deployment_params=parameters)
-            prefect_service.update_dataflow_v1(deployment_id, payload)
+            prefect_service.update_dataflow_v1(dataflow.deployment_id, payload)
             self.stdout.write(
                 f"updated timeout for deployment {dataflow.deployment_name} with id : {dataflow.deployment_id}"
             )
