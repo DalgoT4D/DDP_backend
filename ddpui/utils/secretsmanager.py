@@ -104,6 +104,11 @@ def generate_superset_credentials_name():
     return f"supersetCreds-{uuid4()}"
 
 
+def generate_dalgo_user_superset_credentials_name():
+    """store the connection credentials to their data warehouse"""
+    return f"dalgoUserSupersetCreds-{uuid4()}"
+
+
 def save_github_token(org: Org, access_token: str):
     """saves a github auth token for an org under a predefined secret name"""
     aws_sm = get_client()
@@ -201,6 +206,30 @@ def save_superset_usage_dashboard_credentials(credentials: dict):
 
 
 def retrieve_superset_usage_dashboard_credentials(
+    secret_id: str,
+) -> dict | None:
+    """decodes and returns the saved superset usage dashboard credentials"""
+    aws_sm = get_client()
+    response = aws_sm.get_secret_value(SecretId=secret_id)
+    return json.loads(response["SecretString"]) if response and "SecretString" in response else None
+
+
+def save_dalgo_user_superset_credentials(credentials: dict):
+    """saves superset usage dashboard user credentials under a predefined secret name"""
+    aws_sm = get_client()
+    secret_name = generate_dalgo_user_superset_credentials_name()
+    response = aws_sm.create_secret(
+        Name=secret_name,
+        SecretString=json.dumps(credentials),
+    )
+    logger.info(
+        "saved superset usage dashboard user credentials in secrets manager under name="
+        + response["Name"]
+    )
+    return secret_name
+
+
+def retrieve_dalgo_user_superset_credentials(
     secret_id: str,
 ) -> dict | None:
     """decodes and returns the saved superset usage dashboard credentials"""
