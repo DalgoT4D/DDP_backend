@@ -1,10 +1,9 @@
 from django.core.management.base import BaseCommand
 
-from ddpui.models.org import Org, OrgDataFlowv1, OrgPrefectBlockv1
-from ddpui.models.org import OrgWarehouse
+from ddpui.models.org import Org, OrgPrefectBlockv1
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask
 from ddpui.ddpairbyte.airbytehelpers import create_airbyte_deployment
-from ddpui.utils.constants import TASK_AIRBYTERESET, TASK_AIRBYTESYNC, TASK_AIRBYTECLEAR
+from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTECLEAR
 from ddpui.ddpprefect import AIRBYTESERVER
 
 

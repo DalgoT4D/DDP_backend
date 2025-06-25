@@ -14,7 +14,7 @@ webhook_router = Router()
 logger = CustomLogger("ddpui")
 
 
-@webhook_router.post("/v1/notification/")
+@webhook_router.post("/v1/notification/", auth=None)
 def post_notification_v1(request):  # pylint: disable=unused-argument
     """webhook endpoint for notifications"""
     if request.headers.get("X-Notification-Key") != os.getenv("PREFECT_NOTIFICATIONS_WEBHOOK_KEY"):

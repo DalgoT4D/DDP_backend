@@ -12,7 +12,7 @@ from ddpui.ddpprefect import prefect_service
 dashboard_router = Router()
 
 
-@dashboard_router.get("/v1", auth=auth.CustomAuthMiddleware())
+@dashboard_router.get("/v1")
 @has_permission(["can_view_dashboard"])
 def get_dashboard_v1(request):
     """Fetch all flows/pipelines created in an organization"""

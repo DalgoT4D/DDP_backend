@@ -6,7 +6,8 @@ from django.utils.dateparse import parse_datetime
 from django.utils.timezone import now as timezone_now
 from ddpui.utils.custom_logger import CustomLogger
 
-from ddpui.models.org import Org, OrgDataFlowv1
+from ddpui.models.org import Org, OrgDataFlowv1, ConnectionMeta
+from ddpui.models.tasks import OrgTask
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.awsses import send_text_message
@@ -93,7 +94,7 @@ def get_org_from_flow_run(flow_run: dict) -> Org | None:
 
 
 def generate_notification_email(orgname: str, flow_run_id: str, logmessages: list) -> str:
-    """until we make a sendgrid template"""
+    """plantext notification email"""
     tag = " [STAGING]" if not PRODUCTION else ""
     email_body = f"""
 To the admins of {orgname}{tag},
@@ -294,22 +295,76 @@ def update_flow_run_for_deployment(deployment_id: str, state: str, flow_run: dic
     return send_failure_notifications
 
 
-def send_failure_emails(org: Org, odf: OrgDataFlowv1 | None, flow_run_id: str, state: str):
+def find_all_values_for_key(obj: dict, key: str) -> list:
+    """finds all occurences of the key in the object"""
+    results = []
+
+    def _search(o):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if k == key:
+                    results.append(v)
+                _search(v)
+        elif isinstance(o, list):
+            for item in o:
+                _search(item)
+
+    _search(obj)
+    return results
+
+
+def send_failure_emails(org: Org, odf: OrgDataFlowv1 | None, flow_run: dict, state: str):
     """send notification emails to org users"""
-    name_of_deployment = odf.name if odf else "[no deployment name]"
-    type_of_deployment = odf.dataflow_type if odf else "[no deployment type]"
     if os.getenv("SEND_FLOWRUN_LOGS_TO_SUPERADMINS", "").lower() in ["true", "1", "yes"]:
-        email_flowrun_logs_to_superadmins(org, flow_run_id)
+        email_flowrun_logs_to_superadmins(org, flow_run["id"])
     if os.getenv("NOTIFY_PLATFORM_ADMINS_OF_ERRORS", "").lower() in ["true", "1", "yes"]:
-        notify_platform_admins(org, flow_run_id, state)
-    notify_org_managers(
-        org,
-        f"To the admins of {org.name},\n\nA job for \"{name_of_deployment}\" of type \"{type_of_deployment}\" has failed, please visit {os.getenv('FRONTEND_URL')} for more details",
-        f"{org.name}: Job failure for {name_of_deployment}",
-    )
+        notify_platform_admins(org, flow_run["id"], state)
+
+    name_of_deployment = odf.name if odf else "[no deployment name]"
     email_orgusers_ses_whitelisted(
         org,
         f'There is a problem with the pipeline "{name_of_deployment}"; we are working on a fix',
+    )
+
+    # start building the email, at any point if we decide we won't send it we just return
+    email_subject = f"{org.name}: Job failure for {name_of_deployment}"
+    email_body = [f"To the admins of {org.name},\n"]
+
+    if odf and odf.dataflow_type == "orchestrate":
+        email_body.append(f"The pipeline {odf.name} has failed")
+
+    elif odf and odf.dataflow_type == "manual":
+        connection_ids = find_all_values_for_key(flow_run.get("parameters", {}), "connection_id")
+        if len(connection_ids) > 0:
+            connection_names = ConnectionMeta.objects.filter(
+                connection_id__in=connection_ids
+            ).values_list("connection_name", flat=True)
+
+            email_body.append("A job has failed, the connection(s) involved were:")
+            for connection_name in connection_names:
+                email_body.append(f"- {connection_name}")
+        else:
+            orgtask_uuids = find_all_values_for_key(flow_run.get("parameters", {}), "orgtask_uuid")
+            task_slugs = OrgTask.objects.filter(uuid__in=orgtask_uuids).values_list(
+                "task__slug", flat=True
+            )
+            if task_slugs.count() == 1 and task_slugs[0] == "generate-edr":
+                # don't send any email
+                return
+
+            email_body.append("A job has failed, the tasks involved were")
+            for task_slug in task_slugs:
+                email_body.append(f"- {task_slug}")
+    else:
+        email_body.append("A job has failed")
+        # should we even bother to send this email???
+        return
+
+    email_body.append(f"\nPlease visit {os.getenv('FRONTEND_URL')} for more details")
+    notify_org_managers(
+        org,
+        "\n".join(email_body),
+        email_subject,
     )
 
 
@@ -344,7 +399,7 @@ def do_handle_prefect_webhook(flow_run_id: str, state: str):
             ):
                 # odf might be None!
                 odf = OrgDataFlowv1.objects.filter(org=org, deployment_id=deployment_id).first()
-                send_failure_emails(org, odf, flow_run_id, state)
+                send_failure_emails(org, odf, flow_run, state)
 
             elif state in [FLOW_RUN_COMPLETED_STATE_NAME]:
                 email_orgusers_ses_whitelisted(org, "Your pipeline completed successfully")

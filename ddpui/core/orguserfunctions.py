@@ -34,7 +34,7 @@ from ddpui.models.org_user import (
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.orgtnc import OrgTnC
 from ddpui.models.role_based_access import Role
-from ddpui.utils import helpers, sendgrid, timezone
+from ddpui.utils import helpers, awsses, timezone
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.orguserhelpers import from_invitation, from_orguser
 from ddpui.utils.redis_client import RedisClient
@@ -138,7 +138,7 @@ def signup_orguser(payload: OrgUserCreate):
     FRONTEND_URL = os.getenv("FRONTEND_URL")
     reset_url = f"{FRONTEND_URL}/verifyemail/?token={token.hex}"
     try:
-        sendgrid.send_signup_email(payload.email, reset_url)
+        awsses.send_signup_email(payload.email, reset_url)
     except Exception:
         return None, "failed to send email"
 
@@ -291,7 +291,7 @@ def invite_user(orguser: OrgUser, payload: InvitationSchema):
         OrgUser.objects.create(
             user=existing_user, org=orguser.org, role=invited_role, new_role=new_role
         )
-        sendgrid.send_youve_been_added_email(invited_email, orguser.user.email, orguser.org.name)
+        awsses.send_youve_been_added_email(invited_email, orguser.user.email, orguser.org.name)
         return (
             InvitationSchema(
                 invited_email=invited_email,
@@ -307,7 +307,7 @@ def invite_user(orguser: OrgUser, payload: InvitationSchema):
         invitation.invited_on = timezone.as_utc(datetime.utcnow())
         # if the invitation is already present - trigger the email again
         invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
-        sendgrid.send_invite_user_email(
+        awsses.send_invite_user_email(
             invitation.invited_email, invitation.invited_by.user.email, invite_url
         )
         logger.info(
@@ -331,7 +331,7 @@ def invite_user(orguser: OrgUser, payload: InvitationSchema):
 
     # trigger an email to the user
     invite_url = f"{frontend_url}/invitations/?invite_code={payload.invite_code}"
-    sendgrid.send_invite_user_email(
+    awsses.send_invite_user_email(
         invitation.invited_email, invitation.invited_by.user.email, invite_url
     )
 
@@ -366,7 +366,7 @@ def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema):
     if existing_user:
         logger.info("user exists, creating new OrgUser")
         OrgUser.objects.create(user=existing_user, org=orguser.org, new_role=invited_role)
-        sendgrid.send_youve_been_added_email(invited_email, orguser.user.email, orguser.org.name)
+        awsses.send_youve_been_added_email(invited_email, orguser.user.email, orguser.org.name)
         return (
             NewInvitationSchema(
                 invited_email=invited_email,
@@ -382,7 +382,7 @@ def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema):
         invitation.invited_on = timezone.as_utc(datetime.utcnow())
         # if the invitation is already present - trigger the email again
         invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
-        sendgrid.send_invite_user_email(
+        awsses.send_invite_user_email(
             invitation.invited_email, invitation.invited_by.user.email, invite_url
         )
         logger.info(
@@ -405,7 +405,7 @@ def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema):
 
     # trigger an email to the user
     invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
-    sendgrid.send_invite_user_email(
+    awsses.send_invite_user_email(
         invitation.invited_email, invitation.invited_by.user.email, invite_url
     )
 
@@ -414,46 +414,6 @@ def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema):
         f"with invite code {invitation.invite_code}",
     )
     return payload, None
-
-
-def accept_invitation(payload: AcceptInvitationSchema):
-    """accept an invitation"""
-    invitation = Invitation.objects.filter(invite_code=payload.invite_code).first()
-    if invitation is None:
-        return None, "invalid invite code"
-
-    # we can have one auth user mapped to multiple orguser and hence multiple orgs
-    # but there can only be one orguser per one org
-    orguser = OrgUser.objects.filter(
-        user__email__iexact=invitation.invited_email, org=invitation.invited_by.org
-    ).first()
-
-    if not orguser:
-        user = User.objects.filter(
-            username=invitation.invited_email,
-            email=invitation.invited_email,
-        ).first()
-        if user is None:
-            if payload.password is None:
-                return None, "password is required"
-            logger.info(
-                f"creating invited user {invitation.invited_email} "
-                f"for {invitation.invited_by.org.name}"
-            )
-            user = User.objects.create_user(
-                username=invitation.invited_email.lower().strip(),
-                email=invitation.invited_email.lower().strip(),
-                password=payload.password,
-            )
-            UserAttributes.objects.create(user=user, email_verified=True)
-        orguser = OrgUser.objects.create(
-            user=user,
-            org=invitation.invited_by.org,
-            role=invitation.invited_role,
-            new_role=invitation.invited_new_role,
-        )
-    invitation.delete()
-    return from_orguser(orguser), None
 
 
 def accept_invitation_v1(payload: AcceptInvitationSchema):
@@ -549,7 +509,7 @@ def resend_invitation(invitation_id: str):
         # trigger an email to the user
         frontend_url = os.getenv("FRONTEND_URL")
         invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
-        sendgrid.send_invite_user_email(
+        awsses.send_invite_user_email(
             invitation.invited_email, invitation.invited_by.user.email, invite_url
         )
 
@@ -577,7 +537,7 @@ def request_reset_password(email: str):
     FRONTEND_URL = os.getenv("FRONTEND_URL")
     reset_url = f"{FRONTEND_URL}/resetpassword/?token={token.hex}"
     try:
-        sendgrid.send_password_reset_email(email, reset_url)
+        awsses.send_password_reset_email(email, reset_url)
     except Exception:
         return None, "failed to send email"
 
@@ -630,7 +590,7 @@ def resend_verification_email(orguser: OrgUser, email: str):
     FRONTEND_URL = os.getenv("FRONTEND_URL")
     reset_url = f"{FRONTEND_URL}/verifyemail/?token={token.hex}"
     try:
-        sendgrid.send_signup_email(email, reset_url)
+        awsses.send_signup_email(email, reset_url)
     except Exception:
         return None, "failed to send email"
 
@@ -659,12 +619,6 @@ def verify_email(payload: VerifyEmailSchema):
     UserAttributes.objects.filter(user=orguser.user).update(
         email_verified=True, updated_at=django_timezone.now()
     )
-
-    if orguser.org.base_plan() == OrgType.DEMO:
-        try:
-            sendgrid.send_demo_account_post_verify_email(orguser.user.email)
-        except Exception:
-            return None, "failed to send email"
 
     return None, None
 
