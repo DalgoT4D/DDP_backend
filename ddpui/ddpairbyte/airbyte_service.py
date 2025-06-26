@@ -6,6 +6,7 @@ These functions do not access the Dalgo database
 
 from typing import Dict, List
 import os
+import json
 from datetime import datetime
 import requests
 from dotenv import load_dotenv
@@ -361,7 +362,7 @@ def create_source(workspace_id: str, name: str, sourcedef_id: str, config: dict)
     )
     if "sourceId" not in res:
         logger.error("Failed to create source: %s", res)
-        raise HttpError(500, "failed to create source")
+        raise HttpError(500, "failed to create source: " + json.dumps(res))
     return res
 
 
@@ -387,7 +388,7 @@ def update_source(source_id: str, name: str, config: dict, sourcedef_id: str) ->
     )
     if "sourceId" not in res:
         logger.error("Failed to update source: %s", res)
-        raise HttpError(500, "failed to update source")
+        raise HttpError(500, "failed to update source: " + json.dumps(res))
     return res
 
 
@@ -418,7 +419,8 @@ def check_source_connection(workspace_id: str, data: AirbyteSourceCreate) -> dic
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get("message", "Something went wrong, please check your credentials")
+        # failure_reason = res.get("message", "Something went wrong, please check your credentials")
+        failure_reason = json.dumps(res)
         logger.error("Failed to check the source connection: %s", res)
         raise HttpError(500, failure_reason)
     return res
@@ -436,7 +438,8 @@ def check_source_connection_for_update(source_id: str, data: AirbyteSourceUpdate
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get("message", "Something went wrong, please check your credentials")
+        # failure_reason = res.get("message", "Something went wrong, please check your credentials")
+        failure_reason = json.dumps(res)
         logger.error("Failed to check the source connection: %s", res)
         raise HttpError(500, failure_reason)
     # {
@@ -491,9 +494,9 @@ def get_source_schema_catalog(
             if "logs" in res["jobInfo"]:
                 error += "\n".join(res["jobInfo"]["logs"]["logLines"])
             logger.error(error)
-            raise HttpError(400, message)
+            raise HttpError(400, error)
     if "catalog" not in res and "jobInfo" not in res:
-        raise HttpError(400, res["message"])
+        raise HttpError(400, res.get("message", json.dumps(res)))
     return res
 
 
@@ -607,7 +610,7 @@ def create_destination(workspace_id: str, name: str, destinationdef_id: str, con
     )
     if "destinationId" not in res:
         logger.error("Failed to create destination: %s", res)
-        raise HttpError(500, "failed to create destination")
+        raise HttpError(500, "failed to create destination: " + json.dumps(res))
     return res
 
 
@@ -636,7 +639,7 @@ def update_destination(
     )
     if "destinationId" not in res:
         logger.error("Failed to update destination: %s", res)
-        raise HttpError(500, "failed to update destination")
+        raise HttpError(500, "failed to update destination: " + json.dumps(res))
     return res
 
 
@@ -655,7 +658,9 @@ def check_destination_connection(workspace_id: str, data: AirbyteDestinationCrea
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get("message", "Something went wrong, please check your credentials")
+        failure_reason = res.get(
+            "message", "Something went wrong, please check your credentials: " + json.dumps(res)
+        )
         logger.error("Failed to check the destination connection: %s", res)
         raise HttpError(500, failure_reason)
     return res
@@ -678,7 +683,9 @@ def check_destination_connection_for_update(
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get("message", "Something went wrong, please check your credentials")
+        failure_reason = res.get(
+            "message", "Something went wrong, please check your credentials: " + json.dumps(res)
+        )
         logger.error("Failed to check the destination connection: %s", res)
         raise HttpError(500, failure_reason)
     return res
@@ -810,7 +817,7 @@ def create_connection(
     res = abreq("connections/create", payload)
     if "connectionId" not in res:
         logger.error("Failed to create connection: %s", res)
-        raise HttpError(500, "failed to create connection")
+        raise HttpError(500, "failed to create connection: " + json.dumps(res))
     return res
 
 
@@ -892,7 +899,7 @@ def update_connection(
     res = abreq("connections/update", current_connection)
     if "connectionId" not in res:
         logger.error("Failed to update connection: %s", res)
-        raise HttpError(500, "failed to update connection")
+        raise HttpError(500, "failed to update connection: " + json.dumps(res))
     return res
 
 

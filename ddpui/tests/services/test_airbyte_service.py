@@ -577,7 +577,7 @@ def test_create_source_failure():
         with pytest.raises(HttpError) as excinfo:
             create_source(workspace_id, "Example Source 1", "1", {"test": "test"})
         assert excinfo.value.status_code == 500
-        assert str(excinfo.value) == "failed to create source"
+        assert str(excinfo.value) == 'failed to create source: {"error": "Invalid request data"}'
 
 
 def test_create_source_with_invalid_workspace_id():
@@ -635,7 +635,7 @@ def test_update_source_failure():
         with pytest.raises(HttpError) as excinfo:
             update_source(source_id, name, {"test": "test"}, sourcedef_id)
         assert excinfo.value.status_code == 500
-        assert str(excinfo.value) == "failed to update source"
+        assert str(excinfo.value) == 'failed to update source: {"error": "Invalid request data"}'
 
 
 def test_update_source_with_invalid_name():
@@ -702,7 +702,10 @@ def test_check_source_connection_failure():
         with pytest.raises(HttpError) as excinfo:
             check_source_connection(workspace_id, data)
 
-        assert str(excinfo.value) == "Credentials are invalid"
+        assert (
+            str(excinfo.value)
+            == '{"status": "failed", "jobInfo": {"succeeded": false}, "message": "Credentials are invalid"}'
+        )
 
 
 def test_check_source_connection_with_invalid_workspace_id():
@@ -848,7 +851,7 @@ def test_get_source_schema_catalog_failure_3():
         with pytest.raises(HttpError) as excinfo:
             get_source_schema_catalog(workspace_id, source_id)
         assert excinfo.value.status_code == 400
-        assert str(excinfo.value) == "Failed to discover schema"
+        assert str(excinfo.value) == "Failed to discover schema for source: my_source_id"
 
 
 def test_get_destination_definitions_success():
@@ -1087,7 +1090,10 @@ def test_create_destination_failure():
         with pytest.raises(HttpError) as excinfo:
             create_destination("workspace-id", "name", "destinationdef_id", {})
 
-        assert str(excinfo.value) == "failed to create destination"
+        assert (
+            str(excinfo.value)
+            == 'failed to create destination: {"wrong-key": "theConnectionSpecification"}'
+        )
 
 
 def test_update_destination_success():
@@ -1137,7 +1143,10 @@ def test_update_destination_failure():
         with pytest.raises(HttpError) as excinfo:
             update_destination("destination_id", "name", {}, "destinationdef_id")
 
-        assert str(excinfo.value) == "failed to update destination"
+        assert (
+            str(excinfo.value)
+            == 'failed to update destination: {"wrong-key": "theConnectionSpecification"}'
+        )
 
 
 def test_check_destination_connection_success():
@@ -1386,7 +1395,7 @@ def test_update_connection_failed_to_update():
                 connection_info,
                 {"sourceId": "source-id", "syncCatalog": {"streams": []}},
             )
-        assert str(excinfo.value) == "failed to update connection"
+        assert str(excinfo.value) == 'failed to update connection: {"no-connectionId": true}'
 
 
 @patch.multiple(
