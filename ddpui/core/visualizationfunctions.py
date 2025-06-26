@@ -38,18 +38,14 @@ def generate_chart_data_service(
         builder.limit_rows(limit)
         stmt = builder.build()
 
-        # Compile the statement with literal values to avoid parameter binding issues
-        from sqlalchemy.dialects import postgresql
-
         stmt = stmt.compile(bind=wclient.engine, compile_kwargs={"literal_binds": True})
         sql = str(stmt)
 
         logger.info(f"Generated SQL query: {sql}")
 
-        result = wclient.execute(sql)
-        data = list(result)
+        rows = wclient.execute(sql)
 
-        return data
+        return rows
     except Exception as e:
         logger.error(f"Failed to generate chart data: {e}")
         raise HttpError(500, f"Failed to fetch chart data: {str(e)}")
