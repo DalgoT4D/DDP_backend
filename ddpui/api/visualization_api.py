@@ -29,7 +29,7 @@ class ChartCreateRequest(Schema):
     title: str
     description: Optional[str] = None
     chart_type: str
-    schema: str
+    schema_name: str
     table: str
     config: Dict[str, Any]
 
@@ -38,7 +38,7 @@ class ChartUpdateRequest(Schema):
     title: Optional[str] = None
     description: Optional[str] = None
     chart_type: Optional[str] = None
-    schema: Optional[str] = None
+    schema_name: Optional[str] = None
     table: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
 
@@ -48,7 +48,7 @@ class ChartResponse(Schema):
     title: str
     description: Optional[str]
     chart_type: str
-    schema: str
+    schema_name: str
     table: str
     config: Dict[str, Any]
     created_at: str
@@ -107,7 +107,7 @@ def create_chart(request, payload: ChartCreateRequest):
             title=payload.title,
             description=payload.description,
             chart_type=payload.chart_type,
-            schema=payload.schema,
+            schema=payload.schema_name,
             table=payload.table,
             config=payload.config,
             created_by=orguser,
@@ -150,8 +150,8 @@ def update_chart(request, chart_id: int, payload: ChartUpdateRequest):
             chart.description = payload.description
         if payload.chart_type is not None:
             chart.chart_type = payload.chart_type
-        if payload.schema is not None:
-            chart.schema = payload.schema
+        if payload.schema_name is not None:
+            chart.schema = payload.schema_name
         if payload.table is not None:
             chart.table = payload.table
         if payload.config is not None:

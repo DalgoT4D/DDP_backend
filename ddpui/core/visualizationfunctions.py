@@ -4,6 +4,7 @@ from sqlalchemy.sql.expression import column
 from ddpui.models.org import OrgWarehouse
 from ddpui.utils import secretsmanager
 from ddpui.dbt_automation.utils.warehouseclient import get_client
+from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.datainsights.query_builder import AggQueryBuilder
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -25,7 +26,8 @@ def generate_chart_data_service(
     """
     try:
         credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
-        wclient = get_client(org_warehouse.wtype, credentials, org_warehouse.bq_location)
+        logger.info(credentials)
+        wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
 
         # Use AggQueryBuilder to build the query
         builder = AggQueryBuilder()
@@ -35,7 +37,14 @@ def generate_chart_data_service(
         builder.offset_rows(offset)
         builder.limit_rows(limit)
         stmt = builder.build()
+
+        # Compile the statement with literal values to avoid parameter binding issues
+        from sqlalchemy.dialects import postgresql
+
+        stmt = stmt.compile(bind=wclient.engine, compile_kwargs={"literal_binds": True})
         sql = str(stmt)
+
+        logger.info(f"Generated SQL query: {sql}")
 
         result = wclient.execute(sql)
         data = list(result)
