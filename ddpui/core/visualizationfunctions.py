@@ -11,7 +11,7 @@ from ddpui.utils.custom_logger import CustomLogger
 logger = CustomLogger("ddpui")
 
 
-def generate_chart_data_service(
+def generate_chart_data(
     org_warehouse: OrgWarehouse,
     schema_name: str,
     table_name: str,
@@ -19,7 +19,7 @@ def generate_chart_data_service(
     yaxis_col: str,
     offset: int = 0,
     limit: int = 10,
-):
+) -> dict:
     """
     Service function to generate chart data by running a custom query on the warehouse.
     This can be used by both direct chart generation and saved chart APIs.
@@ -45,7 +45,21 @@ def generate_chart_data_service(
 
         rows = wclient.execute(sql)
 
-        return rows
+        logger.info(rows)
+
+        data = {
+            "xaxis_data": {
+                str(xaxis_col): [],
+            },
+            "yaxis_data": {
+                str(yaxis_col): [],
+            },
+        }
+
+        data["xaxis_data"][str(xaxis_col)] = [row[xaxis_col] for row in rows]
+        data["yaxis_data"][str(yaxis_col)] = [row[yaxis_col] for row in rows]
+
+        return data
     except Exception as e:
         logger.error(f"Failed to generate chart data: {e}")
         raise HttpError(500, f"Failed to fetch chart data: {str(e)}")

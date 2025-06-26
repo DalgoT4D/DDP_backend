@@ -7,7 +7,7 @@ from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.visualization import Chart
-from ddpui.core.visualizationfunctions import generate_chart_data_service
+from ddpui.core.visualizationfunctions import generate_chart_data
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
@@ -66,9 +66,9 @@ class ChartDataRequest(Schema):
     limit: int = 10
 
 
-@visualization_router.post("/generate_chart/", response=ChartQueryResponse)
+@visualization_router.post("/generate_chart/")
 @has_permission(["can_view_warehouse_data"])
-def generate_chart_data(request, payload: RawChartQueryRequest):
+def post_generate_chart_data(request, payload: RawChartQueryRequest):
     """
     Generate chart data by running a custom query on the warehouse.
     Does not save any chart entry to the DB.
@@ -79,7 +79,7 @@ def generate_chart_data(request, payload: RawChartQueryRequest):
     if not org_warehouse:
         raise HttpError(404, "Please set up your warehouse first")
 
-    data = generate_chart_data_service(
+    data = generate_chart_data(
         org_warehouse=org_warehouse,
         schema_name=payload.schema_name,
         table_name=payload.table_name,
@@ -276,7 +276,7 @@ def get_chart_data(request, chart_id: int, payload: ChartDataRequest):
         if not chart:
             raise HttpError(404, "Chart not found")
 
-        data = generate_chart_data_service(
+        data = generate_chart_data(
             org_warehouse=org_warehouse,
             schema_name=chart.schema,
             table_name=chart.table,
