@@ -65,17 +65,10 @@ class SourceCheckConnectionConsumer(BaseConsumer):
                     self.orguser.org.airbyte_workspace_id, payload
                 )
         except Exception as error:
-            error_message = str(error)
-            try:
-                error_obj = json.loads(error_message)
-                if "message" in error_obj:
-                    error_message = error_obj["message"]
-            except ValueError:
-                pass
             self.respond(
                 WebsocketResponse(
                     data={},
-                    message="Error: " + error_message,
+                    message="Error: " + str(error),
                     status=WebsocketResponseStatus.ERROR,
                 )
             )
@@ -118,17 +111,10 @@ class DestinationCheckConnectionConsumer(BaseConsumer):
                     self.orguser.org.airbyte_workspace_id, payload
                 )
         except Exception as error:
-            error_message = str(error)
-            try:
-                error_obj = json.loads(error_message)
-                if "message" in error_obj:
-                    error_message = error_obj["message"]
-            except ValueError:
-                pass
             self.respond(
                 WebsocketResponse(
                     data={},
-                    message="Error: " + error_message,
+                    message="Error: " + str(error),
                     status=WebsocketResponseStatus.ERROR,
                 )
             )
