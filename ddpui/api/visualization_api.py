@@ -69,24 +69,26 @@ class ChartDataRequest(Schema):
 class MetricCreateRequest(Schema):
     name: str
     description: Optional[str] = None
-    schema: str
+    schema_name: str
     table: str
     temporal_column: Optional[str] = None
     dimension_columns: List[str] = []
     aggregation_function: AggregationFunction
     aggregation_column: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class MetricResponse(Schema):
     id: int
     name: str
     description: Optional[str]
-    schema: str
+    schema_name: str
     table: str
     temporal_column: Optional[str]
     dimension_columns: List[str]
     aggregation_function: str
     aggregation_column: Optional[str]
+    metadata: Optional[Dict[str, Any]]
     created_at: str
     updated_at: str
 
@@ -331,12 +333,13 @@ def create_metric(request, payload: MetricCreateRequest):
             org=org,
             name=payload.name,
             description=payload.description,
-            schema=payload.schema,
+            schema=payload.schema_name,
             table=payload.table,
             temporal_column=payload.temporal_column,
             dimension_columns=payload.dimension_columns,
             aggregation_function=payload.aggregation_function,
             aggregation_column=payload.aggregation_column,
+            metadata=payload.metadata,
             created_by=orguser,
         )
 
@@ -344,12 +347,13 @@ def create_metric(request, payload: MetricCreateRequest):
             id=metric.id,
             name=metric.name,
             description=metric.description,
-            schema=metric.schema,
+            schema_name=metric.schema,
             table=metric.table,
             temporal_column=metric.temporal_column,
             dimension_columns=metric.dimension_columns,
             aggregation_function=metric.aggregation_function,
             aggregation_column=metric.aggregation_column,
+            metadata=metric.metadata,
             created_at=metric.created_at.isoformat(),
             updated_at=metric.updated_at.isoformat(),
         )
@@ -377,3 +381,37 @@ def delete_metric(request, metric_id: int):
     except Exception as e:
         logger.error(f"Failed to delete metric: {e}")
         raise HttpError(500, f"Failed to delete metric: {str(e)}")
+
+
+@visualization_router.get("/metrics/", response=List[MetricResponse])
+@has_permission(["can_view_warehouse_data"])
+def list_metrics(request):
+    """
+    Get all metrics for the current organization.
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    try:
+        metrics = Metric.objects.filter(org=org).order_by("-created_at")
+
+        return [
+            MetricResponse(
+                id=metric.id,
+                name=metric.name,
+                description=metric.description,
+                schema_name=metric.schema,
+                table=metric.table,
+                temporal_column=metric.temporal_column,
+                dimension_columns=metric.dimension_columns,
+                aggregation_function=metric.aggregation_function,
+                aggregation_column=metric.aggregation_column,
+                metadata=metric.metadata,
+                created_at=metric.created_at.isoformat(),
+                updated_at=metric.updated_at.isoformat(),
+            )
+            for metric in metrics
+        ]
+    except Exception as e:
+        logger.error(f"Failed to list metrics: {e}")
+        raise HttpError(500, f"Failed to list metrics: {str(e)}")

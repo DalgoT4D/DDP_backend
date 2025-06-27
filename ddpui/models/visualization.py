@@ -26,6 +26,7 @@ class Chart(models.Model):
     table = models.TextField(max_length=256)
     config = models.JSONField()
     metric = models.ForeignKey("Metric", on_delete=models.SET_NULL, null=True)
+    metadata = models.JSONField(null=True)
     created_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -56,6 +57,8 @@ class Metric(models.Model):
         max_length=20, null=True, choices=AggregationFunction.choices
     )
     aggregation_column = models.CharField(max_length=256, null=True)
+
+    metadata = models.JSONField(null=True)
 
     # Metadata
     created_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE)
