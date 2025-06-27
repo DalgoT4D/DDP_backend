@@ -63,6 +63,7 @@ jobs:
           DBNAME: ${{ secrets.CI_DBNAME }}
           DBUSER: ddp
           DBPASSWORD: ${{ secrets.CI_DBPASSWORD }}
+          DJANGOSECRET: "some-secret-key"
         run: |
           uv run python manage.py migrate
 
@@ -80,6 +81,7 @@ jobs:
           PREFECT_PROXY_API_URL: http://localhost:8080
           DEV_SECRETS_DIR: /tmp/
           CLIENTDBT_ROOT: /tmp
+          DJANGOSECRET: "some-secret-key"
         run: |
           uv run coverage run -m pytest --ignore=ddpui/tests/integration_tests --durations=20
           uv run coverage xml

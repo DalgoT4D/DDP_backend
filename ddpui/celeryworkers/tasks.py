@@ -6,6 +6,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from subprocess import CompletedProcess
 import pytz
+from django.core.management import call_command
 
 import yaml
 from celery.schedules import crontab
@@ -15,7 +16,6 @@ from ddpui.celery import app, Celery
 
 
 from ddpui.utils import timezone, awsses, constants
-from ddpui.utils.helpers import find_key_in_dictionary
 from ddpui.utils.webhook_helpers import (
     notify_org_managers,
     do_handle_prefect_webhook,
@@ -1081,6 +1081,12 @@ def compute_dataflow_run_times(org: Org = None):
         compute_dataflow_run_times_from_history(dataflow)
 
 
+@app.task()
+def flush_blacklisted_tokens():
+    """Flush expired tokens from the blacklist app"""
+    call_command("flushexpiredtokens")
+
+
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender: Celery, **kwargs):
     """periodic celery tasks"""
@@ -1114,6 +1120,14 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
         crontab(minute=0, hour=0),
         check_org_plan_expiry_notify_people.s(),
         name="check org plan expiry and notify the right people",
+    )
+
+    # flush expired blacklisted tokens every 24 hours
+    # this is a custom command in the token_blacklist app
+    sender.add_periodic_task(
+        crontab(minute=0, hour=0),
+        flush_blacklisted_tokens.s(),
+        name="flush expired blacklisted tokens",
     )
 
     # compute run times for each deployment; every 3 hours

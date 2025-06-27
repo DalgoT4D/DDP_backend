@@ -9,8 +9,10 @@ from django.utils.text import slugify
 from django.db.models import Prefetch
 from django.contrib.auth.models import User
 from django.db.models import F
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 
-from ddpui.auth import has_permission
+from ddpui.auth import has_permission, CustomTokenObtainSerializer, CustomTokenRefreshSerializer
 from ddpui.core import orgfunctions, orguserfunctions
 from ddpui.models.org import (
     OrgSchema,
@@ -37,6 +39,9 @@ from ddpui.models.org_user import (
     ChangePasswordSchema,
     UserAttributes,
     VerifyEmailSchema,
+    LoginPayload,
+    TokenRefreshPayload,
+    LogoutPayload,
 )
 from ddpui.models.org_plans import OrgPlanType
 from ddpui.models.org_wren import OrgWren
@@ -54,10 +59,7 @@ load_dotenv()
 logger = CustomLogger("ddpui")
 
 
-@user_org_router.get(
-    "/currentuserv2",
-    response=List[OrgUserResponse],
-)
+@user_org_router.get("/currentuserv2", response=List[OrgUserResponse])
 @has_permission(["can_view_orgusers"])
 def get_current_user_v2(request, org_slug: str = None):
     """return all the OrgUsers for the User making this request"""
@@ -137,16 +139,64 @@ def post_organization_user(request, payload: OrgUserCreate):  # pylint: disable=
 
 
 @user_org_router.post("/login/", auth=None)
-def post_login(request):
-    """Uses the username and password in the request to return an auth token"""
-    request_obj = json.loads(request.body)
-    token = views.obtain_auth_token(request)
-    if "token" in token.data:
-        retval = orguserfunctions.lookup_user(request_obj["username"])
-        retval["token"] = token.data["token"]
-        return retval
+def post_login(request, payload: LoginPayload):
+    """Uses the username and password in the request to return a JWT auth token"""
+    serializer = CustomTokenObtainSerializer(
+        data={
+            "username": payload.username,
+            "password": payload.password,
+        }
+    )
+    serializer.is_valid(raise_exception=True)
+    token_data = serializer.validated_data
+    retval = orguserfunctions.lookup_user(payload.username)
+    retval["token"] = token_data["access"]
+    retval["refresh_token"] = token_data["refresh"]
+    return retval
 
-    return token
+
+@user_org_router.post("/logout/")
+def post_logout(request, payload: LogoutPayload):
+    """
+    Blacklists the refresh token on logout.
+    Ensures the refresh token belongs to the current user.
+    If the refresh token is already invalid/expired, do not blacklist.
+
+    Note: The 'token' field in OutstandingToken is not the raw JWT string,
+    but a re-encoded version (may differ in whitespace, order, etc).
+    Always use the refresh token string to instantiate RefreshToken and check jti/user_id.
+    """
+    refresh_token = payload.refresh
+    if not refresh_token:
+        raise HttpError(400, "Refresh token not found")
+    try:
+        token = RefreshToken(refresh_token)
+        # The actual value stored in OutstandingToken.token may not match the JWT string byte-for-byte.
+        # Instead, always check by jti and user_id.
+        token_user_id = token.payload.get("user_id")
+        if not request.user or request.user.id != token_user_id:
+            raise HttpError(403, "Token does not belong to the current user")
+        # Blacklist by token object (which uses jti under the hood)
+        token.blacklist()
+        return {"success": 1}
+    except TokenError:
+        # Token is already invalid or expired, do not blacklist
+        return {"success": 1}
+    except Exception as e:
+        raise HttpError(400, f"Logout failed: {str(e)}")
+
+
+@user_org_router.post("/token/refresh", auth=None)
+def post_token_refresh(request, payload: TokenRefreshPayload):
+    """Refreshes the JWT token using the refresh token"""
+    serializer = CustomTokenRefreshSerializer(data=payload.dict())
+    try:
+        serializer.is_valid(raise_exception=True)
+    except TokenError:
+        # If the refresh token is blacklisted, SimpleJWT will raise TokenError
+        raise HttpError(401, "Refresh token is invalid or blacklisted")
+    token_data = serializer.validated_data
+    return {"token": token_data["access"]}
 
 
 @user_org_router.get(
