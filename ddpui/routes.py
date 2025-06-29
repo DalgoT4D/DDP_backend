@@ -19,6 +19,7 @@ from ddpui.api.user_preferences_api import userpreference_router
 from ddpui.api.org_preferences_api import orgpreference_router
 from ddpui.api.warehouse_api import warehouse_router
 from ddpui.api.webhook_api import webhook_router
+from ddpui.api.dbt_automation_api import dbtautomation_router
 
 
 src_api = NinjaAPI(
@@ -77,6 +78,7 @@ userpreference_router.tags = ["UserPreference"]
 orgpreference_router.tags = ["OrgPreference"]
 warehouse_router.tags = ["Warehouse"]
 webhook_router.tags = ["Webhook"]
+dbtautomation_router.tags = ["Dbt Automation (UI4T)"]
 
 # mount all the module routes
 src_api.add_router("/api/airbyte/", airbyte_router)
@@ -89,6 +91,7 @@ src_api.add_router("/api/prefect/", pipeline_router)
 src_api.add_router("/api/superset/", superset_router)
 src_api.add_router("/api/tasks/", task_router)
 src_api.add_router("/api/transform/", transform_router)
+src_api.add_router("/api/dbt_automation/", dbtautomation_router)
 src_api.add_router("/api/userpreferences/", userpreference_router)
 src_api.add_router("/api/warehouse/", warehouse_router)
 src_api.add_router("/api/", user_org_router)

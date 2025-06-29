@@ -8,9 +8,21 @@ from ddpui.dbt_automation.utils.dbtproject import dbtProject
 from ddpui.dbt_automation.utils.columnutils import quote_columnname, quote_constvalue
 from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
 from ddpui.dbt_automation.utils.tableutils import source_or_ref
+from ddpui.dbt_automation.schemas import CaseWhenOperationInputSchema
 
 basicConfig(level=INFO)
 logger = getLogger()
+
+
+def casewhen_simulate_output(config: CaseWhenOperationInputSchema) -> list[str]:
+    """
+    Simulate the output of the casewhen operation.
+    This is used to determine the output columns.
+    """
+    source_columns = config["source_columns"]
+    output_col_name = config["output_column_name"]
+
+    return source_columns + [output_col_name]
 
 
 # pylint:disable=unused-argument,logging-fstring-interpolation

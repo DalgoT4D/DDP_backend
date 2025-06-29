@@ -7,9 +7,21 @@ from ddpui.dbt_automation.utils.dbtproject import dbtProject
 from ddpui.dbt_automation.utils.columnutils import quote_columnname, quote_constvalue
 from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
 from ddpui.dbt_automation.utils.tableutils import source_or_ref
+from ddpui.dbt_automation.schemas import CoalesceOperationInputSchema
 
 basicConfig(level=INFO)
 logger = getLogger()
+
+
+def coalesce_columns_simulate_output(config: CoalesceOperationInputSchema) -> list[str]:
+    """
+    Simulate the output of the coalesce_columns operation.
+    This is used to determine the output columns.
+    """
+    source_columns = config.source_columns
+    output_col_name = config.output_column_name
+
+    return source_columns + [output_col_name]
 
 
 # pylint:disable=unused-argument,logging-fstring-interpolation
