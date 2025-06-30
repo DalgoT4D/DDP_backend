@@ -577,7 +577,7 @@ def test_create_source_failure():
         with pytest.raises(HttpError) as excinfo:
             create_source(workspace_id, "Example Source 1", "1", {"test": "test"})
         assert excinfo.value.status_code == 500
-        assert str(excinfo.value) == "failed to create source"
+        assert str(excinfo.value) == 'Failed to create source: {"error": "Invalid request data"}'
 
 
 def test_create_source_with_invalid_workspace_id():
@@ -635,7 +635,7 @@ def test_update_source_failure():
         with pytest.raises(HttpError) as excinfo:
             update_source(source_id, name, {"test": "test"}, sourcedef_id)
         assert excinfo.value.status_code == 500
-        assert str(excinfo.value) == "failed to update source"
+        assert str(excinfo.value) == 'Failed to update source: {"error": "Invalid request data"}'
 
 
 def test_update_source_with_invalid_name():
@@ -702,7 +702,10 @@ def test_check_source_connection_failure():
         with pytest.raises(HttpError) as excinfo:
             check_source_connection(workspace_id, data)
 
-        assert str(excinfo.value) == "Credentials are invalid"
+        assert (
+            str(excinfo.value)
+            == "Failed to check the source connection: " + failed_response["message"]
+        )
 
 
 def test_check_source_connection_with_invalid_workspace_id():
@@ -802,6 +805,11 @@ def test_get_source_schema_catalog_failure_1():
         mock_response = Mock(spec=requests.Response)
         mock_response.status_code = 500
         mock_response.headers = {"Content-Type": "application/json"}
+        failure_reason = {
+            "error": "failed to get source schema catalogs",
+            "message": "error-message",
+        }
+
         mock_response.json.return_value = {
             "error": "failed to get source schema catalogs",
             "message": "error-message",
@@ -810,7 +818,10 @@ def test_get_source_schema_catalog_failure_1():
         with pytest.raises(HttpError) as excinfo:
             get_source_schema_catalog(workspace_id, source_id)
         assert excinfo.value.status_code == 400
-        assert str(excinfo.value) == "error-message"
+        assert (
+            str(excinfo.value)
+            == "Failed to fetch source schema catalog: " + failure_reason["message"]
+        )
 
 
 def test_get_source_schema_catalog_failure_2():
@@ -848,7 +859,7 @@ def test_get_source_schema_catalog_failure_3():
         with pytest.raises(HttpError) as excinfo:
             get_source_schema_catalog(workspace_id, source_id)
         assert excinfo.value.status_code == 400
-        assert str(excinfo.value) == "Failed to discover schema"
+        assert str(excinfo.value) == "Failed to discover schema for source: my_source_id"
 
 
 def test_get_destination_definitions_success():
@@ -1087,7 +1098,10 @@ def test_create_destination_failure():
         with pytest.raises(HttpError) as excinfo:
             create_destination("workspace-id", "name", "destinationdef_id", {})
 
-        assert str(excinfo.value) == "failed to create destination"
+        assert (
+            str(excinfo.value)
+            == 'Failed to create destination: {"wrong-key": "theConnectionSpecification"}'
+        )
 
 
 def test_update_destination_success():
@@ -1137,7 +1151,10 @@ def test_update_destination_failure():
         with pytest.raises(HttpError) as excinfo:
             update_destination("destination_id", "name", {}, "destinationdef_id")
 
-        assert str(excinfo.value) == "failed to update destination"
+        assert (
+            str(excinfo.value)
+            == 'Failed to update destination: {"wrong-key": "theConnectionSpecification"}'
+        )
 
 
 def test_check_destination_connection_success():
@@ -1172,19 +1189,21 @@ def test_check_destination_connection_failure_1():
         mock_response = Mock(spec=requests.Response)
         mock_response.status_code = 200
         mock_response.headers = {"Content-Type": "application/json"}
-        mock_response.json.return_value = {
+        failure_reason = {
             "status": "failed",
             "message": "Credentials are invalid",
             "jobInfo": {
                 "succeeded": False,
             },
         }
+
+        mock_response.json.return_value = failure_reason
         mock_post.return_value = mock_response
 
         with pytest.raises(HttpError) as excinfo:
             check_destination_connection("workspace_id", payload)
 
-        assert str(excinfo.value) == "Credentials are invalid"
+        assert str(excinfo.value) == "Failed to connect to warehouse: " + failure_reason["message"]
 
 
 def test_check_destination_connection_failure_2():
@@ -1195,19 +1214,22 @@ def test_check_destination_connection_failure_2():
         mock_response = Mock(spec=requests.Response)
         mock_response.status_code = 200
         mock_response.headers = {"Content-Type": "application/json"}
-        mock_response.json.return_value = {
+        failure_response = {
             "status": "failed",
             "message": "Credentials are invalid",
             "jobInfo": {
                 "succeeded": False,
             },
         }
+        mock_response.json.return_value = failure_response
         mock_post.return_value = mock_response
 
         with pytest.raises(HttpError) as excinfo:
             check_destination_connection("workspace_id", payload)
 
-        assert str(excinfo.value) == "Credentials are invalid"
+        assert (
+            str(excinfo.value) == "Failed to connect to warehouse: " + failure_response["message"]
+        )
 
 
 def test_check_destination_connection_for_update_success():
@@ -1236,19 +1258,22 @@ def test_check_destination_connection_for_update_failure_1():
         mock_response = Mock(spec=requests.Response)
         mock_response.status_code = 200
         mock_response.headers = {"Content-Type": "application/json"}
-        mock_response.json.return_value = {
+        failure_response = {
             "status": "failed",
             "message": "Credentials are invalid",
             "jobInfo": {
                 "succeeded": False,
             },
         }
+        mock_response.json.return_value = failure_response
         mock_post.return_value = mock_response
 
         with pytest.raises(HttpError) as excinfo:
             check_destination_connection_for_update("destination_id", payload)
 
-        assert str(excinfo.value) == "Credentials are invalid"
+        assert (
+            str(excinfo.value) == "Failed to connect to warehouse: " + failure_response["message"]
+        )
 
 
 def test_check_destination_connection_for_update_failure_2():
@@ -1257,19 +1282,22 @@ def test_check_destination_connection_for_update_failure_2():
         mock_response = Mock(spec=requests.Response)
         mock_response.status_code = 200
         mock_response.headers = {"Content-Type": "application/json"}
-        mock_response.json.return_value = {
+        failure_response = {
             "status": "failed",
             "message": "Credentials are invalid",
             "jobInfo": {
                 "succeeded": False,
             },
         }
+        mock_response.json.return_value = failure_response
         mock_post.return_value = mock_response
 
         with pytest.raises(HttpError) as excinfo:
             check_destination_connection_for_update("destination_id", payload)
 
-        assert str(excinfo.value) == "Credentials are invalid"
+        assert (
+            str(excinfo.value) == "Failed to connect to warehouse: " + failure_response["message"]
+        )
 
 
 def test_get_connections_bad_workspace_id():
@@ -1386,7 +1414,7 @@ def test_update_connection_failed_to_update():
                 connection_info,
                 {"sourceId": "source-id", "syncCatalog": {"streams": []}},
             )
-        assert str(excinfo.value) == "failed to update connection"
+        assert str(excinfo.value) == 'Failed to update connection: {"no-connectionId": true}'
 
 
 @patch.multiple(
