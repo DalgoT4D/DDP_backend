@@ -190,11 +190,7 @@ def post_logout(request, payload: LogoutPayload):
 def post_token_refresh(request, payload: TokenRefreshPayload):
     """Refreshes the JWT token using the refresh token"""
     serializer = CustomTokenRefreshSerializer(data=payload.dict())
-    try:
-        serializer.is_valid(raise_exception=True)
-    except TokenError:
-        # If the refresh token is blacklisted, SimpleJWT will raise TokenError
-        raise HttpError(401, "Refresh token is invalid or blacklisted")
+    serializer.is_valid(raise_exception=True)
     token_data = serializer.validated_data
     return {"token": token_data["access"]}
 

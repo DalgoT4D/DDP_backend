@@ -13,6 +13,9 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import RolePermission
 from ddpui.utils import thread
 from ddpui.utils.redis_client import RedisClient
+from ddpui.utils.custom_logger import CustomLogger
+
+logger = CustomLogger("ddpui")
 
 UNAUTHORIZED = "unauthorized"
 
@@ -83,6 +86,7 @@ class CustomJwtAuthMiddleware(HttpBearer):
             access_token = AccessToken(token)
             token_payload = access_token.payload
         except Exception as err:
+            logger.exception("Invalid or expired token: %s", err)
             raise HttpError(401, "Invalid or expired token")
 
         user_id = token_payload.get("user_id")
