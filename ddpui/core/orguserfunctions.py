@@ -96,20 +96,22 @@ def create_orguser(payload: OrgUserCreate, email_verified: bool = False) -> OrgU
         username=payload.email, email=payload.email, password=payload.password
     )
     UserAttributes.objects.create(user=user, email_verified=email_verified)
+    new_role = None
+    if is_demo:
+        new_role = Role.objects.filter(slug=GUEST_ROLE).first()
+    else:
+        new_role = Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first()
+
     orguser = OrgUser.objects.create(
         user=user,
         org=demo_org,
-        new_role=(
-            Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first()
-            if is_demo
-            else Role.objects.filter(slug=GUEST_ROLE).first()
-        ),
+        new_role=new_role,
         email_verified=email_verified,
     )
     orguser.save()
     UserPreferences.objects.create(orguser=orguser, enable_email_notifications=True)
     logger.info(
-        f"created user [account-manager] " f"{orguser.user.email} having userid {orguser.user.id}"
+        f"created user {new_role.slug} " f"{orguser.user.email} having userid {orguser.user.id}"
     )
 
     return orguser
@@ -169,32 +171,6 @@ def update_orguser_v1(orguser: OrgUser, payload: OrgUserUpdatev1):
 
     logger.info(f"updated orguser {orguser.user.email}")
     return from_orguser(orguser)
-
-
-def delete_orguser(requestor_orguser: OrgUser, payload: DeleteOrgUserPayload):
-    """delete another orguser"""
-    orguser_to_delete = OrgUser.objects.filter(
-        org=requestor_orguser.org, user__email=payload.email
-    ).first()
-
-    if requestor_orguser == orguser_to_delete:
-        return None, "user cannot delete themselves"
-
-    if orguser_to_delete is None:
-        return None, "user does not belong to the org"
-
-    if orguser_to_delete.role > requestor_orguser.role:
-        return None, "cannot delete user having higher role"
-
-    # remove the invitations associated with the org user
-    Invitation.objects.filter(
-        invited_by__org=requestor_orguser.org, invited_email=payload.email
-    ).delete()
-
-    # delete the org user
-    orguser_to_delete.delete()
-
-    return None, None
 
 
 def delete_orguser_v1(requestor_orguser: OrgUser, payload: DeleteOrgUserPayload):

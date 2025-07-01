@@ -39,6 +39,8 @@ class UserAttributes(models.Model):
 """  # pylint: disable=no-member
 
 
+### deprecated
+# the OrgUserRole enum is deprecated and replaced by Role model
 class OrgUserRole(IntEnum):
     """an enum for roles assignable to org-users"""
 

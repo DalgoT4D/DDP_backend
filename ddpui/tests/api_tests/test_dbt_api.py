@@ -28,7 +28,7 @@ from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.ddpprefect import SECRET
 from ddpui.ddpprefect.schema import DbtProfile, OrgDbtGitHub, OrgDbtSchema
 from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1
-from ddpui.models.org_user import OrgUser, OrgUserRole
+from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Permission, Role, RolePermission
 from ddpui.tests.api_tests.test_user_org_api import mock_request, seed_db
 from ddpui.utils.custom_logger import CustomLogger
@@ -66,7 +66,6 @@ def orguser(authuser, org_with_workspace):
     org_user = OrgUser.objects.create(
         user=authuser,
         org=org_with_workspace,
-        role=OrgUserRole.ACCOUNT_MANAGER,
         new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
     )
     yield org_user

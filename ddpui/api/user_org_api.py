@@ -250,21 +250,6 @@ def get_organization_users(request):
     return res
 
 
-@user_org_router.post("/organizations/users/delete")
-@has_permission(["can_delete_orguser"])
-def delete_organization_users(request, payload: DeleteOrgUserPayload):
-    """delete the orguser posted"""
-    orguser: OrgUser = request.orguser
-    if orguser.org is None:
-        raise HttpError(400, "no associated org")
-
-    _, error = orguserfunctions.delete_orguser(orguser, payload)
-    if error:
-        raise HttpError(400, error)
-
-    return {"success": 1}
-
-
 @user_org_router.post("/v1/organizations/users/delete")
 @has_permission(["can_delete_orguser"])
 def delete_organization_users_v1(request, payload: DeleteOrgUserPayload):
@@ -431,20 +416,6 @@ def post_verify_email(request, payload: VerifyEmailSchema):  # pylint: disable=u
 
 
 @user_org_router.post(
-    "/organizations/users/invite/",
-    response=InvitationSchema,
-)
-@has_permission(["can_create_invitation"])
-def post_organization_user_invite(request, payload: InvitationSchema):
-    """Send an invitation to a user to join platform"""
-    orguser: OrgUser = request.orguser
-    retval, error = orguserfunctions.invite_user(orguser, payload)
-    if error:
-        raise HttpError(400, error)
-    return retval
-
-
-@user_org_router.post(
     "/v1/organizations/users/invite/",
     response=NewInvitationSchema,
 )
@@ -464,16 +435,6 @@ def post_organization_user_accept_invite_v1(
 ):  # pylint: disable=unused-argument
     """User accepting the invite sent with a valid invite code"""
     retval, error = orguserfunctions.accept_invitation_v1(payload)
-    if error:
-        raise HttpError(400, error)
-    return retval
-
-
-@user_org_router.get("/users/invitations/")
-@has_permission(["can_view_invitations"])
-def get_invitations(request):
-    """Get all invitations sent by the current user"""
-    retval, error = orguserfunctions.get_invitations_from_orguser(request.orguser)
     if error:
         raise HttpError(400, error)
     return retval
