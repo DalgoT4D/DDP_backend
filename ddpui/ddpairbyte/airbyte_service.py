@@ -14,7 +14,6 @@ from ninja.errors import HttpError
 from flags.state import flag_enabled
 from ddpui import settings
 from ddpui.ddpairbyte import schema
-from ddpui.ddpprefect import prefect_service, AIRBYTESERVER
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.helpers import remove_nested_attribute, nice_bytes
 from ddpui.ddpairbyte.schema import (
@@ -23,8 +22,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteSourceUpdateCheckConnection,
     AirbyteDestinationUpdateCheckConnection,
 )
-from ddpui.utils import thread
-from ddpui.models.org import OrgPrefectBlockv1
+
 
 load_dotenv()
 

@@ -129,7 +129,7 @@ class CustomTokenObtainSerializer(TokenObtainPairSerializer):
             orguser_permissions[orguser.id] = list(
                 RolePermission.objects.filter(role=role).values_list("permission__slug", flat=True)
             )
-        permissions_key = f"jwt_permissions:{uuid.uuid4()}"
+        permissions_key = f"jwt_role_permissions:{uuid.uuid4()}"
         redis_client = RedisClient.get_instance()
         redis_client.setex(
             permissions_key,
