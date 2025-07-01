@@ -9,7 +9,6 @@ from django.utils.text import slugify
 from django.db.models import Prefetch
 from django.contrib.auth.models import User
 from django.db.models import F
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 
 from ddpui.auth import has_permission, CustomTokenObtainSerializer, CustomTokenRefreshSerializer
@@ -182,8 +181,8 @@ def post_logout(request, payload: LogoutPayload):
     except TokenError:
         # Token is already invalid or expired, do not blacklist
         return {"success": 1}
-    except Exception as e:
-        raise HttpError(400, f"Logout failed: {str(e)}")
+    except Exception as err:
+        raise HttpError(400, f"Logout failed: {str(err)}") from err
 
 
 @user_org_router.post("/token/refresh", auth=None)

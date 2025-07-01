@@ -72,7 +72,6 @@ class CustomAuthMiddleware(HttpBearer):
 
                 request.permissions = list(permission_slugs) or []
                 request.orguser = orguser
-                thread.set_current_request(request)
                 return request
 
         raise HttpError(400, UNAUTHORIZED)
@@ -87,7 +86,7 @@ class CustomJwtAuthMiddleware(HttpBearer):
             token_payload = access_token.payload
         except Exception as err:
             logger.exception("Invalid or expired token: %s", err)
-            raise HttpError(401, "Invalid or expired token")
+            raise HttpError(401, "Invalid or expired token") from err
 
         user_id = token_payload.get("user_id")
         permissions_key = token_payload.get("permissions_key")
@@ -114,7 +113,6 @@ class CustomJwtAuthMiddleware(HttpBearer):
 
                 request.permissions = orguser_permissions.get(orguser.id, [])
                 request.orguser = orguser
-                thread.set_current_request(request)
                 return request
 
         raise HttpError(401, "Invalid or expired token")

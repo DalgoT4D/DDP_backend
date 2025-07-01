@@ -38,36 +38,10 @@ def abreq(endpoint, req=None, **kwargs):
     if method not in ["GET", "POST"]:
         raise HttpError(500, "method not supported")
 
-    request = thread.get_current_request()
-
     abhost = os.getenv("AIRBYTE_SERVER_HOST")
     abport = os.getenv("AIRBYTE_SERVER_PORT")
     abver = os.getenv("AIRBYTE_SERVER_APIVER")
     token = os.getenv("AIRBYTE_API_TOKEN")
-
-    if request is not None:
-        org_user = request.orguser
-        org_slug = org_user.org.slug
-        if flag_enabled("AIRBYTE_PROFILE", request_org_slug=org_slug):
-            org_server_block = OrgPrefectBlockv1.objects.filter(
-                org=org_user.org, block_type=AIRBYTESERVER
-            ).first()
-
-            if not org_server_block:
-                raise HttpError(400, "airbyte server block not found")
-
-            block_name = org_server_block.block_name
-
-            try:
-                airbyte_server_block = prefect_service.get_airbyte_server_block(block_name)
-            except Exception as exc:
-                raise Exception("could not connect to prefect-proxy") from exc
-
-            logger.info("Making request to Airbyte server through prefect block: %s", endpoint)
-            abhost = airbyte_server_block["host"]
-            abport = airbyte_server_block["port"]
-            abver = airbyte_server_block["version"]
-            token = airbyte_server_block["token"]
 
     logger.info("Making request to Airbyte server: %s", endpoint)
     try:
