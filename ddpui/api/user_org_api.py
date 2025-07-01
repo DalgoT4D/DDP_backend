@@ -281,21 +281,6 @@ def delete_organization_users_v1(request, payload: DeleteOrgUserPayload):
 
 
 @user_org_router.put(
-    "/organizations/user_self/",
-    response=OrgUserResponse,
-    deprecated=True,
-)
-@has_permission(["can_edit_orguser"])
-def put_organization_user_self(request, payload: OrgUserUpdate):
-    """update the requestor's OrgUser"""
-    orguser: OrgUser = request.orguser
-
-    # not allowed to update own role
-    payload.role = None
-    return orguserfunctions.update_orguser(orguser, payload)
-
-
-@user_org_router.put(
     "/v1/organizations/user_self/",
     response=OrgUserResponse,
 )
