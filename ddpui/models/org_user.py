@@ -1,9 +1,8 @@
 from datetime import datetime
 import uuid
+from django.utils import timezone
 from enum import IntEnum
 from django.utils.text import slugify
-from django.utils import timezone
-
 
 from django.db import models
 from django.contrib.auth.models import User
@@ -67,7 +66,6 @@ class OrgUser(models.Model):
 
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     org = models.ForeignKey(Org, on_delete=models.CASCADE, null=True)
-    role = models.IntegerField(choices=OrgUserRole.choices(), default=OrgUserRole.REPORT_VIEWER)
     new_role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True)
     email_verified = models.BooleanField(default=False)
     llm_optin = models.BooleanField(default=False)  # deprecated
@@ -112,20 +110,12 @@ class OrgUserUpdateNewRole(Schema):
     role_uuid: uuid.UUID
 
 
-class OrgUserNewOwner(Schema):
-    """payload to transfer account ownership"""
-
-    new_owner_email: str
-
-
 class OrgUserResponse(Schema):
     """structure for returning an OrgUser in an http response"""
 
     email: str
     org: OrgSchema = None
     active: bool
-    role: int
-    role_slug: str
     wtype: str | None
     is_demo: bool = False
     new_role_slug: str | None
@@ -137,9 +127,6 @@ class Invitation(models.Model):
     """Invitation to join an org"""
 
     invited_email = models.CharField(max_length=50)
-    invited_role = models.IntegerField(
-        choices=OrgUserRole.choices(), default=OrgUserRole.REPORT_VIEWER
-    )
     invited_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE)
     invited_on = models.DateTimeField()
     invite_code = models.CharField(max_length=36)
@@ -159,8 +146,6 @@ class InvitationSchema(Schema):
     """Docstring"""
 
     invited_email: str
-    invited_role_slug: str
-    invited_role: int = None
     invited_by: OrgUserResponse = None
     invited_on: datetime = None
     invite_code: str = None

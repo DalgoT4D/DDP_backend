@@ -22,8 +22,6 @@ from ddpui.models.org_user import (
     NewInvitationSchema,
     OrgUser,
     OrgUserCreate,
-    OrgUserNewOwner,
-    OrgUserRole,
     OrgUserUpdate,
     OrgUserUpdatev1,
     ResetPasswordSchema,
@@ -100,7 +98,6 @@ def create_orguser(payload: OrgUserCreate, email_verified: bool = False) -> OrgU
     UserAttributes.objects.create(user=user, email_verified=email_verified)
     orguser = OrgUser.objects.create(
         user=user,
-        role=OrgUserRole.ACCOUNT_MANAGER,
         org=demo_org,
         new_role=(
             Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first()
@@ -172,38 +169,6 @@ def update_orguser_v1(orguser: OrgUser, payload: OrgUserUpdatev1):
 
     logger.info(f"updated orguser {orguser.user.email}")
     return from_orguser(orguser)
-
-
-def transfer_ownership(requestor_orguser: OrgUser, payload: OrgUserNewOwner):
-    """transfer ownership of an orguser"""
-    if requestor_orguser.role not in [
-        OrgUserRole.ACCOUNT_MANAGER,
-    ]:
-        return None, "only an account owner can transfer account ownership"
-
-    new_owner = OrgUser.objects.filter(
-        org=requestor_orguser.org,
-        user__email=payload.new_owner_email,
-        user__is_active=True,
-    ).first()
-
-    if new_owner is None:
-        return None, "could not find user having this email address in this org"
-
-    if new_owner.role not in [OrgUserRole.PIPELINE_MANAGER]:
-        return None, "can only promote pipeline managers"
-
-    new_owner.role = OrgUserRole.ACCOUNT_MANAGER
-    requestor_orguser.role = OrgUserRole.PIPELINE_MANAGER
-    try:
-        with transaction.atomic():
-            new_owner.save()
-            requestor_orguser.save()
-    except Exception as error:
-        logger.exception(error)
-        return None, "failed to transfer ownership"
-
-    return from_orguser(requestor_orguser), None
 
 
 def delete_orguser(requestor_orguser: OrgUser, payload: DeleteOrgUserPayload):

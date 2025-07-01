@@ -28,9 +28,7 @@ from ddpui.models.org_user import (
     NewInvitationSchema,
     OrgUser,
     OrgUserCreate,
-    OrgUserNewOwner,
     OrgUserResponse,
-    OrgUserRole,
     OrgUserUpdate,
     OrgUserUpdateNewRole,
     OrgUserUpdatev1,
@@ -106,8 +104,6 @@ def get_current_user_v2(request, org_slug: str = None):
                 email=user.email,
                 org=curr_orguser.org,
                 active=user.is_active,
-                role=curr_orguser.role,
-                role_slug=slugify(OrgUserRole(curr_orguser.role).name),
                 new_role_slug=curr_orguser.new_role.slug,
                 wtype=warehouse.wtype if warehouse else None,
                 permissions=[
@@ -239,8 +235,6 @@ def get_organization_users(request):
                 email=curr_orguser.user.email,
                 org=curr_orguser.org,
                 active=curr_orguser.user.is_active,
-                role=curr_orguser.role,
-                role_slug=slugify(OrgUserRole(curr_orguser.role).name),
                 new_role_slug=curr_orguser.new_role.slug,
                 wtype=warehouse.wtype if warehouse else None,
                 permissions=[
@@ -315,31 +309,6 @@ def put_organization_user_self_v1(request, payload: OrgUserUpdatev1):
 
 
 @user_org_router.put(
-    "/organizations/users/",
-    response=OrgUserResponse,
-    deprecated=True,
-)
-@has_permission(["can_edit_orguser"])
-def put_organization_user(request, payload: OrgUserUpdate):
-    """update another OrgUser"""
-    requestor_orguser: OrgUser = request.orguser
-
-    if requestor_orguser.role not in [
-        OrgUserRole.ACCOUNT_MANAGER,
-        OrgUserRole.PIPELINE_MANAGER,
-    ]:
-        raise HttpError(400, "not authorized to update another user")
-
-    orguser = OrgUser.objects.filter(
-        user__email=payload.toupdate_email, org=request.orguser.org
-    ).first()
-    if orguser is None:
-        raise HttpError(400, "could not find user having this email address in this org")
-
-    return orguserfunctions.update_orguser(orguser, payload)
-
-
-@user_org_router.put(
     "/v1/organizations/users/",
     response=OrgUserResponse,
 )
@@ -363,20 +332,6 @@ def put_organization_user_v1(request, payload: OrgUserUpdatev1):
         payload.role_uuid = None
 
     return orguserfunctions.update_orguser_v1(orguser, payload)
-
-
-@user_org_router.post(
-    "/organizations/users/makeowner/",
-    response=OrgUserResponse,
-)
-@has_permission(["can_edit_orguser_role"])
-def post_transfer_ownership(request, payload: OrgUserNewOwner):
-    """update another OrgUser"""
-    orguser: OrgUser = request.orguser
-    retval, error = orguserfunctions.transfer_ownership(orguser, payload)
-    if error:
-        raise HttpError(400, error)
-    return retval
 
 
 @user_org_router.post(
