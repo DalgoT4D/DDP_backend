@@ -1,3 +1,4 @@
+import os
 import uuid
 import json
 from functools import wraps
@@ -88,12 +89,11 @@ class CustomJwtAuthMiddleware(HttpBearer):
             logger.exception("Invalid or expired token: %s", err)
             raise HttpError(401, "Invalid or expired token") from err
 
-        user_id = token_payload.get("user_id")
-        role_permissions_key = token_payload.get("role_permissions_key")
-        orguser_role_key = token_payload.get("orguser_role_key")
+        role_permissions_key = os.getenv("ROLE_PERMISSIONS_REDIS_KEY", "dalgo_permissions_key")
 
-        if not role_permissions_key:
-            raise HttpError(403, "Permissions key not found in token")
+        user_id = token_payload.get("user_id")
+        role_permissions_key = token_payload.get(role_permissions_key)
+        orguser_role_key = token_payload.get("orguser_role_key")
 
         if token_payload and user_id:
             request.user = User.objects.filter(id=user_id).first()
@@ -101,26 +101,49 @@ class CustomJwtAuthMiddleware(HttpBearer):
             if request.headers.get("x-dalgo-org"):
                 orgslug = request.headers["x-dalgo-org"]
                 q_orguser = q_orguser.filter(org__slug=orgslug)
-            orguser = q_orguser.select_related("org", "user").first()
+            orguser = q_orguser.select_related("org").first()
             if orguser is not None:
                 if orguser.org is None:
                     raise HttpError(400, "register an organization first")
 
                 redis_client = RedisClient.get_instance()
+                orguser_role_id = None
+                permissions_json = None
 
-                orguser_role_map = redis_client.get(orguser_role_key)
-                orguser_role_map_json = json.loads(orguser_role_map)
-                # only fetch role if the orguser is not found in cache;
-                # for cases when a new orguser was added but the user is still logged in
+                if orguser_role_key:
+                    orguser_role_map = redis_client.get(orguser_role_key)
+                    if orguser_role_map:
+                        orguser_role_map_json = json.loads(orguser_role_map)
+
                 if not orguser_role_map_json:
-                    orguser_role_id = orguser.new_role.id
+                    orguser_role_map_json = {str(orguser.id): orguser.new_role.id}
 
-                orguser_role_id = orguser_role_map_json.get(str(orguser.id), None)
+                if (
+                    not orguser_role_map_json
+                    or not isinstance(orguser_role_map, dict)
+                    or len(orguser_role_map_json.keys()) == 0
+                ):
+                    raise HttpError(401, "No orguser role found")
 
-                permissions_map = redis_client.get(role_permissions_key)
-                permissions_json = json.loads(permissions_map)
+                orguser_role_id = orguser_role_map_json.get(str(orguser.id))
+
+                if role_permissions_key:
+                    permissions_map = redis_client.get(role_permissions_key)
+                    if permissions_map:
+                        permissions_json = json.loads(permissions_map)
+
                 if not permissions_json:
-                    raise HttpError(403, "Permissions not found or expired")
+                    role_permissions = {}
+                    for role_perm in RolePermission.objects.select_related("permission").all():
+                        role_permissions.setdefault(str(role_perm.role_id), [])
+                        role_permissions.get(str(role_perm.role_id)).append(
+                            role_perm.permission.slug
+                        )
+
+                    permissions_json = role_permissions
+
+                    # set in redis
+                    redis_client.set(role_permissions_key, permissions_json)
 
                 request.permissions = permissions_json.get(str(orguser_role_id), [])
                 request.orguser = orguser
@@ -134,31 +157,38 @@ class CustomTokenObtainSerializer(TokenObtainPairSerializer):
     def get_token(cls, user):
         token = super().get_token(user)
 
-        orguser_role = {}  # { orguser_id : role_id }
-        for orguser in OrgUser.objects.filter(user=user):
-            orguser_role[orguser.id] = orguser.new_role.id
+        role_permissions_key = os.getenv("ROLE_PERMISSIONS_REDIS_KEY", "dalgo_permissions_key")
 
-        role_permissions = {}  # { role_id : list[permission_slugs] }
-        for role_perm in RolePermission.objects.select_related("permission").all():
-            if role_perm.role_id not in role_permissions:
-                role_permissions[role_perm.role_id] = []
-            role_permissions[role_perm.role_id].append(role_perm.permission.slug)
-
-        role_permissions_key = f"jwt_role_permissions:{uuid.uuid4()}"
         redis_client = RedisClient.get_instance()
-        redis_client.setex(
-            role_permissions_key,
-            60 * 60 * 4,  # 4 hours expiry (should be >= access token lifetime)
-            json.dumps(role_permissions),
-        )
+        role_permissions = redis_client.get(
+            role_permissions_key
+        )  # { role_id : list[permission_slugs] }
 
-        orguser_role_key = f"jwt_orguser_role:{uuid.uuid4()}"
-        redis_client.setex(
-            orguser_role_key,
-            60 * 60 * 4,  # 4 hours expiry (should be >= access token lifetime)
-            json.dumps(orguser_role),
-        )
-        token["role_permissions_key"] = role_permissions_key
+        if not role_permissions:
+            role_permissions = {}
+            for role_perm in RolePermission.objects.select_related("permission").all():
+                if role_perm.role_id not in role_permissions:
+                    role_permissions[role_perm.role_id] = []
+                role_permissions[role_perm.role_id].append(role_perm.permission.slug)
+
+            redis_client.set(
+                role_permissions_key,
+                json.dumps(role_permissions),
+            )
+
+        orguser_role_key = f"orguser_role:{user.id}"
+        orguser_role = redis_client.get(orguser_role_key)
+
+        if not orguser_role:
+            orguser_role = {}  # { orguser_id : role_id }
+            for orguser in OrgUser.objects.filter(user=user):
+                orguser_role[orguser.id] = orguser.new_role.id
+
+            redis_client.set(
+                orguser_role_key,
+                json.dumps(orguser_role),
+            )
+
         token["orguser_role_key"] = orguser_role_key
         return token
 
