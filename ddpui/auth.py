@@ -114,7 +114,9 @@ class CustomJwtAuthMiddleware(HttpBearer):
                     if orguser_role_map:
                         orguser_role_map_json = json.loads(orguser_role_map)
 
-                if not orguser_role_map_json:
+                # its possible that new orguser is created for the user after the cache was last updated
+                # no need to update the cache here
+                if not orguser_role_map_json or (str(orguser.id) not in orguser_role_map_json):
                     orguser_role_map_json = {str(orguser.id): orguser.new_role.id}
 
                 if (
@@ -175,18 +177,18 @@ class CustomTokenObtainSerializer(TokenObtainPairSerializer):
                 json.dumps(role_permissions),
             )
 
+        # always refresh this redis key when someone logs in
+        # new orgusers might be created for the user
         orguser_role_key = f"orguser_role:{user.id}"
-        orguser_role = redis_client.get(orguser_role_key)
 
-        if not orguser_role:
-            orguser_role = {}  # { orguser_id : role_id }
-            for orguser in OrgUser.objects.filter(user=user):
-                orguser_role[orguser.id] = orguser.new_role.id
+        orguser_role = {}  # { orguser_id : role_id }
+        for orguser in OrgUser.objects.filter(user=user):
+            orguser_role[orguser.id] = orguser.new_role.id
 
-            redis_client.set(
-                orguser_role_key,
-                json.dumps(orguser_role),
-            )
+        redis_client.set(
+            orguser_role_key,
+            json.dumps(orguser_role),
+        )
 
         token["orguser_role_key"] = orguser_role_key
         return token
