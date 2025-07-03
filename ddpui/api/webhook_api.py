@@ -74,6 +74,6 @@ def post_airbyte_job_details(request, job_id: str):
     if request.headers.get("X-Notification-Key") != os.getenv("AIRBYTE_NOTIFICATIONS_WEBHOOK_KEY"):
         raise HttpError(400, "unauthorized")
 
-    sync_single_airbyte_job_stats.delay(job_id)
+    sync_single_airbyte_job_stats.delay(int(job_id))
 
     return {"status": "ok"}
