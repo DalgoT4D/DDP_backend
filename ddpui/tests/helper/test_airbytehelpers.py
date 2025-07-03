@@ -1,9 +1,9 @@
 from unittest.mock import patch, Mock, ANY
 import os
+from datetime import datetime
 from pathlib import Path
 import yaml
 import pytest
-from datetime import datetime
 from ddpui.ddpairbyte.airbytehelpers import (
     add_custom_airbyte_connector,
     upgrade_custom_sources,
@@ -33,7 +33,7 @@ from ddpui.models.org import (
     TransformType,
 )
 from ddpui.models.flow_runs import PrefectFlowRun
-from ddpui.models.org_user import OrgUser, OrgUserRole, User
+from ddpui.models.org_user import OrgUser, User
 from ddpui.models.airbyte import AirbyteJob
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.models.tasks import Task, OrgTask, OrgDataFlowv1, DataflowOrgTask
