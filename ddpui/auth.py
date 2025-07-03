@@ -92,7 +92,6 @@ class CustomJwtAuthMiddleware(HttpBearer):
         role_permissions_key = os.getenv("ROLE_PERMISSIONS_REDIS_KEY", "dalgo_permissions_key")
 
         user_id = token_payload.get("user_id")
-        role_permissions_key = token_payload.get(role_permissions_key)
         orguser_role_key = token_payload.get("orguser_role_key")
 
         if token_payload and user_id:
@@ -119,8 +118,8 @@ class CustomJwtAuthMiddleware(HttpBearer):
                     orguser_role_map_json = {str(orguser.id): orguser.new_role.id}
 
                 if (
-                    not orguser_role_map_json
-                    or not isinstance(orguser_role_map, dict)
+                    orguser_role_map_json is None
+                    or not isinstance(orguser_role_map_json, dict)
                     or len(orguser_role_map_json.keys()) == 0
                 ):
                     raise HttpError(401, "No orguser role found")
