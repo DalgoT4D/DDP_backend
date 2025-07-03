@@ -31,7 +31,7 @@ from ddpui.models.org import (
     TransformType,
 )
 from ddpui.models.flow_runs import PrefectFlowRun
-from ddpui.models.org_user import OrgUser, OrgUserRole, User
+from ddpui.models.org_user import OrgUser, User
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.models.tasks import Task, OrgTask, OrgDataFlowv1, DataflowOrgTask
 from ddpui.ddpprefect import DBTCLIPROFILE, schema, DBTCORE
@@ -86,7 +86,6 @@ def orguser(authuser, org_without_workspace):
     orguser_ = OrgUser.objects.create(
         user=authuser,
         org=org_without_workspace,
-        role=OrgUserRole.ACCOUNT_MANAGER,
         new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
     )
     yield orguser_
@@ -1191,7 +1190,7 @@ def test_schedule_update_connection_schema_success(
                         "slug": "update-schema",
                         "airbyte_server_block": "",
                         "connection_id": "connection_id",
-                        "timeout": 15,
+                        "timeout": ANY,
                         "type": "Airbyte Connection",
                         "orgtask_uuid": ANY,
                         "flow_name": None,

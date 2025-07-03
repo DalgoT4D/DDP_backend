@@ -3,8 +3,10 @@ from django.core.management.base import BaseCommand
 from django.contrib.auth.models import User
 
 from ddpui.models.org_user import OrgUser, OrgUserRole
+from ddpui.models.role_based_access import Role
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.constants import SYSTEM_USER_EMAIL
+from ddpui.auth import ACCOUNT_MANAGER_ROLE
 
 logger = CustomLogger("ddpui")
 
@@ -33,5 +35,9 @@ class Command(BaseCommand):
             logger.info("created auth user")
         orguser = OrgUser.objects.filter(user=user).first()
         if orguser is None:
-            OrgUser.objects.create(user=user, org=None, role=OrgUserRole.ACCOUNT_MANAGER)
+            OrgUser.objects.create(
+                user=user,
+                org=None,
+                new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+            )
             logger.info("created system orguser")

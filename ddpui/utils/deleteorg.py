@@ -1,6 +1,6 @@
 import uuid
 from ninja.errors import HttpError
-from ddpui.models.org_user import Org, OrgUser, OrgUserRole
+from ddpui.models.org_user import Org, OrgUser
 from ddpui.models.org import OrgWarehouse, OrgDataFlowv1
 from ddpui.models.tasks import OrgTask, DataflowOrgTask
 from ddpui.models.org import OrgPrefectBlockv1
@@ -10,6 +10,7 @@ from ddpui.ddpprefect import AIRBYTESERVER, DBTCLIPROFILE
 from ddpui.ddpdbt import dbt_service
 from ddpui.utils import secretsmanager
 from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTERESET
+from ddpui.auth import ACCOUNT_MANAGER_ROLE
 
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -181,7 +182,7 @@ def delete_orgusers(org: Org, dry_run: bool = False):  # skipcq: PYL-R0201
 
 def display_org(org: Org):
     """show org"""
-    account_admin = OrgUser.objects.filter(org=org, role=OrgUserRole.ACCOUNT_MANAGER).first()
+    account_admin = OrgUser.objects.filter(org=org, new_role__slug=ACCOUNT_MANAGER_ROLE).first()
     logger.info(
         "OrgName: %-25s %-25s Airbyte workspace ID: %-40s Admin: %s",
         org.name,
