@@ -5,7 +5,7 @@ import pytz
 from django.core.management.base import BaseCommand, CommandParser
 
 from ddpui.models.tasks import DataflowOrgTask
-from ddpui.models.syncstats import SyncStats
+from ddpui.models.airbyte import SyncStats
 from ddpui.ddpairbyte.airbyte_service import get_jobs_for_connection, abreq
 
 # from ddpui.ddpairbyte.airbytehelpers import get_job_info_for_connection

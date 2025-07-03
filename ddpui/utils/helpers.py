@@ -1,3 +1,4 @@
+import pytz
 import shlex
 import subprocess
 import re
@@ -191,4 +192,15 @@ def find_key_in_dictionary(dictionary: dict, key):
             val = find_key_in_dictionary(v, key)
             if val:
                 return val
+    return None
+
+
+def from_timestamp(timestamp: int) -> datetime:
+    """
+    Convert a Unix timestamp to a datetime object.
+    :param timestamp: Unix timestamp in seconds.
+    :return: Corresponding datetime object.
+    """
+    if timestamp > 0:
+        return datetime.fromtimestamp(timestamp, tz=pytz.UTC)
     return None
