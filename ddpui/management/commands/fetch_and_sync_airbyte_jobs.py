@@ -36,9 +36,8 @@ class Command(BaseCommand):
 
         orgs = Org.objects.all()
         if orgslug and orgslug.lower() != "all":
-            try:
-                orgs = Org.objects.filter(slug=orgslug)
-            except Org.DoesNotExist:
+            orgs = Org.objects.filter(slug=orgslug)
+            if not orgs.exists():
                 raise CommandError(f"Org with slug '{orgslug}' does not exist.")
 
         for org in orgs:
