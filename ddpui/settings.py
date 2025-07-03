@@ -15,6 +15,14 @@ from pathlib import Path
 import sentry_sdk
 from datetime import timedelta
 
+from opentelemetry import trace
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.django import DjangoInstrumentor
+
+
 from corsheaders.defaults import default_headers
 from dotenv import load_dotenv
 from ddpui.utils.ddp_logger import setup_logger as setup_ddp_logger
@@ -48,8 +56,46 @@ SECRET_KEY = os.getenv("DJANGOSECRET")
 DEBUG = os.getenv("DEBUG", "") == "True"
 
 
-# CORS
+# open-telemetry
+try:
+    # Configure OpenTelemetry Resource
+    resource = Resource.create(
+        {
+            "service.name": os.getenv("OTEL_SERVICE_NAME", "dalgo-backend"),
+            "service.version": "1.0.0",
+        }
+    )
 
+    provider = TracerProvider(resource=resource)
+    trace.set_tracer_provider(provider)
+
+    # Use HTTP exporter instead of gRPC
+    endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
+    full_endpoint = endpoint + "/v1/traces"
+
+    print(f"OpenTelemetry connecting to: {full_endpoint}")
+
+    otlp_exporter = OTLPSpanExporter(
+        endpoint=full_endpoint,
+        timeout=int(os.getenv("OTEL_EXPORTER_OTLP_TIMEOUT", "30")),
+    )
+
+    span_processor = BatchSpanProcessor(otlp_exporter)
+    provider.add_span_processor(span_processor)
+
+    DjangoInstrumentor().instrument()
+    print(
+        f"OpenTelemetry configured successfully with service: {os.getenv('OTEL_SERVICE_NAME', 'dalgo-backend')}"
+    )
+
+except Exception as e:
+    print(f"ERROR: OpenTelemetry configuration failed: {e}")
+    import traceback
+
+    traceback.print_exc()
+
+
+# CORS
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
@@ -58,6 +104,7 @@ ALLOWED_HOSTS = [
     "staging.dalgo.org",
     "dashboard.dalgo.org",
 ]
+
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_METHODS = [
     "GET",
