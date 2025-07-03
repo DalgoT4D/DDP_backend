@@ -202,5 +202,5 @@ def from_timestamp(timestamp: int) -> datetime:
     :return: Corresponding datetime object.
     """
     if timestamp > 0:
-        return datetime.fromtimestamp(timestamp).astimezone(pytz.UTC)
+        return datetime.fromtimestamp(timestamp, tz=pytz.UTC)
     return None
