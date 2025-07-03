@@ -6,18 +6,15 @@ These functions do not access the Dalgo database
 
 from typing import Dict, List
 import os
-import pytz
 from datetime import datetime
+import pytz
 import requests
 from dotenv import load_dotenv
 from ninja.errors import HttpError
-from django.forms.models import model_to_dict
-from flags.state import flag_enabled
 from ddpui import settings
 from ddpui.ddpairbyte import schema
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.helpers import remove_nested_attribute, nice_bytes
-from ddpui.utils.helpers import from_timestamp
 from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
     AirbyteDestinationCreate,
@@ -25,8 +22,6 @@ from ddpui.ddpairbyte.schema import (
     AirbyteDestinationUpdateCheckConnection,
 )
 
-from ddpui.models.tasks import OrgTask
-from ddpui.models.airbyte import AirbyteJob
 
 load_dotenv()
 
@@ -923,7 +918,7 @@ def get_jobs_for_connection(
     connection_id: str,
     limit: int = 1,
     offset: int = 0,
-    job_types: list[str] = ["sync"],
+    job_types: list[str] | None = None,
     created_at_start: datetime = None,
     created_at_end: datetime = None,
 ) -> int | None:
@@ -941,6 +936,9 @@ def get_jobs_for_connection(
     """
     if not isinstance(connection_id, str):
         raise HttpError(400, "connection_id must be a string")
+
+    if job_types is None:
+        job_types = ["sync"]
 
     payload = {
         "configTypes": job_types,
