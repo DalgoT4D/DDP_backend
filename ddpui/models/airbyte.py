@@ -86,3 +86,11 @@ class AirbyteJob(models.Model):
             delta = self.ended_at - self.started_at
             return int(delta.total_seconds())
         return None
+
+    @property
+    def last_attempt_no(self):
+        """Returns the last attempt number if attempts exist, otherwise returns None."""
+        if self.attempts:
+            attempts_list = list(map(lambda x: x["attempt"], self.attempts))
+            return max([attempt["id"] for attempt in attempts_list])
+        return None

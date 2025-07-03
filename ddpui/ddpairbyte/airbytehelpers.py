@@ -52,11 +52,13 @@ from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.core.dbtfunctions import map_airbyte_destination_spec_to_dbtcli_profile
 from ddpui.models.org import OrgDataFlowv1, OrgWarehouse
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskLockStatus
-from ddpui.utils.constants import (
-    TASK_AIRBYTESYNC,
-    TASK_AIRBYTECLEAR,
+from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTECLEAR
+from ddpui.utils.helpers import (
+    generate_hash_id,
+    update_dict_but_not_stars,
+    from_timestamp,
+    nice_bytes,
 )
-from ddpui.utils.helpers import generate_hash_id, update_dict_but_not_stars, from_timestamp
 from ddpui.utils import secretsmanager
 from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
 from ddpui.core.pipelinefunctions import (
@@ -683,13 +685,12 @@ def get_sync_job_history_for_connection(
     org: Org, connection_id: str, limit: int = 10, offset: int = 0
 ):
     """
-    Get all sync jobs (paginated) for a connection
+    Get all sync jobs (paginated) for a connection using AirbyteJob model
     Returns
     - Date
     - Records synced
     - Bytes synced
     - Duration
-    - logs
 
     In case there no sync jobs, return an empty list
     """
@@ -703,16 +704,37 @@ def get_sync_job_history_for_connection(
     if org_task is None:
         return None, "connection not found"
 
-    res = {"history": [], "totalSyncs": 0}
-    result = airbyte_service.get_jobs_for_connection(
-        connection_id, limit, offset, job_types=["sync", "reset_connection"]
-    )
-    res["totalSyncs"] = result["totalJobCount"]
-    if len(result["jobs"]) == 0:
-        return [], None
+    # Query AirbyteJob model instead of calling airbyte service
+    airbyte_jobs = AirbyteJob.objects.filter(
+        config_id=connection_id, job_type__in=["sync", "reset_connection"]
+    ).order_by("-created_at")[offset : offset + limit]
 
-    for job in result["jobs"]:
-        job_info = airbyte_service.parse_job_info(job)
+    total_syncs = AirbyteJob.objects.filter(
+        config_id=connection_id, job_type__in=["sync", "reset_connection"]
+    ).count()
+
+    res = {"history": [], "totalSyncs": total_syncs}
+
+    if not airbyte_jobs.exists():
+        return res, None
+
+    for job in airbyte_jobs:
+        job_info = {
+            "job_id": job.job_id,
+            "status": job.status,
+            "job_type": job.job_type,
+            "created_at": job.created_at,
+            "started_at": job.started_at,
+            "ended_at": job.ended_at,
+            "records_emitted": job.records_emitted or 0,
+            "bytes_emitted": nice_bytes(job.bytes_emitted) or 0,
+            "records_committed": job.records_committed or 0,
+            "bytes_committed": nice_bytes(job.bytes_committed) or 0,
+            "stream_stats": job.stream_stats,
+            "reset_config": job.reset_config,
+            "duration_seconds": job.duration,
+            "last_attempt_no": job.last_attempt_no,
+        }
 
         res["history"].append(job_info)
 
