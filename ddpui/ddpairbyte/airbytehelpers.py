@@ -67,7 +67,6 @@ from ddpui.core.pipelinefunctions import (
 )
 from ddpui.core.orgtaskfunctions import fetch_orgtask_lock_v1
 from ddpui.models.tasks import TaskLock
-from ddpui.models.airbyte import AirbyteJob
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.ddpdbt.elementary_service import create_elementary_profile, elementary_setup_status
 
