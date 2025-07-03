@@ -104,6 +104,7 @@ def abreq(endpoint, req=None, **kwargs):
     try:
         res.raise_for_status()
     except Exception as error:
+        logger.info("here2222")
         logger.exception(error.args)
         raise HttpError(res.status_code, res.text) from error
 
@@ -365,8 +366,9 @@ def create_source(workspace_id: str, name: str, sourcedef_id: str, config: dict)
         },
     )
     if "sourceId" not in res:
-        logger.error("Failed to create source: %s", res)
-        raise HttpError(500, "failed to create source")
+        error_message = "Failed to create source: " + res.get("message", json.dumps(res))
+        logger.error("Failed to create source: %s", error_message)
+        raise HttpError(500, error_message)
     return res
 
 
@@ -391,8 +393,9 @@ def update_source(source_id: str, name: str, config: dict, sourcedef_id: str) ->
         },
     )
     if "sourceId" not in res:
-        logger.error("Failed to update source: %s", res)
-        raise HttpError(500, "failed to update source")
+        error_message = "Failed to update source: " + res.get("message", json.dumps(res))
+        logger.error("Failed to update source: %s", error_message)
+        raise HttpError(500, error_message)
     return res
 
 
@@ -423,9 +426,11 @@ def check_source_connection(workspace_id: str, data: AirbyteSourceCreate) -> dic
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get("message", "Something went wrong, please check your credentials")
-        logger.error("Failed to check the source connection: %s", res)
-        raise HttpError(500, failure_reason)
+        error_message = "Failed to check the source connection: " + res.get(
+            "message", json.dumps(res)
+        )
+        logger.error("Failed to check the source connection: %s", error_message)
+        raise HttpError(500, error_message)
     return res
 
 
@@ -441,22 +446,12 @@ def check_source_connection_for_update(source_id: str, data: AirbyteSourceUpdate
         timeout=60,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get("message", "Something went wrong, please check your credentials")
-        logger.error("Failed to check the source connection: %s", res)
-        raise HttpError(500, failure_reason)
-    # {
-    #   'status': 'succeeded',
-    #   'jobInfo': {
-    #     'id': 'ecd78210-5eaa-4a70-89ad-af1d9bc7c7f2',
-    #     'configType': 'check_connection_source',
-    #     'configId': 'Optional[decd338e-5647-4c0b-adf4-da0e75f5a750]',
-    #     'createdAt': 1678891375849,
-    #     'endedAt': 1678891403356,
-    #     'succeeded': True,
-    #     'connectorConfigurationUpdated': False,
-    #     'logs': {'logLines': [str]}
-    #   }
-    # }
+        error_message = "Failed to check the source connection: " + res.get(
+            "message", json.dumps(res)
+        )
+        logger.error("Failed to check the source connection: %s", error_message)
+        raise HttpError(500, error_message)
+
     return res
 
 
@@ -496,9 +491,14 @@ def get_source_schema_catalog(
             if "logs" in res["jobInfo"]:
                 error += "\n".join(res["jobInfo"]["logs"]["logLines"])
             logger.error(error)
-            raise HttpError(400, message)
+            raise HttpError(400, error)
     if "catalog" not in res and "jobInfo" not in res:
-        raise HttpError(400, res["message"])
+        error_message = "Failed to fetch source schema catalog: " + res.get(
+            "message", json.dumps(res)
+        )
+        logger.error("Failed to fetch source schema catalog: %s", error_message)
+        raise HttpError(400, error_message)
+
     return res
 
 
@@ -611,8 +611,9 @@ def create_destination(workspace_id: str, name: str, destinationdef_id: str, con
         timeout=120,
     )
     if "destinationId" not in res:
-        logger.error("Failed to create destination: %s", res)
-        raise HttpError(500, "failed to create destination")
+        error_message = "Failed to create destination: " + res.get("message", json.dumps(res))
+        logger.error("Failed to create destination: %s", error_message)
+        raise HttpError(500, error_message)
     return res
 
 
@@ -640,8 +641,9 @@ def update_destination(
         timeout=120,
     )
     if "destinationId" not in res:
-        logger.error("Failed to update destination: %s", res)
-        raise HttpError(500, "failed to update destination")
+        error_message = "Failed to update destination: " + res.get("message", json.dumps(res))
+        logger.error("Failed to update destination: %s", error_message)
+        raise HttpError(500, error_message)
     return res
 
 
@@ -657,12 +659,12 @@ def check_destination_connection(workspace_id: str, data: AirbyteDestinationCrea
             "connectionConfiguration": data.config,
             "workspaceId": workspace_id,
         },
-        timeout=60,
+        timeout=120,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get("message", "Something went wrong, please check your credentials")
-        logger.error("Failed to check the destination connection: %s", res)
-        raise HttpError(500, failure_reason)
+        error_message = "Failed to connect to warehouse: " + res.get("message", json.dumps(res))
+        logger.error("Failed to connect to warehouse: %s", error_message)
+        raise HttpError(500, error_message)
     return res
 
 
@@ -680,12 +682,12 @@ def check_destination_connection_for_update(
             "connectionConfiguration": data.config,
             "name": data.name,
         },
-        timeout=60,
+        timeout=120,
     )
     if "jobInfo" not in res or res.get("status") == "failed":
-        failure_reason = res.get("message", "Something went wrong, please check your credentials")
-        logger.error("Failed to check the destination connection: %s", res)
-        raise HttpError(500, failure_reason)
+        error_message = "Failed to connect to warehouse: " + res.get("message", json.dumps(res))
+        logger.error("Failed to connect to warehouse: %s", error_message)
+        raise HttpError(500, error_message)
     return res
 
 
@@ -814,8 +816,9 @@ def create_connection(
 
     res = abreq("connections/create", payload)
     if "connectionId" not in res:
-        logger.error("Failed to create connection: %s", res)
-        raise HttpError(500, "failed to create connection")
+        error_message = "Failed to create connection: " + res.get("message", json.dumps(res))
+        logger.error("Failed to create connection: %s", error_message)
+        raise HttpError(500, error_message)
     return res
 
 
@@ -896,8 +899,9 @@ def update_connection(
 
     res = abreq("connections/update", current_connection)
     if "connectionId" not in res:
-        logger.error("Failed to update connection: %s", res)
-        raise HttpError(500, "failed to update connection")
+        error_message = "Failed to update connection: " + res.get("message", json.dumps(res))
+        logger.error("Failed to update connection: %s", error_message)
+        raise HttpError(500, error_message)
     return res
 
 

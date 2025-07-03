@@ -64,11 +64,11 @@ class SourceCheckConnectionConsumer(BaseConsumer):
                 response = airbyte_service.check_source_connection(
                     self.orguser.org.airbyte_workspace_id, payload
                 )
-        except Exception:
+        except Exception as error:
             self.respond(
                 WebsocketResponse(
                     data={},
-                    message="Invalid credentials",
+                    message="Error: " + str(error),
                     status=WebsocketResponseStatus.ERROR,
                 )
             )
@@ -110,11 +110,11 @@ class DestinationCheckConnectionConsumer(BaseConsumer):
                 response = airbyte_service.check_destination_connection(
                     self.orguser.org.airbyte_workspace_id, payload
                 )
-        except Exception:
+        except Exception as error:
             self.respond(
                 WebsocketResponse(
                     data={},
-                    message="Invalid credentials",
+                    message="Error: " + str(error),
                     status=WebsocketResponseStatus.ERROR,
                 )
             )
