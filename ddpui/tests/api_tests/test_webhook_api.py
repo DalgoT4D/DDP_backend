@@ -229,9 +229,7 @@ def test_post_notification_v1_orchestrate():
         mock_get_flow_run.return_value = flow_run
         user = User.objects.create(email="email", username="username")
         new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
-        OrgUser.objects.create(
-            org=org, user=user, role=OrgUserRole.ACCOUNT_MANAGER, new_role=new_role
-        )
+        OrgUser.objects.create(org=org, user=user, new_role=new_role)
         do_handle_prefect_webhook(flow_run["id"], flow_run["state_name"])
         assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
         mock_email_flowrun_logs_to_superadmins_2.assert_not_called()
@@ -280,9 +278,7 @@ def test_post_notification_v1_manual_with_connection_id():
         mock_get_flow_run.return_value = flow_run
         user = User.objects.create(email="email", username="username")
         new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
-        OrgUser.objects.create(
-            org=org, user=user, role=OrgUserRole.ACCOUNT_MANAGER, new_role=new_role
-        )
+        OrgUser.objects.create(org=org, user=user, new_role=new_role)
         do_handle_prefect_webhook(flow_run["id"], flow_run["state_name"])
         assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
         mock_email_flowrun_logs_to_superadmins_2.assert_not_called()
@@ -331,9 +327,7 @@ def test_post_notification_v1_manual_with_orgtask_id(seed_master_tasks):
         mock_get_flow_run.return_value = flow_run
         user = User.objects.create(email="email", username="username")
         new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
-        OrgUser.objects.create(
-            org=org, user=user, role=OrgUserRole.ACCOUNT_MANAGER, new_role=new_role
-        )
+        OrgUser.objects.create(org=org, user=user, new_role=new_role)
         do_handle_prefect_webhook(flow_run["id"], flow_run["state_name"])
         assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
         mock_email_flowrun_logs_to_superadmins_2.assert_not_called()
@@ -377,9 +371,7 @@ def test_post_notification_v1_manual_with_orgtask_id_generate_edr(seed_master_ta
         mock_get_flow_run.return_value = flow_run
         user = User.objects.create(email="email", username="username")
         new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
-        OrgUser.objects.create(
-            org=org, user=user, role=OrgUserRole.ACCOUNT_MANAGER, new_role=new_role
-        )
+        OrgUser.objects.create(org=org, user=user, new_role=new_role)
         do_handle_prefect_webhook(flow_run["id"], flow_run["state_name"])
         assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
         mock_email_flowrun_logs_to_superadmins_2.assert_not_called()
@@ -418,9 +410,7 @@ def test_post_notification_v1_email_supersadmins():
         mock_get_flow_run.return_value = flow_run
         user = User.objects.create(email="email", username="username")
         new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
-        OrgUser.objects.create(
-            org=org, user=user, role=OrgUserRole.ACCOUNT_MANAGER, new_role=new_role
-        )
+        OrgUser.objects.create(org=org, user=user, new_role=new_role)
 
         # Use context manager to ensure environment variables are properly reset
         with patch.dict(

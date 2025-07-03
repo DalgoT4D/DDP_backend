@@ -16,22 +16,16 @@ from ddpui.api.user_org_api import (
     get_current_user_v2,
     post_organization_user,
     get_organization_users,
-    delete_organization_users,
     delete_organization_users_v1,
-    put_organization_user_self,
     put_organization_user_self_v1,
-    put_organization_user,
     put_organization_user_v1,
-    post_transfer_ownership,
     post_organization_warehouse,
     get_organizations_warehouses,
-    post_organization_user_invite,
     post_organization_user_invite_v1,
     post_organization_user_accept_invite_v1,
     post_forgot_password,
     post_reset_password,
     post_verify_email,
-    get_invitations,
     get_invitations_v1,
     post_resend_invitation,
     delete_invitation,
@@ -43,10 +37,8 @@ from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.org_user import (
     OrgUser,
     OrgUserCreate,
-    OrgUserRole,
     OrgUserUpdate,
     OrgUserUpdatev1,
-    OrgUserNewOwner,
     InvitationSchema,
     NewInvitationSchema,
     Invitation,
@@ -122,7 +114,6 @@ def orguser(authuser, org_without_workspace):
     orguser = OrgUser.objects.create(
         user=authuser,
         org=org_without_workspace,
-        role=OrgUserRole.ACCOUNT_MANAGER,
         new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
     )
     yield orguser
@@ -135,7 +126,6 @@ def nonadminorguser(authuser, org_without_workspace):
     orguser = OrgUser.objects.create(
         user=authuser,
         org=org_without_workspace,
-        role=OrgUserRole.REPORT_VIEWER,
         new_role=Role.objects.filter(slug=GUEST_ROLE).first(),
     )
     yield orguser
@@ -148,7 +138,6 @@ def orguserwithoutorg(authuser):
     orguser = OrgUser.objects.create(
         user=authuser,
         org=None,
-        role=OrgUserRole.REPORT_VIEWER,
         new_role=Role.objects.filter(slug=GUEST_ROLE).first(),
     )
     yield orguser
@@ -181,13 +170,11 @@ def test_get_current_userv2_has_user(authuser, org_with_workspace, org_without_w
     orguser1 = OrgUser.objects.create(
         user=authuser,
         org=org_with_workspace,
-        role=OrgUserRole.REPORT_VIEWER,
         new_role=Role.objects.filter(slug=GUEST_ROLE).first(),
     )
     orguser2 = OrgUser.objects.create(
         user=authuser,
         org=org_without_workspace,
-        role=OrgUserRole.ACCOUNT_MANAGER,
         new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
     )
 
@@ -202,12 +189,12 @@ def test_get_current_userv2_has_user(authuser, org_with_workspace, org_without_w
     assert response[1].active == authuser.is_active
 
     if response[0].org.slug == org_with_workspace.slug:
-        assert response[0].role == orguser1.role
-        assert response[1].role == orguser2.role
+        assert response[0].new_role_slug == orguser1.new_role.slug
+        assert response[1].new_role_slug == orguser2.new_role.slug
 
     elif response[1].org.slug == org_with_workspace.slug:
-        assert response[1].role == orguser1.role
-        assert response[0].role == orguser2.role
+        assert response[1].new_role_slug == orguser1.new_role.slug
+        assert response[0].new_role_slug == orguser2.new_role.slug
 
 
 # ================================================================================
@@ -295,7 +282,7 @@ def test_post_organization_user_success(orguser):
     assert response.email == payload.email
     assert response.org is None
     assert response.active is True
-    assert response.role == OrgUserRole.ACCOUNT_MANAGER
+    assert response.new_role_slug == ACCOUNT_MANAGER_ROLE
 
     the_authuser = User.objects.filter(email=payload.email).first()
     if the_authuser:
@@ -320,7 +307,7 @@ def test_post_organization_user_success_lowercase_email(orguser):
     assert response.email == payload.email.lower()
     assert response.org is None
     assert response.active is True
-    assert response.role == OrgUserRole.ACCOUNT_MANAGER
+    assert response.new_role_slug == ACCOUNT_MANAGER_ROLE
 
     the_authuser = User.objects.filter(email=payload.email).first()
     if the_authuser:
@@ -348,15 +335,6 @@ def test_get_organization_users(orguser):
 
 
 # ================================================================================
-def test_delete_organization_users_no_org(orguser):
-    """a failing test, requestor has no associated org"""
-    orguser.org = None
-    request = mock_request(orguser)
-    payload = DeleteOrgUserPayload(email="email-dne")
-
-    with pytest.raises(HttpError) as excinfo:
-        delete_organization_users(request, payload)
-    assert str(excinfo.value) == "no associated org"
 
 
 def test_delete_organization_users_no_org_v1(orguser):
@@ -370,16 +348,6 @@ def test_delete_organization_users_no_org_v1(orguser):
     assert str(excinfo.value) == "no associated org"
 
 
-def test_delete_organization_users_wrong_org(orguser):
-    """a failing test, orguser dne"""
-    request = mock_request(orguser)
-    payload = DeleteOrgUserPayload(email="email-dne")
-
-    with pytest.raises(HttpError) as excinfo:
-        delete_organization_users(request, payload)
-    assert str(excinfo.value) == "user does not belong to the org"
-
-
 def test_delete_organization_users_wrong_org_v1(orguser):
     """a failing test, orguser dne"""
     request = mock_request(orguser)
@@ -388,17 +356,6 @@ def test_delete_organization_users_wrong_org_v1(orguser):
     with pytest.raises(HttpError) as excinfo:
         delete_organization_users_v1(request, payload)
     assert str(excinfo.value) == "user does not belong to the org"
-
-
-def test_delete_organization_users_cant_delete_self(orguser):
-    """a failing test, orguser dne"""
-    request = mock_request(orguser)
-    request.orguser = orguser
-    payload = DeleteOrgUserPayload(email=orguser.user.email)
-
-    with pytest.raises(HttpError) as excinfo:
-        delete_organization_users(request, payload)
-    assert str(excinfo.value) == "user cannot delete themselves"
 
 
 def test_delete_organization_users_cant_delete_self_v1(orguser):
@@ -410,19 +367,6 @@ def test_delete_organization_users_cant_delete_self_v1(orguser):
     with pytest.raises(HttpError) as excinfo:
         delete_organization_users_v1(request, payload)
     assert str(excinfo.value) == "user cannot delete themselves"
-
-
-def test_delete_organization_users_cant_delete_higher_role(orguser):
-    """a failing test, orguser not authorized"""
-    orguser.role = OrgUserRole.PIPELINE_MANAGER
-    request = mock_request(orguser)
-    payload = DeleteOrgUserPayload(email="useremail")
-    user = User.objects.create(email=payload.email, username=payload.email)
-    OrgUser.objects.create(org=orguser.org, user=user, role=OrgUserRole.ACCOUNT_MANAGER)
-
-    with pytest.raises(HttpError) as excinfo:
-        delete_organization_users(request, payload)
-    assert str(excinfo.value) == "cannot delete user having higher role"
 
 
 def test_delete_organization_users_cant_delete_higher_role_v1(orguser):
@@ -439,18 +383,6 @@ def test_delete_organization_users_cant_delete_higher_role_v1(orguser):
     with pytest.raises(HttpError) as excinfo:
         delete_organization_users_v1(request, payload)
     assert str(excinfo.value) == "cannot delete user having higher role"
-
-
-def test_delete_organization_users_success(orguser):
-    """a passing test"""
-    request = mock_request(orguser)
-    payload = DeleteOrgUserPayload(email="useremail")
-    user = User.objects.create(email=payload.email, username=payload.email)
-    OrgUser.objects.create(org=orguser.org, user=user)
-    assert OrgUser.objects.filter(org=orguser.org, user__email=payload.email).count() == 1
-    delete_organization_users(request, payload)
-    assert OrgUser.objects.filter(org=orguser.org, user__email=payload.email).count() == 0
-    user.delete()
 
 
 def test_delete_organization_users_success_v1(orguser):
@@ -471,21 +403,6 @@ def test_delete_organization_users_success_v1(orguser):
 
 
 # ================================================================================
-def test_put_organization_user_self(orguser):
-    """a success test"""
-    request = mock_request(orguser)
-
-    new_active_status = not orguser.user.is_active
-    payload = OrgUserUpdate(
-        toupdate_email="unused-param",
-        email="newemail",
-        active=new_active_status,
-    )
-
-    response = put_organization_user_self(request, payload)
-
-    assert response.email == "newemail"
-    assert response.active is new_active_status
 
 
 def test_put_organization_user_self_v1(orguser):
@@ -506,18 +423,6 @@ def test_put_organization_user_self_v1(orguser):
 
 
 # ================================================================================
-def test_put_organization_user_not_authorized(orguser, nonadminorguser):
-    """a failing test, requestor cannot update another user"""
-    request = mock_request(nonadminorguser)
-
-    payload = OrgUserUpdate(
-        toupdate_email=orguser.user.email,
-        email="newemail",
-    )
-
-    with pytest.raises(HttpError) as excinfo:
-        put_organization_user(request, payload)
-    assert str(excinfo.value) == "unauthorized"
 
 
 def test_put_organization_user_v1_not_authorized(orguser, nonadminorguser):
@@ -534,19 +439,6 @@ def test_put_organization_user_v1_not_authorized(orguser, nonadminorguser):
     assert str(excinfo.value) == "unauthorized"
 
 
-def test_put_organization_user(orguser, nonadminorguser):
-    """a success test, requestor updates another user"""
-    request = mock_request(orguser)
-
-    payload = OrgUserUpdate(
-        toupdate_email=nonadminorguser.user.email,
-        email="newemail",
-    )
-
-    response = put_organization_user(request, payload)
-    assert response.email == payload.email
-
-
 def test_put_organization_user_v1(orguser, nonadminorguser):
     """a success test, requestor updates another user"""
     request = mock_request(orguser)
@@ -558,81 +450,6 @@ def test_put_organization_user_v1(orguser, nonadminorguser):
 
     response = put_organization_user_v1(request, payload)
     assert response.email == payload.email
-
-
-# ================================================================================
-def test_post_transfer_ownership_only_account_owner(authuser, org_with_workspace):
-    """only an account owner can transfer account ownership"""
-    orguser = OrgUser.objects.create(
-        user=authuser,
-        org=org_with_workspace,
-        new_role=Role.objects.filter(slug=PIPELINE_MANAGER_ROLE).first(),
-    )
-    orguser.role = OrgUserRole.PIPELINE_MANAGER
-    request = mock_request(orguser)
-    payload = OrgUserNewOwner(new_owner_email="new-email")
-    with pytest.raises(HttpError) as excinfo:
-        post_transfer_ownership(request, payload)
-    assert str(excinfo.value) == "unauthorized"
-
-
-def test_post_transfer_ownership_no_such_user(authuser, org_with_workspace):
-    """only an account owner can transfer account ownership"""
-    orguser = OrgUser.objects.create(
-        user=authuser,
-        org=org_with_workspace,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    orguser.role = OrgUserRole.ACCOUNT_MANAGER
-    request = mock_request(orguser)
-    payload = OrgUserNewOwner(new_owner_email="new-email")
-    with pytest.raises(HttpError) as excinfo:
-        post_transfer_ownership(request, payload)
-    assert str(excinfo.value) == "could not find user having this email address in this org"
-
-
-def test_post_transfer_ownership_not_pipeline_mgr(authuser, org_with_workspace):
-    """only an account owner can transfer account ownership"""
-    orguser = OrgUser.objects.create(
-        user=authuser,
-        org=org_with_workspace,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    orguser.role = OrgUserRole.ACCOUNT_MANAGER
-    request = mock_request(orguser)
-    new_owner_authuser = User.objects.create(username="new-owner", email="new-owner")
-    new_owner = OrgUser.objects.create(user=new_owner_authuser, org=org_with_workspace)
-    new_owner.role = OrgUserRole.REPORT_VIEWER
-    payload = OrgUserNewOwner(new_owner_email="new-owner")
-    with pytest.raises(HttpError) as excinfo:
-        post_transfer_ownership(request, payload)
-    assert str(excinfo.value) == "can only promote pipeline managers"
-
-
-@patch(
-    "ddpui.core.orguserfunctions.transaction.atomic",
-    Mock(side_effect=Exception("db error")),
-)
-def test_post_transfer_ownership_db_error(
-    authuser,
-    org_with_workspace,
-):
-    """only an account owner can transfer account ownership"""
-    orguser = OrgUser.objects.create(
-        user=authuser,
-        org=org_with_workspace,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    orguser.role = OrgUserRole.ACCOUNT_MANAGER
-    request = mock_request(orguser)
-    new_owner_authuser = User.objects.create(username="new-owner", email="new-owner")
-    new_owner = OrgUser.objects.create(user=new_owner_authuser, org=org_with_workspace)
-    new_owner.role = OrgUserRole.PIPELINE_MANAGER
-    new_owner.save()
-    payload = OrgUserNewOwner(new_owner_email="new-owner")
-    with pytest.raises(HttpError) as excinfo:
-        post_transfer_ownership(request, payload)
-    assert str(excinfo.value) == "failed to transfer ownership"
 
 
 # ================================================================================
@@ -753,15 +570,6 @@ def test_get_organizations_warehouses(orguser):
 
 
 # ================================================================================
-@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
-def test_post_organization_user_invite_no_org(orguser):
-    """failing test, no org"""
-    orguser.org = None
-    request = mock_request(orguser)
-    payload = InvitationSchema(invited_email="some-email", invited_role_slug="report_viewer")
-    with pytest.raises(HttpError) as excinfo:
-        post_organization_user_invite(request, payload)
-    assert str(excinfo.value) == "create an organization first"
 
 
 @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
@@ -779,16 +587,6 @@ def test_post_organization_user_invite_v1_no_org(orguser):
 
 
 @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
-def test_post_organization_user_invite_nosuchrole(orguser):
-    """failing test, no such role"""
-    request = mock_request(orguser)
-    payload = InvitationSchema(invited_email="some-email", invited_role_slug="hot_stepper")
-    with pytest.raises(HttpError) as excinfo:
-        post_organization_user_invite(request, payload)
-    assert str(excinfo.value) == "Invalid role"
-
-
-@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
 def test_post_organization_user_invite_v1_nosuchrole(orguser):
     """failing test, no such role"""
     request = mock_request(orguser)
@@ -796,17 +594,6 @@ def test_post_organization_user_invite_v1_nosuchrole(orguser):
     with pytest.raises(HttpError) as excinfo:
         post_organization_user_invite_v1(request, payload)
     assert str(excinfo.value) == "Invalid role"
-
-
-@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
-def test_post_organization_user_invite_insufficientrole(orguser):
-    """failing test, no such role"""
-    orguser.role = 1
-    request = mock_request(orguser)
-    payload = InvitationSchema(invited_email="some-email", invited_role_slug="pipeline_manager")
-    with pytest.raises(HttpError) as excinfo:
-        post_organization_user_invite(request, payload)
-    assert str(excinfo.value) == "Insufficient permissions for this operation"
 
 
 @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
@@ -820,37 +607,6 @@ def test_post_organization_user_invite_v1_insufficientrole(orguser):
     with pytest.raises(HttpError) as excinfo:
         post_organization_user_invite_v1(request, payload)
     assert str(excinfo.value) == "Insufficient permissions for this operation"
-
-
-@patch("ddpui.utils.awsses.send_invite_user_email", mock_awsses=Mock())
-def test_post_organization_user_invite(mock_awsses, orguser):
-    """success test, inviting a new user"""
-    payload = InvitationSchema(
-        invited_email="inivted_email",
-        invited_role_slug="report_viewer",
-        invited_by=None,
-        invited_on=timezone.as_ist(datetime.now()),
-        invite_code="invite_code",
-    )
-
-    request = mock_request(orguser)
-
-    assert (
-        Invitation.objects.filter(invited_email=payload.invited_email, invited_by=orguser).count()
-        == 0
-    )
-    response = post_organization_user_invite(request, payload)
-    assert (
-        Invitation.objects.filter(invited_email=payload.invited_email, invited_by=orguser).count()
-        == 1
-    )
-
-    assert response.invited_by.email == orguser.user.email
-    assert response.invited_by.role == orguser.role
-    assert response.invited_role == payload.invited_role
-    assert response.invited_on == payload.invited_on
-    assert response.invite_code == payload.invite_code
-    mock_awsses.assert_called_once()
 
 
 @patch("ddpui.utils.awsses.send_invite_user_email", mock_awsses=Mock())
@@ -882,59 +638,15 @@ def test_post_organization_user_invite_v1(mock_awsses, orguser):
 
 
 @patch("ddpui.utils.awsses.send_invite_user_email", mock_awsses=Mock())
-def test_post_organization_user_invite_multiple_open_invites(mock_awsses, orguser):
-    """success test, inviting a new user"""
-    another_org = Org.objects.create(name="anotherorg", slug="anotherorg")
-    another_user = User.objects.create(username="anotheruser", email="anotheruser")
-    another_org_user = OrgUser.objects.create(
-        org=another_org, user=another_user, role=OrgUserRole.PIPELINE_MANAGER
-    )
-    Invitation.objects.create(
-        invited_email="inivted_email",
-        invited_role=OrgUserRole.PIPELINE_MANAGER,
-        invited_by=another_org_user,
-        invited_on=timezone.as_ist(datetime.now()),
-        invite_code="invite_code_existing",
-    )
-    payload = InvitationSchema(
-        invited_email="inivted_email",
-        invited_role_slug="report_viewer",
-        invited_by=None,
-        invited_on=timezone.as_ist(datetime.now()),
-        invite_code="invite_code",
-    )
-
-    request = mock_request(orguser)
-
-    assert (
-        Invitation.objects.filter(invited_email=payload.invited_email, invited_by=orguser).count()
-        == 0
-    )
-    response = post_organization_user_invite(request, payload)
-    assert (
-        Invitation.objects.filter(invited_email=payload.invited_email, invited_by=orguser).count()
-        == 1
-    )
-
-    assert response.invited_by.email == orguser.user.email
-    assert response.invited_by.role == orguser.role
-    assert response.invited_role == payload.invited_role
-    assert response.invited_on == payload.invited_on
-    assert response.invite_code == payload.invite_code
-    mock_awsses.assert_called_once()
-
-
-@patch("ddpui.utils.awsses.send_invite_user_email", mock_awsses=Mock())
 def test_post_organization_user_invite_v1_multiple_open_invites(mock_awsses, orguser):
     """success test, inviting a new user"""
     another_org = Org.objects.create(name="anotherorg", slug="anotherorg")
     another_user = User.objects.create(username="anotheruser", email="anotheruser")
-    another_org_user = OrgUser.objects.create(
-        org=another_org, user=another_user, role=OrgUserRole.PIPELINE_MANAGER
-    )
+    new_role = Role.objects.filter(slug=PIPELINE_MANAGER_ROLE).first()
+    another_org_user = OrgUser.objects.create(org=another_org, user=another_user, new_role=new_role)
     Invitation.objects.create(
         invited_email="inivted_email",
-        invited_role=OrgUserRole.PIPELINE_MANAGER,
+        invited_new_role=new_role,
         invited_by=another_org_user,
         invited_on=timezone.as_ist(datetime.now()),
         invite_code="invite_code_existing",
@@ -966,41 +678,6 @@ def test_post_organization_user_invite_v1_multiple_open_invites(mock_awsses, org
 
 
 @patch("ddpui.utils.awsses.send_invite_user_email", mock_awsses=Mock())
-def test_post_organization_user_invite_lowercase_email(mock_awsses, orguser: OrgUser):
-    """success test, inviting a new user"""
-    payload = InvitationSchema(
-        invited_email="INVITED_EMAIL",
-        invited_role_slug="report_viewer",
-        invited_by=None,
-        invited_on=timezone.as_ist(datetime.now()),
-        invite_code="invite_code",
-    )
-
-    request = mock_request(orguser)
-
-    assert (
-        Invitation.objects.filter(
-            invited_email__iexact=payload.invited_email, invited_by=orguser
-        ).count()
-        == 0
-    )
-    response = post_organization_user_invite(request, payload)
-    assert (
-        Invitation.objects.filter(
-            invited_email=payload.invited_email.lower(), invited_by=orguser
-        ).count()
-        == 1
-    )
-
-    assert response.invited_by.email == orguser.user.email
-    assert response.invited_by.role == orguser.role
-    assert response.invited_role == payload.invited_role
-    assert response.invited_on == payload.invited_on
-    assert response.invite_code == payload.invite_code
-    mock_awsses.assert_called_once()
-
-
-@patch("ddpui.utils.awsses.send_invite_user_email", mock_awsses=Mock())
 def test_post_organization_user_invite_v1_lowercase_email(mock_awsses, orguser: OrgUser):
     """success test, inviting a new user"""
     payload = NewInvitationSchema(
@@ -1028,30 +705,6 @@ def test_post_organization_user_invite_v1_lowercase_email(mock_awsses, orguser: 
     assert invitation.invite_code is not None
     assert invitation.invited_on is not None
     mock_awsses.assert_called_once()
-
-
-@patch("ddpui.utils.awsses.send_youve_been_added_email", mock_awsses=Mock())
-def test_post_organization_user_invite_user_exists(mock_awsses, orguser: OrgUser):
-    """success test, inviting an existing user"""
-    user = User.objects.create(email="existinguser", username="existinguser")
-    assert OrgUser.objects.filter(user=user).count() == 0
-
-    payload = InvitationSchema(
-        invited_email="existinguser",
-        invited_role_slug="report_viewer",
-        invited_by=None,
-        invited_on=timezone.as_ist(datetime.now()),
-        invite_code="invite_code",
-    )
-
-    request = mock_request(orguser)
-
-    response = post_organization_user_invite(request, payload)
-    mock_awsses.assert_called_once()
-
-    assert OrgUser.objects.filter(user=user).count() == 1
-    assert OrgUser.objects.filter(user=user, org=orguser.org).count() == 1
-    assert response.invited_role == payload.invited_role
 
 
 @patch("ddpui.utils.awsses.send_youve_been_added_email", mock_awsses=Mock())
@@ -1284,15 +937,6 @@ def test_post_verify_email_no_such_orguser():
 
 
 # ================================================================================
-def test_get_invitations_no_org(orguser):
-    """failure - no org"""
-    orguser.org = None
-    request = mock_request(orguser)
-    with pytest.raises(HttpError) as excinfo:
-        get_invitations(request)
-    assert str(excinfo.value) == "create an organization first"
-
-
 def test_get_invitations_v1_no_org(orguser):
     """failure - no org"""
     orguser.org = None
@@ -1302,23 +946,6 @@ def test_get_invitations_v1_no_org(orguser):
     assert str(excinfo.value) == "create an organization first"
 
 
-def test_get_invitations(orguser):
-    """success - return invitations"""
-    request = mock_request(orguser)
-    Invitation.objects.create(
-        invited_by=orguser,
-        invited_email="invited-email",
-        invited_role=1,
-        invited_on=timezone.as_ist(datetime(2023, 1, 1, 10, 0, 0)),
-    )
-    response = get_invitations(request)
-    assert len(response) == 1
-    assert response[0]["invited_email"] == "invited-email"
-    assert response[0]["invited_role_slug"] == "report_viewer"
-    assert response[0]["invited_role"] == 1
-    assert response[0]["invited_on"] == datetime(2023, 1, 1, 4, 30, 0, tzinfo=timezone.pytz.utc)
-
-
 def test_get_invitations_v1(orguser):
     """success - return invitations"""
     request = mock_request(orguser)
@@ -1326,7 +953,6 @@ def test_get_invitations_v1(orguser):
     Invitation.objects.create(
         invited_by=orguser,
         invited_email="invited-email",
-        invited_role=1,
         invited_on=timezone.as_ist(datetime(2023, 1, 1, 10, 0, 0)),
         invited_new_role=guest_role,
     )
@@ -1359,7 +985,7 @@ def test_post_resend_invitation(mock_awsses: Mock, orguser):
         invited_email="email",
         invite_code="hello",
         invited_by=orguser,
-        invited_role=1,
+        invited_new_role=Role.objects.filter(slug=GUEST_ROLE).first(),
     )
     frontend_url = os.getenv("FRONTEND_URL")
     invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
@@ -1388,7 +1014,7 @@ def test_delete_invitation(orguser):
         invited_email="email",
         invite_code="hello",
         invited_by=orguser,
-        invited_role=1,
+        invited_new_role=Role.objects.filter(slug=GUEST_ROLE).first(),
     )
     request = mock_request(orguser=orguser)
     assert Invitation.objects.filter(id=invitation.id).exists()

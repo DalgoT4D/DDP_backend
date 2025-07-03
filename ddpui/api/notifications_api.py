@@ -65,21 +65,6 @@ def get_notification_recipients(request, notification_id: int):
     return result
 
 
-@notification_router.get("/", deprecated=True)
-def get_user_notifications(request, page: int = 1, limit: int = 10):
-    """
-    Returns all the notifications for a particular user.
-    It returns only the past notifications,i.e,notifications
-    which are already sent
-    """
-    orguser = request.orguser
-    error, result = notifications_service.fetch_user_notifications(orguser, page, limit)
-    if error is not None:
-        raise HttpError(400, error)
-
-    return result
-
-
 @notification_router.get("/v1")
 def get_user_notifications_v1(request, page: int = 1, limit: int = 10, read_status: int = None):
     """
@@ -90,22 +75,6 @@ def get_user_notifications_v1(request, page: int = 1, limit: int = 10, read_stat
     orguser = request.orguser
     error, result = notifications_service.fetch_user_notifications_v1(
         orguser, page, limit, read_status
-    )
-    if error is not None:
-        raise HttpError(400, error)
-
-    return result
-
-
-@notification_router.put("/", deprecated=True)
-def mark_as_read(request, payload: UpdateReadStatusSchema):
-    """
-    Handles the task of updating the read_status
-    of a notification to true or false
-    """
-    orguser: OrgUser = request.orguser
-    error, result = notifications_service.mark_notification_as_read_or_unread(
-        orguser.id, payload.notification_id, payload.read_status
     )
     if error is not None:
         raise HttpError(400, error)

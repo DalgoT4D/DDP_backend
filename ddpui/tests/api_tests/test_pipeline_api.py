@@ -47,7 +47,7 @@ from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask, Task, TaskLock
-from ddpui.models.org_user import OrgUser, OrgUserRole
+from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.constants import TASK_DBTRUN
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
@@ -88,7 +88,6 @@ def orguser(org_without_dbt_workspace):
             username="tempusername", email="tempuseremail", password="tempuserpassword"
         ),
         org=org_without_dbt_workspace,
-        role=OrgUserRole.ACCOUNT_MANAGER,
         new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
     )
     yield orguser
@@ -137,7 +136,6 @@ def orguser_dbt_workspace(org_with_dbt_workspace):
             username="tempusername", email="tempuseremail", password="tempuserpassword"
         ),
         org=org_with_dbt_workspace,
-        role=OrgUserRole.ACCOUNT_MANAGER,
         new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
     )
     yield orguser
@@ -227,7 +225,6 @@ def orguser_transform_tasks(org_with_transformation_tasks):
             username="tempusername", email="tempuseremail", password="tempuserpassword"
         ),
         org=org_with_transformation_tasks,
-        role=OrgUserRole.ACCOUNT_MANAGER,
         email_verified=True,
         new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
     )

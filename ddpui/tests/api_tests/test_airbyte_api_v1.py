@@ -36,7 +36,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteWorkspaceCreate,
 )
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, SUPER_ADMIN_ROLE
-from ddpui.models.org_user import OrgUser, OrgUserRole
+from ddpui.models.org_user import OrgUser
 from ddpui.models.org import Org, OrgPrefectBlockv1, OrgWarehouse
 from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask, Task
 from ddpui.models.flow_runs import PrefectFlowRun
@@ -82,7 +82,6 @@ def orguser(authuser, org_without_workspace):
     orguser = OrgUser.objects.create(
         user=authuser,
         org=org_without_workspace,
-        role=OrgUserRole.ACCOUNT_MANAGER,
         new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
     )
     yield orguser
@@ -95,7 +94,6 @@ def orguser_workspace(authuser, org_with_workspace):
     orguser = OrgUser.objects.create(
         user=authuser,
         org=org_with_workspace,
-        role=OrgUserRole.ACCOUNT_MANAGER,
         new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
     )
     yield orguser

@@ -5,16 +5,14 @@ from unittest.mock import patch, MagicMock
 from ninja.errors import HttpError
 from ddpui.models.org import Org
 from ddpui.models.role_based_access import Role
-from ddpui.models.org_user import OrgUser, OrgUserRole
+from ddpui.models.org_user import OrgUser
 from ddpui import auth
 from django.contrib.auth.models import User
 from ddpui.api.notifications_api import (
     post_create_notification,
     get_notification_history,
     get_notification_recipients,
-    get_user_notifications,
     delete_notification,
-    mark_as_read,
     get_unread_notifications_count,
 )
 from ddpui.schemas.notifications_api_schemas import (
@@ -53,7 +51,6 @@ def orguser(authuser, org_without_workspace):
     orguser = OrgUser.objects.create(
         user=authuser,
         org=org_without_workspace,
-        role=OrgUserRole.ACCOUNT_MANAGER,
         new_role=Role.objects.filter(slug=auth.ACCOUNT_MANAGER_ROLE).first(),
     )
     yield orguser
@@ -260,61 +257,6 @@ def test_get_notification_recipients_success():
         assert isinstance(response["res"], list)
         assert all(isinstance(recipient, dict) for recipient in response["res"])
         mock_get_notification_recipients.assert_called_once_with(1)
-
-
-def test_get_user_notifications_success(orguser):
-    """tests the success of api endpoint for fetching user notifications for the OrgUser"""
-    request = MagicMock()
-    request.orguser = orguser
-    with patch(
-        "ddpui.core.notifications_service.fetch_user_notifications"
-    ) as mock_get_user_notifications:
-        mock_get_user_notifications.return_value = (None, {"success": True, "res": []})
-        response = get_user_notifications(request, 1, 10)
-        assert response["success"] is True
-        assert isinstance(response["res"], list)
-        assert all(isinstance(notification, dict) for notification in response["res"])
-        mock_get_user_notifications.assert_called_once_with(orguser, 1, 10)
-
-
-def test_mark_as_read_success(orguser):
-    """tests the success of api endpoint for marking notification as read for the OrgUser"""
-    request = MagicMock()
-    request.orguser = orguser
-    payload = UpdateReadStatusSchema(notification_id=1, read_status=True)
-    with patch(
-        "ddpui.core.notifications_service.mark_notification_as_read_or_unread"
-    ) as mock_mark_as_read:
-        mock_mark_as_read.return_value = (
-            None,
-            {"success": True, "message": "Notification updated successfully"},
-        )
-        response = mark_as_read(request, payload)
-        assert response["success"] is True
-        assert response["message"] == "Notification updated successfully"
-        mock_mark_as_read.assert_called_once_with(orguser.id, 1, True)
-
-
-def test_mark_as_read_invalid_notification_id(orguser):
-    """
-    tests the failure of api endpoint for marking notification
-    as read with invalid notification id
-    """
-    request = MagicMock()
-    request.orguser = orguser
-    payload = UpdateReadStatusSchema(notification_id=0, read_status=True)  # Invalid ID
-
-    with patch(
-        "ddpui.core.notifications_service.mark_notification_as_read_or_unread"
-    ) as mock_mark_as_read:
-        mock_mark_as_read.return_value = (
-            "Notification not found for the given user",
-            None,
-        )
-        with pytest.raises(HttpError) as excinfo:
-            mark_as_read(request, payload)
-        assert "Notification not found for the given user" in str(excinfo.value)
-        mock_mark_as_read.assert_called_once_with(orguser.id, 0, True)
 
 
 def test_delete_notification_success():
