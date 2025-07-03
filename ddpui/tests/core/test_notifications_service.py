@@ -6,7 +6,7 @@ from django.utils import timezone
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.models.notifications import Notification, NotificationRecipient
 from ddpui.models.org import Org
-from ddpui.models.org_user import OrgUser, OrgUserRole
+from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Permission, Role, RolePermission
 from ddpui.core.notifications_service import (
     get_recipients,
@@ -56,7 +56,6 @@ def orguser(authuser, org_without_workspace):
     orguser = OrgUser.objects.create(
         user=authuser,
         org=org_without_workspace,
-        role=OrgUserRole.ACCOUNT_MANAGER,
         new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
     )
     yield orguser

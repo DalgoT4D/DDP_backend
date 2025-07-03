@@ -11,7 +11,7 @@ django.setup()
 
 from django.contrib.auth.models import User
 from ddpui.models.org import Org, OrgWarehouse
-from ddpui.models.org_user import OrgUser, OrgUserRole
+from ddpui.models.org_user import OrgUser
 from ddpui.api.airbyte_api import (
     get_airbyte_source_definitions,
     get_airbyte_source_definition_specifications,
@@ -84,7 +84,6 @@ def orguser(authuser, org_without_workspace):
     orguser = OrgUser.objects.create(
         user=authuser,
         org=org_without_workspace,
-        role=OrgUserRole.ACCOUNT_MANAGER,
         new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
     )
     yield orguser
@@ -97,7 +96,6 @@ def orguser_workspace(authuser, org_with_workspace):
     orguser = OrgUser.objects.create(
         user=authuser,
         org=org_with_workspace,
-        role=OrgUserRole.ACCOUNT_MANAGER,
         new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
     )
     yield orguser
