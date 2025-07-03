@@ -22,6 +22,12 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.django import DjangoInstrumentor
 
+# Configure Logs
+from opentelemetry._logs import set_logger_provider
+from opentelemetry.sdk._logs import LoggerProvider
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+
 
 from corsheaders.defaults import default_headers
 from dotenv import load_dotenv
@@ -82,6 +88,21 @@ try:
 
     span_processor = BatchSpanProcessor(otlp_exporter)
     provider.add_span_processor(span_processor)
+
+    logger_provider = LoggerProvider(resource=resource)
+    set_logger_provider(logger_provider)
+
+    # OTLP Log Exporter
+    log_endpoint = endpoint + "/v1/logs"
+    print(f"OpenTelemetry logs connecting to: {log_endpoint}")
+
+    otlp_log_exporter = OTLPLogExporter(
+        endpoint=log_endpoint,
+        timeout=int(os.getenv("OTEL_EXPORTER_OTLP_TIMEOUT", "30")),
+    )
+
+    log_processor = BatchLogRecordProcessor(otlp_log_exporter)
+    logger_provider.add_log_record_processor(log_processor)
 
     DjangoInstrumentor().instrument()
     print(

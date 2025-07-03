@@ -1,6 +1,8 @@
 import inspect
 import logging
 from opentelemetry import trace
+from opentelemetry._logs import get_logger_provider
+from opentelemetry.sdk._logs import LoggingHandler
 
 
 class CustomLogger:
@@ -9,6 +11,18 @@ class CustomLogger:
     def __init__(self, name, level=logging.INFO):
         self.logger = logging.getLogger(name)
         self.logger.setLevel(level)
+
+        # Add OpenTelemetry logging handler if available
+        try:
+            logger_provider = get_logger_provider()
+            if logger_provider and not any(
+                isinstance(h, LoggingHandler) for h in self.logger.handlers
+            ):
+                otel_handler = LoggingHandler(level=level, logger_provider=logger_provider)
+                self.logger.addHandler(otel_handler)
+        except Exception:
+            # If OpenTelemetry is not configured, continue without it
+            pass
 
     def get_slug(self):
         """retrieve the org.slug from the request"""
