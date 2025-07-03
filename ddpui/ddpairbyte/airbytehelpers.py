@@ -466,8 +466,6 @@ def get_connections(org: Org) -> List[AirbyteGetConnectionsResponse]:
         # find the latest job for this connection
         latest_job = latest_airbyte_jobs.filter(config_id=conn["connectionId"]).first()
 
-        logger.info(latest_job)
-
         if latest_job:
             conn["lastRun"] = {
                 "airbyteJobId": latest_job.job_id,
