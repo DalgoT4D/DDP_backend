@@ -17,7 +17,7 @@ class Command(BaseCommand):
             "--orgslug",
             type=str,
             default=None,
-            help="Slug of the org to filter jobs (default: all orgs)",
+            help="Slug of the org to filter jobs (default: all orgs); Use all to do it for all orgs",
         )
         parser.add_argument(
             "--connection_id",
@@ -34,14 +34,15 @@ class Command(BaseCommand):
         if last_n_days <= 0:
             raise CommandError("last_n_days must be greater than 0.")
 
-        org = None
-        if orgslug:
+        orgs = Org.objects.all()
+        if orgslug and orgslug.lower() != "all":
             try:
-                org = Org.objects.get(slug=orgslug)
+                orgs = Org.objects.filter(slug=orgslug)
             except Org.DoesNotExist:
                 raise CommandError(f"Org with slug '{orgslug}' does not exist.")
 
-        fetch_and_update_airbyte_jobs_for_all_connections(
-            last_n_days=last_n_days, org=org, connection_id=connection_id
-        )
+        for org in orgs:
+            fetch_and_update_airbyte_jobs_for_all_connections(
+                last_n_days=last_n_days, org=org, connection_id=connection_id
+            )
         self.stdout.write(self.style.SUCCESS("Successfully fetched and updated Airbyte jobs."))
