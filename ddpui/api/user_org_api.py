@@ -9,8 +9,9 @@ from django.utils.text import slugify
 from django.db.models import Prefetch
 from django.contrib.auth.models import User
 from django.db.models import F
+from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 
-from ddpui.auth import has_permission
+from ddpui.auth import has_permission, CustomTokenObtainSerializer, CustomTokenRefreshSerializer
 from ddpui.core import orgfunctions, orguserfunctions
 from ddpui.models.org import (
     OrgSchema,
@@ -27,9 +28,7 @@ from ddpui.models.org_user import (
     NewInvitationSchema,
     OrgUser,
     OrgUserCreate,
-    OrgUserNewOwner,
     OrgUserResponse,
-    OrgUserRole,
     OrgUserUpdate,
     OrgUserUpdateNewRole,
     OrgUserUpdatev1,
@@ -37,6 +36,9 @@ from ddpui.models.org_user import (
     ChangePasswordSchema,
     UserAttributes,
     VerifyEmailSchema,
+    LoginPayload,
+    TokenRefreshPayload,
+    LogoutPayload,
 )
 from ddpui.models.org_plans import OrgPlanType
 from ddpui.models.org_wren import OrgWren
@@ -54,10 +56,7 @@ load_dotenv()
 logger = CustomLogger("ddpui")
 
 
-@user_org_router.get(
-    "/currentuserv2",
-    response=List[OrgUserResponse],
-)
+@user_org_router.get("/currentuserv2", response=List[OrgUserResponse])
 @has_permission(["can_view_orgusers"])
 def get_current_user_v2(request, org_slug: str = None):
     """return all the OrgUsers for the User making this request"""
@@ -105,8 +104,6 @@ def get_current_user_v2(request, org_slug: str = None):
                 email=user.email,
                 org=curr_orguser.org,
                 active=user.is_active,
-                role=curr_orguser.role,
-                role_slug=slugify(OrgUserRole(curr_orguser.role).name),
                 new_role_slug=curr_orguser.new_role.slug,
                 wtype=warehouse.wtype if warehouse else None,
                 permissions=[
@@ -137,16 +134,60 @@ def post_organization_user(request, payload: OrgUserCreate):  # pylint: disable=
 
 
 @user_org_router.post("/login/", auth=None)
-def post_login(request):
-    """Uses the username and password in the request to return an auth token"""
-    request_obj = json.loads(request.body)
-    token = views.obtain_auth_token(request)
-    if "token" in token.data:
-        retval = orguserfunctions.lookup_user(request_obj["username"])
-        retval["token"] = token.data["token"]
-        return retval
+def post_login(request, payload: LoginPayload):
+    """Uses the username and password in the request to return a JWT auth token"""
+    serializer = CustomTokenObtainSerializer(
+        data={
+            "username": payload.username,
+            "password": payload.password,
+        }
+    )
+    serializer.is_valid(raise_exception=True)
+    token_data = serializer.validated_data
+    retval = orguserfunctions.lookup_user(payload.username)
+    retval["token"] = token_data["access"]
+    retval["refresh_token"] = token_data["refresh"]
+    return retval
 
-    return token
+
+@user_org_router.post("/logout/")
+def post_logout(request, payload: LogoutPayload):
+    """
+    Blacklists the refresh token on logout.
+    Ensures the refresh token belongs to the current user.
+    If the refresh token is already invalid/expired, do not blacklist.
+
+    Note: The 'token' field in OutstandingToken is not the raw JWT string,
+    but a re-encoded version (may differ in whitespace, order, etc).
+    Always use the refresh token string to instantiate RefreshToken and check jti/user_id.
+    """
+    refresh_token = payload.refresh
+    if not refresh_token:
+        raise HttpError(400, "Refresh token not found")
+    try:
+        token = RefreshToken(refresh_token)
+        # The actual value stored in OutstandingToken.token may not match the JWT string byte-for-byte.
+        # Instead, always check by jti and user_id.
+        token_user_id = token.payload.get("user_id")
+        if not request.user or request.user.id != token_user_id:
+            raise HttpError(403, "Token does not belong to the current user")
+        # Blacklist by token object (which uses jti under the hood)
+        token.blacklist()
+        return {"success": 1}
+    except TokenError:
+        # Token is already invalid or expired, do not blacklist
+        return {"success": 1}
+    except Exception as err:
+        raise HttpError(400, f"Logout failed: {str(err)}") from err
+
+
+@user_org_router.post("/token/refresh", auth=None)
+def post_token_refresh(request, payload: TokenRefreshPayload):
+    """Refreshes the JWT token using the refresh token"""
+    serializer = CustomTokenRefreshSerializer(data=payload.dict())
+    serializer.is_valid(raise_exception=True)
+    token_data = serializer.validated_data
+    return {"token": token_data["access"]}
 
 
 @user_org_router.get(
@@ -194,8 +235,6 @@ def get_organization_users(request):
                 email=curr_orguser.user.email,
                 org=curr_orguser.org,
                 active=curr_orguser.user.is_active,
-                role=curr_orguser.role,
-                role_slug=slugify(OrgUserRole(curr_orguser.role).name),
                 new_role_slug=curr_orguser.new_role.slug,
                 wtype=warehouse.wtype if warehouse else None,
                 permissions=[
@@ -209,21 +248,6 @@ def get_organization_users(request):
         )
 
     return res
-
-
-@user_org_router.post("/organizations/users/delete")
-@has_permission(["can_delete_orguser"])
-def delete_organization_users(request, payload: DeleteOrgUserPayload):
-    """delete the orguser posted"""
-    orguser: OrgUser = request.orguser
-    if orguser.org is None:
-        raise HttpError(400, "no associated org")
-
-    _, error = orguserfunctions.delete_orguser(orguser, payload)
-    if error:
-        raise HttpError(400, error)
-
-    return {"success": 1}
 
 
 @user_org_router.post("/v1/organizations/users/delete")
@@ -242,21 +266,6 @@ def delete_organization_users_v1(request, payload: DeleteOrgUserPayload):
 
 
 @user_org_router.put(
-    "/organizations/user_self/",
-    response=OrgUserResponse,
-    deprecated=True,
-)
-@has_permission(["can_edit_orguser"])
-def put_organization_user_self(request, payload: OrgUserUpdate):
-    """update the requestor's OrgUser"""
-    orguser: OrgUser = request.orguser
-
-    # not allowed to update own role
-    payload.role = None
-    return orguserfunctions.update_orguser(orguser, payload)
-
-
-@user_org_router.put(
     "/v1/organizations/user_self/",
     response=OrgUserResponse,
 )
@@ -267,31 +276,6 @@ def put_organization_user_self_v1(request, payload: OrgUserUpdatev1):
     # not allowed to update own role
     payload.role_uuid = None
     return orguserfunctions.update_orguser_v1(orguser, payload)
-
-
-@user_org_router.put(
-    "/organizations/users/",
-    response=OrgUserResponse,
-    deprecated=True,
-)
-@has_permission(["can_edit_orguser"])
-def put_organization_user(request, payload: OrgUserUpdate):
-    """update another OrgUser"""
-    requestor_orguser: OrgUser = request.orguser
-
-    if requestor_orguser.role not in [
-        OrgUserRole.ACCOUNT_MANAGER,
-        OrgUserRole.PIPELINE_MANAGER,
-    ]:
-        raise HttpError(400, "not authorized to update another user")
-
-    orguser = OrgUser.objects.filter(
-        user__email=payload.toupdate_email, org=request.orguser.org
-    ).first()
-    if orguser is None:
-        raise HttpError(400, "could not find user having this email address in this org")
-
-    return orguserfunctions.update_orguser(orguser, payload)
 
 
 @user_org_router.put(
@@ -318,20 +302,6 @@ def put_organization_user_v1(request, payload: OrgUserUpdatev1):
         payload.role_uuid = None
 
     return orguserfunctions.update_orguser_v1(orguser, payload)
-
-
-@user_org_router.post(
-    "/organizations/users/makeowner/",
-    response=OrgUserResponse,
-)
-@has_permission(["can_edit_orguser_role"])
-def post_transfer_ownership(request, payload: OrgUserNewOwner):
-    """update another OrgUser"""
-    orguser: OrgUser = request.orguser
-    retval, error = orguserfunctions.transfer_ownership(orguser, payload)
-    if error:
-        raise HttpError(400, error)
-    return retval
 
 
 @user_org_router.post(
@@ -446,20 +416,6 @@ def post_verify_email(request, payload: VerifyEmailSchema):  # pylint: disable=u
 
 
 @user_org_router.post(
-    "/organizations/users/invite/",
-    response=InvitationSchema,
-)
-@has_permission(["can_create_invitation"])
-def post_organization_user_invite(request, payload: InvitationSchema):
-    """Send an invitation to a user to join platform"""
-    orguser: OrgUser = request.orguser
-    retval, error = orguserfunctions.invite_user(orguser, payload)
-    if error:
-        raise HttpError(400, error)
-    return retval
-
-
-@user_org_router.post(
     "/v1/organizations/users/invite/",
     response=NewInvitationSchema,
 )
@@ -479,16 +435,6 @@ def post_organization_user_accept_invite_v1(
 ):  # pylint: disable=unused-argument
     """User accepting the invite sent with a valid invite code"""
     retval, error = orguserfunctions.accept_invitation_v1(payload)
-    if error:
-        raise HttpError(400, error)
-    return retval
-
-
-@user_org_router.get("/users/invitations/")
-@has_permission(["can_view_invitations"])
-def get_invitations(request):
-    """Get all invitations sent by the current user"""
-    retval, error = orguserfunctions.get_invitations_from_orguser(request.orguser)
     if error:
         raise HttpError(400, error)
     return retval

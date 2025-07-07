@@ -14,7 +14,7 @@ from ddpui.ddpprefect import (
     FLOW_RUN_RUNNING_STATE_TYPE,
     FLOW_RUN_COMPLETED_STATE_TYPE,
 )
-from ddpui.models.org_user import OrgUser, OrgUserRole, Role
+from ddpui.models.org_user import OrgUser, Role
 from ddpui.core.pipelinefunctions import fetch_pipeline_lock_v1, lock_tasks_for_dataflow
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_DBTRUN
@@ -68,7 +68,6 @@ def orguser(authuser, org_with_server_block):
     orguser = OrgUser.objects.create(
         user=authuser,
         org=org_with_server_block,
-        role=OrgUserRole.ACCOUNT_MANAGER,
         new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
     )
     yield orguser

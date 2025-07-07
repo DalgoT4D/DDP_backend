@@ -5,7 +5,7 @@ from ninja.errors import HttpError
 from ddpui.models.org import Org
 from ddpui.models.role_based_access import Permission, Role, RolePermission
 from ddpui.models.userpreferences import UserPreferences
-from ddpui.models.org_user import OrgUser, OrgUserRole
+from ddpui.models.org_user import OrgUser
 from ddpui import auth
 from django.contrib.auth.models import User
 from ddpui.tests.api_tests.test_user_org_api import mock_request, seed_db
@@ -50,7 +50,6 @@ def orguser(authuser, org_without_workspace):
     orguser = OrgUser.objects.create(
         user=authuser,
         org=org_without_workspace,
-        role=OrgUserRole.ACCOUNT_MANAGER,
         new_role=Role.objects.filter(slug=auth.ACCOUNT_MANAGER_ROLE).first(),
     )
     yield orguser
