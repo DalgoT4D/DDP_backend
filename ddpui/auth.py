@@ -87,7 +87,7 @@ def set_roles_and_permissions_in_redis(
         role_permissions.setdefault(str(role_perm.role_id), [])
         role_permissions.get(str(role_perm.role_id)).append(role_perm.permission.slug)
     # set in redis
-    redis_client.set(role_permissions_key, json.dumps(role_permissions))
+    redis_client.set(role_permissions_key, role_permissions)
     return role_permissions
 
 
