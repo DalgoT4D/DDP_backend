@@ -144,15 +144,10 @@ def post_login(request, payload: LoginPayload):
     )
     serializer.is_valid(raise_exception=True)
     token_data = serializer.validated_data
-
-    try:
-        retval = orguserfunctions.lookup_user(payload.username)
-        retval["token"] = token_data["access"]
-        retval["refresh_token"] = token_data["refresh"]
-        return retval
-    except Exception as e:
-        logger.error(f"Login failed for user '{payload.username}': {str(e)}")
-        raise HttpError(400, f"Login failed: {str(e)}")
+    retval = orguserfunctions.lookup_user(payload.username)
+    retval["token"] = token_data["access"]
+    retval["refresh_token"] = token_data["refresh"]
+    return retval
 
 
 @user_org_router.post("/logout/")
