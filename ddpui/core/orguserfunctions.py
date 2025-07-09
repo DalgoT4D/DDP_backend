@@ -44,6 +44,10 @@ def lookup_user(email: str):
     """look up user by username"""
     user = User.objects.filter(email=email).first()
 
+    if user is None:
+        logger.error(f"lookup_user: User with email '{email}' not found in database")
+        raise Exception(f"User with email '{email}' not found")
+
     userattributes = UserAttributes.objects.filter(user=user).first()
     if userattributes is None:
         userattributes = UserAttributes.objects.create(user=user)
