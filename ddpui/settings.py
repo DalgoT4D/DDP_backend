@@ -264,34 +264,11 @@ FIXTURE_DIRS = [
 PRODUCTION = os.getenv("PRODUCTION", "") == "True"
 
 
-def debug_user_authentication_rule(user):
-    """Custom authentication rule with detailed logging for debugging"""
-    import logging
-
-    logger = logging.getLogger("ddpui")
-
-    logger.info(f"USER_AUTHENTICATION_RULE called with user: {user}")
-
-    if user is None:
-        logger.error("USER_AUTHENTICATION_RULE: user is None")
-        return False
-
-    logger.info(f"USER_AUTHENTICATION_RULE: user found - {user.username} ({user.email})")
-    logger.info(f"USER_AUTHENTICATION_RULE: user.is_active = {user.is_active}")
-
-    if not user.is_active:
-        logger.error(f"USER_AUTHENTICATION_RULE: user {user.username} is not active")
-        return False
-
-    logger.info(f"USER_AUTHENTICATION_RULE: user {user.username} passed all checks")
-    return True
-
-
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=int(os.getenv("JWT_ACCESS_TOKEN_EXPIRY_HOURS", "12"))),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=int(os.getenv("JWT_REFRESH_TOKEN_EXPIRY_DAYS", "30"))),
     "AUTH_HEADER_TYPES": ("Bearer",),
     "SIGNING_KEY": os.getenv("JWT_SECRET_KEY", SECRET_KEY),
-    "USER_AUTHENTICATION_RULE": debug_user_authentication_rule,
+    "USER_AUTHENTICATION_RULE": None,
     # ...add other SimpleJWT settings as needed...
 }
