@@ -23,6 +23,11 @@ class SupportedChartType(Enum):
     BAR = "bar"
 
 
+class ComputationType(Enum):
+    RAW = "raw"
+    AGGREGATE = "aggregated"
+
+
 ###### api request and response schemas ######
 
 
@@ -30,8 +35,8 @@ class RawChartQueryRequest(Schema):
     chart_type: str
     schema_name: str
     table_name: str
-    xaxis_col: str
-    yaxis_col: str
+    xaxis_col: Optional[str] = None
+    yaxis_col: Optional[str] = None
     offset: int
     limit: int = 10
 
@@ -78,20 +83,21 @@ class ChartDataRequest(Schema):
 
 
 class GenerateChartConfigRequest(Schema):
-    charting_library: str
+    charting_library: str = SupportedChartingLibrary.APACHE_ECHARTS.value
     chart_type: str
     schema_name: str
     table_name: str
-    title: str
-    description: Optional[str] = None
-    xaxis: str
-    yaxis: str
     offset: int = 0
     limit: int = 10
+    title: Optional[str]
+    description: Optional[str] = None
+    xaxis: Optional[str] = None
+    yaxis: Optional[str] = None
     computation_type: str
-    dimension_col: str
-    aggregate_func: str
-    aggregate_col: str
+    dimension_col: Optional[str]
+    aggregate_func: Optional[str]
+    aggregate_col: Optional[str]
+    aggregate_col_alias: Optional[str]
 
 
 ##########################################

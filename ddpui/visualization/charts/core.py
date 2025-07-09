@@ -7,6 +7,7 @@ from ddpui.visualization.charts.schema import (
     SupportedChartType,
     SeriesData,
     AggregateFunction,
+    ComputationType,
 )
 from ninja.errors import HttpError
 from sqlalchemy.sql.expression import column
@@ -43,9 +44,7 @@ def generate_echarts_bar_chart_config(xaxis: SeriesData, yseries: list[SeriesDat
     for i, series in enumerate(yseries):
         color = color_palette[i % len(color_palette)]  # Cycle through colors
         series_config = {
-            "name": (
-                series.name.split("_")[0].title() if "_" in series.name else series.name.title()
-            ),
+            "name": series.name.title(),
             "data": series.data,
             "type": "bar",
             "itemStyle": {"color": color},
@@ -54,7 +53,7 @@ def generate_echarts_bar_chart_config(xaxis: SeriesData, yseries: list[SeriesDat
         yaxis_series_list.append(series_config)
 
     xaxis_series: dict = {
-        "name": xaxis.name.split("_")[0].title() if "_" in xaxis.name else xaxis.name.title(),
+        "name": xaxis.name.title(),
         "type": "category",
         "data": xaxis.data,
         "nameLocation": "middle",
@@ -87,10 +86,18 @@ def generate_echarts_line_chart_config(payload: GenerateChartConfigRequest):
     sample_values = [150, 230, 224, 218, 135, 147]
 
     x_axis_name = (
-        payload.xaxis.split("_")[0].title() if "_" in payload.xaxis else payload.xaxis.title()
+        payload.xaxis.split("_")[0].title()
+        if payload.xaxis and "_" in payload.xaxis
+        else payload.xaxis.title()
+        if payload.xaxis
+        else "X-Axis"
     )
     y_axis_name = (
-        payload.yaxis.split("_")[0].title() if "_" in payload.yaxis else payload.yaxis.title()
+        payload.yaxis.split("_")[0].title()
+        if payload.yaxis and "_" in payload.yaxis
+        else payload.yaxis.title()
+        if payload.yaxis
+        else "Y-Axis"
     )
 
     config = {
@@ -150,7 +157,7 @@ def generate_echarts_pie_chart_config(payload: GenerateChartConfigRequest):
         "legend": {"orient": "vertical", "left": "left"},
         "series": [
             {
-                "name": payload.yaxis.title(),
+                "name": payload.yaxis or "Data",
                 "type": "pie",
                 "radius": "50%",
                 "data": sample_data,
@@ -180,12 +187,11 @@ def fetch_chart_data_from_warehouse(
         credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
         wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
 
-        do_groupby = False
+        do_groupby = payload.computation_type == ComputationType.AGGREGATE.value
 
         # Use AggQueryBuilder to build the query
         builder = AggQueryBuilder()
         if payload.dimension_col:
-            do_groupby = True
             builder.add_column(column(payload.dimension_col))
 
         if payload.xaxis:
@@ -195,7 +201,6 @@ def fetch_chart_data_from_warehouse(
             builder.add_column(column(payload.yaxis))
 
         if payload.aggregate_func:
-            do_groupby = True
             # Map aggregate function enum to SQLAlchemy func
             aggregate_func_map = {
                 AggregateFunction.COUNT.value: lambda col: func.count(),  # COUNT(*) doesn't need a column
@@ -209,10 +214,10 @@ def fetch_chart_data_from_warehouse(
             if payload.aggregate_func in aggregate_func_map:
                 agg_func = aggregate_func_map[payload.aggregate_func]
                 if payload.aggregate_func == AggregateFunction.COUNT.value:
-                    builder.add_column(agg_func(None).label(payload.yaxis))
+                    builder.add_column(agg_func(None).label(payload.aggregate_col_alias))
                 elif payload.aggregate_col:
                     builder.add_column(
-                        agg_func(column(payload.aggregate_col)).label(payload.aggregate_col)
+                        agg_func(column(payload.aggregate_col)).label(payload.aggregate_col_alias)
                     )
                 else:
                     raise ValueError(
@@ -229,7 +234,8 @@ def fetch_chart_data_from_warehouse(
             if payload.xaxis:
                 groupby_cols.append(payload.xaxis)
 
-            builder.group_cols_by(*groupby_cols)
+            if groupby_cols:  # Only group by if there are columns to group by
+                builder.group_cols_by(*groupby_cols)
 
         builder.fetch_from(payload.table_name, payload.schema_name)
         builder.offset_rows(payload.offset)
@@ -262,7 +268,7 @@ def transform_rows_to_echarts_bar_series_data(
             SeriesData(name=payload.yaxis or "Empty", data=[])
         ]
 
-    if payload.computation_type == "raw":
+    if payload.computation_type == ComputationType.RAW.value:
         # For raw charts: direct x-axis and y-axis mapping
         xaxis_data = (
             [
@@ -287,46 +293,86 @@ def transform_rows_to_echarts_bar_series_data(
 
         return xaxis_series, yaxis_series
 
-    else:  # computation_type == "agg"
-        # For aggregated charts: group by dimension and create multiple series
+    else:
+        if payload.xaxis:
+            unique_xaxis_values = sorted(
+                set(row[payload.xaxis] for row in rows), key=lambda x: (x is None, x)
+            )
+            xaxis_data_formatted = [
+                str(x) if x is not None else "Null" for x in unique_xaxis_values
+            ]
+            xaxis_series = SeriesData(name=payload.xaxis, data=xaxis_data_formatted)
+        else:
+            xaxis_series = SeriesData(name="Empty", data=[])
 
-        unique_xaxis_values = sorted(
-            set(row[payload.xaxis] for row in rows), key=lambda x: (x is None, x)
-        )
-        xaxis_data_formatted = [str(x) if x is not None else "Unknown" for x in unique_xaxis_values]
-        xaxis_series = SeriesData(name=payload.xaxis, data=xaxis_data_formatted)
-
-        unique_dimensions = sorted(
-            set(row[payload.dimension_col] for row in rows), key=lambda x: (x is None, x)
-        )
+        unique_dimensions = []
+        if payload.dimension_col:
+            unique_dimensions = sorted(
+                set(row[payload.dimension_col] for row in rows), key=lambda x: (x is None, x)
+            )
 
         yaxis_series = []
 
         for dimension_value in unique_dimensions:
             series_data = []
 
-            for continent in unique_xaxis_values:
-                matching_row = next(
-                    (
-                        row
-                        for row in rows
-                        if row[payload.dimension_col] == dimension_value
-                        and row[payload.xaxis] == continent
-                    ),
-                    None,
-                )
+            for unique_xaxis_val in unique_xaxis_values:
+                matching_row = None
+                if payload.dimension_col and payload.xaxis:
+                    # Both dimension_col and xaxis are available
+                    matching_row = next(
+                        (
+                            row
+                            for row in rows
+                            if row[payload.dimension_col] == dimension_value
+                            and row[payload.xaxis] == unique_xaxis_val
+                        ),
+                        None,
+                    )
+                elif payload.dimension_col:
+                    # Only dimension_col is available
+                    matching_row = next(
+                        (row for row in rows if row[payload.dimension_col] == dimension_value),
+                        None,
+                    )
+                elif payload.xaxis:
+                    # Only xaxis is available
+                    matching_row = next(
+                        (row for row in rows if row[payload.xaxis] == unique_xaxis_val),
+                        None,
+                    )
 
-                if matching_row and matching_row[payload.aggregate_col] is not None:
-                    series_data.append(int(matching_row[payload.aggregate_col]))
-                else:
-                    series_data.append(0)  # Default value if no data found
+                if (
+                    matching_row
+                    and payload.aggregate_col_alias
+                    and matching_row[payload.aggregate_col_alias] is not None
+                ):
+                    series_data.append(int(matching_row[payload.aggregate_col_alias]))
 
             yaxis_series.append(
                 SeriesData(
-                    name=str(dimension_value) if dimension_value is not None else "Unknown",
+                    name=str(dimension_value) if dimension_value is not None else "Null",
                     data=series_data,
                 )
             )
+
+        if not yaxis_series:
+            # pick the payload.aggregate_col_alias if available
+            # value should be picked from rows
+            if payload.aggregate_col_alias:
+                yaxis_series.append(
+                    SeriesData(
+                        name=payload.aggregate_col_alias,
+                        data=[
+                            (
+                                int(row[payload.aggregate_col_alias])
+                                if row[payload.aggregate_col_alias] is not None
+                                else 0
+                            )
+                            for row in rows
+                        ],
+                    )
+                )
 
         return xaxis_series, yaxis_series
 
