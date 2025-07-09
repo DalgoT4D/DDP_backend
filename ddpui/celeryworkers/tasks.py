@@ -419,27 +419,6 @@ def run_dbt_commands(self, org_id: int, task_id: str, dbt_run_params: dict = Non
         task_lock.delete()
 
 
-@app.task(bind=False)
-def delete_airbyte_connections(task_key: str, org_id, connection_ids: list[str]):
-    """deletes a set of airbyte connections and related dalgo artifacts"""
-    org = Org.objects.get(id=org_id)
-    # the task_key is keyed by org only
-    taskprogress = SingleTaskProgress(task_key, 180)
-    taskprogress.add({"message": "started", "status": TaskProgressStatus.RUNNING, "result": None})
-    for connection_id in connection_ids:
-        airbytehelpers.delete_connection(org, connection_id)
-        taskprogress.add(
-            {
-                "message": f"connection {connection_id} deleted",
-                "status": TaskProgressStatus.RUNNING,
-                "result": {},
-            }
-        )
-    taskprogress.add(
-        {"message": "all connections deleted", "status": TaskProgressStatus.COMPLETED, "result": {}}
-    )
-
-
 def detect_schema_changes_for_org(org: Org):
     """detect schema changes for all connections of this org"""
     org_tasks = OrgTask.objects.filter(org=org, task__slug=TASK_AIRBYTESYNC)

@@ -5,7 +5,6 @@ from typing import List
 from ninja.errors import HttpError
 from ninja import Router
 
-from ddpui import auth
 from ddpui import settings
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import (
@@ -28,7 +27,7 @@ from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgType
 from ddpui.models.llm import LogsSummarizationType, LlmSession, LlmSessionStatus
-from ddpui.ddpairbyte import airbytehelpers
+from ddpui.ddpairbyte import airbytehelpers, deleteconnection
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.celeryworkers.tasks import (
     get_connection_catalog_task,
@@ -496,7 +495,7 @@ def delete_airbyte_connection_v1(request, connection_id):
     if org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    _, error = airbytehelpers.delete_connection(org, connection_id)
+    _, error = deleteconnection.delete_connection(org, connection_id)
     if error:
         raise HttpError(400, error)
 

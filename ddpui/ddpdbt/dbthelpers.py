@@ -115,7 +115,7 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
                 new_block_name,
                 str(error),
             )
-            return (None, None), "Failed to update the cli profile block"
+            return (None, None), "Failed to create the cli profile block"
 
         # save the cli profile block in django db
         cli_profile_block = OrgPrefectBlockv1.objects.create(
