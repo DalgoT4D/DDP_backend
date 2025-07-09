@@ -348,6 +348,8 @@ def transform_rows_to_echarts_bar_series_data(
                     and matching_row[payload.aggregate_col_alias] is not None
                 ):
                     series_data.append(int(matching_row[payload.aggregate_col_alias]))
+                else:
+                    series_data.append(0)
 
             yaxis_series.append(
                 SeriesData(
