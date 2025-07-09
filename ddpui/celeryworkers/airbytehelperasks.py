@@ -15,14 +15,23 @@ def delete_airbyte_connections(task_key: str, org_id, connection_ids: list[str])
     taskprogress = SingleTaskProgress(task_key, 180)
     taskprogress.add({"message": "started", "status": TaskProgressStatus.RUNNING, "result": None})
     for connection_id in connection_ids:
-        delete_connection(org, connection_id)
-        taskprogress.add(
-            {
-                "message": f"connection {connection_id} deleted",
-                "status": TaskProgressStatus.RUNNING,
-                "result": {},
-            }
-        )
+        try:
+            delete_connection(org, connection_id)
+            taskprogress.add(
+                {
+                    "message": f"connection {connection_id} deleted",
+                    "status": TaskProgressStatus.RUNNING,
+                    "result": {},
+                }
+            )
+        except Exception as err:
+            taskprogress.add(
+                {
+                    "message": f"Failed to delete connection {connection_id}: {str(err)}",
+                    "status": TaskProgressStatus.RUNNING,
+                    "result": {"error": str(err)},
+                }
+            )
     taskprogress.add(
         {"message": "all connections deleted", "status": TaskProgressStatus.COMPLETED, "result": {}}
     )

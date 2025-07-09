@@ -63,10 +63,13 @@ def delete_connection(org: Org, connection_id: str):
             #    {seq, slug, type, timeout, orgtask__uuid, connection_id, airbyte_server_block}
             parameters = deployment["parameters"]
             # logger.info(parameters)
+            tasks_to_keep = []
             for task in parameters["config"]["tasks"]:
                 if task.get("connection_id") == connection_id:
                     logger.info(f"deleting task {task['slug']} from deployment")
-                    parameters["config"]["tasks"].remove(task)
+                else:
+                    tasks_to_keep.append(task)
+            parameters["config"]["tasks"] = tasks_to_keep
             # logger.info(parameters)
             if len(parameters["config"]["tasks"]) > 0:
                 payload = PrefectDataFlowUpdateSchema3(deployment_params=parameters)

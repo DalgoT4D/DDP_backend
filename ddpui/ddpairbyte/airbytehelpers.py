@@ -4,7 +4,7 @@ functions which work with airbyte and with the dalgo database
 
 import json
 import re
-from typing import List
+from typing import List, Tuple
 from uuid import uuid4
 from datetime import datetime
 from ninja.errors import HttpError
@@ -300,7 +300,7 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
     return res, None
 
 
-def get_connections(org: Org) -> List[AirbyteGetConnectionsResponse]:
+def get_connections(org: Org) -> Tuple[List[AirbyteGetConnectionsResponse], None]:
     """
         Purpose:
 
