@@ -81,3 +81,5 @@ FREE_TRIAL = {
     "dataQuality": ["Data quality dashboards"],
     "superset": ["Superset dashboards", "Superset Usage dashboards"],
 }
+
+AIRBYTE_CONNECTION_DEPRECATED = "deprecated"
