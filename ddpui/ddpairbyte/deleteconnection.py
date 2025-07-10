@@ -17,7 +17,7 @@ logger = CustomLogger("airbyte")
 def delete_connection(org: Org, connection_id: str):
     """deletes an airbyte connection"""
 
-    dataflows_to_delete: list[OrgDataFlowv1] = []
+    dataflows_to_delete: dict[int, OrgDataFlowv1] = {}
     orgtask_to_delete: list[OrgTask] = []
 
     # delete manual-sync and manual-reset dataflows
@@ -28,22 +28,24 @@ def delete_connection(org: Org, connection_id: str):
         for dataflow_orgtask in DataflowOrgTask.objects.filter(
             orgtask=org_task, dataflow__dataflow_type="manual"
         ):
-            dataflows_to_delete.append(dataflow_orgtask.dataflow)
+            # if there is a reset and a sync then the dataflow will appear twice in this loop
+            # ... that's why we use a dict keyed on the dataflow.id instead of a list
+            dataflows_to_delete[dataflow_orgtask.dataflow.id] = dataflow_orgtask.dataflow
             logger.info("will delete %s", dataflow_orgtask.dataflow.deployment_name)
 
         orgtask_to_delete.append(org_task)
 
     # delete all deployments
-    for dataflow in dataflows_to_delete:
+    for dataflow in dataflows_to_delete.values():
         logger.info("deleting prefect deployment %s", dataflow.deployment_name)
         prefect_service.delete_deployment_by_id(dataflow.deployment_id)
 
     # delete all dataflows
     logger.info("deleting org dataflows from db")
-    for dataflow in dataflows_to_delete:
+    for dataflow in dataflows_to_delete.values():
         # if there is a reset and a sync then the dataflow will appear twice in this list
-        if dataflow.id:
-            dataflow.delete()
+        dataflow.delete()
+    dataflows_to_delete = None
 
     # remove from orchestration dataflows
     for org_task in OrgTask.objects.filter(
