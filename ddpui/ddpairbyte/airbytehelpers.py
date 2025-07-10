@@ -530,9 +530,10 @@ def get_connections(org: Org) -> Tuple[List[AirbyteGetConnectionsResponse], None
         conn["lastRun"] = last_runs[-1] if len(last_runs) > 0 else None
         del conn["look_up_last_run_deployment_ids"]
 
-    delete_airbyte_connections.delay(
-        f"delete-connections-{org.slug}", org.id, connections_to_clean_up
-    )
+    if connections_to_clean_up:
+        delete_airbyte_connections.delay(
+            f"delete-connections-{org.slug}", org.id, connections_to_clean_up
+        )
 
     return res, None
 
