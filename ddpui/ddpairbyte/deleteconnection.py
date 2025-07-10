@@ -79,6 +79,7 @@ def delete_connection(org: Org, connection_id: str):
                 logger.info("updated deployment %s", dataflow_orgtask.dataflow.deployment_name)
             else:
                 prefect_service.delete_deployment_by_id(dataflow_orgtask.dataflow.deployment_id)
+                dataflow_orgtask.dataflow.delete()
 
     # delete all orgtasks
     for org_task in orgtask_to_delete:
