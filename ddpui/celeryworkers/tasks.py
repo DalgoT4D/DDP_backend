@@ -448,6 +448,16 @@ def detect_schema_changes_for_org(org: Org):
             logger.error(err)
             continue
 
+        if connection_catalog is None:
+            if os.getenv("ADMIN_EMAIL"):
+                send_text_message(
+                    os.getenv("ADMIN_EMAIL"),
+                    f"Schema change detection errors for {org.slug}",
+                    f"connection_catalog is None for {org_task.connection_id}",
+                )
+            logger.error(err)
+            continue
+
         if connection_catalog["status"] == AIRBYTE_CONNECTION_DEPRECATED:
             deprecated_org_tasks.append(org_task)
             continue
@@ -483,12 +493,15 @@ def detect_schema_changes_for_org(org: Org):
             except Exception as err:
                 logger.error(err)
 
-    for deprecated_org_task in deprecated_org_tasks:
+    if len(deprecated_org_tasks) > 0:
+        deprecated_connection_ids = [
+            deprecated_org_task.connection_id for deprecated_org_task in deprecated_org_tasks
+        ]
         logger.info(
-            f"deleting OrgSchemaChange for deprecated connection {deprecated_org_task.connection_id} for {org.slug}"
+            f"deleting OrgSchemaChange for deprecated connections {','.join(deprecated_connection_ids)} for {org.slug}"
         )
         OrgSchemaChange.objects.filter(
-            org=org, connection_id=deprecated_org_task.connection_id
+            org=org, connection_id__in=deprecated_connection_ids
         ).delete()
 
 
