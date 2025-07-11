@@ -9,6 +9,7 @@ from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.org import Org, OrgDataFlowv1, ConnectionMeta
 from ddpui.models.tasks import OrgTask
 from ddpui.models.org_user import OrgUser
+from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.awsses import send_text_message
 from ddpui.models.tasks import (
@@ -35,6 +36,8 @@ from ddpui.core.notifications_service import (
 )
 from ddpui.utils.constants import SYSTEM_USER_EMAIL
 from ddpui.utils.discord import send_discord_notification
+from ddpui.celeryworkers.tasks import summarize_logs
+from ddpui.models.llm import LogsSummarizationType
 
 logger = CustomLogger("ddpui")
 
@@ -179,6 +182,42 @@ def notify_platform_admins(org: Org, flow_run_id: str, state: str):
         )
     if os.getenv("ADMIN_DISCORD_WEBHOOK"):
         send_discord_notification(os.getenv("ADMIN_DISCORD_WEBHOOK"), message)
+
+
+def generate_llm_failure_summary(org: Org, flow_run_id: str):
+    """Generate LLM failure summary for a failed Prefect flow run"""
+    try:
+        # Check if auto-generation of LLM failure summaries is enabled
+        if not os.getenv("AUTO_GENERATE_LLM_FAILURE_SUMMARIES", "").lower() in ["true", "1", "yes"]:
+            logger.info(
+                f"LLM failure summary auto-generation disabled, skipping for flow run {flow_run_id}"
+            )
+            return
+
+        # Get system user to use for LLM summarization
+        system_user = OrgUser.objects.filter(user__email=SYSTEM_USER_EMAIL).first()
+        if not system_user:
+            logger.error(
+                f"System user not found, skipping LLM failure summary for flow run {flow_run_id}"
+            )
+            return
+
+        # Trigger the summarize_logs task asynchronously
+        logger.info(f"Triggering LLM failure summary for flow run {flow_run_id}")
+        summarize_logs.apply_async(
+            kwargs={
+                "orguser_id": system_user.id,
+                "type": LogsSummarizationType.DEPLOYMENT,
+                "flow_run_id": flow_run_id,
+                "task_id": None,  # Summarize entire flow run, not a specific task
+                "regenerate": False,  # Use cached summary if available
+            }
+        )
+        logger.info(f"LLM failure summary task triggered for flow run {flow_run_id}")
+    except Exception as err:
+        logger.error(
+            f"Failed to trigger LLM failure summary for flow run {flow_run_id}: {str(err)}"
+        )
 
 
 def get_flow_run_times(flow_run: dict) -> tuple:
@@ -400,6 +439,9 @@ def do_handle_prefect_webhook(flow_run_id: str, state: str):
                 # odf might be None!
                 odf = OrgDataFlowv1.objects.filter(org=org, deployment_id=deployment_id).first()
                 send_failure_emails(org, odf, flow_run, state)
+
+                # Generate LLM failure summary for failed/crashed flow runs
+                generate_llm_failure_summary(org, flow_run_id)
 
             elif state in [FLOW_RUN_COMPLETED_STATE_NAME]:
                 email_orgusers_ses_whitelisted(org, "Your pipeline completed successfully")

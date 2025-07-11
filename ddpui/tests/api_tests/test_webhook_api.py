@@ -29,6 +29,7 @@ from ddpui.utils.webhook_helpers import (
     notify_platform_admins,
     do_handle_prefect_webhook,
     get_flow_run_times,
+    generate_llm_failure_summary,
 )
 from ddpui.auth import SUPER_ADMIN_ROLE, GUEST_ROLE, ACCOUNT_MANAGER_ROLE
 from ddpui.models.org import Org, ConnectionMeta
@@ -686,3 +687,77 @@ def test_get_flow_run_times_no_expected_start_time():
     start_time, expected_start_time = get_flow_run_times(flow_run)
     assert str(start_time) == flow_run["start_time"]
     assert expected_start_time is not None
+
+
+def test_llm_failure_summary_generation():
+    """tests that LLM failure summary is triggered for failed flow runs"""
+    org = Org.objects.create(name="test-org", slug="test-org")
+
+    # Create system user
+    User.objects.create(email="system@dalgo.ai", username="system@dalgo.ai")
+    system_user = OrgUser.objects.create(
+        user=User.objects.get(email="system@dalgo.ai"),
+        org=None,  # System user has no org
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+    )
+
+    flow_run = {
+        "parameters": {
+            "config": {"org_slug": org.slug},
+        },
+        "deployment_id": "test-deployment-id",
+        "id": "test-flow-run-id",
+        "name": "test-flow-run-name",
+        "start_time": str(datetime.now()),
+        "expected_start_time": str(datetime.now()),
+        "total_run_time": 12,
+        "status": FLOW_RUN_FAILED_STATE_TYPE,
+        "state_name": FLOW_RUN_FAILED_STATE_NAME,
+    }
+
+    with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
+        "ddpui.utils.webhook_helpers.send_failure_emails"
+    ) as mock_send_failure_emails, patch(
+        "ddpui.utils.webhook_helpers.generate_llm_failure_summary"
+    ) as mock_generate_llm_summary, patch.dict(
+        os.environ, {"AUTO_GENERATE_LLM_FAILURE_SUMMARIES": "True"}
+    ):
+        mock_get_flow_run.return_value = flow_run
+
+        do_handle_prefect_webhook(flow_run["id"], flow_run["state_name"])
+
+        # Verify that LLM failure summary generation was called
+        mock_generate_llm_summary.assert_called_once_with(org, flow_run["id"])
+
+
+def test_llm_failure_summary_disabled():
+    """tests that LLM failure summary is not triggered when disabled"""
+    org = Org.objects.create(name="test-org-2", slug="test-org-2")
+
+    flow_run = {
+        "parameters": {
+            "config": {"org_slug": org.slug},
+        },
+        "deployment_id": "test-deployment-id-2",
+        "id": "test-flow-run-id-2",
+        "name": "test-flow-run-name-2",
+        "start_time": str(datetime.now()),
+        "expected_start_time": str(datetime.now()),
+        "total_run_time": 12,
+        "status": FLOW_RUN_FAILED_STATE_TYPE,
+        "state_name": FLOW_RUN_FAILED_STATE_NAME,
+    }
+
+    with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
+        "ddpui.utils.webhook_helpers.send_failure_emails"
+    ) as mock_send_failure_emails, patch(
+        "ddpui.utils.webhook_helpers.generate_llm_failure_summary"
+    ) as mock_generate_llm_summary, patch.dict(
+        os.environ, {"AUTO_GENERATE_LLM_FAILURE_SUMMARIES": "False"}
+    ):
+        mock_get_flow_run.return_value = flow_run
+
+        do_handle_prefect_webhook(flow_run["id"], flow_run["state_name"])
+
+        # Verify that LLM failure summary generation was called but early returned
+        mock_generate_llm_summary.assert_called_once_with(org, flow_run["id"])
