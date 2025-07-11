@@ -16,6 +16,19 @@ class SentToEnum(str, Enum):
     SINGLE_USER = "single_user"
 
 
+class NotificationCategoryEnum(str, Enum):
+    """
+    Schema for notification categories
+    """
+
+    INCIDENT = "incident"
+    SCHEMA_CHANGE = "schema_change"
+    JOB_FAILURE = "job_failure"
+    LATE_RUN = "late_run"
+    DBT_TEST_FAILURE = "dbt_test_failure"
+    SYSTEM = "system"
+
+
 class CreateNotificationPayloadSchema(BaseModel):
     """Schema for creating a new notification api."""
 
@@ -27,6 +40,7 @@ class CreateNotificationPayloadSchema(BaseModel):
     user_email: Optional[str] = None
     manager_or_above: Optional[bool] = False
     org_slug: Optional[str] = None
+    category: Optional[NotificationCategoryEnum] = NotificationCategoryEnum.SYSTEM
 
     class Config:
         use_enum_values = True
@@ -55,3 +69,56 @@ class NotificationDataSchema(Schema):
     urgent: Optional[bool] = False
     scheduled_time: Optional[datetime] = None
     recipients: List[int]  # list of orguser ids
+    category: Optional[str] = "system"
+
+
+class UserNotificationPreferencesSchema(Schema):
+    """Schema for user notification preferences"""
+
+    enable_email_notifications: bool
+    subscribe_incident: bool
+    subscribe_schema_change: bool
+    subscribe_job_failure: bool
+    subscribe_late_run: bool
+    subscribe_dbt_test_failure: bool
+    subscribe_system: bool
+
+
+class NotificationFiltersSchema(Schema):
+    """Schema for filtering notifications"""
+
+    category: Optional[NotificationCategoryEnum] = None
+    urgent_only: Optional[bool] = False
+
+
+class UserNotificationPreferencesResponseSchema(Schema):
+    """Schema for returning user notification preferences"""
+
+    email_notifications_enabled: bool
+    incident_notifications: bool
+    schema_change_notifications: bool
+    job_failure_notifications: bool
+    late_run_notifications: bool
+    dbt_test_failure_notifications: bool
+    system_notifications: bool
+
+
+class NotificationResponseSchema(Schema):
+    """Schema for notification response with category info"""
+
+    id: int
+    message: str
+    timestamp: datetime
+    urgent: bool
+    read_status: bool
+    category: str
+    author: str
+
+
+class UrgentNotificationSchema(Schema):
+    """Schema for urgent notifications to display in notification bar"""
+
+    id: int
+    message: str
+    category: str
+    timestamp: datetime

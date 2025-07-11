@@ -5,6 +5,8 @@ from django.core.paginator import Paginator
 from ddpui.models.notifications import (
     Notification,
     NotificationRecipient,
+    UserNotificationPreferences,
+    NotificationCategory,
 )
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.org import Org
@@ -68,6 +70,15 @@ def handle_recipient(
     """
     recipient = OrgUser.objects.get(id=recipient_id)
     user_preference, created = UserPreferences.objects.get_or_create(orguser=recipient)
+
+    # Get or create notification preferences
+    notification_preferences, _ = UserNotificationPreferences.objects.get_or_create(user=recipient)
+
+    # Check if user is subscribed to this notification category
+    if not notification_preferences.is_subscribed_to_category(notification.category):
+        # Skip this recipient as they're not subscribed to this category
+        return None
+
     notification_recipient = NotificationRecipient.objects.create(
         notification=notification, recipient=recipient
     )
@@ -81,10 +92,11 @@ def handle_recipient(
         notification.sent_time = timezone.as_utc(datetime.now())
         notification.save()
 
-        if user_preference.enable_email_notifications:
+        # Check if user has email notifications enabled
+        if notification_preferences.email_notifications_enabled:
             try:
                 send_text_message(
-                    user_preference.orguser.user.email,
+                    recipient.user.email,
                     notification.email_subject,
                     notification.message,
                 )
@@ -112,6 +124,7 @@ def create_notification(
     urgent = notification_data.urgent
     scheduled_time = notification_data.scheduled_time
     recipients = notification_data.recipients
+    category = getattr(notification_data, "category", "system")
 
     errors = []
     notification = Notification.objects.create(
@@ -120,6 +133,7 @@ def create_notification(
         email_subject=email_subject,
         urgent=urgent,
         scheduled_time=scheduled_time,
+        category=category,
     )
 
     if not notification:
@@ -380,3 +394,295 @@ def get_unread_notifications_count(
     ).count()
 
     return None, {"success": True, "res": unread_count}
+
+
+# New category-related functions
+def get_user_notification_preferences(
+    orguser: OrgUser,
+) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """
+    Get user notification preferences including category subscriptions
+    """
+    try:
+        user_preference, created = UserPreferences.objects.get_or_create(orguser=orguser)
+        return None, {"success": True, "res": user_preference.to_json()}
+    except Exception as e:
+        return f"Error retrieving user preferences: {str(e)}", None
+
+
+def update_user_notification_preferences(
+    orguser: OrgUser, preferences_data: dict
+) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """
+    Update user notification preferences including category subscriptions
+    """
+    try:
+        user_preference, created = UserPreferences.objects.get_or_create(orguser=orguser)
+
+        # Update preferences based on provided data
+        for key, value in preferences_data.items():
+            if hasattr(user_preference, key):
+                setattr(user_preference, key, value)
+
+        user_preference.save()
+        return None, {"success": True, "message": "Preferences updated successfully"}
+    except Exception as e:
+        return f"Error updating user preferences: {str(e)}", None
+
+
+def fetch_user_notifications_by_category(
+    orguser: OrgUser, page: int, limit: int, category: str = None, urgent_only: bool = False
+) -> Tuple[Optional[None], Dict[str, Any]]:
+    """
+    Returns notifications for a specific user filtered by category
+    """
+    # Base query for user's notifications
+    user_notifications = (
+        NotificationRecipient.objects.filter(recipient=orguser)
+        .select_related("notification")
+        .order_by("-notification__timestamp")
+    )
+
+    # Apply category filter
+    if category:
+        user_notifications = user_notifications.filter(notification__category=category)
+
+    # Apply urgent filter
+    if urgent_only:
+        user_notifications = user_notifications.filter(notification__urgent=True)
+
+    paginator = Paginator(user_notifications, limit)
+    paginated_notifications = paginator.get_page(page)
+
+    notification_list = [
+        {
+            "id": notification_recipient.notification.id,
+            "author": notification_recipient.notification.author,
+            "message": notification_recipient.notification.message,
+            "email_subject": notification_recipient.notification.email_subject,
+            "timestamp": notification_recipient.notification.timestamp,
+            "urgent": notification_recipient.notification.urgent,
+            "category": notification_recipient.notification.category,
+            "scheduled_time": notification_recipient.notification.scheduled_time,
+            "sent_time": notification_recipient.notification.sent_time,
+            "read_status": notification_recipient.read_status,
+        }
+        for notification_recipient in paginated_notifications
+    ]
+
+    return None, {
+        "success": True,
+        "res": notification_list,
+        "page": paginated_notifications.number,
+        "total_pages": paginated_notifications.paginator.num_pages,
+        "total_notifications": paginated_notifications.paginator.count,
+    }
+
+
+def get_urgent_notifications_for_user(
+    orguser: OrgUser,
+) -> Tuple[Optional[None], Dict[str, Any]]:
+    """
+    Get all unread urgent notifications for a user (for notification bar)
+    """
+    urgent_notifications = (
+        NotificationRecipient.objects.filter(
+            recipient=orguser, read_status=False, notification__urgent=True
+        )
+        .select_related("notification")
+        .order_by("-notification__timestamp")
+    )
+
+    notification_list = [
+        {
+            "id": notification_recipient.notification.id,
+            "author": notification_recipient.notification.author,
+            "message": notification_recipient.notification.message,
+            "timestamp": notification_recipient.notification.timestamp,
+            "category": notification_recipient.notification.category,
+        }
+        for notification_recipient in urgent_notifications
+    ]
+
+    return None, {"success": True, "res": notification_list}
+
+
+def create_categorized_notification(
+    author: str,
+    message: str,
+    email_subject: str,
+    category: str,
+    recipients: List[int],
+    urgent: bool = False,
+    scheduled_time: Optional[datetime] = None,
+) -> Tuple[Optional[Dict[str, str]], Optional[Dict[str, Any]]]:
+    """
+    Helper function to create notifications with specific categories
+    """
+    notification_data = NotificationDataSchema(
+        author=author,
+        message=message,
+        email_subject=email_subject,
+        urgent=urgent,
+        scheduled_time=scheduled_time,
+        recipients=recipients,
+        category=category,
+    )
+    return create_notification(notification_data)
+
+
+def get_user_notification_preferences(orguser: OrgUser) -> UserNotificationPreferences:
+    """Get or create user notification preferences"""
+    preferences, created = UserNotificationPreferences.objects.get_or_create(user=orguser)
+    return preferences
+
+
+def update_user_notification_preferences(
+    orguser: OrgUser,
+    email_notifications_enabled: bool = None,
+    incident_notifications: bool = None,
+    schema_change_notifications: bool = None,
+    job_failure_notifications: bool = None,
+    late_run_notifications: bool = None,
+    dbt_test_failure_notifications: bool = None,
+    system_notifications: bool = None,
+) -> UserNotificationPreferences:
+    """Update user notification preferences"""
+    preferences = get_user_notification_preferences(orguser)
+
+    if email_notifications_enabled is not None:
+        preferences.email_notifications_enabled = email_notifications_enabled
+    if incident_notifications is not None:
+        preferences.incident_notifications = incident_notifications
+    if schema_change_notifications is not None:
+        preferences.schema_change_notifications = schema_change_notifications
+    if job_failure_notifications is not None:
+        preferences.job_failure_notifications = job_failure_notifications
+    if late_run_notifications is not None:
+        preferences.late_run_notifications = late_run_notifications
+    if dbt_test_failure_notifications is not None:
+        preferences.dbt_test_failure_notifications = dbt_test_failure_notifications
+    if system_notifications is not None:
+        preferences.system_notifications = system_notifications
+
+    preferences.save()
+    return preferences
+
+
+def get_filtered_notifications(
+    orguser: OrgUser,
+    page: int = 1,
+    limit: int = 10,
+    category: str = None,
+    urgent_only: bool = False,
+    read_status: Optional[int] = None,
+) -> Tuple[Optional[None], Dict[str, Any]]:
+    """Get notifications filtered by category and other criteria"""
+    notifications_query = NotificationRecipient.objects.filter(recipient=orguser)
+
+    if category:
+        notifications_query = notifications_query.filter(notification__category=category)
+
+    if urgent_only:
+        notifications_query = notifications_query.filter(notification__urgent=True)
+
+    if read_status is not None:
+        notifications_query = notifications_query.filter(read_status=(read_status == 1))
+
+    notifications_query = notifications_query.order_by("-notification__timestamp")
+
+    paginator = Paginator(notifications_query, limit)
+    paginated_notifications = paginator.get_page(page)
+
+    notification_list = [
+        {
+            "id": notification_recipient.notification.id,
+            "message": notification_recipient.notification.message,
+            "timestamp": notification_recipient.notification.timestamp,
+            "urgent": notification_recipient.notification.urgent,
+            "read_status": notification_recipient.read_status,
+            "category": notification_recipient.notification.category,
+            "author": notification_recipient.notification.author,
+        }
+        for notification_recipient in paginated_notifications
+    ]
+
+    return None, {
+        "success": True,
+        "res": notification_list,
+        "page": page,
+        "limit": limit,
+        "total_pages": paginator.num_pages,
+        "total_count": paginator.count,
+    }
+
+
+def get_urgent_notifications_for_user(orguser: OrgUser) -> List[Dict[str, Any]]:
+    """Get urgent unread notifications for display in notification bar"""
+    urgent_notifications = (
+        NotificationRecipient.objects.filter(
+            recipient=orguser, notification__urgent=True, read_status=False
+        )
+        .select_related("notification")
+        .order_by("-notification__timestamp")
+    )
+
+    return [
+        {
+            "id": notif.notification.id,
+            "message": notif.notification.message,
+            "category": notif.notification.category,
+            "timestamp": notif.notification.timestamp,
+        }
+        for notif in urgent_notifications
+    ]
+
+
+def create_job_failure_notification(
+    flow_run_id: str, org: Org, error_message: str = "A data pipeline job has failed."
+) -> None:
+    """Create a job failure notification for all subscribed users in an org"""
+    recipients = OrgUser.objects.filter(org=org).values_list("id", flat=True)
+
+    create_categorized_notification(
+        author="system@dalgo.ai",
+        message=f"Job failure detected for flow run {flow_run_id}: {error_message}",
+        email_subject="Data Pipeline Job Failure",
+        category=NotificationCategory.JOB_FAILURE,
+        recipients=list(recipients),
+        urgent=False,
+    )
+
+
+def create_dbt_test_failure_notification(test_name: str, org: Org, error_details: str = "") -> None:
+    """Create a dbt test failure notification"""
+    recipients = OrgUser.objects.filter(org=org).values_list("id", flat=True)
+
+    message = f"dbt test '{test_name}' has failed."
+    if error_details:
+        message += f" Details: {error_details}"
+
+    create_categorized_notification(
+        author="system@dalgo.ai",
+        message=message,
+        email_subject="dbt Test Failure",
+        category=NotificationCategory.DBT_TEST_FAILURE,
+        recipients=list(recipients),
+        urgent=False,
+    )
+
+
+def create_late_run_notification(
+    flow_name: str, org: Org, expected_time: str, delay_minutes: int
+) -> None:
+    """Create a late run notification"""
+    recipients = OrgUser.objects.filter(org=org).values_list("id", flat=True)
+
+    create_categorized_notification(
+        author="system@dalgo.ai",
+        message=f"Pipeline '{flow_name}' is running late. Expected at {expected_time}, delayed by {delay_minutes} minutes.",
+        email_subject="Data Pipeline Running Late",
+        category=NotificationCategory.LATE_RUN,
+        recipients=list(recipients),
+        urgent=False,
+    )
