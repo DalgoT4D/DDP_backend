@@ -27,6 +27,9 @@ from ddpui.ddpprefect import (
     FLOW_RUN_TERMINAL_STATE_TYPES,
 )
 from ddpui.ddpdbt.schema import DbtCloudJobParams, DbtProjectParams
+from ddpui.ddpprefect.schema import (
+    PrefectDataFlowUpdateSchema3,
+)
 from ddpui.ddpprefect import prefect_service
 from ddpui.core.pipelinefunctions import setup_dbt_core_task_config, setup_dbt_cloud_task_config
 from ddpui.utils.constants import TASK_DBTRUN, TASK_GENERATE_EDR
@@ -181,11 +184,12 @@ def create_prefect_deployment_for_dbtcore_task(
 
 
 def delete_orgtask(org_task: OrgTask):
-    """Delete an orgtask; along with its deployment if its there"""
+    """Delete an orgtask; along with any deployments it may be attached to"""
 
+    # we first go through manual (system-generated) dataflows since the logic is straightforward
     for dataflow_orgtask in DataflowOrgTask.objects.filter(
-        orgtask=org_task
-    ).all():  # only long running task like TASK_DBTRUN, TASK_AIRBYTESYNC will have dataflow
+        orgtask=org_task, dataflow__dataflow_type="manual"
+    ):
         # delete the manual deployment for this
         dataflow = dataflow_orgtask.dataflow
         if dataflow:
@@ -195,11 +199,52 @@ def delete_orgtask(org_task: OrgTask):
             try:
                 prefect_service.delete_deployment_by_id(dataflow.deployment_id)
             except Exception:
+                # we want to return an error if the deployment exists in prefect
+                # but failed to be deleted
+                # we want to ignore it if the deployment doesn't exist
+                # hmmm
                 pass
-            logger.info("FINISHED deleting manual deployment for dbt run")
+            logger.info("FINISHED deleting manual deployment for orgtask")
             logger.info("deleting OrgDataFlowv1")
             dataflow.delete()
 
+        logger.info("deleting DataflowOrgTask")
+        dataflow_orgtask.delete()
+
+    # now we do the orchestrated (user-generated, with or without a schedule) pipelines
+    # here the deployment may contain a series of tasks and we only want to remove the tasks
+    # which correspond to this OrgTask
+    for dataflow_orgtask in DataflowOrgTask.objects.filter(
+        orgtask=org_task, dataflow__dataflow_type="orchestrate"
+    ):
+        dataflow = dataflow_orgtask.dataflow
+        if dataflow:
+            # fetch config from prefect
+            deployment = prefect_service.get_deployment(dataflow.deployment_id)
+            # { name, deploymentId, tags, cron, isScheduleActive, parameters }
+            # parameters = {config: {org_slug, tasks}}
+            # tasks = list of
+            #    {seq, slug, type, timeout, orgtask_uuid, connection_id, airbyte_server_block}
+            parameters = deployment["parameters"]
+            # logger.info(parameters)
+            tasks_to_keep = []
+            for task in parameters["config"]["tasks"]:
+                if task.get("orgtask_uuid") == str(org_task.uuid):
+                    logger.info(f"deleting task {task['slug']} from deployment")
+                else:
+                    tasks_to_keep.append(task)
+            parameters["config"]["tasks"] = tasks_to_keep
+            # logger.info(parameters)
+            if len(parameters["config"]["tasks"]) > 0:
+                payload = PrefectDataFlowUpdateSchema3(deployment_params=parameters)
+                prefect_service.update_dataflow_v1(dataflow.deployment_id, payload)
+                logger.info("updated deployment %s", dataflow.deployment_name)
+            else:
+                prefect_service.delete_deployment_by_id(dataflow.deployment_id)
+                dataflow.delete()
+
+        # the dataflow i.e. prefect deploymenet may or may not have been deleted. in either case
+        # this orgtask is no longer attached to it so delete the mapping relation
         logger.info("deleting DataflowOrgTask")
         dataflow_orgtask.delete()
 
