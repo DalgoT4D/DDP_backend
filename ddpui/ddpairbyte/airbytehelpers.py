@@ -383,8 +383,8 @@ def get_connections(org: Org) -> Tuple[List[AirbyteGetConnectionsResponse], None
 
     airbyte_connections = airbyte_service.get_webbackend_connections(org.airbyte_workspace_id)
 
-    res = []
-    connections_to_clean_up = []
+    res: list[dict] = []
+    connections_to_clean_up: list[str] = []
     redisclient = RedisClient.get_instance()
 
     for sync_dataflow in sync_dataflows:
@@ -541,6 +541,7 @@ def get_connections(org: Org) -> Tuple[List[AirbyteGetConnectionsResponse], None
         del conn["look_up_last_run_deployment_ids"]
 
     if connections_to_clean_up:
+        logger.info("cleaning up connections " + connections_to_clean_up)
         delete_airbyte_connections.delay(
             f"delete-connections-{org.slug}", org.id, connections_to_clean_up
         )
