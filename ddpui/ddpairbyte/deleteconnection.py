@@ -10,7 +10,7 @@ from ddpui.ddpairbyte import airbyte_service
 logger = CustomLogger("airbyte")
 
 
-def delete_connection(org: Org, connection_id: str):
+def delete_org_connection(org: Org, connection_id: str):
     """deletes an airbyte connection"""
 
     # remove all orgtasks (sync, clear, ...)

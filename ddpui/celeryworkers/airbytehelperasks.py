@@ -4,7 +4,7 @@ from ddpui.models.tasks import (
     TaskProgressStatus,
 )
 from ddpui.utils.singletaskprogress import SingleTaskProgress
-from ddpui.ddpairbyte.deleteconnection import delete_connection
+from ddpui.ddpairbyte.deleteconnection import delete_org_connection
 from ddpui.utils.redis_client import RedisClient
 
 
@@ -18,7 +18,7 @@ def delete_airbyte_connections(task_key: str, org_id, connection_ids: list[str])
     redisclient = RedisClient.get_instance()
     for connection_id in connection_ids:
         try:
-            delete_connection(org, connection_id)
+            delete_org_connection(org, connection_id)
             redisclient.delete(f"deleting-{connection_id}")
             taskprogress.add(
                 {

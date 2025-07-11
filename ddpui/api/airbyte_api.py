@@ -495,7 +495,7 @@ def delete_airbyte_connection_v1(request, connection_id):
     if org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    _, error = deleteconnection.delete_connection(org, connection_id)
+    _, error = deleteconnection.delete_org_connection(org, connection_id)
     if error:
         raise HttpError(400, error)
 
