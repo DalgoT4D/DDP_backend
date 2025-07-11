@@ -62,6 +62,7 @@ from ddpui.core.orgtaskfunctions import fetch_orgtask_lock_v1
 from ddpui.models.tasks import TaskLock
 from ddpui.ddpdbt.elementary_service import create_elementary_profile, elementary_setup_status
 from ddpui.ddpdbt.dbthelpers import create_or_update_org_cli_block
+from ddpui.utils.redis_client import RedisClient
 
 logger = CustomLogger("airbyte")
 
@@ -384,6 +385,7 @@ def get_connections(org: Org) -> Tuple[List[AirbyteGetConnectionsResponse], None
 
     res = []
     connections_to_clean_up = []
+    redisclient = RedisClient.get_instance()
 
     for sync_dataflow in sync_dataflows:
         sync_dataflow_orgtasks = [
@@ -434,14 +436,22 @@ def get_connections(org: Org) -> Tuple[List[AirbyteGetConnectionsResponse], None
         connection = [
             conn for conn in airbyte_connections if conn["connectionId"] == org_task.connection_id
         ]
+
+        def ensure_only_one_add_across_parallel_requests(connection_id: str):
+            """avoid a race condition in case get_connections() is called twice in parallel"""
+            cacheval = redisclient.get(f"deleting-{connection_id}")
+            if not cacheval:
+                redisclient.set(f"deleting-{connection_id}", True, 10)  # expire after 10 seconds
+                connections_to_clean_up.append(connection_id)
+
         if len(connection) == 0:
             logger.error(f"could not find connection {org_task.connection_id} in airbyte")
-            connections_to_clean_up.append(org_task.connection_id)
+            ensure_only_one_add_across_parallel_requests(org_task.connection_id)
             continue
 
         connection = connection[0]
         if connection["status"] == AIRBYTE_CONNECTION_DEPRECATED:
-            connections_to_clean_up.append(org_task.connection_id)
+            ensure_only_one_add_across_parallel_requests(org_task.connection_id)
             continue
 
         look_up_last_run_deployment_ids = []
