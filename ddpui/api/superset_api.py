@@ -18,7 +18,25 @@ logger = CustomLogger("ddpui")
 @superset_router.post("embed_token/{dashboard_uuid}/")
 @has_permission(["can_view_usage_dashboard"])
 def post_fetch_embed_token(request, dashboard_uuid):  # pylint: disable=unused-argument
-    """endpoint to fetch the embed token of a dashboard from superset"""
+    """
+    Fetch an embed token for a Superset dashboard to enable embedded viewing.
+
+    Authenticates with Superset using stored credentials and generates an embed
+    token that allows the specified dashboard to be embedded in the application.
+    Requires the organization to have an active Superset subscription and warehouse.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+        dashboard_uuid (str): UUID of the Superset dashboard to embed
+
+    Returns:
+        dict: Embed token and related authentication information for dashboard embedding
+
+    Raises:
+        HttpError: 400 if organization, warehouse, or Superset subscription not configured,
+                      or if credential retrieval fails
+        HttpError: 403 if user lacks permission to view usage dashboard
+    """
     orguser: OrgUser = request.orguser
     if orguser.org is None:
         raise HttpError(400, "create an organization first")

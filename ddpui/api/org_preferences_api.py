@@ -29,7 +29,23 @@ orgpreference_router = Router()
 
 @orgpreference_router.post("/")
 def create_org_preferences(request, payload: CreateOrgPreferencesSchema):
-    """Creates preferences for an organization"""
+    """
+    Create initial preferences for an organization.
+
+    Establishes the default preferences configuration for an organization.
+    Each organization can only have one preferences record, so this will
+    fail if preferences already exist.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+        payload (CreateOrgPreferencesSchema): Initial preferences configuration
+
+    Returns:
+        dict: Success status and created preferences data
+
+    Raises:
+        HttpError: 400 if organization preferences already exist
+    """
     orguser: OrgUser = request.orguser
     org = orguser.org
     payload.org = org

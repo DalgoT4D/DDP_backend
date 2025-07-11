@@ -15,7 +15,30 @@ dashboard_router = Router()
 @dashboard_router.get("/v1")
 @has_permission(["can_view_dashboard"])
 def get_dashboard_v1(request):
-    """Fetch all flows/pipelines created in an organization"""
+    """
+    Fetch dashboard data including all data flows/pipelines and their execution status.
+
+    Returns comprehensive dashboard information including:
+    - All orchestration data flows for the organization
+    - Recent flow run history (last 50 runs per flow)
+    - Task lock status for each flow
+    - Deployment and scheduling information
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+
+    Returns:
+        list: List of flow dictionaries containing:
+            - name: Flow name
+            - deploymentId: Prefect deployment ID
+            - cron: Scheduling expression
+            - deploymentName: Human-readable deployment name
+            - runs: Recent execution history
+            - lock: Current lock status if any user has locked the flow
+
+    Raises:
+        HttpError: 403 if user lacks dashboard view permissions
+    """
     orguser = request.orguser
 
     org_data_flows = OrgDataFlowv1.objects.filter(org=orguser.org, dataflow_type="orchestrate")
