@@ -8,8 +8,8 @@ from ddpui.utils.webhook_helpers import (
     get_flowrun_id_and_state,
     FLOW_RUN,
 )
-from ddpui.celeryworkers.tasks import handle_prefect_webhook
-from ddpui.models.llm import LlmSession, LlmSessionStatus
+from ddpui.celeryworkers.tasks import handle_prefect_webhook, generate_failure_summary
+from ddpui.models.llm import LlmSession, LlmSessionStatus, LlmAssistantType
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
 
@@ -42,6 +42,7 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
         message_type = get_message_type(message_object)
         if message_type == FLOW_RUN:
             flow_run_id = message_object["id"]
+            state = message_object.get("state", {}).get("name", "unknown")
 
     else:
         # 'Flow run {flow_run_name} with id {flow_run_id} entered state {flow_run_state_name}'
@@ -51,6 +52,45 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
         return {"status": "ok"}
 
     logger.info("found flow-run id %s, state %s", flow_run_id, state)
+
+    # Check if this is a failure state and trigger LLM summary generation
+    from ddpui.ddpprefect import FLOW_RUN_FAILED_STATE_NAME, FLOW_RUN_CRASHED_STATE_NAME
+
+    if state in [FLOW_RUN_FAILED_STATE_NAME, FLOW_RUN_CRASHED_STATE_NAME]:
+        try:
+            # Get flow run details to find the organization
+            from ddpui.ddpprefect import prefect_service
+
+            flow_run = prefect_service.get_flow_run_poll(flow_run_id)
+
+            if flow_run:
+                from ddpui.utils.webhook_helpers import get_org_from_flow_run
+
+                org = get_org_from_flow_run(flow_run)
+
+                if org and hasattr(org, "orgpreferences") and org.orgpreferences.llm_optin:
+                    logger.info(
+                        f"Triggering LLM failure summary for flow run {flow_run_id} in org {org.slug}"
+                    )
+                    deployment_id = flow_run.get("deployment_id")
+                    generate_failure_summary.delay(
+                        flow_run_id=flow_run_id,
+                        org_id=org.id,
+                        deployment_id=deployment_id,
+                    )
+                else:
+                    logger.info(
+                        f"LLM not enabled for org or org not found for flow run {flow_run_id}"
+                    )
+            else:
+                logger.warning(f"Could not retrieve flow run details for {flow_run_id}")
+
+        except Exception as err:
+            logger.error(
+                f"Failed to trigger LLM failure summary for flow run {flow_run_id}: {str(err)}"
+            )
+
+    # Continue with existing webhook processing
     handle_prefect_webhook.delay(flow_run_id, state)
     return {"status": "ok"}
 
@@ -110,3 +150,57 @@ def get_failure_summary(request, flow_run_id: str):
     except Exception as err:
         logger.error(f"Error retrieving failure summary for flow run {flow_run_id}: {str(err)}")
         raise HttpError(500, f"Failed to retrieve failure summary: {str(err)}")
+
+
+@webhook_router.get("/failure-summaries/")
+@has_permission(["can_view_logs"])
+def get_failure_summaries(request, limit: int = 10, offset: int = 0):
+    """Get LLM failure summaries for the organization"""
+    try:
+        orguser: OrgUser = request.orguser
+
+        # Get all LLM sessions for failure summaries in this org
+        llm_sessions = (
+            LlmSession.objects.filter(
+                org=orguser.org,
+                session_status=LlmSessionStatus.COMPLETED,
+                session_type=LlmAssistantType.LOG_SUMMARIZATION,
+                flow_run_id__isnull=False,
+            )
+            .order_by("-created_at")
+            .select_related("orguser__user")[offset : offset + limit]
+        )
+
+        total_count = LlmSession.objects.filter(
+            org=orguser.org,
+            session_status=LlmSessionStatus.COMPLETED,
+            session_type=LlmAssistantType.LOG_SUMMARIZATION,
+            flow_run_id__isnull=False,
+        ).count()
+
+        summaries = []
+        for session in llm_sessions:
+            summaries.append(
+                {
+                    "session_id": session.session_id,
+                    "flow_run_id": session.flow_run_id,
+                    "created_at": session.created_at,
+                    "user_prompts": session.user_prompts,
+                    "assistant_prompt": session.assistant_prompt,
+                    "response": session.response,
+                    "session_status": session.session_status,
+                    "created_by": (session.orguser.user.email if session.orguser else "System"),
+                }
+            )
+
+        return {
+            "status": "success",
+            "summaries": summaries,
+            "total_count": total_count,
+            "limit": limit,
+            "offset": offset,
+        }
+
+    except Exception as err:
+        logger.error(f"Error retrieving failure summaries: {str(err)}")
+        raise HttpError(500, f"Failed to retrieve failure summaries: {str(err)}")
