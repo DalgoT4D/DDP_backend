@@ -225,6 +225,9 @@ def put_dbt_schema_v1(request, payload: OrgDbtTarget):
     org = orguser.org
     if org.dbt is None:
         raise HttpError(400, "create a dbt workspace first")
+    warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if warehouse is None:
+        raise HttpError(400, "No warehouse configuration found for this organization")
 
     org.dbt.default_schema = payload.target_configs_schema
     org.dbt.save()
@@ -234,7 +237,6 @@ def put_dbt_schema_v1(request, payload: OrgDbtTarget):
 
     if cli_profile_block:
         logger.info(f"Updating the cli profile block's schema : {cli_profile_block.block_name}")
-        warehouse = OrgWarehouse.objects.filter(org=org).first()
         prefect_service.update_dbt_cli_profile_block(
             block_name=cli_profile_block.block_name,
             target=payload.target_configs_schema,
