@@ -6,10 +6,8 @@ import json
 import re
 from typing import List, Tuple
 from uuid import uuid4
-from pathlib import Path
-import pytz
 from datetime import datetime, timedelta
-import yaml
+import pytz
 from ninja.errors import HttpError
 from django.utils.text import slugify
 from django.utils import timezone as djangotimezone
