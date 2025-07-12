@@ -20,6 +20,7 @@ from ddpui.ddpairbyte.airbytehelpers import (
     schedule_update_connection_schema,
     fetch_and_update_airbyte_job_details,
     fetch_and_update_airbyte_jobs_for_all_connections,
+    fetch_and_update_org_schema_changes,
 )
 from ddpui.ddpairbyte.schema import (
     AirbyteDestinationUpdate,
@@ -33,6 +34,7 @@ from ddpui.models.org import (
     OrgWarehouse,
     OrgDbt,
     TransformType,
+    OrgSchemaChange,
 )
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.models.org_user import OrgUser, User
@@ -1370,3 +1372,122 @@ def test_fetch_and_update_airbyte_jobs_for_all_connections(
 
     mock_get_jobs_for_connection.assert_called_once()
     mock_fetch_and_update_airbyte_job_details.assert_called_once_with("test_job_id")
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection_catalog")
+def test_fetch_and_update_org_schema_changes_breaking_change(
+    mock_get_connection_catalog,
+    org_with_workspace,
+):
+    """tests fetch_and_update_org_schema_changes with a breaking change"""
+    connection_id = "test_connection_id"
+
+    mock_get_connection_catalog.return_value = {
+        "schemaChange": "breaking",
+        "catalogDiff": {"transforms": [{"stream_name": "test_stream"}]},
+    }
+
+    OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+    assert not OrgSchemaChange.objects.filter(connection_id=connection_id).exists()
+    fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
+
+    assert OrgSchemaChange.objects.filter(connection_id=connection_id).exists()
+    OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection_catalog")
+def test_fetch_and_update_org_schema_changes_non_breaking_change_with_diff(
+    mock_get_connection_catalog,
+    org_with_workspace,
+):
+    """tests fetch_and_update_org_schema_changes with a non-breaking change and a diff"""
+    connection_id = "test_connection_id"
+
+    mock_get_connection_catalog.return_value = {
+        "schemaChange": "non_breaking",
+        "catalogDiff": {"transforms": [{"stream_name": "test_stream"}]},
+    }
+
+    OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+    assert not OrgSchemaChange.objects.filter(connection_id=connection_id).exists()
+    fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
+
+    assert OrgSchemaChange.objects.filter(connection_id=connection_id).exists()
+    OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection_catalog")
+def test_fetch_and_update_org_schema_changes_non_breaking_change_without_diff(
+    mock_get_connection_catalog,
+    org_with_workspace,
+):
+    """tests fetch_and_update_org_schema_changes with a non-breaking change and no diff"""
+    connection_id = "test_connection_id"
+    OrgSchemaChange.objects.create(
+        org=org_with_workspace, connection_id=connection_id, change_type="breaking"
+    )
+
+    mock_get_connection_catalog.return_value = {
+        "schemaChange": "non_breaking",
+        "catalogDiff": {"transforms": []},
+    }
+
+    fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
+
+    # no transforms, no schema change
+    assert not OrgSchemaChange.objects.filter(connection_id=connection_id).exists()
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection_catalog")
+def test_fetch_and_update_org_schema_changes_no_change(
+    mock_get_connection_catalog,
+    org_with_workspace,
+):
+    """tests fetch_and_update_org_schema_changes with no change"""
+    connection_id = "test_connection_id"
+    OrgSchemaChange.objects.create(
+        org=org_with_workspace, connection_id=connection_id, change_type="breaking"
+    )
+
+    mock_get_connection_catalog.return_value = {
+        "schemaChange": "no_change",
+        "catalogDiff": {},
+    }
+
+    fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
+
+    # no change
+    assert not OrgSchemaChange.objects.filter(connection_id=connection_id).exists()
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection_catalog")
+def test_fetch_and_update_org_schema_changes_invalid_change_type(
+    mock_get_connection_catalog,
+    org_with_workspace,
+):
+    """tests fetch_and_update_org_schema_changes with an invalid change type"""
+    connection_id = "test_connection_id"
+
+    mock_get_connection_catalog.return_value = {
+        "schemaChange": "invalid_change_type",
+        "catalogDiff": {},
+    }
+
+    err, result = fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
+    assert err is None
+    assert "Something went wrong" in result
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection_catalog")
+def test_fetch_and_update_org_schema_changes_api_error(
+    mock_get_connection_catalog,
+    org_with_workspace,
+):
+    """tests fetch_and_update_org_schema_changes with an API error"""
+    connection_id = "test_connection_id"
+
+    mock_get_connection_catalog.side_effect = Exception("API Error")
+
+    _, error = fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
+
+    assert "Something went wrong" in error
