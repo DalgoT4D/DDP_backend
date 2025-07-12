@@ -364,6 +364,21 @@ def test_put_dbt_schema_v1_success(
         )
 
 
+def test_get_transform_type_none(orguser: OrgUser):
+    """tests get_transform_type"""
+    request = mock_request(orguser)
+    retval = get_transform_type(request)
+    assert retval == {"transform_type": None}
+
+
+def test_get_transform_type_non_none(orguser: OrgUser):
+    """tests get_transform_type"""
+    orguser.org.dbt = OrgDbt(transform_type="ui")
+    request = mock_request(orguser)
+    retval = get_transform_type(request)
+    assert retval == {"transform_type": "ui"}
+
+
 def test_get_elementary_setup_status_failure(orguser):
     """failure"""
     request = mock_request(orguser)
