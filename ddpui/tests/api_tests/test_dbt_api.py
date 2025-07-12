@@ -439,7 +439,6 @@ def test_post_run_dbt_commands_no_payload(orguser: OrgUser, f_org_tasks):
     ) as mock_task_progress, patch(
         "ddpui.celeryworkers.tasks.run_dbt_commands.delay", return_value=mock_celery_task
     ) as mock_run_dbt:
-
         response = post_run_dbt_commands(request)
 
         # Verify task ID is returned
@@ -473,7 +472,6 @@ def test_post_run_dbt_commands_with_payload(orguser: OrgUser, f_org_tasks):
     ) as mock_task_progress, patch(
         "ddpui.celeryworkers.tasks.run_dbt_commands.delay", return_value=mock_celery_task
     ) as mock_run_dbt:
-
         response = post_run_dbt_commands(request, payload)
 
         # Verify task ID is returned
@@ -512,7 +510,6 @@ def test_post_run_dbt_commands_task_locks(orguser: OrgUser, f_org_tasks):
     ), patch(
         "ddpui.api.dbt_api.TaskLock.objects.create", side_effect=mock_task_lock_create
     ) as mock_lock_create:
-
         response = post_run_dbt_commands(request)
 
         # Verify 3 task locks were created (for clean, deps, run)
@@ -551,7 +548,6 @@ def test_post_run_dbt_commands_exception_handling(orguser: OrgUser, f_org_tasks)
     ), patch(
         "ddpui.api.dbt_api.TaskLock.objects.create", side_effect=mock_task_lock_create
     ):
-
         # The function should raise the exception but still clean up locks
         with pytest.raises(Exception, match="Celery error"):
             post_run_dbt_commands(request)
@@ -583,7 +579,6 @@ def test_post_run_dbt_commands_task_filtering(orguser: OrgUser, f_org_tasks):
         ), patch(
             "ddpui.api.dbt_api.TaskLock.objects.create"
         ) as mock_lock_create:
-
             post_run_dbt_commands(request)
 
             # Should only create 3 locks for system tasks, not the client task
