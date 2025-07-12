@@ -16,6 +16,9 @@ from ddpui.api.dbt_api import (
     get_dbt_workspace,
     post_dbt_git_pull,
     post_dbt_makedocs,
+    put_dbt_schema_v1,
+    get_transform_type,
+    post_run_dbt_commands,
     post_dbt_workspace,
     put_dbt_github,
     get_elementary_setup_status,
@@ -25,9 +28,9 @@ from ddpui.api.dbt_api import (
     post_create_edr_sendreport_dataflow,
 )
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.ddpprefect import SECRET
-from ddpui.ddpprefect.schema import DbtProfile, OrgDbtGitHub, OrgDbtSchema
-from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1
+from ddpui.ddpprefect import SECRET, DBTCLIPROFILE
+from ddpui.ddpprefect.schema import DbtProfile, OrgDbtGitHub, OrgDbtSchema, OrgDbtTarget
+from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Permission, Role, RolePermission
 from ddpui.tests.api_tests.test_user_org_api import mock_request, seed_db
@@ -70,6 +73,26 @@ def orguser(authuser, org_with_workspace):
     )
     yield org_user
     org_user.delete()
+
+
+@pytest.fixture
+def f_orgwarehouse(org_with_workspace):
+    """an OrgWarehouse attached to the org_with_workspace"""
+    warehouse = OrgWarehouse.objects.create(
+        org=org_with_workspace, wtype="postgres", credentials=""
+    )
+    yield warehouse
+    warehouse.delete()
+
+
+@pytest.fixture
+def f_dbtcliprofileblock(org_with_workspace):
+    """an OrgPrefectBlockv1 attached to the org_with_workspace"""
+    block = OrgPrefectBlockv1.objects.create(
+        org=org_with_workspace, block_type=DBTCLIPROFILE, block_name="fake-block_name"
+    )
+    yield block
+    block.delete()
 
 
 def test_seed_data(seed_db):
@@ -285,12 +308,60 @@ def test_post_dbt_makedocs(
     orguser: OrgUser,
 ):
     """success"""
-    orguser = orguser
     orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
     request = mock_request(orguser)
 
     post_dbt_makedocs(request)
     mock_create_single_html.assert_called_once()
+
+
+def test_put_dbt_schema_v1_no_dbt(orguser: OrgUser):
+    """test put_dbt_schema_v1 no orgdbt"""
+    orguser.org.dbt = None
+    payload = OrgDbtTarget(target_configs_schema="new-target")
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as excinfo:
+        put_dbt_schema_v1(request, payload)
+    assert str(excinfo.value) == "create a dbt workspace first"
+
+
+def test_put_dbt_schema_v1_no_warehouse(orguser: OrgUser):
+    """test put_dbt_schema_v1 no warehouse"""
+    orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
+    payload = OrgDbtTarget(target_configs_schema="new-target")
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as excinfo:
+        put_dbt_schema_v1(request, payload)
+    assert str(excinfo.value) == "No warehouse configuration found for this organization"
+
+
+def test_put_dbt_schema_v1_no_cli_profile(orguser: OrgUser, f_orgwarehouse: OrgWarehouse):
+    """test put_dbt_schema_v1 no dbt cli profile"""
+    orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
+    payload = OrgDbtTarget(target_configs_schema="new-target")
+    request = mock_request(orguser)
+    retval = put_dbt_schema_v1(request, payload)
+    assert retval == {"success": 1}
+    assert orguser.org.dbt.default_schema == payload.target_configs_schema
+
+
+def test_put_dbt_schema_v1_success(
+    orguser: OrgUser, f_orgwarehouse: OrgWarehouse, f_dbtcliprofileblock: OrgPrefectBlockv1
+):
+    """test put_dbt_schema_v1 success flow"""
+    orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
+    payload = OrgDbtTarget(target_configs_schema="new-target")
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.ddpprefect.prefect_service.update_dbt_cli_profile_block"
+    ) as mock_update_dbt_cli_profile_block:
+        retval = put_dbt_schema_v1(request, payload)
+        assert retval == {"success": 1}
+        mock_update_dbt_cli_profile_block.assert_called_once_with(
+            block_name=f_dbtcliprofileblock.block_name,
+            target=payload.target_configs_schema,
+            wtype=f_orgwarehouse.wtype,
+        )
 
 
 def test_get_elementary_setup_status_failure(orguser):
