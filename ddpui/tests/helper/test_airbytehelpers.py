@@ -1,6 +1,7 @@
 from unittest.mock import patch, Mock, ANY
 import os
 from datetime import datetime
+import pytz
 from pathlib import Path
 import yaml
 import pytest
@@ -446,88 +447,63 @@ def test_get_job_info_for_connection(
     ]
 
 
-@patch(
-    "ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_jobs_for_connection",
-    mock_get_jobs_for_connection=Mock(),
-)
-@patch(
-    "ddpui.ddpairbyte.airbytehelpers.airbyte_service.parse_job_info",
-    mock_parse_job_info=Mock(),
-)
-def test_get_sync_history_for_connection_no_jobs(
-    mock_parse_job_info: Mock, mock_get_jobs_for_connection: Mock
-):
+def test_get_sync_history_for_connection_no_jobs():
     """tests get_sync_job_history_for_connection for success"""
     org = Org.objects.create(name="org", slug="org")
-    task = Task.objects.create(type="airbyte", slug="airbyte-sync", label="AIRBYTE sync")
-    OrgTask.objects.create(org=org, task=task, connection_id="connection_id")
+    synctask = Task.objects.create(type="airbyte", slug="airbyte-sync", label="AIRBYTE sync")
+    OrgTask.objects.create(org=org, task=synctask, connection_id="connection_id")
 
-    mock_get_jobs_for_connection.return_value = {
-        "jobs": [
-            {
-                "job": {
-                    "id": "JOB_ID",
-                    "status": "JOB_STATUS",
-                },
-                "attempts": [
-                    {
-                        "id": 1,
-                        "status": "failed",
-                        "recordsSynced": 0,
-                    },
-                    {
-                        "id": 2,
-                        "endedAt": 123123123,
-                        "createdAt": 123123123,
-                        "status": "succeeded",
-                        "recordsSynced": 100,
-                        "bytesSynced": 0,
-                        "totalStats": {
-                            "recordsEmitted": 0,
-                            "recordsCommitted": 0,
-                            "bytesEmitted": 500,
-                        },
-                    },
-                ],
-            }
-        ],
-        "totalJobCount": 1,
-    }
-    mock_parse_job_info.return_value = "job-info"
+    result, error = get_sync_job_history_for_connection(org, "connection_id")
+    assert error is None
+    assert result == {"history": [], "totalSyncs": 0}
+
+
+def test_get_sync_history_for_connection_success():
+    """tests get_sync_job_history_for_connection for the case when the connection has no syncs created yet"""
+    org = Org.objects.create(name="org", slug="org")
+    synctask = Task.objects.create(type="airbyte", slug="airbyte-sync", label="AIRBYTE sync")
+    OrgTask.objects.create(org=org, task=synctask, connection_id="connection_id")
+    started_at = datetime(2025, 1, 1, 0, 0, 0, tzinfo=pytz.UTC)
+    ended_at = datetime(2025, 1, 1, 0, 10, 0, tzinfo=pytz.UTC)
+    job = AirbyteJob.objects.create(
+        job_id=1,
+        config_id="connection_id",
+        job_type="sync",
+        created_at=started_at,
+        started_at=started_at,
+        ended_at=ended_at,
+        status="succeeded",
+        records_emitted=10,
+        bytes_emitted=20,
+        bytes_committed=10,
+        records_committed=5,
+        stream_stats={"a": 2},
+        reset_config={},
+        attempts=[{"attempt": {"id": 1}}, {"attempt": {"id": 2}}],
+    )
 
     result, error = get_sync_job_history_for_connection(org, "connection_id")
     assert error is None
     assert "history" in result
     assert len(result["history"]) == 1
-    assert result["history"][0] == "job-info"
+    assert result["history"][0] == {
+        "job_id": 1,
+        "status": "succeeded",
+        "job_type": "sync",
+        "created_at": started_at,
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "records_emitted": job.records_emitted,
+        "bytes_emitted": "20 bytes",
+        "records_committed": job.records_committed,
+        "bytes_committed": "10 bytes",
+        "stream_stats": job.stream_stats,
+        "reset_config": job.reset_config,
+        "duration_seconds": 600,  # end - start
+        "last_attempt_no": 2,
+    }
     assert result["totalSyncs"] == 1
-
-
-@patch(
-    "ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_jobs_for_connection",
-    mock_get_jobs_for_connection=Mock(),
-)
-@patch(
-    "ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_logs_for_job",
-    mock_get_logs_for_job=Mock(),
-)
-def test_get_sync_history_for_connection_success(
-    mock_get_logs_for_job: Mock, mock_get_jobs_for_connection: Mock
-):
-    """tests get_sync_job_history_for_connection for the case when the connection has no syncs created yet"""
-    org = Org.objects.create(name="org", slug="org")
-    task = Task.objects.create(type="airbyte", slug="airbyte-sync", label="AIRBYTE sync")
-    OrgTask.objects.create(org=org, task=task, connection_id="connection_id")
-
-    mock_get_jobs_for_connection.return_value = {"jobs": [], "totalJobCount": 0}
-    mock_get_logs_for_job.return_value = [
-        "line1",
-        "line2",
-    ]
-
-    result, error = get_sync_job_history_for_connection(org, "connection_id")
-    assert error is None
-    assert result == []
+    job.delete()
 
 
 @patch("ddpui.ddpairbyte.airbytehelpers.generate_hash_id")
