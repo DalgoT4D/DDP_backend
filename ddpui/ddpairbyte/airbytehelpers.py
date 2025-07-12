@@ -356,7 +356,6 @@ def get_connections(org: Org) -> Tuple[List[AirbyteGetConnectionsResponse], None
             •	estimated wait time if queued.
 
     """
-
     sync_dataflows = (
         OrgDataFlowv1.objects.filter(
             org=org,

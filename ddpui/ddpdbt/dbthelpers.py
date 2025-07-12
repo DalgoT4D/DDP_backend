@@ -14,10 +14,7 @@ logger = CustomLogger("ddphelpers")
 
 
 def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_creds: dict):
-    """
-    Create/update the block in db and also in prefect
-    """
-
+    """Create/update the block in db and also in prefect"""
     bqlocation = None
     priority = None  # whether to run in "batch" mode or "interactive" mode for bigquery
     if warehouse.wtype == "bigquery":

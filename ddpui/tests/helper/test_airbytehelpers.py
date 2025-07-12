@@ -1,9 +1,6 @@
 from unittest.mock import patch, Mock, ANY
-import os
 from datetime import datetime
 import pytz
-from pathlib import Path
-import yaml
 import pytest
 from ddpui.ddpairbyte.airbytehelpers import (
     add_custom_airbyte_connector,
@@ -31,8 +28,6 @@ from ddpui.models.org import (
     Org,
     OrgPrefectBlockv1,
     OrgWarehouse,
-    OrgDbt,
-    TransformType,
     OrgSchemaChange,
 )
 from ddpui.models.flow_runs import PrefectFlowRun

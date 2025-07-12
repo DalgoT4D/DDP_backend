@@ -12,7 +12,6 @@ logger = CustomLogger("airbyte")
 
 def delete_org_connection(org: Org, connection_id: str):
     """deletes an airbyte connection"""
-
     # remove all orgtasks (sync, clear, ...)
     for org_task in OrgTask.objects.filter(
         org=org,
