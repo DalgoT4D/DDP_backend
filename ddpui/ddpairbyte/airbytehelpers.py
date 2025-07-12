@@ -1312,9 +1312,9 @@ def fetch_and_update_airbyte_jobs_for_all_connections(
     if connection_id:
         org_tasks = org_tasks.filter(connection_id=connection_id)
 
-    for connection_id in org_tasks.values_list("connection_id", flat=True).distinct():
+    for orgtask_connection_id in org_tasks.values_list("connection_id", flat=True).distinct():
         try:
-            logger.info("Syncing job history for connection %s", connection_id)
+            logger.info("Syncing job history for connection %s", orgtask_connection_id)
 
             offset = 0
             limit = 20
@@ -1322,7 +1322,7 @@ def fetch_and_update_airbyte_jobs_for_all_connections(
             while curr_itr_count >= limit:
                 # by default the jobs are ordered by createdAt
                 jobs_dict = airbyte_service.get_jobs_for_connection(
-                    connection_id,
+                    orgtask_connection_id,
                     limit=limit,
                     offset=offset,
                     job_types=["sync", "reset_connection", "clear", "refresh"],
@@ -1330,7 +1330,7 @@ def fetch_and_update_airbyte_jobs_for_all_connections(
                     created_at_end=end_time,
                 )
                 if len(jobs_dict.get("jobs", [])) == 0:
-                    logger.info("No jobs found for connection %s", connection_id)
+                    logger.info("No jobs found for connection %s", orgtask_connection_id)
                     break
 
                 for job in jobs_dict.get("jobs", []):
@@ -1343,6 +1343,6 @@ def fetch_and_update_airbyte_jobs_for_all_connections(
         except Exception as e:
             logger.error(
                 "Failed to sync job history for connection %s: %s",
-                connection_id,
+                orgtask_connection_id,
                 str(e),
             )
