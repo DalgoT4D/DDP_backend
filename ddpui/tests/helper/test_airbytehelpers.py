@@ -19,6 +19,7 @@ from ddpui.ddpairbyte.airbytehelpers import (
     create_or_update_org_cli_block,
     schedule_update_connection_schema,
     fetch_and_update_airbyte_job_details,
+    fetch_and_update_airbyte_jobs_for_all_connections,
 )
 from ddpui.ddpairbyte.schema import (
     AirbyteDestinationUpdate,
@@ -1348,3 +1349,24 @@ def test_fetch_and_update_airbyte_job_details_no_started_at_raises(mock_get_job_
 
     with pytest.raises(Exception, match="No startedAt found for job_id=999"):
         fetch_and_update_airbyte_job_details(job_id)
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_jobs_for_connection")
+@patch("ddpui.ddpairbyte.airbytehelpers.fetch_and_update_airbyte_job_details")
+def test_fetch_and_update_airbyte_jobs_for_all_connections(
+    mock_fetch_and_update_airbyte_job_details, mock_get_jobs_for_connection
+):
+    """tests fetch_and_update_airbyte_jobs_for_all_connections"""
+    org = Org.objects.create(name="org", slug="org")
+    synctask = Task.objects.create(type="airbyte", slug="airbyte-sync", label="AIRBYTE sync")
+    OrgTask.objects.create(org=org, task=synctask, connection_id="connection_id")
+
+    mock_get_jobs_for_connection.return_value = {
+        "jobs": [{"job": {"id": "test_job_id"}}],
+        "totalJobCount": 1,
+    }
+
+    fetch_and_update_airbyte_jobs_for_all_connections(org=org, last_n_days=1)
+
+    mock_get_jobs_for_connection.assert_called_once()
+    mock_fetch_and_update_airbyte_job_details.assert_called_once_with("test_job_id")
