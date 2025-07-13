@@ -26,10 +26,17 @@ from ddpui.api.dbt_api import (
     post_create_elementary_tracking_tables,
     post_create_elementary_profile,
     post_create_edr_sendreport_dataflow,
+    put_dbt_venv,
 )
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.ddpprefect import SECRET, DBTCLIPROFILE
-from ddpui.ddpprefect.schema import DbtProfile, OrgDbtGitHub, OrgDbtSchema, OrgDbtTarget
+from ddpui.ddpprefect.schema import (
+    DbtProfile,
+    OrgDbtGitHub,
+    OrgDbtSchema,
+    OrgDbtTarget,
+    OrgDbtVenv,
+)
 from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Permission, Role, RolePermission
@@ -706,3 +713,35 @@ def test_post_create_edr_sendreport_dataflow_success(orguser):
     ), patch("ddpui.api.dbt_api.get_edr_send_report_task", return_value="orgtask"):
         response = post_create_edr_sendreport_dataflow(request)
         assert response == {"status": "ok"}
+
+
+def test_put_dbt_venv_no_dbt(orguser: OrgUser):
+    """test put_dbt_venv no orgdbt"""
+    orguser.org.dbt = None
+    payload = OrgDbtVenv(dbt_venv="new-venv")
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as excinfo:
+        put_dbt_venv(request, payload)
+    assert str(excinfo.value) == "create a dbt workspace first"
+
+
+def test_put_dbt_venv_new_env_dne(orguser: OrgUser):
+    """test put_dbt_venv dne flow"""
+    orguser.org.dbt = OrgDbt(dbt_venv="old-venv")
+    payload = OrgDbtVenv(dbt_venv="new-venv")
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as excinfo:
+        put_dbt_venv(request, payload)
+    assert "does not exist" in str(excinfo.value)
+
+
+def test_put_dbt_venv_success(orguser: OrgUser):
+    """test put_dbt_venv success flow"""
+    orguser.org.dbt = OrgDbt(dbt_venv="old-venv")
+    payload = OrgDbtVenv(dbt_venv="new-venv")
+    request = mock_request(orguser)
+    with patch("pathlib.Path.exists") as mock_exists:
+        mock_exists.return_value = True
+        result = put_dbt_venv(request, payload)
+        assert orguser.org.dbt.dbt_venv == "new-venv"
+        assert result == {"success": 1, "dbt_venv": orguser.org.dbt.dbt_venv}

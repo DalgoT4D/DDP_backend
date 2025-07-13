@@ -24,7 +24,14 @@ from ddpui.utils.constants import (
 )
 from ddpui.ddpdbt import dbt_service, elementary_service
 from ddpui.ddpprefect import DBTCLIPROFILE, SECRET, prefect_service
-from ddpui.ddpprefect.schema import OrgDbtGitHub, OrgDbtSchema, OrgDbtTarget, PrefectSecretBlockEdit
+from ddpui.ddpprefect.schema import (
+    OrgDbtGitHub,
+    OrgDbtSchema,
+    OrgDbtTarget,
+    OrgDbtVenv,
+    PrefectSecretBlockEdit,
+)
+
 from ddpui.models.org import OrgPrefectBlockv1, Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser, OrgUserResponse
 from ddpui.core.orgdbt_manager import DbtProjectManager
@@ -247,6 +254,42 @@ def put_dbt_schema_v1(request, payload: OrgDbtTarget):
         )
 
     return {"success": 1}
+
+
+@dbt_router.get("/dbt_venv")
+@has_permission(["can_view_dbt_workspace"])
+def get_dbt_venv(request):
+    """return details of the dbt workspace for this org"""
+    orguser: OrgUser = request.orguser
+    if orguser.org.dbt is None:
+        return {"error": "no dbt workspace has been configured"}
+
+    return {"dbt_venv": orguser.org.dbt.dbt_venv}
+
+
+@dbt_router.put("/dbt_venv/")
+@has_permission(["can_edit_dbt_workspace"])
+def put_dbt_venv(request, payload: OrgDbtVenv):
+    """Update the dbt_venv for the dbt cli profile block"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    if org.dbt is None:
+        raise HttpError(400, "create a dbt workspace first")
+
+    if payload.dbt_venv in ["", None]:
+        org.dbt.dbt_venv = DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH
+    else:
+        dbt_env_dir = (
+            DbtProjectManager.dbt_venv_base_dir() / payload.dbt_venv
+        )  # /data/dbt_venv/ + venv
+        if not dbt_env_dir.exists():
+            raise HttpError(400, "the directory " + str(dbt_env_dir) + " does not exist")
+        org.dbt.dbt_venv = payload.dbt_venv
+
+    org.dbt.save()
+    logger.info("updated orgdbt")
+
+    return {"success": 1, "dbt_venv": org.dbt.dbt_venv}
 
 
 @dbt_router.get("/dbt_transform/")

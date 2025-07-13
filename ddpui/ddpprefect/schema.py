@@ -262,6 +262,12 @@ class OrgDbtTarget(Schema):
     target_configs_schema: str
 
 
+class OrgDbtVenv(Schema):
+    """Docstring"""
+
+    dbt_venv: str
+
+
 class PrefectDbtRun(Schema):
     """Docstring"""
 
