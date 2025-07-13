@@ -26,6 +26,7 @@ from ddpui.api.dbt_api import (
     post_create_elementary_tracking_tables,
     post_create_elementary_profile,
     post_create_edr_sendreport_dataflow,
+    get_available_dbt_venvs,
     put_dbt_venv,
 )
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
@@ -745,3 +746,51 @@ def test_put_dbt_venv_success(orguser: OrgUser):
         result = put_dbt_venv(request, payload)
         assert orguser.org.dbt.dbt_venv == "new-venv"
         assert result == {"success": 1, "dbt_venv": orguser.org.dbt.dbt_venv}
+
+
+def test_get_available_dbt_venvs_no_dbt(orguser: OrgUser):
+    """tests get_available_dbt_venvs"""
+    orguser.org.dbt = None
+    request = mock_request(orguser)
+    retval = get_available_dbt_venvs(request)
+    assert retval == {"error": "no dbt workspace has been configured"}
+
+
+def test_get_available_dbt_venvs_single(orguser: OrgUser):
+    """tests get_available_dbt_venvs"""
+    orguser.org.dbt = OrgDbt(dbt_venv="some-venv")
+    os.environ["DBT_VENV"] = "current-dbt-venv"
+    os.environ["DBT_DISPLAYNAME"] = "current-dbt-displayname"
+    request = mock_request(orguser)
+    retval = get_available_dbt_venvs(request)
+    assert retval == {
+        "dbt_venvs": [
+            {
+                "dbt_venv": os.getenv("DBT_VENV"),
+                "display_name": os.getenv("DBT_DISPLAYNAME"),  # "dbt 1.8"
+            },
+        ]
+    }
+
+
+def test_get_available_dbt_venvs_two(orguser: OrgUser):
+    """tests get_available_dbt_venvs"""
+    orguser.org.dbt = OrgDbt(dbt_venv="some-venv")
+    os.environ["DBT_VENV"] = "current-dbt-venv"
+    os.environ["DBT_DISPLAYNAME"] = "current-dbt-displayname"
+    os.environ["NEXT_DBT_VENV"] = "next-dbt-venv"
+    os.environ["NEXT_DBT_DISPLAYNAME"] = "next-dbt-displayname"
+    request = mock_request(orguser)
+    retval = get_available_dbt_venvs(request)
+    assert retval == {
+        "dbt_venvs": [
+            {
+                "dbt_venv": os.getenv("DBT_VENV"),
+                "display_name": os.getenv("DBT_DISPLAYNAME"),  # "dbt 1.8"
+            },
+            {
+                "dbt_venv": os.getenv("NEXT_DBT_VENV"),
+                "display_name": os.getenv("NEXT_DBT_DISPLAYNAME"),  # "dbt 1.8"
+            },
+        ]
+    }

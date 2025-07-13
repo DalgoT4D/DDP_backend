@@ -267,6 +267,30 @@ def get_dbt_venv(request):
     return {"dbt_venv": orguser.org.dbt.dbt_venv}
 
 
+@dbt_router.get("/available_dbtvenvs")
+@has_permission(["can_view_dbt_workspace"])
+def get_available_dbt_venvs(request):
+    """return details of the dbt workspace for this org"""
+    orguser: OrgUser = request.orguser
+    if orguser.org.dbt is None:
+        return {"error": "no dbt workspace has been configured"}
+
+    dbt_venvs = [
+        {
+            "dbt_venv": os.getenv("DBT_VENV"),
+            "display_name": os.getenv("DBT_DISPLAYNAME"),  # "dbt 1.8"
+        },
+    ]
+    if os.getenv("NEXT_DBT_VENV") and os.getenv("NEXT_DBT_DISPLAYNAME"):
+        dbt_venvs.append(
+            {
+                "dbt_venv": os.getenv("NEXT_DBT_VENV"),
+                "display_name": os.getenv("NEXT_DBT_DISPLAYNAME"),
+            }
+        )
+    return {"dbt_venvs": dbt_venvs}
+
+
 @dbt_router.put("/dbt_venv/")
 @has_permission(["can_edit_dbt_workspace"])
 def put_dbt_venv(request, payload: OrgDbtVenv):
