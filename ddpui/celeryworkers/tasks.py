@@ -7,10 +7,10 @@ from datetime import datetime, timedelta
 from subprocess import CompletedProcess
 import pytz
 from django.core.management import call_command
+from django.utils.text import slugify
 
 import yaml
 from celery.schedules import crontab
-from django.utils.text import slugify
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.celery import app, Celery
 
@@ -56,6 +56,7 @@ from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.singletaskprogress import SingleTaskProgress
 from ddpui.utils.constants import (
     TASK_AIRBYTESYNC,
+    AIRBYTE_CONNECTION_DEPRECATED,
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.ddpdbt.schema import DbtProjectParams
@@ -73,6 +74,7 @@ from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.core import llm_service
 from ddpui.utils.helpers import (
+    find_key_in_dictionary,
     convert_sqlalchemy_rows_to_csv_string,
 )
 
@@ -428,6 +430,8 @@ def detect_schema_changes_for_org(org: Org):
     ):
         schema_change.delete()
 
+    deprecated_org_tasks: list[OrgTask] = []
+
     # check for schema changes
     for org_task in org_tasks:
         connection_catalog, err = airbytehelpers.fetch_and_update_org_schema_changes(
@@ -435,7 +439,27 @@ def detect_schema_changes_for_org(org: Org):
         )
 
         if err:
+            if os.getenv("ADMIN_EMAIL"):
+                send_text_message(
+                    os.getenv("ADMIN_EMAIL"),
+                    f"Schema change detection errors for {org.slug}",
+                    err,
+                )
             logger.error(err)
+            continue
+
+        if connection_catalog is None:
+            if os.getenv("ADMIN_EMAIL"):
+                send_text_message(
+                    os.getenv("ADMIN_EMAIL"),
+                    f"Schema change detection errors for {org.slug}",
+                    f"connection_catalog is None for {org_task.connection_id}",
+                )
+            logger.error(err)
+            continue
+
+        if connection_catalog["status"] == AIRBYTE_CONNECTION_DEPRECATED:
+            deprecated_org_tasks.append(org_task)
             continue
 
         change_type = connection_catalog.get("schemaChange")
@@ -469,6 +493,17 @@ def detect_schema_changes_for_org(org: Org):
             except Exception as err:
                 logger.error(err)
 
+    if len(deprecated_org_tasks) > 0:
+        deprecated_connection_ids = [
+            deprecated_org_task.connection_id for deprecated_org_task in deprecated_org_tasks
+        ]
+        logger.info(
+            f"deleting OrgSchemaChange for deprecated connections {','.join(deprecated_connection_ids)} for {org.slug}"
+        )
+        OrgSchemaChange.objects.filter(
+            org=org, connection_id__in=deprecated_connection_ids
+        ).delete()
+
 
 @app.task()
 def schema_change_detection():
@@ -485,8 +520,15 @@ def get_connection_catalog_task(task_key, org_id, connection_id):
     taskprogress.add({"message": "started", "status": TaskProgressStatus.RUNNING, "result": None})
 
     connection_catalog, err = airbytehelpers.fetch_and_update_org_schema_changes(org, connection_id)
+    # unsure how to handle a deprecated connection, ideally we would never get here
 
     if err:
+        if os.getenv("ADMIN_EMAIL"):
+            send_text_message(
+                os.getenv("ADMIN_EMAIL"),
+                f"Unhandled schema change detection errors for {org.slug}",
+                err,
+            )
         logger.error(err)
         taskprogress.add(
             {
