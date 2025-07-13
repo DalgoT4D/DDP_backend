@@ -218,10 +218,13 @@ def check_repo_exists(gitrepo_url: str, gitrepo_access_token: str | None) -> boo
     return response.status_code == 200
 
 
-def get_git_branches(org: Org):  # pragma: no cover
+def get_git_branches(org: Org) -> list[str] | None:  # pragma: no cover
     """get available git branches to check out for an Org"""
-    run_dir = DbtProjectManager.get_dbt_project_dir(org.dbt)
+    if org.dbt is None:
+        logger.error(f"No dbt workspace configured for org: {org.slug}")
+        return None
 
+    run_dir = DbtProjectManager.get_dbt_project_dir(org.dbt)
     try:
         # First command: git for-each-ref
         with subprocess.Popen(
