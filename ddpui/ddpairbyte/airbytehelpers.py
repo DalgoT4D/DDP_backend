@@ -47,7 +47,7 @@ from ddpui.utils.constants import (
     TASK_AIRBYTECLEAR,
     AIRBYTE_CONNECTION_DEPRECATED,
 )
-from ddpui.celeryworkers.airbytehelperasks import delete_airbyte_connections
+from ddpui.celeryworkers.airbytehelpertasks import delete_airbyte_connections
 from ddpui.utils.helpers import (
     generate_hash_id,
     update_dict_but_not_stars,
