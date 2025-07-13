@@ -1,4 +1,4 @@
-# management/commands/github_to_ui4t.py {org} {file_path}
+"""management/commands/github_to_ui4t.py {org} {file_path}"""
 
 import json
 from django.core.management.base import BaseCommand
@@ -20,14 +20,12 @@ class Command(BaseCommand):
     ]
 
     def add_arguments(self, parser):
+        """command line arguments for the script"""
         parser.add_argument("org", type=str, help="Org slug")
         parser.add_argument("file_path", type=str, help="Path to the DBT manifest JSON file")
 
     def handle(self, *args, **options):
-        """
-        Loads DBT manifest data into the database for a specified organization.
-        """
-
+        """Loads DBT manifest data into the database for a specified organization."""
         org = Org.objects.filter(slug=options["org"]).first()
         if org is None:
             print(f"Org with slug {options['org']} does not exist")

@@ -1,6 +1,4 @@
-"""
-Tests for ddpui/utils/importdbtproject.py
-"""
+"""Tests for ddpui/utils/importdbtproject.py"""
 
 from unittest.mock import Mock, patch
 

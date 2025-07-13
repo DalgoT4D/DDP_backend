@@ -1,4 +1,4 @@
-""" functions to import a dbt project into dalgo """
+"""functions to import a dbt project into dalgo"""
 
 import uuid
 from ninja import Schema
@@ -46,7 +46,7 @@ def extract_models(
                 resource_type=node_value.get("resource_type"),
                 source_name=node_value.get("package_name"),
                 depends_on=node_value.get("depends_on", {}).get("nodes", []),
-                columns=[column_name for column_name in node_value.get("columns", {}).keys()],
+                columns=list(node_value.get("columns", {}).keys()),
             )
             models_metadata[node_key] = model_metadata
 
@@ -55,7 +55,6 @@ def extract_models(
 
 def extract_sources(manifest: dict) -> dict[str, SourceMetaData]:
     """extracts source descriptions from dbt docs manifest.json"""
-
     sources_metadata: dict[str, SourceMetaData] = {}
 
     for source_key, source_value in manifest["sources"].items():
@@ -81,20 +80,20 @@ def create_orgdbtmodel_model(orgdbt: OrgDbt, model_metadata: ModelMetadata):
         and model_metadata.original_file_path
         and model_metadata.dbschema
         and model_metadata.resource_type
-    ):
-        if not OrgDbtModel.objects.filter(
+        and not OrgDbtModel.objects.filter(
             orgdbt=orgdbt, schema=model_metadata.dbschema, name=model_metadata.name
-        ).exists():
-            OrgDbtModel.objects.create(
-                uuid=uuid.uuid4(),
-                orgdbt=orgdbt,
-                schema=model_metadata.dbschema,
-                name=model_metadata.name,
-                sql_path=model_metadata.original_file_path,
-                type=model_metadata.resource_type,
-                source_name=model_metadata.dbschema,
-                output_cols=model_metadata.columns,
-            )
+        ).exists()
+    ):
+        OrgDbtModel.objects.create(
+            uuid=uuid.uuid4(),
+            orgdbt=orgdbt,
+            schema=model_metadata.dbschema,
+            name=model_metadata.name,
+            sql_path=model_metadata.original_file_path,
+            type=model_metadata.resource_type,
+            source_name=model_metadata.dbschema,
+            output_cols=model_metadata.columns,
+        )
 
 
 def create_orgdbtmodel_source(orgdbt: OrgDbt, source_metadata: SourceMetaData):
@@ -104,22 +103,22 @@ def create_orgdbtmodel_source(orgdbt: OrgDbt, source_metadata: SourceMetaData):
         and source_metadata.dbschema
         and source_metadata.database
         and source_metadata.resource_type
-    ):
-        if not OrgDbtModel.objects.filter(
+        and not OrgDbtModel.objects.filter(
             orgdbt=orgdbt,
             schema=source_metadata.dbschema,
             name=source_metadata.identifier,
-        ).exists():
-            OrgDbtModel.objects.create(
-                uuid=uuid.uuid4(),
-                orgdbt=orgdbt,
-                schema=source_metadata.dbschema,
-                name=source_metadata.identifier,
-                display_name=source_metadata.name,
-                type=source_metadata.resource_type,
-                source_name=source_metadata.source_name,
-                sql_path=source_metadata.path,
-            )
+        ).exists()
+    ):
+        OrgDbtModel.objects.create(
+            uuid=uuid.uuid4(),
+            orgdbt=orgdbt,
+            schema=source_metadata.dbschema,
+            name=source_metadata.identifier,
+            display_name=source_metadata.name,
+            type=source_metadata.resource_type,
+            source_name=source_metadata.source_name,
+            sql_path=source_metadata.path,
+        )
 
 
 def create_orgdbtedges(orgdbt: OrgDbt, model_metadata: ModelMetadata):
