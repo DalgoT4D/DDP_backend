@@ -4,13 +4,10 @@ functions which work with airbyte and with the dalgo database
 
 import json
 import re
-import os
-from typing import List
+from typing import List, Tuple
 from uuid import uuid4
-from pathlib import Path
-import pytz
 from datetime import datetime, timedelta
-import yaml
+import pytz
 from ninja.errors import HttpError
 from django.utils.text import slugify
 from django.utils import timezone as djangotimezone
@@ -22,7 +19,6 @@ from django.forms.models import model_to_dict
 
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import AirbyteWorkspace
-from ddpui.ddpprefect import prefect_service, schema, DBTCORE
 from ddpui.models.org import (
     Org,
     OrgPrefectBlockv1,
@@ -42,17 +38,18 @@ from ddpui.ddpairbyte.schema import (
     AirbyteConnectionSchemaUpdateSchedule,
     AirbyteGetConnectionsResponse,
 )
-from ddpui.ddpdbt.schema import DbtProjectParams
+from ddpui.ddpprefect import prefect_service, schema, DBTCORE, AIRBYTESERVER
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
-    PrefectDataFlowUpdateSchema3,
 )
-from ddpui.ddpprefect import AIRBYTESERVER
-from ddpui.ddpprefect import DBTCLIPROFILE
-from ddpui.core.dbtfunctions import map_airbyte_destination_spec_to_dbtcli_profile
 from ddpui.models.org import OrgDataFlowv1, OrgWarehouse
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskLockStatus
-from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTECLEAR
+from ddpui.utils.constants import (
+    TASK_AIRBYTESYNC,
+    TASK_AIRBYTECLEAR,
+    AIRBYTE_CONNECTION_DEPRECATED,
+)
+from ddpui.celeryworkers.airbytehelpertasks import delete_airbyte_connections
 from ddpui.utils.helpers import (
     generate_hash_id,
     update_dict_but_not_stars,
@@ -67,8 +64,9 @@ from ddpui.core.pipelinefunctions import (
 )
 from ddpui.core.orgtaskfunctions import fetch_orgtask_lock_v1
 from ddpui.models.tasks import TaskLock
-from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.ddpdbt.elementary_service import create_elementary_profile, elementary_setup_status
+from ddpui.ddpdbt.dbthelpers import create_or_update_org_cli_block
+from ddpui.utils.redis_client import RedisClient
 
 logger = CustomLogger("airbyte")
 
@@ -307,9 +305,57 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
     return res, None
 
 
-def get_connections(org: Org) -> List[AirbyteGetConnectionsResponse]:
-    """return connections with last run details"""
+def get_connections(org: Org) -> Tuple[List[AirbyteGetConnectionsResponse], None]:
+    """
+        Purpose:
 
+    This function returns all active Airbyte connections for a given organization (org), along with metadata such as:
+            •	sync and clear dataflows,
+            •	the most recent run,
+            •	lock status (i.e., whether a sync is queued or running),
+            •	an estimated wait time if a run is queued.
+
+    It also identifies and schedules the deletion of connections that are no longer found in Airbyte or have been deprecated.
+
+    ⸻
+
+    What It Does:
+            1.	Fetch Dataflows:
+    Filters for manual-type dataflows associated with the organization that have a corresponding clear flow configured.
+            2.	Fetch OrgTasks and TaskLocks:
+            •	Retrieves OrgTask objects linked to those dataflows.
+            •	Retrieves TaskLock entries to assess the state of each task (e.g., queued or running).
+            3.	Fetch Connections from Airbyte:
+    Retrieves a list of all Airbyte connections in the org’s workspace.
+            4.	Iterate Through Each Dataflow:
+    For each sync dataflow:
+            •	Matches it with its associated OrgTask.
+            •	Tries to find the related clear task (if present).
+            •	Looks up the corresponding connection info from Airbyte.
+            •	If a connection is not found or is marked as deprecated, it adds it to a cleanup list.
+            5.	Lock and Run Status:
+            •	Finds any task locks.
+            •	Uses the lock object to estimate if a sync is queued and how long the wait is likely to be.
+            6.	Last Run Information:
+            •	Collects all deployment IDs across all relevant org tasks.
+            •	Queries for the most recent flow runs for each deployment.
+            •	Attaches the latest run information to each connection.
+            7.	Cleanup:
+            •	If any connections were found to be missing or deprecated, it schedules them for deletion in the background via a Celery task.
+
+    ⸻
+
+    Return Value:
+
+    A list of dictionaries, one per active connection, containing:
+            •	basic connection info (name, status, source, destination),
+            •	sync deployment ID,
+            •	clear/reset deployment IDs (if present),
+            •	lock status (queued, running, etc.),
+            •	last successful run metadata,
+            •	estimated wait time if queued.
+
+    """
     sync_dataflows = (
         OrgDataFlowv1.objects.filter(
             org=org,
@@ -340,7 +386,9 @@ def get_connections(org: Org) -> List[AirbyteGetConnectionsResponse]:
 
     airbyte_connections = airbyte_service.get_webbackend_connections(org.airbyte_workspace_id)
 
-    res = []
+    res: list[dict] = []
+    connections_to_clean_up: list[str] = []
+    redisclient = RedisClient.get_instance()
 
     for sync_dataflow in sync_dataflows:
         sync_dataflow_orgtasks = [
@@ -391,19 +439,23 @@ def get_connections(org: Org) -> List[AirbyteGetConnectionsResponse]:
         connection = [
             conn for conn in airbyte_connections if conn["connectionId"] == org_task.connection_id
         ]
+
+        def ensure_only_one_add_across_parallel_requests(connection_id: str):
+            """avoid a race condition in case get_connections() is called twice in parallel"""
+            cacheval = redisclient.get(f"deleting-{connection_id}")
+            if not cacheval:
+                redisclient.set(f"deleting-{connection_id}", True, 10)  # expire after 10 seconds
+                connections_to_clean_up.append(connection_id)
+
         if len(connection) == 0:
             logger.error(f"could not find connection {org_task.connection_id} in airbyte")
+            ensure_only_one_add_across_parallel_requests(org_task.connection_id)
             continue
+
         connection = connection[0]
-
-        # look_up_last_run_deployment_ids = []
-
-        # for df_orgtask in [
-        #     df_orgtask
-        #     for df_orgtask in all_orgtask_dataflows
-        #     if df_orgtask.orgtask_id == org_task.id
-        # ]:
-        #     look_up_last_run_deployment_ids.append(df_orgtask.dataflow.deployment_id)
+        if connection["status"] == AIRBYTE_CONNECTION_DEPRECATED:
+            ensure_only_one_add_across_parallel_requests(org_task.connection_id)
+            continue
 
         clear_dataflow: OrgDataFlowv1 = sync_dataflow.clear_conn_dataflow
 
@@ -477,6 +529,12 @@ def get_connections(org: Org) -> List[AirbyteGetConnectionsResponse]:
         else:
             conn["lastRun"] = None
 
+    if connections_to_clean_up:
+        logger.info("cleaning up connections " + connections_to_clean_up)
+        delete_airbyte_connections.delay(
+            f"delete-connections-{org.slug}", org.id, connections_to_clean_up
+        )
+
     return res, None
 
 
@@ -491,6 +549,11 @@ def get_one_connection(org: Org, connection_id: str):
 
     # fetch airbyte connection
     airbyte_conn = airbyte_service.get_connection(org.airbyte_workspace_id, org_task.connection_id)
+    if airbyte_conn["status"] == AIRBYTE_CONNECTION_DEPRECATED:
+        delete_airbyte_connections.delay(
+            f"delete-connections-{org.slug}", org.id, [org_task.connection_id]
+        )
+        return None, "connection not found"
 
     dataflow_orgtask = DataflowOrgTask.objects.filter(
         orgtask=org_task, dataflow__dataflow_type="manual"
@@ -562,6 +625,10 @@ def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUp
 
     # fetch connection by id from airbyte
     connection = airbyte_service.get_connection(org.airbyte_workspace_id, connection_id)
+    if connection["status"] == AIRBYTE_CONNECTION_DEPRECATED:
+        delete_airbyte_connections.delay(f"delete-connections-{org.slug}", org.id, [connection_id])
+        return None, "connection not found"
+
     connection["operationIds"] = []
 
     # update name
@@ -580,80 +647,6 @@ def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUp
         )
 
     return res, None
-
-
-def delete_connection(org: Org, connection_id: str):
-    """deletes an airbyte connection"""
-
-    dataflows_to_delete: list[OrgDataFlowv1] = []
-    orgtask_to_delete: list[OrgTask] = []
-
-    # delete manual-sync and manual-reset dataflows
-    for org_task in OrgTask.objects.filter(
-        org=org,
-        connection_id=connection_id,
-    ):
-        for dataflow_orgtask in DataflowOrgTask.objects.filter(
-            orgtask=org_task, dataflow__dataflow_type="manual"
-        ):
-            dataflows_to_delete.append(dataflow_orgtask.dataflow)
-            logger.info("will delete %s", dataflow_orgtask.dataflow.deployment_name)
-
-        orgtask_to_delete.append(org_task)
-
-    # delete all deployments
-    for dataflow in dataflows_to_delete:
-        logger.info("deleting prefect deployment %s", dataflow.deployment_name)
-        prefect_service.delete_deployment_by_id(dataflow.deployment_id)
-
-    # delete all dataflows
-    logger.info("deleting org dataflows from db")
-    for dataflow in dataflows_to_delete:
-        # if there is a reset and a sync then the dataflow will appear twice in this list
-        if dataflow.id:
-            dataflow.delete()
-
-    # remove from orchestration dataflows
-    for org_task in OrgTask.objects.filter(
-        org=org,
-        connection_id=connection_id,
-    ):
-        # this org_task is already in the to_delete list from above
-
-        for dataflow_orgtask in DataflowOrgTask.objects.filter(
-            orgtask=org_task, dataflow__dataflow_type="orchestrate"
-        ):
-            # fetch config from prefect
-            deployment = prefect_service.get_deployment(dataflow_orgtask.dataflow.deployment_id)
-            # { name, deploymentId, tags, cron, isScheduleActive, parameters }
-            # parameters = {config: {org_slug, tasks}}
-            # tasks = list of
-            #    {seq, slug, type, timeout, orgtask__uuid, connection_id, airbyte_server_block}
-            parameters = deployment["parameters"]
-            # logger.info(parameters)
-            for task in parameters["config"]["tasks"]:
-                if task.get("connection_id") == connection_id:
-                    logger.info(f"deleting task {task['slug']} from deployment")
-                    parameters["config"]["tasks"].remove(task)
-            # logger.info(parameters)
-            payload = PrefectDataFlowUpdateSchema3(deployment_params=parameters)
-            prefect_service.update_dataflow_v1(dataflow_orgtask.dataflow.deployment_id, payload)
-            logger.info("updated deployment %s", dataflow_orgtask.dataflow.deployment_name)
-
-    # delete all orgtasks
-    for org_task in orgtask_to_delete:
-        logger.info("deleting orgtask %s", org_task.task.slug)
-        org_task.delete()
-
-    # delete airbyte connection
-    logger.info("deleting airbyte connection %s", connection_id)
-    airbyte_service.delete_connection(org.airbyte_workspace_id, connection_id)
-
-    if OrgSchemaChange.objects.filter(connection_id=connection_id).exists():
-        OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
-        logger.info(f"Deleted schema changes for connection {connection_id}")
-
-    return None, None
 
 
 def get_job_info_for_connection(org: Org, connection_id: str):
@@ -880,121 +873,6 @@ def create_warehouse(org: Org, payload: OrgWarehouseSchema):
     create_or_update_org_cli_block(org, warehouse, dbt_credentials)
 
     return None, None
-
-
-def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_creds: dict):
-    """
-    Create/update the block in db and also in prefect
-    """
-
-    bqlocation = None
-    priority = None  # whether to run in "batch" mode or "interactive" mode for bigquery
-    if warehouse.wtype == "bigquery":
-        if "dataset_location" in airbyte_creds:
-            bqlocation = airbyte_creds["dataset_location"]
-            del airbyte_creds["dataset_location"]
-
-        if "transformation_priority" in airbyte_creds:
-            priority = airbyte_creds["transformation_priority"]
-            del airbyte_creds["transformation_priority"]
-
-    profile_name = None
-    target = None
-    dbt_project_params: DbtProjectParams = None
-    try:
-        dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
-
-        dbt_project_filename = str(Path(dbt_project_params.project_dir) / "dbt_project.yml")
-        if not os.path.exists(dbt_project_filename):
-            raise HttpError(400, dbt_project_filename + " is missing")
-
-        with open(dbt_project_filename, "r", encoding="utf-8") as dbt_project_file:
-            dbt_project = yaml.safe_load(dbt_project_file)
-            if "profile" not in dbt_project:
-                raise HttpError(400, "could not find 'profile:' in dbt_project.yml")
-
-        profile_name = dbt_project["profile"]
-        target = dbt_project_params.target
-    except Exception as err:
-        logger.error(
-            "Failed to fetch the dbt profile - looks like transformation has not been setup. Using 'default' as profile name and continuing"
-        )
-        logger.error(err)
-
-    dbt_creds = map_airbyte_destination_spec_to_dbtcli_profile(airbyte_creds, dbt_project_params)
-
-    dbt_creds.pop("ssl_mode", None)
-    dbt_creds.pop("ssl", None)
-
-    # set defaults to target and profile
-    # cant create a cli profile without these two
-    # idea is these should be updated when we setup transformation or update the warehouse
-    if not profile_name:
-        profile_name = "default"
-
-    if not target:
-        target = "default"
-
-    logger.info("Found org=%s profile_name=%s target=%s", org.slug, profile_name, target)
-    cli_profile_block = OrgPrefectBlockv1.objects.filter(org=org, block_type=DBTCLIPROFILE).first()
-    if cli_profile_block:
-        logger.info(
-            f"Updating the cli profile block : {cli_profile_block.block_name} for org={org.slug} with profile={profile_name} target={target}"
-        )
-        try:
-            prefect_service.update_dbt_cli_profile_block(
-                block_name=cli_profile_block.block_name,
-                wtype=warehouse.wtype,
-                credentials=dbt_creds,
-                bqlocation=bqlocation,
-                profilename=profile_name,
-                target=target,
-                priority=priority,
-            )
-        except Exception as error:
-            logger.error(
-                "Failed to update the cli profile block %s , err=%s",
-                cli_profile_block.block_name,
-                str(error),
-            )
-            return (None, None), "Failed to update the cli profile block"
-        logger.info(f"Successfully updated the cli profile block : {cli_profile_block.block_name}")
-    else:
-        logger.info(
-            "Creating a new cli profile block for %s with profile=%s & target=%s ",
-            org.slug,
-            profile_name,
-            target,
-        )
-        new_block_name = f"{org.slug}-{profile_name}"
-
-        try:
-            cli_block_response = prefect_service.create_dbt_cli_profile_block(
-                block_name=new_block_name,
-                profilename=profile_name,
-                target=target,
-                wtype=warehouse.wtype,
-                bqlocation=bqlocation,
-                credentials=dbt_creds,
-                priority=priority,
-            )
-        except Exception as error:
-            logger.error(
-                "Failed to create a new cli profile block %s , err=%s",
-                new_block_name,
-                str(error),
-            )
-            return (None, None), "Failed to update the cli profile block"
-
-        # save the cli profile block in django db
-        cli_profile_block = OrgPrefectBlockv1.objects.create(
-            org=org,
-            block_type=DBTCLIPROFILE,
-            block_id=cli_block_response["block_id"],
-            block_name=cli_block_response["block_name"],
-        )
-
-    return (cli_profile_block, dbt_project_params), None
 
 
 def get_warehouses(org: Org):

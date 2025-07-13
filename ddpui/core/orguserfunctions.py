@@ -8,7 +8,6 @@ from datetime import datetime
 from uuid import uuid4
 
 from django.contrib.auth.models import User
-from django.db import transaction
 from django.utils.text import slugify
 from django.utils import timezone as django_timezone
 
@@ -18,7 +17,6 @@ from ddpui.models.org_user import (
     AcceptInvitationSchema,
     DeleteOrgUserPayload,
     Invitation,
-    InvitationSchema,
     NewInvitationSchema,
     OrgUser,
     OrgUserCreate,
@@ -28,6 +26,7 @@ from ddpui.models.org_user import (
     ChangePasswordSchema,
     UserAttributes,
     VerifyEmailSchema,
+    OrgUserRole,
 )
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.orgtnc import OrgTnC
@@ -201,90 +200,6 @@ def delete_orguser_v1(requestor_orguser: OrgUser, payload: DeleteOrgUserPayload)
     orguser_to_delete.delete()
 
     return None, None
-
-
-def invite_user(orguser: OrgUser, payload: InvitationSchema):
-    """invite a user to an org"""
-    frontend_url = os.getenv("FRONTEND_URL")
-
-    logger.info(payload)
-
-    if orguser.org is None:
-        return None, "create an organization first"
-
-    invited_email = payload.invited_email.lower().strip()
-    if OrgUser.objects.filter(org=orguser.org, user__email__iexact=invited_email).exists():
-        return None, "user already has an account"
-
-    role_slugs = OrgUserRole.role_slugs()
-    if payload.invited_role_slug not in role_slugs:
-        return None, "Invalid role"
-
-    invited_role = role_slugs[payload.invited_role_slug]
-
-    # user can only invite a role equal or lower to their role
-    if invited_role > orguser.role:
-        return None, "Insufficient permissions for this operation"
-
-    existing_user = User.objects.filter(email__iexact=invited_email).first()
-
-    # new role for the invited user; so that he doesnt' get stuck due new RBAC changes released
-    new_role = Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first()
-
-    if existing_user:
-        logger.info("user exists, creating new OrgUser")
-        OrgUser.objects.create(
-            user=existing_user, org=orguser.org, role=invited_role, new_role=new_role
-        )
-        awsses.send_youve_been_added_email(invited_email, orguser.user.email, orguser.org.name)
-        return (
-            InvitationSchema(
-                invited_email=invited_email,
-                invited_role_slug=payload.invited_role_slug,
-            ),
-            None,
-        )
-
-    invitation = Invitation.objects.filter(
-        invited_email__iexact=invited_email, invited_by__org=orguser.org
-    ).first()
-    if invitation:
-        invitation.invited_on = timezone.as_utc(datetime.utcnow())
-        # if the invitation is already present - trigger the email again
-        invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
-        awsses.send_invite_user_email(
-            invitation.invited_email, invitation.invited_by.user.email, invite_url
-        )
-        logger.info(
-            f"Resent invitation to {invited_email} to join {orguser.org.name} "
-            f"with invite code {invitation.invite_code}",
-        )
-        return from_invitation(invitation), None
-
-    payload.invited_by = from_orguser(orguser)
-    payload.invited_on = timezone.as_utc(datetime.utcnow())
-    payload.invite_code = str(uuid4())
-
-    invitation = Invitation.objects.create(
-        invited_email=invited_email,
-        invited_role=invited_role,
-        invited_by=orguser,
-        invited_on=payload.invited_on,
-        invite_code=payload.invite_code,
-        invited_new_role=new_role,
-    )
-
-    # trigger an email to the user
-    invite_url = f"{frontend_url}/invitations/?invite_code={payload.invite_code}"
-    awsses.send_invite_user_email(
-        invitation.invited_email, invitation.invited_by.user.email, invite_url
-    )
-
-    logger.info(
-        f"Invited {invited_email} to join {orguser.org.name} "
-        f"with invite code {payload.invite_code}",
-    )
-    return payload, None
 
 
 def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema):
@@ -579,7 +494,6 @@ def ensure_orguser_for_org(orguser: OrgUser, org):
     else:
         OrgUser.objects.create(
             user=orguser.user,
-            role=OrgUserRole.ACCOUNT_MANAGER,
             email_verified=True,
             org=org,
             new_role=orguser.new_role,

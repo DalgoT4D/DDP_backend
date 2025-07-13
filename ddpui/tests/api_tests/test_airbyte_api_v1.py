@@ -624,7 +624,7 @@ def test_put_airbyte_connection_v1_no_streams(orguser_workspace, warehouse_with_
 
 @patch.multiple(
     "ddpui.ddpairbyte.airbyte_service",
-    get_connection=Mock(return_value={"conn-key": "conn-val"}),
+    get_connection=Mock(return_value={"conn-key": "conn-val", "status": "active"}),
 )
 def test_put_airbyte_connection_v1(orguser_workspace):
     """tests PUT /v1/connections/{connection_id}/update success"""
@@ -654,6 +654,7 @@ def test_put_airbyte_connection_v1(orguser_workspace):
 
     connection = {
         "conn-key": "conn-val",
+        "status": "active",
         "operationIds": [],
         "name": payload.name,
         "skipReset": False,

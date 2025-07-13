@@ -3,7 +3,7 @@ from django.core.management.base import BaseCommand
 from ddpui.models.org import Org
 from ddpui.models.org import OrgWarehouse
 from ddpui.utils import secretsmanager
-from ddpui.ddpairbyte.airbytehelpers import create_or_update_org_cli_block
+from ddpui.ddpdbt.dbthelpers import create_or_update_org_cli_block
 from ddpui.ddpdbt.elementary_service import create_elementary_profile
 
 
