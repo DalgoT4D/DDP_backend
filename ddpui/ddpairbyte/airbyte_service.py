@@ -8,10 +8,10 @@ from typing import Dict, List
 import os
 import json
 from datetime import datetime
+import pytz
 import requests
 from dotenv import load_dotenv
 from ninja.errors import HttpError
-from flags.state import flag_enabled
 from ddpui import settings
 from ddpui.ddpairbyte import schema
 from ddpui.utils.custom_logger import CustomLogger
@@ -916,7 +916,12 @@ def get_job_info_without_logs(job_id: str) -> dict:
 
 
 def get_jobs_for_connection(
-    connection_id: str, limit: int = 1, offset: int = 0, job_types: list[str] = ["sync"]
+    connection_id: str,
+    limit: int = 1,
+    offset: int = 0,
+    job_types: list[str] | None = None,
+    created_at_start: datetime = None,
+    created_at_end: datetime = None,
 ) -> int | None:
     """
     returns most recent job for a connection
@@ -933,13 +938,28 @@ def get_jobs_for_connection(
     if not isinstance(connection_id, str):
         raise HttpError(400, "connection_id must be a string")
 
+    if job_types is None:
+        job_types = ["sync"]
+
+    payload = {
+        "configTypes": job_types,
+        "configId": connection_id,
+        "pagination": {"rowOffset": offset, "pageSize": limit},
+    }
+
+    if created_at_start:
+        payload["createdAtStart"] = (
+            created_at_start.astimezone(pytz.UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        )
+
+    if created_at_end:
+        payload["createdAtEnd"] = (
+            created_at_end.astimezone(pytz.UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        )
+
     result = abreq(
         "jobs/list",
-        {
-            "configTypes": job_types,
-            "configId": connection_id,
-            "pagination": {"rowOffset": offset, "pageSize": limit},
-        },
+        payload,
     )
     return result
 
