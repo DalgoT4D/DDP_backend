@@ -21,9 +21,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("org", type=str, help="Org slug")
-        parser.add_argument(
-            "file_path", type=str, help="Path to the DBT manifest JSON file"
-        )
+        parser.add_argument("file_path", type=str, help="Path to the DBT manifest JSON file")
 
     def handle(self, *args, **options):
         """

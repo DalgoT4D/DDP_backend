@@ -46,9 +46,7 @@ def extract_models(
                 resource_type=node_value.get("resource_type"),
                 source_name=node_value.get("package_name"),
                 depends_on=node_value.get("depends_on", {}).get("nodes", []),
-                columns=[
-                    column_name for column_name in node_value.get("columns", {}).keys()
-                ],
+                columns=[column_name for column_name in node_value.get("columns", {}).keys()],
             )
             models_metadata[node_key] = model_metadata
 
@@ -166,15 +164,10 @@ def create_orgdbtoperation(orgdbt: OrgDbt, model_metadata: ModelMetadata):
             continue
 
     if parent_model is None:
-        print(
-            f"did not find parent model for {model_metadata.dbschema}.{model_metadata.name} "
-        )
+        print(f"did not find parent model for {model_metadata.dbschema}.{model_metadata.name} ")
         print(model_metadata.depends_on)
 
-    if (
-        parent_model
-        and not OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).exists()
-    ):
+    if parent_model and not OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).exists():
         OrgDbtOperation.objects.create(
             dbtmodel=orgdbt_model,
             uuid=uuid.uuid4(),
