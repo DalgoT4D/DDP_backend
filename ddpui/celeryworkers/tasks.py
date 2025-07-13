@@ -1269,6 +1269,31 @@ def check_for_long_running_flow_runs():
         )
 
 
+@app.task(bind=True)
+def sync_single_airbyte_job_stats(self, job_id: int):
+    """Syncs a single Airbyte job stats"""
+    logger.info("Syncing details from airbyte for job %s", job_id)
+    airbytehelpers.fetch_and_update_airbyte_job_details(job_id)
+
+
+@app.task(bind=True)
+def sync_airbyte_job_stats_for_all_connections(
+    self, last_n_days: int = 7, last_n_hours: int = 0, connection_id: str = None, org_id: int = None
+):
+    """Syncs Airbyte job stats for all connections in the orgs"""
+
+    org = None
+    if org_id:
+        org = Org.objects.filter(id=org_id).first()
+        if not org:
+            logger.error("Org with id %s not found", org_id)
+            raise Exception(f"Org with id {org_id} not found")
+
+    airbytehelpers.fetch_and_update_airbyte_jobs_for_all_connections(
+        last_n_days=last_n_days, last_n_hours=last_n_hours, connection_id=connection_id, org=org
+    )
+
+
 @app.task()
 def compute_dataflow_run_times(org: Org = None):
     """Computes run times for all dataflows"""
@@ -1337,3 +1362,10 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
             compute_dataflow_run_times.s(),
             name="compute run times of each deployment based on its past flow runs",
         )
+
+    # sync airbyte job stats for connections; every 24 hours
+    sender.add_periodic_task(
+        crontab(minute=0, hour=0),
+        sync_airbyte_job_stats_for_all_connections.s(last_n_days=2),
+        name="sync airbyte job stats for all connections",
+    )
