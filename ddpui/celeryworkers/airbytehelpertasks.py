@@ -10,7 +10,23 @@ from ddpui.utils.redis_client import RedisClient
 
 @app.task(bind=False)
 def delete_airbyte_connections(task_key: str, org_id, connection_ids: list[str]):
-    """deletes a set of airbyte connections and related dalgo artifacts"""
+    """
+    Deletes a set of Airbyte connections and related Dalgo artifacts asynchronously.
+
+    Args:
+        task_key (str): Unique key for progress tracking
+        org_id: Organization ID to which connections belong
+        connection_ids (list[str]): List of Airbyte connection IDs to delete
+
+    Raises:
+        Org.DoesNotExist: If organization with given ID doesn't exist
+    """
+    if not connection_ids:
+        return
+
+    if not isinstance(connection_ids, list):
+        raise ValueError("connection_ids must be a list")
+
     org = Org.objects.get(id=org_id)
     # the task_key is keyed by org only
     taskprogress = SingleTaskProgress(task_key, 180)
