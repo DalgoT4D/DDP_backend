@@ -222,30 +222,33 @@ def get_git_branches(org: Org):  # pragma: no cover
     """get available git branches to check out for an Org"""
     run_dir = DbtProjectManager.get_dbt_project_dir(org.dbt)
 
-    # First command: git for-each-ref
-    with subprocess.Popen(
-        [
-            "/usr/bin/git",
-            "for-each-ref",
-            "--format=%(refname:short)",
-            "refs/heads",
-            "refs/remotes/origin",
-        ],
-        stdout=subprocess.PIPE,
-        cwd=run_dir,
-    ) as p1:
-        # Second command: sed to remove 'origin/' prefix
+    try:
+        # First command: git for-each-ref
         with subprocess.Popen(
-            ["/usr/bin/sed", "s|^origin/||"], stdin=p1.stdout, stdout=subprocess.PIPE, cwd=run_dir
-        ) as p2:
-            # Third command: sort -u
-            with subprocess.Popen(
-                ["/usr/bin/sort", "-u"], stdin=p2.stdout, stdout=subprocess.PIPE, cwd=run_dir
-            ) as p3:
-                # Read final output
-                output, _ = p3.communicate()
-                branches = output.decode().splitlines()
+            [
+                "/usr/bin/git",
+                "for-each-ref",
+                "--format=%(refname:short)",
+                "refs/heads",
+                "refs/remotes/origin",
+            ],
+            stdout=subprocess.PIPE,
+            cwd=run_dir,
+        ) as p1, subprocess.Popen(  # Second command: sed to remove 'origin/' prefix
+            ["/usr/bin/sed", "s|^origin/||"],
+            stdin=p1.stdout,
+            stdout=subprocess.PIPE,
+            cwd=run_dir,
+        ) as p2, subprocess.Popen(  # Third command: sort -u
+            ["/usr/bin/sort", "-u"], stdin=p2.stdout, stdout=subprocess.PIPE, cwd=run_dir
+        ) as p3:
+            # Read final output
+            output, _ = p3.communicate()
+            branches = output.decode().splitlines()
 
-                return branches
+            return branches
+    except (subprocess.SubprocessError, OSError) as e:
+        logger.error(f"Failed to get git branches for org: {e}")
+        return None
 
     return None
