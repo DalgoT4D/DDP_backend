@@ -443,8 +443,8 @@ def get_connections(org: Org) -> Tuple[List[AirbyteGetConnectionsResponse], None
         def ensure_only_one_add_across_parallel_requests(connection_id: str):
             """avoid a race condition in case get_connections() is called twice in parallel"""
             cacheval = redisclient.get(f"deleting-{connection_id}")
-            if not cacheval:
-                redisclient.set(f"deleting-{connection_id}", True, 10)  # expire after 10 seconds
+            if not cacheval or not cacheval == "true":
+                redisclient.set(f"deleting-{connection_id}", "true", 10)  # expire after 10 seconds
                 connections_to_clean_up.append(connection_id)
 
         if len(connection) == 0:
