@@ -316,6 +316,22 @@ def put_dbt_venv(request, payload: OrgDbtVenv):
     return {"success": 1, "dbt_venv": org.dbt.dbt_venv}
 
 
+@dbt_router.get("/git_branches/")
+@has_permission(["can_edit_dbt_workspace"])
+def get_git_branches(request):
+    """get all available git branches to check out"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    if org.dbt is None:
+        raise HttpError(400, "No OrgDbt set up")
+
+    branches = dbt_service.get_git_branches(org)
+    if not branches:
+        raise HttpError(400, "No Git branches found")
+    return {"branches": branches}
+
+
 @dbt_router.get("/dbt_transform/")
 @has_permission(["can_view_dbt_workspace"])
 def get_transform_type(request):

@@ -216,3 +216,33 @@ def check_repo_exists(gitrepo_url: str, gitrepo_access_token: str | None) -> boo
         return False
 
     return response.status_code == 200
+
+
+def get_git_branches(org: Org):  # pragma: no cover
+    """get available git branches to check out for an Org"""
+    run_dir = DbtProjectManager.get_dbt_project_dir(org.dbt)
+
+    # First command: git for-each-ref
+    with subprocess.Popen(
+        ["git", "for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes/origin"],
+        stdout=subprocess.PIPE,
+        cwd=run_dir,
+    ) as p1:
+
+        # Second command: sed to remove 'origin/' prefix
+        with subprocess.Popen(
+            ["sed", "s|^origin/||"], stdin=p1.stdout, stdout=subprocess.PIPE, cwd=run_dir
+        ) as p2:
+
+            # Third command: sort -u
+            with subprocess.Popen(
+                ["sort", "-u"], stdin=p2.stdout, stdout=subprocess.PIPE, cwd=run_dir
+            ) as p3:
+
+                # Read final output
+                output, _ = p3.communicate()
+                branches = output.decode().splitlines()
+
+                return branches
+
+    return None

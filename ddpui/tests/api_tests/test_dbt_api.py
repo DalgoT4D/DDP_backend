@@ -28,6 +28,7 @@ from ddpui.api.dbt_api import (
     post_create_edr_sendreport_dataflow,
     get_available_dbt_venvs,
     put_dbt_venv,
+    get_git_branches,
 )
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.ddpprefect import SECRET, DBTCLIPROFILE
@@ -794,3 +795,33 @@ def test_get_available_dbt_venvs_two(orguser: OrgUser):
             },
         ]
     }
+
+
+def test_get_git_branches_no_orgdbt(orguser: OrgUser):
+    """tests get_git_branches with no org.dbt"""
+    orguser.org.dbt = None
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as excinfo:
+        get_git_branches(request)
+    assert str(excinfo.value) == "No OrgDbt set up"
+
+
+def test_get_git_branches_no_branches(orguser: OrgUser):
+    """tests get_git_branches with no git branches"""
+    orguser.org.dbt = OrgDbt(dbt_venv="dbt-venv")
+    request = mock_request(orguser)
+    with patch("ddpui.ddpdbt.dbt_service.get_git_branches") as mock_get_git_branches:
+        mock_get_git_branches.return_value = None
+        with pytest.raises(HttpError) as excinfo:
+            get_git_branches(request)
+        assert str(excinfo.value) == "No Git branches found"
+
+
+def test_get_git_branches_success(orguser: OrgUser):
+    """tests get_git_branches - success"""
+    orguser.org.dbt = OrgDbt(dbt_venv="dbt-venv")
+    request = mock_request(orguser)
+    with patch("ddpui.ddpdbt.dbt_service.get_git_branches") as mock_get_git_branches:
+        mock_get_git_branches.return_value = ["a", "b"]
+        retval = get_git_branches(request)
+        assert retval == {"branches": ["a", "b"]}
