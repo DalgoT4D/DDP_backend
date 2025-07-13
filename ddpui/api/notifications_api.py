@@ -6,6 +6,8 @@ from ddpui.schemas.notifications_api_schemas import (
     CreateNotificationPayloadSchema,
     UpdateReadStatusSchema,
     UpdateReadStatusSchemav1,
+    DismissUrgentNotificationSchema,
+    CategorySubscriptionSchema,
 )
 from ddpui.models.org_user import OrgUser
 
@@ -51,9 +53,11 @@ def post_create_notification(request, payload: CreateNotificationPayloadSchema):
     notification_data = {
         "author": payload.author,
         "message": payload.message,
+        "email_subject": payload.message,  # Use message as email subject if not provided
         "urgent": payload.urgent,
         "scheduled_time": payload.scheduled_time,
         "recipients": recipients,
+        "category": payload.category,
     }
 
     error, result = notifications_service.create_notification(notification_data)
@@ -65,13 +69,15 @@ def post_create_notification(request, payload: CreateNotificationPayloadSchema):
 
 
 @notification_router.get("/history")
-def get_notification_history(request, page: int = 1, limit: int = 10, read_status: int = None):
+def get_notification_history(
+    request, page: int = 1, limit: int = 10, read_status: int = None, category: str = None
+):
     """
     Retrieve the complete notification history including past and scheduled notifications.
 
     Returns a paginated list of all notifications in the system, including those
     that have been sent and those scheduled for future delivery. Supports filtering
-    by read status.
+    by read status and category.
 
     Args:
         request: HTTP request object containing authentication data
@@ -79,6 +85,7 @@ def get_notification_history(request, page: int = 1, limit: int = 10, read_statu
         limit (int, optional): Number of notifications per page. Defaults to 10
         read_status (int, optional): Filter by read status (0=unread, 1=read).
                                    None returns all notifications
+        category (str, optional): Filter by notification category
 
     Returns:
         dict: Paginated notification history with metadata
@@ -86,7 +93,9 @@ def get_notification_history(request, page: int = 1, limit: int = 10, read_statu
     Raises:
         HttpError: 400 if history retrieval fails
     """
-    error, result = notifications_service.get_notification_history(page, limit, read_status=None)
+    error, result = notifications_service.get_notification_history(
+        page, limit, read_status, category
+    )
     if error is not None:
         raise HttpError(400, error)
 
@@ -119,13 +128,15 @@ def get_notification_recipients(request, notification_id: int):
 
 
 @notification_router.get("/v1")
-def get_user_notifications_v1(request, page: int = 1, limit: int = 10, read_status: int = None):
+def get_user_notifications_v1(
+    request, page: int = 1, limit: int = 10, read_status: int = None, category: str = None
+):
     """
     Retrieve notifications for the authenticated user.
 
     Returns a paginated list of notifications that have been sent to the current
     user. Only includes past notifications that have already been delivered,
-    not future scheduled notifications. Supports filtering by read status.
+    not future scheduled notifications. Supports filtering by read status and category.
 
     Args:
         request: HTTP request object containing orguser authentication data
@@ -133,6 +144,7 @@ def get_user_notifications_v1(request, page: int = 1, limit: int = 10, read_stat
         limit (int, optional): Number of notifications per page. Defaults to 10
         read_status (int, optional): Filter by read status (0=unread, 1=read).
                                    None returns all notifications
+        category (str, optional): Filter by notification category
 
     Returns:
         dict: Paginated user notifications with metadata
@@ -142,7 +154,7 @@ def get_user_notifications_v1(request, page: int = 1, limit: int = 10, read_stat
     """
     orguser = request.orguser
     error, result = notifications_service.fetch_user_notifications_v1(
-        orguser, page, limit, read_status
+        orguser, page, limit, read_status, category
     )
     if error is not None:
         raise HttpError(400, error)
@@ -226,6 +238,112 @@ def get_unread_notifications_count(request):
     """
     orguser: OrgUser = request.orguser
     error, result = notifications_service.get_unread_notifications_count(orguser)
+    if error is not None:
+        raise HttpError(400, error)
+
+    return result
+
+
+@notification_router.get("/urgent")
+def get_urgent_notifications(request):
+    """
+    Get urgent notifications that haven't been dismissed by the user.
+
+    Returns urgent notifications that should be displayed in the prominent
+    notification bar at the top of the page.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+
+    Returns:
+        dict: List of urgent notifications that haven't been dismissed
+
+    Raises:
+        HttpError: 400 if retrieval fails
+    """
+    orguser: OrgUser = request.orguser
+    error, result = notifications_service.get_urgent_notifications(orguser)
+    if error is not None:
+        raise HttpError(400, error)
+
+    return result
+
+
+@notification_router.post("/urgent/dismiss")
+def dismiss_urgent_notification(request, payload: DismissUrgentNotificationSchema):
+    """
+    Dismiss an urgent notification for the authenticated user.
+
+    Marks an urgent notification as dismissed so it won't appear in the
+    urgent notifications bar anymore.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+        payload: Schema containing the notification_id to dismiss
+
+    Returns:
+        dict: Success message
+
+    Raises:
+        HttpError: 400 if dismissal fails
+    """
+    orguser: OrgUser = request.orguser
+    error, result = notifications_service.dismiss_urgent_notification(
+        orguser, payload.notification_id
+    )
+    if error is not None:
+        raise HttpError(400, error)
+
+    return result
+
+
+@notification_router.get("/categories/{category}")
+def get_notifications_by_category(request, category: str, page: int = 1, limit: int = 10):
+    """
+    Get notifications for a specific category for the authenticated user.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+        category: The notification category to filter by
+        page (int, optional): Page number for pagination. Defaults to 1
+        limit (int, optional): Number of notifications per page. Defaults to 10
+
+    Returns:
+        dict: Paginated notifications for the specified category
+
+    Raises:
+        HttpError: 400 if retrieval fails
+    """
+    orguser: OrgUser = request.orguser
+    error, result = notifications_service.get_notifications_by_category(
+        orguser, category, page, limit
+    )
+    if error is not None:
+        raise HttpError(400, error)
+
+    return result
+
+
+@notification_router.put("/category-subscriptions")
+def update_category_subscriptions(request, payload: CategorySubscriptionSchema):
+    """
+    Update the user's category subscription preferences.
+
+    Allows users to subscribe or unsubscribe from specific notification categories.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+        payload: Schema containing the subscription preferences to update
+
+    Returns:
+        dict: Updated preferences and success message
+
+    Raises:
+        HttpError: 400 if update fails
+    """
+    orguser: OrgUser = request.orguser
+    subscription_data = payload.dict(exclude_none=True)
+    error, result = notifications_service.update_category_subscriptions(orguser, subscription_data)
     if error is not None:
         raise HttpError(400, error)
 
