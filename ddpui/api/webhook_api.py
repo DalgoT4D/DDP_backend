@@ -8,7 +8,7 @@ from ddpui.utils.webhook_helpers import (
     get_flowrun_id_and_state,
     FLOW_RUN,
 )
-from ddpui.celeryworkers.tasks import handle_prefect_webhook
+from ddpui.celeryworkers.tasks import handle_prefect_webhook, sync_single_airbyte_job_stats
 from ddpui.models.llm import LlmSession, LlmSessionStatus
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
@@ -110,3 +110,14 @@ def get_failure_summary(request, flow_run_id: str):
     except Exception as err:
         logger.error(f"Error retrieving failure summary for flow run {flow_run_id}: {str(err)}")
         raise HttpError(500, f"Failed to retrieve failure summary: {str(err)}")
+
+
+@webhook_router.post("/v1/airbyte_job/{job_id}", auth=None)
+def post_airbyte_job_details(request, job_id: str):
+    """webhook endpoint for Airbyte job details"""
+    if request.headers.get("X-Notification-Key") != os.getenv("AIRBYTE_NOTIFICATIONS_WEBHOOK_KEY"):
+        raise HttpError(400, "unauthorized")
+
+    sync_single_airbyte_job_stats.delay(int(job_id))
+
+    return {"status": "ok"}
