@@ -993,6 +993,206 @@ def handle_prefect_webhook(self, flow_run_id: str, state: str):  # skipcq: PYL-W
     do_handle_prefect_webhook(flow_run_id, state)
 
 
+@app.task(bind=True)
+def generate_failure_summary(
+    self,
+    flow_run_id: str,
+    org_id: int,
+    deployment_id: str = None,
+):
+    """
+    Generate LLM failure summary for a failed Prefect flow run
+    1. Fetch flow run details and logs from Prefect
+    2. Upload logs as a file to LLM service
+    3. Query the LLM service with prompts for summarizing and resolving errors
+    4. Store the summary in the database
+    """
+    taskprogress = SingleTaskProgress(self.request.id, 60 * 10)
+    taskprogress.add(
+        {"message": "Started generating failure summary", "status": "running", "result": []}
+    )
+
+    try:
+        org = Org.objects.filter(id=org_id).first()
+        if not org:
+            logger.error(f"Organization not found for id: {org_id}")
+            taskprogress.add(
+                {
+                    "message": "Organization not found",
+                    "status": TaskProgressStatus.FAILED,
+                    "result": None,
+                }
+            )
+            return
+
+        # Get system user for creating the LLM session
+        system_user = OrgUser.objects.filter(user__email=SYSTEM_USER_EMAIL).first()
+        if not system_user:
+            logger.error("System user not found")
+            taskprogress.add(
+                {
+                    "message": "System user not found",
+                    "status": TaskProgressStatus.FAILED,
+                    "result": None,
+                }
+            )
+            return
+
+        # Check if summary already exists for this flow run
+        existing_session = (
+            LlmSession.objects.filter(
+                org=org,
+                flow_run_id=flow_run_id,
+                session_status=LlmSessionStatus.COMPLETED,
+                session_type=LlmAssistantType.LOG_SUMMARIZATION,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+
+        if existing_session:
+            logger.info(f"LLM failure summary already exists for flow run {flow_run_id}")
+            taskprogress.add(
+                {
+                    "message": "Summary already exists for this flow run",
+                    "status": TaskProgressStatus.COMPLETED,
+                    "result": existing_session.response,
+                }
+            )
+            return
+
+        # Create a new LLM session
+        llm_session = LlmSession.objects.create(
+            request_uuid=self.request.id,
+            orguser=system_user,
+            org=org,
+            flow_run_id=flow_run_id,
+            session_status=LlmSessionStatus.RUNNING,
+            session_type=LlmAssistantType.LOG_SUMMARIZATION,
+        )
+
+        taskprogress.add(
+            {
+                "message": "Created LLM session, fetching logs",
+                "status": TaskProgressStatus.RUNNING,
+                "result": None,
+            }
+        )
+
+        # Fetch flow run logs
+        try:
+            logs_arr = recurse_flow_run_logs(flow_run_id)
+            if not logs_arr:
+                logger.warning(f"No logs found for flow run {flow_run_id}")
+                logs_text = "No logs available for this flow run."
+            else:
+                logs_text = "\n".join([log["message"] for log in logs_arr])
+        except Exception as err:
+            logger.error(f"Error fetching logs for flow run {flow_run_id}: {str(err)}")
+            logs_text = f"Error fetching logs: {str(err)}"
+
+        taskprogress.add(
+            {
+                "message": "Fetched logs, uploading to LLM service",
+                "status": TaskProgressStatus.RUNNING,
+                "result": None,
+            }
+        )
+
+        # Get assistant prompt for log summarization
+        assistant_prompt = AssistantPrompt.objects.filter(
+            type=LlmAssistantType.LOG_SUMMARIZATION
+        ).first()
+
+        if not assistant_prompt:
+            logger.error("Assistant prompt not found for log summarization")
+            llm_session.session_status = LlmSessionStatus.FAILED
+            llm_session.save()
+            taskprogress.add(
+                {
+                    "message": "Assistant prompt not found for log summarization",
+                    "status": TaskProgressStatus.FAILED,
+                    "result": None,
+                }
+            )
+            return
+
+        # Upload logs to LLM service and generate summary
+        user_prompts = [
+            "Summarize the primary error that occurred in this Prefect flow run",
+            "What steps can I take to solve the error you identified?",
+            "What are the likely root causes of this failure?",
+        ]
+
+        try:
+            # Upload logs as a file to LLM service
+            fpath, session_id = llm_service.upload_text_as_file(
+                logs_text, f"prefect_failure_logs_{flow_run_id}"
+            )
+            logger.info(f"Uploaded logs to LLM service at {fpath}, session ID: {session_id}")
+
+            taskprogress.add(
+                {
+                    "message": "Uploaded logs, querying LLM for summary",
+                    "status": TaskProgressStatus.RUNNING,
+                    "result": None,
+                }
+            )
+
+            # Query LLM service for failure analysis
+            result = llm_service.file_search_query_and_poll(
+                assistant_prompt=assistant_prompt.prompt,
+                queries=user_prompts,
+                session_id=session_id,
+            )
+
+            # Close the LLM session
+            logger.info("Closing LLM session")
+            llm_service.close_file_search_session(result["session_id"])
+
+            # Save the results to database
+            llm_session.user_prompts = user_prompts
+            llm_session.assistant_prompt = assistant_prompt.prompt
+            llm_session.response = [
+                {"prompt": prompt, "response": response}
+                for prompt, response in zip(user_prompts, result["result"])
+            ]
+            llm_session.session_id = result["session_id"]
+            llm_session.session_status = LlmSessionStatus.COMPLETED
+            llm_session.save()
+
+            logger.info(f"Generated LLM failure summary for flow run {flow_run_id}")
+            taskprogress.add(
+                {
+                    "message": "Generated failure summary successfully",
+                    "status": TaskProgressStatus.COMPLETED,
+                    "result": llm_session.response,
+                }
+            )
+
+        except Exception as err:
+            logger.error(f"Error generating LLM summary for flow run {flow_run_id}: {str(err)}")
+            llm_session.session_status = LlmSessionStatus.FAILED
+            llm_session.save()
+            taskprogress.add(
+                {
+                    "message": f"Failed to generate summary: {str(err)}",
+                    "status": TaskProgressStatus.FAILED,
+                    "result": None,
+                }
+            )
+
+    except Exception as err:
+        logger.error(f"Unexpected error in generate_failure_summary: {str(err)}")
+        taskprogress.add(
+            {
+                "message": f"Unexpected error: {str(err)}",
+                "status": TaskProgressStatus.FAILED,
+                "result": None,
+            }
+        )
+
+
 @app.task()
 def check_org_plan_expiry_notify_people():
     """sends an email to the org's account manager to notify them that their plan will expire in a week"""
