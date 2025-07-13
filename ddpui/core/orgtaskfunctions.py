@@ -198,12 +198,12 @@ def delete_orgtask(org_task: OrgTask):
             # do this in try catch because it can fail & throw error
             try:
                 prefect_service.delete_deployment_by_id(dataflow.deployment_id)
-            except Exception:
+            except Exception as err:
                 # we want to return an error if the deployment exists in prefect
                 # but failed to be deleted
                 # we want to ignore it if the deployment doesn't exist
                 # hmmm
-                pass
+                logger.error(f"Failed to delete deployment {dataflow.deployment_id}: {err}")
             logger.info("FINISHED deleting manual deployment for orgtask")
             logger.info("deleting OrgDataFlowv1")
             dataflow.delete()
