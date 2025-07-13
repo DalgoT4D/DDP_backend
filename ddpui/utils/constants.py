@@ -82,4 +82,14 @@ FREE_TRIAL = {
     "superset": ["Superset dashboards", "Superset Usage dashboards"],
 }
 
+
+# map airbyte task status to prefect task status
+# pending ┃ running ┃ incomplete ┃ failed ┃ succeeded ┃ cancelled
+AIRBYTE_JOB_STATUS_PENDING = "pending"
+AIRBYTE_JOB_STATUS_RUNNING = "running"
+AIRBYTE_JOB_STATUS_INCOMPLETE = "incomplete"
+AIRBYTE_JOB_STATUS_SUCCESS = "succeeded"
+AIRBYTE_JOB_STATUS_FAILED = "failed"
+AIRBYTE_JOB_STATUS_CANCELLED = "cancelled"
+
 AIRBYTE_CONNECTION_DEPRECATED = "deprecated"

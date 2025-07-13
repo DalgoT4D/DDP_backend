@@ -6,7 +6,8 @@ import json
 import re
 from typing import List, Tuple
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timedelta
+import pytz
 from ninja.errors import HttpError
 from django.utils.text import slugify
 from django.utils import timezone as djangotimezone
@@ -25,6 +26,7 @@ from ddpui.models.org import (
     OrgWarehouseSchema,
     ConnectionMeta,
 )
+from ddpui.models.airbyte import AirbyteJob
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.custom_logger import CustomLogger
@@ -51,6 +53,8 @@ from ddpui.celeryworkers.airbytehelpertasks import delete_airbyte_connections
 from ddpui.utils.helpers import (
     generate_hash_id,
     update_dict_but_not_stars,
+    from_timestamp,
+    nice_bytes,
 )
 from ddpui.utils import secretsmanager
 from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
@@ -352,7 +356,6 @@ def get_connections(org: Org) -> Tuple[List[AirbyteGetConnectionsResponse], None
             •	estimated wait time if queued.
 
     """
-
     sync_dataflows = (
         OrgDataFlowv1.objects.filter(
             org=org,
@@ -373,18 +376,18 @@ def get_connections(org: Org) -> Tuple[List[AirbyteGetConnectionsResponse], None
     org_task_ids = all_dataflow_orgtasks.values_list("orgtask_id", flat=True)
     all_org_task_locks = TaskLock.objects.filter(orgtask_id__in=org_task_ids)
 
-    # for the above of orgtask_ids, we fetch all the dataflows of each orgtasks
-    # this will be used to find the last run of each dataflow
-    all_orgtask_dataflows = DataflowOrgTask.objects.filter(
-        orgtask_id__in=org_task_ids
-    ).select_related("dataflow")
+    # # for the above of orgtask_ids, we fetch all the dataflows of each orgtasks
+    # # this will be used to find the last run of each dataflow
+    # all_orgtask_dataflows = DataflowOrgTask.objects.filter(
+    #     orgtask_id__in=org_task_ids
+    # ).select_related("dataflow")
 
     warehouse = OrgWarehouse.objects.filter(org=org).first()
 
     airbyte_connections = airbyte_service.get_webbackend_connections(org.airbyte_workspace_id)
 
-    res = []
-    connections_to_clean_up = []
+    res: list[dict] = []
+    connections_to_clean_up: list[str] = []
     redisclient = RedisClient.get_instance()
 
     for sync_dataflow in sync_dataflows:
@@ -454,15 +457,6 @@ def get_connections(org: Org) -> Tuple[List[AirbyteGetConnectionsResponse], None
             ensure_only_one_add_across_parallel_requests(org_task.connection_id)
             continue
 
-        look_up_last_run_deployment_ids = []
-
-        for df_orgtask in [
-            df_orgtask
-            for df_orgtask in all_orgtask_dataflows
-            if df_orgtask.orgtask_id == org_task.id
-        ]:
-            look_up_last_run_deployment_ids.append(df_orgtask.dataflow.deployment_id)
-
         clear_dataflow: OrgDataFlowv1 = sync_dataflow.clear_conn_dataflow
 
         lock = None
@@ -501,7 +495,7 @@ def get_connections(org: Org) -> Tuple[List[AirbyteGetConnectionsResponse], None
                 "lock": lock,  # this will have the status of the flow run
                 "resetConnDeploymentId": None,
                 "clearConnDeploymentId": clear_dataflow.deployment_id if clear_dataflow else None,
-                "look_up_last_run_deployment_ids": look_up_last_run_deployment_ids,
+                # "look_up_last_run_deployment_ids": look_up_last_run_deployment_ids,
                 "queuedFlowRunWaitTime": (
                     prefect_service.estimate_time_for_next_queued_run_of_dataflow(sync_dataflow)
                     if lock and lock["status"] == TaskLockStatus.QUEUED
@@ -510,37 +504,33 @@ def get_connections(org: Org) -> Tuple[List[AirbyteGetConnectionsResponse], None
             }
         )
 
-    # fetch all last runs in one go
-    all_last_run_deployment_ids = []
-    for conn in res:
-        all_last_run_deployment_ids.extend(conn["look_up_last_run_deployment_ids"])
+    connection_ids = [conn["connectionId"] for conn in res]
 
-    flow_runs_with_row_number = PrefectFlowRun.objects.filter(
-        deployment_id__in=all_last_run_deployment_ids
-    ).annotate(
+    latest_airbyte_jobs_grouped = AirbyteJob.objects.filter(config_id__in=connection_ids).annotate(
         row_number=Window(
-            expression=RowNumber(),
-            partition_by=[F("deployment_id")],
-            order_by=F("start_time").desc(),
+            expression=RowNumber(), partition_by=[F("config_id")], order_by=F("created_at").desc()
         )
     )
-    last_flow_run_per_deployment = flow_runs_with_row_number.filter(row_number=1)
 
-    # attach last run for each conn based on latest(look_up_last_run_deployment_ids)
+    latest_airbyte_jobs = latest_airbyte_jobs_grouped.filter(row_number=1)
+
+    # attach last run for each conn
     for conn in res:
-        last_runs = []
-        for run in last_flow_run_per_deployment:
-            if run.deployment_id in conn["look_up_last_run_deployment_ids"]:
-                last_runs.append(run.to_json())
+        # find the latest job for this connection
+        latest_job = latest_airbyte_jobs.filter(config_id=conn["connectionId"]).first()
 
-        last_runs.sort(
-            key=lambda run: (run["startTime"] if run["startTime"] else run["expectedStartTime"])
-        )
-
-        conn["lastRun"] = last_runs[-1] if len(last_runs) > 0 else None
-        del conn["look_up_last_run_deployment_ids"]
+        if latest_job:
+            conn["lastRun"] = {
+                "airbyteJobId": latest_job.job_id,
+                "status": latest_job.status,
+                "startTime": latest_job.created_at,
+                "expectedStartTime": latest_job.created_at,
+            }
+        else:
+            conn["lastRun"] = None
 
     if connections_to_clean_up:
+        logger.info("cleaning up connections " + connections_to_clean_up)
         delete_airbyte_connections.delay(
             f"delete-connections-{org.slug}", org.id, connections_to_clean_up
         )
@@ -687,13 +677,12 @@ def get_sync_job_history_for_connection(
     org: Org, connection_id: str, limit: int = 10, offset: int = 0
 ):
     """
-    Get all sync jobs (paginated) for a connection
+    Get all sync jobs (paginated) for a connection using AirbyteJob model
     Returns
     - Date
     - Records synced
     - Bytes synced
     - Duration
-    - logs
 
     In case there no sync jobs, return an empty list
     """
@@ -707,16 +696,37 @@ def get_sync_job_history_for_connection(
     if org_task is None:
         return None, "connection not found"
 
-    res = {"history": [], "totalSyncs": 0}
-    result = airbyte_service.get_jobs_for_connection(
-        connection_id, limit, offset, job_types=["sync", "reset_connection"]
-    )
-    res["totalSyncs"] = result["totalJobCount"]
-    if len(result["jobs"]) == 0:
-        return [], None
+    # Query AirbyteJob model instead of calling airbyte service
+    airbyte_jobs = AirbyteJob.objects.filter(
+        config_id=connection_id, job_type__in=["sync", "reset_connection"]
+    ).order_by("-created_at")[offset : offset + limit]
 
-    for job in result["jobs"]:
-        job_info = airbyte_service.parse_job_info(job)
+    total_syncs = AirbyteJob.objects.filter(
+        config_id=connection_id, job_type__in=["sync", "reset_connection"]
+    ).count()
+
+    res = {"history": [], "totalSyncs": total_syncs}
+
+    if not airbyte_jobs.exists():
+        return res, None
+
+    for job in airbyte_jobs:
+        job_info = {
+            "job_id": job.job_id,
+            "status": job.status,
+            "job_type": job.job_type,
+            "created_at": job.created_at,
+            "started_at": job.started_at,
+            "ended_at": job.ended_at,
+            "records_emitted": job.records_emitted or 0,
+            "bytes_emitted": nice_bytes(job.bytes_emitted) or 0,
+            "records_committed": job.records_committed or 0,
+            "bytes_committed": nice_bytes(job.bytes_committed) or 0,
+            "stream_stats": job.stream_stats,
+            "reset_config": job.reset_config,
+            "duration_seconds": job.duration,
+            "last_attempt_no": job.last_attempt_no,
+        }
 
         res["history"].append(job_info)
 
@@ -1090,3 +1100,127 @@ def schedule_update_connection_schema(
         raise HttpError(400, "failed to start the schema update flow run") from error
 
     return res
+
+
+def fetch_and_update_airbyte_job_details(job_id: str):
+    """Fetches the details of an Airbyte job and populates in our db."""
+    job_info = airbyte_service.get_job_info_without_logs(job_id)
+
+    job_data: dict = job_info.get("job", {})
+    attempts_data: list[dict] = job_info.get("attempts", [])
+    if not attempts_data:
+        logger.info(f"No attempts found for job_id={job_id}")
+        raise Exception(f"No attempts found for job_id={job_id}")
+
+    # attempt with the highest id is the latest attempt
+    attempts = list(map(lambda x: x["attempt"], attempts_data))
+    latest_attempt: dict = max(attempts, key=lambda x: x["id"], default=None)
+
+    if not latest_attempt:
+        logger.error("No attempts found for job_id=%s", job_id)
+        raise Exception(f"No attempts found for job_id={job_id}")
+
+    # for started_at ; take the minimum of the startedAt of all attempts
+    started_at = min(
+        [attempt.get("createdAt") for attempt in attempts if attempt.get("createdAt") is not None],
+        default=None,
+    )
+
+    if not started_at:
+        logger.error("No startedAt found for job_id=%s", job_id)
+        raise Exception(f"No startedAt found for job_id={job_id}")
+
+    # Prepare fields for AirbyteJob
+    job_fields = {
+        "job_id": job_data.get("id"),
+        "job_type": job_data.get("configType"),
+        "config_id": job_data.get("configId"),
+        "status": job_data.get("status"),
+        "reset_config": job_data.get("resetConfig"),
+        "refresh_config": job_data.get("refreshConfig"),
+        "stream_stats": job_data.get("streamAggregatedStats"),
+        "records_emitted": job_data.get("aggregatedStats", {}).get("recordsEmitted", 0),
+        "bytes_emitted": job_data.get("aggregatedStats", {}).get("bytesEmitted", 0),
+        "records_committed": job_data.get("aggregatedStats", {}).get("recordsCommitted", 0),
+        "bytes_committed": job_data.get("aggregatedStats", {}).get("bytesCommitted", 0),
+        "started_at": from_timestamp(started_at),
+        "ended_at": from_timestamp(latest_attempt.get("endedAt")),
+        "created_at": from_timestamp(job_data.get("createdAt")),
+        "attempts": attempts_data,
+    }
+
+    # Create or update the AirbyteJob entry
+    airbyte_job, is_created = AirbyteJob.objects.update_or_create(
+        job_id=job_fields["job_id"],
+        defaults=job_fields,
+    )
+
+    if is_created:
+        logger.info(f"Created new AirbyteJob with job_id={job_id}")
+
+    return model_to_dict(airbyte_job)
+
+
+def fetch_and_update_airbyte_jobs_for_all_connections(
+    last_n_days: int = 0, last_n_hours: int = 0, connection_id: str = None, org: Org = None
+):
+    """
+    Fetches and updates Airbyte job details for all connections in the given org
+    or for a specific connection if provided.
+    Args:
+        last_n_days (int): Number of days to look back for jobs.
+        connection_id (str, optional): Specific connection ID to filter jobs.
+        org (Org, optional): Organization object to filter jobs.
+    Raises:
+        ValueError: If last_n_days is not a positive integer.
+    """
+
+    if not isinstance(last_n_days, int) or last_n_days < 0:
+        raise ValueError("last_n_days must be a non-negative integer")
+
+    # figure out start datetime and end datetime based on now & last_n_days
+    start_time = datetime.now(pytz.utc) - timedelta(days=last_n_days, hours=last_n_hours)
+    end_time = datetime.now(pytz.utc)
+
+    org_tasks = OrgTask.objects.filter(connection_id__isnull=False)
+
+    if org:
+        org_tasks = org_tasks.filter(org=org)
+
+    if connection_id:
+        org_tasks = org_tasks.filter(connection_id=connection_id)
+
+    for orgtask_connection_id in org_tasks.values_list("connection_id", flat=True).distinct():
+        try:
+            logger.info("Syncing job history for connection %s", orgtask_connection_id)
+
+            offset = 0
+            limit = 20
+            curr_itr_count = 20
+            while curr_itr_count >= limit:
+                # by default the jobs are ordered by createdAt
+                jobs_dict = airbyte_service.get_jobs_for_connection(
+                    orgtask_connection_id,
+                    limit=limit,
+                    offset=offset,
+                    job_types=["sync", "reset_connection", "clear", "refresh"],
+                    created_at_start=start_time,
+                    created_at_end=end_time,
+                )
+                if len(jobs_dict.get("jobs", [])) == 0:
+                    logger.info("No jobs found for connection %s", orgtask_connection_id)
+                    break
+
+                for job in jobs_dict.get("jobs", []):
+                    curr_job = job.get("job", {})
+                    fetch_and_update_airbyte_job_details(str(curr_job.get("id")))
+
+                offset += limit
+                curr_itr_count = jobs_dict.get("totalJobCount", 0)
+
+        except Exception as e:
+            logger.error(
+                "Failed to sync job history for connection %s: %s",
+                orgtask_connection_id,
+                str(e),
+            )
