@@ -111,7 +111,7 @@ class Command(BaseCommand):
                 # Update deployment if modified and not dry run
                 if modified:
                     if not dry_run:
-                        res = prefect_put(
+                        prefect_put(
                             f"v1/deployments/{deployment.deployment_id}",
                             {"deployment_params": deployment_params},
                         )
