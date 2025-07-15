@@ -4,6 +4,7 @@ import os
 import shutil
 from pathlib import Path
 from datetime import datetime, timedelta
+from time import sleep
 from subprocess import CompletedProcess
 import pytz
 from django.core.management import call_command
@@ -510,6 +511,7 @@ def schema_change_detection():
     """detects schema changes for all the orgs and sends an email to admins if there is a change"""
     for org in Org.objects.all():
         detect_schema_changes_for_org(org)
+        sleep(int(os.getenv("SCHEMA_CHANGE_DETECTION_INTER_ORG_DELAY", "60")))  # wait between jobs
 
 
 @app.task(bind=False)
