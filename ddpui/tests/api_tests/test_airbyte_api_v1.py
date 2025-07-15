@@ -1,4 +1,6 @@
 import os
+from datetime import datetime
+import pytz
 from unittest.mock import MagicMock, Mock, patch
 from django.core.management import call_command
 
@@ -35,6 +37,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteWorkspace,
     AirbyteWorkspaceCreate,
 )
+from ddpui.models.airbyte import AirbyteJob
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, SUPER_ADMIN_ROLE
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import Org, OrgPrefectBlockv1, OrgWarehouse
@@ -262,6 +265,17 @@ def test_get_airbyte_connections_success(orguser_workspace):
     DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=org_task)
 
     OrgWarehouse.objects.create(org=request.orguser.org, name="fake-warehouse-name")
+    start_time = datetime(2025, 1, 1, 0, 0, 0, tzinfo=pytz.UTC)
+    ended_time = datetime(2025, 1, 1, 0, 10, 0, tzinfo=pytz.UTC)
+
+    AirbyteJob.objects.create(
+        config_id=org_task.connection_id,
+        job_id=999,
+        job_type="sync",
+        status="succeeded",
+        created_at=start_time,
+        ended_at=ended_time,
+    )
 
     result = get_airbyte_connections_v1(request)
     assert len(result) == 1
@@ -273,11 +287,10 @@ def test_get_airbyte_connections_success(orguser_workspace):
     assert result[0]["destination"]["name"] == "fake-warehouse-name"
     assert result[0]["status"] == "conn-status"
     assert result[0]["deploymentId"] == "fake-deployment-id"
-    assert result[0]["lastRun"]["id"] == "some-fake-run-id"
-    assert result[0]["lastRun"]["deployment_id"] == "fake-deployment-id"
-    assert result[0]["lastRun"]["name"] == "airbyte-sync-run"
-    assert result[0]["lastRun"]["state_name"] == "Completed"
-    assert result[0]["lastRun"]["status"] == "COMPLETED"
+    assert result[0]["lastRun"]["airbyteJobId"] == 999
+    assert result[0]["lastRun"]["status"] == "succeeded"
+    assert result[0]["lastRun"]["startTime"] == start_time
+    assert result[0]["lastRun"]["expectedStartTime"] == start_time
     assert result[0]["lock"] is None
 
 
@@ -611,7 +624,7 @@ def test_put_airbyte_connection_v1_no_streams(orguser_workspace, warehouse_with_
 
 @patch.multiple(
     "ddpui.ddpairbyte.airbyte_service",
-    get_connection=Mock(return_value={"conn-key": "conn-val"}),
+    get_connection=Mock(return_value={"conn-key": "conn-val", "status": "active"}),
 )
 def test_put_airbyte_connection_v1(orguser_workspace):
     """tests PUT /v1/connections/{connection_id}/update success"""
@@ -641,6 +654,7 @@ def test_put_airbyte_connection_v1(orguser_workspace):
 
     connection = {
         "conn-key": "conn-val",
+        "status": "active",
         "operationIds": [],
         "name": payload.name,
         "skipReset": False,

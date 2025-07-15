@@ -5,7 +5,6 @@ from uuid import uuid4
 from ninja import Router
 from ninja.errors import HttpError
 
-from ddpui import auth
 from ddpui.auth import has_permission
 from ddpui.celeryworkers.tasks import (
     clone_github_repo,
@@ -26,7 +25,7 @@ from ddpui.utils.constants import (
 from ddpui.ddpdbt import dbt_service, elementary_service
 from ddpui.ddpprefect import DBTCLIPROFILE, SECRET, prefect_service
 from ddpui.ddpprefect.schema import OrgDbtGitHub, OrgDbtSchema, OrgDbtTarget, PrefectSecretBlockEdit
-from ddpui.models.org import OrgPrefectBlockv1, Org
+from ddpui.models.org import OrgPrefectBlockv1, Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser, OrgUserResponse
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.core.orgtaskfunctions import get_edr_send_report_task
@@ -226,20 +225,22 @@ def put_dbt_schema_v1(request, payload: OrgDbtTarget):
     org = orguser.org
     if org.dbt is None:
         raise HttpError(400, "create a dbt workspace first")
+    warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if warehouse is None:
+        raise HttpError(400, "No warehouse configuration found for this organization")
 
     org.dbt.default_schema = payload.target_configs_schema
     org.dbt.save()
     logger.info("updated orgdbt")
 
-    cli_profile_block = OrgPrefectBlockv1.objects.filter(
-        org=orguser.org, block_type=DBTCLIPROFILE
-    ).first()
+    cli_profile_block = OrgPrefectBlockv1.objects.filter(org=org, block_type=DBTCLIPROFILE).first()
 
     if cli_profile_block:
         logger.info(f"Updating the cli profile block's schema : {cli_profile_block.block_name}")
         prefect_service.update_dbt_cli_profile_block(
             block_name=cli_profile_block.block_name,
             target=payload.target_configs_schema,
+            wtype=warehouse.wtype,
         )
         logger.info(
             f"Successfully updated the cli profile block's schema : {cli_profile_block.block_name}"

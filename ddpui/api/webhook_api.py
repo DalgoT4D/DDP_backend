@@ -71,6 +71,17 @@ def post_notification_v1(request):  # pylint: disable=unused-argument
 #    })
 
 
+@webhook_router.post("/v1/airbyte_job/{job_id}", auth=None)
+def post_airbyte_job_details(request, job_id: str):
+    """webhook endpoint for Airbyte job details"""
+    if request.headers.get("X-Notification-Key") != os.getenv("AIRBYTE_NOTIFICATIONS_WEBHOOK_KEY"):
+        raise HttpError(400, "unauthorized")
+
+    sync_single_airbyte_job_stats.delay(int(job_id))
+
+    return {"status": "ok"}
+
+
 @webhook_router.get("/failure-summary/{flow_run_id}")
 @has_permission(["can_view_logs"])
 def get_failure_summary(request, flow_run_id: str):
