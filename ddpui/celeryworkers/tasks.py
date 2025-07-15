@@ -420,7 +420,7 @@ def run_dbt_commands(self, org_id: int, task_id: str, dbt_run_params: dict = Non
         task_lock.delete()
 
 
-def detect_schema_changes_for_org(org: Org):
+def detect_schema_changes_for_org(org: Org, delay=0):
     """detect schema changes for all connections of this org"""
     org_tasks = OrgTask.objects.filter(org=org, task__slug=TASK_AIRBYTESYNC)
 
@@ -438,6 +438,8 @@ def detect_schema_changes_for_org(org: Org):
         connection_catalog, err = airbytehelpers.fetch_and_update_org_schema_changes(
             org, org_task.connection_id
         )
+        if delay:
+            sleep(delay)
 
         if err:
             if os.getenv("ADMIN_EMAIL"):
@@ -506,12 +508,22 @@ def detect_schema_changes_for_org(org: Org):
         ).delete()
 
 
-@app.task()
+@app.task(bind=False)
 def schema_change_detection():
     """detects schema changes for all the orgs and sends an email to admins if there is a change"""
     for org in Org.objects.all():
-        detect_schema_changes_for_org(org)
-        sleep(int(os.getenv("SCHEMA_CHANGE_DETECTION_INTER_ORG_DELAY", "60")))  # wait between jobs
+        try:
+            delay = int(os.getenv("SCHEMA_CHANGE_DETECTION_INTER_ORG_DELAY", "10"))
+            if delay < 0:
+                logger.error("SCHEMA_CHANGE_DETECTION_INTER_ORG_DELAY must be >= 0")
+                delay = 0
+        except ValueError:
+            logger.error(
+                "invalid value for SCHEMA_CHANGE_DETECTION_INTER_ORG_DELAY in .env: "
+                + os.getenv("SCHEMA_CHANGE_DETECTION_INTER_ORG_DELAY")
+            )
+            delay = 0
+        detect_schema_changes_for_org(org, delay)
 
 
 @app.task(bind=False)
