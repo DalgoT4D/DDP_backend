@@ -51,7 +51,7 @@ from ddpui.models.llm import (
     LogsSummarizationType,
     LlmSessionStatus,
 )
-from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
+from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess, get_integer_env_var
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.singletaskprogress import SingleTaskProgress
@@ -511,18 +511,8 @@ def detect_schema_changes_for_org(org: Org, delay=0):
 @app.task(bind=False)
 def schema_change_detection():
     """detects schema changes for all the orgs and sends an email to admins if there is a change"""
+    delay = get_integer_env_var("SCHEMA_CHANGE_DETECTION_INTER_ORG_DELAY", 0, logger, False)
     for org in Org.objects.all():
-        try:
-            delay = int(os.getenv("SCHEMA_CHANGE_DETECTION_INTER_ORG_DELAY", "10"))
-            if delay < 0:
-                logger.error("SCHEMA_CHANGE_DETECTION_INTER_ORG_DELAY must be >= 0")
-                delay = 0
-        except ValueError:
-            logger.error(
-                "invalid value for SCHEMA_CHANGE_DETECTION_INTER_ORG_DELAY in .env: "
-                + os.getenv("SCHEMA_CHANGE_DETECTION_INTER_ORG_DELAY")
-            )
-            delay = 0
         detect_schema_changes_for_org(org, delay)
 
 
@@ -1173,7 +1163,12 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
     """periodic celery tasks"""
     # schema change detection; once a day
     sender.add_periodic_task(
-        crontab(hour=18, minute=30),
+        crontab(
+            hour=get_integer_env_var("SCHEMA_CHANGE_DETECTION_SCHEDULE_HOUR", 18, logger, False),
+            minute=get_integer_env_var(
+                "SCHEMA_CHANGE_DETECTION_SCHEDULE_MINUTE", 30, logger, False
+            ),
+        ),
         schema_change_detection.s(),
         name="schema change detection",
     )
