@@ -3,6 +3,26 @@ from ninja import Schema
 from ddpui.ddpprefect.schema import DeploymentCurrentQueueTime
 
 
+class AirbyteConnectionCreatePayload(BaseModel):
+    sourceId: str
+    destinationId: str
+    name: str
+    status: str
+
+
+class AirbyteConnectionResponse(BaseModel):
+    connectionId: str
+    name: str
+    status: str
+    lastSyncTime: Optional[str] = None
+
+
+class AirbyteConnectionsListResponse(BaseModel):
+    connections: List[AirbyteConnectionResponse]
+    totalCount: int
+
+
+# ...
 # request schemas
 class AirbyteWorkspaceCreate(Schema):
     """Docstring"""
@@ -68,6 +88,16 @@ class AirbyteConnectionCreate(Schema):
     destinationSchema: str = None
 
 
+# In ddpui/ddpairbyte/schema.py
+# ... (existing schemas)
+
+
+class AirbyteSourceCreateResponse(Schema):  # <-- Using a clear, specific name
+    """Schema for the response when creating an Airbyte source."""
+
+    sourceId: str
+
+
 class AirbyteConnectionCreateResponse(Schema):
     """Docstring"""
 
@@ -84,6 +114,7 @@ class AirbyteConnectionCreateResponse(Schema):
     lock: Optional[dict | None]
     isRunning: bool = False
     resetConnDeploymentId: str = None
+    sourceId: str
 
 
 class AirbyteGetConnectionsResponse(Schema):
