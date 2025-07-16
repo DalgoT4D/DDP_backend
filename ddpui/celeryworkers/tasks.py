@@ -766,9 +766,6 @@ def summarize_logs(
                 "flow_run_id": flow_run_id,
                 "task_id": task_id,
             }
-            # Only filter by orguser if it exists
-            if orguser:
-                llm_session_filter["orguser"] = orguser
             llm_session = LlmSession.objects.filter(**llm_session_filter)
 
         elif type == LogsSummarizationType.AIRBYTE_SYNC:
