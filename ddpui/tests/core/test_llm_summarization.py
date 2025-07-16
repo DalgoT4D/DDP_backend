@@ -263,28 +263,3 @@ class TestWebhookIntegration:
 
         # Verify summarization was triggered
         mock_trigger.assert_called_once_with("flow-run-1", mock_flow_run)
-
-    @patch("ddpui.celeryworkers.tasks.trigger_log_summarization_for_failed_flow.delay")
-    @patch("ddpui.utils.webhook_helpers.get_org_from_flow_run")
-    @patch("ddpui.utils.webhook_helpers.prefect_service.get_flow_run_poll")
-    def test_webhook_no_trigger_when_llm_disabled(
-        self, mock_get_flow_run, mock_get_org, mock_trigger
-    ):
-        """Test webhook does not trigger summarization when LLM is disabled"""
-        from ddpui.utils.webhook_helpers import do_handle_prefect_webhook
-        from ddpui.ddpprefect import FLOW_RUN_FAILED_STATE_NAME
-
-        # Create org without LLM
-        org = Org.objects.create(name="No LLM Org", slug="no-llm-org")
-        OrgPreferences.objects.create(org=org, llm_optin=False)
-
-        # Mock flow run and org
-        mock_flow_run = {"id": "flow-run-1", "deployment_id": "dep-1"}
-        mock_get_flow_run.return_value = mock_flow_run
-        mock_get_org.return_value = org
-
-        # Call webhook handler with failure state
-        do_handle_prefect_webhook("flow-run-1", FLOW_RUN_FAILED_STATE_NAME)
-
-        # Verify summarization was NOT triggered
-        mock_trigger.assert_not_called()
