@@ -56,6 +56,8 @@ from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.singletaskprogress import SingleTaskProgress
 from ddpui.utils.constants import (
     TASK_AIRBYTESYNC,
+    TASK_AIRBYTERESET,
+    TASK_AIRBYTECLEAR,
     AIRBYTE_CONNECTION_DEPRECATED,
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager
@@ -69,6 +71,7 @@ from ddpui.ddpprefect.prefect_service import (
     recurse_flow_run_logs,
     get_long_running_flow_runs,
     compute_dataflow_run_times_from_history,
+    get_flow_run_poll,
 )
 from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
@@ -673,7 +676,7 @@ def add_custom_connectors_to_workspace(self, workspace_id, custom_sources: list[
 @app.task(bind=True)
 def summarize_logs(
     self,
-    orguser_id: str,
+    orguser_id: str = None,  # Make optional for system calls
     type: str = LogsSummarizationType.DEPLOYMENT,  # deployment or airbyte_sync (two types of logs in Dalgo)
     flow_run_id: str = None,
     task_id: str = None,
@@ -689,12 +692,56 @@ def summarize_logs(
     3. Query the llm service with two prompts one for the summarizing & other for figuring out how to resolve errors
 
     If regenerate is True and the summary is not found, the program will generate it again & return
+    Modified to support system-triggered summarization
     """
     taskprogress = SingleTaskProgress(self.request.id, 60 * 10)
 
     taskprogress.add({"message": "Started", "status": "running", "result": []})
 
-    orguser = OrgUser.objects.filter(id=orguser_id).first()
+    # Handle both user and system triggered calls
+    orguser = None
+    org = None
+
+    if orguser_id:
+        orguser = OrgUser.objects.filter(id=orguser_id).first()
+        org = orguser.org if orguser else None
+    else:
+        # System-triggered call - extract org from flow_run
+        if flow_run_id:
+            # Import here to avoid circular import
+            from ddpui.utils.webhook_helpers import get_org_from_flow_run
+
+            flow_run = get_flow_run_poll(flow_run_id)
+            org = get_org_from_flow_run(flow_run)
+        elif job_id and connection_id:
+            # For airbyte jobs, get org from connection
+            from ddpui.ddpprefect import AIRBYTECONNECTION
+
+            block = OrgPrefectBlockv1.objects.filter(
+                block_name=connection_id, block_type=AIRBYTECONNECTION
+            ).first()
+            org = block.org if block else None
+
+    if not org:
+        taskprogress.add(
+            {
+                "message": "Unable to determine organization",
+                "status": TaskProgressStatus.FAILED,
+                "result": None,
+            }
+        )
+        return
+
+    # Check if LLM is enabled for the org
+    if not hasattr(org, "preferences") or not org.preferences.llm_optin:
+        taskprogress.add(
+            {
+                "message": "LLM not enabled for organization",
+                "status": TaskProgressStatus.FAILED,
+                "result": None,
+            }
+        )
+        return
 
     # validations
     if type == LogsSummarizationType.AIRBYTE_SYNC:
@@ -725,17 +772,22 @@ def summarize_logs(
     if not regenerate:
         # try to fetch response from db
         if type == LogsSummarizationType.DEPLOYMENT:
-            llm_session = LlmSession.objects.filter(
-                orguser=orguser,
-                org=orguser.org,
-                flow_run_id=flow_run_id,
-                task_id=task_id,
-            )
+            llm_session_filter = {
+                "org": org,
+                "flow_run_id": flow_run_id,
+                "task_id": task_id,
+            }
+            # Only filter by orguser if it exists
+            if orguser:
+                llm_session_filter["orguser"] = orguser
+            llm_session = LlmSession.objects.filter(**llm_session_filter)
 
         elif type == LogsSummarizationType.AIRBYTE_SYNC:
-            llm_session = LlmSession.objects.filter(
-                orguser=orguser, org=orguser.org, airbyte_job_id=job_id
-            )
+            llm_session_filter = {"org": org, "airbyte_job_id": job_id}
+            # Only filter by orguser if it exists
+            if orguser:
+                llm_session_filter["orguser"] = orguser
+            llm_session = LlmSession.objects.filter(**llm_session_filter)
 
         llm_session = llm_session.order_by("-created_at").first()
 
@@ -752,8 +804,8 @@ def summarize_logs(
     # create a partial session
     llm_session = LlmSession.objects.create(
         request_uuid=self.request.id,
-        orguser=orguser,
-        org=orguser.org,
+        orguser=orguser,  # Can be None for system calls
+        org=org,
         flow_run_id=flow_run_id,
         task_id=task_id,
         airbyte_job_id=job_id,
@@ -867,6 +919,96 @@ def summarize_logs(
         )
         llm_session.session_status = LlmSessionStatus.FAILED
         llm_session.save()
+
+
+@app.task(bind=True, max_retries=3, default_retry_delay=60)
+def trigger_log_summarization_for_failed_flow(self, flow_run_id: str, flow_run: dict = None):
+    """
+    Triggers automatic summarization for failed pipeline runs.
+    Handles both regular pipelines and airbyte syncs.
+    """
+    try:
+        # Get flow run if not provided
+        if not flow_run:
+            flow_run = get_flow_run_poll(flow_run_id)
+
+        # Check if summary already exists to prevent duplicates
+        existing_summary = LlmSession.objects.filter(
+            flow_run_id=flow_run_id, session_type=LlmAssistantType.LOG_SUMMARIZATION
+        ).exists()
+
+        if existing_summary:
+            logger.info(f"Summary already exists for flow_run {flow_run_id}")
+            return
+
+        # Get failed task information
+        task_runs = get_flow_run_graphs(flow_run_id)
+
+        # Find the failed task
+        failed_task = None
+        for task in task_runs:
+            if task.get("state_type") == "FAILED" or task.get("state_name") == "DBT_TEST_FAILED":
+                failed_task = task
+                break
+
+        if not failed_task:
+            logger.warning(f"No failed task found in flow_run {flow_run_id}")
+            return
+
+        # Check if this is an airbyte sync task
+        is_airbyte_task = False
+        connection_id = None
+
+        for task in flow_run.get("parameters", {}).get("config", {}).get("tasks", []):
+            if task.get("slug", "") in [TASK_AIRBYTESYNC, TASK_AIRBYTERESET, TASK_AIRBYTECLEAR]:
+                is_airbyte_task = True
+                connection_id = task.get("connection_id", None)
+                break
+
+        # Trigger appropriate summarization
+        if is_airbyte_task and connection_id:
+            # For airbyte syncs, get the latest failed job from database
+            from ddpui.models.airbyte import AirbyteJob
+
+            # Get the latest failed job for this connection
+            # Assume job is already synced by the time we reach here
+            airbyte_job = (
+                AirbyteJob.objects.filter(config_id=connection_id, status="failed")
+                .order_by("-created_at")
+                .first()
+            )
+
+            if not airbyte_job:
+                logger.error(f"No failed airbyte job found for connection {connection_id}")
+                return
+
+            # Trigger airbyte sync summarization
+            summarize_logs.delay(
+                orguser_id=None,  # System call
+                type=LogsSummarizationType.AIRBYTE_SYNC,
+                flow_run_id=flow_run_id,
+                task_id=failed_task.get("id"),
+                job_id=airbyte_job.job_id,
+                connection_id=connection_id,
+            )
+
+            logger.info(f"Triggered airbyte summarization for job_id {airbyte_job.job_id}")
+        else:
+            # Trigger deployment summarization
+            summarize_logs.delay(
+                orguser_id=None,  # System call
+                type=LogsSummarizationType.DEPLOYMENT,
+                flow_run_id=flow_run_id,
+                task_id=failed_task.get("id"),
+            )
+
+            logger.info(f"Triggered deployment summarization for task {failed_task.get('id')}")
+
+        logger.info(f"Successfully triggered summarization for flow_run {flow_run_id}")
+
+    except Exception as e:
+        logger.exception(f"Error triggering summarization for {flow_run_id}: {str(e)}")
+        raise self.retry(exc=e)
 
 
 @app.task(bind=True)
