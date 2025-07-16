@@ -732,17 +732,6 @@ def summarize_logs(
         )
         return
 
-    # Check if LLM is enabled for the org
-    if not hasattr(org, "preferences") or not org.preferences.llm_optin:
-        taskprogress.add(
-            {
-                "message": "LLM not enabled for organization",
-                "status": TaskProgressStatus.FAILED,
-                "result": None,
-            }
-        )
-        return
-
     # validations
     if type == LogsSummarizationType.AIRBYTE_SYNC:
         try:
@@ -784,9 +773,6 @@ def summarize_logs(
 
         elif type == LogsSummarizationType.AIRBYTE_SYNC:
             llm_session_filter = {"org": org, "airbyte_job_id": job_id}
-            # Only filter by orguser if it exists
-            if orguser:
-                llm_session_filter["orguser"] = orguser
             llm_session = LlmSession.objects.filter(**llm_session_filter)
 
         llm_session = llm_session.order_by("-created_at").first()
