@@ -13,10 +13,10 @@ from typing import (
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpprefect.prefect_service import prefect_get, prefect_post, prefect_put, prefect_delete
 
-# Add your new import here, replacing 'airbyte_schema' with your actual schema filename
 from ddpui.ddpairbyte.schema import (
-    AirbyteSourceCreate,  # This should already be here
-    AirbyteSourceCreateResponse,  # <--- ADD THIS LINE
+    AirbyteSourceCreate,
+    AirbyteSourceCreateResponse,
+    AirbyteConnectionSpecification,
     # ... any other schemas imported from ddpui/ddpairbyte/schema.py
 )
 
@@ -89,7 +89,9 @@ def get_airbyte_source_definitions(request):
     return res["sourceDefinitions"]
 
 
-@airbyte_router.get("/source_definitions/{sourcedef_id}/specifications")
+@airbyte_router.get(
+    "/source_definitions/{sourcedef_id}/specifications", response=AirbyteConnectionSpecification
+)
 @has_permission(["can_view_sources"])
 def get_airbyte_source_definition_specifications(request, sourcedef_id):
     """

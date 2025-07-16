@@ -1,6 +1,16 @@
 from typing import Optional
 from ninja import Schema
 from ddpui.ddpprefect.schema import DeploymentCurrentQueueTime
+from typing import Dict, Any
+from pydantic import Field
+
+
+class AirbyteConnectionSpecification(Schema):
+    dollar_schema: str = Field(alias="$schema")
+    title: str
+    type: str
+    required: List[str]
+    properties: Dict[str, Any]
 
 
 class AirbyteConnectionCreatePayload(BaseModel):
