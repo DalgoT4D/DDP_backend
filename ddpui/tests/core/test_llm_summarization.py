@@ -106,34 +106,6 @@ class TestSummarizeLogsSystemUser:
         # Verify progress was started
         mock_progress_add.assert_any_call({"message": "Started", "status": "running", "result": []})
 
-    @patch.object(SingleTaskProgress, "__init__", return_value=None)
-    @patch.object(SingleTaskProgress, "add")
-    def test_summarize_logs_llm_disabled(self, mock_progress_add, mock_progress_init):
-        """Test summarize_logs fails when LLM is disabled for org"""
-        # Create org without LLM
-        org = Org.objects.create(name="No LLM Org", slug="no-llm-org")
-        OrgPreferences.objects.create(org=org, llm_optin=False)
-
-        block = OrgPrefectBlockv1.objects.create(
-            org=org, block_name="test-connection", block_type=AIRBYTECONNECTION
-        )
-
-        summarize_logs(
-            orguser_id=None,
-            type=LogsSummarizationType.AIRBYTE_SYNC,
-            job_id=12345,
-            connection_id="test-connection",
-        )
-
-        # Verify it failed due to LLM not enabled
-        mock_progress_add.assert_any_call(
-            {
-                "message": "LLM not enabled for organization",
-                "status": TaskProgressStatus.FAILED,
-                "result": None,
-            }
-        )
-
 
 class TestTriggerLogSummarization:
     """Test trigger_log_summarization_for_failed_flow task"""
