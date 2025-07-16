@@ -793,6 +793,7 @@ def summarize_logs(
         task_id=task_id,
         airbyte_job_id=job_id,
         session_status=LlmSessionStatus.RUNNING,
+        session_type=LlmAssistantType.LOG_SUMMARIZATION,
     )
 
     # logs
