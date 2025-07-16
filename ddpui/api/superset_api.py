@@ -3,15 +3,18 @@ import urllib.parse
 import requests
 import json
 import urllib
+from typing import Optional
 
 from ninja import Router, Schema
 from ninja.errors import HttpError
+from django.http import HttpResponse, FileResponse
 
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgWarehouse
 from ddpui.utils import secretsmanager
 from ddpui.auth import has_permission
+from ddpui.services.superset_service import SupersetService
 
 superset_router = Router()
 logger = CustomLogger("ddpui")
@@ -152,68 +155,28 @@ def post_superset_admin_creds(request, payload: SupersetDalgoUserCreds):
 
 
 @superset_router.get("dashboards/")
-def get_dashboards(request):
-    """Endpoint to list all dashboards from Superset using org admin creds"""
+def get_dashboards(
+    request,
+    page: int = 0,
+    page_size: int = 20,
+    search: Optional[str] = None,
+    status: Optional[str] = None,
+):
+    """List dashboards with enhanced features including search, filter, and thumbnails"""
     orguser: OrgUser = request.orguser
-    if orguser.org is None:
-        raise HttpError(400, "create an organization first")
 
-    if orguser.org.viz_url is None:
-        raise HttpError(
-            400,
-            "your superset subscription is not active, please contact the Dalgo team",
-        )
+    if not orguser.org or not orguser.org.viz_url:
+        return {"result": [], "count": 0}
 
-    dalgo_user_secret_key = orguser.org.dalgouser_superset_creds_key
-    credentials = secretsmanager.retrieve_dalgo_user_superset_credentials(dalgo_user_secret_key)
-    if credentials is None:
-        raise HttpError(400, "superset admin credentials are missing for this org")
+    # SupersetService will raise HttpError if something goes wrong
+    service = SupersetService(orguser.org)
+    data = service.get_dashboards(page, page_size, search, status)
 
-    credentials: SupersetDalgoUserCreds = SupersetDalgoUserCreds(**credentials)
+    # Enhance with thumbnail URLs
+    for dashboard in data.get("result", []):
+        dashboard["thumbnail_url"] = f"/api/superset/dashboards/{dashboard['id']}/thumbnail/"
 
-    # Authenticate and get access token
-    try:
-        response = requests.post(
-            f"{orguser.org.viz_url}api/v1/security/login",
-            json={
-                "password": credentials.password,
-                "username": credentials.username,
-                "refresh": True,
-                "provider": "db",
-            },
-            timeout=10,
-        )
-        response.raise_for_status()
-        access_token = response.json()["access_token"]
-    except requests.exceptions.RequestException as err:
-        logger.error("Error fetching jwt token from superset: %s", str(err))
-        raise HttpError(500, "couldn't connect to superset")
-
-    # List dashboards
-    try:
-        query_dict = {"page": 0, "page_size": 10}
-        formatted_json = json.dumps(query_dict)
-        query_params = urllib.parse.quote(formatted_json)
-
-        url = f"{orguser.org.viz_url}api/v1/dashboard/?q={query_params}"
-
-        response = requests.get(
-            url,
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "Content-Type": "application/json",
-            },
-            timeout=30,
-        )
-
-        logger.info("sending request to superset with URL: %s", url)
-        response.raise_for_status()
-        dashboards = response.json().get("result", [])
-    except requests.exceptions.RequestException as err:
-        logger.error("Error fetching dashboards from superset: %s", str(err))
-        raise HttpError(500, "couldn't connect to superset")
-
-    return dashboards
+    return data
 
 
 @superset_router.get("dashboards/{dashboard_id}/embed_info/")
@@ -340,61 +303,64 @@ def get_single_dashboard_embed_info(request, dashboard_id: str):
 
 @superset_router.get("dashboards/{dashboard_id}/")
 def get_dashboard_by_id(request, dashboard_id: str):
-    """Endpoint to get details of a specific dashboard from Superset using org admin creds"""
+    """Get single dashboard details"""
     orguser: OrgUser = request.orguser
-    if orguser.org is None:
-        raise HttpError(400, "create an organization first")
 
-    if orguser.org.viz_url is None:
-        raise HttpError(
-            400,
-            "your superset subscription is not active, please contact the Dalgo team",
+    if not orguser.org or not orguser.org.viz_url:
+        raise HttpError(400, "Superset not configured for this organization")
+
+    # SupersetService will raise HttpError if something goes wrong
+    service = SupersetService(orguser.org)
+    return service.get_dashboard_by_id(dashboard_id)
+
+
+@superset_router.post("dashboards/{dashboard_id}/guest_token/")
+def post_dashboard_guest_token(request, dashboard_id: str):
+    """Generate guest token for dashboard embedding"""
+    orguser: OrgUser = request.orguser
+
+    if not orguser.org or not orguser.org.viz_url:
+        raise HttpError(400, "Superset not configured for this organization")
+
+    # SupersetService will raise HttpError if something goes wrong
+    service = SupersetService(orguser.org)
+    dashboard = service.get_dashboard_by_id(dashboard_id)
+    dashboard_uuid = dashboard.get("uuid")
+
+    if not dashboard_uuid:
+        raise HttpError(404, "Dashboard not found")
+
+    # Generate guest token - service will raise HttpError on failure
+    guest_token_data = service.get_guest_token(dashboard_uuid)
+
+    return {
+        "guest_token": guest_token_data["token"],
+        "expires_in": 300,  # 5 minutes
+        "dashboard_uuid": dashboard_uuid,
+        "superset_domain": orguser.org.viz_url.rstrip("/"),
+    }
+
+
+@superset_router.get("dashboards/{dashboard_id}/thumbnail/")
+def get_dashboard_thumbnail(request, dashboard_id: str):
+    """Get dashboard thumbnail with caching"""
+    orguser: OrgUser = request.orguser
+
+    if not orguser.org or not orguser.org.viz_url:
+        raise HttpError(400, "Superset not configured for this organization")
+
+    service = SupersetService(orguser.org)
+    thumbnail = service.get_dashboard_thumbnail(dashboard_id)
+
+    if not thumbnail:
+        # Return placeholder image
+        # First check if placeholder exists, if not return 404
+        placeholder_path = os.path.join(
+            os.path.dirname(__file__), "..", "assets", "dashboard-placeholder.svg"
         )
+        if os.path.exists(placeholder_path):
+            return FileResponse(placeholder_path, content_type="image/svg+xml")
+        else:
+            raise HttpError(404, "Dashboard thumbnail not found")
 
-    dalgo_user_secret_key = orguser.org.dalgouser_superset_creds_key
-    credentials = secretsmanager.retrieve_dalgo_user_superset_credentials(dalgo_user_secret_key)
-    if credentials is None:
-        raise HttpError(400, "superset admin credentials are missing for this org")
-
-    credentials: SupersetDalgoUserCreds = SupersetDalgoUserCreds(**credentials)
-
-    # Authenticate and get access token
-    try:
-        response = requests.post(
-            f"{orguser.org.viz_url}api/v1/security/login",
-            json={
-                "password": credentials.password,
-                "username": credentials.username,
-                "refresh": True,
-                "provider": "db",
-            },
-            timeout=10,
-        )
-        response.raise_for_status()
-        access_token = response.json()["access_token"]
-    except requests.exceptions.RequestException as err:
-        logger.error("Error fetching jwt token from superset: %s", str(err))
-        raise HttpError(500, "couldn't connect to superset")
-
-    # Get single dashboard details
-    try:
-        url = f"{orguser.org.viz_url}api/v1/dashboard/{dashboard_id}"
-
-        response = requests.get(
-            url,
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "Content-Type": "application/json",
-            },
-            timeout=30,
-        )
-
-        logger.info("Fetching dashboard details with URL: %s", url)
-        response.raise_for_status()
-        dashboard = response.json().get("result", {})
-
-    except requests.exceptions.RequestException as err:
-        logger.error("Error fetching dashboard details from superset: %s", str(err))
-        raise HttpError(500, "couldn't fetch dashboard details from superset")
-
-    return dashboard
+    return HttpResponse(thumbnail, content_type="image/png")
