@@ -324,19 +324,20 @@ def post_dashboard_guest_token(request, dashboard_id: str):
 
     # SupersetService will raise HttpError if something goes wrong
     service = SupersetService(orguser.org)
-    dashboard = service.get_dashboard_by_id(dashboard_id)
-    dashboard_uuid = dashboard.get("uuid")
 
-    if not dashboard_uuid:
-        raise HttpError(404, "Dashboard not found")
+    # Get or create embedded UUID for this dashboard
+    embedded_uuid = service.get_or_create_embedded_uuid(dashboard_id)
 
-    # Generate guest token - service will raise HttpError on failure
-    guest_token_data = service.get_guest_token(dashboard_uuid)
+    if not embedded_uuid:
+        raise HttpError(400, "Failed to get embedded UUID for dashboard")
+
+    # Generate guest token using the embedded UUID
+    guest_token_data = service.get_guest_token(embedded_uuid)
 
     return {
         "guest_token": guest_token_data["token"],
         "expires_in": 300,  # 5 minutes
-        "dashboard_uuid": dashboard_uuid,
+        "dashboard_uuid": embedded_uuid,
         "superset_domain": orguser.org.viz_url.rstrip("/"),
     }
 

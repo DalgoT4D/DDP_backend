@@ -218,7 +218,7 @@ class SupersetService:
                     "user": {
                         "username": credentials["username"],
                     },
-                    "resources": [{"type": "dashboard", "id": dashboard_uuid}],
+                    "resources": [{"type": "dashboard", "id": str(dashboard_uuid)}],
                     "rls": [],  # Row level security rules if needed
                 },
                 headers={
@@ -294,6 +294,71 @@ class SupersetService:
         )
 
         return response.json()
+
+    def get_or_create_embedded_uuid(self, dashboard_id: str) -> Optional[str]:
+        """Get or create embedded UUID for a dashboard.
+
+        Args:
+            dashboard_id: Dashboard ID
+
+        Returns:
+            Embedded UUID string, or None if failed
+
+        Raises:
+            HttpError: On API failure
+        """
+        access_token = self.get_access_token()
+        url = f"{self.org.viz_url}api/v1/dashboard/{dashboard_id}/embedded"
+
+        try:
+            # First try GET to see if embedded info exists
+            response = self._make_request_with_retry(
+                "GET",
+                url,
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                },
+                timeout=30,
+            )
+
+            embedded_info = response.json().get("result", {})
+            embedded_uuid = embedded_info.get("uuid")
+
+            if embedded_uuid:
+                return embedded_uuid
+
+        except HttpError as e:
+            # If 404, embedded info doesn't exist, so we need to create it
+            if e.status_code != 404:
+                raise
+
+        # Create embedded info if it doesn't exist
+        try:
+            csrf_token, session_cookie = self.get_csrf_token(access_token)
+
+            response = self._make_request_with_retry(
+                "POST",
+                url,
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                    "X-CSRFToken": csrf_token,
+                    "Referer": f"{self.org.viz_url.rstrip('/')}",
+                },
+                json={"allowed_domains": []},
+                cookies={"session": session_cookie} if session_cookie else {},
+                timeout=30,
+            )
+
+            embedded_info = response.json().get("result", {})
+            embedded_uuid = embedded_info.get("uuid")
+
+            return embedded_uuid
+
+        except Exception as e:
+            logger.error(f"Failed to create embedded UUID for dashboard {dashboard_id}: {str(e)}")
+            return None
 
     def get_dashboard_by_id(self, dashboard_id: str) -> Dict[str, Any]:
         """Get single dashboard details.
