@@ -483,7 +483,7 @@ def test_post_organization_warehouse_unknownwtype(orguser):
     save_warehouse_credentials=Mock(return_value="credentials_lookupkey"),
 )
 @patch.multiple(
-    "ddpui.ddpairbyte.airbytehelpers",
+    "ddpui.ddpdbt.dbthelpers",
     create_or_update_org_cli_block=Mock(return_value=((None, None), None)),
 )
 def test_post_organization_warehouse_bigquery(orguser):

@@ -557,14 +557,8 @@ def get_filtered_deployments(org_slug, deployment_ids):  # pragma: no cover
 
 def delete_deployment_by_id(deployment_id: str) -> dict:  # pragma: no cover
     """Proxy api call to delete a deployment from prefect db"""
-    try:
-        res = requests.delete(
-            f"{PREFECT_PROXY_API_URL}/proxy/deployments/{deployment_id}",
-            timeout=http_timeout,
-        )
-        res.raise_for_status()
-    except Exception as error:
-        raise HttpError(res.status_code, res.text) from error
+    prefect_delete(f"deployments/{deployment_id}", timeout=http_timeout)
+
     return {"success": 1}
 
 

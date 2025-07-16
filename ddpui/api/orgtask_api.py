@@ -1,15 +1,12 @@
 import uuid
-import os
-from pathlib import Path
 from datetime import datetime
 
 from ninja import Router
 from ninja.errors import HttpError
 
 from django.forms.models import model_to_dict
-from ddpui import auth
 from ddpui.ddpprefect import prefect_service
-from ddpui.ddpairbyte import airbytehelpers
+from ddpui.ddpdbt import dbthelpers
 
 from ddpui.ddpprefect import DBTCLIPROFILE, SECRET, DBTCLOUDCREDS
 from ddpui.models.org import (
@@ -197,7 +194,7 @@ def post_system_transformation_tasks(request):
         raise HttpError(400, str(error)) from error
 
     # create a dbt cli profile block
-    (cli_profile_block, dbt_project_params), error = airbytehelpers.create_or_update_org_cli_block(
+    (cli_profile_block, dbt_project_params), error = dbthelpers.create_or_update_org_cli_block(
         orguser.org, warehouse, credentials
     )
     if error:
