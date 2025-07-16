@@ -1,6 +1,29 @@
 """Dalgo API for Airbyte"""
 
+# File: ddpui/api/airbyte_api.py
 import os
+
+from ninja import Router, Schema
+from ninja.errors import HttpError
+from typing import (
+    List,
+    Optional,
+)  # Ensure List and Optional are imported if you use them directly in hints
+
+from ddpui.utils.custom_logger import CustomLogger
+from ddpui.ddpprefect.prefect_service import prefect_get, prefect_post, prefect_put, prefect_delete
+
+# Add your new import here, replacing 'airbyte_schema' with your actual schema filename
+from ddpui.ddpairbyte.schema import (
+    AirbyteSourceCreate,  # This should already be here
+    AirbyteConnectionCreateResponse,  # <--- ADD THIS LINE
+    # ... any other schemas imported from ddpui/ddpairbyte/schema.py
+)
+
+logger = CustomLogger("ddpui")
+router = Router()
+# ...
+
 from typing import List
 from ninja.errors import HttpError
 from ninja import Router
@@ -84,7 +107,7 @@ def get_airbyte_source_definition_specifications(request, sourcedef_id):
     return res["connectionSpecification"]
 
 
-@airbyte_router.post("/sources/")
+@airbyte_router.post("/sources/", response=AirbyteConnectionCreateResponse)
 @has_permission(["can_create_source"])
 def post_airbyte_source(request, payload: AirbyteSourceCreate):
     """Create airbyte source in the user organization workspace"""
