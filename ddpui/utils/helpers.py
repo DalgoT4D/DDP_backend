@@ -210,7 +210,7 @@ def from_timestamp(timestamp: int) -> datetime:
 def get_integer_env_var(varname: str, default_value: int, logger, allow_negative=False):
     """reads a var from the environment, converts to int and returns"""
     try:
-        varvalue = int(os.getenv(varname, "10"))
+        varvalue = int(os.getenv(varname, str(default_value)))
         if not allow_negative and varvalue < 0:
             if logger:
                 logger.error("%s must be >= 0", varname)
