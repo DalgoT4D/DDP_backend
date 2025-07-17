@@ -6,9 +6,33 @@ from pydantic import Field
 from typing import List, Optional, Dict, Any
 
 
-class AirbyteSourceDefinition(Schema):
-    """Schema for a single Airbyte Source Definition."""
+# In ddpui/ddpairbyte/schema.py
+# (Place this along with other response schemas)
 
+# In ddpui/ddpairbyte/schema.py
+# (Place this along with other response schemas)
+# In ddpui/ddpairbyte/schema.py
+# (Ensure 'from typing import Optional' and 'from ninja import Schema' are at the top)
+
+
+class AirbyteTaskResponse(Schema):
+    task_id: str
+    message: Optional[str] = None
+
+
+class AirbyteJobAttemptLog(Schema):
+    logLines: List[str]
+
+
+class AirbyteJobStatusResponse(Schema):
+    status: str
+
+
+class AirbyteSuccessResponse(Schema):
+    success: int
+
+
+class AirbyteSourceDefinition(Schema):
     sourceDefinitionId: str
     name: str
     dockerRepository: str

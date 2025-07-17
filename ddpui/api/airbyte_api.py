@@ -5,6 +5,7 @@ import os
 
 from ninja import Router, Schema
 from ninja.errors import HttpError
+from django.http import HttpRequest
 from typing import (
     List,
     Optional,
@@ -45,9 +46,12 @@ from ddpui.ddpairbyte.schema import (
     AirbyteDestinationUpdateCheckConnection,
     AirbyteConnectionUpdate,
     AirbyteSourceDefinition,
+    AirbyteSuccessResponse,
+    AirbyteJobStatusResponse,
+    AirbyteJobAttemptLog,
+    AirbyteTaskResponse,
 )
 from ddpui.auth import has_permission
-
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgType
 from ddpui.models.llm import LogsSummarizationType, LlmSession, LlmSessionStatus
@@ -621,10 +625,12 @@ def get_connection_catalog_v1(request, connection_id):
     return {"task_id": task_key}
 
 
-@airbyte_router.post("/v1/connections/{connection_id}/schema_update/schedule")
+@airbyte_router.post(
+    "/v1/connections/{connection_id}/schema_update/schedule", response=AirbyteSuccessResponse
+)
 @has_permission(["can_edit_connection"])
 def schedule_update_connection_schema(
-    request, connection_id, payload: AirbyteConnectionSchemaUpdateSchedule
+    request: HttpRequest, connection_id: str, payload: AirbyteConnectionSchemaUpdateSchedule
 ):
     """
     schedule a schema change flow for a connection. this would include
@@ -657,10 +663,10 @@ def get_schema_changes_for_connection(request):
     return res
 
 
-@airbyte_router.get("/v1/connections/{connection_id}/logsummary")
+@airbyte_router.get("/v1/connections/{connection_id}/logsummary", response=AirbyteTaskResponse)
 @has_permission(["can_view_pipeline"])
 def get_flow_runs_logsummary_v1(
-    request, connection_id: str, job_id: int, attempt_number: int, regenerate: int = 0
+    request: HttpRequest, connection_id: str, job_id: int, attempt_number: int, regenerate: int = 0
 ):  # pylint: disable=unused-argument
     """
     Use llms to summarize logs
@@ -692,10 +698,10 @@ def get_flow_runs_logsummary_v1(
         raise HttpError(400, "failed to retrieve logs") from error
 
 
-@airbyte_router.get("/v1/logs")
+@airbyte_router.get("/v1/logs", response=AirbyteJobAttemptLog)
 @has_permission(["can_view_connection"])
 def get_job_logs(
-    request,
+    request: HttpRequest,
     job_id: int,
     attempt_number: int,
 ):
@@ -709,10 +715,12 @@ def get_job_logs(
     return log_lines
 
 
-@airbyte_router.post("/v1/connections/{connection_id}/cancel/{job_type}/")
+@airbyte_router.post(
+    "/v1/connections/{connection_id}/cancel/{job_type}/", response=AirbyteJobStatusResponse
+)
 @has_permission(["can_edit_connection"])
 def post_cancel_connection_job(
-    request,
+    request: HttpRequest,
     connection_id: str,
     job_type: str,
 ):
