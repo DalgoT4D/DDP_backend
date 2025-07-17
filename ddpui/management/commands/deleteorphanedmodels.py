@@ -34,12 +34,24 @@ class Command(BaseCommand):
         )
         model_sql_files = list(model_sql_files)
         # now read all files in the models/ folder
-        project_dir = Path(os.getenv("CLIENTDBT_ROOT")) / orgdbt.project_dir
-        for sql_file in (project_dir / "models").rglob("*.sql"):
+        clientdbt_root = os.getenv("CLIENTDBT_ROOT")
+        if clientdbt_root is None:
+            raise CommandError("CLIENTDBT_ROOT environment variable not set")
+        project_dir = Path(clientdbt_root) / orgdbt.project_dir
+
+        models_dir = project_dir / "models"
+        if not models_dir.exists():
+            self.stdout.write(f"Models directory not found: {models_dir}")
+            return
+
+        for sql_file in (models_dir).rglob("*.sql"):
             relative_pathname = str(Path(sql_file).relative_to(project_dir))
             if relative_pathname not in model_sql_files:
                 if options["delete"]:
-                    print(f"Deleting {sql_file}")
-                    os.unlink(sql_file)
+                    try:
+                        self.stdout.write(f"Deleting {sql_file}")
+                        os.unlink(sql_file)
+                    except OSError as e:
+                        self.stderr.write(f"Error deleting {sql_file}: {e}")
                 else:
-                    print(f"Will delete {sql_file}")
+                    self.stdout.write(f"Will delete {sql_file}")
