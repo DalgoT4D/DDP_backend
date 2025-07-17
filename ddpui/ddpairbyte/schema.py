@@ -3,6 +3,18 @@ from ninja import Schema
 from ddpui.ddpprefect.schema import DeploymentCurrentQueueTime
 from typing import Dict, Any
 from pydantic import Field
+from typing import List, Optional, Dict, Any
+
+
+class AirbyteSourceDefinition(Schema):
+    """Schema for a single Airbyte Source Definition."""
+
+    sourceDefinitionId: str
+    name: str
+    dockerRepository: str
+    dockerImageTag: str
+    documentationUrl: str
+    icon: Optional[str] = None
 
 
 class AirbyteConnectionSpecification(Schema):

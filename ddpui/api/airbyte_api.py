@@ -44,6 +44,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteSourceUpdateCheckConnection,
     AirbyteDestinationUpdateCheckConnection,
     AirbyteConnectionUpdate,
+    AirbyteSourceDefinition,
 )
 from ddpui.auth import has_permission
 
@@ -62,14 +63,15 @@ from ddpui.models.tasks import (
     TaskProgressStatus,
 )
 from ddpui.utils.singletaskprogress import SingleTaskProgress
+from typing import List
 
 airbyte_router = Router()
 logger = CustomLogger("airbyte")
 
 
-@airbyte_router.get("/source_definitions")
+@airbyte_router.get("/source_definitions", response=List[AirbyteSourceDefinition])
 @has_permission(["can_view_sources"])
-def get_airbyte_source_definitions(request):
+def get_airbyte_source_definitions(request: HttpRequest):
     """Fetch airbyte source definitions in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
