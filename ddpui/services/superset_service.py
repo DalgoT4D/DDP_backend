@@ -334,7 +334,16 @@ class SupersetService:
             timeout=30,
         )
 
-        return response.json()
+        result = response.json()
+
+        # Add URL field to each dashboard
+        if "result" in result and isinstance(result["result"], list):
+            base_url = self.org.viz_url.rstrip("/")
+            for dashboard in result["result"]:
+                if "id" in dashboard:
+                    dashboard["url"] = f"{base_url}/superset/dashboard/{dashboard['id']}/"
+
+        return result
 
     def get_or_create_embedded_uuid(self, dashboard_id: str) -> Optional[str]:
         """Get or create embedded UUID for a dashboard.
@@ -427,7 +436,14 @@ class SupersetService:
             timeout=30,
         )
 
-        return response.json().get("result", {})
+        result = response.json().get("result", {})
+
+        # Add URL field to dashboard
+        if result and "id" in result:
+            base_url = self.org.viz_url.rstrip("/")
+            result["url"] = f"{base_url}/superset/dashboard/{result['id']}/"
+
+        return result
 
     def cache_dashboard_screenshot(self, dashboard_id: str) -> Optional[str]:
         """Generate/cache a dashboard screenshot and return cache key.
