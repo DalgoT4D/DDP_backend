@@ -172,9 +172,16 @@ def get_dashboards(
     service = SupersetService(orguser.org)
     data = service.get_dashboards(page, page_size, search, status)
 
-    # Enhance with thumbnail URLs
+    # Use thumbnail URLs directly from Superset (they include the digest parameter)
     for dashboard in data.get("result", []):
-        dashboard["thumbnail_url"] = f"/api/superset/dashboards/{dashboard['id']}/thumbnail/"
+        # Check if Superset provides thumbnail_url directly
+        if "thumbnail_url" in dashboard and dashboard["thumbnail_url"]:
+            # If Superset provides thumbnail_url, make it absolute
+            if dashboard["thumbnail_url"].startswith("/"):
+                dashboard[
+                    "thumbnail_url"
+                ] = f"{orguser.org.viz_url.rstrip('/')}{dashboard['thumbnail_url']}"
+        # If no thumbnail_url from Superset, leave it empty (will show placeholder)
 
     return data
 

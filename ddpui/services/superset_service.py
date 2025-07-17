@@ -43,10 +43,12 @@ class SupersetService:
             HttpError: On authentication failure or connection issues
         """
         last_error = None
+        last_response = None
 
         for attempt in range(self.max_retries):
             try:
                 response = requests.request(method, url, **kwargs)
+                last_response = response
 
                 if response.status_code == 401:
                     # Clear cached tokens and retry
@@ -59,8 +61,29 @@ class SupersetService:
                         ] = f"Bearer {self.get_access_token(force_refresh=True)}"
                         continue
                     else:
-                        # Final attempt failed, raise HttpError
-                        raise HttpError(401, "Authentication expired with Superset")
+                        # Final attempt failed, raise HttpError with response details
+                        error_msg = "Authentication expired with Superset"
+                        try:
+                            error_data = response.json()
+                            if "message" in error_data:
+                                error_msg = error_data["message"]
+                        except:
+                            pass
+                        raise HttpError(401, error_msg)
+
+                # Handle other HTTP errors immediately (don't retry)
+                if response.status_code >= 400:
+                    error_msg = f"Superset API error: {response.status_code}"
+                    try:
+                        error_data = response.json()
+                        if "message" in error_data:
+                            error_msg = error_data["message"]
+                        elif "error" in error_data:
+                            error_msg = error_data["error"]
+                    except:
+                        error_msg = f"HTTP {response.status_code}: {response.reason}"
+
+                    raise HttpError(response.status_code, error_msg)
 
                 response.raise_for_status()
                 return response
@@ -71,11 +94,29 @@ class SupersetService:
                     time.sleep(self.retry_delay * (attempt + 1))
                     continue
 
-        # All retries failed
+        # All retries failed due to connection issues
         logger.error(
             f"Failed to connect to Superset after {self.max_retries} attempts: {str(last_error)}"
         )
-        raise HttpError(503, "Failed to connect to Superset")
+
+        # If we have a last response, use its status code
+        if last_response and hasattr(last_response, "status_code"):
+            error_msg = f"Request failed after {self.max_retries} retries"
+            try:
+                error_data = last_response.json()
+                if "message" in error_data:
+                    error_msg = error_data["message"]
+            except:
+                error_msg = f"HTTP {last_response.status_code}: {last_response.reason}"
+            raise HttpError(last_response.status_code, error_msg)
+
+        # Connection error without response
+        if isinstance(last_error, requests.exceptions.ConnectionError):
+            raise HttpError(503, "Unable to connect to Superset server")
+        elif isinstance(last_error, requests.exceptions.Timeout):
+            raise HttpError(504, "Request to Superset server timed out")
+        else:
+            raise HttpError(503, f"Superset request failed: {str(last_error)}")
 
     def _clear_cached_tokens(self):
         """Clear all cached tokens for the organization."""
@@ -388,28 +429,109 @@ class SupersetService:
 
         return response.json().get("result", {})
 
-    def get_dashboard_thumbnail(self, dashboard_id: str) -> Optional[bytes]:
-        """Get dashboard thumbnail.
+    def cache_dashboard_screenshot(self, dashboard_id: str) -> Optional[str]:
+        """Generate/cache a dashboard screenshot and return cache key.
 
         Args:
             dashboard_id: Dashboard ID
 
         Returns:
-            Thumbnail image bytes or None if not found
+            Cache key for the screenshot, or None if failed
+
+        Raises:
+            HttpError: On API failure
+        """
+        access_token = self.get_access_token()
+        csrf_token, session_cookie = self.get_csrf_token(access_token)
+
+        url = f"{self.org.viz_url}api/v1/dashboard/{dashboard_id}/cache_dashboard_screenshot/"
+
+        try:
+            response = self._make_request_with_retry(
+                "POST",
+                url,
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "X-CSRFToken": csrf_token,
+                    "Content-Type": "application/json",
+                    "Referer": f"{self.org.viz_url.rstrip('/')}",
+                },
+                json=[],  # Empty array as request body
+                cookies={"session": session_cookie} if session_cookie else {},
+                timeout=60,  # Longer timeout for screenshot generation
+            )
+
+            result = response.json()
+
+            # Extract cache_key from response
+            cache_key = result.get("cache_key")
+            if cache_key:
+                # Cache the cache_key for future use
+                redis_key = f"superset:screenshot_cache_key:{self.org.id}:{dashboard_id}"
+                self.redis.set(redis_key, cache_key, 3600)  # Cache for 1 hour
+                return cache_key
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to cache dashboard screenshot for {dashboard_id}: {str(e)}")
+            return None
+
+    def get_dashboard_screenshot(self, dashboard_id: str, cache_key: str) -> Optional[bytes]:
+        """Get dashboard screenshot using cache key.
+
+        Args:
+            dashboard_id: Dashboard ID
+            cache_key: Cache key from cache_dashboard_screenshot
+
+        Returns:
+            Screenshot image bytes or None if not found
 
         Raises:
             HttpError: On API failure (except 404)
         """
         access_token = self.get_access_token()
 
-        # First, check if dashboard has a cached thumbnail URL
+        url = f"{self.org.viz_url}api/v1/dashboard/{dashboard_id}/screenshot/{cache_key}/"
+
+        try:
+            response = self._make_request_with_retry(
+                "GET",
+                url,
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                },
+                timeout=30,
+            )
+
+            return response.content
+        except HttpError as e:
+            if e.status_code == 404:
+                return None  # Screenshot not ready yet or doesn't exist
+            raise
+
+    def get_dashboard_thumbnail(self, dashboard_id: str) -> Optional[bytes]:
+        """Get dashboard thumbnail with automatic screenshot generation.
+
+        Args:
+            dashboard_id: Dashboard ID
+
+        Returns:
+            Thumbnail image bytes or None if not available
+
+        Raises:
+            HttpError: On API failure (except 404)
+        """
+        access_token = self.get_access_token()
+
+        # First, check if we have a cached thumbnail
         cache_key = f"superset:thumbnail:{self.org.id}:{dashboard_id}"
         cached_thumbnail = self.redis.get(cache_key)
         if cached_thumbnail:
             return cached_thumbnail
 
+        # Try the direct thumbnail endpoint first (if Superset has native thumbnails)
         url = f"{self.org.viz_url}api/v1/dashboard/{dashboard_id}/thumbnail/"
-
         try:
             response = self._make_request_with_retry(
                 "GET",
@@ -423,9 +545,33 @@ class SupersetService:
             # Cache the thumbnail for 1 hour
             if response.content:
                 self.redis.set(cache_key, response.content, 3600)
+                return response.content
 
-            return response.content
         except HttpError as e:
-            if e.status_code == 404:
-                return None  # Dashboard doesn't have thumbnail
-            raise
+            if e.status_code != 404:
+                raise
+
+        # If direct thumbnail fails, try screenshot approach
+        # Check if we have a cached screenshot cache_key
+        screenshot_cache_key_redis = f"superset:screenshot_cache_key:{self.org.id}:{dashboard_id}"
+        cached_key = self.redis.get(screenshot_cache_key_redis)
+
+        if cached_key:
+            screenshot = self.get_dashboard_screenshot(dashboard_id, cached_key.decode("utf-8"))
+            if screenshot:
+                # Cache as thumbnail too
+                self.redis.set(cache_key, screenshot, 3600)
+                return screenshot
+
+        # Generate new screenshot if no cached key or screenshot not ready
+        new_cache_key = self.cache_dashboard_screenshot(dashboard_id)
+        if new_cache_key:
+            # Wait a moment for screenshot generation, then try to fetch
+            time.sleep(2)
+            screenshot = self.get_dashboard_screenshot(dashboard_id, new_cache_key)
+            if screenshot:
+                # Cache as thumbnail
+                self.redis.set(cache_key, screenshot, 3600)
+                return screenshot
+
+        return None
