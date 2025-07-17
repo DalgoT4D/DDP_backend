@@ -959,7 +959,9 @@ def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
         logger.info(f"Fetching schema change (catalog) for connection {org.slug}|{connection_id}")
         connection_catalog = airbyte_service.get_connection_catalog(
             connection_id,
-            timeout=get_integer_env_var("AIRBYTE_FETCH_CONNECTION_CATALOG_TIMEOUT_SECONDS", 300),
+            timeout=get_integer_env_var(
+                "AIRBYTE_FETCH_CONNECTION_CATALOG_TIMEOUT_SECONDS", 300, logger
+            ),
         )
     except Exception as err:
         return (
