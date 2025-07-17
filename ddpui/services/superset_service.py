@@ -156,7 +156,7 @@ class SupersetService:
         # Login to get access token
         try:
             response = requests.post(
-                f"{self.org.viz_url}api/v1/security/login",
+                f"{self.org.viz_url.rstrip('/')}/api/v1/security/login",
                 json={
                     "password": credentials["password"],
                     "username": credentials["username"],
@@ -198,7 +198,7 @@ class SupersetService:
 
         try:
             response = requests.get(
-                f"{self.org.viz_url}api/v1/security/csrf_token",
+                f"{self.org.viz_url.rstrip('/')}/api/v1/security/csrf_token",
                 headers={"Authorization": f"Bearer {access_token}"},
                 timeout=10,
             )
@@ -254,7 +254,7 @@ class SupersetService:
 
         try:
             response = requests.post(
-                f"{self.org.viz_url}api/v1/security/guest_token",
+                f"{self.org.viz_url.rstrip('/')}/api/v1/security/guest_token",
                 json={
                     "user": {
                         "username": credentials["username"],
@@ -321,7 +321,7 @@ class SupersetService:
         if filters:
             query_params["filters"] = filters
 
-        url = f"{self.org.viz_url}api/v1/dashboard/"
+        url = f"{self.org.viz_url.rstrip('/')}/api/v1/dashboard/"
 
         response = self._make_request_with_retry(
             "GET",
@@ -349,7 +349,7 @@ class SupersetService:
             HttpError: On API failure
         """
         access_token = self.get_access_token()
-        url = f"{self.org.viz_url}api/v1/dashboard/{dashboard_id}/embedded"
+        url = f"{self.org.viz_url.rstrip('/')}/api/v1/dashboard/{dashboard_id}/embedded"
 
         try:
             # First try GET to see if embedded info exists
@@ -415,7 +415,7 @@ class SupersetService:
         """
         access_token = self.get_access_token()
 
-        url = f"{self.org.viz_url}api/v1/dashboard/{dashboard_id}"
+        url = f"{self.org.viz_url.rstrip('/')}/api/v1/dashboard/{dashboard_id}"
 
         response = self._make_request_with_retry(
             "GET",
@@ -444,7 +444,7 @@ class SupersetService:
         access_token = self.get_access_token()
         csrf_token, session_cookie = self.get_csrf_token(access_token)
 
-        url = f"{self.org.viz_url}api/v1/dashboard/{dashboard_id}/cache_dashboard_screenshot/"
+        url = f"{self.org.viz_url.rstrip('/')}/api/v1/dashboard/{dashboard_id}/cache_dashboard_screenshot/"
 
         try:
             response = self._make_request_with_retry(
@@ -492,7 +492,7 @@ class SupersetService:
         """
         access_token = self.get_access_token()
 
-        url = f"{self.org.viz_url}api/v1/dashboard/{dashboard_id}/screenshot/{cache_key}/"
+        url = f"{self.org.viz_url.rstrip('/')}/api/v1/dashboard/{dashboard_id}/screenshot/{cache_key}/"
 
         try:
             response = self._make_request_with_retry(
@@ -510,7 +510,7 @@ class SupersetService:
                 return None  # Screenshot not ready yet or doesn't exist
             raise
 
-    def get_dashboard_thumbnail(self, dashboard_id: str) -> Optional[bytes]:
+    def get_dashboard_thumbnail(self, dashboard_id: str, thumbnail_url: str) -> Optional[bytes]:
         """Get dashboard thumbnail with automatic screenshot generation.
 
         Args:
@@ -531,7 +531,10 @@ class SupersetService:
             return cached_thumbnail
 
         # Try the direct thumbnail endpoint first (if Superset has native thumbnails)
-        url = f"{self.org.viz_url}api/v1/dashboard/{dashboard_id}/thumbnail/"
+        # Ensure proper URL joining (handle trailing/leading slashes)
+        base_url = self.org.viz_url.rstrip("/")
+        thumbnail_path = thumbnail_url.lstrip("/")
+        url = f"{base_url}/{thumbnail_path}"
         try:
             response = self._make_request_with_retry(
                 "GET",

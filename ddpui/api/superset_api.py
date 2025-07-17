@@ -25,6 +25,10 @@ class SupersetDalgoUserCreds(Schema):
     password: str
 
 
+class ThumbnailRequestPayload(Schema):
+    thumbnail_url: str
+
+
 @superset_router.post("embed_token/{dashboard_uuid}/")
 @has_permission(["can_view_usage_dashboard"])
 def post_fetch_embed_token(request, dashboard_uuid):  # pylint: disable=unused-argument
@@ -171,17 +175,6 @@ def get_dashboards(
     # SupersetService will raise HttpError if something goes wrong
     service = SupersetService(orguser.org)
     data = service.get_dashboards(page, page_size, search, status)
-
-    # Use thumbnail URLs directly from Superset (they include the digest parameter)
-    for dashboard in data.get("result", []):
-        # Check if Superset provides thumbnail_url directly
-        if "thumbnail_url" in dashboard and dashboard["thumbnail_url"]:
-            # If Superset provides thumbnail_url, make it absolute
-            if dashboard["thumbnail_url"].startswith("/"):
-                dashboard[
-                    "thumbnail_url"
-                ] = f"{orguser.org.viz_url.rstrip('/')}{dashboard['thumbnail_url']}"
-        # If no thumbnail_url from Superset, leave it empty (will show placeholder)
 
     return data
 
@@ -349,8 +342,8 @@ def post_dashboard_guest_token(request, dashboard_id: str):
     }
 
 
-@superset_router.get("dashboards/{dashboard_id}/thumbnail/")
-def get_dashboard_thumbnail(request, dashboard_id: str):
+@superset_router.post("dashboards/{dashboard_id}/thumbnail/")
+def post_dashboard_thumbnail(request, dashboard_id: str, payload: ThumbnailRequestPayload):
     """Get dashboard thumbnail with caching"""
     orguser: OrgUser = request.orguser
 
@@ -358,7 +351,7 @@ def get_dashboard_thumbnail(request, dashboard_id: str):
         raise HttpError(400, "Superset not configured for this organization")
 
     service = SupersetService(orguser.org)
-    thumbnail = service.get_dashboard_thumbnail(dashboard_id)
+    thumbnail = service.get_dashboard_thumbnail(dashboard_id, payload.thumbnail_url)
 
     if not thumbnail:
         # Return placeholder image
