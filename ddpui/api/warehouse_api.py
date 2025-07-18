@@ -485,3 +485,58 @@ def get_warehouse_schemas_and_tables(
         raise HttpError(500, "Failed to fetch data from the warehouse") from err
 
     return res
+
+
+# Chart Builder specific endpoints that match frontend expectations
+@warehouse_router.get("/schemas/")
+@has_permission(["can_view_warehouse_data"])
+def get_schemas_for_chart(request):
+    """Get list of schemas for chart builder"""
+    try:
+        result = get_warehouse_data(request, "schemas")
+        return result
+    except Exception as e:
+        logger.error(f"Failed to get schemas: {str(e)}")
+        raise HttpError(500, f"Failed to get schemas: {str(e)}")
+
+
+@warehouse_router.get("/tables/")
+@has_permission(["can_view_warehouse_data"])
+def get_tables_for_chart(request, schema_name: str):
+    """Get list of tables for a specific schema for chart builder"""
+    try:
+        result = get_warehouse_data(request, "tables", schema_name=schema_name)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to get tables for schema {schema_name}: {str(e)}")
+        raise HttpError(500, f"Failed to get tables: {str(e)}")
+
+
+@warehouse_router.get("/columns/")
+@has_permission(["can_view_warehouse_data"])
+def get_columns_for_chart(request, schema_name: str, table_name: str):
+    """Get list of columns with data types for chart builder"""
+    try:
+        # Get raw column data
+        columns = get_warehouse_data(
+            request, "table_columns", schema_name=schema_name, table_name=table_name
+        )
+
+        # Transform to match expected format
+        if isinstance(columns, list):
+            # If it's already in the right format, return as is
+            if len(columns) > 0 and isinstance(columns[0], dict) and "name" in columns[0]:
+                return columns
+
+            # Otherwise transform from simple list to dict format
+            return [{"name": col, "data_type": "unknown"} for col in columns]
+        elif isinstance(columns, dict) and "columns" in columns:
+            # Handle case where columns are nested
+            return columns["columns"]
+        else:
+            # Fallback
+            return []
+
+    except Exception as e:
+        logger.error(f"Failed to get columns for {schema_name}.{table_name}: {str(e)}")
+        raise HttpError(500, f"Failed to get columns: {str(e)}")

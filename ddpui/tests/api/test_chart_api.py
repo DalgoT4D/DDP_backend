@@ -5,12 +5,14 @@ from django.test import TestCase, Client
 from django.contrib.auth.models import User
 from django.urls import reverse
 from rest_framework import status
+from rest_framework_simplejwt.tokens import AccessToken
 from ddpui.models.chart import Chart, ChartSnapshot
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.admin_user import AdminUser
-from ddpui.models.role_based_access import Role
+from ddpui.models.role_based_access import Role, Permission, RolePermission
 from ddpui.core.chart_service import ChartService
+from ddpui.routes import src_api
 
 
 class TestChartAPI(TestCase):
@@ -34,13 +36,28 @@ class TestChartAPI(TestCase):
         # Create role
         self.role = Role.objects.create(slug="account_manager", name="Account Manager", level=1)
 
+        # Create permissions
+        self.permissions = []
+        for perm_slug in [
+            "can_view_chart",
+            "can_create_chart",
+            "can_edit_chart",
+            "can_delete_chart",
+        ]:
+            permission = Permission.objects.create(slug=perm_slug, name=perm_slug)
+            RolePermission.objects.create(role=self.role, permission=permission)
+            self.permissions.append(permission)
+
         # Create org user
         self.org_user = OrgUser.objects.create(
             user=self.django_user, org=self.org, new_role=self.role
         )
 
-        # Mock authentication
-        self.client.force_login(self.django_user)
+        # Create JWT token
+        token = AccessToken.for_user(self.django_user)
+        token["orguser_role_key"] = f"orguser_role:{self.django_user.id}"
+        self.client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {str(token)}"
+        self.client.defaults["HTTP_X_DALGO_ORG"] = self.org.slug
 
         # Create a test chart
         self.chart_config = {
@@ -60,6 +77,9 @@ class TestChartAPI(TestCase):
             table_name="test_table",
             config=self.chart_config,
         )
+
+        # Base URL for chart API
+        self.base_url = "/api/charts"
 
     def test_create_chart_success(self):
         """Test successful chart creation via API"""
@@ -82,7 +102,7 @@ class TestChartAPI(TestCase):
             mock_service.return_value.create_chart.return_value = self.test_chart
 
             response = self.client.post(
-                "/api/charts/",
+                self.base_url + "/",
                 data=json.dumps(payload),
                 content_type="application/json",
                 HTTP_X_DALGO_ORG=self.org.slug,
@@ -104,7 +124,7 @@ class TestChartAPI(TestCase):
         }
 
         response = self.client.post(
-            "/api/charts/",
+            self.base_url + "/",
             data=json.dumps(payload),
             content_type="application/json",
             HTTP_X_DALGO_ORG=self.org.slug,
@@ -120,7 +140,7 @@ class TestChartAPI(TestCase):
         with patch("ddpui.api.chart_api.ChartService") as mock_service:
             mock_service.return_value.get_charts.return_value = [self.test_chart]
 
-            response = self.client.get("/api/charts/", HTTP_X_DALGO_ORG=self.org.slug)
+            response = self.client.get(self.base_url + "/", HTTP_X_DALGO_ORG=self.org.slug)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         response_data = json.loads(response.content)
@@ -133,7 +153,8 @@ class TestChartAPI(TestCase):
             mock_service.return_value.get_charts.return_value = [self.test_chart]
 
             response = self.client.get(
-                "/api/charts/?chart_type=echarts&schema_name=public", HTTP_X_DALGO_ORG=self.org.slug
+                self.base_url + "/?chart_type=echarts&schema_name=public",
+                HTTP_X_DALGO_ORG=self.org.slug,
             )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -149,7 +170,7 @@ class TestChartAPI(TestCase):
             mock_service.return_value.get_chart.return_value = self.test_chart
 
             response = self.client.get(
-                f"/api/charts/{self.test_chart.id}", HTTP_X_DALGO_ORG=self.org.slug
+                self.base_url + f"/{self.test_chart.id}", HTTP_X_DALGO_ORG=self.org.slug
             )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -162,7 +183,7 @@ class TestChartAPI(TestCase):
         with patch("ddpui.api.chart_api.ChartService") as mock_service:
             mock_service.return_value.get_chart.side_effect = Exception("Chart not found")
 
-            response = self.client.get("/api/charts/999", HTTP_X_DALGO_ORG=self.org.slug)
+            response = self.client.get(self.base_url + "/999", HTTP_X_DALGO_ORG=self.org.slug)
 
         self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
         response_data = json.loads(response.content)
@@ -179,8 +200,10 @@ class TestChartAPI(TestCase):
             "config": {
                 "chartType": "pie",
                 "computation_type": "aggregated",
-                "aggregate_func": "sum",
                 "aggregate_col": "amount",
+                "aggregate_func": "sum",
+                "aggregate_col_alias": "total_amount",
+                "dimension_col": "region",
             },
         }
 
@@ -188,7 +211,7 @@ class TestChartAPI(TestCase):
             mock_service.return_value.update_chart.return_value = self.test_chart
 
             response = self.client.put(
-                f"/api/charts/{self.test_chart.id}",
+                self.base_url + f"/{self.test_chart.id}",
                 data=json.dumps(payload),
                 content_type="application/json",
                 HTTP_X_DALGO_ORG=self.org.slug,
@@ -205,7 +228,7 @@ class TestChartAPI(TestCase):
             mock_service.return_value.delete_chart.return_value = True
 
             response = self.client.delete(
-                f"/api/charts/{self.test_chart.id}", HTTP_X_DALGO_ORG=self.org.slug
+                self.base_url + f"/{self.test_chart.id}", HTTP_X_DALGO_ORG=self.org.slug
             )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -229,14 +252,21 @@ class TestChartAPI(TestCase):
         mock_chart_data = {
             "chart_config": {"type": "bar"},
             "raw_data": {"data": [{"x": "A", "y": 10}]},
-            "metadata": {"count": 1},
+            "metadata": {
+                "chart_type": "bar",
+                "computation_type": "raw",
+                "schema_name": "public",
+                "table_name": "users",
+                "record_count": 1,
+                "generated_at": "2024-03-20T12:00:00Z",
+            },
         }
 
         with patch("ddpui.api.chart_api.ChartService") as mock_service:
             mock_service.return_value.generate_chart_data.return_value = mock_chart_data
 
             response = self.client.post(
-                "/api/charts/generate",
+                self.base_url + "/generate",
                 data=json.dumps(payload),
                 content_type="application/json",
                 HTTP_X_DALGO_ORG=self.org.slug,
@@ -265,14 +295,21 @@ class TestChartAPI(TestCase):
         mock_chart_data = {
             "chart_config": {"type": "bar"},
             "raw_data": {"data": [{"region": "North", "total_amount": 1000}]},
-            "metadata": {"count": 1},
+            "metadata": {
+                "chart_type": "bar",
+                "computation_type": "aggregated",
+                "schema_name": "public",
+                "table_name": "sales",
+                "record_count": 1,
+                "generated_at": "2024-03-20T12:00:00Z",
+            },
         }
 
         with patch("ddpui.api.chart_api.ChartService") as mock_service:
             mock_service.return_value.generate_chart_data.return_value = mock_chart_data
 
             response = self.client.post(
-                "/api/charts/generate",
+                self.base_url + "/generate",
                 data=json.dumps(payload),
                 content_type="application/json",
                 HTTP_X_DALGO_ORG=self.org.slug,
@@ -286,7 +323,7 @@ class TestChartAPI(TestCase):
     def test_toggle_favorite_success(self):
         """Test successful chart favorite toggle"""
         response = self.client.post(
-            f"/api/charts/{self.test_chart.id}/favorite", HTTP_X_DALGO_ORG=self.org.slug
+            self.base_url + f"/{self.test_chart.id}/favorite", HTTP_X_DALGO_ORG=self.org.slug
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -296,7 +333,7 @@ class TestChartAPI(TestCase):
 
     def test_toggle_favorite_chart_not_found(self):
         """Test favorite toggle for non-existent chart"""
-        response = self.client.post("/api/charts/999/favorite", HTTP_X_DALGO_ORG=self.org.slug)
+        response = self.client.post(self.base_url + "/999/favorite", HTTP_X_DALGO_ORG=self.org.slug)
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
@@ -305,7 +342,9 @@ class TestChartAPI(TestCase):
         with patch("ddpui.api.chart_api.ChartService") as mock_service:
             mock_service.clean_expired_snapshots.return_value = None
 
-            response = self.client.post("/api/charts/cleanup-cache", HTTP_X_DALGO_ORG=self.org.slug)
+            response = self.client.post(
+                self.base_url + "/cleanup-cache", HTTP_X_DALGO_ORG=self.org.slug
+            )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         response_data = json.loads(response.content)
@@ -322,7 +361,9 @@ class TestChartAPI(TestCase):
             mock_service.return_value.get_cache_stats.return_value = mock_cache_stats
             mock_service.return_value._get_connection_pool_stats.return_value = mock_pool_stats
 
-            response = self.client.get("/api/charts/cache-stats", HTTP_X_DALGO_ORG=self.org.slug)
+            response = self.client.get(
+                self.base_url + "/cache-stats", HTTP_X_DALGO_ORG=self.org.slug
+            )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         response_data = json.loads(response.content)
@@ -351,7 +392,7 @@ class TestChartAPI(TestCase):
             mock_rate_check.return_value = False
 
             response = self.client.post(
-                "/api/charts/",
+                self.base_url + "/",
                 data=json.dumps(payload),
                 content_type="application/json",
                 HTTP_X_DALGO_ORG=self.org.slug,
@@ -378,7 +419,7 @@ class TestChartAPI(TestCase):
             mock_rate_check.return_value = False
 
             response = self.client.post(
-                "/api/charts/generate",
+                self.base_url + "/generate",
                 data=json.dumps(payload),
                 content_type="application/json",
                 HTTP_X_DALGO_ORG=self.org.slug,
@@ -391,14 +432,14 @@ class TestChartAPI(TestCase):
 
     def test_unauthorized_access(self):
         """Test unauthorized access to chart endpoints"""
-        self.client.logout()
+        self.client.force_authenticate(user=None)  # Force logout
 
-        response = self.client.get("/api/charts/")
+        response = self.client.get(self.base_url + "/")
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_missing_org_header(self):
         """Test requests without organization header"""
-        response = self.client.get("/api/charts/")
+        response = self.client.get(self.base_url + "/")
         # The behavior depends on the auth middleware implementation
         # This test ensures the endpoint handles missing org header gracefully
         self.assertIn(response.status_code, [400, 401, 403])
@@ -406,7 +447,7 @@ class TestChartAPI(TestCase):
     def test_invalid_json_payload(self):
         """Test requests with invalid JSON payload"""
         response = self.client.post(
-            "/api/charts/",
+            self.base_url + "/",
             data="invalid json",
             content_type="application/json",
             HTTP_X_DALGO_ORG=self.org.slug,
@@ -440,7 +481,7 @@ class TestChartAPI(TestCase):
 
         # Test that user can view their own chart
         response = self.client.get(
-            f"/api/charts/{self.test_chart.id}", HTTP_X_DALGO_ORG=self.org.slug
+            self.base_url + f"/{self.test_chart.id}", HTTP_X_DALGO_ORG=self.org.slug
         )
 
         # The exact behavior depends on the permission implementation
@@ -470,7 +511,7 @@ class TestChartAPI(TestCase):
             )
 
             response = self.client.post(
-                "/api/charts/generate",
+                self.base_url + "/generate",
                 data=json.dumps(payload),
                 content_type="application/json",
                 HTTP_X_DALGO_ORG=self.org.slug,
@@ -499,7 +540,7 @@ class TestChartAPI(TestCase):
             "title": "Complex Chart",
             "chart_type": "echarts",
             "schema_name": "public",
-            "table": "sales",
+            "table": "users",
             "config": complex_config,
         }
 
@@ -507,7 +548,7 @@ class TestChartAPI(TestCase):
             mock_service.return_value.create_chart.return_value = self.test_chart
 
             response = self.client.post(
-                "/api/charts/",
+                self.base_url + "/",
                 data=json.dumps(payload),
                 content_type="application/json",
                 HTTP_X_DALGO_ORG=self.org.slug,

@@ -25,6 +25,40 @@ logger = CustomLogger("chart_service")
 class ChartService:
     """Service class for chart operations"""
 
+    VALID_CHART_TYPES = [
+        "bar",
+        "line",
+        "pie",
+        "scatter",
+        "area",
+        "funnel",
+        "radar",
+        "heatmap",
+        "table",
+        "gauge",
+        "boxplot",
+        "candlestick",
+        "sankey",
+        "treemap",
+        "sunburst",
+        "number",
+    ]
+
+    AGGREGATED_CHART_TYPES = ["pie", "funnel", "gauge", "treemap", "sunburst", "number"]
+
+    RAW_CHART_TYPES = [
+        "bar",
+        "line",
+        "scatter",
+        "area",
+        "radar",
+        "heatmap",
+        "table",
+        "boxplot",
+        "candlestick",
+        "sankey",
+    ]
+
     def __init__(self, org: Org, user: OrgUser):
         self.org = org
         self.user = user
@@ -322,6 +356,86 @@ class ChartService:
         except Exception as e:
             raise ValidationError(f"Failed to generate chart data: {str(e)}")
 
+    def validate_chart_type(self, chart_type: str, computation_type: str) -> None:
+        """Validate chart type and computation type combination"""
+        if chart_type not in self.VALID_CHART_TYPES:
+            raise ValidationError(
+                f"Invalid chart type. Must be one of {', '.join(self.VALID_CHART_TYPES)}"
+            )
+
+        if computation_type == "raw" and chart_type not in self.RAW_CHART_TYPES:
+            raise ValidationError(f"Chart type '{chart_type}' requires aggregated data")
+
+        if computation_type == "aggregated" and chart_type not in self.AGGREGATED_CHART_TYPES:
+            raise ValidationError(f"Chart type '{chart_type}' requires raw data")
+
+    def validate_chart_config(self, chart_type: str, config: dict) -> None:
+        """Validate chart configuration based on chart type"""
+        if chart_type in self.AGGREGATED_CHART_TYPES:
+            required_fields = ["aggregate_col", "aggregate_func"]
+            if not all(field in config for field in required_fields):
+                raise ValidationError(
+                    f"Chart type '{chart_type}' requires {', '.join(required_fields)}"
+                )
+
+            if chart_type != "number" and "dimension_col" not in config:
+                raise ValidationError(f"Chart type '{chart_type}' requires dimension_col")
+
+        elif chart_type in self.RAW_CHART_TYPES:
+            if chart_type not in ["table", "heatmap"]:  # These don't require x/y axes
+                if "xAxis" not in config or "yAxis" not in config:
+                    raise ValidationError(f"Chart type '{chart_type}' requires xAxis and yAxis")
+
+            if chart_type == "heatmap" and (
+                "dimensions" not in config or len(config["dimensions"]) < 2
+            ):
+                raise ValidationError("Heatmap requires at least 2 dimensions")
+
+    def generate_chart_data(self, chart_type: str, computation_type: str, **kwargs) -> dict:
+        """Generate chart data based on chart type and computation"""
+        self.validate_chart_type(chart_type, computation_type)
+
+        if computation_type == "raw":
+            data = self._generate_raw_chart_data(chart_type, **kwargs)
+        else:
+            data = self._generate_aggregated_chart_data(chart_type, **kwargs)
+
+        return self._format_chart_data(chart_type, data)
+
+    def _format_chart_data(self, chart_type: str, data: dict) -> dict:
+        """Format chart data based on chart type for ECharts"""
+        if not data or "data" not in data:
+            return {"data": [], "config": {}}
+
+        base_config = {
+            "title": {"text": ""},
+            "tooltip": {"trigger": "axis"},
+            "legend": {"data": []},
+            "grid": {"left": "3%", "right": "4%", "bottom": "3%", "containLabel": True},
+        }
+
+        if chart_type == "pie":
+            return {
+                "data": data["data"],
+                "config": {
+                    **base_config,
+                    "series": [{"type": "pie", "radius": "50%", "data": data["data"]}],
+                },
+            }
+        elif chart_type in ["bar", "line", "area"]:
+            return {
+                "data": data["data"],
+                "config": {
+                    **base_config,
+                    "xAxis": {"type": "category", "data": data.get("xAxis", [])},
+                    "yAxis": {"type": "value"},
+                    "series": [{"type": chart_type, "data": data.get("yAxis", [])}],
+                },
+            }
+        # Add more chart type configurations as needed
+
+        return {"data": data["data"], "config": base_config}
+
     def _validate_chart_config(self, config):
         """Validate chart configuration with comprehensive checks"""
         # Convert schema object to dict if needed
@@ -349,6 +463,22 @@ class ChartService:
             "radar",
             "number",
             "map",
+            "table",
+            "gauge",
+            "boxplot",
+            "candlestick",
+            "sankey",
+            "treemap",
+            "sunburst",
+            "parallel",
+            "themeRiver",
+            "calendar",
+            "graph",
+            "tree",
+            "wordCloud",
+            "liquidFill",
+            "pictorialBar",
+            "custom",
         ]
         if config["chartType"] not in valid_chart_types:
             raise ValidationError(
@@ -362,19 +492,39 @@ class ChartService:
                 f"Invalid computation type: {config['computation_type']}. Must be one of: {', '.join(valid_computation_types)}"
             )
 
-        # Validate fields based on computation type
+        # Validate fields based on computation type and chart type
         if config["computation_type"] == "raw":
-            if not config.get("xAxis") or not config.get("yAxis"):
-                raise ValidationError("xAxis and yAxis are required for raw computation")
+            # Raw computation validation
+            if config["chartType"] in ["bar", "line", "area", "scatter"]:
+                if not config.get("xaxis") or not config.get("yaxis"):
+                    raise ValidationError("xaxis and yaxis are required for raw computation")
 
-            # Validate axis field names (basic SQL injection prevention)
-            for axis_name, axis_value in [
-                ("xAxis", config.get("xAxis")),
-                ("yAxis", config.get("yAxis")),
-            ]:
-                if axis_value and not self._is_valid_column_name(axis_value):
-                    raise ValidationError(f"Invalid {axis_name} column name: {axis_value}")
+                # Validate axis field names (basic SQL injection prevention)
+                for axis_name, axis_value in [
+                    ("xaxis", config.get("xaxis")),
+                    ("yaxis", config.get("yaxis")),
+                ]:
+                    if axis_value and not self._is_valid_column_name(axis_value):
+                        raise ValidationError(f"Invalid {axis_name} column name: {axis_value}")
+            elif config["chartType"] in ["pie", "funnel", "radar"]:
+                if not config.get("dimension_col") or not config.get("aggregate_col"):
+                    raise ValidationError(
+                        "dimension_col and aggregate_col are required for pie/funnel/radar charts"
+                    )
+            elif config["chartType"] in ["heatmap"]:
+                if (
+                    not config.get("xaxis")
+                    or not config.get("yaxis")
+                    or not config.get("aggregate_col")
+                ):
+                    raise ValidationError(
+                        "xaxis, yaxis, and aggregate_col are required for heatmap"
+                    )
+            elif config["chartType"] in ["number"]:
+                if not config.get("aggregate_col"):
+                    raise ValidationError("aggregate_col is required for number chart")
         else:
+            # Aggregated computation validation
             if not config.get("aggregate_func"):
                 raise ValidationError("aggregate_func is required for aggregated computation")
 
@@ -385,11 +535,41 @@ class ChartService:
                     f"Invalid aggregate function: {config['aggregate_func']}. Must be one of: {', '.join(valid_agg_funcs)}"
                 )
 
+            # Validate required fields based on chart type
+            if config["chartType"] in ["bar", "line", "area"]:
+                if not config.get("dimension_col") or not config.get("aggregate_col"):
+                    raise ValidationError(
+                        "dimension_col and aggregate_col are required for aggregated bar/line/area charts"
+                    )
+            elif config["chartType"] in ["pie", "funnel", "radar"]:
+                if not config.get("dimension_col") or not config.get("aggregate_col"):
+                    raise ValidationError(
+                        "dimension_col and aggregate_col are required for pie/funnel/radar charts"
+                    )
+            elif config["chartType"] in ["heatmap"]:
+                if (
+                    not config.get("xaxis")
+                    or not config.get("yaxis")
+                    or not config.get("aggregate_col")
+                ):
+                    raise ValidationError(
+                        "xaxis, yaxis, and aggregate_col are required for heatmap"
+                    )
+            elif config["chartType"] in ["number"]:
+                if not config.get("aggregate_col"):
+                    raise ValidationError("aggregate_col is required for number chart")
+
             # Validate aggregate column if provided
             if config.get("aggregate_col") and not self._is_valid_column_name(
                 config["aggregate_col"]
             ):
                 raise ValidationError(f"Invalid aggregate column name: {config['aggregate_col']}")
+
+            # Validate dimension column if provided
+            if config.get("dimension_col") and not self._is_valid_column_name(
+                config["dimension_col"]
+            ):
+                raise ValidationError(f"Invalid dimension column name: {config['dimension_col']}")
 
         # Validate dimensions if provided
         if config.get("dimensions"):
@@ -551,26 +731,67 @@ class ChartService:
         x_axis_data = []
         y_axis_data = []
 
-        for row in query_result:
-            if computation_type == "raw":
-                x_value = row.get("x")
-                y_value = row.get("y")
-            else:
-                x_value = row.get(xaxis)
-                y_value = row.get(aggregate_col_alias or "count")
+        if chart_type in ["bar", "line", "area", "scatter"]:
+            for row in query_result:
+                if computation_type == "raw":
+                    x_value = row.get("x")
+                    y_value = row.get("y")
+                else:
+                    x_value = row.get(dimension_col or xaxis)
+                    y_value = row.get(aggregate_col_alias or "count")
 
-            x_axis_data.append(x_value)
-            y_axis_data.append(y_value)
+                x_axis_data.append(x_value)
+                y_axis_data.append(y_value)
 
-            data.append(
-                {
-                    "x": x_value,
-                    "y": y_value,
-                    "name": str(x_value),
-                    "value": y_value,
-                    **row,  # Include all original fields
-                }
-            )
+                data.append(
+                    {
+                        "x": x_value,
+                        "y": y_value,
+                        "name": str(x_value),
+                        "value": y_value,
+                        **row,  # Include all original fields
+                    }
+                )
+        elif chart_type in ["pie", "funnel", "radar"]:
+            for row in query_result:
+                name = row.get(dimension_col or xaxis)
+                value = row.get(aggregate_col_alias or "count")
+
+                data.append(
+                    {
+                        "name": str(name),
+                        "value": value,
+                        **row,  # Include all original fields
+                    }
+                )
+        elif chart_type == "heatmap":
+            # Create a 2D matrix for heatmap
+            x_values = sorted(list(set(row.get(xaxis) for row in query_result)))
+            y_values = sorted(list(set(row.get(yaxis) for row in query_result)))
+
+            # Initialize matrix with zeros
+            matrix = [[0 for _ in range(len(x_values))] for _ in range(len(y_values))]
+            x_index = {x: i for i, x in enumerate(x_values)}
+            y_index = {y: i for i, y in enumerate(y_values)}
+
+            for row in query_result:
+                x = row.get(xaxis)
+                y = row.get(yaxis)
+                value = row.get(aggregate_col_alias or "count")
+                matrix[y_index[y]][x_index[x]] = value
+
+            # Transform matrix into data points
+            for i, y in enumerate(y_values):
+                for j, x in enumerate(x_values):
+                    data.append([j, i, matrix[i][j]])
+
+            x_axis_data = x_values
+            y_axis_data = y_values
+        elif chart_type == "number":
+            # For number chart, just take the first value
+            if query_result:
+                value = query_result[0].get(aggregate_col_alias or "count")
+                data = [{"value": value}]
 
         return {
             "data": data,
@@ -626,31 +847,6 @@ class ChartService:
                     ],
                 }
             )
-
-        elif chart_type == "pie":
-            base_config.update(
-                {
-                    "series": [
-                        {
-                            "name": aggregate_col_alias or "Value",
-                            "type": "pie",
-                            "radius": "50%",
-                            "data": [
-                                {"value": item["y"], "name": item["name"]}
-                                for item in chart_data.get("data", [])
-                            ],
-                            "emphasis": {
-                                "itemStyle": {
-                                    "shadowBlur": 10,
-                                    "shadowOffsetX": 0,
-                                    "shadowColor": "rgba(0, 0, 0, 0.5)",
-                                }
-                            },
-                        }
-                    ]
-                }
-            )
-
         elif chart_type == "scatter":
             base_config.update(
                 {
@@ -674,6 +870,119 @@ class ChartService:
                             "emphasis": {"focus": "series"},
                         }
                     ],
+                }
+            )
+        elif chart_type == "pie":
+            base_config.update(
+                {
+                    "series": [
+                        {
+                            "name": aggregate_col_alias or "Value",
+                            "type": "pie",
+                            "radius": "50%",
+                            "data": [
+                                {"value": item["value"], "name": item["name"]}
+                                for item in chart_data.get("data", [])
+                            ],
+                            "emphasis": {
+                                "itemStyle": {
+                                    "shadowBlur": 10,
+                                    "shadowOffsetX": 0,
+                                    "shadowColor": "rgba(0, 0, 0, 0.5)",
+                                }
+                            },
+                        }
+                    ]
+                }
+            )
+        elif chart_type == "funnel":
+            base_config.update(
+                {
+                    "series": [
+                        {
+                            "name": aggregate_col_alias or "Value",
+                            "type": "funnel",
+                            "data": [
+                                {"value": item["value"], "name": item["name"]}
+                                for item in chart_data.get("data", [])
+                            ],
+                            "emphasis": {"focus": "series"},
+                        }
+                    ]
+                }
+            )
+        elif chart_type == "radar":
+            # Get unique indicators from data
+            indicators = [
+                {"name": item["name"], "max": max(d["value"] for d in chart_data.get("data", []))}
+                for item in chart_data.get("data", [])
+            ]
+            base_config.update(
+                {
+                    "radar": {
+                        "indicator": indicators,
+                    },
+                    "series": [
+                        {
+                            "name": aggregate_col_alias or "Value",
+                            "type": "radar",
+                            "data": [
+                                {
+                                    "value": [item["value"] for item in chart_data.get("data", [])],
+                                    "name": aggregate_col_alias or "Series",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            )
+        elif chart_type == "heatmap":
+            base_config.update(
+                {
+                    "xAxis": {
+                        "type": "category",
+                        "data": chart_data.get("x-axis", []),
+                        "name": xaxis or "X-Axis",
+                        "nameLocation": "middle",
+                        "nameGap": 30,
+                    },
+                    "yAxis": {
+                        "type": "category",
+                        "data": chart_data.get("y-axis", []),
+                        "name": yaxis or "Y-Axis",
+                        "nameLocation": "middle",
+                        "nameGap": 50,
+                    },
+                    "visualMap": {
+                        "min": 0,
+                        "max": max(item[2] for item in chart_data.get("data", []))
+                        if chart_data.get("data")
+                        else 0,
+                        "calculable": True,
+                        "orient": "horizontal",
+                        "left": "center",
+                        "bottom": "5%",
+                    },
+                    "series": [
+                        {
+                            "name": aggregate_col_alias or "Value",
+                            "type": "heatmap",
+                            "data": chart_data.get("data", []),
+                            "emphasis": {"focus": "series"},
+                        }
+                    ],
+                }
+            )
+        elif chart_type == "number":
+            base_config.update(
+                {
+                    "series": [
+                        {
+                            "type": "gauge",
+                            "detail": {"formatter": "{value}"},
+                            "data": [{"value": chart_data.get("data", [{}])[0].get("value", 0)}],
+                        }
+                    ]
                 }
             )
 

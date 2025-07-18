@@ -86,7 +86,7 @@ class ChartAPIIntegrationTest(TestCase):
     def test_create_chart_success(self):
         """Test successful chart creation"""
         response = self.client.post(
-            "/api/visualization/charts/",
+            "/api/charts/",
             json.dumps(self.chart_data),
             content_type="application/json",
         )
@@ -103,7 +103,7 @@ class ChartAPIIntegrationTest(TestCase):
         RolePermission.objects.filter(role=self.role).delete()
 
         response = self.client.post(
-            "/api/visualization/charts/",
+            "/api/charts/",
             json.dumps(self.chart_data),
             content_type="application/json",
         )
@@ -116,7 +116,7 @@ class ChartAPIIntegrationTest(TestCase):
         invalid_data["config"]["chartType"] = "invalid_type"
 
         response = self.client.post(
-            "/api/visualization/charts/", json.dumps(invalid_data), content_type="application/json"
+            "/api/charts/", json.dumps(invalid_data), content_type="application/json"
         )
 
         self.assertEqual(response.status_code, 400)
@@ -129,7 +129,7 @@ class ChartAPIIntegrationTest(TestCase):
         del invalid_data["config"]["computation_type"]
 
         response = self.client.post(
-            "/api/visualization/charts/", json.dumps(invalid_data), content_type="application/json"
+            "/api/charts/", json.dumps(invalid_data), content_type="application/json"
         )
 
         self.assertEqual(response.status_code, 400)
@@ -142,7 +142,7 @@ class ChartAPIIntegrationTest(TestCase):
         malicious_data["config"]["xAxis"] = "date; DROP TABLE users; --"
 
         response = self.client.post(
-            "/api/visualization/charts/",
+            "/api/charts/",
             json.dumps(malicious_data),
             content_type="application/json",
         )
@@ -165,7 +165,7 @@ class ChartAPIIntegrationTest(TestCase):
             config=self.chart_data["config"],
         )
 
-        response = self.client.get("/api/visualization/charts/")
+        response = self.client.get("/api/charts/")
 
         self.assertEqual(response.status_code, 200)
         response_data = json.loads(response.content)
@@ -198,7 +198,7 @@ class ChartAPIIntegrationTest(TestCase):
         )
 
         # Test filtering by chart_type
-        response = self.client.get("/api/visualization/charts/?chart_type=bar")
+        response = self.client.get("/api/charts/?chart_type=bar")
 
         self.assertEqual(response.status_code, 200)
         response_data = json.loads(response.content)
@@ -221,7 +221,7 @@ class ChartAPIIntegrationTest(TestCase):
             )
 
         # Test pagination
-        response = self.client.get("/api/visualization/charts/?limit=2&offset=0")
+        response = self.client.get("/api/charts/?limit=2&offset=0")
 
         self.assertEqual(response.status_code, 200)
         response_data = json.loads(response.content)
@@ -241,7 +241,7 @@ class ChartAPIIntegrationTest(TestCase):
             config=self.chart_data["config"],
         )
 
-        response = self.client.get(f"/api/visualization/charts/{chart.id}")
+        response = self.client.get(f"/api/charts/{chart.id}")
 
         self.assertEqual(response.status_code, 200)
         response_data = json.loads(response.content)
@@ -250,7 +250,7 @@ class ChartAPIIntegrationTest(TestCase):
 
     def test_get_single_chart_not_found(self):
         """Test single chart retrieval when chart doesn't exist"""
-        response = self.client.get("/api/visualization/charts/999")
+        response = self.client.get("/api/charts/999")
 
         self.assertEqual(response.status_code, 400)
         response_data = json.loads(response.content)
@@ -272,7 +272,7 @@ class ChartAPIIntegrationTest(TestCase):
         update_data = {"title": "Updated Title", "description": "Updated Description"}
 
         response = self.client.put(
-            f"/api/visualization/charts/{chart.id}",
+            f"/api/charts/{chart.id}",
             json.dumps(update_data),
             content_type="application/json",
         )
@@ -287,7 +287,7 @@ class ChartAPIIntegrationTest(TestCase):
         update_data = {"title": "Updated Title"}
 
         response = self.client.put(
-            "/api/visualization/charts/999",
+            "/api/charts/999",
             json.dumps(update_data),
             content_type="application/json",
         )
@@ -309,7 +309,7 @@ class ChartAPIIntegrationTest(TestCase):
             config=self.chart_data["config"],
         )
 
-        response = self.client.delete(f"/api/visualization/charts/{chart.id}")
+        response = self.client.delete(f"/api/charts/{chart.id}")
 
         self.assertEqual(response.status_code, 200)
         response_data = json.loads(response.content)
@@ -318,7 +318,7 @@ class ChartAPIIntegrationTest(TestCase):
 
     def test_delete_chart_not_found(self):
         """Test chart deletion when chart doesn't exist"""
-        response = self.client.delete("/api/visualization/charts/999")
+        response = self.client.delete("/api/charts/999")
 
         self.assertEqual(response.status_code, 400)
         response_data = json.loads(response.content)
@@ -358,9 +358,7 @@ class ChartAPIIntegrationTest(TestCase):
             "limit": 10,
         }
 
-        response = self.client.post(
-            "/api/visualization/charts/generate", generate_data, format="json"
-        )
+        response = self.client.post("/api/charts/generate", generate_data, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data["success"])
@@ -380,7 +378,7 @@ class ChartAPIIntegrationTest(TestCase):
         }
 
         response = self.client.post(
-            "/api/visualization/charts/generate",
+            "/api/charts/generate",
             json.dumps(generate_data),
             content_type="application/json",
         )
@@ -401,7 +399,7 @@ class ChartAPIIntegrationTest(TestCase):
         }
 
         response = self.client.post(
-            "/api/visualization/charts/generate",
+            "/api/charts/generate",
             json.dumps(generate_data),
             content_type="application/json",
         )
@@ -423,7 +421,7 @@ class ChartAPIIntegrationTest(TestCase):
             config=self.chart_data["config"],
         )
 
-        response = self.client.post(f"/api/visualization/charts/{chart.id}/favorite")
+        response = self.client.post(f"/api/charts/{chart.id}/favorite")
 
         self.assertEqual(response.status_code, 200)
         response_data = json.loads(response.content)
@@ -432,7 +430,7 @@ class ChartAPIIntegrationTest(TestCase):
 
     def test_toggle_favorite_not_found(self):
         """Test favorite toggle when chart doesn't exist"""
-        response = self.client.post("/api/visualization/charts/999/favorite")
+        response = self.client.post("/api/charts/999/favorite")
 
         self.assertEqual(response.status_code, 500)
         response_data = json.loads(response.content)
@@ -440,7 +438,7 @@ class ChartAPIIntegrationTest(TestCase):
 
     def test_cleanup_cache_success(self):
         """Test successful cache cleanup"""
-        response = self.client.post("/api/visualization/charts/cleanup-cache")
+        response = self.client.post("/api/charts/cleanup-cache")
 
         self.assertEqual(response.status_code, 200)
         response_data = json.loads(response.content)
@@ -451,7 +449,7 @@ class ChartAPIIntegrationTest(TestCase):
         # Remove authentication
         self.client.defaults.pop("HTTP_AUTHORIZATION", None)
 
-        response = self.client.get("/api/visualization/charts/")
+        response = self.client.get("/api/charts/")
 
         self.assertEqual(response.status_code, 401)
 
@@ -479,7 +477,7 @@ class ChartAPIIntegrationTest(TestCase):
         )
 
         # Try to access other org's chart
-        response = self.client.get(f"/api/visualization/charts/{other_chart.id}")
+        response = self.client.get(f"/api/charts/{other_chart.id}")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertFalse(response.data["success"])
@@ -487,7 +485,7 @@ class ChartAPIIntegrationTest(TestCase):
     def test_malformed_json_request(self):
         """Test handling of malformed JSON requests"""
         response = self.client.post(
-            "/api/visualization/charts/", '{"invalid": json}', content_type="application/json"
+            "/api/charts/", '{"invalid": json}', content_type="application/json"
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
@@ -497,7 +495,7 @@ class ChartAPIIntegrationTest(TestCase):
         large_data = self.chart_data.copy()
         large_data["description"] = "x" * 10000  # Very long description
 
-        response = self.client.post("/api/visualization/charts/", large_data, format="json")
+        response = self.client.post("/api/charts/", large_data, format="json")
 
         # Should still work but description should be truncated
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -514,7 +512,7 @@ class ChartAPIIntegrationTest(TestCase):
         def create_chart(title):
             data = self.chart_data.copy()
             data["title"] = title
-            response = self.client.post("/api/visualization/charts/", data, format="json")
+            response = self.client.post("/api/charts/", data, format="json")
             results.append(response.status_code)
 
         # Create multiple threads

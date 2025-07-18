@@ -1,0 +1,339 @@
+INFO:     Started server process [33461]
+INFO:     Waiting for application startup.
+INFO:     ASGI 'lifespan' protocol appears unsupported.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8002 (Press CTRL+C to quit)
+INFO:     127.0.0.1:51342 - "POST /api/login/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51346 - "GET /api/currentuserv2 HTTP/1.1" 200 OK
+INFO - 2025-07-17 23:34:15,329 - ddpui - custom_logger.py - get_warehouse_data - : Found org_warehouse: test-warehouse
+INFO:ddpui:Found org_warehouse: test-warehouse
+INFO - 2025-07-17 23:34:15,329 - ddpui - custom_logger.py - get_warehouse_data - : Getting client for warehouse: test-warehouse
+INFO:ddpui:Getting client for warehouse: test-warehouse
+INFO - 2025-07-17 23:34:15,330 - ddpui - custom_logger.py - get_client - : using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+INFO:     127.0.0.1:51349 - "GET /api/warehouse/schemas HTTP/1.1" 200 OK
+WARNING:django.request:Not Found: /api/warehouse/schemas/public/tables
+INFO:     127.0.0.1:51353 - "GET /api/warehouse/schemas/public/tables HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51385 - "POST /api/login/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51388 - "GET /api/currentuserv2 HTTP/1.1" 200 OK
+INFO - 2025-07-17 23:34:33,542 - ddpui - custom_logger.py - get_warehouse_data - : Found org_warehouse: test-warehouse
+INFO:ddpui:Found org_warehouse: test-warehouse
+INFO - 2025-07-17 23:34:33,542 - ddpui - custom_logger.py - get_warehouse_data - : Getting client for warehouse: test-warehouse
+INFO:ddpui:Getting client for warehouse: test-warehouse
+INFO - 2025-07-17 23:34:33,543 - ddpui - custom_logger.py - get_client - : using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+INFO:     127.0.0.1:51391 - "GET /api/warehouse/schemas HTTP/1.1" 200 OK
+INFO - 2025-07-17 23:34:33,560 - ddpui - custom_logger.py - get_warehouse_data - : Found org_warehouse: test-warehouse
+INFO:ddpui:Found org_warehouse: test-warehouse
+INFO - 2025-07-17 23:34:33,561 - ddpui - custom_logger.py - get_warehouse_data - : Getting client for warehouse: test-warehouse
+INFO:ddpui:Getting client for warehouse: test-warehouse
+INFO - 2025-07-17 23:34:33,561 - ddpui - custom_logger.py - get_client - : using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+INFO:     127.0.0.1:51395 - "GET /api/warehouse/tables/public HTTP/1.1" 200 OK
+'NoneType' object has no attribute 'id'
+ERROR:django.request:Internal Server Error: /api/login/
+INFO:     127.0.0.1:51722 - "POST /api/login/ HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:64797 - "POST /api/login/ HTTP/1.1" 200 OK
+WARNING:django.request:Not Found: /api/currentuserv2
+INFO:     127.0.0.1:64800 - "GET /api/currentuserv2 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:64836 - "POST /api/login/ HTTP/1.1" 200 OK
+WARNING:django.request:Not Found: /api/currentuserv2
+INFO:     127.0.0.1:64839 - "GET /api/currentuserv2 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:64892 - "POST /api/login/ HTTP/1.1" 200 OK
+WARNING:django.request:Not Found: /api/currentuserv2
+INFO:     127.0.0.1:64895 - "GET /api/currentuserv2 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:64930 - "POST /api/login/ HTTP/1.1" 200 OK
+WARNING:django.request:Not Found: /api/currentuserv2
+INFO:     127.0.0.1:64933 - "GET /api/currentuserv2 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:65033 - "POST /api/login/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65036 - "GET /api/currentuserv2 HTTP/1.1" 200 OK
+INFO - 2025-07-18 09:23:14,351 - ddpui - custom_logger.py - get_warehouse_data - : Found org_warehouse: test-warehouse
+INFO:ddpui:Found org_warehouse: test-warehouse
+INFO - 2025-07-18 09:23:14,352 - ddpui - custom_logger.py - get_warehouse_data - : Getting client for warehouse: test-warehouse
+INFO:ddpui:Getting client for warehouse: test-warehouse
+INFO - 2025-07-18 09:23:14,353 - ddpui - custom_logger.py - get_client - : using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+INFO:     127.0.0.1:65033 - "GET /api/warehouse/schemas/ HTTP/1.1" 200 OK
+WARNING:django.request:Unprocessable Entity: /api/warehouse/tables/
+INFO:     127.0.0.1:65036 - "GET /api/warehouse/tables/?schema=analytics HTTP/1.1" 422 Unprocessable Entity
+INFO:     127.0.0.1:65086 - "POST /api/login/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65089 - "GET /api/currentuserv2 HTTP/1.1" 200 OK
+INFO - 2025-07-18 09:23:41,089 - ddpui - custom_logger.py - get_warehouse_data - : Found org_warehouse: test-warehouse
+INFO:ddpui:Found org_warehouse: test-warehouse
+INFO - 2025-07-18 09:23:41,090 - ddpui - custom_logger.py - get_warehouse_data - : Getting client for warehouse: test-warehouse
+INFO:ddpui:Getting client for warehouse: test-warehouse
+INFO - 2025-07-18 09:23:41,090 - ddpui - custom_logger.py - get_client - : using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+INFO:     127.0.0.1:65086 - "GET /api/warehouse/schemas/ HTTP/1.1" 200 OK
+INFO - 2025-07-18 09:23:41,116 - ddpui - custom_logger.py - get_warehouse_data - : Found org_warehouse: test-warehouse
+INFO:ddpui:Found org_warehouse: test-warehouse
+INFO - 2025-07-18 09:23:41,116 - ddpui - custom_logger.py - get_warehouse_data - : Getting client for warehouse: test-warehouse
+INFO:ddpui:Getting client for warehouse: test-warehouse
+INFO - 2025-07-18 09:23:41,117 - ddpui - custom_logger.py - get_client - : using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+INFO:     127.0.0.1:65089 - "GET /api/warehouse/tables/?schema_name=analytics HTTP/1.1" 200 OK
+WARNING:django.request:Unprocessable Entity: /api/warehouse/columns/
+INFO:     127.0.0.1:65086 - "GET /api/warehouse/columns/?schema=analytics&table=sales HTTP/1.1" 422 Unprocessable Entity
+INFO:     127.0.0.1:65129 - "POST /api/login/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65132 - "GET /api/currentuserv2 HTTP/1.1" 200 OK
+INFO - 2025-07-18 09:24:00,874 - ddpui - custom_logger.py - get_warehouse_data - : Found org_warehouse: test-warehouse
+INFO:ddpui:Found org_warehouse: test-warehouse
+INFO - 2025-07-18 09:24:00,875 - ddpui - custom_logger.py - get_warehouse_data - : Getting client for warehouse: test-warehouse
+INFO:ddpui:Getting client for warehouse: test-warehouse
+INFO - 2025-07-18 09:24:00,875 - ddpui - custom_logger.py - get_client - : using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+INFO:     127.0.0.1:65129 - "GET /api/warehouse/schemas/ HTTP/1.1" 200 OK
+INFO - 2025-07-18 09:24:00,892 - ddpui - custom_logger.py - get_warehouse_data - : Found org_warehouse: test-warehouse
+INFO:ddpui:Found org_warehouse: test-warehouse
+INFO - 2025-07-18 09:24:00,893 - ddpui - custom_logger.py - get_warehouse_data - : Getting client for warehouse: test-warehouse
+INFO:ddpui:Getting client for warehouse: test-warehouse
+INFO - 2025-07-18 09:24:00,893 - ddpui - custom_logger.py - get_client - : using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+INFO:     127.0.0.1:65132 - "GET /api/warehouse/tables/?schema_name=analytics HTTP/1.1" 200 OK
+INFO - 2025-07-18 09:24:00,913 - ddpui - custom_logger.py - get_warehouse_data - : Found org_warehouse: test-warehouse
+INFO:ddpui:Found org_warehouse: test-warehouse
+INFO - 2025-07-18 09:24:00,914 - ddpui - custom_logger.py - get_warehouse_data - : Getting client for warehouse: test-warehouse
+INFO:ddpui:Getting client for warehouse: test-warehouse
+INFO - 2025-07-18 09:24:00,914 - ddpui - custom_logger.py - get_client - : using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+INFO:     127.0.0.1:65129 - "GET /api/warehouse/columns/?schema_name=analytics&table_name=sales HTTP/1.1" 200 OK
+INFO - 2025-07-18 09:24:00,956 - ddpui - custom_logger.py - get_client - admin-org: using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+ERROR:chart_service:Failed to connect to warehouse for org admin-org: 'username'
+WARNING:django.request:Bad Request: /api/charts/generate
+INFO:     127.0.0.1:65132 - "POST /api/charts/generate HTTP/1.1" 400 Bad Request
+INFO:     127.0.0.1:65309 - "POST /api/login/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65312 - "GET /api/currentuserv2 HTTP/1.1" 200 OK
+INFO - 2025-07-18 09:25:49,076 - ddpui - custom_logger.py - get_warehouse_data - : Found org_warehouse: test-warehouse
+INFO:ddpui:Found org_warehouse: test-warehouse
+INFO - 2025-07-18 09:25:49,078 - ddpui - custom_logger.py - get_warehouse_data - : Getting client for warehouse: test-warehouse
+INFO:ddpui:Getting client for warehouse: test-warehouse
+INFO - 2025-07-18 09:25:49,078 - ddpui - custom_logger.py - get_client - : using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+ERROR - 2025-07-18 09:25:49,079 - ddpui - custom_logger.py - get_warehouse_data - : Exception occurred in get_schemas: Extra data: line 6 column 1 (char 254)
+Traceback (most recent call last):
+  File "/Users/siddhant/Documents/Dalgo/DDP_backend/ddpui/core/warehousefunctions.py", line 27, in get_warehouse_data
+    data = client.get_tables(kwargs["schema_name"])
+  File "/Users/siddhant/Documents/Dalgo/DDP_backend/ddpui/core/dbtautomation_service.py", line 115, in _get_wclient
+    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+  File "/Users/siddhant/Documents/Dalgo/DDP_backend/ddpui/utils/secretsmanager.py", line 175, in retrieve_warehouse_credentials
+    response = aws_sm.get_secret_value(SecretId=warehouse.credentials)
+  File "/Users/siddhant/Documents/Dalgo/DDP_backend/ddpui/utils/secretsmanager.py", line 63, in get_secret_value
+    secret = json.load(infile)
+  File "/Users/siddhant/.pyenv/versions/3.10.18/lib/python3.10/json/__init__.py", line 293, in load
+    return loads(fp.read(),
+  File "/Users/siddhant/.pyenv/versions/3.10.18/lib/python3.10/json/__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+  File "/Users/siddhant/.pyenv/versions/3.10.18/lib/python3.10/json/decoder.py", line 340, in decode
+    raise JSONDecodeError("Extra data", s, end)
+json.decoder.JSONDecodeError: Extra data: line 6 column 1 (char 254)
+ERROR:ddpui:Exception occurred in get_schemas: Extra data: line 6 column 1 (char 254)
+Traceback (most recent call last):
+  File "/Users/siddhant/Documents/Dalgo/DDP_backend/ddpui/core/warehousefunctions.py", line 27, in get_warehouse_data
+    data = client.get_tables(kwargs["schema_name"])
+  File "/Users/siddhant/Documents/Dalgo/DDP_backend/ddpui/core/dbtautomation_service.py", line 115, in _get_wclient
+    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+  File "/Users/siddhant/Documents/Dalgo/DDP_backend/ddpui/utils/secretsmanager.py", line 175, in retrieve_warehouse_credentials
+    response = aws_sm.get_secret_value(SecretId=warehouse.credentials)
+  File "/Users/siddhant/Documents/Dalgo/DDP_backend/ddpui/utils/secretsmanager.py", line 63, in get_secret_value
+    secret = json.load(infile)
+  File "/Users/siddhant/.pyenv/versions/3.10.18/lib/python3.10/json/__init__.py", line 293, in load
+    return loads(fp.read(),
+  File "/Users/siddhant/.pyenv/versions/3.10.18/lib/python3.10/json/__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+  File "/Users/siddhant/.pyenv/versions/3.10.18/lib/python3.10/json/decoder.py", line 340, in decode
+    raise JSONDecodeError("Extra data", s, end)
+json.decoder.JSONDecodeError: Extra data: line 6 column 1 (char 254)
+ERROR - 2025-07-18 09:25:49,080 - ddpui - custom_logger.py - get_schemas_for_chart - : Failed to get schemas: Failed to get schemas
+ERROR:ddpui:Failed to get schemas: Failed to get schemas
+ERROR:django.request:Internal Server Error: /api/warehouse/schemas/
+INFO:     127.0.0.1:65309 - "GET /api/warehouse/schemas/ HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:65352 - "POST /api/login/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65355 - "GET /api/currentuserv2 HTTP/1.1" 200 OK
+INFO - 2025-07-18 09:26:07,749 - ddpui - custom_logger.py - get_warehouse_data - : Found org_warehouse: test-warehouse
+INFO:ddpui:Found org_warehouse: test-warehouse
+INFO - 2025-07-18 09:26:07,749 - ddpui - custom_logger.py - get_warehouse_data - : Getting client for warehouse: test-warehouse
+INFO:ddpui:Getting client for warehouse: test-warehouse
+INFO - 2025-07-18 09:26:07,750 - ddpui - custom_logger.py - get_client - : using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+ERROR - 2025-07-18 09:26:07,754 - ddpui - custom_logger.py - get_warehouse_data - : Exception occurred in get_schemas: connection to server at "localhost" (::1), port 5432 failed: FATAL:  database "test_db" does not exist
+Traceback (most recent call last):
+  File "/Users/siddhant/Documents/Dalgo/DDP_backend/ddpui/core/warehousefunctions.py", line 27, in get_warehouse_data
+    data = client.get_tables(kwargs["schema_name"])
+  File "/Users/siddhant/Documents/Dalgo/DDP_backend/ddpui/core/dbtautomation_service.py", line 118, in _get_wclient
+    return get_client(org_warehouse.wtype, credentials, org_warehouse.bq_location)
+  File "/Users/siddhant/Documents/Dalgo/DDP_backend/ddpui/dbt_automation/utils/warehouseclient.py", line 11, in get_client
+    client = PostgresClient(conn_info)
+  File "/Users/siddhant/Documents/Dalgo/DDP_backend/ddpui/dbt_automation/utils/postgres.py", line 111, in __init__
+    self.connection = PostgresClient.get_connection(conn_info)
+  File "/Users/siddhant/Documents/Dalgo/DDP_backend/ddpui/dbt_automation/utils/postgres.py", line 71, in get_connection
+    connection = psycopg2.connect(**connect_params)
+  File "/Users/siddhant/Documents/Dalgo/DDP_backend/.venv/lib/python3.10/site-packages/psycopg2/__init__.py", line 122, in connect
+    conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+psycopg2.OperationalError: connection to server at "localhost" (::1), port 5432 failed: FATAL:  database "test_db" does not exist
+
+ERROR:ddpui:Exception occurred in get_schemas: connection to server at "localhost" (::1), port 5432 failed: FATAL:  database "test_db" does not exist
+Traceback (most recent call last):
+  File "/Users/siddhant/Documents/Dalgo/DDP_backend/ddpui/core/warehousefunctions.py", line 27, in get_warehouse_data
+    data = client.get_tables(kwargs["schema_name"])
+  File "/Users/siddhant/Documents/Dalgo/DDP_backend/ddpui/core/dbtautomation_service.py", line 118, in _get_wclient
+    return get_client(org_warehouse.wtype, credentials, org_warehouse.bq_location)
+  File "/Users/siddhant/Documents/Dalgo/DDP_backend/ddpui/dbt_automation/utils/warehouseclient.py", line 11, in get_client
+    client = PostgresClient(conn_info)
+  File "/Users/siddhant/Documents/Dalgo/DDP_backend/ddpui/dbt_automation/utils/postgres.py", line 111, in __init__
+    self.connection = PostgresClient.get_connection(conn_info)
+  File "/Users/siddhant/Documents/Dalgo/DDP_backend/ddpui/dbt_automation/utils/postgres.py", line 71, in get_connection
+    connection = psycopg2.connect(**connect_params)
+  File "/Users/siddhant/Documents/Dalgo/DDP_backend/.venv/lib/python3.10/site-packages/psycopg2/__init__.py", line 122, in connect
+    conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+psycopg2.OperationalError: connection to server at "localhost" (::1), port 5432 failed: FATAL:  database "test_db" does not exist
+
+ERROR - 2025-07-18 09:26:07,755 - ddpui - custom_logger.py - get_schemas_for_chart - : Failed to get schemas: Failed to get schemas
+ERROR:ddpui:Failed to get schemas: Failed to get schemas
+ERROR:django.request:Internal Server Error: /api/warehouse/schemas/
+INFO:     127.0.0.1:65352 - "GET /api/warehouse/schemas/ HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:65384 - "POST /api/login/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65387 - "GET /api/currentuserv2 HTTP/1.1" 200 OK
+INFO - 2025-07-18 09:26:21,760 - ddpui - custom_logger.py - get_warehouse_data - : Found org_warehouse: test-warehouse
+INFO:ddpui:Found org_warehouse: test-warehouse
+INFO - 2025-07-18 09:26:21,760 - ddpui - custom_logger.py - get_warehouse_data - : Getting client for warehouse: test-warehouse
+INFO:ddpui:Getting client for warehouse: test-warehouse
+INFO - 2025-07-18 09:26:21,761 - ddpui - custom_logger.py - get_client - : using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+INFO:     127.0.0.1:65384 - "GET /api/warehouse/schemas/ HTTP/1.1" 200 OK
+INFO - 2025-07-18 09:26:21,782 - ddpui - custom_logger.py - get_warehouse_data - : Found org_warehouse: test-warehouse
+INFO:ddpui:Found org_warehouse: test-warehouse
+INFO - 2025-07-18 09:26:21,783 - ddpui - custom_logger.py - get_warehouse_data - : Getting client for warehouse: test-warehouse
+INFO:ddpui:Getting client for warehouse: test-warehouse
+INFO - 2025-07-18 09:26:21,783 - ddpui - custom_logger.py - get_client - : using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+INFO:     127.0.0.1:65387 - "GET /api/warehouse/tables/?schema_name=analytics HTTP/1.1" 200 OK
+INFO - 2025-07-18 09:26:21,806 - ddpui - custom_logger.py - get_warehouse_data - : Found org_warehouse: test-warehouse
+INFO:ddpui:Found org_warehouse: test-warehouse
+INFO - 2025-07-18 09:26:21,807 - ddpui - custom_logger.py - get_warehouse_data - : Getting client for warehouse: test-warehouse
+INFO:ddpui:Getting client for warehouse: test-warehouse
+INFO - 2025-07-18 09:26:21,807 - ddpui - custom_logger.py - get_client - : using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+INFO:     127.0.0.1:65384 - "GET /api/warehouse/columns/?schema_name=analytics&table_name=sales HTTP/1.1" 200 OK
+INFO - 2025-07-18 09:26:21,833 - ddpui - custom_logger.py - get_client - admin-org: using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+WARNING:django.request:Bad Request: /api/charts/generate
+INFO:     127.0.0.1:65387 - "POST /api/charts/generate HTTP/1.1" 400 Bad Request
+INFO:     127.0.0.1:49174 - "POST /api/login/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49177 - "GET /api/currentuserv2 HTTP/1.1" 200 OK
+INFO - 2025-07-18 09:28:11,970 - ddpui - custom_logger.py - get_warehouse_data - : Found org_warehouse: test-warehouse
+INFO:ddpui:Found org_warehouse: test-warehouse
+INFO - 2025-07-18 09:28:11,972 - ddpui - custom_logger.py - get_warehouse_data - : Getting client for warehouse: test-warehouse
+INFO:ddpui:Getting client for warehouse: test-warehouse
+INFO - 2025-07-18 09:28:11,972 - ddpui - custom_logger.py - get_client - : using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+INFO:     127.0.0.1:49174 - "GET /api/warehouse/schemas/ HTTP/1.1" 200 OK
+INFO - 2025-07-18 09:28:11,994 - ddpui - custom_logger.py - get_warehouse_data - : Found org_warehouse: test-warehouse
+INFO:ddpui:Found org_warehouse: test-warehouse
+INFO - 2025-07-18 09:28:11,994 - ddpui - custom_logger.py - get_warehouse_data - : Getting client for warehouse: test-warehouse
+INFO:ddpui:Getting client for warehouse: test-warehouse
+INFO - 2025-07-18 09:28:11,994 - ddpui - custom_logger.py - get_client - : using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+INFO:     127.0.0.1:49177 - "GET /api/warehouse/tables/?schema_name=analytics HTTP/1.1" 200 OK
+INFO - 2025-07-18 09:28:12,015 - ddpui - custom_logger.py - get_warehouse_data - : Found org_warehouse: test-warehouse
+INFO:ddpui:Found org_warehouse: test-warehouse
+INFO - 2025-07-18 09:28:12,016 - ddpui - custom_logger.py - get_warehouse_data - : Getting client for warehouse: test-warehouse
+INFO:ddpui:Getting client for warehouse: test-warehouse
+INFO - 2025-07-18 09:28:12,016 - ddpui - custom_logger.py - get_client - : using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+INFO:     127.0.0.1:49174 - "GET /api/warehouse/columns/?schema_name=analytics&table_name=sales HTTP/1.1" 200 OK
+INFO - 2025-07-18 09:28:12,040 - ddpui - custom_logger.py - get_client - admin-org: using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+ERROR:chart_service:Failed to cache chart data: Object of type Decimal is not JSON serializable
+INFO:     127.0.0.1:49177 - "POST /api/charts/generate HTTP/1.1" 200 OK
+INFO:chart_api:Chart creation request from user test@dalgo.com for org admin-org
+INFO - 2025-07-18 09:28:12,068 - ddpui - custom_logger.py - get_client - admin-org: using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+INFO:chart_service:Creating chart 'Sales by Product Category' for org admin-org by user test@dalgo.com
+INFO:chart_service:Successfully created chart 6 'Sales by Product Category'
+INFO:chart_api:Successfully created chart 6 for user test@dalgo.com
+INFO:     127.0.0.1:49174 - "POST /api/charts/ HTTP/1.1" 200 OK
+INFO - 2025-07-18 09:28:12,091 - ddpui - custom_logger.py - get_client - admin-org: using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+INFO:     127.0.0.1:49177 - "GET /api/charts/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50987 - "POST /api/login/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50990 - "GET /api/currentuserv2 HTTP/1.1" 200 OK
+INFO - 2025-07-18 09:57:27,164 - ddpui - custom_logger.py - get_warehouse_data - : Found org_warehouse: test-warehouse
+INFO:ddpui:Found org_warehouse: test-warehouse
+INFO - 2025-07-18 09:57:27,165 - ddpui - custom_logger.py - get_warehouse_data - : Getting client for warehouse: test-warehouse
+INFO:ddpui:Getting client for warehouse: test-warehouse
+INFO - 2025-07-18 09:57:27,165 - ddpui - custom_logger.py - get_client - : using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+INFO:     127.0.0.1:50987 - "GET /api/warehouse/schemas/ HTTP/1.1" 200 OK
+INFO - 2025-07-18 09:57:27,185 - ddpui - custom_logger.py - get_client - admin-org: using dev secretsmanager
+INFO:ddpui:using dev secretsmanager
+ERROR:chart_service:Failed to cache chart data: Object of type Decimal is not JSON serializable
+INFO:     127.0.0.1:50990 - "POST /api/charts/generate HTTP/1.1" 200 OK
+WARNING:django.request:Method Not Allowed: /api/charts/
+INFO:     127.0.0.1:52520 - "HEAD /api/charts/ HTTP/1.1" 405 Method Not Allowed
+WARNING:django.request:Unauthorized: /api/charts/
+INFO:     127.0.0.1:53367 - "GET /api/charts/ HTTP/1.1" 401 Unauthorized
+WARNING:django.request:Unauthorized: /api/charts/generate
+INFO:     127.0.0.1:53369 - "POST /api/charts/generate HTTP/1.1" 401 Unauthorized
+WARNING:django.request:Not Found: /api/charts/templates/
+INFO:     127.0.0.1:53367 - "GET /api/charts/templates/ HTTP/1.1" 404 Not Found
+WARNING:django.request:Unauthorized: /api/charts/cache-stats
+INFO:     127.0.0.1:53369 - "GET /api/charts/cache-stats HTTP/1.1" 401 Unauthorized
+WARNING:django.request:Unauthorized: /api/warehouse/schemas/
+INFO:     127.0.0.1:53367 - "GET /api/warehouse/schemas/ HTTP/1.1" 401 Unauthorized
+WARNING:django.request:Unauthorized: /api/warehouse/tables/
+INFO:     127.0.0.1:53369 - "GET /api/warehouse/tables/?schema=public HTTP/1.1" 401 Unauthorized
+WARNING:django.request:Unauthorized: /api/warehouse/columns/
+INFO:     127.0.0.1:53367 - "GET /api/warehouse/columns/?schema=public&table=test HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:53369 - "GET /admin/ HTTP/1.1" 302 Found
+INFO:     127.0.0.1:53367 - "GET /admin/login/?next=/admin/ HTTP/1.1" 200 OK
+WARNING:django.request:Not Found: /
+INFO:     127.0.0.1:53369 - "GET / HTTP/1.1" 404 Not Found
+WARNING:django.request:Not Found: /
+INFO:     127.0.0.1:54379 - "GET / HTTP/1.1" 404 Not Found
+WARNING:django.request:Unauthorized: /api/charts/
+INFO:     127.0.0.1:54384 - "GET /api/charts/ HTTP/1.1" 401 Unauthorized
+WARNING:django.request:Not Found: /api/users/login/
+INFO:     127.0.0.1:54384 - "POST /api/users/login/ HTTP/1.1" 404 Not Found
+WARNING:django.request:Unauthorized: /api/charts/
+INFO:     127.0.0.1:54384 - "GET /api/charts/ HTTP/1.1" 401 Unauthorized
+WARNING:django.request:Unauthorized: /api/charts/
+INFO:     127.0.0.1:54384 - "POST /api/charts/ HTTP/1.1" 401 Unauthorized
+WARNING:django.request:Unauthorized: /api/charts/1
+INFO:     127.0.0.1:54384 - "GET /api/charts/1 HTTP/1.1" 401 Unauthorized
+WARNING:django.request:Unauthorized: /api/charts/1
+INFO:     127.0.0.1:54384 - "PUT /api/charts/1 HTTP/1.1" 401 Unauthorized
+WARNING:django.request:Unauthorized: /api/charts/1
+INFO:     127.0.0.1:54384 - "DELETE /api/charts/1 HTTP/1.1" 401 Unauthorized
+WARNING:django.request:Unauthorized: /api/charts/generate
+INFO:     127.0.0.1:54384 - "POST /api/charts/generate HTTP/1.1" 401 Unauthorized
+WARNING:django.request:Unauthorized: /api/warehouse/schemas/
+INFO:     127.0.0.1:54384 - "GET /api/warehouse/schemas/ HTTP/1.1" 401 Unauthorized
+WARNING:django.request:Unauthorized: /api/warehouse/tables/
+INFO:     127.0.0.1:54384 - "GET /api/warehouse/tables/?schema=public HTTP/1.1" 401 Unauthorized
+WARNING:django.request:Unauthorized: /api/warehouse/columns/
+INFO:     127.0.0.1:54384 - "GET /api/warehouse/columns/?schema=public&table=test HTTP/1.1" 401 Unauthorized
+WARNING:django.request:Unauthorized: /api/charts/generate
+INFO:     127.0.0.1:54384 - "POST /api/charts/generate HTTP/1.1" 401 Unauthorized
+WARNING:django.request:Unauthorized: /api/charts/
+INFO:     127.0.0.1:54384 - "POST /api/charts/ HTTP/1.1" 401 Unauthorized
+WARNING:django.request:Unauthorized: /api/charts/
+INFO:     127.0.0.1:54499 - "GET /api/charts/ HTTP/1.1" 401 Unauthorized
+WARNING:django.request:Unauthorized: /api/charts/
+INFO:     127.0.0.1:54499 - "POST /api/charts/ HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:54499 - "OPTIONS /api/charts/ HTTP/1.1" 200 OK
+WARNING:django.request:Not Found: /api/v1/workspaces/create
+INFO:     127.0.0.1:54744 - "POST /api/v1/workspaces/create HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:55287 - "POST /api/login/ HTTP/1.1" 200 OK
+WARNING:django.request:Not Found: /api/currentuserv2
+INFO:     127.0.0.1:55290 - "GET /api/currentuserv2 HTTP/1.1" 404 Not Found
+WARNING:django.request:Not Found: /api/charts/
+INFO:     127.0.0.1:55293 - "POST /api/charts/ HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:55361 - "GET /api/docs HTTP/1.1" 200 OK
+WARNING:django.request:Method Not Allowed: /api/charts/
+INFO:     127.0.0.1:55386 - "HEAD /api/charts/ HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:55435 - "POST /api/login/ HTTP/1.1" 200 OK
+WARNING:django.request:Not Found: /api/currentuserv2
+INFO:     127.0.0.1:55438 - "GET /api/currentuserv2 HTTP/1.1" 404 Not Found
+WARNING:django.request:Not Found: /api/charts/
+INFO:     127.0.0.1:55441 - "POST /api/charts/ HTTP/1.1" 404 Not Found

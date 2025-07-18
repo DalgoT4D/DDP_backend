@@ -393,3 +393,55 @@ def toggle_favorite(request, chart_id: int):
         return JsonResponse(
             {"success": False, "error": str(e), "message": "Failed to toggle favorite"}, status=500
         )
+
+
+@chart_router.get("/{chart_id}/data", response=ChartGenerateResponseSchema)
+@has_permission(["can_view_chart"])
+def get_chart_data(request, chart_id: int):
+    """Get data for a specific chart"""
+    try:
+        orguser = request.orguser
+        chart_service = ChartService(orguser.org, orguser)
+
+        # Get the chart
+        chart = chart_service.get_chart(chart_id)
+
+        # Extract configuration
+        config = chart.config
+        computation_type = config.get("computation_type", "raw")
+
+        # Generate chart data based on configuration
+        if computation_type == "raw":
+            chart_data = chart_service.generate_chart_data(
+                chart_type=config.get("chartType"),
+                computation_type=computation_type,
+                schema_name=chart.schema_name,
+                table_name=chart.table_name,
+                xaxis=config.get("xAxis"),
+                yaxis=config.get("yAxis"),
+            )
+        else:
+            chart_data = chart_service.generate_chart_data(
+                chart_type=config.get("chartType"),
+                computation_type=computation_type,
+                schema_name=chart.schema_name,
+                table_name=chart.table_name,
+                aggregate_col=config.get("aggregate_col"),
+                aggregate_func=config.get("aggregate_func"),
+                aggregate_col_alias=config.get("aggregate_col_alias"),
+                dimension_col=config.get("dimension_col"),
+            )
+
+        return JsonResponse(
+            {"success": True, "data": chart_data, "message": "Chart data retrieved successfully"}
+        )
+
+    except ValidationError as e:
+        return JsonResponse(
+            {"success": False, "error": str(e), "message": "Failed to retrieve chart data"},
+            status=400,
+        )
+    except Exception as e:
+        return JsonResponse(
+            {"success": False, "error": str(e), "message": "Internal server error"}, status=500
+        )
