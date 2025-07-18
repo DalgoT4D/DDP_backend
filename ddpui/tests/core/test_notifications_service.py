@@ -18,6 +18,7 @@ from ddpui.core.notifications_service import (
     mark_notification_as_read_or_unread,
     delete_scheduled_notification,
     get_unread_notifications_count,
+    mark_all_notifications_as_read,
 )
 from ddpui.schemas.notifications_api_schemas import SentToEnum, NotificationDataSchema
 from ddpui.tests.api_tests.test_user_org_api import mock_request, seed_db
@@ -258,3 +259,49 @@ def test_count_unread_notifications_success(orguser):
     assert error is None
     assert result["success"] is True
     assert result["res"] >= 0
+
+
+def test_mark_all_notifications_as_read_success(orguser, unsent_notification):
+    """test success mark all notifications as read"""
+    # Create additional unread notifications for the same user
+    notification2 = Notification.objects.create(
+        author="test_author_2",
+        message="Test message 2",
+        urgent=False,
+        scheduled_time=None,
+        sent_time=datetime.now(),
+    )
+    NotificationRecipient.objects.create(
+        notification=notification2,
+        recipient=orguser,
+        read_status=False,
+    )
+
+    # Ensure the first notification is also unread
+    NotificationRecipient.objects.filter(
+        notification=unsent_notification, recipient=orguser
+    ).update(read_status=False)
+
+    error, result = mark_all_notifications_as_read(orguser.id)
+    assert error is None
+    assert result["success"] is True
+    assert result["updated_count"] >= 1
+
+    # Clean up
+    notification2.delete()
+
+
+def test_mark_all_notifications_as_read_no_unread_notifications(orguser):
+    """test mark all notifications as read when no unread notifications exist"""
+    error, result = mark_all_notifications_as_read(orguser.id)
+    assert error is None
+    assert result["success"] is True
+    assert result["updated_count"] == 0
+
+
+def test_mark_all_notifications_as_read_user_not_exist():
+    """test failure mark all notifications as read when user doesn't exist"""
+    error, result = mark_all_notifications_as_read(9999)
+    assert error is None  # Function doesn't check if user exists, just updates matching records
+    assert result["success"] is True
+    assert result["updated_count"] == 0
