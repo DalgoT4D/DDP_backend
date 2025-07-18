@@ -23,16 +23,16 @@ import ddpui.utils.flags  # pylint: disable=unused-import
 
 load_dotenv()
 
-sentry_sdk.init(
-    dsn=os.getenv("SENTRY_DSN"),
-    # Set traces_sample_rate to 1.0 to capture 100%
-    # of transactions for performance monitoring.
-    traces_sample_rate=float(os.getenv("SENTRY_TSR", "1.0")),
-    # Set profiles_sample_rate to 1.0 to profile 100%
-    # of sampled transactions.
-    # We recommend adjusting this value in production.
-    profiles_sample_rate=float(os.getenv("SENTRY_PSR", "1.0")),
-)
+# sentry_sdk.init(
+#     dsn=os.getenv("SENTRY_DSN"),
+#     # Set traces_sample_rate to 1.0 to capture 100%
+#     # of transactions for performance monitoring.
+#     traces_sample_rate=float(os.getenv("SENTRY_TSR", "1.0")),
+#     # Set profiles_sample_rate to 1.0 to profile 100%
+#     # of sampled transactions.
+#     # We recommend adjusting this value in production.
+#     profiles_sample_rate=float(os.getenv("SENTRY_PSR", "1.0")),
+# )
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -94,6 +94,7 @@ INSTALLED_APPS = [
     "django_extensions",
     "channels",
     "flags",
+    "ninja",
 ]
 
 # Feature flags
@@ -270,4 +271,27 @@ SIMPLE_JWT = {
     "AUTH_HEADER_TYPES": ("Bearer",),
     "SIGNING_KEY": os.getenv("JWT_SECRET_KEY", SECRET_KEY),
     # ...add other SimpleJWT settings as needed...
+}
+
+# Django Ninja settings
+NINJA_JWT = {
+    "AUTH_HEADER_TYPES": ("Bearer",),
+    "AUTH_HEADER_NAME": "HTTP_AUTHORIZATION",
+    "ALGORITHM": "HS256",
+    "SIGNING_KEY": os.getenv("JWT_SECRET_KEY", SECRET_KEY),
+    "VERIFYING_KEY": None,
+    "AUDIENCE": None,
+    "ISSUER": None,
+    "JWK_URL": None,
+    "LEEWAY": 0,
+    "AUTH_TOKEN_CLASSES": ("rest_framework_simplejwt.tokens.AccessToken",),
+    "TOKEN_TYPE_CLAIM": "token_type",
+    "JTI_CLAIM": "jti",
+    "SLIDING_TOKEN_REFRESH_EXP_CLAIM": "refresh_exp",
+    "SLIDING_TOKEN_LIFETIME": timedelta(
+        hours=int(os.getenv("JWT_ACCESS_TOKEN_EXPIRY_HOURS", "12"))
+    ),
+    "SLIDING_TOKEN_REFRESH_LIFETIME": timedelta(
+        days=int(os.getenv("JWT_REFRESH_TOKEN_EXPIRY_DAYS", "30"))
+    ),
 }
