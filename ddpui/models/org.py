@@ -72,6 +72,7 @@ class Org(models.Model):
     viz_url = models.CharField(max_length=100, null=True)
     viz_login_type = models.CharField(choices=OrgVizLoginType.choices(), max_length=50, null=True)
     ses_whitelisted_email = models.TextField(max_length=100, null=True)
+    dalgouser_superset_creds_key = models.TextField(null=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
