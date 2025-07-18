@@ -9,6 +9,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui import auth
 from django.contrib.auth.models import User
 from ddpui.api.notifications_api import (
+    mark_all_notifications_as_read,
     post_create_notification,
     get_notification_history,
     get_notification_recipients,
@@ -329,3 +330,33 @@ def test_get_unread_notifications_count_success(orguser):
         assert response["success"] is True
         assert response["res"] == 0
         mock_get_unread_notifications_count.assert_called_once_with(orguser)
+
+
+@patch("ddpui.core.notifications_service.mark_all_notifications_as_read")
+def test_mark_all_notifications_as_read_success(mock_mark_all_notifications_as_read, orguser):
+    """Tests the success of the API endpoint to mark all notifications as read"""
+    mock_mark_all_notifications_as_read.return_value = (None, {"success": True, "updated_count": 5})
+
+    request = MagicMock()
+    request.orguser = orguser
+
+    response = mark_all_notifications_as_read(request)
+
+    assert response["success"] is True
+    assert response["updated_count"] == 5
+    mock_mark_all_notifications_as_read.assert_called_once_with(orguser.id)
+
+
+@patch("ddpui.core.notifications_service.mark_all_notifications_as_read")
+def test_mark_all_notifications_as_read_error(mock_mark_all_notifications_as_read, orguser):
+    """Tests the failure of the API endpoint when the service returns an error"""
+    mock_mark_all_notifications_as_read.return_value = ("Some error occurred", None)
+
+    request = MagicMock()
+    request.orguser = orguser
+
+    with pytest.raises(HttpError) as excinfo:
+        mark_all_notifications_as_read(request)
+
+    assert "Some error occurred" in str(excinfo.value)
+    mock_mark_all_notifications_as_read.assert_called_once_with(orguser.id)
