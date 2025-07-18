@@ -1,3 +1,4 @@
+from unittest.mock import patch
 from ddpui.utils.helpers import (
     remove_nested_attribute,
     isvalid_email,
@@ -7,6 +8,7 @@ from ddpui.utils.helpers import (
     update_dict_but_not_stars,
     nice_bytes,
     find_key_in_dictionary,
+    get_integer_env_var,
 )
 
 
@@ -195,3 +197,38 @@ def test_find_key_in_dictionary():
     assert find_key_in_dictionary({"a": {"b": "c"}}, "b") == "c"
     assert find_key_in_dictionary({"a": {"b": {"c": "d"}}}, "c") == "d"
     assert find_key_in_dictionary({"a": {"b": {"c": "d"}}}, "d") is None
+
+
+def test_get_integer_env_var_1():
+    """tests get_integer_env_var"""
+    with patch("os.getenv") as mock_getenv:
+        mock_getenv.return_value = ""
+        assert get_integer_env_var("TEST_VAR", 19, None, False) == 19
+
+
+def test_get_integer_env_var_2():
+    """tests get_integer_env_var"""
+    with patch("os.getenv") as mock_getenv:
+        mock_getenv.return_value = "18"
+        assert get_integer_env_var("TEST_VAR", 19, None, False) == 18
+
+
+def test_get_integer_env_var_3():
+    """tests get_integer_env_var"""
+    with patch("os.getenv") as mock_getenv:
+        mock_getenv.return_value = "hello"
+        assert get_integer_env_var("TEST_VAR", 20, None, False) == 20
+
+
+def test_get_integer_env_var_4():
+    """tests get_integer_env_var"""
+    with patch("os.getenv") as mock_getenv:
+        mock_getenv.return_value = "-20"
+        assert get_integer_env_var("TEST_VAR", 21, None, False) == 21
+
+
+def test_get_integer_env_var_5():
+    """tests get_integer_env_var"""
+    with patch("os.getenv") as mock_getenv:
+        mock_getenv.return_value = "-20"
+        assert get_integer_env_var("TEST_VAR", 21, None, True) == -20
