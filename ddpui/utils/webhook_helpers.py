@@ -434,3 +434,11 @@ def do_handle_prefect_webhook(flow_run_id: str, state: str):
                         connection_id,
                         flow_run_id,
                     )
+
+        # Trigger automatic summarization for failures
+        if state in [FLOW_RUN_FAILED_STATE_NAME, FLOW_RUN_CRASHED_STATE_NAME]:
+            org = get_org_from_flow_run(flow_run)
+            # Import here to avoid circular import
+            from ddpui.celeryworkers.tasks import trigger_log_summarization_for_failed_flow
+
+            trigger_log_summarization_for_failed_flow.delay(flow_run_id, flow_run)
