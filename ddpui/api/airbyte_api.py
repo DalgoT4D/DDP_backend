@@ -50,6 +50,24 @@ from ddpui.ddpairbyte.schema import (
     AirbyteJobStatusResponse,
     AirbyteJobAttemptLog,
     AirbyteTaskResponse,
+    AirbyteCheckConnectionResponse,
+    AirbyteConnectionSchemaUpdate,
+    AirbyteSource,
+    AirbyteCatalog,
+    AirbyteDestinationDefinition,
+    AirbyteDestinationIdResponse,
+    AirbyteDestination,
+    AirbyteJobSimpleStatus,
+    AirbyteStreamJsonSchema,
+    AirbyteStream,
+    AirbyteStreamConfig,
+    AirbyteSelectedStream,
+    AirbyteSyncCatalog,
+    AirbyteSchedule,
+    AirbyteConnectionResponse,
+    AirbyteJobInfo,
+    AirbyteAttempt,
+    AirbyteJob,
 )
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
@@ -148,9 +166,9 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
     return {"sourceId": source["sourceId"]}
 
 
-@airbyte_router.put("/sources/{source_id}")
+@airbyte_router.put("/sources/{source_id}", response=AirbyteSourceCreateResponse)
 @has_permission(["can_edit_source"])
-def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
+def put_airbyte_source(request: HttpRequest, source_id: str, payload: AirbyteSourceUpdate):
     """Update airbyte source in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org is None:
@@ -179,9 +197,9 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
     return {"sourceId": source["sourceId"]}
 
 
-@airbyte_router.post("/sources/check_connection/")
+@airbyte_router.post("/sources/check_connection/", response=AirbyteCheckConnectionResponse)
 @has_permission(["can_create_source"])
-def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
+def post_airbyte_check_source(request: HttpRequest, payload: AirbyteSourceCreate):
     """Test the source connection in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -209,10 +227,12 @@ def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
     }
 
 
-@airbyte_router.post("/sources/{source_id}/check_connection_for_update/")
+@airbyte_router.post(
+    "/sources/{source_id}/check_connection_for_update/", response=AirbyteCheckConnectionResponse
+)
 @has_permission(["can_edit_source"])
 def post_airbyte_check_source_for_update(
-    request, source_id: str, payload: AirbyteSourceUpdateCheckConnection
+    request: HttpRequest, source_id: str, payload: AirbyteSourceUpdateCheckConnection
 ):
     """Test the source connection in the user organization workspace"""
     orguser: OrgUser = request.orguser
@@ -240,9 +260,9 @@ def post_airbyte_check_source_for_update(
     }
 
 
-@airbyte_router.get("/sources")
+@airbyte_router.get("/sources", response=List[AirbyteSource])
 @has_permission(["can_view_sources"])
-def get_airbyte_sources(request):
+def get_airbyte_sources(request: HttpRequest):
     """Fetch all airbyte sources in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -253,9 +273,9 @@ def get_airbyte_sources(request):
     return res
 
 
-@airbyte_router.get("/sources/{source_id}")
+@airbyte_router.get("/sources/{source_id}", response=AirbyteSource)
 @has_permission(["can_view_source"])
-def get_airbyte_source(request, source_id):
+def get_airbyte_source(request: HttpRequest, source_id: str):
     """Fetch a single airbyte source in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -266,9 +286,9 @@ def get_airbyte_source(request, source_id):
     return res
 
 
-@airbyte_router.get("/sources/{source_id}/schema_catalog")
+@airbyte_router.get("/sources/{source_id}/schema_catalog", response=AirbyteCatalog)
 @has_permission(["can_view_source"])
-def get_airbyte_source_schema_catalog(request, source_id):
+def get_airbyte_source_schema_catalog(request: HttpRequest, source_id: str):
     """Fetch schema catalog for a source in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -279,9 +299,9 @@ def get_airbyte_source_schema_catalog(request, source_id):
     return res
 
 
-@airbyte_router.get("/destination_definitions")
+@airbyte_router.get("/destination_definitions", response=List[AirbyteDestinationDefinition])
 @has_permission(["can_view_warehouses"])
-def get_airbyte_destination_definitions(request):
+def get_airbyte_destination_definitions(request: HttpRequest):
     """Fetch destination definitions in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -297,9 +317,12 @@ def get_airbyte_destination_definitions(request):
     return res
 
 
-@airbyte_router.get("/destination_definitions/{destinationdef_id}/specifications")
+@airbyte_router.get(
+    "/destination_definitions/{destinationdef_id}/specifications",
+    response=AirbyteConnectionSpecification,
+)
 @has_permission(["can_view_warehouse"])
-def get_airbyte_destination_definition_specifications(request, destinationdef_id):
+def get_airbyte_destination_definition_specifications(request: HttpRequest, destinationdef_id: str):
     """
     Fetch specifications for a destination
     definition in the user organization workspace
@@ -315,9 +338,9 @@ def get_airbyte_destination_definition_specifications(request, destinationdef_id
     return res
 
 
-@airbyte_router.post("/destinations/")
+@airbyte_router.post("/destinations/", response=AirbyteDestinationIdResponse)
 @has_permission(["can_create_warehouse"])
-def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
+def post_airbyte_destination(request: HttpRequest, payload: AirbyteDestinationCreate):
     """Create an airbyte destination in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -333,9 +356,9 @@ def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
     return {"destinationId": destination["destinationId"]}
 
 
-@airbyte_router.post("/destinations/check_connection/")
+@airbyte_router.post("/destinations/check_connection/", response=AirbyteCheckConnectionResponse)
 @has_permission(["can_create_warehouse"])
-def post_airbyte_check_destination(request, payload: AirbyteDestinationCreate):
+def post_airbyte_check_destination(request: HttpRequest, payload: AirbyteDestinationCreate):
     """Test connection to destination in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -350,10 +373,13 @@ def post_airbyte_check_destination(request, payload: AirbyteDestinationCreate):
     }
 
 
-@airbyte_router.post("/destinations/{destination_id}/check_connection_for_update/")
+@airbyte_router.post(
+    "/destinations/{destination_id}/check_connection_for_update/",
+    response=AirbyteCheckConnectionResponse,
+)
 @has_permission(["can_edit_warehouse"])
 def post_airbyte_check_destination_for_update(
-    request, destination_id: str, payload: AirbyteDestinationUpdateCheckConnection
+    request: HttpRequest, destination_id: str, payload: AirbyteDestinationUpdateCheckConnection
 ):
     """Test connection to destination in the user organization workspace"""
     orguser: OrgUser = request.orguser
@@ -367,9 +393,9 @@ def post_airbyte_check_destination_for_update(
     }
 
 
-@airbyte_router.get("/destinations")
+@airbyte_router.get("/destinations", response=List[AirbyteDestination])
 @has_permission(["can_view_warehouses"])
-def get_airbyte_destinations(request):
+def get_airbyte_destinations(request: HttpRequest):
     """Fetch all airbyte destinations in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -380,9 +406,9 @@ def get_airbyte_destinations(request):
     return res
 
 
-@airbyte_router.get("/destinations/{destination_id}")
+@airbyte_router.get("/destinations/{destination_id}", response=AirbyteDestination)
 @has_permission(["can_view_warehouse"])
-def get_airbyte_destination(request, destination_id):
+def get_airbyte_destination(request: HttpRequest, destination_id: str):
     """Fetch an airbyte destination in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -393,9 +419,9 @@ def get_airbyte_destination(request, destination_id):
     return res
 
 
-@airbyte_router.get("/jobs/{job_id}")
+@airbyte_router.get("/jobs/{job_id}", response=AirbyteJobStatusResponse)
 @has_permission(["can_view_connection"])
-def get_job_status(request, job_id):
+def get_job_status(request: HttpRequest, job_id: int):
     """get the job info from airbyte"""
     result = airbyte_service.get_job_info(job_id)
     logs = result["attempts"][-1]["logs"]["logLines"]
@@ -405,9 +431,9 @@ def get_job_status(request, job_id):
     }
 
 
-@airbyte_router.get("/jobs/{job_id}/status")
+@airbyte_router.get("/jobs/{job_id}/status", response=AirbyteJobSimpleStatus)
 @has_permission(["can_view_connection"])
-def get_job_status_without_logs(request, job_id):
+def get_job_status_without_logs(request: HttpRequest, job_id: int):
     """get the job info from airbyte"""
     result = airbyte_service.get_job_info_without_logs(job_id)
     print(result)
@@ -422,7 +448,7 @@ def get_job_status_without_logs(request, job_id):
 
 @airbyte_router.post("/v1/workspace/", response=AirbyteWorkspace)
 @has_permission(["can_create_org"])
-def post_airbyte_workspace_v1(request, payload: AirbyteWorkspaceCreate):
+def post_airbyte_workspace_v1(request: HttpRequest, payload: AirbyteWorkspaceCreate):
     """Create an airbyte workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is not None:
@@ -442,7 +468,7 @@ def post_airbyte_workspace_v1(request, payload: AirbyteWorkspaceCreate):
     response=AirbyteConnectionCreateResponse,
 )
 @has_permission(["can_create_connection"])
-def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
+def post_airbyte_connection_v1(request: HttpRequest, payload: AirbyteConnectionCreate):
     """Create an airbyte connection in the user organization workspace"""
     orguser: OrgUser = request.orguser
     org = orguser.org
@@ -465,7 +491,7 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
     response=List[AirbyteGetConnectionsResponse],
 )
 @has_permission(["can_view_connections"])
-def get_airbyte_connections_v1(request):
+def get_airbyte_connections_v1(request: HttpRequest):
     """Fetch all airbyte connections in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -481,10 +507,10 @@ def get_airbyte_connections_v1(request):
 
 @airbyte_router.get(
     "/v1/connections/{connection_id}",
-    response=AirbyteConnectionCreateResponse,
+    response=AirbyteConnectionResponse,
 )
 @has_permission(["can_view_connection"])
-def get_airbyte_connection_v1(request, connection_id):
+def get_airbyte_connection_v1(request: HttpRequest, connection_id: str):
     """Fetch a connection in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -497,10 +523,10 @@ def get_airbyte_connection_v1(request, connection_id):
     return res
 
 
-@airbyte_router.put("/v1/connections/{connection_id}/update")
+@airbyte_router.put("/v1/connections/{connection_id}/update", response=AirbyteConnectionResponse)
 @has_permission(["can_edit_connection"])
 def put_airbyte_connection_v1(
-    request, connection_id, payload: AirbyteConnectionUpdate
+    request: HttpRequest, connection_id: str, payload: AirbyteConnectionUpdate
 ):  # pylint: disable=unused-argument
     """Update an airbyte connection in the user organization workspace"""
     orguser: OrgUser = request.orguser
@@ -515,9 +541,9 @@ def put_airbyte_connection_v1(
     return res
 
 
-@airbyte_router.delete("/v1/connections/{connection_id}")
+@airbyte_router.delete("/v1/connections/{connection_id}", response=AirbyteSuccessResponse)
 @has_permission(["can_delete_connection"])
-def delete_airbyte_connection_v1(request, connection_id):
+def delete_airbyte_connection_v1(request: HttpRequest, connection_id: str):
     """Update an airbyte connection in the user organization workspace"""
     orguser: OrgUser = request.orguser
     org = orguser.org
@@ -533,9 +559,9 @@ def delete_airbyte_connection_v1(request, connection_id):
     return {"success": 1}
 
 
-@airbyte_router.get("/v1/connections/{connection_id}/jobs")
+@airbyte_router.get("/v1/connections/{connection_id}/jobs", response=AirbyteJobInfo)
 @has_permission(["can_view_connection"])
-def get_latest_job_for_connection(request, connection_id):
+def get_latest_job_for_connection(request: HttpRequest, connection_id: str):
     """get the job info from airbyte for a connection"""
     orguser: OrgUser = request.orguser
     org = orguser.org
@@ -548,9 +574,11 @@ def get_latest_job_for_connection(request, connection_id):
     return job_info
 
 
-@airbyte_router.get("/v1/connections/{connection_id}/sync/history")
+@airbyte_router.get("/v1/connections/{connection_id}/sync/history", response=List[AirbyteJobInfo])
 @has_permission(["can_view_connection"])
-def get_sync_history_for_connection(request, connection_id, limit: int = 10, offset: int = 0):
+def get_sync_history_for_connection(
+    request: HttpRequest, connection_id: str, limit: int = 10, offset: int = 0
+):
     """get the job info from airbyte for a connection"""
     orguser: OrgUser = request.orguser
     org = orguser.org
@@ -565,9 +593,11 @@ def get_sync_history_for_connection(request, connection_id, limit: int = 10, off
     return job_info
 
 
-@airbyte_router.put("/v1/destinations/{destination_id}/")
+@airbyte_router.put("/v1/destinations/{destination_id}/", response=AirbyteDestinationIdResponse)
 @has_permission(["can_edit_warehouse"])
-def put_airbyte_destination_v1(request, destination_id: str, payload: AirbyteDestinationUpdate):
+def put_airbyte_destination_v1(
+    request: HttpRequest, destination_id: str, payload: AirbyteDestinationUpdate
+):
     """Update an airbyte destination in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org is None:
@@ -582,9 +612,12 @@ def put_airbyte_destination_v1(request, destination_id: str, payload: AirbyteDes
     return {"destinationId": destination["destinationId"]}
 
 
-@airbyte_router.delete("/sources/{source_id}")
+@airbyte_router.delete(
+    "/sources/{source_id}",
+    response=AirbyteSuccessResponse,
+)
 @has_permission(["can_delete_source"])
-def delete_airbyte_source_v1(request, source_id):
+def delete_airbyte_source_v1(request: HttpRequest, source_id: str):
     """Delete a single airbyte source in the user organization workspace"""
     logger.info("deleting source started")
 
@@ -599,9 +632,9 @@ def delete_airbyte_source_v1(request, source_id):
     return {"success": 1}
 
 
-@airbyte_router.get("/v1/connections/{connection_id}/catalog")
+@airbyte_router.get("/v1/connections/{connection_id}/catalog", response=AirbyteTaskResponse)
 @has_permission(["can_view_connection"])
-def get_connection_catalog_v1(request, connection_id):
+def get_connection_catalog_v1(request: HttpRequest, connection_id: str):
     """Fetch a connection in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -648,9 +681,9 @@ def schedule_update_connection_schema(
     return {"success": 1}
 
 
-@airbyte_router.get("/v1/connection/schema_change")
+@airbyte_router.get("/v1/connection/schema_change", response=List[AirbyteConnectionSchemaUpdate])
 @has_permission(["can_view_connection"])
-def get_schema_changes_for_connection(request):
+def get_schema_changes_for_connection(request: HttpRequest):
     """Get schema changes for an org"""
     orguser: OrgUser = request.orguser
     org = orguser.org
