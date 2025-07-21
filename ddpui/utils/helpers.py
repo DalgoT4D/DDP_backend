@@ -223,7 +223,7 @@ def get_integer_env_var(varname: str, default_value: int, logger, allow_negative
 
 
 def extract_year_month(date_str : str)->str:
-        try:
+    try:
         dates = datetime.fromisoformat(date_str)
         return dates.strftime("%Y-%m")
     except ValueError:
