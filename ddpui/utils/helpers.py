@@ -220,3 +220,13 @@ def get_integer_env_var(varname: str, default_value: int, logger, allow_negative
             logger.error("invalid value for " + varname + " in .env: " + os.getenv(varname))
         varvalue = default_value
     return varvalue
+
+
+def extract_year_month(date_str: str)->str:
+    
+    """Extracting the 'yyy-mm' from the date string in ISO format """
+    try:
+        date = datetime.fromisoformat(date_str)
+        return date.strftime("%Y-%m")
+    except ValueError:
+        raise ValueError(f"Invalid Date String: {date_str}")

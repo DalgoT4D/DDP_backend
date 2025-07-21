@@ -10,6 +10,8 @@ from ddpui.utils.helpers import (
     find_key_in_dictionary,
     get_integer_env_var,
 )
+from ddpui.utils.helpers import extract_year_month
+
 
 
 def test_remove_nested_attribute():
@@ -232,3 +234,15 @@ def test_get_integer_env_var_5():
     with patch("os.getenv") as mock_getenv:
         mock_getenv.return_value = "-20"
         assert get_integer_env_var("TEST_VAR", 21, None, True) == -20
+
+
+def test_extract_year_month_valid():
+    assert extract_year_month("2025-07-21")=="2025-07"
+    assert extract_year_month("1999-01-01")=="1999-01"
+    
+def test_extract_year_month_invalid():
+    try:
+        extract_year_month("not-a-date")
+        assert False,"Expected ValueError for invalid date"
+    except ValueError:
+        pass
