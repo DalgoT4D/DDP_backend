@@ -1,3 +1,4 @@
+import pytest
 from unittest.mock import patch
 from ddpui.utils.helpers import (
     remove_nested_attribute,
@@ -240,8 +241,7 @@ def test_extract_year_month_valid():
     assert extract_year_month("2025-07-21")=="2025-07"
     assert extract_year_month("1999-01-01")=="1999-01"
     
-import pytest
-from ddpui.utils import extract_year_month  # or adjust import as needed
+
 
 def test_extract_year_month_invalid():
     with pytest.raises(ValueError, match="Invalid Date String"):
