@@ -240,9 +240,9 @@ def test_extract_year_month_valid():
     assert extract_year_month("2025-07-21")=="2025-07"
     assert extract_year_month("1999-01-01")=="1999-01"
     
+import pytest
+from ddpui.utils import extract_year_month  # or adjust import as needed
+
 def test_extract_year_month_invalid():
-    try:
+    with pytest.raises(ValueError, match="Invalid Date String"):
         extract_year_month("not-a-date")
-        assert False,"Expected ValueError for invalid date"
-    except ValueError:
-        pass
