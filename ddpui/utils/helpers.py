@@ -222,9 +222,19 @@ def get_integer_env_var(varname: str, default_value: int, logger, allow_negative
     return varvalue
 
 
-def extract_year_month(date_str : str)->str:
-    try:
-        dates = datetime.fromisoformat(date_str)
-        return dates.strftime("%Y-%m")
-    except ValueError:
-        raise ValueError(f"Invalid Date String: {date_str}")
+def extract_year_month(date_str: str) -> str:
+    """
+    Extract the year and month from an ISO-formatted date string.
+
+    Args:
+        date_str (str): A date string in ISO 8601 format (e.g., "2024-07-21T15:00:00").
+
+    Returns:
+        str: A string containing the year and month in "YYYY-MM" format.
+
+    Raises:
+        ValueError: If the input string is not a valid ISO date.
+    """
+    dates = datetime.fromisoformat(date_str)
+    return dates.strftime("%Y-%m")
+
