@@ -1,4 +1,5 @@
 from sqlalchemy.sql.functions import Function
+from sqlalchemy import func
 from sqlalchemy.sql.expression import (
     table,
     TableClause,
@@ -30,6 +31,34 @@ class AggQueryBuilder:
     def add_column(self, agg_col: Function | ColumnClause):
         """Push a column to select"""
         self.column_clauses.append(agg_col)
+        return self
+
+    def add_aggregate_column(self, column_name: str, agg_func: str, alias: str = None):
+        """Add an aggregate column with specified function"""
+        col = column(column_name)
+
+        agg_functions = {
+            "sum": func.sum,
+            "avg": func.avg,
+            "count": func.count,
+            "min": func.min,
+            "max": func.max,
+            "count_distinct": lambda c: func.count(func.distinct(c)),
+        }
+
+        agg_func_lower = agg_func.lower()
+        if agg_func_lower not in agg_functions:
+            raise ValueError(f"Unsupported aggregate function: {agg_func}")
+
+        if agg_func_lower == "count_distinct":
+            agg_column = agg_functions[agg_func_lower](col)
+        else:
+            agg_column = agg_functions[agg_func_lower](col)
+
+        if alias:
+            agg_column = agg_column.label(alias)
+
+        self.column_clauses.append(agg_column)
         return self
 
     def fetch_from(self, db_table: str, db_schema: str):
@@ -121,5 +150,84 @@ class AggQueryBuilder:
         self.offset_records: int = 0
         self.where_clauses: list = []
         self.having_clauses: list = []
+
+        return self
+
+
+class QueryBuilder:
+    """
+    Simple query builder for non-aggregated queries
+    """
+
+    def __init__(self):
+        self.column_clauses: list[ColumnClause] = []
+        self.select_from: TableClause = None
+        self.order_by_clauses: list[ColumnClause] = []
+        self.limit_records: int = None
+        self.offset_records: int = 0
+        self.where_clauses: list = []
+
+    def add_column(self, col_name: str):
+        """Add a column to select"""
+        self.column_clauses.append(column(col_name))
+        return self
+
+    def fetch_from(self, db_table: str, db_schema: str):
+        """Set the table to select from"""
+        self.select_from = table(db_table, schema=db_schema)
+        return self
+
+    def where_clause(self, condition):
+        """Add where clause"""
+        self.where_clauses.append(condition)
+        return self
+
+    def order_cols_by(self, cols: list[tuple[str, str]]):
+        """Order by columns"""
+        for col, order in cols:
+            if order.lower() == "asc":
+                self.order_by_clauses.append(asc(column(col)))
+            elif order.lower() == "desc":
+                self.order_by_clauses.append(desc(column(col)))
+        return self
+
+    def limit_rows(self, limit: int):
+        """Limit the number of rows"""
+        self.limit_records = limit
+        return self
+
+    def offset_rows(self, offset: int):
+        """Offset the number of rows"""
+        self.offset_records = offset
+        return self
+
+    def build(self):
+        """Build and return the SQL statement"""
+        if self.select_from is None:
+            raise ValueError("Table to select from is not provided")
+
+        stmt: Select = select(*self.column_clauses)
+        stmt = stmt.select_from(self.select_from)
+
+        if len(self.where_clauses) > 0:
+            for where_clause in self.where_clauses:
+                stmt = stmt.where(where_clause)
+
+        if len(self.order_by_clauses) > 0:
+            stmt = stmt.order_by(*self.order_by_clauses)
+
+        if self.limit_records:
+            stmt = stmt.slice(self.offset_records, self.offset_records + self.limit_records)
+
+        return stmt
+
+    def reset(self):
+        """Reset the query builder"""
+        self.column_clauses: list[ColumnClause] = []
+        self.select_from: TableClause = None
+        self.order_by_clauses: list[ColumnClause] = []
+        self.limit_records: int = None
+        self.offset_records: int = 0
+        self.where_clauses: list = []
 
         return self

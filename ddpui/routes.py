@@ -19,6 +19,7 @@ from ddpui.api.user_preferences_api import userpreference_router
 from ddpui.api.org_preferences_api import orgpreference_router
 from ddpui.api.warehouse_api import warehouse_router
 from ddpui.api.webhook_api import webhook_router
+from ddpui.api.charts_api import charts_router
 
 
 src_api = NinjaAPI(
@@ -78,6 +79,7 @@ userpreference_router.tags = ["UserPreference"]
 orgpreference_router.tags = ["OrgPreference"]
 warehouse_router.tags = ["Warehouse"]
 webhook_router.tags = ["Webhook"]
+charts_router.tags = ["Charts"]
 
 # mount all the module routes
 src_api.add_router("/api/airbyte/", airbyte_router)
@@ -95,3 +97,4 @@ src_api.add_router("/api/warehouse/", warehouse_router)
 src_api.add_router("/api/", user_org_router)
 src_api.add_router("/webhooks/", webhook_router)
 src_api.add_router("/api/orgpreferences/", orgpreference_router)
+src_api.add_router("/api/charts/", charts_router)

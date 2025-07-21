@@ -1,0 +1,506 @@
+"""Chart API endpoints"""
+from typing import Optional, List
+from datetime import datetime, timedelta
+import hashlib
+import json
+
+from django.shortcuts import get_object_or_404
+from django.db.models import Q
+from django.utils import timezone
+from ninja import Router, Schema
+from ninja.errors import HttpError
+
+from ddpui.auth import has_permission
+from ddpui.models.org_user import OrgUser
+from ddpui.models.visualization import Chart, ChartSnapshot
+from ddpui.datainsights.query_builder import AggQueryBuilder, QueryBuilder
+from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
+from sqlalchemy import column
+from ddpui.core.echarts_config_generator import EChartsConfigGenerator
+from ddpui.utils.custom_logger import CustomLogger
+
+logger = CustomLogger("ddpui")
+
+charts_router = Router()
+
+
+class ChartCreate(Schema):
+    """Schema for creating a chart"""
+
+    title: str
+    description: Optional[str] = None
+    chart_type: str
+    computation_type: str
+    schema_name: str
+    table_name: str
+
+    # For raw data
+    x_axis_column: Optional[str] = None
+    y_axis_column: Optional[str] = None
+
+    # For aggregated data
+    dimension_column: Optional[str] = None
+    aggregate_column: Optional[str] = None
+    aggregate_function: Optional[str] = None
+    extra_dimension_column: Optional[str] = None
+
+    # Customizations
+    customizations: Optional[dict] = None
+
+
+class ChartUpdate(Schema):
+    """Schema for updating a chart"""
+
+    title: Optional[str] = None
+    description: Optional[str] = None
+    customizations: Optional[dict] = None
+    is_favorite: Optional[bool] = None
+
+
+class ChartResponse(Schema):
+    """Schema for chart response"""
+
+    id: int
+    title: str
+    description: Optional[str]
+    chart_type: str
+    computation_type: str
+    schema_name: str
+    table_name: str
+    x_axis_column: Optional[str]
+    y_axis_column: Optional[str]
+    dimension_column: Optional[str]
+    aggregate_column: Optional[str]
+    aggregate_function: Optional[str]
+    extra_dimension_column: Optional[str]
+    config: dict
+    customizations: dict
+    is_favorite: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class ChartDataPayload(Schema):
+    """Schema for chart data request"""
+
+    chart_type: str
+    computation_type: str
+    schema_name: str
+    table_name: str
+
+    # For raw data
+    x_axis: Optional[str] = None
+    y_axis: Optional[str] = None
+
+    # For aggregated data
+    dimension_col: Optional[str] = None
+    aggregate_col: Optional[str] = None
+    aggregate_func: Optional[str] = None
+    extra_dimension: Optional[str] = None
+
+    # Customizations
+    customizations: Optional[dict] = None
+
+    # Pagination
+    offset: int = 0
+    limit: int = 100
+
+
+class ChartDataResponse(Schema):
+    """Schema for chart data response"""
+
+    data: dict
+    echarts_config: dict
+
+
+class DataPreviewResponse(Schema):
+    """Schema for data preview response"""
+
+    columns: List[str]
+    column_types: dict
+    data: List[dict]
+    total_rows: int
+    page: int
+    page_size: int
+
+
+def has_schema_access(request, schema_name: str) -> bool:
+    """Check if user has access to schema"""
+    # TODO: Implement proper schema access control
+    # For now, allow access to all schemas in the org
+    return True
+
+
+def transform_data_for_chart(results, chart_type, computation_type, payload):
+    """Transform query results to chart-specific data format"""
+
+    if chart_type == "bar":
+        if computation_type == "raw":
+            return {
+                "xAxisData": [row[payload.x_axis] for row in results],
+                "series": [
+                    {"name": payload.y_axis, "data": [row[payload.y_axis] for row in results]}
+                ],
+                "legend": [payload.y_axis],
+            }
+        else:  # aggregated
+            if payload.extra_dimension:
+                # Group by extra dimension
+                grouped_data = {}
+                x_values = set()
+
+                for row in results:
+                    dimension = row[payload.extra_dimension]
+                    x_value = row[payload.dimension_col]
+                    x_values.add(x_value)
+
+                    if dimension not in grouped_data:
+                        grouped_data[dimension] = {}
+
+                    grouped_data[dimension][x_value] = row.get(
+                        f"{payload.aggregate_func}_{payload.aggregate_col}", 0
+                    )
+
+                x_axis_data = sorted(list(x_values))
+
+                return {
+                    "xAxisData": x_axis_data,
+                    "series": [
+                        {
+                            "name": dimension,
+                            "data": [grouped_data[dimension].get(x, 0) for x in x_axis_data],
+                        }
+                        for dimension in grouped_data.keys()
+                    ],
+                    "legend": list(grouped_data.keys()),
+                }
+            else:
+                return {
+                    "xAxisData": [row[payload.dimension_col] for row in results],
+                    "series": [
+                        {
+                            "name": f"{payload.aggregate_func}({payload.aggregate_col})",
+                            "data": [
+                                row[f"{payload.aggregate_func}_{payload.aggregate_col}"]
+                                for row in results
+                            ],
+                        }
+                    ],
+                    "legend": [f"{payload.aggregate_func}({payload.aggregate_col})"],
+                }
+
+    elif chart_type == "pie":
+        if computation_type == "raw":
+            # For raw data, count occurrences
+            value_counts = {}
+            for row in results:
+                key = str(row[payload.x_axis])
+                value_counts[key] = value_counts.get(key, 0) + 1
+
+            return {
+                "pieData": [{"value": count, "name": name} for name, count in value_counts.items()],
+                "seriesName": payload.x_axis,
+            }
+        else:  # aggregated
+            return {
+                "pieData": [
+                    {
+                        "value": row[f"{payload.aggregate_func}_{payload.aggregate_col}"],
+                        "name": str(row[payload.dimension_col]),
+                    }
+                    for row in results
+                ],
+                "seriesName": f"{payload.aggregate_func}({payload.aggregate_col})",
+            }
+
+    elif chart_type == "line":
+        if computation_type == "raw":
+            return {
+                "xAxisData": [row[payload.x_axis] for row in results],
+                "series": [
+                    {"name": payload.y_axis, "data": [row[payload.y_axis] for row in results]}
+                ],
+                "legend": [payload.y_axis],
+            }
+        else:  # aggregated
+            if payload.extra_dimension:
+                # Similar to bar chart grouping
+                grouped_data = {}
+                x_values = set()
+
+                for row in results:
+                    dimension = row[payload.extra_dimension]
+                    x_value = row[payload.dimension_col]
+                    x_values.add(x_value)
+
+                    if dimension not in grouped_data:
+                        grouped_data[dimension] = {}
+
+                    grouped_data[dimension][x_value] = row.get(
+                        f"{payload.aggregate_func}_{payload.aggregate_col}", 0
+                    )
+
+                x_axis_data = sorted(list(x_values))
+
+                return {
+                    "xAxisData": x_axis_data,
+                    "series": [
+                        {
+                            "name": dimension,
+                            "data": [grouped_data[dimension].get(x, 0) for x in x_axis_data],
+                        }
+                        for dimension in grouped_data.keys()
+                    ],
+                    "legend": list(grouped_data.keys()),
+                }
+            else:
+                return {
+                    "xAxisData": [row[payload.dimension_col] for row in results],
+                    "series": [
+                        {
+                            "name": f"{payload.aggregate_func}({payload.aggregate_col})",
+                            "data": [
+                                row[f"{payload.aggregate_func}_{payload.aggregate_col}"]
+                                for row in results
+                            ],
+                        }
+                    ],
+                    "legend": [f"{payload.aggregate_func}({payload.aggregate_col})"],
+                }
+
+    return {}
+
+
+def get_query_hash(payload: ChartDataPayload) -> str:
+    """Generate hash for query caching"""
+    query_dict = {
+        "chart_type": payload.chart_type,
+        "computation_type": payload.computation_type,
+        "schema_name": payload.schema_name,
+        "table_name": payload.table_name,
+        "x_axis": payload.x_axis,
+        "y_axis": payload.y_axis,
+        "dimension_col": payload.dimension_col,
+        "aggregate_col": payload.aggregate_col,
+        "aggregate_func": payload.aggregate_func,
+        "extra_dimension": payload.extra_dimension,
+        "offset": payload.offset,
+        "limit": payload.limit,
+    }
+    query_str = json.dumps(query_dict, sort_keys=True)
+    return hashlib.sha256(query_str.encode()).hexdigest()
+
+
+@charts_router.get("/", response=List[ChartResponse])
+@has_permission(["can_view_charts"])
+def list_charts(request):
+    """List all charts for the organization"""
+    orguser = request.orguser
+    charts = Chart.objects.filter(org=orguser.org).order_by("-updated_at")
+    return charts
+
+
+@charts_router.get("/{chart_id}/", response=ChartResponse)
+@has_permission(["can_view_charts"])
+def get_chart(request, chart_id: int):
+    """Get a specific chart"""
+    orguser = request.orguser
+    chart = get_object_or_404(Chart, id=chart_id, org=orguser.org)
+    return chart
+
+
+@charts_router.post("/", response=ChartResponse)
+@has_permission(["can_create_charts"])
+def create_chart(request, payload: ChartCreate):
+    """Create a new chart"""
+    orguser = request.orguser
+    chart = Chart.objects.create(
+        title=payload.title,
+        description=payload.description,
+        chart_type=payload.chart_type,
+        computation_type=payload.computation_type,
+        schema_name=payload.schema_name,
+        table_name=payload.table_name,
+        x_axis_column=payload.x_axis_column,
+        y_axis_column=payload.y_axis_column,
+        dimension_column=payload.dimension_column,
+        aggregate_column=payload.aggregate_column,
+        aggregate_function=payload.aggregate_function,
+        extra_dimension_column=payload.extra_dimension_column,
+        customizations=payload.customizations or {},
+        user=orguser,
+        org=orguser.org,
+    )
+    return chart
+
+
+@charts_router.put("/{chart_id}/", response=ChartResponse)
+@has_permission(["can_edit_charts"])
+def update_chart(request, chart_id: int, payload: ChartUpdate):
+    """Update a chart"""
+    orguser = request.orguser
+    chart = get_object_or_404(Chart, id=chart_id, org=orguser.org)
+
+    if payload.title is not None:
+        chart.title = payload.title
+    if payload.description is not None:
+        chart.description = payload.description
+    if payload.customizations is not None:
+        chart.customizations = payload.customizations
+    if payload.is_favorite is not None:
+        chart.is_favorite = payload.is_favorite
+
+    chart.save()
+    return chart
+
+
+@charts_router.delete("/{chart_id}/")
+@has_permission(["can_delete_charts"])
+def delete_chart(request, chart_id: int):
+    """Delete a chart"""
+    orguser = request.orguser
+    chart = get_object_or_404(Chart, id=chart_id, org=orguser.org)
+    chart.delete()
+    return {"success": True}
+
+
+@charts_router.post("/chart-data/", response=ChartDataResponse)
+@has_permission(["can_view_warehouse_data"])
+def get_chart_data(request, payload: ChartDataPayload):
+    """Get chart data with ECharts configuration"""
+    orguser = request.orguser
+
+    # Validate user has access to schema/table
+    if not has_schema_access(request, payload.schema_name):
+        raise HttpError(403, "Access denied to schema")
+
+    # Check cache first
+    query_hash = get_query_hash(payload)
+    cached_snapshot = (
+        ChartSnapshot.objects.filter(query_hash=query_hash, expires_at__gt=timezone.now())
+        .order_by("-created_at")
+        .first()
+    )
+
+    if cached_snapshot:
+        logger.info(f"Using cached data for query hash: {query_hash}")
+        return ChartDataResponse(
+            data=cached_snapshot.data, echarts_config=cached_snapshot.echarts_config
+        )
+
+    # Build query based on computation type
+    warehouse = WarehouseFactory.get_warehouse_client(orguser.org)
+
+    if payload.computation_type == "raw":
+        # Build raw data query
+        query_builder = QueryBuilder()
+        query_builder.fetch_from(payload.table_name, payload.schema_name)
+        query_builder.add_column(payload.x_axis)
+        query_builder.add_column(payload.y_axis)
+
+        if payload.extra_dimension:
+            query_builder.add_column(payload.extra_dimension)
+
+    else:  # aggregated
+        # Build aggregated query
+        query_builder = AggQueryBuilder()
+        query_builder.fetch_from(payload.table_name, payload.schema_name)
+        query_builder.add_column(column(payload.dimension_col))
+        query_builder.add_aggregate_column(
+            payload.aggregate_col,
+            payload.aggregate_func,
+            f"{payload.aggregate_func}_{payload.aggregate_col}",
+        )
+        query_builder.group_cols_by(payload.dimension_col)
+
+        if payload.extra_dimension:
+            query_builder.add_column(column(payload.extra_dimension))
+            query_builder.group_cols_by(payload.extra_dimension)
+
+    # Add pagination
+    query_builder.limit_rows(payload.limit)
+    query_builder.offset_rows(payload.offset)
+
+    # Execute query
+    sql = query_builder.build()
+    results = warehouse.execute(sql)
+
+    # Transform data for chart
+    chart_data = transform_data_for_chart(
+        results, payload.chart_type, payload.computation_type, payload
+    )
+
+    # Generate ECharts config
+    config_generators = {
+        "bar": EChartsConfigGenerator.generate_bar_config,
+        "pie": EChartsConfigGenerator.generate_pie_config,
+        "line": EChartsConfigGenerator.generate_line_config,
+    }
+
+    echarts_config = config_generators[payload.chart_type](chart_data, payload.customizations)
+
+    # Cache the result (optional - you can make this configurable)
+    # Note: This is a simplified caching mechanism. In production,
+    # you might want to associate this with a specific chart ID
+
+    return ChartDataResponse(data=chart_data, echarts_config=echarts_config)
+
+
+@charts_router.post("/chart-data-preview/", response=DataPreviewResponse)
+@has_permission(["can_view_warehouse_data"])
+def get_chart_data_preview(request, payload: ChartDataPayload):
+    """Get paginated data preview for chart"""
+    orguser = request.orguser
+
+    # Validate user has access to schema/table
+    if not has_schema_access(request, payload.schema_name):
+        raise HttpError(403, "Access denied to schema")
+
+    warehouse = WarehouseFactory.get_warehouse_client(orguser.org)
+
+    # Build query to get column info
+    columns_query = f"""
+        SELECT column_name, data_type 
+        FROM information_schema.columns 
+        WHERE table_schema = '{payload.schema_name}' 
+        AND table_name = '{payload.table_name}'
+        ORDER BY ordinal_position
+    """
+    column_info = warehouse.execute(columns_query)
+    columns = [col["column_name"] for col in column_info]
+    column_types = {col["column_name"]: col["data_type"] for col in column_info}
+
+    # Build data query
+    query_builder = QueryBuilder()
+    query_builder.fetch_from(payload.table_name, payload.schema_name)
+
+    # Add all columns
+    for col in columns:
+        query_builder.add_column(col)
+
+    # Add pagination
+    page_size = payload.limit
+    page = (payload.offset // page_size) + 1
+    query_builder.limit_rows(page_size)
+    query_builder.offset_rows(payload.offset)
+
+    # Execute query
+    sql = query_builder.build()
+    results = warehouse.execute(sql)
+
+    # Get total count
+    count_query = f"""
+        SELECT COUNT(*) as total 
+        FROM {payload.schema_name}.{payload.table_name}
+    """
+    count_result = warehouse.execute(count_query)
+    total_rows = count_result[0]["total"] if count_result else 0
+
+    return DataPreviewResponse(
+        columns=columns,
+        column_types=column_types,
+        data=results,
+        total_rows=total_rows,
+        page=page,
+        page_size=page_size,
+    )
