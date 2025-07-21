@@ -171,7 +171,7 @@ class TestCreateOrgAndUserCommand:
 
         with patch.dict(os.environ, {"PASSWORD": "env_password123"}):
             call_command(
-                "createorganduser", org_name, user_email, "env_password123", role="account-manager"
+                "createorganduser", org_name, user_email, role="account-manager"
             )
 
         # Verify user was created with correct password
