@@ -168,11 +168,9 @@ class TestCreateOrgAndUserCommand:
             return Org.objects.create(name=org_schema.name, slug=org_schema.slug)
 
         mock_create_org.side_effect = create_org_side_effect
-
+        # test password via environment variable
         with patch.dict(os.environ, {"PASSWORD": "env_password123"}):
-            call_command(
-                "createorganduser", org_name, user_email, role="account-manager"
-            )
+            call_command("createorganduser", org_name, user_email, role="account-manager")
 
         # Verify user was created with correct password
         user = User.objects.get(email=user_email)
