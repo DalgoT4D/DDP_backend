@@ -1,17 +1,3 @@
-from typing import Optional
-from ninja import Schema
-from ddpui.ddpprefect.schema import DeploymentCurrentQueueTime
-from typing import Dict, Any
-from pydantic import Field
-from typing import List, Optional, Dict, Any
-from typing import List
-from ninja import Schema
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel
-from ninja import Schema
-from typing import Optional
-
-
 class AirbyteJob(Schema):
     """Schema for the 'job' object within Airbyte job info."""
 
@@ -99,17 +85,17 @@ class AirbyteSchedule(Schema):
     cronExpression: Optional[str] = None
 
 
-class AirbyteConnectionResponse(Schema):
+class AirbyteConnectionSimpleResponse(Schema):
     """Schema for a full Airbyte connection object."""
 
     connectionId: str
     sourceId: str
     destinationId: str
     name: str
-    status: str  # e.g., "active", "inactive", "deprecated"
-    syncCatalog: AirbyteSyncCatalog  # This will contain the configured streams
-    schedule: Optional[AirbyteSchedule] = None  # The schedule object itself (for basic/cron)
-    scheduleType: Optional[str] = None  # e.g., "manual", "basic", "cron"
+    status: str
+    syncCatalog: AirbyteSyncCatalog
+    schedule: Optional[AirbyteSchedule] = None
+    scheduleType: Optional[str] = None
     sourceDefinitionId: str
     destinationDefinitionId: str
 
@@ -225,7 +211,7 @@ class AirbyteConnectionCreatePayload(BaseModel):
     status: str
 
 
-class AirbyteConnectionResponse(BaseModel):
+class AirbyteResponse(BaseModel):
     connectionId: str
     name: str
     status: str
@@ -233,7 +219,7 @@ class AirbyteConnectionResponse(BaseModel):
 
 
 class AirbyteConnectionsListResponse(BaseModel):
-    connections: List[AirbyteConnectionResponse]
+    connections: List[AirbyteResponse]
     totalCount: int
 
 

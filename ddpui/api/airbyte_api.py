@@ -1,34 +1,9 @@
 """Dalgo API for Airbyte"""
 
-# File: ddpui/api/airbyte_api.py
-import os
-
-from ninja import Router, Schema
-from ninja.errors import HttpError
-from django.http import HttpRequest
-from typing import (
-    List,
-    Optional,
-)  # Ensure List and Optional are imported if you use them directly in hints
-
-from ddpui.utils.custom_logger import CustomLogger
-from ddpui.ddpprefect.prefect_service import prefect_get, prefect_post, prefect_put, prefect_delete
-
-from ddpui.ddpairbyte.schema import (
-    AirbyteSourceCreate,
-    AirbyteSourceCreateResponse,
-    AirbyteConnectionSpecification,
-    # ... any other schemas imported from ddpui/ddpairbyte/schema.py
-)
-
-logger = CustomLogger("ddpui")
-router = Router()
-# ...
 
 from typing import List
 from ninja.errors import HttpError
 from ninja import Router
-
 from ddpui import settings
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import (
@@ -64,7 +39,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteSelectedStream,
     AirbyteSyncCatalog,
     AirbyteSchedule,
-    AirbyteConnectionResponse,
+    AirbyteResponse,
     AirbyteJobInfo,
     AirbyteAttempt,
     AirbyteJob,
@@ -436,7 +411,6 @@ def get_job_status(request: HttpRequest, job_id: int):
 def get_job_status_without_logs(request: HttpRequest, job_id: int):
     """get the job info from airbyte"""
     result = airbyte_service.get_job_info_without_logs(job_id)
-    print(result)
     return {
         "status": result["job"]["status"],
     }
@@ -507,7 +481,7 @@ def get_airbyte_connections_v1(request: HttpRequest):
 
 @airbyte_router.get(
     "/v1/connections/{connection_id}",
-    response=AirbyteConnectionResponse,
+    response=AirbyteResponse,
 )
 @has_permission(["can_view_connection"])
 def get_airbyte_connection_v1(request: HttpRequest, connection_id: str):
@@ -523,7 +497,7 @@ def get_airbyte_connection_v1(request: HttpRequest, connection_id: str):
     return res
 
 
-@airbyte_router.put("/v1/connections/{connection_id}/update", response=AirbyteConnectionResponse)
+@airbyte_router.put("/v1/connections/{connection_id}/update", response=AirbyteResponse)
 @has_permission(["can_edit_connection"])
 def put_airbyte_connection_v1(
     request: HttpRequest, connection_id: str, payload: AirbyteConnectionUpdate
