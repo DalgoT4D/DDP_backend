@@ -4,6 +4,8 @@
 from typing import List
 from ninja.errors import HttpError
 from ninja import Router
+from django.http import HttpRequest
+import os
 from ddpui import settings
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import (
@@ -27,6 +29,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteTaskResponse,
     AirbyteCheckConnectionResponse,
     AirbyteConnectionSchemaUpdate,
+    AirbyteConnectionOneSchemaUpdate,
     AirbyteSource,
     AirbyteCatalog,
     AirbyteDestinationDefinition,
@@ -60,7 +63,6 @@ from ddpui.models.tasks import (
     TaskProgressStatus,
 )
 from ddpui.utils.singletaskprogress import SingleTaskProgress
-from typing import List
 
 airbyte_router = Router()
 logger = CustomLogger("airbyte")
@@ -92,7 +94,7 @@ def get_airbyte_source_definitions(request: HttpRequest):
     "/source_definitions/{sourcedef_id}/specifications", response=AirbyteConnectionSpecification
 )
 @has_permission(["can_view_sources"])
-def get_airbyte_source_definition_specifications(request, sourcedef_id):
+def get_airbyte_source_definition_specifications(request: HttpRequest, sourcedef_id: str):
     """
     Fetch definition specifications for a particular
     source definition in the user organization workspace

@@ -1,3 +1,9 @@
+from typing import Any, Dict, List, Optional
+from ninja import Schema
+from pydantic import BaseModel, Field
+from ddpui.ddpprefect.schema import DeploymentCurrentQueueTime
+
+
 class AirbyteJob(Schema):
     """Schema for the 'job' object within Airbyte job info."""
 
@@ -356,7 +362,7 @@ class AirbyteWorkspace(Schema):
     initialSetupComplete: bool
 
 
-class AirbyteConnectionSchemaUpdate(Schema):
+class AirbyteConnectionOneSchemaUpdate(Schema):
     """Docstring"""
 
     syncCatalog: dict
