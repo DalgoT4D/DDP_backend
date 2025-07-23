@@ -1,11 +1,10 @@
 """Dalgo API for Airbyte"""
 
-
+import os
 from typing import List
 from ninja.errors import HttpError
 from ninja import Router
 from django.http import HttpRequest
-import os
 from ddpui import settings
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import (
@@ -29,23 +28,16 @@ from ddpui.ddpairbyte.schema import (
     AirbyteTaskResponse,
     AirbyteCheckConnectionResponse,
     AirbyteConnectionSchemaUpdate,
-    AirbyteConnectionOneSchemaUpdate,
+    AirbyteSourceCreateResponse,
+    AirbyteConnectionSpecification,
     AirbyteSource,
     AirbyteCatalog,
     AirbyteDestinationDefinition,
     AirbyteDestinationIdResponse,
     AirbyteDestination,
     AirbyteJobSimpleStatus,
-    AirbyteStreamJsonSchema,
-    AirbyteStream,
-    AirbyteStreamConfig,
-    AirbyteSelectedStream,
-    AirbyteSyncCatalog,
-    AirbyteSchedule,
     AirbyteResponse,
     AirbyteJobInfo,
-    AirbyteAttempt,
-    AirbyteJob,
 )
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
