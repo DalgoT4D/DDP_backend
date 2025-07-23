@@ -104,7 +104,7 @@ def get_airbyte_source_definition_specifications(request: HttpRequest, sourcedef
 
 @airbyte_router.post("/sources/", response=AirbyteSourceCreateResponse)
 @has_permission(["can_create_source"])
-def post_airbyte_source(request, payload: AirbyteSourceCreate):
+def post_airbyte_source(request: HttpRequest, payload: AirbyteSourceCreate):
     """Create airbyte source in the user organization workspace"""
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
