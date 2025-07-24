@@ -169,6 +169,8 @@ class QueryBuilder:
 
     def add_column(self, col_name: str):
         """Add a column to select"""
+        if col_name is None:
+            raise ValueError("Column name cannot be None")
         self.column_clauses.append(column(col_name))
         return self
 

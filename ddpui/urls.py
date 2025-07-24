@@ -3,7 +3,7 @@ from django.contrib import admin
 from django.urls import include, path
 from django.http import HttpResponse
 
-from ddpui.routes import src_api
+from ddpui.routes import src_api, test_api
 from ddpui.html.docs import get_dbt_docs
 from ddpui.html.elementary import get_elementary_report
 
@@ -30,6 +30,7 @@ urlpatterns = [
     path("prometheus/", include("django_prometheus.urls")),
     path("sentry-debug/", trigger_error),
     path("", src_api.urls),
+    path("", test_api.urls),  # Test API without auth
 ]
 
 # socket endpoints
