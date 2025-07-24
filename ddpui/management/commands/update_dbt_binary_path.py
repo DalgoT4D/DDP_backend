@@ -1,10 +1,15 @@
 """Updates the dbt binary path in Prefect deployments for dbt Core Operation tasks"""
 
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 from django.core.management.base import BaseCommand, CommandError
 
 from ddpui.models.org import Org, OrgDataFlowv1
 from ddpui.ddpprefect.prefect_service import prefect_put, prefect_get
 from ddpui.ddpprefect import DBTCORE
+
+load_dotenv()
 
 
 class Command(BaseCommand):
@@ -20,11 +25,6 @@ class Command(BaseCommand):
             help="The organization slug to update deployments for",
         )
         parser.add_argument(
-            "dbt_binary_path",
-            type=str,
-            help="The new path to the dbt binary",
-        )
-        parser.add_argument(
             "--dry-run",
             action="store_true",
             help="Show what would be changed without making actual changes",
@@ -33,7 +33,6 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         """Handle the command execution"""
         org_slug = options["org_slug"]
-        dbt_binary_path = options["dbt_binary_path"]
         dry_run = options["dry_run"]
 
         # Validate organization exists
@@ -41,6 +40,11 @@ class Command(BaseCommand):
             org = Org.objects.get(slug=org_slug)
         except Org.DoesNotExist:
             raise CommandError(f"Organization with slug '{org_slug}' does not exist")
+
+        if org.dbt is None:
+            raise CommandError("dbt is not set up for org")
+
+        dbt_binary_path = Path(os.getenv("DBT_VENV")) / org.dbt.dbt_venv / "bin/dbt"
 
         # Get all deployments for this organization
         deployments = OrgDataFlowv1.objects.filter(org=org)
