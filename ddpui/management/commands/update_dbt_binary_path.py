@@ -44,7 +44,7 @@ class Command(BaseCommand):
         if org.dbt is None:
             raise CommandError("dbt is not set up for org")
 
-        dbt_binary_path = Path(os.getenv("DBT_VENV")) / org.dbt.dbt_venv / "bin/dbt"
+        dbt_binary_path = str(Path(os.getenv("DBT_VENV")) / org.dbt.dbt_venv / "bin/dbt")
 
         # Get all deployments for this organization
         deployments = OrgDataFlowv1.objects.filter(org=org)
