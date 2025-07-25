@@ -36,18 +36,8 @@ class ChartCreate(Schema):
     schema_name: str
     table_name: str
 
-    # For raw data
-    x_axis_column: Optional[str] = None
-    y_axis_column: Optional[str] = None
-
-    # For aggregated data
-    dimension_column: Optional[str] = None
-    aggregate_column: Optional[str] = None
-    aggregate_function: Optional[str] = None
-    extra_dimension_column: Optional[str] = None
-
-    # Customizations
-    customizations: Optional[dict] = None
+    # All column configuration and customizations in config
+    config: dict
 
 
 class ChartUpdate(Schema):
@@ -55,7 +45,7 @@ class ChartUpdate(Schema):
 
     title: Optional[str] = None
     description: Optional[str] = None
-    customizations: Optional[dict] = None
+    config: Optional[dict] = None
     is_favorite: Optional[bool] = None
 
 
@@ -69,14 +59,7 @@ class ChartResponse(Schema):
     computation_type: str
     schema_name: str
     table_name: str
-    x_axis_column: Optional[str]
-    y_axis_column: Optional[str]
-    dimension_column: Optional[str]
-    aggregate_column: Optional[str]
-    aggregate_function: Optional[str]
-    extra_dimension_column: Optional[str]
-    config: dict
-    customizations: dict
+    config: dict  # Contains all column configuration and customizations
     is_favorite: bool
     created_at: datetime
     updated_at: datetime
@@ -133,15 +116,42 @@ def has_schema_access(request, schema_name: str) -> bool:
     return True
 
 
+def convert_value(value):
+    """Convert values to JSON-serializable format"""
+    from datetime import datetime, date
+    from decimal import Decimal
+
+    if isinstance(value, datetime):
+        return value.isoformat()
+    elif isinstance(value, date):
+        return value.isoformat()
+    elif isinstance(value, Decimal):
+        return float(value)
+    return value
+
+
 def transform_data_for_chart(results, chart_type, computation_type, payload):
     """Transform query results to chart-specific data format"""
+
+    # Handle None values in payload - pie charts only need x_axis
+    if (
+        computation_type == "raw"
+        and chart_type != "pie"
+        and (not payload.x_axis or not payload.y_axis)
+    ):
+        return {}
+    elif computation_type == "raw" and chart_type == "pie" and not payload.x_axis:
+        return {}
 
     if chart_type == "bar":
         if computation_type == "raw":
             return {
-                "xAxisData": [row[payload.x_axis] for row in results],
+                "xAxisData": [convert_value(row[payload.x_axis]) for row in results],
                 "series": [
-                    {"name": payload.y_axis, "data": [row[payload.y_axis] for row in results]}
+                    {
+                        "name": payload.y_axis,
+                        "data": [convert_value(row[payload.y_axis]) for row in results],
+                    }
                 ],
                 "legend": [payload.y_axis],
             }
@@ -218,9 +228,12 @@ def transform_data_for_chart(results, chart_type, computation_type, payload):
     elif chart_type == "line":
         if computation_type == "raw":
             return {
-                "xAxisData": [row[payload.x_axis] for row in results],
+                "xAxisData": [convert_value(row[payload.x_axis]) for row in results],
                 "series": [
-                    {"name": payload.y_axis, "data": [row[payload.y_axis] for row in results]}
+                    {
+                        "name": payload.y_axis,
+                        "data": [convert_value(row[payload.y_axis]) for row in results],
+                    }
                 ],
                 "legend": [payload.y_axis],
             }
@@ -544,11 +557,56 @@ def get_chart(request, chart_id: int):
     return chart
 
 
+@charts_router.get("/{chart_id}/data/", response=ChartDataResponse)
+@has_permission(["can_view_chart"])
+def get_chart_data_by_id(request, chart_id: int):
+    """Get chart data using saved chart configuration"""
+    orguser = request.orguser
+    chart = get_object_or_404(Chart, id=chart_id, org=orguser.org)
+
+    # Build payload from chart config
+    config = chart.config
+    payload = ChartDataPayload(
+        chart_type=chart.chart_type,
+        computation_type=chart.computation_type,
+        schema_name=chart.schema_name,
+        table_name=chart.table_name,
+        x_axis=config.get("x_axis_column"),
+        y_axis=config.get("y_axis_column"),
+        dimension_col=config.get("dimension_column"),
+        aggregate_col=config.get("aggregate_column"),
+        aggregate_func=config.get("aggregate_function"),
+        extra_dimension=config.get("extra_dimension_column"),
+        customizations=config.get("customizations", {}),
+        offset=0,
+        limit=100,
+    )
+
+    # Use existing get_chart_data logic
+    return get_chart_data(request, payload)
+
+
 @charts_router.post("/", response=ChartResponse)
 @has_permission(["can_create_chart"])
 def create_chart(request, payload: ChartCreate):
     """Create a new chart"""
     orguser = request.orguser
+
+    # Validate config structure
+    config = payload.config
+    if payload.computation_type == "raw":
+        if not config.get("x_axis_column") and not config.get("y_axis_column"):
+            raise HttpError(400, "At least one axis column must be specified for raw data")
+    else:  # aggregated
+        if (
+            not config.get("dimension_column")
+            or not config.get("aggregate_column")
+            or not config.get("aggregate_function")
+        ):
+            raise HttpError(
+                400, "Dimension, aggregate column and function are required for aggregated data"
+            )
+
     chart = Chart.objects.create(
         title=payload.title,
         description=payload.description,
@@ -556,13 +614,7 @@ def create_chart(request, payload: ChartCreate):
         computation_type=payload.computation_type,
         schema_name=payload.schema_name,
         table_name=payload.table_name,
-        x_axis_column=payload.x_axis_column,
-        y_axis_column=payload.y_axis_column,
-        dimension_column=payload.dimension_column,
-        aggregate_column=payload.aggregate_column,
-        aggregate_function=payload.aggregate_function,
-        extra_dimension_column=payload.extra_dimension_column,
-        customizations=payload.customizations or {},
+        config=config,
         user=orguser,
         org=orguser.org,
     )
@@ -580,8 +632,8 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
         chart.title = payload.title
     if payload.description is not None:
         chart.description = payload.description
-    if payload.customizations is not None:
-        chart.customizations = payload.customizations
+    if payload.config is not None:
+        chart.config = payload.config
     if payload.is_favorite is not None:
         chart.is_favorite = payload.is_favorite
 

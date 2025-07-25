@@ -43,21 +43,28 @@ class Chart(models.Model):
     schema_name = models.CharField(max_length=255)
     table_name = models.CharField(max_length=255)
 
-    # Column configuration for raw data
-    x_axis_column = models.CharField(max_length=255, blank=True, null=True)
-    y_axis_column = models.CharField(max_length=255, blank=True, null=True)
-
-    # Column configuration for aggregated data
-    dimension_column = models.CharField(max_length=255, blank=True, null=True)
-    aggregate_column = models.CharField(max_length=255, blank=True, null=True)
-    aggregate_function = models.CharField(
-        max_length=20, choices=AGGREGATE_FUNC_CHOICES, blank=True, null=True
+    # Configuration JSON field containing all column mappings and customizations
+    # Structure:
+    # {
+    #   "x_axis_column": "string (for raw)",
+    #   "y_axis_column": "string (for raw)",
+    #   "dimension_column": "string (for aggregated)",
+    #   "aggregate_column": "string (for aggregated)",
+    #   "aggregate_function": "sum|avg|count|min|max (for aggregated)",
+    #   "extra_dimension_column": "string (optional)",
+    #   "customizations": {
+    #     "orientation": "horizontal|vertical",
+    #     "stacked": boolean,
+    #     "showDataLabels": boolean,
+    #     "xAxisTitle": "string",
+    #     "yAxisTitle": "string",
+    #     "donut": boolean (for pie),
+    #     "smooth": boolean (for line)
+    #   }
+    # }
+    config = models.JSONField(
+        default=dict, help_text="Chart configuration including columns and customizations"
     )
-    extra_dimension_column = models.CharField(max_length=255, blank=True, null=True)
-
-    # ECharts configuration and customizations
-    config = models.JSONField(default=dict, help_text="ECharts configuration object")
-    customizations = models.JSONField(default=dict, help_text="Chart customization settings")
 
     # Metadata
     user = models.ForeignKey(OrgUser, on_delete=models.CASCADE, related_name="charts")
@@ -84,18 +91,18 @@ class Chart(models.Model):
             return {
                 "schema": self.schema_name,
                 "table": self.table_name,
-                "x_axis": self.x_axis_column,
-                "y_axis": self.y_axis_column,
-                "extra_dimension": self.extra_dimension_column,
+                "x_axis": self.config.get("x_axis_column"),
+                "y_axis": self.config.get("y_axis_column"),
+                "extra_dimension": self.config.get("extra_dimension_column"),
             }
         else:  # aggregated
             return {
                 "schema": self.schema_name,
                 "table": self.table_name,
-                "dimension": self.dimension_column,
-                "aggregate_col": self.aggregate_column,
-                "aggregate_func": self.aggregate_function,
-                "extra_dimension": self.extra_dimension_column,
+                "dimension": self.config.get("dimension_column"),
+                "aggregate_col": self.config.get("aggregate_column"),
+                "aggregate_func": self.config.get("aggregate_function"),
+                "extra_dimension": self.config.get("extra_dimension_column"),
             }
 
 

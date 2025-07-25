@@ -20,7 +20,6 @@ from ddpui.api.org_preferences_api import orgpreference_router
 from ddpui.api.warehouse_api import warehouse_router
 from ddpui.api.webhook_api import webhook_router
 from ddpui.api.charts_api import charts_router
-from ddpui.api.test_charts_api import test_router
 
 
 src_api = NinjaAPI(
@@ -107,4 +106,4 @@ test_api = NinjaAPI(
     description="Test endpoints without authentication",
     docs_url="/test-api/docs",
 )
-test_api.add_router("/test/", test_router)
+# test_api.add_router("/test/", test_router)  # Removed test router
