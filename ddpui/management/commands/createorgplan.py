@@ -42,7 +42,7 @@ class Command(BaseCommand):
             if org_plan:
                 self.stdout.write(str(org_plan))
             else:
-                self.stdout.write("no such org")
+                self.stdout.write(self.style.ERROR(f"No Plan for Org {options['org']}"))
             return
 
         if not org_plan:
@@ -75,33 +75,37 @@ class Command(BaseCommand):
                 pytz.UTC
             )
 
-        if options["plan"]:
-            org_plan.features = {
-                "pipeline": ["Ingest", "Transform", "Orchestrate"],
-                "aiFeatures": ["AI data analysis"],
-                "dataQuality": ["Data quality dashboards"],
-            }
+        if org_plan.base_plan == "Free Trial":
+            org_plan.can_upgrade_plan = True
 
-            if options["with_superset"] == "yes":
-                org_plan.features["superset"] = ["Superset dashboards", "Superset Usage dashboards"]
-
-            elif options["with_superset"] == "no" and "superset" in org_plan.features:
-                del org_plan.features["superset"]
-
-            if options["plan"] == "Free Trial":
-                org_plan.can_upgrade_plan = True
-
-            elif options["plan"] == "Internal":
-                org_plan.can_upgrade_plan = False
-
-            elif options["with_superset"] == "no":
-                org_plan.can_upgrade_plan = True
-
-            elif options["with_superset"] == "yes":
-                org_plan.can_upgrade_plan = False
+        elif org_plan.base_plan == "Internal":
+            org_plan.can_upgrade_plan = False
 
         if options["with_superset"] == "yes":
-            org_plan.superset_included = options["with_superset"]
+            org_plan.superset_included = True
+
+            if org_plan.base_plan == "DALGO":
+                org_plan.can_upgrade_plan = False
+
+        elif options["with_superset"] == "no":
+            org_plan.superset_included = False
+
+            if org_plan.base_plan == "DALGO":
+                org_plan.can_upgrade_plan = True
+
+        # always recompute org_plan.features
+        org_plan.features = {
+            "pipeline": ["Ingest", "Transform", "Orchestrate"],
+            "aiFeatures": ["AI data analysis"],
+            "dataQuality": ["Data quality dashboards"],
+        }
+
+        if org_plan.superset_included:
+            org_plan.features["superset"] = ["Superset dashboards", "Superset Usage dashboards"]
+
+        else:
+            if "superset" in org_plan.features:
+                del org_plan.features["superset"]
 
         org_plan.save()
 
