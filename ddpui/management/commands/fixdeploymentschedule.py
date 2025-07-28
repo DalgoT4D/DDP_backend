@@ -38,7 +38,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
 
         # fetch deployments which have a cron in our db
-        query = Q(dataflow_type="orchestrate", cron__isnull=False)
+        query = Q(dataflow_type="orchestrate", cron__isnull=False) & ~Q(cron="")
         if options["org"]:
             query &= Q(org__slug=options["org"])
         if options["deployment_id"]:
