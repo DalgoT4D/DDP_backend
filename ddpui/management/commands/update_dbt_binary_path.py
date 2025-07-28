@@ -117,7 +117,7 @@ class Command(BaseCommand):
                     if not dry_run:
                         prefect_put(
                             f"v1/deployments/{deployment.deployment_id}",
-                            {"deployment_params": deployment_params},
+                            {"deployment_params": deployment_params, "cron": deployment.cron},
                         )
                         self.stdout.write(
                             self.style.SUCCESS(
