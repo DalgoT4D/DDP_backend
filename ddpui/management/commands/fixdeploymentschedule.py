@@ -36,7 +36,6 @@ class Command(BaseCommand):
             return flow_run
 
     def handle(self, *args, **options):
-
         # fetch deployments which have a cron in our db
         query = Q(dataflow_type="orchestrate", cron__isnull=False) & ~Q(cron="")
         if options["org"]:
@@ -45,7 +44,6 @@ class Command(BaseCommand):
             query &= Q(deployment_id=options["deployment_id"])
 
         for odf in OrgDataFlowv1.objects.filter(query):
-
             # fetch the corresponding prefect object
             deployment = prefect_service.get_deployment(odf.deployment_id)
 
