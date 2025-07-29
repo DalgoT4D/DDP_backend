@@ -6,8 +6,9 @@ from dotenv import load_dotenv
 from django.core.management.base import BaseCommand, CommandError
 
 from ddpui.models.org import Org, OrgDataFlowv1
-from ddpui.ddpprefect.prefect_service import prefect_put, prefect_get
+from ddpui.ddpprefect.prefect_service import get_deployment, update_dataflow_v1
 from ddpui.ddpprefect import DBTCORE
+from ddpui.ddpprefect.schema import PrefectDataFlowUpdateSchema3
 
 load_dotenv()
 
@@ -65,7 +66,7 @@ class Command(BaseCommand):
         for deployment in deployments:
             try:
                 # Fetch deployment from Prefect
-                prefect_deployment = prefect_get(f"deployments/{deployment.deployment_id}")
+                prefect_deployment = get_deployment(deployment.deployment_id)
                 deployment_params = prefect_deployment["parameters"]
 
                 # Check if deployment has tasks in config
@@ -115,9 +116,11 @@ class Command(BaseCommand):
                 # Update deployment if modified and not dry run
                 if modified:
                     if not dry_run:
-                        prefect_put(
-                            f"v1/deployments/{deployment.deployment_id}",
-                            {"deployment_params": deployment_params, "cron": deployment.cron},
+                        update_dataflow_v1(
+                            deployment.deployment_id,
+                            PrefectDataFlowUpdateSchema3(
+                                deployment_params=deployment_params, cron=deployment.cron
+                            ),
                         )
                         self.stdout.write(
                             self.style.SUCCESS(
