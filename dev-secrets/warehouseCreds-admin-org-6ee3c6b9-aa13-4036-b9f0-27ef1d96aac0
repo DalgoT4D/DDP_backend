@@ -1,1 +1,0 @@
-{"Name": "warehouseCreds-admin-org-6ee3c6b9-aa13-4036-b9f0-27ef1d96aac0", "SecretId": "warehouseCreds-admin-org-6ee3c6b9-aa13-4036-b9f0-27ef1d96aac0", "SecretString": "{\"host\": \"localhost\", \"port\": 5432, \"database\": \"postgres\", \"username\": \"postgres\", \"password\": \"postgres\"}"}
