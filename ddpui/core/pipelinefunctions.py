@@ -31,7 +31,6 @@ from ddpui.ddpprefect import (
     FLOW_RUN_PENDING_STATE_TYPE,
     FLOW_RUN_RUNNING_STATE_TYPE,
     FLOW_RUN_SCHEDULED_STATE_TYPE,
-    FLOW_RUN_COMPLETED_STATE_TYPE,
 )
 from ddpui.utils.constants import (
     PREFECT_AIRBYTE_TASKS_TIMEOUT,
@@ -345,10 +344,14 @@ def fix_transform_tasks_seq_dataflow(deployment_id: str):
         task["seq"] = i + len(other_tasks)
 
     tasks = other_tasks + updated_transform_tasks
+    # need the cron
+    odf = OrgDataFlowv1.objects.filter(deployment_id=deployment_id).first()
+    if odf is None:
+        raise Exception("missing OrgDataFlowv1 for deployment_id " + deployment_id)
     try:
         prefect_service.update_dataflow_v1(
             deployment_id,
-            PrefectDataFlowUpdateSchema3(deployment_params={"config": config}),
+            PrefectDataFlowUpdateSchema3(deployment_params={"config": config}, cron=odf.cron),
         )
         logger.info(f"Update the seq for deployment {deployment_id}")
     except Exception as err:

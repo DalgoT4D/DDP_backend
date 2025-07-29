@@ -74,7 +74,9 @@ class Command(BaseCommand):
                 try:
                     prefect_service.update_dataflow_v1(
                         dataflow.deployment_id,
-                        PrefectDataFlowUpdateSchema3(deployment_params={"config": config}),
+                        PrefectDataFlowUpdateSchema3(
+                            deployment_params={"config": config}, cron=dataflow.cron
+                        ),
                     )
                 except Exception as err:
                     logger.error(
