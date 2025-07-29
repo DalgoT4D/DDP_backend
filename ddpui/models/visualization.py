@@ -1,4 +1,5 @@
 """Chart/Visualization models for Dalgo platform"""
+
 from django.db import models
 from django.contrib.postgres.fields import ArrayField
 from ddpui.models.org import Org
@@ -43,25 +44,6 @@ class Chart(models.Model):
     schema_name = models.CharField(max_length=255)
     table_name = models.CharField(max_length=255)
 
-    # Configuration JSON field containing all column mappings and customizations
-    # Structure:
-    # {
-    #   "x_axis_column": "string (for raw)",
-    #   "y_axis_column": "string (for raw)",
-    #   "dimension_column": "string (for aggregated)",
-    #   "aggregate_column": "string (for aggregated)",
-    #   "aggregate_function": "sum|avg|count|min|max (for aggregated)",
-    #   "extra_dimension_column": "string (optional)",
-    #   "customizations": {
-    #     "orientation": "horizontal|vertical",
-    #     "stacked": boolean,
-    #     "showDataLabels": boolean,
-    #     "xAxisTitle": "string",
-    #     "yAxisTitle": "string",
-    #     "donut": boolean (for pie),
-    #     "smooth": boolean (for line)
-    #   }
-    # }
     config = models.JSONField(
         default=dict, help_text="Chart configuration including columns and customizations"
     )
@@ -72,15 +54,6 @@ class Chart(models.Model):
     is_favorite = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        db_table = "charts"
-        ordering = ["-updated_at"]
-        indexes = [
-            models.Index(fields=["org", "user"]),
-            models.Index(fields=["chart_type"]),
-            models.Index(fields=["created_at"]),
-        ]
 
     def __str__(self):
         return f"{self.title} ({self.chart_type})"
@@ -118,15 +91,6 @@ class ChartSnapshot(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField(help_text="When this snapshot expires")
-
-    class Meta:
-        db_table = "chart_snapshots"
-        ordering = ["-created_at"]
-        indexes = [
-            models.Index(fields=["chart", "created_at"]),
-            models.Index(fields=["query_hash"]),
-            models.Index(fields=["expires_at"]),
-        ]
 
     def __str__(self):
         return f"Snapshot for {self.chart.title} at {self.created_at}"
