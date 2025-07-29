@@ -10,7 +10,7 @@ from ddpui import auth
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service
 
-from ddpui.ddpprefect import DBTCLIPROFILE, AIRBYTESERVER, DBTCLOUDCREDS
+from ddpui.ddpprefect import DBTCLIPROFILE, AIRBYTESERVER, DBTCLOUDCREDS, AIRBYTECONNECTION
 from ddpui.models.org import OrgDataFlowv1, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import DataflowOrgTask, OrgTask, TaskLockStatus
@@ -26,7 +26,10 @@ from ddpui.ddpprefect.schema import (
 )
 from ddpui.utils.constants import TASK_DBTRUN, TASK_AIRBYTESYNC
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.schemas.org_task_schema import TaskParameters
+from ddpui.schemas.org_task_schema import (
+    TaskParameters,
+    ClearSelectedStreams,
+)
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.utils.prefectlogs import parse_prefect_logs
 from ddpui.utils.helpers import generate_hash_id
@@ -632,6 +635,60 @@ def post_run_prefect_org_deployment_task(request, deployment_id, payload: TaskPa
     for tasklock in locks:
         tasklock.flow_run_id = res["flow_run_id"]
         tasklock.save()
+
+    return res
+
+
+@pipeline_router.post("/v1/flows/{deployment_id}/clear_streams/")
+@has_permission(["can_run_pipeline"])
+def clear_selected_streams_api(request, deployment_id: str, payload: ClearSelectedStreams):
+    orguser: OrgUser = request.orguser
+
+    if orguser.org is None:
+        raise HttpError(400, "Register an organization first")
+
+    dataflow = OrgDataFlowv1.objects.filter(org=orguser.org, deployment_id=deployment_id).first()
+    if not dataflow:
+        raise HttpError(404, "Deployment not found")
+
+    # Validate connection_id and selected_streams
+    if not payload.connection_id:
+        raise HttpError(400, "connection_id is required")
+    if not payload.streams:
+        raise HttpError(400, "streams list cannot be empty")
+
+    # Construct flow parameters for selected stream clearing
+    flow_run_params = {
+        "config": {
+            "tasks": [
+                {
+                    "type": AIRBYTECONNECTION,
+                    "slug": "airbyte-clear",
+                    "connection_id": payload.connection_id,
+                    "streams": payload.streams,
+                }
+            ],
+            "org_slug": orguser.org.slug,
+        }
+    }
+
+    try:
+        res = prefect_service.create_deployment_flow_run(deployment_id, flow_run_params)
+        PrefectFlowRun.objects.create(
+            deployment_id=deployment_id,
+            flow_run_id=res["flow_run_id"],
+            name=res.get("name", "selected-stream-clear"),
+            start_time=None,
+            expected_start_time=djantotimezone.now(),
+            total_run_time=-1,
+            status="Scheduled",
+            state_name="Scheduled",
+            retries=0,
+            orguser=orguser,
+        )
+    except Exception as e:
+        logger.exception(e)
+        raise HttpError(400, "Failed to start selected stream clear run")
 
     return res
 
