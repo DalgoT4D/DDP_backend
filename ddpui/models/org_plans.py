@@ -55,3 +55,12 @@ class OrgPlans(models.Model):
             "can_upgrade_plan": self.can_upgrade_plan,
             "upgrade_requested": self.upgrade_requested,
         }
+
+    def __str__(self):
+        start_date = self.start_date.strftime("%Y-%m-%d") if self.start_date else "Not started"
+        end_date = self.end_date.strftime("%Y-%m-%d") if self.end_date else "No end"
+        return (
+            f"Org={self.org.slug} Plan={self.base_plan} Superset={str(self.superset_included)} "
+            + f"Duration={self.subscription_duration} Start={start_date} End={end_date} "
+            + f"Can Upgrade={str(self.can_upgrade_plan)} Upgrade requested={self.upgrade_requested}"
+        )

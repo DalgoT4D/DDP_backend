@@ -1902,3 +1902,338 @@ def test_cancel_connection_job_no_running_jobs():
             job_types=["sync"],
         )
         assert result == {"cancelled": False}
+
+
+def test_update_connection_with_all_columns_selected():
+    """Test update_connection when all columns are selected - should disable field selection"""
+    workspace_id = "test_workspace"
+
+    # Mock connection_info
+    connection_info = Mock()
+    connection_info.streams = [
+        {
+            "name": "test_stream",
+            "selected": True,
+            "syncMode": "full_refresh",
+            "destinationSyncMode": "overwrite",
+            "columns": [
+                {"name": "col1", "selected": True},
+                {"name": "col2", "selected": True},
+                {"name": "col3", "selected": True},
+            ],
+        }
+    ]
+    connection_info.syncCatalog = {"streams": [{"stream": {"name": "test_stream"}, "config": {}}]}
+
+    current_connection = {"syncCatalog": {"streams": []}}
+
+    expected_response = {"connectionId": "test_connection_id"}
+
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
+        mock_abreq.return_value = expected_response
+
+        result = update_connection(workspace_id, connection_info, current_connection)
+
+        # Verify the call was made with correct field selection config
+        call_args = mock_abreq.call_args[0][1]
+        stream_config = call_args["syncCatalog"]["streams"][0]["config"]
+
+        assert stream_config["fieldSelectionEnabled"] == False
+        assert stream_config["selectedFields"] == []
+        assert result == expected_response
+
+
+def test_update_connection_with_partial_columns_selected():
+    """Test update_connection when only some columns are selected - should enable field selection"""
+    workspace_id = "test_workspace"
+
+    connection_info = Mock()
+    connection_info.streams = [
+        {
+            "name": "test_stream",
+            "selected": True,
+            "syncMode": "full_refresh",
+            "destinationSyncMode": "overwrite",
+            "columns": [
+                {"name": "col1", "selected": True},
+                {"name": "col2", "selected": False},
+                {"name": "col3", "selected": True},
+            ],
+        }
+    ]
+    connection_info.syncCatalog = {"streams": [{"stream": {"name": "test_stream"}, "config": {}}]}
+
+    current_connection = {"syncCatalog": {"streams": []}}
+
+    expected_response = {"connectionId": "test_connection_id"}
+
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
+        mock_abreq.return_value = expected_response
+
+        result = update_connection(workspace_id, connection_info, current_connection)
+
+        # Verify the call was made with correct field selection config
+        call_args = mock_abreq.call_args[0][1]
+        stream_config = call_args["syncCatalog"]["streams"][0]["config"]
+
+        assert stream_config["fieldSelectionEnabled"] == True
+        assert len(stream_config["selectedFields"]) == 2
+        assert {"fieldPath": ["col1"]} in stream_config["selectedFields"]
+        assert {"fieldPath": ["col3"]} in stream_config["selectedFields"]
+        assert result == expected_response
+
+
+def test_update_connection_with_no_columns_selected():
+    """Test update_connection when no columns are selected - should enable field selection with empty fields"""
+    workspace_id = "test_workspace"
+
+    connection_info = Mock()
+    connection_info.streams = [
+        {
+            "name": "test_stream",
+            "selected": True,
+            "syncMode": "full_refresh",
+            "destinationSyncMode": "overwrite",
+            "columns": [
+                {"name": "col1", "selected": False},
+                {"name": "col2", "selected": False},
+                {"name": "col3", "selected": False},
+            ],
+        }
+    ]
+    connection_info.syncCatalog = {"streams": [{"stream": {"name": "test_stream"}, "config": {}}]}
+
+    current_connection = {"syncCatalog": {"streams": []}}
+
+    expected_response = {"connectionId": "test_connection_id"}
+
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
+        mock_abreq.return_value = expected_response
+
+        result = update_connection(workspace_id, connection_info, current_connection)
+
+        # Verify the call was made with correct field selection config
+        call_args = mock_abreq.call_args[0][1]
+        stream_config = call_args["syncCatalog"]["streams"][0]["config"]
+
+        assert stream_config["fieldSelectionEnabled"] == True
+        assert stream_config["selectedFields"] == []
+        assert result == expected_response
+
+
+def test_update_connection_with_no_columns_provided():
+    """Test update_connection when no columns are provided - should default to all columns selected"""
+    workspace_id = "test_workspace"
+
+    connection_info = Mock()
+    connection_info.streams = [
+        {
+            "name": "test_stream",
+            "selected": True,
+            "syncMode": "full_refresh",
+            "destinationSyncMode": "overwrite"
+            # No columns key
+        }
+    ]
+    connection_info.syncCatalog = {"streams": [{"stream": {"name": "test_stream"}, "config": {}}]}
+
+    current_connection = {"syncCatalog": {"streams": []}}
+
+    expected_response = {"connectionId": "test_connection_id"}
+
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
+        mock_abreq.return_value = expected_response
+
+        result = update_connection(workspace_id, connection_info, current_connection)
+
+        # Verify the call was made with correct field selection config
+        call_args = mock_abreq.call_args[0][1]
+        stream_config = call_args["syncCatalog"]["streams"][0]["config"]
+
+        assert stream_config["fieldSelectionEnabled"] == False
+        assert stream_config["selectedFields"] == []
+        assert result == expected_response
+
+
+def test_update_connection_with_empty_columns_list():
+    """Test update_connection when columns list is empty - should default to all columns selected"""
+    workspace_id = "test_workspace"
+
+    connection_info = Mock()
+    connection_info.streams = [
+        {
+            "name": "test_stream",
+            "selected": True,
+            "syncMode": "full_refresh",
+            "destinationSyncMode": "overwrite",
+            "columns": [],  # Empty columns list
+        }
+    ]
+    connection_info.syncCatalog = {"streams": [{"stream": {"name": "test_stream"}, "config": {}}]}
+
+    current_connection = {"syncCatalog": {"streams": []}}
+
+    expected_response = {"connectionId": "test_connection_id"}
+
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
+        mock_abreq.return_value = expected_response
+
+        result = update_connection(workspace_id, connection_info, current_connection)
+
+        # Verify the call was made with correct field selection config
+        call_args = mock_abreq.call_args[0][1]
+        stream_config = call_args["syncCatalog"]["streams"][0]["config"]
+
+        assert stream_config["fieldSelectionEnabled"] == False
+        assert stream_config["selectedFields"] == []
+        assert result == expected_response
+
+
+def test_update_connection_with_columns_missing_selected_field():
+    """Test update_connection when columns don't have 'selected' field - should treat as unselected"""
+    workspace_id = "test_workspace"
+
+    connection_info = Mock()
+    connection_info.streams = [
+        {
+            "name": "test_stream",
+            "selected": True,
+            "syncMode": "full_refresh",
+            "destinationSyncMode": "overwrite",
+            "columns": [
+                {"name": "col1", "selected": True},
+                {"name": "col2"},  # Missing selected field
+                {"name": "col3", "selected": False},
+            ],
+        }
+    ]
+    connection_info.syncCatalog = {"streams": [{"stream": {"name": "test_stream"}, "config": {}}]}
+
+    current_connection = {"syncCatalog": {"streams": []}}
+
+    expected_response = {"connectionId": "test_connection_id"}
+
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
+        mock_abreq.return_value = expected_response
+
+        result = update_connection(workspace_id, connection_info, current_connection)
+
+        # Verify the call was made with correct field selection config
+        call_args = mock_abreq.call_args[0][1]
+        stream_config = call_args["syncCatalog"]["streams"][0]["config"]
+
+        assert stream_config["fieldSelectionEnabled"] == True
+        assert len(stream_config["selectedFields"]) == 1
+        assert {"fieldPath": ["col1"]} in stream_config["selectedFields"]
+        assert result == expected_response
+
+
+def test_update_connection_multiple_streams_with_different_column_configs():
+    """Test update_connection with multiple streams having different column configurations"""
+    workspace_id = "test_workspace"
+
+    connection_info = Mock()
+    connection_info.streams = [
+        {
+            "name": "stream1",
+            "selected": True,
+            "syncMode": "full_refresh",
+            "destinationSyncMode": "overwrite",
+            "columns": [{"name": "col1", "selected": True}, {"name": "col2", "selected": True}],
+        },
+        {
+            "name": "stream2",
+            "selected": True,
+            "syncMode": "full_refresh",
+            "destinationSyncMode": "overwrite",
+            "columns": [{"name": "col1", "selected": True}, {"name": "col2", "selected": False}],
+        },
+    ]
+    connection_info.syncCatalog = {
+        "streams": [
+            {"stream": {"name": "stream1"}, "config": {}},
+            {"stream": {"name": "stream2"}, "config": {}},
+        ]
+    }
+
+    current_connection = {"syncCatalog": {"streams": []}}
+
+    expected_response = {"connectionId": "test_connection_id"}
+
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
+        mock_abreq.return_value = expected_response
+
+        result = update_connection(workspace_id, connection_info, current_connection)
+
+        # Verify the call was made with correct field selection config
+        call_args = mock_abreq.call_args[0][1]
+        streams = call_args["syncCatalog"]["streams"]
+
+        # First stream - all columns selected
+        stream1_config = streams[0]["config"]
+        assert stream1_config["fieldSelectionEnabled"] == False
+        assert stream1_config["selectedFields"] == []
+
+        # Second stream - partial columns selected
+        stream2_config = streams[1]["config"]
+        assert stream2_config["fieldSelectionEnabled"] == True
+        assert len(stream2_config["selectedFields"]) == 1
+        assert {"fieldPath": ["col1"]} in stream2_config["selectedFields"]
+
+        assert result == expected_response
+
+
+def test_update_connection_with_incremental_and_columns():
+    """Test update_connection with incremental sync mode and column selection"""
+    workspace_id = "test_workspace"
+
+    connection_info = Mock()
+    connection_info.streams = [
+        {
+            "name": "test_stream",
+            "selected": True,
+            "syncMode": "incremental",
+            "destinationSyncMode": "append_dedup",
+            "primaryKey": ["id"],
+            "cursorField": "updated_at",
+            "columns": [
+                {"name": "id", "selected": True},
+                {"name": "name", "selected": True},
+                {"name": "email", "selected": False},
+                {"name": "updated_at", "selected": True},
+            ],
+        }
+    ]
+    connection_info.syncCatalog = {"streams": [{"stream": {"name": "test_stream"}, "config": {}}]}
+
+    current_connection = {"syncCatalog": {"streams": []}}
+
+    expected_response = {"connectionId": "test_connection_id"}
+
+    with patch("ddpui.ddpairbyte.airbyte_service.abreq") as mock_abreq:
+        mock_abreq.return_value = expected_response
+
+        result = update_connection(workspace_id, connection_info, current_connection)
+
+        # Verify the call was made with correct field selection config
+        call_args = mock_abreq.call_args[0][1]
+        stream_config = call_args["syncCatalog"]["streams"][0]["config"]
+
+        # Check field selection
+        assert stream_config["fieldSelectionEnabled"] == True
+        assert len(stream_config["selectedFields"]) == 3
+        expected_fields = [
+            {"fieldPath": ["id"]},
+            {"fieldPath": ["name"]},
+            {"fieldPath": ["updated_at"]},
+        ]
+        for field in expected_fields:
+            assert field in stream_config["selectedFields"]
+
+        # Check sync mode configs are still set
+        assert stream_config["syncMode"] == "incremental"
+        assert stream_config["destinationSyncMode"] == "append_dedup"
+        assert stream_config["primaryKey"] == [["id"]]
+        assert stream_config["cursorField"] == ["updated_at"]
+
+        assert result == expected_response
