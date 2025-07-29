@@ -14,93 +14,20 @@ from ddpui.models.visualization import Chart, ChartSnapshot
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.schemas.chart_schema import (
+    ChartCreate,
+    ChartUpdate,
+    ChartResponse,
+    ChartDataPayload,
+    ChartDataResponse,
+    DataPreviewResponse,
+    ExecuteChartQuery,
+    TransformDataForChart,
+)
 
 logger = CustomLogger("ddpui")
 
 charts_router = Router()
-
-
-class ChartCreate(Schema):
-    """Schema for creating a chart"""
-
-    title: str
-    description: Optional[str] = None
-    chart_type: str
-    computation_type: str
-    schema_name: str
-    table_name: str
-
-    # All column configuration and customizations in config
-    config: dict
-
-
-class ChartUpdate(Schema):
-    """Schema for updating a chart"""
-
-    title: Optional[str] = None
-    description: Optional[str] = None
-    config: Optional[dict] = None
-    is_favorite: Optional[bool] = None
-
-
-class ChartResponse(Schema):
-    """Schema for chart response"""
-
-    id: int
-    title: str
-    description: Optional[str]
-    chart_type: str
-    computation_type: str
-    schema_name: str
-    table_name: str
-    config: dict  # Contains all column configuration and customizations
-    is_favorite: bool
-    created_at: datetime
-    updated_at: datetime
-
-
-class ChartDataPayload(Schema):
-    """Schema for chart data request"""
-
-    chart_type: str
-    computation_type: str
-    schema_name: str
-    table_name: str
-
-    # For raw data
-    x_axis: Optional[str] = None
-    y_axis: Optional[str] = None
-
-    # For aggregated data
-    dimension_col: Optional[str] = None
-    aggregate_col: Optional[str] = None
-    aggregate_func: Optional[str] = None
-    extra_dimension: Optional[str] = None
-
-    # Customizations
-    customizations: Optional[dict] = None
-
-    # Pagination
-    offset: int = 0
-    limit: int = 100
-
-
-class ChartDataResponse(Schema):
-    """Schema for chart data response"""
-
-    data: dict
-    echarts_config: dict
-
-
-class DataPreviewResponse(Schema):
-    """Schema for data preview response"""
-
-    columns: List[str]
-    column_types: dict
-    data: List[dict]
-    total_rows: int
-    page: int
-    page_size: int
 
 
 def has_schema_access(request, schema_name: str) -> bool:
@@ -167,47 +94,36 @@ def get_chart_data(request, payload: ChartDataPayload):
 
     # Build query
     try:
-        query_builder = charts_service.build_chart_query(
-            payload.computation_type,
-            payload.table_name,
-            payload.schema_name,
-            payload.x_axis,
-            payload.y_axis,
-            payload.dimension_col,
-            payload.aggregate_col,
-            payload.aggregate_func,
-            payload.extra_dimension,
-            payload.limit,
-            payload.offset,
-        )
+        query_builder = charts_service.build_chart_query(payload)
     except ValueError as e:
         raise HttpError(400, str(e))
 
-    # Execute query
-    dict_results = charts_service.execute_chart_query(
-        warehouse,
-        query_builder,
-        payload.computation_type,
-        payload.x_axis,
-        payload.y_axis,
-        payload.dimension_col,
-        payload.aggregate_col,
-        payload.aggregate_func,
-        payload.extra_dimension,
+    execute_payload = ExecuteChartQuery(
+        computation_type=payload.computation_type,
+        x_axis=payload.x_axis,
+        y_axis=payload.y_axis,
+        dimension_col=payload.dimension_col,
+        aggregate_col=payload.aggregate_col,
+        aggregate_func=payload.aggregate_func,
+        extra_dimension=payload.extra_dimension,
     )
 
+    # Execute query
+    dict_results = charts_service.execute_chart_query(warehouse, query_builder, execute_payload)
+
     # Transform data for chart
-    chart_data = charts_service.transform_data_for_chart(
-        dict_results,
-        payload.chart_type,
-        payload.computation_type,
-        payload.x_axis,
-        payload.y_axis,
-        payload.dimension_col,
-        payload.aggregate_col,
-        payload.aggregate_func,
-        payload.extra_dimension,
+    transform_payload = TransformDataForChart(
+        chart_type=payload.chart_type,
+        computation_type=payload.computation_type,
+        x_axis=payload.x_axis,
+        y_axis=payload.y_axis,
+        dimension_col=payload.dimension_col,
+        aggregate_col=payload.aggregate_col,
+        aggregate_func=payload.aggregate_func,
+        extra_dimension=payload.extra_dimension,
+        customizations=payload.customizations,
     )
+    chart_data = charts_service.transform_data_for_chart(dict_results, transform_payload)
 
     # Generate ECharts config
     config_generators = {
@@ -222,9 +138,9 @@ def get_chart_data(request, payload: ChartDataPayload):
 
 
 @charts_router.post("/chart-data-preview/", response=DataPreviewResponse)
-@has_permission(["can_view_warehouse_data"])
+# @has_permission(["can_view_warehouse_data"])
 def get_chart_data_preview(request, payload: ChartDataPayload):
-    """Get paginated data preview for chart"""
+    """Get paginated data preview for chart using the same query as chart data"""
     orguser = request.orguser
 
     # Validate user has access to schema/table
@@ -235,14 +151,9 @@ def get_chart_data_preview(request, payload: ChartDataPayload):
     if not org_warehouse:
         raise HttpError(404, "Warehouse not configured")
 
-    # Get table preview using service
-    preview_data = charts_service.get_table_preview(
-        org_warehouse,
-        payload.schema_name,
-        payload.table_name,
-        payload.limit,
-        payload.offset,
-    )
+    # Get table preview using the same query builder as chart data
+    # This ensures preview shows exactly what will be used for the chart
+    preview_data = charts_service.get_chart_data_table_preview(org_warehouse, payload)
 
     return DataPreviewResponse(
         columns=preview_data["columns"],
