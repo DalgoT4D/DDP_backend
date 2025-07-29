@@ -12,7 +12,7 @@ from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
 
-visualization_router = Router()
+charts_router = Router()
 
 
 class RawChartQueryRequest(Schema):
@@ -93,33 +93,7 @@ class MetricResponse(Schema):
     updated_at: str
 
 
-@visualization_router.post("/generate_chart/")
-@has_permission(["can_view_warehouse_data"])
-def post_generate_chart_data(request, payload: RawChartQueryRequest):
-    """
-    Generate chart data by running a custom query on the warehouse.
-    Does not save any chart entry to the DB.
-    """
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
-    if not org_warehouse:
-        raise HttpError(404, "Please set up your warehouse first")
-
-    data = generate_chart_data(
-        org_warehouse=org_warehouse,
-        schema_name=payload.schema_name,
-        table_name=payload.table_name,
-        xaxis_col=payload.xaxis_col,
-        yaxis_col=payload.yaxis_col,
-        offset=payload.offset,
-        limit=payload.limit,
-    )
-
-    return {"data": data}
-
-
-@visualization_router.post("/charts/", response=ChartResponse)
+@charts_router.post("/", response=ChartResponse)
 @has_permission(["can_view_warehouse_data"])
 def create_chart(request, payload: ChartCreateRequest):
     """
@@ -156,7 +130,7 @@ def create_chart(request, payload: ChartCreateRequest):
         raise HttpError(500, f"Failed to create chart: {str(e)}")
 
 
-@visualization_router.put("/charts/{chart_id}/", response=ChartResponse)
+@charts_router.put("/{chart_id}/", response=ChartResponse)
 @has_permission(["can_view_warehouse_data"])
 def update_chart(request, chart_id: int, payload: ChartUpdateRequest):
     """
@@ -204,7 +178,7 @@ def update_chart(request, chart_id: int, payload: ChartUpdateRequest):
         raise HttpError(500, f"Failed to update chart: {str(e)}")
 
 
-@visualization_router.delete("/charts/{chart_id}/")
+@charts_router.delete("/{chart_id}/")
 @has_permission(["can_view_warehouse_data"])
 def delete_chart(request, chart_id: int):
     """
@@ -225,7 +199,7 @@ def delete_chart(request, chart_id: int):
         raise HttpError(500, f"Failed to delete chart: {str(e)}")
 
 
-@visualization_router.get("/charts/", response=List[ChartResponse])
+@charts_router.get("/", response=List[ChartResponse])
 @has_permission(["can_view_warehouse_data"])
 def list_charts(request):
     """
@@ -256,7 +230,7 @@ def list_charts(request):
         raise HttpError(500, f"Failed to list charts: {str(e)}")
 
 
-@visualization_router.get("/charts/{chart_id}/", response=ChartResponse)
+@charts_router.get("/{chart_id}/", response=ChartResponse)
 @has_permission(["can_view_warehouse_data"])
 def get_chart(request, chart_id: int):
     """
@@ -284,134 +258,3 @@ def get_chart(request, chart_id: int):
     except Exception as e:
         logger.error(f"Failed to get chart: {e}")
         raise HttpError(500, f"Failed to get chart: {str(e)}")
-
-
-@visualization_router.post("/charts/{chart_id}/data/", response=ChartQueryResponse)
-@has_permission(["can_view_warehouse_data"])
-def get_chart_data(request, chart_id: int, payload: ChartDataRequest):
-    """
-    Get chart data for a saved chart using its configuration.
-    """
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
-    if not org_warehouse:
-        raise HttpError(404, "Please set up your warehouse first")
-
-    try:
-        chart = Chart.objects.filter(id=chart_id, org=org).first()
-        if not chart:
-            raise HttpError(404, "Chart not found")
-
-        data = generate_chart_data(
-            org_warehouse=org_warehouse,
-            schema_name=chart.schema,
-            table_name=chart.table,
-            xaxis_col=payload.xaxis_col,
-            yaxis_col=payload.yaxis_col,
-            offset=payload.offset,
-            limit=payload.limit,
-        )
-
-        return {"data": data}
-    except Exception as e:
-        logger.error(f"Failed to get chart data: {e}")
-        raise HttpError(500, f"Failed to get chart data: {str(e)}")
-
-
-@visualization_router.post("/metrics/", response=MetricResponse)
-@has_permission(["can_view_warehouse_data"])
-def create_metric(request, payload: MetricCreateRequest):
-    """
-    Create a new metric definition.
-    """
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-
-    try:
-        metric = Metric.objects.create(
-            org=org,
-            name=payload.name,
-            description=payload.description,
-            schema=payload.schema_name,
-            table=payload.table,
-            temporal_column=payload.temporal_column,
-            dimension_columns=payload.dimension_columns,
-            aggregation_function=payload.aggregation_function,
-            aggregation_column=payload.aggregation_column,
-            metadata=payload.metadata,
-            created_by=orguser,
-        )
-
-        return MetricResponse(
-            id=metric.id,
-            name=metric.name,
-            description=metric.description,
-            schema_name=metric.schema,
-            table=metric.table,
-            temporal_column=metric.temporal_column,
-            dimension_columns=metric.dimension_columns,
-            aggregation_function=metric.aggregation_function,
-            aggregation_column=metric.aggregation_column,
-            metadata=metric.metadata,
-            created_at=metric.created_at.isoformat(),
-            updated_at=metric.updated_at.isoformat(),
-        )
-    except Exception as e:
-        logger.error(f"Failed to create metric: {e}")
-        raise HttpError(500, f"Failed to create metric: {str(e)}")
-
-
-@visualization_router.delete("/metrics/{metric_id}/")
-@has_permission(["can_view_warehouse_data"])
-def delete_metric(request, metric_id: int):
-    """
-    Delete a metric definition.
-    """
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-
-    try:
-        metric = Metric.objects.filter(id=metric_id, org=org).first()
-        if not metric:
-            raise HttpError(404, "Metric not found")
-
-        metric.delete()
-        return {"success": True, "message": "Metric deleted successfully"}
-    except Exception as e:
-        logger.error(f"Failed to delete metric: {e}")
-        raise HttpError(500, f"Failed to delete metric: {str(e)}")
-
-
-@visualization_router.get("/metrics/", response=List[MetricResponse])
-@has_permission(["can_view_warehouse_data"])
-def list_metrics(request):
-    """
-    Get all metrics for the current organization.
-    """
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-
-    try:
-        metrics = Metric.objects.filter(org=org).order_by("-created_at")
-
-        return [
-            MetricResponse(
-                id=metric.id,
-                name=metric.name,
-                description=metric.description,
-                schema_name=metric.schema,
-                table=metric.table,
-                temporal_column=metric.temporal_column,
-                dimension_columns=metric.dimension_columns,
-                aggregation_function=metric.aggregation_function,
-                aggregation_column=metric.aggregation_column,
-                metadata=metric.metadata,
-                created_at=metric.created_at.isoformat(),
-                updated_at=metric.updated_at.isoformat(),
-            )
-            for metric in metrics
-        ]
-    except Exception as e:
-        logger.error(f"Failed to list metrics: {e}")
-        raise HttpError(500, f"Failed to list metrics: {str(e)}")
