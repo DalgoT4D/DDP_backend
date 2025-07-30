@@ -24,7 +24,7 @@ from ddpui.ddpprefect.schema import (
     TaskStateSchema,
     PrefectGetDataflowsResponse,
 )
-from ddpui.utils.constants import TASK_DBTRUN, TASK_AIRBYTESYNC
+from ddpui.utils.constants import TASK_DBTRUN, TASK_AIRBYTESYNC, TASK_AIRBYTECLEAR
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.schemas.org_task_schema import (
     TaskParameters,
@@ -38,6 +38,7 @@ from ddpui.core.pipelinefunctions import (
     pipeline_with_orgtasks,
     fetch_pipeline_lock_v1,
     lock_tasks_for_dataflow,
+    setup_airbyte_clear_streams_task_config,
 )
 from ddpui.celeryworkers.tasks import summarize_logs
 from ddpui.core.orgdbt_manager import DbtProjectManager
@@ -647,32 +648,58 @@ def clear_selected_streams_api(request, deployment_id: str, payload: ClearSelect
     if orguser.org is None:
         raise HttpError(400, "Register an organization first")
 
-    dataflow = OrgDataFlowv1.objects.filter(org=orguser.org, deployment_id=deployment_id).first()
-    if not dataflow:
-        raise HttpError(404, "Deployment not found")
-
-    # Validate connection_id and selected_streams
+    # Validate connection_id and streams
     if not payload.connection_id:
         raise HttpError(400, "connection_id is required")
     if not payload.streams:
         raise HttpError(400, "streams list cannot be empty")
 
-    # Construct flow parameters for selected stream clearing
-    flow_run_params = {
-        "config": {
-            "tasks": [
-                {
-                    "type": AIRBYTECONNECTION,
-                    "slug": "airbyte-clear",
-                    "connection_id": payload.connection_id,
-                    "streams": payload.streams,
-                }
-            ],
-            "org_slug": orguser.org.slug,
-        }
-    }
+    dataflow = OrgDataFlowv1.objects.filter(org=orguser.org, deployment_id=deployment_id).first()
+    if not dataflow:
+        raise HttpError(404, "Deployment not found")
+
+    dataflow_orgtasks = (
+        DataflowOrgTask.objects.filter(dataflow=dataflow).order_by("seq").select_related("orgtask")
+    )
+
+    if dataflow_orgtasks.count() == 0:
+        raise HttpError(400, "no org task mapped to the deployment")
+
+    org_tasks: List[OrgTask] = [dataflow_orgtask.orgtask for dataflow_orgtask in dataflow_orgtasks]
+
+    locks = lock_tasks_for_dataflow(orguser=orguser, dataflow=dataflow, org_tasks=org_tasks)
 
     try:
+        flow_run_params = None
+
+        if (
+            len(org_tasks) == 1
+            and dataflow.dataflow_type == "manual"
+            and org_tasks[0].task.slug == TASK_AIRBYTECLEAR
+            and payload
+        ):
+            logger.info("sending custom flow run params to the deployment run")
+            orgtask = org_tasks[0]
+
+            server_block = OrgPrefectBlockv1.objects.filter(
+                org=orguser.org, block_type=AIRBYTESERVER
+            ).first()
+
+            if server_block:
+                logger.info("found airbyte server block")
+                flow_run_params = {
+                    "config": {
+                        "tasks": [
+                            setup_airbyte_clear_streams_task_config(
+                                orgtask,
+                                server_block,
+                                payload.streams,
+                            ).to_json()
+                        ],
+                        "org_slug": orguser.org.slug,
+                    }
+                }
+
         res = prefect_service.create_deployment_flow_run(deployment_id, flow_run_params)
         PrefectFlowRun.objects.create(
             deployment_id=deployment_id,
@@ -686,9 +713,15 @@ def clear_selected_streams_api(request, deployment_id: str, payload: ClearSelect
             retries=0,
             orguser=orguser,
         )
-    except Exception as e:
-        logger.exception(e)
-        raise HttpError(400, "Failed to start selected stream clear run")
+    except Exception as error:
+        for task_lock in locks:
+            logger.info("deleting TaskLock %s", task_lock.orgtask.task.slug)
+            task_lock.delete()
+        logger.exception(error)
+        raise HttpError(400, "failed to start a run") from error
+    for tasklock in locks:
+        tasklock.flow_run_id = res["flow_run_id"]
+        tasklock.save()
 
     return res
 

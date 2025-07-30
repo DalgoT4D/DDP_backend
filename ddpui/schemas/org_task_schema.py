@@ -1,4 +1,5 @@
 from ninja import Schema
+from typing import List
 
 
 class TaskParameters(Schema):
@@ -8,11 +9,15 @@ class TaskParameters(Schema):
     options: dict | None
 
 
+class StreamSchema(Schema):
+    streamName: str
+
+
 class ClearSelectedStreams(Schema):
     """Schema to define the request payload for clearing selected streams in Airbyte"""
 
     connection_id: str
-    streams: list
+    streams: List[StreamSchema]
 
 
 class CreateOrgTaskPayload(Schema):
