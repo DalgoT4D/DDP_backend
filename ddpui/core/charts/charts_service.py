@@ -11,7 +11,7 @@ from sqlalchemy import column
 from sqlalchemy.dialects import postgresql
 
 from ddpui.models.org import OrgWarehouse
-from ddpui.models.visualization import Chart, ChartSnapshot
+from ddpui.models.visualization import Chart
 from ddpui.datainsights.query_builder import AggQueryBuilder
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.datainsights.warehouse.warehouse_interface import Warehouse
@@ -87,54 +87,6 @@ def convert_value(value: Any, preserve_none: bool = False) -> Any:
     elif isinstance(value, Decimal):
         return float(value)
     return value
-
-
-def get_query_hash(
-    chart_type: str,
-    computation_type: str,
-    schema_name: str,
-    table_name: str,
-    x_axis: Optional[str] = None,
-    y_axis: Optional[str] = None,
-    dimension_col: Optional[str] = None,
-    aggregate_col: Optional[str] = None,
-    aggregate_func: Optional[str] = None,
-    extra_dimension: Optional[str] = None,
-    offset: int = 0,
-    limit: int = 100,
-) -> str:
-    """Generate hash for query caching"""
-    query_dict = {
-        "chart_type": chart_type,
-        "computation_type": computation_type,
-        "schema_name": schema_name,
-        "table_name": table_name,
-        "x_axis": x_axis,
-        "y_axis": y_axis,
-        "dimension_col": dimension_col,
-        "aggregate_col": aggregate_col,
-        "aggregate_func": aggregate_func,
-        "extra_dimension": extra_dimension,
-        "offset": offset,
-        "limit": limit,
-    }
-    query_str = json.dumps(query_dict, sort_keys=True)
-    return hashlib.sha256(query_str.encode()).hexdigest()
-
-
-def get_cached_data(query_hash: str) -> Optional[Tuple[dict, dict]]:
-    """Retrieve cached chart data if available"""
-    cached_snapshot = (
-        ChartSnapshot.objects.filter(query_hash=query_hash, expires_at__gt=timezone.now())
-        .order_by("-created_at")
-        .first()
-    )
-
-    if cached_snapshot:
-        logger.info(f"Using cached data for query hash: {query_hash}")
-        return cached_snapshot.data, cached_snapshot.echarts_config
-
-    return None
 
 
 def build_chart_query(

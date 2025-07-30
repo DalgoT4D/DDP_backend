@@ -10,7 +10,7 @@ from ninja.errors import HttpError
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgWarehouse
-from ddpui.models.visualization import Chart, ChartSnapshot
+from ddpui.models.visualization import Chart
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
 from ddpui.utils.custom_logger import CustomLogger
@@ -37,66 +37,53 @@ def has_schema_access(request, schema_name: str) -> bool:
     return True
 
 
-@charts_router.get("/", response=List[ChartResponse])
-# @has_permission(["can_view_chart"])
-def list_charts(request):
-    """List all charts for the organization"""
-    orguser = request.orguser
-    charts = Chart.objects.filter(org=orguser.org).order_by("-updated_at")
-    return charts
+def generate_chart_render_config(chart: Chart, org_warehouse: OrgWarehouse) -> dict:
+    """Generate ECharts render config from chart's extra_config"""
+    logger.info(f"Generating render config for chart {chart.id}: {chart.title}")
+
+    try:
+        extra_config = chart.extra_config
+        logger.debug(f"Chart {chart.id} extra_config: {extra_config}")
+
+        payload = ChartDataPayload(
+            chart_type=chart.chart_type,
+            computation_type=chart.computation_type,
+            schema_name=chart.schema_name,
+            table_name=chart.table_name,
+            x_axis=extra_config.get("x_axis_column"),
+            y_axis=extra_config.get("y_axis_column"),
+            dimension_col=extra_config.get("dimension_column"),
+            aggregate_col=extra_config.get("aggregate_column"),
+            aggregate_func=extra_config.get("aggregate_function"),
+            extra_dimension=extra_config.get("extra_dimension_column"),
+            customizations=extra_config.get("customizations", {}),
+        )
+
+        # Use the common function to generate config and data
+        result = generate_chart_data_and_config(payload, org_warehouse, chart_id=chart.id)
+        return result.get("echarts_config", {})
+
+    except Exception as e:
+        logger.error(
+            f"Error generating render_config for chart {chart.id}: {str(e)}", exc_info=True
+        )
+        return {}
 
 
-@charts_router.post("/chart-data/", response=ChartDataResponse)
-@has_permission(["can_view_warehouse_data"])
-def get_chart_data(request, payload: ChartDataPayload):
-    """Get chart data with ECharts configuration"""
-    orguser = request.orguser
+def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, chart_id=None) -> dict:
+    """Generate chart data and ECharts config from payload"""
+    chart_id_str = f"chart {chart_id}" if chart_id else "chart"
 
-    # Log the incoming payload for debugging
     logger.info(
-        f"Chart data request - Type: {payload.computation_type}, Schema: {payload.schema_name}, Table: {payload.table_name}"
+        f"Building query for {chart_id_str} - Type: {payload.chart_type}, Computation: {payload.computation_type}"
     )
-    logger.info(
-        f"Columns - x_axis: {payload.x_axis}, y_axis: {payload.y_axis}, dimension_col: {payload.dimension_col}, aggregate_col: {payload.aggregate_col}"
-    )
-
-    # Validate user has access to schema/table
-    if not has_schema_access(request, payload.schema_name):
-        raise HttpError(403, "Access denied to schema")
-
-    # Check cache first
-    query_hash = charts_service.get_query_hash(
-        payload.chart_type,
-        payload.computation_type,
-        payload.schema_name,
-        payload.table_name,
-        payload.x_axis,
-        payload.y_axis,
-        payload.dimension_col,
-        payload.aggregate_col,
-        payload.aggregate_func,
-        payload.extra_dimension,
-        payload.offset,
-        payload.limit,
-    )
-
-    cached_data = charts_service.get_cached_data(query_hash)
-    if cached_data:
-        return ChartDataResponse(data=cached_data[0], echarts_config=cached_data[1])
-
-    # Get org warehouse
-    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
-    if not org_warehouse:
-        raise HttpError(404, "Warehouse not configured")
 
     # Get warehouse client
     warehouse = charts_service.get_warehouse_client(org_warehouse)
 
     # Build query
-    try:
-        query_builder = charts_service.build_chart_query(payload)
-    except ValueError as e:
-        raise HttpError(400, str(e))
+    query_builder = charts_service.build_chart_query(payload)
+    logger.debug(f"Query built for {chart_id_str}: {query_builder}")
 
     execute_payload = ExecuteChartQuery(
         computation_type=payload.computation_type,
@@ -109,7 +96,9 @@ def get_chart_data(request, payload: ChartDataPayload):
     )
 
     # Execute query
+    logger.info(f"Executing query for {chart_id_str}")
     dict_results = charts_service.execute_chart_query(warehouse, query_builder, execute_payload)
+    logger.debug(f"Query results for {chart_id_str}: {len(dict_results)} rows")
 
     # Transform data for chart
     transform_payload = TransformDataForChart(
@@ -132,9 +121,81 @@ def get_chart_data(request, payload: ChartDataPayload):
         "line": EChartsConfigGenerator.generate_line_config,
     }
 
+    logger.info(f"Generating ECharts config for {chart_id_str} with type {payload.chart_type}")
     echarts_config = config_generators[payload.chart_type](chart_data, payload.customizations)
 
-    return ChartDataResponse(data=chart_data, echarts_config=echarts_config)
+    logger.info(f"Successfully generated data and config for {chart_id_str}")
+
+    return {"data": chart_data, "echarts_config": echarts_config}
+
+
+@charts_router.get("/", response=List[ChartResponse])
+# @has_permission(["can_view_chart"])
+def list_charts(request):
+    """List all charts for the organization"""
+    orguser = request.orguser
+    charts = Chart.objects.filter(org=orguser.org).order_by("-updated_at")
+
+    # Get org warehouse once for all charts
+    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if not org_warehouse:
+        logger.warning(f"No warehouse configured for org {orguser.org.id}")
+
+    # Generate render_config for each chart
+    chart_responses = []
+    for chart in charts:
+        chart_dict = {
+            "id": chart.id,
+            "title": chart.title,
+            "description": chart.description,
+            "chart_type": chart.chart_type,
+            "computation_type": chart.computation_type,
+            "schema_name": chart.schema_name,
+            "table_name": chart.table_name,
+            "extra_config": chart.extra_config,
+            "render_config": (
+                generate_chart_render_config(chart, org_warehouse) if org_warehouse else {}
+            ),
+            "created_at": chart.created_at,
+            "updated_at": chart.updated_at,
+        }
+        chart_responses.append(ChartResponse(**chart_dict))
+
+    return chart_responses
+
+
+@charts_router.post("/chart-data/", response=ChartDataResponse)
+@has_permission(["can_view_warehouse_data"])
+def get_chart_data(request, payload: ChartDataPayload):
+    """Get chart data with ECharts configuration"""
+    orguser = request.orguser
+
+    # Log the incoming payload for debugging
+    logger.info(
+        f"Chart data request - Type: {payload.computation_type}, Schema: {payload.schema_name}, Table: {payload.table_name}"
+    )
+    logger.info(
+        f"Columns - x_axis: {payload.x_axis}, y_axis: {payload.y_axis}, dimension_col: {payload.dimension_col}, aggregate_col: {payload.aggregate_col}"
+    )
+
+    # Validate user has access to schema/table
+    if not has_schema_access(request, payload.schema_name):
+        raise HttpError(403, "Access denied to schema")
+
+    # Get org warehouse
+    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Warehouse not configured")
+
+    # Use the common function to generate data and config
+    try:
+        result = generate_chart_data_and_config(payload, org_warehouse)
+        return ChartDataResponse(data=result["data"], echarts_config=result["echarts_config"])
+    except ValueError as e:
+        raise HttpError(400, str(e))
+    except Exception as e:
+        logger.error(f"Error generating chart data: {str(e)}", exc_info=True)
+        raise HttpError(500, "Error generating chart data")
 
 
 @charts_router.post("/chart-data-preview/", response=DataPreviewResponse)
@@ -166,59 +227,94 @@ def get_chart_data_preview(request, payload: ChartDataPayload):
 
 
 @charts_router.get("/{chart_id}/", response=ChartResponse)
-@has_permission(["can_view_chart"])
+# @has_permission(["can_view_chart"])
 def get_chart(request, chart_id: int):
     """Get a specific chart"""
     orguser = request.orguser
     chart = get_object_or_404(Chart, id=chart_id, org=orguser.org)
-    return chart
+
+    # Get org warehouse
+    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if not org_warehouse:
+        logger.warning(f"No warehouse configured for org {orguser.org.id}")
+
+    # Build response with render_config
+    chart_dict = {
+        "id": chart.id,
+        "title": chart.title,
+        "description": chart.description,
+        "chart_type": chart.chart_type,
+        "computation_type": chart.computation_type,
+        "schema_name": chart.schema_name,
+        "table_name": chart.table_name,
+        "extra_config": chart.extra_config,
+        "render_config": (
+            generate_chart_render_config(chart, org_warehouse) if org_warehouse else {}
+        ),
+        "created_at": chart.created_at,
+        "updated_at": chart.updated_at,
+    }
+
+    return ChartResponse(**chart_dict)
 
 
 @charts_router.get("/{chart_id}/data/", response=ChartDataResponse)
-@has_permission(["can_view_chart"])
+# @has_permission(["can_view_chart"])
 def get_chart_data_by_id(request, chart_id: int):
     """Get chart data using saved chart configuration"""
     orguser = request.orguser
     chart = get_object_or_404(Chart, id=chart_id, org=orguser.org)
 
+    # Get org warehouse
+    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Warehouse not configured")
+
     # Build payload from chart config
-    config = chart.config
+    extra_config = chart.extra_config
     payload = ChartDataPayload(
         chart_type=chart.chart_type,
         computation_type=chart.computation_type,
         schema_name=chart.schema_name,
         table_name=chart.table_name,
-        x_axis=config.get("x_axis_column"),
-        y_axis=config.get("y_axis_column"),
-        dimension_col=config.get("dimension_column"),
-        aggregate_col=config.get("aggregate_column"),
-        aggregate_func=config.get("aggregate_function"),
-        extra_dimension=config.get("extra_dimension_column"),
-        customizations=config.get("customizations", {}),
+        x_axis=extra_config.get("x_axis_column"),
+        y_axis=extra_config.get("y_axis_column"),
+        dimension_col=extra_config.get("dimension_column"),
+        aggregate_col=extra_config.get("aggregate_column"),
+        aggregate_func=extra_config.get("aggregate_function"),
+        extra_dimension=extra_config.get("extra_dimension_column"),
+        customizations=extra_config.get("customizations", {}),
         offset=0,
         limit=100,
     )
 
-    # Use existing get_chart_data logic
-    return get_chart_data(request, payload)
+    # Use the common function to generate data and config
+    try:
+        result = generate_chart_data_and_config(payload, org_warehouse, chart_id=chart.id)
+        return ChartDataResponse(data=result["data"], echarts_config=result["echarts_config"])
+    except ValueError as e:
+        raise HttpError(400, str(e))
+    except Exception as e:
+        logger.error(f"Error generating chart data for chart {chart.id}: {str(e)}", exc_info=True)
+        raise HttpError(500, "Error generating chart data")
 
 
 @charts_router.post("/", response=ChartResponse)
-@has_permission(["can_create_chart"])
+# @has_permission(["can_create_chart"])
 def create_chart(request, payload: ChartCreate):
     """Create a new chart"""
     orguser = request.orguser
 
-    # Validate config structure
-    config = payload.config
+    # Validate extra config structure
+    extra_config = payload.extra_config
     if payload.computation_type == "raw":
-        if not config.get("x_axis_column") and not config.get("y_axis_column"):
+        if not extra_config.get("x_axis_column") and not extra_config.get("y_axis_column"):
             raise HttpError(400, "At least one axis column must be specified for raw data")
     else:  # aggregated
         if (
-            not config.get("dimension_column")
-            or not config.get("aggregate_column")
-            or not config.get("aggregate_function")
+            not extra_config.get("dimension_column")
+            or not extra_config.get("aggregate_column")
+            or not extra_config.get("aggregate_function")
         ):
             raise HttpError(
                 400, "Dimension, aggregate column and function are required for aggregated data"
@@ -231,15 +327,39 @@ def create_chart(request, payload: ChartCreate):
         computation_type=payload.computation_type,
         schema_name=payload.schema_name,
         table_name=payload.table_name,
-        config=config,
-        user=orguser,
+        extra_config=extra_config,
+        created_by=orguser,
+        last_modified_by=orguser,
         org=orguser.org,
     )
-    return chart
+
+    # Get org warehouse for render_config generation
+    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if not org_warehouse:
+        logger.warning(f"No warehouse configured for org {orguser.org.id}")
+
+    # Build response with render_config
+    chart_dict = {
+        "id": chart.id,
+        "title": chart.title,
+        "description": chart.description,
+        "chart_type": chart.chart_type,
+        "computation_type": chart.computation_type,
+        "schema_name": chart.schema_name,
+        "table_name": chart.table_name,
+        "extra_config": chart.extra_config,
+        "render_config": (
+            generate_chart_render_config(chart, org_warehouse) if org_warehouse else {}
+        ),
+        "created_at": chart.created_at,
+        "updated_at": chart.updated_at,
+    }
+
+    return ChartResponse(**chart_dict)
 
 
 @charts_router.put("/{chart_id}/", response=ChartResponse)
-@has_permission(["can_edit_chart"])
+# @has_permission(["can_edit_chart"])
 def update_chart(request, chart_id: int, payload: ChartUpdate):
     """Update a chart"""
     orguser = request.orguser
@@ -249,17 +369,55 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
         chart.title = payload.title
     if payload.description is not None:
         chart.description = payload.description
-    if payload.config is not None:
-        chart.config = payload.config
-    if payload.is_favorite is not None:
-        chart.is_favorite = payload.is_favorite
+    if payload.extra_config is not None:
+        # Validate extra config structure based on computation type
+        extra_config = payload.extra_config
+        if chart.computation_type == "raw":
+            if not extra_config.get("x_axis_column") and not extra_config.get("y_axis_column"):
+                raise HttpError(400, "At least one axis column must be specified for raw data")
+        else:  # aggregated
+            if (
+                not extra_config.get("dimension_column")
+                or not extra_config.get("aggregate_column")
+                or not extra_config.get("aggregate_function")
+            ):
+                raise HttpError(
+                    400, "Dimension, aggregate column and function are required for aggregated data"
+                )
+        chart.extra_config = extra_config
+
+    # Update last_modified_by
+    chart.last_modified_by = orguser
 
     chart.save()
-    return chart
+
+    # Get org warehouse for render_config generation
+    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if not org_warehouse:
+        logger.warning(f"No warehouse configured for org {orguser.org.id}")
+
+    # Build response with render_config
+    chart_dict = {
+        "id": chart.id,
+        "title": chart.title,
+        "description": chart.description,
+        "chart_type": chart.chart_type,
+        "computation_type": chart.computation_type,
+        "schema_name": chart.schema_name,
+        "table_name": chart.table_name,
+        "form_config": chart.form_config,
+        "render_config": (
+            generate_chart_render_config(chart, org_warehouse) if org_warehouse else {}
+        ),
+        "created_at": chart.created_at,
+        "updated_at": chart.updated_at,
+    }
+
+    return ChartResponse(**chart_dict)
 
 
 @charts_router.delete("/{chart_id}/")
-@has_permission(["can_delete_chart"])
+# @has_permission(["can_delete_chart"])
 def delete_chart(request, chart_id: int):
     """Delete a chart"""
     orguser = request.orguser

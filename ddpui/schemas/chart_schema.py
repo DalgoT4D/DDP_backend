@@ -15,7 +15,7 @@ class ChartCreate(Schema):
     table_name: str
 
     # All column configuration and customizations in config
-    config: dict
+    extra_config: dict
 
 
 class ChartUpdate(Schema):
@@ -23,8 +23,7 @@ class ChartUpdate(Schema):
 
     title: Optional[str] = None
     description: Optional[str] = None
-    config: Optional[dict] = None
-    is_favorite: Optional[bool] = None
+    extra_config: Optional[dict] = None
 
 
 class ChartResponse(Schema):
@@ -37,8 +36,8 @@ class ChartResponse(Schema):
     computation_type: str
     schema_name: str
     table_name: str
-    config: dict  # Contains all column configuration and customizations
-    is_favorite: bool
+    extra_config: dict  # Contains all column configuration and customizations
+    render_config: dict  # Generated on-the-fly when fetching
     created_at: datetime
     updated_at: datetime
 
