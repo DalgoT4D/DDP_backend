@@ -676,6 +676,7 @@ def clear_selected_streams_api(request, deployment_id: str, payload: ClearSelect
             len(org_tasks) == 1
             and dataflow.dataflow_type == "manual"
             and org_tasks[0].task.slug == TASK_AIRBYTECLEAR
+            and org_tasks[0].connection_id == payload.connection_id
             and payload
         ):
             logger.info("sending custom flow run params to the deployment run")
