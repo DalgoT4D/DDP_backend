@@ -407,7 +407,7 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
         "computation_type": chart.computation_type,
         "schema_name": chart.schema_name,
         "table_name": chart.table_name,
-        "form_config": chart.form_config,
+        "extra_config": chart.extra_config,
         "render_config": (
             generate_chart_render_config(chart, org_warehouse) if org_warehouse else {}
         ),
