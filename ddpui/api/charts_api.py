@@ -130,7 +130,6 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
 
 
 @charts_router.get("/", response=List[ChartResponse])
-# @has_permission(["can_view_chart"])
 def list_charts(request):
     """List all charts for the organization"""
     orguser = request.orguser
@@ -199,7 +198,6 @@ def get_chart_data(request, payload: ChartDataPayload):
 
 
 @charts_router.post("/chart-data-preview/", response=DataPreviewResponse)
-# @has_permission(["can_view_warehouse_data"])
 def get_chart_data_preview(request, payload: ChartDataPayload):
     """Get paginated data preview for chart using the same query as chart data"""
     orguser = request.orguser
@@ -227,7 +225,6 @@ def get_chart_data_preview(request, payload: ChartDataPayload):
 
 
 @charts_router.get("/{chart_id}/", response=ChartResponse)
-# @has_permission(["can_view_chart"])
 def get_chart(request, chart_id: int):
     """Get a specific chart"""
     orguser = request.orguser
@@ -259,7 +256,6 @@ def get_chart(request, chart_id: int):
 
 
 @charts_router.get("/{chart_id}/data/", response=ChartDataResponse)
-# @has_permission(["can_view_chart"])
 def get_chart_data_by_id(request, chart_id: int):
     """Get chart data using saved chart configuration"""
     orguser = request.orguser
@@ -300,7 +296,6 @@ def get_chart_data_by_id(request, chart_id: int):
 
 
 @charts_router.post("/", response=ChartResponse)
-# @has_permission(["can_create_chart"])
 def create_chart(request, payload: ChartCreate):
     """Create a new chart"""
     orguser = request.orguser
@@ -359,7 +354,6 @@ def create_chart(request, payload: ChartCreate):
 
 
 @charts_router.put("/{chart_id}/", response=ChartResponse)
-# @has_permission(["can_edit_chart"])
 def update_chart(request, chart_id: int, payload: ChartUpdate):
     """Update a chart"""
     orguser = request.orguser
@@ -369,6 +363,14 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
         chart.title = payload.title
     if payload.description is not None:
         chart.description = payload.description
+    if payload.chart_type is not None:
+        chart.chart_type = payload.chart_type
+    if payload.computation_type is not None:
+        chart.computation_type = payload.computation_type
+    if payload.schema_name is not None:
+        chart.schema_name = payload.schema_name
+    if payload.table_name is not None:
+        chart.table_name = payload.table_name
     if payload.extra_config is not None:
         # Validate extra config structure based on computation type
         extra_config = payload.extra_config
@@ -417,7 +419,6 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
 
 
 @charts_router.delete("/{chart_id}/")
-# @has_permission(["can_delete_chart"])
 def delete_chart(request, chart_id: int):
     """Delete a chart"""
     orguser = request.orguser

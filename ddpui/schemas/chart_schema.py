@@ -23,6 +23,10 @@ class ChartUpdate(Schema):
 
     title: Optional[str] = None
     description: Optional[str] = None
+    chart_type: Optional[str] = None
+    computation_type: Optional[str] = None
+    schema_name: Optional[str] = None
+    table_name: Optional[str] = None
     extra_config: Optional[dict] = None
 
 
