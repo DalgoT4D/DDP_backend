@@ -113,6 +113,14 @@ class Command(BaseCommand):
                                 self.stdout.write(f"  New command: {new_command}")
                                 self.stdout.write("")
 
+                    elif task["slug"] == "generate-edr":
+                        self.stdout.write(" Old PATH for edr: " + task["env"]["PATH"])
+                        newpath = str(Path(os.getenv("DBT_VENV")) / org.dbt.dbt_venv / "bin")
+                        if task["env"]["PATH"] != newpath:
+                            task["env"]["PATH"] = newpath
+                            modified = True
+                            self.stdout.write(" New PATH for edr: " + task["env"]["PATH"])
+
                 # Update deployment if modified and not dry run
                 if modified:
                     if not dry_run:
