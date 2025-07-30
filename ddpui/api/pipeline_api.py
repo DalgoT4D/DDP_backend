@@ -10,7 +10,7 @@ from ddpui import auth
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service
 
-from ddpui.ddpprefect import DBTCLIPROFILE, AIRBYTESERVER, DBTCLOUDCREDS, AIRBYTECONNECTION
+from ddpui.ddpprefect import DBTCLIPROFILE, AIRBYTESERVER, DBTCLOUDCREDS
 from ddpui.models.org import OrgDataFlowv1, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import DataflowOrgTask, OrgTask, TaskLockStatus
@@ -643,6 +643,7 @@ def post_run_prefect_org_deployment_task(request, deployment_id, payload: TaskPa
 @pipeline_router.post("/v1/flows/{deployment_id}/clear_streams/")
 @has_permission(["can_run_pipeline"])
 def clear_selected_streams_api(request, deployment_id: str, payload: ClearSelectedStreams):
+    """Clear selected streams in Airbyte for a given deployment."""
     orguser: OrgUser = request.orguser
 
     if orguser.org is None:

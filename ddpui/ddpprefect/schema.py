@@ -93,9 +93,7 @@ class PrefectAirbyteRefreshSchemaTaskSetup(Schema):
 
 
 class PrefectAirbyteSyncTaskSetup(Schema):
-    """
-    task config payload in prefect for a airbyte sync task
-    """
+    """task config payload in prefect for a airbyte sync task"""
 
     slug: str
     airbyte_server_block: str
