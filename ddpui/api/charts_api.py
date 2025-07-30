@@ -13,6 +13,7 @@ from ddpui.models.org import OrgWarehouse
 from ddpui.models.visualization import Chart
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
+from ddpui.core.charts.chart_validator import ChartValidator
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.schemas.chart_schema import (
     ChartCreate,
@@ -301,20 +302,17 @@ def create_chart(request, payload: ChartCreate):
     """Create a new chart"""
     orguser = request.orguser
 
-    # Validate extra config structure
-    extra_config = payload.extra_config
-    if payload.computation_type == "raw":
-        if not extra_config.get("x_axis_column") and not extra_config.get("y_axis_column"):
-            raise HttpError(400, "At least one axis column must be specified for raw data")
-    else:  # aggregated
-        if (
-            not extra_config.get("dimension_column")
-            or not extra_config.get("aggregate_column")
-            or not extra_config.get("aggregate_function")
-        ):
-            raise HttpError(
-                400, "Dimension, aggregate column and function are required for aggregated data"
-            )
+    # Validate chart configuration using ChartValidator
+    is_valid, error_message = ChartValidator.validate_chart_config(
+        chart_type=payload.chart_type,
+        computation_type=payload.computation_type,
+        extra_config=payload.extra_config,
+        schema_name=payload.schema_name,
+        table_name=payload.table_name,
+    )
+
+    if not is_valid:
+        raise HttpError(400, error_message)
 
     chart = Chart.objects.create(
         title=payload.title,
@@ -323,7 +321,7 @@ def create_chart(request, payload: ChartCreate):
         computation_type=payload.computation_type,
         schema_name=payload.schema_name,
         table_name=payload.table_name,
-        extra_config=extra_config,
+        extra_config=payload.extra_config,
         created_by=orguser,
         last_modified_by=orguser,
         org=orguser.org,
@@ -360,6 +358,33 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
     orguser = request.orguser
     chart = get_object_or_404(Chart, id=chart_id, org=orguser.org)
 
+    # Prepare the updated values
+    updated_chart_type = payload.chart_type if payload.chart_type is not None else chart.chart_type
+    updated_computation_type = (
+        payload.computation_type if payload.computation_type is not None else chart.computation_type
+    )
+    updated_extra_config = (
+        payload.extra_config if payload.extra_config is not None else chart.extra_config
+    )
+    updated_schema_name = (
+        payload.schema_name if payload.schema_name is not None else chart.schema_name
+    )
+    updated_table_name = payload.table_name if payload.table_name is not None else chart.table_name
+
+    # Validate the updated configuration
+    is_valid, error_message = ChartValidator.validate_for_update(
+        existing_chart_type=chart.chart_type,
+        new_chart_type=payload.chart_type,
+        new_computation_type=payload.computation_type,
+        extra_config=updated_extra_config,
+        schema_name=updated_schema_name,
+        table_name=updated_table_name,
+    )
+
+    if not is_valid:
+        raise HttpError(400, error_message)
+
+    # Apply updates
     if payload.title is not None:
         chart.title = payload.title
     if payload.description is not None:
@@ -373,21 +398,7 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
     if payload.table_name is not None:
         chart.table_name = payload.table_name
     if payload.extra_config is not None:
-        # Validate extra config structure based on computation type
-        extra_config = payload.extra_config
-        if chart.computation_type == "raw":
-            if not extra_config.get("x_axis_column") and not extra_config.get("y_axis_column"):
-                raise HttpError(400, "At least one axis column must be specified for raw data")
-        else:  # aggregated
-            if (
-                not extra_config.get("dimension_column")
-                or not extra_config.get("aggregate_column")
-                or not extra_config.get("aggregate_function")
-            ):
-                raise HttpError(
-                    400, "Dimension, aggregate column and function are required for aggregated data"
-                )
-        chart.extra_config = extra_config
+        chart.extra_config = payload.extra_config
 
     # Update last_modified_by
     chart.last_modified_by = orguser
