@@ -112,23 +112,32 @@ def build_chart_query(
             )
 
     else:  # aggregated
-        # Add dimension column
-        query_builder.add_column(column(payload.dimension_col))
+        # For number charts, we don't need dimension columns
+        if payload.chart_type == "number":
+            # Just add the aggregate column without any grouping
+            query_builder.add_aggregate_column(
+                payload.aggregate_col,
+                payload.aggregate_func,
+                f"{payload.aggregate_func}_{payload.aggregate_col}",
+            )
+        else:
+            # Add dimension column for other chart types
+            query_builder.add_column(column(payload.dimension_col))
 
-        # Add aggregate column
-        query_builder.add_aggregate_column(
-            payload.aggregate_col,
-            payload.aggregate_func,
-            f"{payload.aggregate_func}_{payload.aggregate_col}",
-        )
+            # Add aggregate column
+            query_builder.add_aggregate_column(
+                payload.aggregate_col,
+                payload.aggregate_func,
+                f"{payload.aggregate_func}_{payload.aggregate_col}",
+            )
 
-        # Group by dimension column
-        query_builder.group_cols_by(payload.dimension_col)
+            # Group by dimension column
+            query_builder.group_cols_by(payload.dimension_col)
 
-        # Add extra dimension if specified
-        if payload.extra_dimension:
-            query_builder.add_column(column(payload.extra_dimension))
-            query_builder.group_cols_by(payload.extra_dimension)
+            # Add extra dimension if specified
+            if payload.extra_dimension:
+                query_builder.add_column(column(payload.extra_dimension))
+                query_builder.group_cols_by(payload.extra_dimension)
 
     # Add pagination
     query_builder.limit_rows(payload.limit)
@@ -398,6 +407,20 @@ def transform_data_for_chart(
                     ],
                     "legend": [f"{payload.aggregate_func}({payload.aggregate_col})"],
                 }
+
+    elif payload.chart_type == "number":
+        # Number charts only support aggregated data and return a single value
+        if payload.computation_type == "aggregated" and results:
+            # Get the first (and should be only) row
+            row = results[0] if results else {}
+            value = row.get(f"{payload.aggregate_func}_{payload.aggregate_col}", 0)
+
+            return {
+                "value": value,
+                "metric_name": f"{payload.aggregate_func}({payload.aggregate_col})",
+            }
+        else:
+            return {"value": 0, "metric_name": "No data"}
 
     return {}
 

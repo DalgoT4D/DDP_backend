@@ -6,6 +6,80 @@ class EChartsConfigGenerator:
     """Generate ECharts configurations based on chart type and data"""
 
     @staticmethod
+    def generate_number_config(data: Dict[str, Any], customizations: Dict[str, Any] = None) -> Dict:
+        """Generate number/KPI chart configuration"""
+        customizations = customizations or {}
+
+        # Get the single value from data
+        value = data.get("value", 0)
+        subtitle = customizations.get("subtitle", "")
+        number_format = customizations.get("numberFormat", "default")
+        decimal_places = customizations.get("decimalPlaces", 0)
+
+        # Format the value based on customizations
+        formatted_value = EChartsConfigGenerator._format_number(
+            value, number_format, decimal_places
+        )
+
+        # Create a custom configuration for displaying a single metric
+        # Using a gauge series with custom text display
+        config = {
+            "title": {
+                "text": customizations.get("title", ""),
+                "left": "center",
+                "top": "10%",
+                "textStyle": {"fontSize": 16, "fontWeight": "normal"},
+            },
+            "series": [
+                {
+                    "type": "gauge",
+                    "center": ["50%", "50%"],
+                    "radius": "0%",
+                    "startAngle": 0,
+                    "endAngle": 0,
+                    "axisLine": {"show": False},
+                    "splitLine": {"show": False},
+                    "axisTick": {"show": False},
+                    "axisLabel": {"show": False},
+                    "pointer": {"show": False},
+                    "detail": {
+                        "show": True,
+                        "offsetCenter": [0, 0],
+                        "formatter": formatted_value,
+                        "fontSize": 48,
+                        "fontWeight": "bold",
+                        "color": "#333",
+                    },
+                    "title": {
+                        "show": True,
+                        "offsetCenter": [0, 60],
+                        "fontSize": 16,
+                        "color": "#666",
+                        "fontWeight": "normal",
+                    },
+                    "data": [{"value": value, "name": subtitle}],
+                }
+            ],
+        }
+
+        return config
+
+    @staticmethod
+    def _format_number(value: float, format_type: str, decimal_places: int) -> str:
+        """Format number based on type and decimal places"""
+        if format_type == "percentage":
+            return f"{value:.{decimal_places}f}%"
+        elif format_type == "currency":
+            return f"${value:,.{decimal_places}f}"
+        elif format_type == "comma":
+            return f"{value:,.{decimal_places}f}"
+        else:  # default
+            if decimal_places > 0:
+                return f"{value:.{decimal_places}f}"
+            else:
+                return str(int(value)) if value == int(value) else str(value)
+
+    @staticmethod
     def generate_bar_config(data: Dict[str, Any], customizations: Dict[str, Any] = None) -> Dict:
         """Generate bar chart configuration"""
         customizations = customizations or {}

@@ -12,6 +12,8 @@ CHART_TYPE_CHOICES = [
     ("bar", "Bar Chart"),
     ("pie", "Pie Chart"),
     ("line", "Line Chart"),
+    ("number", "Number Chart"),
+    ("map", "Map Chart"),
 ]
 
 COMPUTATION_TYPE_CHOICES = [

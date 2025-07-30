@@ -119,6 +119,7 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
         "bar": EChartsConfigGenerator.generate_bar_config,
         "pie": EChartsConfigGenerator.generate_pie_config,
         "line": EChartsConfigGenerator.generate_line_config,
+        "number": EChartsConfigGenerator.generate_number_config,
     }
 
     logger.info(f"Generating ECharts config for {chart_id_str} with type {payload.chart_type}")
