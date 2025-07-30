@@ -108,3 +108,4 @@ class TransformDataForChart(Schema):
     aggregate_col: Optional[str] = None
     aggregate_func: Optional[str] = None
     extra_dimension: Optional[str] = None
+    customizations: Optional[dict] = None

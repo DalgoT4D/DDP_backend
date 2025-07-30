@@ -29,15 +29,58 @@ from ddpui.schemas.chart_schema import (
 
 logger = CustomLogger("ddpui.charts")
 
+# Global configuration for null value handling
+NULL_VALUE_LABEL = "Unknown"
+
+
+def handle_null_value(value: Any, null_label: Optional[str] = None) -> Any:
+    """Convert None/null values to configured label for display purposes
+
+    Args:
+        value: The value to check for None
+        null_label: Optional custom label to use instead of default
+
+    Returns:
+        The original value if not None, otherwise the null label
+    """
+    if value is None:
+        return null_label or NULL_VALUE_LABEL
+    return value
+
+
+def safe_get_value(row: Dict[str, Any], key: str, null_label: Optional[str] = None) -> Any:
+    """Safely get value from dict with null handling
+
+    Args:
+        row: Dictionary to get value from
+        key: Key to look up
+        null_label: Optional custom label for null values
+
+    Returns:
+        The value with null handling applied
+    """
+    value = row.get(key)
+    return handle_null_value(value, null_label)
+
 
 def get_warehouse_client(org_warehouse: OrgWarehouse) -> Warehouse:
     """Get warehouse client using the standard method"""
     return WarehouseFactory.get_warehouse_client(org_warehouse)
 
 
-def convert_value(value: Any) -> Any:
-    """Convert values to JSON-serializable format"""
-    if isinstance(value, datetime):
+def convert_value(value: Any, preserve_none: bool = False) -> Any:
+    """Convert values to JSON-serializable format
+
+    Args:
+        value: The value to convert
+        preserve_none: If True, return None as-is; if False, convert to NULL_VALUE_LABEL
+
+    Returns:
+        JSON-serializable value
+    """
+    if value is None:
+        return None if preserve_none else NULL_VALUE_LABEL
+    elif isinstance(value, datetime):
         return value.isoformat()
     elif isinstance(value, date):
         return value.isoformat()
@@ -215,6 +258,9 @@ def transform_data_for_chart(
 ) -> Dict[str, Any]:
     """Transform query results to chart-specific data format"""
 
+    # Get custom null label from customizations if provided
+    null_label = payload.customizations.get("nullValueLabel") if payload.customizations else None
+
     # Handle None values - pie charts only need x_axis for raw data
     if (
         payload.computation_type == "raw"
@@ -228,11 +274,19 @@ def transform_data_for_chart(
     if payload.chart_type == "bar":
         if payload.computation_type == "raw":
             return {
-                "xAxisData": [convert_value(row[payload.x_axis]) for row in results],
+                "xAxisData": [
+                    convert_value(safe_get_value(row, payload.x_axis, null_label))
+                    for row in results
+                ],
                 "series": [
                     {
                         "name": payload.y_axis,
-                        "data": [convert_value(row[payload.y_axis]) for row in results],
+                        "data": [
+                            convert_value(
+                                safe_get_value(row, payload.y_axis, null_label), preserve_none=True
+                            )
+                            for row in results
+                        ],
                     }
                 ],
                 "legend": [payload.y_axis],
@@ -244,8 +298,12 @@ def transform_data_for_chart(
                 x_values = set()
 
                 for row in results:
-                    dimension = row[payload.extra_dimension]
-                    x_value = row[payload.dimension_col]
+                    dimension = handle_null_value(
+                        safe_get_value(row, payload.extra_dimension, null_label), null_label
+                    )
+                    x_value = handle_null_value(
+                        safe_get_value(row, payload.dimension_col, null_label), null_label
+                    )
                     x_values.add(x_value)
 
                     if dimension not in grouped_data:
@@ -270,12 +328,17 @@ def transform_data_for_chart(
                 }
             else:
                 return {
-                    "xAxisData": [row[payload.dimension_col] for row in results],
+                    "xAxisData": [
+                        handle_null_value(
+                            safe_get_value(row, payload.dimension_col, null_label), null_label
+                        )
+                        for row in results
+                    ],
                     "series": [
                         {
                             "name": f"{payload.aggregate_func}({payload.aggregate_col})",
                             "data": [
-                                row[f"{payload.aggregate_func}_{payload.aggregate_col}"]
+                                row.get(f"{payload.aggregate_func}_{payload.aggregate_col}", 0)
                                 for row in results
                             ],
                         }
@@ -288,7 +351,7 @@ def transform_data_for_chart(
             # For raw data, count occurrences
             value_counts = {}
             for row in results:
-                key = str(row[payload.x_axis])
+                key = handle_null_value(safe_get_value(row, payload.x_axis, null_label), null_label)
                 value_counts[key] = value_counts.get(key, 0) + 1
 
             return {
@@ -299,8 +362,10 @@ def transform_data_for_chart(
             return {
                 "pieData": [
                     {
-                        "value": row[f"{payload.aggregate_func}_{payload.aggregate_col}"],
-                        "name": str(row[payload.dimension_col]),
+                        "value": row.get(f"{payload.aggregate_func}_{payload.aggregate_col}", 0),
+                        "name": handle_null_value(
+                            safe_get_value(row, payload.dimension_col, null_label), null_label
+                        ),
                     }
                     for row in results
                 ],
@@ -310,11 +375,19 @@ def transform_data_for_chart(
     elif payload.chart_type == "line":
         if payload.computation_type == "raw":
             return {
-                "xAxisData": [convert_value(row[payload.x_axis]) for row in results],
+                "xAxisData": [
+                    convert_value(safe_get_value(row, payload.x_axis, null_label))
+                    for row in results
+                ],
                 "series": [
                     {
                         "name": payload.y_axis,
-                        "data": [convert_value(row[payload.y_axis]) for row in results],
+                        "data": [
+                            convert_value(
+                                safe_get_value(row, payload.y_axis, null_label), preserve_none=True
+                            )
+                            for row in results
+                        ],
                     }
                 ],
                 "legend": [payload.y_axis],
@@ -326,8 +399,12 @@ def transform_data_for_chart(
                 x_values = set()
 
                 for row in results:
-                    dimension = row[payload.extra_dimension]
-                    x_value = row[payload.dimension_col]
+                    dimension = handle_null_value(
+                        safe_get_value(row, payload.extra_dimension, null_label), null_label
+                    )
+                    x_value = handle_null_value(
+                        safe_get_value(row, payload.dimension_col, null_label), null_label
+                    )
                     x_values.add(x_value)
 
                     if dimension not in grouped_data:
@@ -352,12 +429,17 @@ def transform_data_for_chart(
                 }
             else:
                 return {
-                    "xAxisData": [row[payload.dimension_col] for row in results],
+                    "xAxisData": [
+                        handle_null_value(
+                            safe_get_value(row, payload.dimension_col, null_label), null_label
+                        )
+                        for row in results
+                    ],
                     "series": [
                         {
                             "name": f"{payload.aggregate_func}({payload.aggregate_col})",
                             "data": [
-                                row[f"{payload.aggregate_func}_{payload.aggregate_col}"]
+                                row.get(f"{payload.aggregate_func}_{payload.aggregate_col}", 0)
                                 for row in results
                             ],
                         }
