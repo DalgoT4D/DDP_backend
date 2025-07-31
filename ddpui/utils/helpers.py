@@ -227,7 +227,7 @@ def compare_semver(version1: str, version2: str) -> int:
     """compares semantic versioning strings"""
 
     def parse_version(v):
-        # Regex to parse: major.minor.patch-prerelease+build
+        """Regex to parse: major.minor.patch-prerelease+build"""
         regex = r"^(\d+)\.(\d+)\.(\d+)(?:-([\w\.-]+))?(?:\+[\w\.-]+)?$"
         match = re.match(regex, v)
         if not match:
@@ -237,7 +237,8 @@ def compare_semver(version1: str, version2: str) -> int:
         return (major, minor, patch, prerelease)
 
     def cmp(a, b):
-        return (a > b) - (a < b)  # Returns 1, 0, or -1
+        """Returns 1, 0, or -1"""
+        return (a > b) - (a < b)
 
     v1 = parse_version(version1)
     v2 = parse_version(version2)
@@ -258,8 +259,8 @@ def compare_semver(version1: str, version2: str) -> int:
     if prere2 is None:
         return -1  # version2 is a release, which is higher than prerelease
 
-    # Prerelease comparison: split by '.'
     def pre_release_cmp(pr1, pr2):
+        """Prerelease comparison: split by '.'"""
         parts1 = pr1.split(".")
         parts2 = pr2.split(".")
         len1, len2 = len(parts1), len(parts2)
