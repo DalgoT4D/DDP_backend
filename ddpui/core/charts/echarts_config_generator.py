@@ -217,26 +217,57 @@ class EChartsConfigGenerator:
     def generate_line_config(data: Dict[str, Any], customizations: Dict[str, Any] = None) -> Dict:
         """Generate line chart configuration"""
         customizations = customizations or {}
-        line_style = customizations.get("lineStyle", "straight")
+        line_style = customizations.get("lineStyle", "smooth")  # Default to smooth
         show_data_labels = customizations.get("showDataLabels", False)
         show_data_points = customizations.get("showDataPoints", True)
         x_axis_title = customizations.get("xAxisTitle", "")
         y_axis_title = customizations.get("yAxisTitle", "")
+        x_axis_label_rotation = customizations.get("xAxisLabelRotation", "horizontal")
+        y_axis_label_rotation = customizations.get("yAxisLabelRotation", "horizontal")
+        show_tooltip = customizations.get("showTooltip", True)
+        show_legend = customizations.get("showLegend", True)
+        data_label_position = customizations.get("dataLabelPosition", "top")
+
+        # Convert rotation values to degrees
+        rotation_map = {
+            "horizontal": 0,
+            "45": -45,  # Negative for clockwise rotation
+            "vertical": -90,
+        }
+
+        # Map data label positions for line charts
+        position_map = {
+            "top": "top",
+            "bottom": "bottom",
+            "left": "left",
+            "right": "right",
+        }
 
         config = {
             "title": {"text": customizations.get("title", "")},
-            "tooltip": {"trigger": "axis"},
-            "legend": {"data": data.get("legend", [])},
             "grid": {"left": "3%", "right": "4%", "bottom": "3%", "containLabel": True},
             "xAxis": {
                 "type": "category",
                 "data": data.get("xAxisData", []),
                 "name": x_axis_title,
                 "boundaryGap": False,
+                "axisLabel": {"rotate": rotation_map.get(x_axis_label_rotation, 0)},
             },
-            "yAxis": {"type": "value", "name": y_axis_title},
+            "yAxis": {
+                "type": "value",
+                "name": y_axis_title,
+                "axisLabel": {"rotate": rotation_map.get(y_axis_label_rotation, 0)},
+            },
             "series": [],
         }
+
+        # Add tooltip if enabled
+        if show_tooltip:
+            config["tooltip"] = {"trigger": "axis"}
+
+        # Add legend if enabled
+        if show_legend:
+            config["legend"] = {"data": data.get("legend", [])}
 
         # Build series
         for series_data in data.get("series", []):
@@ -245,7 +276,10 @@ class EChartsConfigGenerator:
                 "type": "line",
                 "smooth": line_style == "smooth",
                 "data": series_data.get("data", []),
-                "label": {"show": show_data_labels, "position": "top"},
+                "label": {
+                    "show": show_data_labels,
+                    "position": position_map.get(data_label_position, "top"),
+                },
                 "showSymbol": show_data_points,
             }
             config["series"].append(series_config)
