@@ -153,27 +153,35 @@ class EChartsConfigGenerator:
     def generate_pie_config(data: Dict[str, Any], customizations: Dict[str, Any] = None) -> Dict:
         """Generate pie chart configuration"""
         customizations = customizations or {}
-        chart_style = customizations.get("chartStyle", "pie")
+        chart_style = customizations.get("chartStyle", "donut")  # Default to donut
         show_data_labels = customizations.get("showDataLabels", True)
         label_format = customizations.get("labelFormat", "percentage")
+        data_label_position = customizations.get("dataLabelPosition", "outside")
         legend_position = customizations.get("legendPosition", "right")
+        show_legend = customizations.get("showLegend", True)
+        show_tooltip = customizations.get("showTooltip", True)
 
         # Determine label formatter
         formatter_map = {
-            "percentage": "{b}: {d}%",
-            "value": "{b}: {c}",
+            "percentage": "{d}%",
+            "value": "{c}",
             "name_percentage": "{b}\n{d}%",
             "name_value": "{b}\n{c}",
         }
 
+        # Determine label position mapping
+        position_map = {
+            "outside": "outside",
+            "inside": "inside",
+            "center": "center",
+            # Legacy mappings for compatibility
+            "top": "outside",
+            "bottom": "outside",
+            "mid": "inside",
+        }
+
         config = {
             "title": {"text": customizations.get("title", "")},
-            "tooltip": {"trigger": "item", "formatter": "{a} <br/>{b}: {c} ({d}%)"},
-            "legend": {
-                "orient": "vertical" if legend_position in ["left", "right"] else "horizontal",
-                legend_position: 10 if legend_position in ["left", "right"] else "center",
-                "data": [item["name"] for item in data.get("pieData", [])],
-            },
             "series": [
                 {
                     "name": data.get("seriesName", "Data"),
@@ -182,13 +190,26 @@ class EChartsConfigGenerator:
                     "avoidLabelOverlap": False,
                     "label": {
                         "show": show_data_labels,
-                        "formatter": formatter_map.get(label_format, "{b}: {d}%"),
+                        "position": position_map.get(data_label_position, "outside"),
+                        "formatter": formatter_map.get(label_format, "{d}%"),
                     },
-                    "labelLine": {"show": show_data_labels},
+                    "labelLine": {"show": show_data_labels and data_label_position == "outside"},
                     "data": data.get("pieData", []),
                 }
             ],
         }
+
+        # Add tooltip if enabled
+        if show_tooltip:
+            config["tooltip"] = {"trigger": "item", "formatter": "{a} <br/>{b}: {c} ({d}%)"}
+
+        # Add legend if enabled
+        if show_legend:
+            config["legend"] = {
+                "orient": "vertical" if legend_position in ["left", "right"] else "horizontal",
+                legend_position: 10 if legend_position in ["left", "right"] else "center",
+                "data": [item["name"] for item in data.get("pieData", [])],
+            }
 
         return config
 
