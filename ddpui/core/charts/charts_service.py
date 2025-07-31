@@ -68,6 +68,20 @@ def get_warehouse_client(org_warehouse: OrgWarehouse) -> Warehouse:
     return WarehouseFactory.get_warehouse_client(org_warehouse)
 
 
+def get_aggregate_column_name(aggregate_func: str, aggregate_col: str) -> str:
+    """Get the correct aggregate column name for data retrieval"""
+    if aggregate_func.lower() == "count" and aggregate_col is None:
+        return "count_all"
+    return f"{aggregate_func}_{aggregate_col}"
+
+
+def get_aggregate_display_name(aggregate_func: str, aggregate_col: str) -> str:
+    """Get the display name for aggregate columns in chart legends"""
+    if aggregate_func.lower() == "count" and aggregate_col is None:
+        return "Total Count"
+    return f"{aggregate_func}({aggregate_col})"
+
+
 def convert_value(value: Any, preserve_none: bool = False) -> Any:
     """Convert values to JSON-serializable format
 
@@ -97,7 +111,6 @@ def build_chart_query(
     query_builder.fetch_from(payload.table_name, payload.schema_name)
 
     if payload.computation_type == "raw":
-        # For raw queries, add regular columns without aggregation
         if payload.x_axis:
             query_builder.add_column(column(payload.x_axis))
         if payload.y_axis:
@@ -114,21 +127,33 @@ def build_chart_query(
     else:  # aggregated
         # For number charts, we don't need dimension columns
         if payload.chart_type == "number":
+            # Handle count with None column case - use "count_all" alias
+            if payload.aggregate_func.lower() == "count" and payload.aggregate_col is None:
+                alias = "count_all"
+            else:
+                alias = f"{payload.aggregate_func}_{payload.aggregate_col}"
+
             # Just add the aggregate column without any grouping
             query_builder.add_aggregate_column(
                 payload.aggregate_col,
                 payload.aggregate_func,
-                f"{payload.aggregate_func}_{payload.aggregate_col}",
+                alias,
             )
         else:
             # Add dimension column for other chart types
             query_builder.add_column(column(payload.dimension_col))
 
+            # Handle count with None column case - use "count_all" alias
+            if payload.aggregate_func.lower() == "count" and payload.aggregate_col is None:
+                alias = "count_all"
+            else:
+                alias = f"{payload.aggregate_func}_{payload.aggregate_col}"
+
             # Add aggregate column
             query_builder.add_aggregate_column(
                 payload.aggregate_col,
                 payload.aggregate_func,
-                f"{payload.aggregate_func}_{payload.aggregate_col}",
+                alias,
             )
 
             # Group by dimension column
@@ -203,8 +228,11 @@ def execute_chart_query(
         col_index = 0
         column_mapping.append((payload.dimension_col, col_index))
         col_index += 1
-        # The aggregate column name is formatted as func_column
-        agg_col_name = f"{payload.aggregate_func}_{payload.aggregate_col}"
+        # Handle count with None column case - use "count_all" name
+        if payload.aggregate_func.lower() == "count" and payload.aggregate_col is None:
+            agg_col_name = "count_all"
+        else:
+            agg_col_name = f"{payload.aggregate_func}_{payload.aggregate_col}"
         column_mapping.append((agg_col_name, col_index))
         col_index += 1
         if payload.extra_dimension:
@@ -270,9 +298,10 @@ def transform_data_for_chart(
                     if dimension not in grouped_data:
                         grouped_data[dimension] = {}
 
-                    grouped_data[dimension][x_value] = row.get(
-                        f"{payload.aggregate_func}_{payload.aggregate_col}", 0
+                    agg_col_name = get_aggregate_column_name(
+                        payload.aggregate_func, payload.aggregate_col
                     )
+                    grouped_data[dimension][x_value] = row.get(agg_col_name, 0)
 
                 x_axis_data = sorted(list(x_values))
 
@@ -297,14 +326,23 @@ def transform_data_for_chart(
                     ],
                     "series": [
                         {
-                            "name": f"{payload.aggregate_func}({payload.aggregate_col})",
+                            "name": get_aggregate_display_name(
+                                payload.aggregate_func, payload.aggregate_col
+                            ),
                             "data": [
-                                row.get(f"{payload.aggregate_func}_{payload.aggregate_col}", 0)
+                                row.get(
+                                    get_aggregate_column_name(
+                                        payload.aggregate_func, payload.aggregate_col
+                                    ),
+                                    0,
+                                )
                                 for row in results
                             ],
                         }
                     ],
-                    "legend": [f"{payload.aggregate_func}({payload.aggregate_col})"],
+                    "legend": [
+                        get_aggregate_display_name(payload.aggregate_func, payload.aggregate_col)
+                    ],
                 }
 
     elif payload.chart_type == "pie":
@@ -323,14 +361,21 @@ def transform_data_for_chart(
             return {
                 "pieData": [
                     {
-                        "value": row.get(f"{payload.aggregate_func}_{payload.aggregate_col}", 0),
+                        "value": row.get(
+                            get_aggregate_column_name(
+                                payload.aggregate_func, payload.aggregate_col
+                            ),
+                            0,
+                        ),
                         "name": handle_null_value(
                             safe_get_value(row, payload.dimension_col, null_label), null_label
                         ),
                     }
                     for row in results
                 ],
-                "seriesName": f"{payload.aggregate_func}({payload.aggregate_col})",
+                "seriesName": get_aggregate_display_name(
+                    payload.aggregate_func, payload.aggregate_col
+                ),
             }
 
     elif payload.chart_type == "line":
@@ -371,9 +416,10 @@ def transform_data_for_chart(
                     if dimension not in grouped_data:
                         grouped_data[dimension] = {}
 
-                    grouped_data[dimension][x_value] = row.get(
-                        f"{payload.aggregate_func}_{payload.aggregate_col}", 0
+                    agg_col_name = get_aggregate_column_name(
+                        payload.aggregate_func, payload.aggregate_col
                     )
+                    grouped_data[dimension][x_value] = row.get(agg_col_name, 0)
 
                 x_axis_data = sorted(list(x_values))
 
@@ -398,14 +444,23 @@ def transform_data_for_chart(
                     ],
                     "series": [
                         {
-                            "name": f"{payload.aggregate_func}({payload.aggregate_col})",
+                            "name": get_aggregate_display_name(
+                                payload.aggregate_func, payload.aggregate_col
+                            ),
                             "data": [
-                                row.get(f"{payload.aggregate_func}_{payload.aggregate_col}", 0)
+                                row.get(
+                                    get_aggregate_column_name(
+                                        payload.aggregate_func, payload.aggregate_col
+                                    ),
+                                    0,
+                                )
                                 for row in results
                             ],
                         }
                     ],
-                    "legend": [f"{payload.aggregate_func}({payload.aggregate_col})"],
+                    "legend": [
+                        get_aggregate_display_name(payload.aggregate_func, payload.aggregate_col)
+                    ],
                 }
 
     elif payload.chart_type == "number":
@@ -413,11 +468,14 @@ def transform_data_for_chart(
         if payload.computation_type == "aggregated" and results:
             # Get the first (and should be only) row
             row = results[0] if results else {}
-            value = row.get(f"{payload.aggregate_func}_{payload.aggregate_col}", 0)
+            agg_col_name = get_aggregate_column_name(payload.aggregate_func, payload.aggregate_col)
+            value = row.get(agg_col_name, 0)
 
             return {
                 "value": value,
-                "metric_name": f"{payload.aggregate_func}({payload.aggregate_col})",
+                "metric_name": get_aggregate_display_name(
+                    payload.aggregate_func, payload.aggregate_col
+                ),
             }
         else:
             return {"value": 0, "metric_name": "No data"}
@@ -460,7 +518,7 @@ def get_chart_data_table_preview(
         column_mapping.append((payload.dimension_col, col_index))
         columns.append(payload.dimension_col)
         col_index += 1
-        agg_col_name = f"{payload.aggregate_func}_{payload.aggregate_col}"
+        agg_col_name = get_aggregate_column_name(payload.aggregate_func, payload.aggregate_col)
         column_mapping.append((agg_col_name, col_index))
         columns.append(agg_col_name)
         col_index += 1
@@ -478,9 +536,22 @@ def get_chart_data_table_preview(
     page_size = payload.limit
     page = (payload.offset // page_size) + 1
 
-    # Get total count
-    count_query = f"SELECT COUNT(*) as total FROM {payload.schema_name}.{payload.table_name}"
-    count_result = warehouse.execute(count_query)
+    # Get total count using the existing query_builder as subquery (without LIMIT/OFFSET)
+    # Temporarily remove pagination from existing query builder
+    original_limit = query_builder.limit_records
+    original_offset = query_builder.offset_records
+    query_builder.limit_records = None
+    query_builder.offset_records = 0
+
+    # Build the original query as subquery and wrap with COUNT(*)
+    original_subquery = query_builder.build()
+    count_sql = f"SELECT COUNT(*) as total FROM ({original_subquery.compile(bind=warehouse.engine, compile_kwargs={'literal_binds': True})}) as subquery"
+
+    # Restore original pagination settings
+    query_builder.limit_records = original_limit
+    query_builder.offset_records = original_offset
+
+    count_result = warehouse.execute(count_sql)
     total_rows = count_result[0]["total"] if count_result else 0
 
     return {
