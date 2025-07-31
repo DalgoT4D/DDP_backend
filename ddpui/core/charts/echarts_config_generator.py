@@ -88,21 +88,34 @@ class EChartsConfigGenerator:
         show_data_labels = customizations.get("showDataLabels", False)
         x_axis_title = customizations.get("xAxisTitle", "")
         y_axis_title = customizations.get("yAxisTitle", "")
+        x_axis_label_rotation = customizations.get("xAxisLabelRotation", "horizontal")
+        y_axis_label_rotation = customizations.get("yAxisLabelRotation", "horizontal")
+        show_tooltip = customizations.get("showTooltip", True)
+        show_legend = customizations.get("showLegend", True)
+        data_label_position = customizations.get("dataLabelPosition", "top")
+
+        # Convert rotation values to degrees
+        rotation_map = {
+            "horizontal": 0,
+            "45": -45,  # Negative for clockwise rotation
+            "vertical": -90,
+        }
 
         config = {
             "title": {"text": customizations.get("title", "")},
-            "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
-            "legend": {"data": data.get("legend", [])},
+            "legend": {"data": data.get("legend", []), "show": show_legend},
             "grid": {"left": "3%", "right": "4%", "bottom": "3%", "containLabel": True},
             "xAxis": {
                 "type": "category" if orientation == "vertical" else "value",
                 "data": data.get("xAxisData", []) if orientation == "vertical" else None,
                 "name": x_axis_title,
+                "axisLabel": {"rotate": rotation_map.get(x_axis_label_rotation, 0)},
             },
             "yAxis": {
                 "type": "value" if orientation == "vertical" else "category",
                 "data": data.get("yAxisData", []) if orientation == "horizontal" else None,
                 "name": y_axis_title,
+                "axisLabel": {"rotate": rotation_map.get(y_axis_label_rotation, 0)},
             },
             "series": [],
         }
@@ -115,12 +128,24 @@ class EChartsConfigGenerator:
                 "data": series_data.get("data", []),
                 "label": {
                     "show": show_data_labels,
-                    "position": "top" if orientation == "vertical" else "right",
+                    "position": data_label_position
+                    if orientation == "vertical"
+                    else (
+                        "right"
+                        if data_label_position == "top"
+                        else "left"
+                        if data_label_position == "bottom"
+                        else "inside"
+                    ),
                 },
             }
             if is_stacked:
                 series_config["stack"] = "total"
             config["series"].append(series_config)
+
+        # Add tooltip if enabled
+        if show_tooltip:
+            config["tooltip"] = {"trigger": "axis", "axisPointer": {"type": "shadow"}}
 
         return config
 
