@@ -82,7 +82,7 @@ class ChartDataResponse(Schema):
 class DataPreviewResponse(Schema):
     """Schema for data preview response"""
 
-    columns: List[str]
+    columns: List
     column_types: dict
     data: List[dict]
     total_rows: int
