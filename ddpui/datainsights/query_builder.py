@@ -1,4 +1,5 @@
 from sqlalchemy.sql.functions import Function
+from sqlalchemy import func
 from sqlalchemy.sql.expression import (
     table,
     TableClause,
@@ -30,6 +31,34 @@ class AggQueryBuilder:
     def add_column(self, agg_col: Function | ColumnClause):
         """Push a column to select"""
         self.column_clauses.append(agg_col)
+        return self
+
+    def add_aggregate_column(self, column_name: str, agg_func: str, alias: str = None):
+        """Add an aggregate column with specified function"""
+        col = column(column_name)
+
+        agg_functions = {
+            "sum": func.sum,
+            "avg": func.avg,
+            "count": func.count,
+            "min": func.min,
+            "max": func.max,
+            "count_distinct": lambda c: func.count(func.distinct(c)),
+        }
+
+        agg_func_lower = agg_func.lower()
+        if agg_func_lower not in agg_functions:
+            raise ValueError(f"Unsupported aggregate function: {agg_func}")
+
+        if agg_func_lower == "count_distinct":
+            agg_column = agg_functions[agg_func_lower](col)
+        else:
+            agg_column = agg_functions[agg_func_lower](col)
+
+        if alias:
+            agg_column = agg_column.label(alias)
+
+        self.column_clauses.append(agg_column)
         return self
 
     def fetch_from(self, db_table: str, db_schema: str):
