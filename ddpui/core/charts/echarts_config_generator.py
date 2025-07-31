@@ -15,11 +15,23 @@ class EChartsConfigGenerator:
         subtitle = customizations.get("subtitle", "")
         number_format = customizations.get("numberFormat", "default")
         decimal_places = customizations.get("decimalPlaces", 0)
+        number_size = customizations.get("numberSize", "medium")
+        number_prefix = customizations.get("numberPrefix", "")
+        number_suffix = customizations.get("numberSuffix", "")
 
         # Format the value based on customizations
         formatted_value = EChartsConfigGenerator._format_number(
-            value, number_format, decimal_places
+            value, number_format, decimal_places, number_prefix, number_suffix
         )
+
+        # Map number size to font size
+        size_map = {
+            "small": 32,
+            "medium": 48,
+            "large": 64,
+        }
+
+        font_size = size_map.get(number_size, 48)
 
         # Create a custom configuration for displaying a single metric
         # Using a gauge series with custom text display
@@ -46,13 +58,16 @@ class EChartsConfigGenerator:
                         "show": True,
                         "offsetCenter": [0, 0],
                         "formatter": formatted_value,
-                        "fontSize": 48,
+                        "fontSize": font_size,
                         "fontWeight": "bold",
                         "color": "#333",
                     },
                     "title": {
                         "show": True,
-                        "offsetCenter": [0, 60],
+                        "offsetCenter": [
+                            0,
+                            font_size + 20,
+                        ],  # Position subtitle below number based on size
                         "fontSize": 16,
                         "color": "#666",
                         "fontWeight": "normal",
@@ -65,19 +80,28 @@ class EChartsConfigGenerator:
         return config
 
     @staticmethod
-    def _format_number(value: float, format_type: str, decimal_places: int) -> str:
-        """Format number based on type and decimal places"""
+    def _format_number(
+        value: float, format_type: str, decimal_places: int, prefix: str = "", suffix: str = ""
+    ) -> str:
+        """Format number based on type, decimal places, prefix and suffix"""
+        # Format the number based on type
         if format_type == "percentage":
-            return f"{value:.{decimal_places}f}%"
+            formatted = f"{value:.{decimal_places}f}%"
         elif format_type == "currency":
-            return f"${value:,.{decimal_places}f}"
+            formatted = f"${value:,.{decimal_places}f}"
         elif format_type == "comma":
-            return f"{value:,.{decimal_places}f}"
+            formatted = f"{value:,.{decimal_places}f}"
         else:  # default
             if decimal_places > 0:
-                return f"{value:.{decimal_places}f}"
+                formatted = f"{value:.{decimal_places}f}"
             else:
-                return str(int(value)) if value == int(value) else str(value)
+                formatted = str(int(value)) if value == int(value) else str(value)
+
+        # Add prefix and suffix if provided
+        if prefix or suffix:
+            return f"{prefix}{formatted}{suffix}"
+
+        return formatted
 
     @staticmethod
     def generate_bar_config(data: Dict[str, Any], customizations: Dict[str, Any] = None) -> Dict:
