@@ -35,6 +35,7 @@ from ddpui.utils import helpers, awsses, timezone
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.orguserhelpers import from_invitation, from_orguser
 from ddpui.utils.redis_client import RedisClient
+from urllib.parse import urlparse
 
 logger = CustomLogger("ddpui")
 
@@ -376,7 +377,7 @@ def resend_invitation(invitation_id: str):
     return None, None
 
 
-def request_reset_password(email: str):
+def request_reset_password(email: str, request_origin: str = None):
     """send the reset password email"""
     orguser = OrgUser.objects.filter(user__email=email, user__is_active=True).first()
 
@@ -394,8 +395,12 @@ def request_reset_password(email: str):
     redis.set(redis_key, orguserid_bytes)
     redis.expire(redis_key, 3600 * 24)  # 24 hours
 
-    FRONTEND_URL = os.getenv("FRONTEND_URL")
-    reset_url = f"{FRONTEND_URL}/resetpassword/?token={token.hex}"
+    logger.info(request_origin, "request origin")
+    parsed_url = urlparse(request_origin)
+    frontend_base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+    # Use consistent route pattern for all frontends
+    reset_url = f"{frontend_base_url}/resetpassword/?token={token.hex}"
+
     try:
         awsses.send_password_reset_email(email, reset_url)
     except Exception:
