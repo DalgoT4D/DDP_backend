@@ -79,7 +79,7 @@ class ChartValidator:
             logger.warning(f"Chart validation failed: {str(e)}")
             return False, str(e)
         except Exception as e:
-            logger.error(f"Unexpected error during chart validation: {str(e)}", exc_info=True)
+            logger.error(f"Unexpected error during chart validation: {str(e)}")
             return False, f"Validation error: {str(e)}"
 
     @staticmethod

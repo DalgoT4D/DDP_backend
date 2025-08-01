@@ -65,9 +65,7 @@ def generate_chart_render_config(chart: Chart, org_warehouse: OrgWarehouse) -> d
         return result.get("echarts_config", {})
 
     except Exception as e:
-        logger.error(
-            f"Error generating render_config for chart {chart.id}: {str(e)}", exc_info=True
-        )
+        logger.error(f"Error generating render_config for chart {chart.id}: {str(e)}")
         return {}
 
 
@@ -195,7 +193,7 @@ def get_chart_data(request, payload: ChartDataPayload):
     except ValueError as e:
         raise HttpError(400, str(e))
     except Exception as e:
-        logger.error(f"Error generating chart data: {str(e)}", exc_info=True)
+        logger.error(f"Error generating chart data: {str(e)}")
         raise HttpError(500, "Error generating chart data")
 
 
@@ -293,7 +291,7 @@ def get_chart_data_by_id(request, chart_id: int):
     except ValueError as e:
         raise HttpError(400, str(e))
     except Exception as e:
-        logger.error(f"Error generating chart data for chart {chart.id}: {str(e)}", exc_info=True)
+        logger.error(f"Error generating chart data for chart {chart.id}: {str(e)}")
         raise HttpError(500, "Error generating chart data")
 
 
