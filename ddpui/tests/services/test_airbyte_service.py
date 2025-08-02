@@ -1976,7 +1976,7 @@ def test_update_connection_with_partial_columns_selected():
         call_args = mock_abreq.call_args[0][1]
         stream_config = call_args["syncCatalog"]["streams"][0]["config"]
 
-        assert stream_config["fieldSelectionEnabled"] == True
+        assert stream_config["fieldSelectionEnabled"] is True
         assert len(stream_config["selectedFields"]) == 2
         assert {"fieldPath": ["col1"]} in stream_config["selectedFields"]
         assert {"fieldPath": ["col3"]} in stream_config["selectedFields"]
@@ -2016,7 +2016,7 @@ def test_update_connection_with_no_columns_selected():
         call_args = mock_abreq.call_args[0][1]
         stream_config = call_args["syncCatalog"]["streams"][0]["config"]
 
-        assert stream_config["fieldSelectionEnabled"] == True
+        assert stream_config["fieldSelectionEnabled"] is True
         assert stream_config["selectedFields"] == []
         assert result == expected_response
 
@@ -2031,7 +2031,7 @@ def test_update_connection_with_no_columns_provided():
             "name": "test_stream",
             "selected": True,
             "syncMode": "full_refresh",
-            "destinationSyncMode": "overwrite"
+            "destinationSyncMode": "overwrite",
             # No columns key
         }
     ]
@@ -2122,7 +2122,7 @@ def test_update_connection_with_columns_missing_selected_field():
         call_args = mock_abreq.call_args[0][1]
         stream_config = call_args["syncCatalog"]["streams"][0]["config"]
 
-        assert stream_config["fieldSelectionEnabled"] == True
+        assert stream_config["fieldSelectionEnabled"] is True
         assert len(stream_config["selectedFields"]) == 1
         assert {"fieldPath": ["col1"]} in stream_config["selectedFields"]
         assert result == expected_response
@@ -2176,7 +2176,7 @@ def test_update_connection_multiple_streams_with_different_column_configs():
 
         # Second stream - partial columns selected
         stream2_config = streams[1]["config"]
-        assert stream2_config["fieldSelectionEnabled"] == True
+        assert stream2_config["fieldSelectionEnabled"] is True
         assert len(stream2_config["selectedFields"]) == 1
         assert {"fieldPath": ["col1"]} in stream2_config["selectedFields"]
 
@@ -2220,7 +2220,7 @@ def test_update_connection_with_incremental_and_columns():
         stream_config = call_args["syncCatalog"]["streams"][0]["config"]
 
         # Check field selection
-        assert stream_config["fieldSelectionEnabled"] == True
+        assert stream_config["fieldSelectionEnabled"] is True
         assert len(stream_config["selectedFields"]) == 3
         expected_fields = [
             {"fieldPath": ["id"]},
