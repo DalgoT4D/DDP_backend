@@ -11,7 +11,7 @@ class TaskParameters(Schema):
 class ClearSelectedStreams(Schema):
     """Schema to define the request payload for clearing selected streams in Airbyte"""
 
-    connection_id: str
+    connectionId: str
     streams: list[str]
 
 

@@ -650,7 +650,7 @@ def clear_selected_streams_api(request, deployment_id: str, payload: ClearSelect
         raise HttpError(400, "Register an organization first")
 
     # Validate connection_id and streams
-    if not payload.connection_id:
+    if not payload.connectionId:
         raise HttpError(400, "connection_id is required")
     if not payload.streams:
         raise HttpError(400, "streams list cannot be empty")
@@ -673,34 +673,43 @@ def clear_selected_streams_api(request, deployment_id: str, payload: ClearSelect
     try:
         flow_run_params = None
 
-        if (
-            len(org_tasks) == 1
-            and dataflow.dataflow_type == "manual"
-            and org_tasks[0].task.slug == TASK_AIRBYTECLEAR
-            and org_tasks[0].connection_id == payload.connection_id
-            and payload
-        ):
-            logger.info("sending custom flow run params to the deployment run")
-            orgtask = org_tasks[0]
+        if dataflow.dataflow_type != "manual":
+            raise HttpError(400, "This endpoint is only for manual dataflows")
 
-            server_block = OrgPrefectBlockv1.objects.filter(
-                org=orguser.org, block_type=AIRBYTESERVER
-            ).first()
+        if len(org_tasks) != 1:
+            raise HttpError(400, "This endpoint is only for dataflows with a single task")
 
-            if server_block:
-                logger.info("found airbyte server block")
-                flow_run_params = {
-                    "config": {
-                        "tasks": [
-                            setup_airbyte_clear_streams_task_config(
-                                orgtask,
-                                server_block,
-                                payload.streams,
-                            ).to_json()
-                        ],
-                        "org_slug": orguser.org.slug,
-                    }
+        orgtask = org_tasks[0]
+
+        if orgtask.task.slug != TASK_AIRBYTECLEAR:
+            raise HttpError(400, "This endpoint is only for Airbyte Clear tasks")
+
+        if orgtask.connection_id != payload.connectionId:
+            raise HttpError(400, "Connection ID does not match the task's connection ID")
+
+        if not payload or not payload.streams:
+            raise HttpError(400, "Streams must be provided to clear")
+
+        logger.info("sending custom flow run params to the deployment run")
+
+        server_block = OrgPrefectBlockv1.objects.filter(
+            org=orguser.org, block_type=AIRBYTESERVER
+        ).first()
+
+        if server_block:
+            logger.info("found airbyte server block")
+            flow_run_params = {
+                "config": {
+                    "tasks": [
+                        setup_airbyte_clear_streams_task_config(
+                            orgtask,
+                            server_block,
+                            payload.streams,
+                        ).to_json()
+                    ],
+                    "org_slug": orguser.org.slug,
                 }
+            }
 
         res = prefect_service.create_deployment_flow_run(deployment_id, flow_run_params)
         PrefectFlowRun.objects.create(
@@ -720,7 +729,7 @@ def clear_selected_streams_api(request, deployment_id: str, payload: ClearSelect
             logger.info("deleting TaskLock %s", task_lock.orgtask.task.slug)
             task_lock.delete()
         logger.exception(error)
-        raise HttpError(400, "failed to start a run") from error
+        raise HttpError(400, f"Failed to start a run {str(error)}") from error
     for tasklock in locks:
         tasklock.flow_run_id = res["flow_run_id"]
         tasklock.save()
