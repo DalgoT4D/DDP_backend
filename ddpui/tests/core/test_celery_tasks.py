@@ -9,6 +9,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
+from ddpui.settings import PRODUCTION
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse, TransformType, OrgSchemaChange
 from ddpui.models.org_user import OrgUser
 from ddpui.models.dbt_workflow import OrgDbtModel
@@ -364,8 +365,9 @@ def test_detect_schema_changes_for_org_ensure_orphan_connections_are_deleted(
         fetch_and_update_org_schema_changes_mock.return_value = None, "error"
         detect_schema_changes_for_org(org_without_workspace)
     assert OrgSchemaChange.objects.filter(org=org_without_workspace).count() == 0
+    tag = " [STAGING]" if not PRODUCTION else ""
     mock_send_text_message.assert_called_once_with(
-        "adminemail", "Schema change detection errors for test-org-WO-slug", "error"
+        "adminemail", f"Schema change detection errors for test-org-WO-slug{tag}", "error"
     )
 
 

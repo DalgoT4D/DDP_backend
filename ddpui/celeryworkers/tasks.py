@@ -14,6 +14,7 @@ import yaml
 from celery.schedules import crontab
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.celery import app, Celery
+from ddpui.settings import PRODUCTION
 
 
 from ddpui.utils import timezone, awsses, constants
@@ -432,6 +433,7 @@ def detect_schema_changes_for_org(org: Org, delay=0):
         schema_change.delete()
 
     deprecated_org_tasks: list[OrgTask] = []
+    tag = " [STAGING]" if not PRODUCTION else ""
 
     # check for schema changes
     for org_task in org_tasks:
@@ -445,7 +447,7 @@ def detect_schema_changes_for_org(org: Org, delay=0):
             if os.getenv("ADMIN_EMAIL"):
                 send_text_message(
                     os.getenv("ADMIN_EMAIL"),
-                    f"Schema change detection errors for {org.slug}",
+                    f"Schema change detection errors for {org.slug}{tag}",
                     err,
                 )
             logger.error(err)
@@ -455,7 +457,7 @@ def detect_schema_changes_for_org(org: Org, delay=0):
             if os.getenv("ADMIN_EMAIL"):
                 send_text_message(
                     os.getenv("ADMIN_EMAIL"),
-                    f"Schema change detection errors for {org.slug}",
+                    f"Schema change detection errors for {org.slug}{tag}",
                     f"connection_catalog is None for {org_task.connection_id}",
                 )
             logger.error(err)
@@ -469,7 +471,8 @@ def detect_schema_changes_for_org(org: Org, delay=0):
         catalog_diff: dict = connection_catalog.get("catalogDiff")
 
         logger.info(
-            "Found schema changes for connection %s of type %s",
+            "Found schema changes for %s connection %s of type %s",
+            org.slug,
             org_task.connection_id,
             change_type,
         )
