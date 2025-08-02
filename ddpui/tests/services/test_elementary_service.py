@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from unittest.mock import patch, Mock, mock_open, MagicMock, ANY
 import pytest
@@ -320,7 +321,6 @@ def test_check_dbt_files_missing_elementary_package_missing_target_schema(
     mock_get_elementary_package_version.return_value = None
 
     response = check_dbt_files(org)
-    print("here31231231", response)
 
     mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
 
@@ -365,7 +365,10 @@ def test_check_dbt_files_have_elementary_package_missing_target_schema(
     mock_packages_yml.exists.return_value = True
 
     mock_get_elementary_target_schema.return_value = None
-    mock_get_elementary_package_version.return_value = "100"
+    mock_get_elementary_package_version.return_value = {
+        "package": "elementary-data/elementary",
+        "version": "0.19.1",
+    }
 
     response = check_dbt_files(org)
 
@@ -375,13 +378,73 @@ def test_check_dbt_files_have_elementary_package_missing_target_schema(
         None,
         {
             "exists": {
-                "elementary_package": "100",
+                "elementary_package": {
+                    "package": "elementary-data/elementary",
+                    "version": "0.19.1",
+                },
             },
             "missing": {
                 "elementary_target_schema": ANY,
             },
         },
     )
+
+
+@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
+@patch("ddpui.ddpdbt.elementary_service.get_elementary_package_version")
+@patch("ddpui.ddpdbt.elementary_service.get_elementary_target_schema")
+@patch("ddpui.ddpdbt.elementary_service.Path")
+def test_check_dbt_files_needs_upgrade(
+    mock_path,
+    mock_get_elementary_target_schema,
+    mock_get_elementary_package_version,
+    mock_gather_dbt_project_params,
+    org,
+):
+    """tests check_dbt_files"""
+    mock_gather_dbt_project_params.retval = Mock(project_dir="test-project-dir")
+
+    mock_dbt_project_yml = MagicMock()
+    mock_dbt_project_yml.__str__.return_value = "dbt_project.yml"
+    mock_packages_yml = MagicMock()
+    mock_packages_yml.__str__.return_value = "packages.yml"
+
+    # Configure the mock to handle the "/" operator
+    mock_path.return_value.__truediv__.side_effect = lambda other: (
+        mock_dbt_project_yml if other == "dbt_project.yml" else mock_packages_yml
+    )
+
+    # Configure the mock to handle the exists() method
+    mock_dbt_project_yml.exists.return_value = True
+    mock_packages_yml.exists.return_value = True
+
+    mock_get_elementary_target_schema.return_value = None
+    mock_get_elementary_package_version.return_value = {
+        "package": "elementary-data/elementary",
+        "version": "0.19.1",
+    }
+    os.environ["LATEST_ELEMENTARY_PACKAGE_VERSION"] = "0.20.1"
+    response = check_dbt_files(org)
+
+    mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
+
+    assert response == (
+        None,
+        {
+            "exists": {
+                "elementary_package": {
+                    "package": "elementary-data/elementary",
+                    "version": "0.19.1",
+                    "needs_upgrade": "0.20.1",
+                },
+            },
+            "missing": {
+                "elementary_target_schema": ANY,
+            },
+        },
+    )
+
+    del os.environ["LATEST_ELEMENTARY_PACKAGE_VERSION"]
 
 
 @patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
@@ -412,7 +475,7 @@ def test_check_dbt_files_missing_elementary_package_have_target_schema(
     mock_dbt_project_yml.exists.return_value = True
     mock_packages_yml.exists.return_value = True
 
-    mock_get_elementary_target_schema.return_value = "100"
+    mock_get_elementary_target_schema.return_value = {"+schema": "elementary"}
     mock_get_elementary_package_version.return_value = None
 
     response = check_dbt_files(org)
@@ -423,7 +486,7 @@ def test_check_dbt_files_missing_elementary_package_have_target_schema(
         None,
         {
             "exists": {
-                "elementary_target_schema": "100",
+                "elementary_target_schema": {"+schema": "elementary"},
             },
             "missing": {
                 "elementary_package": ANY,

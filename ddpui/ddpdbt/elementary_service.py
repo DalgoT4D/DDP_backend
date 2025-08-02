@@ -26,7 +26,7 @@ from ddpui.core.pipelinefunctions import setup_edr_send_report_task_config
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.ddpprefect import prefect_service
-from ddpui.utils.helpers import generate_hash_id
+from ddpui.utils.helpers import generate_hash_id, compare_semver
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
 )
@@ -65,7 +65,7 @@ def elementary_setup_status(org: Org) -> dict:
     return {"status": "not-set-up"}
 
 
-def get_elementary_target_schema(dbt_project_yml: str):
+def get_elementary_target_schema(dbt_project_yml: str) -> dict | None:
     """{'schema': 'elementary'} or {'+schema': 'elementary'}"""
     with open(dbt_project_yml, "r", encoding="utf-8") as dbt_project_yml_f:  # skipcq: PTC-W6004
         dbt_project_obj = yaml.safe_load(dbt_project_yml_f)
@@ -78,7 +78,7 @@ def get_elementary_target_schema(dbt_project_yml: str):
         return None
 
 
-def get_elementary_package_version(packages_yml: str):
+def get_elementary_package_version(packages_yml: str) -> dict | None:
     """{'package': 'elementary-data/elementary', 'version': '0.15.2'}"""
     with open(packages_yml, "r", encoding="utf-8") as packages_yml_f:  # skipcq: PTC-W6004
         packages_obj = yaml.safe_load(packages_yml_f)
@@ -111,19 +111,27 @@ def check_dbt_files(org: Org):
 
     elementary_package = get_elementary_package_version(packages_yml)
     elementary_target_schema = get_elementary_target_schema(dbt_project_yml)
+    latest_elementary_package_version = os.getenv("LATEST_ELEMENTARY_PACKAGE_VERSION", "0.16.1")
 
     retval = {"exists": {}, "missing": {}}
 
     if elementary_package is not None:
         retval["exists"]["elementary_package"] = elementary_package
+        if (
+            latest_elementary_package_version
+            and compare_semver(elementary_package["version"], latest_elementary_package_version) < 0
+        ):
+            retval["exists"]["elementary_package"][
+                "needs_upgrade"
+            ] = latest_elementary_package_version
     else:
         retval["missing"][
             "elementary_package"
-        ] = """
+        ] = f"""
             # Add this to packages.yml file
             packages:
             - package: elementary-data/elementary
-                version: 0.16.1
+                version: {latest_elementary_package_version}
                 ## Docs: https://docs.elementary-data.com
         """
 

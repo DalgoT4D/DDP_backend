@@ -9,6 +9,7 @@ from ddpui.utils.helpers import (
     nice_bytes,
     find_key_in_dictionary,
     get_integer_env_var,
+    compare_semver,
 )
 
 
@@ -232,3 +233,23 @@ def test_get_integer_env_var_5():
     with patch("os.getenv") as mock_getenv:
         mock_getenv.return_value = "-20"
         assert get_integer_env_var("TEST_VAR", 21, None, True) == -20
+
+
+def test_compare_semver_1():
+    """tests compare_semver"""
+    assert compare_semver("0.1.1", "0.1.2") == -1
+
+
+def test_compare_semver_2():
+    """tests compare_semver"""
+    assert compare_semver("1.2.3", "1.2.3-alpha") == 1
+
+
+def test_compare_semver_3():
+    """tests compare_semver"""
+    assert compare_semver("1.2.3-beta.2", "1.2.3-beta.11") == -1
+
+
+def test_compare_semver_4():
+    """tests compare_semver"""
+    assert compare_semver("2.0.0", "1.9.9") == 1
