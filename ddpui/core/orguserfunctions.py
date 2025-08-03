@@ -35,7 +35,6 @@ from ddpui.utils import helpers, awsses, timezone
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.orguserhelpers import from_invitation, from_orguser
 from ddpui.utils.redis_client import RedisClient
-from urllib.parse import urlparse
 
 logger = CustomLogger("ddpui")
 
@@ -441,7 +440,7 @@ def change_password(payload: ChangePasswordSchema, orguser: OrgUser):
     return None, None
 
 
-def resend_verification_email(orguser: OrgUser, email: str, is_v2: bool = False):
+def resend_verification_email(orguser: OrgUser, email: str):
     """send a verification email to the user"""
     redis = RedisClient.get_instance()
     token = uuid4()
