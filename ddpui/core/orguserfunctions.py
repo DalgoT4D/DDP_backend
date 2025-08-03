@@ -377,7 +377,7 @@ def resend_invitation(invitation_id: str):
     return None, None
 
 
-def request_reset_password(email: str, request_origin: str = None):
+def request_reset_password(email: str, is_v2: bool = False):
     """send the reset password email"""
     orguser = OrgUser.objects.filter(user__email=email, user__is_active=True).first()
 
@@ -395,11 +395,10 @@ def request_reset_password(email: str, request_origin: str = None):
     redis.set(redis_key, orguserid_bytes)
     redis.expire(redis_key, 3600 * 24)  # 24 hours
 
-    logger.info(request_origin, "request origin")
-    parsed_url = urlparse(request_origin)
-    frontend_base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
-    # Use consistent route pattern for all frontends
-    reset_url = f"{frontend_base_url}/resetpassword/?token={token.hex}"
+    # To seperate the frontend urls for v1 and v2
+    FRONTEND_URL = os.getenv("FRONTEND_URL_V2") if is_v2 else os.getenv("FRONTEND_URL")
+
+    reset_url = f"{FRONTEND_URL}/resetpassword/?token={token.hex}"
 
     try:
         awsses.send_password_reset_email(email, reset_url)
@@ -442,7 +441,7 @@ def change_password(payload: ChangePasswordSchema, orguser: OrgUser):
     return None, None
 
 
-def resend_verification_email(orguser: OrgUser, email: str):
+def resend_verification_email(orguser: OrgUser, email: str, is_v2: bool = False):
     """send a verification email to the user"""
     redis = RedisClient.get_instance()
     token = uuid4()
@@ -452,7 +451,11 @@ def resend_verification_email(orguser: OrgUser, email: str):
 
     redis.set(redis_key, orguserid_bytes)
 
-    FRONTEND_URL = os.getenv("FRONTEND_URL")
+    FRONTEND_URL = ""
+    if is_v2 is None:
+        FRONTEND_URL = os.getenv("FRONTEND_URL")
+    else:
+        FRONTEND_URL = os.getenv("FRONTEND_URL_V2")
     reset_url = f"{FRONTEND_URL}/verifyemail/?token={token.hex}"
     try:
         awsses.send_signup_email(email, reset_url)

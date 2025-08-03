@@ -369,8 +369,22 @@ def get_organizations_warehouses(request):
 def post_forgot_password(request, payload: ForgotPasswordSchema):  # pylint: disable=unused-argument
     """step 1 of the forgot-password flow"""
     # Get the origin from request headers
-    request_origin = request.headers.get("Origin") or request.headers.get("Referer", "")
-    _, error = orguserfunctions.request_reset_password(payload.email, request_origin)
+    _, error = orguserfunctions.request_reset_password(payload.email, False)
+    if error:
+        raise HttpError(400, error)
+    return {"success": 1}
+
+
+@user_org_router.post(
+    "/users/forgot_password_v2/",
+    auth=None,
+)
+def post_forgot_password_v2(
+    request, payload: ForgotPasswordSchema
+):  # pylint: disable=unused-argument
+    """step 1 of the forgot-password flow"""
+    # Get the origin from request headers
+    _, error = orguserfunctions.request_reset_password(payload.email, True)
     if error:
         raise HttpError(400, error)
     return {"success": 1}
