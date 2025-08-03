@@ -451,11 +451,7 @@ def resend_verification_email(orguser: OrgUser, email: str, is_v2: bool = False)
 
     redis.set(redis_key, orguserid_bytes)
 
-    FRONTEND_URL = ""
-    if is_v2 is None:
-        FRONTEND_URL = os.getenv("FRONTEND_URL")
-    else:
-        FRONTEND_URL = os.getenv("FRONTEND_URL_V2")
+    FRONTEND_URL = os.getenv("FRONTEND_URL")
     reset_url = f"{FRONTEND_URL}/verifyemail/?token={token.hex}"
     try:
         awsses.send_signup_email(email, reset_url)
