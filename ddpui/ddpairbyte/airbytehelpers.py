@@ -966,7 +966,7 @@ def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
     except Exception as err:
         return (
             None,
-            f"Something went wrong fetching schema change (catalog) for connection {connection_id}: {err}",
+            f"Something went wrong fetching schema change (catalog) for {org.slug} connection {connection_id}: {err}",
         )
 
     # update schema change type in our db
@@ -1008,7 +1008,7 @@ def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
     except Exception as err:
         return (
             None,
-            f"Something went wrong updating OrgSchemaChange {connection_id}: {err}",
+            f"Something went wrong updating OrgSchemaChange {org.slug} {connection_id}: {err}",
         )
 
     return connection_catalog, None
