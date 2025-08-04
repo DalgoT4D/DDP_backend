@@ -244,7 +244,7 @@ def compare_semver(version1: str, version2: str) -> int:
     v2 = parse_version(version2)
 
     # Compare major, minor, patch
-    for a, b in zip(v1[:3], v2[:3]):
+    for a, b in zip(v1[:3], v2[:3], strict=True):
         result = cmp(a, b)
         if result != 0:
             return result
