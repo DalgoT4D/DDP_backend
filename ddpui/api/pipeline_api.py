@@ -24,9 +24,12 @@ from ddpui.ddpprefect.schema import (
     TaskStateSchema,
     PrefectGetDataflowsResponse,
 )
-from ddpui.utils.constants import TASK_DBTRUN, TASK_AIRBYTESYNC
+from ddpui.utils.constants import TASK_DBTRUN, TASK_AIRBYTESYNC, TASK_AIRBYTECLEAR
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.schemas.org_task_schema import TaskParameters
+from ddpui.schemas.org_task_schema import (
+    TaskParameters,
+    ClearSelectedStreams,
+)
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.utils.prefectlogs import parse_prefect_logs
 from ddpui.utils.helpers import generate_hash_id
@@ -35,6 +38,7 @@ from ddpui.core.pipelinefunctions import (
     pipeline_with_orgtasks,
     fetch_pipeline_lock_v1,
     lock_tasks_for_dataflow,
+    setup_airbyte_clear_streams_task_config,
 )
 from ddpui.celeryworkers.tasks import summarize_logs
 from ddpui.core.orgdbt_manager import DbtProjectManager
@@ -629,6 +633,103 @@ def post_run_prefect_org_deployment_task(request, deployment_id, payload: TaskPa
         logger.exception(error)
         raise HttpError(400, "failed to start a run") from error
 
+    for tasklock in locks:
+        tasklock.flow_run_id = res["flow_run_id"]
+        tasklock.save()
+
+    return res
+
+
+@pipeline_router.post("/v1/flows/{deployment_id}/clear_streams/")
+@has_permission(["can_run_pipeline"])
+def clear_selected_streams_api(request, deployment_id: str, payload: ClearSelectedStreams):
+    """Clear selected streams in Airbyte for a given deployment."""
+    orguser: OrgUser = request.orguser
+
+    if orguser.org is None:
+        raise HttpError(400, "Register an organization first")
+
+    # Validate connection_id and streams
+    if not payload.connectionId:
+        raise HttpError(400, "connection_id is required")
+    if not payload.streams:
+        raise HttpError(400, "streams list cannot be empty")
+
+    dataflow = OrgDataFlowv1.objects.filter(org=orguser.org, deployment_id=deployment_id).first()
+    if not dataflow:
+        raise HttpError(404, "Deployment not found")
+
+    dataflow_orgtasks = (
+        DataflowOrgTask.objects.filter(dataflow=dataflow).order_by("seq").select_related("orgtask")
+    )
+
+    if dataflow_orgtasks.count() == 0:
+        raise HttpError(400, "no org task mapped to the deployment")
+
+    org_tasks: List[OrgTask] = [dataflow_orgtask.orgtask for dataflow_orgtask in dataflow_orgtasks]
+
+    locks = lock_tasks_for_dataflow(orguser=orguser, dataflow=dataflow, org_tasks=org_tasks)
+
+    try:
+        flow_run_params = None
+
+        if dataflow.dataflow_type != "manual":
+            raise HttpError(400, "This endpoint is only for manual dataflows")
+
+        if len(org_tasks) != 1:
+            raise HttpError(400, "This endpoint is only for dataflows with a single task")
+
+        orgtask = org_tasks[0]
+
+        if orgtask.task.slug != TASK_AIRBYTECLEAR:
+            raise HttpError(400, "This endpoint is only for Airbyte Clear tasks")
+
+        if orgtask.connection_id != payload.connectionId:
+            raise HttpError(400, "Connection ID does not match the task's connection ID")
+
+        if not payload or not payload.streams:
+            raise HttpError(400, "Streams must be provided to clear")
+
+        logger.info("sending custom flow run params to the deployment run")
+
+        server_block = OrgPrefectBlockv1.objects.filter(
+            org=orguser.org, block_type=AIRBYTESERVER
+        ).first()
+
+        if server_block:
+            logger.info("found airbyte server block")
+            flow_run_params = {
+                "config": {
+                    "tasks": [
+                        setup_airbyte_clear_streams_task_config(
+                            orgtask,
+                            server_block,
+                            payload.streams,
+                        ).to_json()
+                    ],
+                    "org_slug": orguser.org.slug,
+                }
+            }
+
+        res = prefect_service.create_deployment_flow_run(deployment_id, flow_run_params)
+        PrefectFlowRun.objects.create(
+            deployment_id=deployment_id,
+            flow_run_id=res["flow_run_id"],
+            name=res.get("name", "selected-stream-clear"),
+            start_time=None,
+            expected_start_time=djantotimezone.now(),
+            total_run_time=-1,
+            status="Scheduled",
+            state_name="Scheduled",
+            retries=0,
+            orguser=orguser,
+        )
+    except Exception as error:
+        for task_lock in locks:
+            logger.info("deleting TaskLock %s", task_lock.orgtask.task.slug)
+            task_lock.delete()
+        logger.exception(error)
+        raise HttpError(400, f"Failed to start a run {str(error)}") from error
     for tasklock in locks:
         tasklock.flow_run_id = res["flow_run_id"]
         tasklock.save()

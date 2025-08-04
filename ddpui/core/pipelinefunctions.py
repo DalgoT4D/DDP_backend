@@ -20,6 +20,7 @@ from ddpui.ddpprefect.schema import (
     PrefectAirbyteSyncTaskSetup,
     PrefectAirbyteRefreshSchemaTaskSetup,
     PrefectDataFlowUpdateSchema3,
+    PrefectAirbyteClearStreamsTaskSetup,
 )
 from ddpui.ddpprefect import (
     AIRBYTECONNECTION,
@@ -31,7 +32,6 @@ from ddpui.ddpprefect import (
     FLOW_RUN_PENDING_STATE_TYPE,
     FLOW_RUN_RUNNING_STATE_TYPE,
     FLOW_RUN_SCHEDULED_STATE_TYPE,
-    FLOW_RUN_COMPLETED_STATE_TYPE,
 )
 from ddpui.utils.constants import (
     PREFECT_AIRBYTE_TASKS_TIMEOUT,
@@ -62,6 +62,25 @@ def setup_airbyte_sync_task_config(
         connection_id=org_task.connection_id,
         timeout=PREFECT_AIRBYTE_TASKS_TIMEOUT,
         orgtask_uuid=str(org_task.uuid),
+    )
+
+
+def setup_airbyte_clear_streams_task_config(
+    org_task: OrgTask,
+    server_block: OrgPrefectBlockv1,
+    streams: list,
+    seq: int = 1,
+):
+    """constructs the prefect payload for an airbyte clear streams task config"""
+    return PrefectAirbyteClearStreamsTaskSetup(
+        seq=seq,
+        slug=org_task.task.slug,
+        type=AIRBYTECONNECTION,
+        airbyte_server_block=server_block.block_name,
+        connection_id=org_task.connection_id,
+        timeout=PREFECT_AIRBYTE_TASKS_TIMEOUT,
+        orgtask_uuid=str(org_task.uuid),
+        streams=streams,
     )
 
 
@@ -345,10 +364,14 @@ def fix_transform_tasks_seq_dataflow(deployment_id: str):
         task["seq"] = i + len(other_tasks)
 
     tasks = other_tasks + updated_transform_tasks
+    # need the cron
+    odf = OrgDataFlowv1.objects.filter(deployment_id=deployment_id).first()
+    if odf is None:
+        raise Exception("missing OrgDataFlowv1 for deployment_id " + deployment_id)
     try:
         prefect_service.update_dataflow_v1(
             deployment_id,
-            PrefectDataFlowUpdateSchema3(deployment_params={"config": config}),
+            PrefectDataFlowUpdateSchema3(deployment_params={"config": config}, cron=odf.cron),
         )
         logger.info(f"Update the seq for deployment {deployment_id}")
     except Exception as err:

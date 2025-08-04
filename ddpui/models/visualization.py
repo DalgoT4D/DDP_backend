@@ -1,86 +1,67 @@
-import uuid
+"""Chart/Visualization models for Dalgo platform"""
+
 from django.db import models
-from django.utils import timezone
-from enum import Enum
+from django.contrib.postgres.fields import ArrayField
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
+from ddpui.utils.custom_logger import CustomLogger
 
+logger = CustomLogger("ddpui")
 
-class AggregationFunction(models.TextChoices):
-    COUNT = "count", "Count"
-    COUNT_DISTINCT = "count_distinct", "Count Distinct"
-    SUM = "sum", "Sum"
-    MIN = "min", "Min"
-    MAX = "max", "Max"
-    AVERAGE = "average", "Average"
+CHART_TYPE_CHOICES = [
+    ("bar", "Bar Chart"),
+    ("pie", "Pie Chart"),
+    ("line", "Line Chart"),
+    ("number", "Number Chart"),
+    ("map", "Map Chart"),
+]
+
+COMPUTATION_TYPE_CHOICES = [
+    ("raw", "Raw Data"),
+    ("aggregated", "Aggregated Data"),
+]
+
+AGGREGATE_FUNC_CHOICES = [
+    ("sum", "SUM"),
+    ("avg", "AVG"),
+    ("count", "COUNT"),
+    ("min", "MIN"),
+    ("max", "MAX"),
+    ("count_distinct", "COUNT DISTINCT"),
+]
 
 
 class Chart(models.Model):
-    """Docstring"""
+    """Chart configuration model"""
 
-    org = models.ForeignKey(Org, on_delete=models.CASCADE)
-    title = models.TextField(max_length=256)
-    description = models.TextField(null=True)
-    chart_type = models.TextField(max_length=256)
-    schema = models.TextField(max_length=256)
-    table = models.TextField(max_length=256)
-    config = models.JSONField()
-    metric = models.ForeignKey("Metric", on_delete=models.SET_NULL, null=True)
-    metadata = models.JSONField(null=True)
-    created_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE)
-    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self) -> str:
-        return f"Chart[{self.title}|{self.chart_type}]"
-
-
-class Metric(models.Model):
-    """Model for storing metric definitions with aggregation functions and dimensions"""
-
-    org = models.ForeignKey(Org, on_delete=models.CASCADE)
-    name = models.CharField(max_length=256)
-    description = models.TextField(null=True, blank=True)
-
-    # Database location
-    schema = models.CharField(max_length=256)
-    table = models.CharField(max_length=256)
-
-    # Temporal column (optional, at most one)
-    temporal_column = models.CharField(max_length=256, null=True)
-
-    # Dimension columns (stored as JSON array)
-    dimension_columns = models.JSONField(default=list)
-
-    # Measure configuration
-    aggregation_function = models.CharField(
-        max_length=20, null=True, choices=AggregationFunction.choices
+    id = models.BigAutoField(primary_key=True)
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, null=True)
+    chart_type = models.CharField(max_length=20, choices=CHART_TYPE_CHOICES)
+    computation_type = models.CharField(
+        max_length=20, choices=COMPUTATION_TYPE_CHOICES, default="raw"
     )
-    aggregation_column = models.CharField(max_length=256, null=True)
 
-    metadata = models.JSONField(null=True)
+    # Data source configuration
+    schema_name = models.CharField(max_length=255)
+    table_name = models.CharField(max_length=255)
+
+    extra_config = models.JSONField(
+        default=dict, help_text="Create chart form config including customizations"
+    )
 
     # Metadata
-    created_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE)
-    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    created_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE, db_column="created_by")
+    org = models.ForeignKey(Org, on_delete=models.CASCADE)
+    last_modified_by = models.ForeignKey(
+        OrgUser,
+        on_delete=models.CASCADE,
+        db_column="last_modified_by",
+        null=True,
+        related_name="last_modified_by",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    def clean(self):
-        from django.core.exceptions import ValidationError
-
-        # Validate that aggregation_column is provided for non-count functions
-        if self.aggregation_function != AggregationFunction.COUNT and not self.aggregation_column:
-            raise ValidationError(
-                "Aggregation column is required for aggregation functions other than count"
-            )
-
-        # Validate that aggregation_column is not provided for count function
-        if self.aggregation_function == AggregationFunction.COUNT and self.aggregation_column:
-            raise ValidationError("Aggregation column should not be provided for count function")
-
-    def save(self, *args, **kwargs):
-        self.clean()
-        super().save(*args, **kwargs)
-
-    def __str__(self) -> str:
-        return f"Metric[{self.name}|{self.aggregation_function}]"
+    def __str__(self):
+        return f"{self.title} ({self.chart_type})"
