@@ -79,7 +79,7 @@ class ChartValidator:
             logger.warning(f"Chart validation failed: {str(e)}")
             return False, str(e)
         except Exception as e:
-            logger.error(f"Unexpected error during chart validation: {str(e)}", exc_info=True)
+            logger.error(f"Unexpected error during chart validation: {str(e)}")
             return False, f"Validation error: {str(e)}"
 
     @staticmethod
@@ -118,6 +118,14 @@ class ChartValidator:
             )
 
     @staticmethod
+    def _validate_aggregate_column(
+        aggregate_col: Optional[str], aggregate_func: Optional[str]
+    ) -> None:
+        """Validate aggregate column - not required for count function"""
+        if not aggregate_col and aggregate_func != "count":
+            raise ChartValidationError("Aggregate column is required except for count function")
+
+    @staticmethod
     def _validate_bar_chart(
         computation_type: str,
         x_axis: Optional[str],
@@ -144,10 +152,7 @@ class ChartValidator:
                 raise ChartValidationError(
                     "Bar chart with aggregated data requires dimension column"
                 )
-            if not aggregate_col:
-                raise ChartValidationError(
-                    "Bar chart with aggregated data requires aggregate column"
-                )
+            ChartValidator._validate_aggregate_column(aggregate_col, aggregate_func)
             if not aggregate_func:
                 raise ChartValidationError(
                     "Bar chart with aggregated data requires aggregate function"
@@ -188,10 +193,7 @@ class ChartValidator:
                 raise ChartValidationError(
                     "Pie chart with aggregated data requires dimension column"
                 )
-            if not aggregate_col:
-                raise ChartValidationError(
-                    "Pie chart with aggregated data requires aggregate column"
-                )
+            ChartValidator._validate_aggregate_column(aggregate_col, aggregate_func)
             if not aggregate_func:
                 raise ChartValidationError(
                     "Pie chart with aggregated data requires aggregate function"
@@ -232,10 +234,7 @@ class ChartValidator:
                 raise ChartValidationError(
                     "Line chart with aggregated data requires dimension column"
                 )
-            if not aggregate_col:
-                raise ChartValidationError(
-                    "Line chart with aggregated data requires aggregate column"
-                )
+            ChartValidator._validate_aggregate_column(aggregate_col, aggregate_func)
             if not aggregate_func:
                 raise ChartValidationError(
                     "Line chart with aggregated data requires aggregate function"
@@ -261,8 +260,7 @@ class ChartValidator:
         if computation_type != "aggregated":
             raise ChartValidationError("Number charts only support aggregated data")
 
-        if not aggregate_col:
-            raise ChartValidationError("Number chart requires aggregate column")
+        ChartValidator._validate_aggregate_column(aggregate_col, aggregate_func)
 
         if not aggregate_func:
             raise ChartValidationError("Number chart requires aggregate function")

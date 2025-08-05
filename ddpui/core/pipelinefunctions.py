@@ -20,6 +20,7 @@ from ddpui.ddpprefect.schema import (
     PrefectAirbyteSyncTaskSetup,
     PrefectAirbyteRefreshSchemaTaskSetup,
     PrefectDataFlowUpdateSchema3,
+    PrefectAirbyteClearStreamsTaskSetup,
 )
 from ddpui.ddpprefect import (
     AIRBYTECONNECTION,
@@ -61,6 +62,25 @@ def setup_airbyte_sync_task_config(
         connection_id=org_task.connection_id,
         timeout=PREFECT_AIRBYTE_TASKS_TIMEOUT,
         orgtask_uuid=str(org_task.uuid),
+    )
+
+
+def setup_airbyte_clear_streams_task_config(
+    org_task: OrgTask,
+    server_block: OrgPrefectBlockv1,
+    streams: list,
+    seq: int = 1,
+):
+    """constructs the prefect payload for an airbyte clear streams task config"""
+    return PrefectAirbyteClearStreamsTaskSetup(
+        seq=seq,
+        slug=org_task.task.slug,
+        type=AIRBYTECONNECTION,
+        airbyte_server_block=server_block.block_name,
+        connection_id=org_task.connection_id,
+        timeout=PREFECT_AIRBYTE_TASKS_TIMEOUT,
+        orgtask_uuid=str(org_task.uuid),
+        streams=streams,
     )
 
 

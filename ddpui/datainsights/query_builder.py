@@ -35,25 +35,31 @@ class AggQueryBuilder:
 
     def add_aggregate_column(self, column_name: str, agg_func: str, alias: str = None):
         """Add an aggregate column with specified function"""
-        col = column(column_name)
-
-        agg_functions = {
-            "sum": func.sum,
-            "avg": func.avg,
-            "count": func.count,
-            "min": func.min,
-            "max": func.max,
-            "count_distinct": lambda c: func.count(func.distinct(c)),
-        }
-
         agg_func_lower = agg_func.lower()
-        if agg_func_lower not in agg_functions:
-            raise ValueError(f"Unsupported aggregate function: {agg_func}")
 
-        if agg_func_lower == "count_distinct":
-            agg_column = agg_functions[agg_func_lower](col)
+        # Handle count with None column - use COUNT(*) instead of COUNT(None)
+        if agg_func_lower == "count" and column_name is None:
+            agg_column = func.count()
         else:
-            agg_column = agg_functions[agg_func_lower](col)
+            # Quote column name to preserve case
+            col = column(column_name)
+
+            agg_functions = {
+                "sum": func.sum,
+                "avg": func.avg,
+                "count": func.count,
+                "min": func.min,
+                "max": func.max,
+                "count_distinct": lambda c: func.count(func.distinct(c)),
+            }
+
+            if agg_func_lower not in agg_functions:
+                raise ValueError(f"Unsupported aggregate function: {agg_func}")
+
+            if agg_func_lower == "count_distinct":
+                agg_column = agg_functions[agg_func_lower](col)
+            else:
+                agg_column = agg_functions[agg_func_lower](col)
 
         if alias:
             agg_column = agg_column.label(alias)
