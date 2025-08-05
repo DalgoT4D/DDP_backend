@@ -6,4 +6,4 @@ from ddpui.models.org_supersets import OrgSupersets
 from ddpui.models.org_wren import OrgWren
 from ddpui.models.visualization import Chart
 from ddpui.models.admin_user import AdminUser
-from ddpui.models.visualization import Chart
+from ddpui.models.dashboard import Dashboard, DashboardFilter, DashboardLock
