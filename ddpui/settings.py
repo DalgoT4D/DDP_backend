@@ -57,6 +57,8 @@ ALLOWED_HOSTS = [
     "api.dalgo.org",
     "staging.dalgo.org",
     "dashboard.dalgo.org",
+    "staging-app.dalgo.org",
+    "app.dalgo.org",
 ]
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_METHODS = [
