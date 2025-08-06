@@ -58,7 +58,7 @@ class Dashboard(models.Model):
     grid_columns = models.IntegerField(default=12)
 
     # Layout configuration stored as JSON
-    layout_config = models.JSONField(default=dict, help_text="Grid layout positions and sizes")
+    layout_config = models.JSONField(default=list, help_text="Grid layout positions and sizes")
 
     # Components configuration
     components = models.JSONField(default=dict, help_text="Dashboard components configuration")

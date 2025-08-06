@@ -41,7 +41,8 @@ class DashboardUpdate(Schema):
 
     title: Optional[str] = None
     description: Optional[str] = None
-    layout_config: Optional[dict] = None
+    grid_columns: Optional[int] = None
+    layout_config: Optional[list[dict]] = None
     components: Optional[dict] = None
     is_published: Optional[bool] = None
 
@@ -91,7 +92,7 @@ class DashboardResponse(Schema):
     description: Optional[str]
     dashboard_type: str
     grid_columns: int
-    layout_config: dict
+    layout_config: list[dict]
     components: dict
     is_published: bool
     published_at: Optional[datetime]
@@ -162,11 +163,12 @@ def list_dashboards(
         query &= Q(is_published=is_published)
 
     # Fetch dashboards with related data
-    dashboards = (
-        Dashboard.objects.filter(query)
-        .prefetch_related("filters", Prefetch("lock", queryset=DashboardLock.objects.all()))
-        .order_by("-updated_at")
-    )
+    # dashboards = (
+    #     Dashboard.objects.filter(query)
+    #     .prefetch_related("filters", Prefetch("lock", queryset=DashboardLock.objects.all()))
+    #     .order_by("-updated_at")
+    # )
+    dashboards = Dashboard.objects.filter(query).order_by("-updated_at")
 
     return [get_dashboard_response(d) for d in dashboards]
 
@@ -230,6 +232,9 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
     if payload.description is not None:
         dashboard.description = payload.description
 
+    if payload.grid_columns is not None:
+        dashboard.grid_columns = payload.grid_columns
+
     if payload.layout_config is not None:
         dashboard.layout_config = payload.layout_config
 
@@ -243,6 +248,13 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
 
     dashboard.last_modified_by = orguser
     dashboard.save()
+
+    # Auto-refresh lock if dashboard is locked by current user
+    if hasattr(dashboard, "lock") and dashboard.lock:
+        if not dashboard.lock.is_expired() and dashboard.lock.locked_by == orguser:
+            dashboard.lock.expires_at = timezone.now() + timedelta(minutes=2)
+            dashboard.lock.save()
+            logger.info(f"Auto-refreshed lock for dashboard {dashboard_id} during save")
 
     return get_dashboard_response(dashboard)
 
@@ -285,8 +297,8 @@ def lock_dashboard(request, dashboard_id: int):
         lock = dashboard.lock
         if not lock.is_expired():
             if lock.locked_by == orguser:
-                # Refresh lock
-                lock.expires_at = timezone.now() + timedelta(minutes=30)
+                # Refresh lock with 2-minute duration
+                lock.expires_at = timezone.now() + timedelta(minutes=2)
                 lock.save()
                 return LockResponse(
                     lock_token=lock.lock_token,
@@ -301,17 +313,50 @@ def lock_dashboard(request, dashboard_id: int):
     except DashboardLock.DoesNotExist:
         pass
 
-    # Create new lock
+    # Create new lock with 2-minute duration
     lock = DashboardLock.objects.create(
         dashboard=dashboard,
         locked_by=orguser,
         lock_token=str(uuid.uuid4()),
-        expires_at=timezone.now() + timedelta(minutes=30),
+        expires_at=timezone.now() + timedelta(minutes=2),
     )
 
     return LockResponse(
         lock_token=lock.lock_token, expires_at=lock.expires_at, locked_by=lock.locked_by.user.email
     )
+
+
+@dashboard_native_router.put("/{dashboard_id}/lock/refresh/")
+# @has_permission(["can_edit_dashboards"])
+def refresh_dashboard_lock(request, dashboard_id: int):
+    """Refresh dashboard lock to extend expiry"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
+    except Dashboard.DoesNotExist:
+        raise HttpError(404, "Dashboard not found")
+
+    try:
+        lock = dashboard.lock
+        if lock.is_expired():
+            raise HttpError(410, "Lock has expired")
+        if lock.locked_by != orguser:
+            raise HttpError(403, "You can only refresh your own locks")
+
+        # Refresh lock with 2-minute duration
+        lock.expires_at = timezone.now() + timedelta(minutes=2)
+        lock.save()
+
+        logger.info(f"Refreshed lock for dashboard {dashboard_id}")
+
+        return LockResponse(
+            lock_token=lock.lock_token,
+            expires_at=lock.expires_at,
+            locked_by=lock.locked_by.user.email,
+        )
+    except DashboardLock.DoesNotExist:
+        raise HttpError(404, "No active lock found")
 
 
 @dashboard_native_router.delete("/{dashboard_id}/lock/")
@@ -330,6 +375,7 @@ def unlock_dashboard(request, dashboard_id: int):
         if lock.locked_by != orguser:
             raise HttpError(403, "You can only unlock your own locks")
         lock.delete()
+        logger.info(f"Unlocked dashboard {dashboard_id}")
     except DashboardLock.DoesNotExist:
         pass
 
