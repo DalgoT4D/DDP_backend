@@ -18,7 +18,11 @@ from ddpui.celeryworkers.moretasks import schedule_notification_task
 
 
 def get_recipients(
-    sent_to: str, org_slug: str, user_email: str, manager_or_above: bool
+    sent_to: str,
+    org_slug: str,
+    user_email: str,
+    manager_or_above: bool,
+    category: Optional[str] = None,
 ) -> Tuple[Optional[str], Optional[List[int]]]:
     """Returns the list of recipients based on the request parameters"""
 
@@ -52,6 +56,29 @@ def get_recipients(
             "id", flat=True
         )
 
+    # Map category string to the correct field name
+    category_field_mapping = {
+        "incident": "subscribe_incident_notifications",
+        "schema_change": "subscribe_schema_change_notifications",
+        "job_failure": "subscribe_job_failure_notifications",
+        "late_runs": "subscribe_late_runs_notifications",
+        "dbt_test_failure": "subscribe_dbt_test_failure_notifications",
+    }
+
+    preference_field = category_field_mapping.get(category)
+
+    if preference_field:
+        #  Filter recipients by subscription preference
+        recipients = (
+            OrgUser.objects.filter(
+                id__in=recipients,
+                preferences__isnull=False,
+            )
+            .filter(**{f"preferences__{preference_field}": True})
+            .values_list("id", flat=True)
+        )
+
+    # If no recipients found, return an error message
     if not recipients:
         return "No users found for the given information", None
 

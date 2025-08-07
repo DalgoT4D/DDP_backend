@@ -34,6 +34,7 @@ def post_create_notification(request, payload: CreateNotificationPayloadSchema):
             - org_slug: Target organization
             - user_email: Specific user email (optional)
             - manager_or_above: Whether to include managers (optional)
+            - category: Notification category (optional, defaults to INCIDENT)
 
     Returns:
         dict: Created notification details including ID and delivery status
@@ -44,7 +45,11 @@ def post_create_notification(request, payload: CreateNotificationPayloadSchema):
 
     # Filter OrgUser data based on sent_to field
     error, recipients = notifications_service.get_recipients(
-        payload.sent_to, payload.org_slug, payload.user_email, payload.manager_or_above
+        payload.sent_to,
+        payload.org_slug,
+        payload.user_email,
+        payload.manager_or_above,
+        payload.category,
     )
 
     if error is not None:
