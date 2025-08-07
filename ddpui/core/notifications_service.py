@@ -452,31 +452,6 @@ def dismiss_urgent_notification(
         return "Urgent notification not found", None
 
 
-# update category subscription preferences
-def update_category_subscriptions(
-    orguser: OrgUser, subscription_data: Dict[str, bool]
-) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
-    """
-    Update user's category subscription preferences.
-    """
-    try:
-        user_preference, created = UserPreferences.objects.get_or_create(orguser=orguser)
-
-        for field, value in subscription_data.items():
-            if hasattr(user_preference, field) and value is not None:
-                setattr(user_preference, field, value)
-
-        user_preference.save()
-
-        return None, {
-            "success": True,
-            "message": "Category subscriptions updated successfully",
-            "preferences": user_preference.to_json(),
-        }
-    except Exception as e:
-        return f"Error updating category subscriptions: {str(e)}", None
-
-
 # get notifications by category
 def get_notifications_by_category(
     orguser: OrgUser, category: str, page: int = 1, limit: int = 10

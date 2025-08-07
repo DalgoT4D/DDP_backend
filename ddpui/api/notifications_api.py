@@ -322,29 +322,3 @@ def get_notifications_by_category(request, category: str, page: int = 1, limit: 
         raise HttpError(400, error)
 
     return result
-
-
-@notification_router.put("/category-subscriptions")
-def update_category_subscriptions(request, payload: CategorySubscriptionSchema):
-    """
-    Update the user's category subscription preferences.
-
-    Allows users to subscribe or unsubscribe from specific notification categories.
-
-    Args:
-        request: HTTP request object containing orguser authentication data
-        payload: Schema containing the subscription preferences to update
-
-    Returns:
-        dict: Updated preferences and success message
-
-    Raises:
-        HttpError: 400 if update fails
-    """
-    orguser: OrgUser = request.orguser
-    subscription_data = payload.dict(exclude_none=True)
-    error, result = notifications_service.update_category_subscriptions(orguser, subscription_data)
-    if error is not None:
-        raise HttpError(400, error)
-
-    return result
