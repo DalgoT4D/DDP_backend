@@ -46,6 +46,10 @@ def generate_chart_render_config(chart: Chart, org_warehouse: OrgWarehouse) -> d
         extra_config = chart.extra_config
         logger.debug(f"Chart {chart.id} extra_config: {extra_config}")
 
+        # Get existing customizations and add chart title
+        customizations = extra_config.get("customizations", {})
+        customizations["title"] = chart.title  # Add chart title to customizations
+
         payload = ChartDataPayload(
             chart_type=chart.chart_type,
             computation_type=chart.computation_type,
@@ -57,7 +61,7 @@ def generate_chart_render_config(chart: Chart, org_warehouse: OrgWarehouse) -> d
             aggregate_col=extra_config.get("aggregate_column"),
             aggregate_func=extra_config.get("aggregate_function"),
             extra_dimension=extra_config.get("extra_dimension_column"),
-            customizations=extra_config.get("customizations", {}),
+            customizations=customizations,
         )
 
         # Use the common function to generate config and data
@@ -256,8 +260,10 @@ def get_chart(request, chart_id: int):
 
 
 @charts_router.get("/{chart_id}/data/", response=ChartDataResponse)
-def get_chart_data_by_id(request, chart_id: int):
-    """Get chart data using saved chart configuration"""
+def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str] = None):
+    """Get chart data using saved chart configuration with optional dashboard filters"""
+    import json
+
     orguser = request.orguser
     chart = get_object_or_404(Chart, id=chart_id, org=orguser.org)
 
@@ -267,7 +273,37 @@ def get_chart_data_by_id(request, chart_id: int):
         raise HttpError(404, "Warehouse not configured")
 
     # Build payload from chart config
-    extra_config = chart.extra_config
+    extra_config = chart.extra_config.copy() if chart.extra_config else {}
+
+    # Apply dashboard filters if provided
+    if dashboard_filters:
+        try:
+            filters = json.loads(dashboard_filters)
+            logger.info(f"Applying dashboard filters to chart {chart_id}: {filters}")
+
+            # Apply filters by modifying the extra_config
+            where_conditions = extra_config.get("where_conditions", [])
+            if isinstance(where_conditions, str):
+                where_conditions = [where_conditions] if where_conditions else []
+
+            # Convert filters to WHERE conditions
+            # This logic should match the dashboard_service._apply_filters_to_chart method
+            for filter_id, filter_value in filters.items():
+                if filter_value is not None:
+                    # TODO: Look up filter configuration from DashboardFilter model
+                    # For now, we'll pass the filters to the query builder
+                    pass
+
+            # Store filters in extra_config for the query builder to use
+            extra_config["dashboard_filters"] = filters
+
+        except json.JSONDecodeError:
+            logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
+
+    # Get existing customizations and add chart title
+    customizations = extra_config.get("customizations", {})
+    customizations["title"] = chart.title  # Add chart title to customizations
+
     payload = ChartDataPayload(
         chart_type=chart.chart_type,
         computation_type=chart.computation_type,
@@ -279,9 +315,10 @@ def get_chart_data_by_id(request, chart_id: int):
         aggregate_col=extra_config.get("aggregate_column"),
         aggregate_func=extra_config.get("aggregate_function"),
         extra_dimension=extra_config.get("extra_dimension_column"),
-        customizations=extra_config.get("customizations", {}),
+        customizations=customizations,
         offset=0,
         limit=100,
+        extra_config=extra_config,  # Pass the modified extra_config with filters
     )
 
     # Use the common function to generate data and config

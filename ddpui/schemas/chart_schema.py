@@ -67,6 +67,9 @@ class ChartDataPayload(Schema):
     # Customizations
     customizations: Optional[dict] = None
 
+    # Extra config for filters and other settings
+    extra_config: Optional[dict] = None
+
     # Pagination
     offset: int = 0
     limit: int = 100
