@@ -1,10 +1,16 @@
 """Updates the dbt binary path in Prefect deployments for dbt Core Operation tasks"""
 
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 from django.core.management.base import BaseCommand, CommandError
 
 from ddpui.models.org import Org, OrgDataFlowv1
-from ddpui.ddpprefect.prefect_service import prefect_put, prefect_get
+from ddpui.ddpprefect.prefect_service import get_deployment, update_dataflow_v1
 from ddpui.ddpprefect import DBTCORE
+from ddpui.ddpprefect.schema import PrefectDataFlowUpdateSchema3
+
+load_dotenv()
 
 
 class Command(BaseCommand):
@@ -20,11 +26,6 @@ class Command(BaseCommand):
             help="The organization slug to update deployments for",
         )
         parser.add_argument(
-            "dbt_binary_path",
-            type=str,
-            help="The new path to the dbt binary",
-        )
-        parser.add_argument(
             "--dry-run",
             action="store_true",
             help="Show what would be changed without making actual changes",
@@ -33,7 +34,6 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         """Handle the command execution"""
         org_slug = options["org_slug"]
-        dbt_binary_path = options["dbt_binary_path"]
         dry_run = options["dry_run"]
 
         # Validate organization exists
@@ -41,6 +41,11 @@ class Command(BaseCommand):
             org = Org.objects.get(slug=org_slug)
         except Org.DoesNotExist:
             raise CommandError(f"Organization with slug '{org_slug}' does not exist")
+
+        if org.dbt is None:
+            raise CommandError("dbt is not set up for org")
+
+        dbt_binary_path = str(Path(os.getenv("DBT_VENV")) / org.dbt.dbt_venv / "bin/dbt")
 
         # Get all deployments for this organization
         deployments = OrgDataFlowv1.objects.filter(org=org)
@@ -61,7 +66,7 @@ class Command(BaseCommand):
         for deployment in deployments:
             try:
                 # Fetch deployment from Prefect
-                prefect_deployment = prefect_get(f"deployments/{deployment.deployment_id}")
+                prefect_deployment = get_deployment(deployment.deployment_id)
                 deployment_params = prefect_deployment["parameters"]
 
                 # Check if deployment has tasks in config
@@ -108,12 +113,22 @@ class Command(BaseCommand):
                                 self.stdout.write(f"  New command: {new_command}")
                                 self.stdout.write("")
 
+                    elif task["slug"] == "generate-edr":
+                        self.stdout.write(" Old PATH for edr: " + task["env"]["PATH"])
+                        newpath = str(Path(os.getenv("DBT_VENV")) / org.dbt.dbt_venv / "bin")
+                        if task["env"]["PATH"] != newpath:
+                            task["env"]["PATH"] = newpath
+                            modified = True
+                            self.stdout.write(" New PATH for edr: " + task["env"]["PATH"])
+
                 # Update deployment if modified and not dry run
                 if modified:
                     if not dry_run:
-                        prefect_put(
-                            f"v1/deployments/{deployment.deployment_id}",
-                            {"deployment_params": deployment_params},
+                        update_dataflow_v1(
+                            deployment.deployment_id,
+                            PrefectDataFlowUpdateSchema3(
+                                deployment_params=deployment_params, cron=deployment.cron
+                            ),
                         )
                         self.stdout.write(
                             self.style.SUCCESS(

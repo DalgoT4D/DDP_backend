@@ -177,7 +177,7 @@ class CustomTokenObtainSerializer(TokenObtainPairSerializer):
 
     @classmethod
     def get_token(cls, user):
-        token = super().get_token(user)  # we think AccessToken.for_user is giving us this token
+        token = super().get_token(user)  # This returns a RefreshToken and Not an AccessToken
 
         role_permissions_key = os.getenv("ROLE_PERMISSIONS_REDIS_KEY", "dalgo_permissions_key")
 
@@ -203,6 +203,7 @@ class CustomTokenObtainSerializer(TokenObtainPairSerializer):
             json.dumps(orguser_role),
         )
 
+        # Add custom claims to refresh token (automatically propagates to access token)
         token["orguser_role_key"] = orguser_role_key
         return token
 
@@ -212,7 +213,7 @@ class CustomTokenObtainSerializer(TokenObtainPairSerializer):
 
 
 class CustomTokenRefreshSerializer(TokenRefreshSerializer):
-    """client calss the refresh api to get a new access token"""
+    """client calls the refresh api to get a new access token"""
 
     def validate(self, attrs):
         data = super().validate(attrs)
@@ -221,7 +222,8 @@ class CustomTokenRefreshSerializer(TokenRefreshSerializer):
         user_id = refresh.payload.get("user_id")
         user = User.objects.filter(id=user_id).first()
         if user:
-            # Generate a new access token with custom claims
-            access_token = CustomTokenObtainSerializer.get_token(user)
+            # Generate a new refresh token with custom claims (which will also add claims to access token)
+            refresh_token = CustomTokenObtainSerializer.get_token(user)
+            access_token = refresh_token.access_token
             data["access"] = str(access_token)
         return data

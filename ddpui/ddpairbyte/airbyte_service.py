@@ -780,6 +780,34 @@ def create_connection(
                 schema_cat["config"]["cursorField"] = []
                 schema_cat["config"]["primaryKey"] = []
 
+            if (
+                "columns" in selected_streams[stream_name]
+                and selected_streams[stream_name]["columns"]
+            ):
+                columns = selected_streams[stream_name]["columns"]
+                count = 0
+
+                for column in columns:
+                    if column.get("selected", False):
+                        count += 1
+
+                if count == len(columns):
+                    schema_cat["config"]["fieldSelectionEnabled"] = False
+                    schema_cat["config"]["selectedFields"] = []
+                else:
+                    schema_cat["config"]["fieldSelectionEnabled"] = True
+                    schema_cat["config"]["selectedFields"] = []
+
+                    for column in columns:
+                        if column.get("selected", False):
+                            schema_cat["config"]["selectedFields"].append(
+                                {"fieldPath": [column["name"]]}
+                            )
+            else:
+                # No column information or empty columns list - default to all columns selected
+                schema_cat["config"]["fieldSelectionEnabled"] = False
+                schema_cat["config"]["selectedFields"] = []
+
             payload["syncCatalog"]["streams"].append(schema_cat)
 
     res = abreq("connections/create", payload)
@@ -862,6 +890,34 @@ def update_connection(
             else:
                 schema_cat["config"]["cursorField"] = []
                 schema_cat["config"]["primaryKey"] = []
+
+            if (
+                "columns" in selected_streams[stream_name]
+                and selected_streams[stream_name]["columns"]
+            ):
+                columns = selected_streams[stream_name]["columns"]
+                count = 0
+
+                for column in columns:
+                    if column.get("selected", False):
+                        count += 1
+
+                if count == len(columns):
+                    schema_cat["config"]["fieldSelectionEnabled"] = False
+                    schema_cat["config"]["selectedFields"] = []
+                else:
+                    schema_cat["config"]["fieldSelectionEnabled"] = True
+                    schema_cat["config"]["selectedFields"] = []
+
+                    for column in columns:
+                        if column.get("selected", False):
+                            schema_cat["config"]["selectedFields"].append(
+                                {"fieldPath": [column["name"]]}
+                            )
+            else:
+                # No column information or empty columns list - default to all columns selected
+                schema_cat["config"]["fieldSelectionEnabled"] = False
+                schema_cat["config"]["selectedFields"] = []
 
             current_connection["syncCatalog"]["streams"].append(schema_cat)
 

@@ -55,6 +55,7 @@ from ddpui.utils.helpers import (
     update_dict_but_not_stars,
     from_timestamp,
     nice_bytes,
+    get_integer_env_var,
 )
 from ddpui.utils import secretsmanager
 from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
@@ -956,11 +957,16 @@ def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
     """
     try:
         logger.info(f"Fetching schema change (catalog) for connection {org.slug}|{connection_id}")
-        connection_catalog = airbyte_service.get_connection_catalog(connection_id, timemout=60)
+        connection_catalog = airbyte_service.get_connection_catalog(
+            connection_id,
+            timeout=get_integer_env_var(
+                "AIRBYTE_FETCH_CONNECTION_CATALOG_TIMEOUT_SECONDS", 300, logger
+            ),
+        )
     except Exception as err:
         return (
             None,
-            f"Something went wrong fetching schema change (catalog) for connection {connection_id}: {err}",
+            f"Something went wrong fetching schema change (catalog) for {org.slug} connection {connection_id}: {err}",
         )
 
     # update schema change type in our db
@@ -1002,7 +1008,7 @@ def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
     except Exception as err:
         return (
             None,
-            f"Something went wrong updating OrgSchemaChange {connection_id}: {err}",
+            f"Something went wrong updating OrgSchemaChange {org.slug} {connection_id}: {err}",
         )
 
     return connection_catalog, None
