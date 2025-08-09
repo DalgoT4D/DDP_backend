@@ -236,7 +236,9 @@ def delete_orgtask(org_task: OrgTask):
             parameters["config"]["tasks"] = tasks_to_keep
             # logger.info(parameters)
             if len(parameters["config"]["tasks"]) > 0:
-                payload = PrefectDataFlowUpdateSchema3(deployment_params=parameters)
+                payload = PrefectDataFlowUpdateSchema3(
+                    deployment_params=parameters, cron=dataflow.cron
+                )
                 prefect_service.update_dataflow_v1(dataflow.deployment_id, payload)
                 logger.info("updated deployment %s", dataflow.deployment_name)
             else:

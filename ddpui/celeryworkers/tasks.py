@@ -4,6 +4,7 @@ import os
 import shutil
 from pathlib import Path
 from datetime import datetime, timedelta
+from time import sleep
 from subprocess import CompletedProcess
 import pytz
 from django.core.management import call_command
@@ -13,6 +14,7 @@ import yaml
 from celery.schedules import crontab
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.celery import app, Celery
+from ddpui.settings import PRODUCTION
 
 
 from ddpui.utils import timezone, awsses, constants
@@ -50,7 +52,7 @@ from ddpui.models.llm import (
     LogsSummarizationType,
     LlmSessionStatus,
 )
-from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess
+from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess, get_integer_env_var
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.singletaskprogress import SingleTaskProgress
@@ -422,7 +424,7 @@ def run_dbt_commands(self, org_id: int, task_id: str, dbt_run_params: dict = Non
         task_lock.delete()
 
 
-def detect_schema_changes_for_org(org: Org):
+def detect_schema_changes_for_org(org: Org, delay=0):
     """detect schema changes for all connections of this org"""
     org_tasks = OrgTask.objects.filter(org=org, task__slug=TASK_AIRBYTESYNC)
 
@@ -434,18 +436,21 @@ def detect_schema_changes_for_org(org: Org):
         schema_change.delete()
 
     deprecated_org_tasks: list[OrgTask] = []
+    tag = " [STAGING]" if not PRODUCTION else ""
 
     # check for schema changes
     for org_task in org_tasks:
         connection_catalog, err = airbytehelpers.fetch_and_update_org_schema_changes(
             org, org_task.connection_id
         )
+        if delay:
+            sleep(delay)
 
         if err:
             if os.getenv("ADMIN_EMAIL"):
                 send_text_message(
                     os.getenv("ADMIN_EMAIL"),
-                    f"Schema change detection errors for {org.slug}",
+                    f"Schema change detection errors for {org.slug}{tag}",
                     err,
                 )
             logger.error(err)
@@ -455,7 +460,7 @@ def detect_schema_changes_for_org(org: Org):
             if os.getenv("ADMIN_EMAIL"):
                 send_text_message(
                     os.getenv("ADMIN_EMAIL"),
-                    f"Schema change detection errors for {org.slug}",
+                    f"Schema change detection errors for {org.slug}{tag}",
                     f"connection_catalog is None for {org_task.connection_id}",
                 )
             logger.error(err)
@@ -469,7 +474,8 @@ def detect_schema_changes_for_org(org: Org):
         catalog_diff: dict = connection_catalog.get("catalogDiff")
 
         logger.info(
-            "Found schema changes for connection %s of type %s",
+            "Found schema changes for %s connection %s of type %s",
+            org.slug,
             org_task.connection_id,
             change_type,
         )
@@ -508,11 +514,12 @@ def detect_schema_changes_for_org(org: Org):
         ).delete()
 
 
-@app.task()
+@app.task(bind=False)
 def schema_change_detection():
     """detects schema changes for all the orgs and sends an email to admins if there is a change"""
+    delay = get_integer_env_var("SCHEMA_CHANGE_DETECTION_INTER_ORG_DELAY", 0, logger, False)
     for org in Org.objects.all():
-        detect_schema_changes_for_org(org)
+        detect_schema_changes_for_org(org, delay)
 
 
 @app.task(bind=False)
@@ -1285,7 +1292,12 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
     """periodic celery tasks"""
     # schema change detection; once a day
     sender.add_periodic_task(
-        crontab(hour=18, minute=30),
+        crontab(
+            hour=get_integer_env_var("SCHEMA_CHANGE_DETECTION_SCHEDULE_HOUR", 18, logger, False),
+            minute=get_integer_env_var(
+                "SCHEMA_CHANGE_DETECTION_SCHEDULE_MINUTE", 30, logger, False
+            ),
+        ),
         schema_change_detection.s(),
         name="schema change detection",
     )

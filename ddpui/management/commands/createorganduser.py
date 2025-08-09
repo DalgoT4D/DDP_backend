@@ -78,7 +78,7 @@ class Command(BaseCommand):
         user = User.objects.filter(email=options["email"]).first()
 
         if not OrgUser.objects.filter(org=org, user=user).exists():
-            OrgUser.objects.create(org=org, user=user, role=3, new_role=role, email_verified=True)
+            OrgUser.objects.create(org=org, user=user, new_role=role, email_verified=True)
             print(f"OrgUser {user.email} created for Org {org.name} with role {role.name}")
         else:
             print(f"OrgUser {user.email} already exists for Org {org.name}")
