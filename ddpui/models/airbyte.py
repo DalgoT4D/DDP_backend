@@ -94,3 +94,17 @@ class AirbyteJob(models.Model):
             attempts_list = list(map(lambda x: x["attempt"], self.attempts))
             return max([attempt["id"] for attempt in attempts_list])
         return None
+
+    @property
+    def latest_failed_attempt_id(self):
+        """Returns the ID of the latest failed attempt if attempts exist, otherwise returns None."""
+        if self.attempts:
+            failed_attempts = [
+                attempt["attempt"]
+                for attempt in self.attempts
+                if attempt["attempt"]["status"] == "failed"
+            ]
+            if failed_attempts:
+                return max(failed_attempts, key=lambda x: x["id"])["id"]
+
+        return None
