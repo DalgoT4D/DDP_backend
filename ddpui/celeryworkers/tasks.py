@@ -823,7 +823,6 @@ def summarize_logs(
 
             task = tasks_to_summarize[0]
             task["logs"] = recurse_flow_run_logs(flow_run_id, task_id)
-
             logs_text = "\n".join([log["message"] for log in task["logs"]])
 
         elif type == LogsSummarizationType.AIRBYTE_SYNC:
