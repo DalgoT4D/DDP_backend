@@ -7,7 +7,7 @@ import hashlib
 import json
 
 from django.utils import timezone
-from sqlalchemy import column
+from sqlalchemy import column, and_, or_, text
 from sqlalchemy.dialects import postgresql
 
 from ddpui.models.org import OrgWarehouse
@@ -164,9 +164,69 @@ def build_chart_query(
                 query_builder.add_column(column(payload.extra_dimension))
                 query_builder.group_cols_by(payload.extra_dimension)
 
+    # Apply dashboard filters if provided
+    if payload.dashboard_filters:
+        query_builder = apply_dashboard_filters(query_builder, payload.dashboard_filters)
+
     # Add pagination
     query_builder.limit_rows(payload.limit)
     query_builder.offset_rows(payload.offset)
+
+    return query_builder
+
+
+def apply_dashboard_filters(
+    query_builder: AggQueryBuilder, filters: List[Dict[str, Any]]
+) -> AggQueryBuilder:
+    """Apply dashboard filters to the query builder using WHERE clauses
+
+    Args:
+        query_builder: The AggQueryBuilder instance to modify
+        filters: List of resolved filter dictionaries with format:
+                {
+                    'filter_id': str,
+                    'column': str,
+                    'type': str ('value' or 'numerical'),
+                    'value': Any,
+                    'settings': dict
+                }
+
+    Returns:
+        Modified query builder with applied filters
+    """
+    if not filters:
+        return query_builder
+
+    for filter_config in filters:
+        column_name = filter_config["column"]
+        filter_type = filter_config["type"]
+        value = filter_config["value"]
+
+        if value is None:
+            continue
+
+        if filter_type == "value":
+            if isinstance(value, list):
+                # Multiple values - use IN clause
+                if len(value) > 0:
+                    # Convert list values to proper SQL format
+                    query_builder.where_clause(column(column_name).in_(value))
+            else:
+                # Single value - use equality
+                query_builder.where_clause(column(column_name) == value)
+
+        elif filter_type == "numerical":
+            if isinstance(value, dict):
+                # Range filter
+                if "min" in value and "max" in value:
+                    query_builder.where_clause(
+                        and_(
+                            column(column_name) >= value["min"], column(column_name) <= value["max"]
+                        )
+                    )
+            else:
+                # Single numerical value
+                query_builder.where_clause(column(column_name) == value)
 
     return query_builder
 

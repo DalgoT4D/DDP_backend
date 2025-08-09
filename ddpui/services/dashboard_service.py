@@ -226,19 +226,30 @@ class DashboardService:
             warehouse_client = get_warehouse_client(org_warehouse)
 
             # Build query for distinct values
-            query = f"""
-                SELECT DISTINCT {column} as value
-                FROM {schema}.{table}
-                WHERE {column} IS NOT NULL
-                ORDER BY value
-                LIMIT {limit}
-            """
+            if org_warehouse.wtype == "postgres":
+                query = f"""
+                    SELECT DISTINCT "{column}" as value
+                    FROM "{schema}"."{table}"
+                    WHERE "{column}" IS NOT NULL
+                    ORDER BY value
+                    LIMIT {limit}
+                """
+            elif org_warehouse.wtype == "bigquery":
+                query = f"""
+                    SELECT DISTINCT `{column}` as value
+                    FROM `{org_warehouse.bq_location}.{schema}.{table}`
+                    WHERE `{column}` IS NOT NULL
+                    ORDER BY value
+                    LIMIT {limit}
+                """
+            else:
+                raise ValueError(f"Unsupported warehouse type: {org_warehouse.wtype}")
 
             # Execute query
-            result = warehouse_client.execute_query(query)
+            result = warehouse_client.execute(query)
 
-            # Extract values
-            options = [row.get("value", "") for row in result.get("data", [])]
+            # Extract values - result is a list of dictionaries
+            options = [str(row.get("value", "")) for row in result if row.get("value") is not None]
 
             # Cache for 5 minutes
             cache.set(cache_key, options, 300)

@@ -70,6 +70,9 @@ class ChartDataPayload(Schema):
     # Extra config for filters and other settings
     extra_config: Optional[dict] = None
 
+    # Dashboard filters
+    dashboard_filters: Optional[dict] = None
+
     # Pagination
     offset: int = 0
     limit: int = 100

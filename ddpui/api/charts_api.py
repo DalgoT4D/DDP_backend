@@ -275,30 +275,46 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
     # Build payload from chart config
     extra_config = chart.extra_config.copy() if chart.extra_config else {}
 
-    # Apply dashboard filters if provided
+    # Parse and resolve dashboard filters if provided
+    resolved_dashboard_filters = None
     if dashboard_filters:
         try:
-            filters = json.loads(dashboard_filters)
-            logger.info(f"Applying dashboard filters to chart {chart_id}: {filters}")
+            filter_values = json.loads(dashboard_filters)
+            logger.info(f"Applying dashboard filters to chart {chart_id}: {filter_values}")
 
-            # Apply filters by modifying the extra_config
-            where_conditions = extra_config.get("where_conditions", [])
-            if isinstance(where_conditions, str):
-                where_conditions = [where_conditions] if where_conditions else []
+            # Resolve filter configurations to get column information
+            from ddpui.models.dashboard import DashboardFilter
 
-            # Convert filters to WHERE conditions
-            # This logic should match the dashboard_service._apply_filters_to_chart method
-            for filter_id, filter_value in filters.items():
+            resolved_filters = []
+
+            for filter_id, filter_value in filter_values.items():
                 if filter_value is not None:
-                    # TODO: Look up filter configuration from DashboardFilter model
-                    # For now, we'll pass the filters to the query builder
-                    pass
+                    try:
+                        # Get the filter configuration from the database
+                        dashboard_filter = DashboardFilter.objects.get(id=filter_id)
 
-            # Store filters in extra_config for the query builder to use
-            extra_config["dashboard_filters"] = filters
+                        # Only apply this filter if it applies to the same table as the chart
+                        if (
+                            dashboard_filter.schema_name == chart.schema_name
+                            and dashboard_filter.table_name == chart.table_name
+                        ):
+                            resolved_filters.append(
+                                {
+                                    "filter_id": filter_id,
+                                    "column": dashboard_filter.column_name,
+                                    "type": dashboard_filter.filter_type,
+                                    "value": filter_value,
+                                    "settings": dashboard_filter.settings,
+                                }
+                            )
+                    except DashboardFilter.DoesNotExist:
+                        logger.warning(f"Dashboard filter {filter_id} not found")
+
+            resolved_dashboard_filters = resolved_filters
 
         except json.JSONDecodeError:
             logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
+            resolved_dashboard_filters = None
 
     # Get existing customizations and add chart title
     customizations = extra_config.get("customizations", {})
@@ -318,7 +334,8 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
         customizations=customizations,
         offset=0,
         limit=100,
-        extra_config=extra_config,  # Pass the modified extra_config with filters
+        extra_config=extra_config,
+        dashboard_filters=resolved_dashboard_filters,  # Pass resolved dashboard filters
     )
 
     # Use the common function to generate data and config

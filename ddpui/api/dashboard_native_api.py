@@ -44,6 +44,7 @@ class DashboardUpdate(Schema):
     grid_columns: Optional[int] = None
     layout_config: Optional[list[dict]] = None
     components: Optional[dict] = None
+    filters: Optional[list[dict]] = None
     is_published: Optional[bool] = None
 
 
@@ -240,6 +241,24 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
 
     if payload.components is not None:
         dashboard.components = payload.components
+
+    # Handle filters update
+    if payload.filters is not None:
+        # Delete existing filters and recreate them
+        # This ensures filters are in sync with frontend state
+        dashboard.filters.all().delete()
+
+        # Create new filters from payload
+        for filter_data in payload.filters:
+            DashboardFilter.objects.create(
+                dashboard=dashboard,
+                filter_type=filter_data.get("filter_type", "value"),
+                schema_name=filter_data.get("schema_name", ""),
+                table_name=filter_data.get("table_name", ""),
+                column_name=filter_data.get("column_name", ""),
+                settings=filter_data.get("settings", {}),
+                order=filter_data.get("order", 0),
+            )
 
     if payload.is_published is not None:
         dashboard.is_published = payload.is_published
