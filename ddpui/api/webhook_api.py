@@ -8,10 +8,7 @@ from ddpui.utils.webhook_helpers import (
     get_flowrun_id_and_state,
     FLOW_RUN,
 )
-from ddpui.celeryworkers.tasks import handle_prefect_webhook
-from ddpui.models.llm import LlmSession, LlmSessionStatus
-from ddpui.auth import has_permission
-from ddpui.models.org_user import OrgUser
+from ddpui.celeryworkers.tasks import handle_prefect_webhook, sync_single_airbyte_job_stats
 
 webhook_router = Router()
 logger = CustomLogger("ddpui")
@@ -80,44 +77,3 @@ def post_airbyte_job_details(request, job_id: str):
     sync_single_airbyte_job_stats.delay(int(job_id))
 
     return {"status": "ok"}
-
-
-@webhook_router.get("/failure-summary/{flow_run_id}")
-@has_permission(["can_view_logs"])
-def get_failure_summary(request, flow_run_id: str):
-    """Get LLM failure summary for a specific flow run"""
-    try:
-        orguser: OrgUser = request.orguser
-
-        # Find the LLM session for this flow run
-        llm_session = (
-            LlmSession.objects.filter(
-                org=orguser.org, flow_run_id=flow_run_id, session_status=LlmSessionStatus.COMPLETED
-            )
-            .order_by("-created_at")
-            .first()
-        )
-
-        if not llm_session:
-            return {
-                "status": "not_found",
-                "message": "No LLM failure summary found for this flow run",
-                "flow_run_id": flow_run_id,
-            }
-
-        return {
-            "status": "success",
-            "flow_run_id": flow_run_id,
-            "summary": {
-                "session_id": llm_session.session_id,
-                "created_at": llm_session.created_at,
-                "user_prompts": llm_session.user_prompts,
-                "assistant_prompt": llm_session.assistant_prompt,
-                "response": llm_session.response,
-                "session_status": llm_session.session_status,
-            },
-        }
-
-    except Exception as err:
-        logger.error(f"Error retrieving failure summary for flow run {flow_run_id}: {str(err)}")
-        raise HttpError(500, f"Failed to retrieve failure summary: {str(err)}")
