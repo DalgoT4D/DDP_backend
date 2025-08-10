@@ -325,6 +325,12 @@ class EChartsConfigGenerator:
         color_scheme = customizations.get("colorScheme", "Blues")
         show_tooltip = customizations.get("showTooltip", True)
         show_legend = customizations.get("showLegend", True)
+        roam = customizations.get("roam", True)
+        enable_select = customizations.get("select", False)
+        zoom = customizations.get("zoom", 1.0)
+        center_mode = customizations.get("centerMode", "auto")
+        center_lon = customizations.get("centerLon", 0)
+        center_lat = customizations.get("centerLat", 0)
 
         # Color schemes mapping
         color_schemes = {
@@ -341,17 +347,28 @@ class EChartsConfigGenerator:
         # Generate unique map name based on geojson content
         map_name = f"map_{hash(str(geojson)) % 10000}"
 
+        # Build series with customizations
+        series_config = {
+            "type": "map",
+            "map": map_name,
+            "data": map_data,
+            "roam": roam,  # Enable/disable zoom and pan
+            "zoom": zoom,  # Initial zoom level
+            "emphasis": {"label": {"show": True}, "itemStyle": {"areaColor": "#ffa500"}},
+        }
+
+        # Set center position if custom mode
+        if center_mode == "custom":
+            series_config["center"] = [center_lon, center_lat]
+
+        # Enable selection if requested
+        if enable_select:
+            series_config["select"] = {"itemStyle": {"areaColor": "#ff6b6b"}}
+            series_config["selectedMode"] = "single"
+
         config = {
             "title": {"text": customizations.get("title", ""), "left": "center"},
-            "series": [
-                {
-                    "type": "map",
-                    "map": map_name,
-                    "data": map_data,
-                    "emphasis": {"label": {"show": True}, "itemStyle": {"areaColor": "#ffa500"}},
-                }
-            ],
-            "geo": {"map": map_name, "roam": True, "emphasis": {"focus": "self"}},
+            "series": [series_config],
             "mapData": geojson,  # Custom property for frontend registration
             "mapName": map_name,  # Custom property for frontend registration
         }
