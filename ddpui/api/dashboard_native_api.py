@@ -124,8 +124,54 @@ class FilterOptionsResponse(Schema):
 
 # Helper functions
 def get_dashboard_response(dashboard: Dashboard) -> dict:
-    """Convert dashboard model to response dict"""
+    """Convert dashboard model to response dict with migration support"""
     lock = getattr(dashboard, "lock", None)
+
+    # Check if components need migration from old filter format to new format
+    components = dashboard.components or {}
+    needs_update = False
+
+    for comp_id, component in components.items():
+        if component.get("type") == "filter":
+            # Check if this is old format (full config) vs new format (just filterId reference)
+            config = component.get("config", {})
+            if "filterId" not in config and "column_name" in config:
+                # This is old format, needs migration
+                # Find or create matching filter in DashboardFilter table
+                matching_filter = dashboard.filters.filter(
+                    column_name=config.get("column_name"),
+                    table_name=config.get("table_name", ""),
+                    schema_name=config.get("schema_name", ""),
+                ).first()
+
+                if not matching_filter:
+                    # Create filter if it doesn't exist
+                    matching_filter = DashboardFilter.objects.create(
+                        dashboard=dashboard,
+                        filter_type=config.get("filter_type", "value"),
+                        schema_name=config.get("schema_name", ""),
+                        table_name=config.get("table_name", ""),
+                        column_name=config.get("column_name", ""),
+                        settings=config.get("settings", {}),
+                        order=0,
+                    )
+
+                # Update component to new format with just filterId reference
+                components[comp_id] = {
+                    "id": comp_id,
+                    "type": "filter",
+                    "config": {
+                        "filterId": matching_filter.id,
+                        "name": config.get("name", matching_filter.column_name),
+                    },
+                }
+                needs_update = True
+
+    if needs_update:
+        # Save migrated components back to database
+        dashboard.components = components
+        dashboard.save(update_fields=["components"])
+        logger.info(f"Migrated filter components for dashboard {dashboard.id}")
 
     response_data = dashboard.to_json()
     response_data["is_locked"] = bool(lock and not lock.is_expired())
@@ -133,8 +179,17 @@ def get_dashboard_response(dashboard: Dashboard) -> dict:
         lock.locked_by.user.email if lock and not lock.is_expired() else None
     )
 
-    # Add filters
-    response_data["filters"] = [f.to_json() for f in dashboard.filters.all()]
+    # Add filters without position data in settings
+    filters_data = []
+    for f in dashboard.filters.all():
+        filter_json = f.to_json()
+        # Remove position and name from settings if they exist (for backward compatibility)
+        if "settings" in filter_json:
+            filter_json["settings"].pop("position", None)
+            filter_json["settings"].pop("name", None)
+        filters_data.append(filter_json)
+
+    response_data["filters"] = filters_data
 
     return response_data
 
@@ -242,23 +297,58 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
     if payload.components is not None:
         dashboard.components = payload.components
 
-    # Handle filters update
+    # Handle filters update with intelligent sync
     if payload.filters is not None:
-        # Delete existing filters and recreate them
-        # This ensures filters are in sync with frontend state
-        dashboard.filters.all().delete()
+        # Extract filter IDs that are currently in components
+        filter_ids_in_components = set()
+        if payload.components:
+            for component in payload.components.values():
+                if component.get("type") == "filter":
+                    filter_id = component.get("config", {}).get("filterId")
+                    if filter_id:
+                        filter_ids_in_components.add(filter_id)
 
-        # Create new filters from payload
+        # Get existing filter IDs
+        existing_filter_ids = set(dashboard.filters.values_list("id", flat=True))
+
+        # Delete filters that are no longer in components
+        filters_to_delete = existing_filter_ids - filter_ids_in_components
+        if filters_to_delete:
+            dashboard.filters.filter(id__in=filters_to_delete).delete()
+            logger.info(f"Deleted filters {filters_to_delete} from dashboard {dashboard_id}")
+
+        # Update or create filters from payload
         for filter_data in payload.filters:
-            DashboardFilter.objects.create(
-                dashboard=dashboard,
-                filter_type=filter_data.get("filter_type", "value"),
-                schema_name=filter_data.get("schema_name", ""),
-                table_name=filter_data.get("table_name", ""),
-                column_name=filter_data.get("column_name", ""),
-                settings=filter_data.get("settings", {}),
-                order=filter_data.get("order", 0),
-            )
+            filter_id = filter_data.get("id")
+
+            # Clean settings - remove position and name if present
+            settings = filter_data.get("settings", {}).copy()
+            settings.pop("position", None)
+            settings.pop("name", None)
+
+            if filter_id and filter_id in existing_filter_ids:
+                # Update existing filter
+                dashboard.filters.filter(id=filter_id).update(
+                    filter_type=filter_data.get("filter_type", "value"),
+                    schema_name=filter_data.get("schema_name", ""),
+                    table_name=filter_data.get("table_name", ""),
+                    column_name=filter_data.get("column_name", ""),
+                    settings=settings,
+                    order=filter_data.get("order", 0),
+                )
+            else:
+                # Create new filter
+                new_filter = DashboardFilter.objects.create(
+                    dashboard=dashboard,
+                    filter_type=filter_data.get("filter_type", "value"),
+                    schema_name=filter_data.get("schema_name", ""),
+                    table_name=filter_data.get("table_name", ""),
+                    column_name=filter_data.get("column_name", ""),
+                    settings=settings,
+                    order=filter_data.get("order", 0),
+                )
+                # Update the filter_data with the new ID for response
+                filter_data["id"] = new_filter.id
 
     if payload.is_published is not None:
         dashboard.is_published = payload.is_published

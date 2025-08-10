@@ -71,7 +71,7 @@ class ChartDataPayload(Schema):
     extra_config: Optional[dict] = None
 
     # Dashboard filters
-    dashboard_filters: Optional[dict] = None
+    dashboard_filters: Optional[list[dict]] = None
 
     # Pagination
     offset: int = 0
