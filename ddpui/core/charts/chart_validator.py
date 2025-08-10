@@ -70,8 +70,14 @@ class ChartValidator:
                     computation_type, aggregate_col, aggregate_func, customizations
                 )
             elif chart_type == "map":
-                # Map validation to be implemented later
-                raise ChartValidationError("Map charts are not yet implemented")
+                ChartValidator._validate_map_chart(
+                    computation_type,
+                    extra_config.get("geographic_column"),
+                    extra_config.get("value_column"),
+                    extra_config.get("aggregate_function"),
+                    extra_config.get("selected_geojson_id"),
+                    customizations,
+                )
 
             return True, None
 
@@ -335,3 +341,46 @@ class ChartValidator:
 
         except ChartValidationError as e:
             return False, str(e)
+
+    @staticmethod
+    def _validate_map_chart(
+        computation_type: str,
+        geographic_column: Optional[str],
+        value_column: Optional[str],
+        aggregate_func: Optional[str],
+        selected_geojson_id: Optional[int],
+        customizations: Dict,
+    ) -> None:
+        """Validate map chart configuration"""
+        # Maps only support aggregated data
+        if computation_type != "aggregated":
+            raise ChartValidationError("Map charts only support aggregated data")
+
+        if not geographic_column:
+            raise ChartValidationError("Map chart requires geographic column")
+
+        if not value_column:
+            raise ChartValidationError("Map chart requires value column")
+
+        if not aggregate_func:
+            raise ChartValidationError("Map chart requires aggregate function")
+
+        ChartValidator._validate_aggregate_function(aggregate_func)
+
+        if not selected_geojson_id:
+            raise ChartValidationError("Map chart requires selected GeoJSON")
+
+        # Validate customizations if present
+        if customizations:
+            color_scheme = customizations.get("colorScheme")
+            if color_scheme and color_scheme not in [
+                "Blues",
+                "Reds",
+                "Greens",
+                "Purples",
+                "Oranges",
+                "Greys",
+            ]:
+                raise ChartValidationError(
+                    f"Invalid color scheme '{color_scheme}'. Must be one of: Blues, Reds, Greens, Purples, Oranges, Greys"
+                )

@@ -24,6 +24,8 @@ from ddpui.schemas.chart_schema import (
     DataPreviewResponse,
     ExecuteChartQuery,
     TransformDataForChart,
+    GeoJSONListResponse,
+    GeoJSONDetailResponse,
 )
 
 logger = CustomLogger("ddpui")
@@ -77,6 +79,10 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
         f"Building query for {chart_id_str} - Type: {payload.chart_type}, Computation: {payload.computation_type}"
     )
 
+    # Handle maps differently
+    if payload.chart_type == "map":
+        return generate_map_data_and_config(payload, org_warehouse, chart_id)
+
     # Get warehouse client
     warehouse = charts_service.get_warehouse_client(org_warehouse)
 
@@ -127,6 +133,50 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
     logger.info(f"Successfully generated data and config for {chart_id_str}")
 
     return {"data": chart_data, "echarts_config": echarts_config}
+
+
+def generate_map_data_and_config(payload: ChartDataPayload, org_warehouse, chart_id=None) -> dict:
+    """Generate map data and ECharts config from payload"""
+    chart_id_str = f"map {chart_id}" if chart_id else "map"
+
+    logger.info(f"Generating map data for {chart_id_str}")
+
+    # Import map services
+    from ddpui.core.charts.maps_service import build_map_query, transform_data_for_map
+    from ddpui.models.geojson import GeoJSON
+
+    # Get GeoJSON data
+    geojson_id = payload.selected_geojson_id
+    if not geojson_id:
+        raise ValueError("Map requires selected_geojson_id")
+
+    geojson = get_object_or_404(GeoJSON, id=geojson_id)
+
+    # Get warehouse client and build query
+    warehouse = charts_service.get_warehouse_client(org_warehouse)
+    query_builder = build_map_query(payload)
+
+    # Execute query
+    logger.info(f"Executing map query for {chart_id_str}")
+    dict_results = charts_service.execute_query(warehouse, query_builder)
+    logger.info(f"Map query results for {chart_id_str}: {len(dict_results)} rows")
+
+    # Transform for map
+    map_data = transform_data_for_map(
+        dict_results,
+        geojson.geojson_data,
+        payload.geographic_column,
+        payload.value_column,
+        payload.aggregate_func or "sum",
+        payload.customizations,
+    )
+
+    # Generate map config
+    echarts_config = EChartsConfigGenerator.generate_map_config(map_data, payload.customizations)
+
+    logger.info(f"Successfully generated map data and config for {chart_id_str}")
+
+    return {"data": map_data, "echarts_config": echarts_config}
 
 
 @charts_router.get("/", response=List[ChartResponse])
@@ -221,6 +271,43 @@ def get_chart_data_preview(request, payload: ChartDataPayload):
         total_rows=preview_data["total_rows"],
         page=preview_data["page"],
         page_size=preview_data["page_size"],
+    )
+
+
+# Map-specific endpoints - Must come before /{chart_id}/ routes to avoid conflicts
+
+
+@charts_router.get("/geojsons/", response=List[GeoJSONListResponse])
+def list_available_geojsons(request, country_code: str = "IND", layer_level: int = 1):
+    """List available GeoJSONs for a country and layer"""
+    orguser = request.orguser
+
+    from ddpui.core.charts.maps_service import get_available_geojsons
+
+    geojsons = get_available_geojsons(country_code, layer_level, orguser.org.id)
+
+    return [GeoJSONListResponse(**geojson) for geojson in geojsons]
+
+
+@charts_router.get("/geojsons/{geojson_id}/", response=GeoJSONDetailResponse)
+def get_geojson_data(request, geojson_id: int):
+    """Get specific GeoJSON data"""
+    orguser = request.orguser
+
+    from ddpui.models.geojson import GeoJSON
+
+    geojson = get_object_or_404(GeoJSON, id=geojson_id)
+
+    # Check access permissions
+    if not geojson.is_default and geojson.org_id != orguser.org.id:
+        raise HttpError(403, "Access denied to GeoJSON")
+
+    return GeoJSONDetailResponse(
+        id=geojson.id,
+        name=geojson.name,
+        display_name=geojson.display_name,
+        geojson_data=geojson.geojson_data,
+        properties_key=geojson.properties_key,
     )
 
 
