@@ -114,6 +114,7 @@ class DashboardFilter(models.Model):
     dashboard = models.ForeignKey(Dashboard, on_delete=models.CASCADE, related_name="filters")
 
     # Filter configuration
+    name = models.CharField(max_length=255, help_text="Display name for the filter", default="")
     filter_type = models.CharField(max_length=20, choices=DashboardFilterType.choices())
     schema_name = models.CharField(max_length=255)
     table_name = models.CharField(max_length=255)
@@ -129,13 +130,14 @@ class DashboardFilter(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.dashboard.title} - {self.column_name} ({self.filter_type})"
+        return f"{self.dashboard.title} - {self.name or self.column_name} ({self.filter_type})"
 
     def to_json(self):
         """Return JSON representation"""
         return {
             "id": self.id,
             "dashboard_id": self.dashboard_id,
+            "name": self.name,
             "filter_type": self.filter_type,
             "schema_name": self.schema_name,
             "table_name": self.table_name,

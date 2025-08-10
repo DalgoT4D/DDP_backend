@@ -51,6 +51,7 @@ class DashboardUpdate(Schema):
 class FilterCreate(Schema):
     """Schema for creating a filter"""
 
+    name: Optional[str] = None
     filter_type: str
     schema_name: str
     table_name: str
@@ -62,6 +63,7 @@ class FilterCreate(Schema):
 class FilterUpdate(Schema):
     """Schema for updating a filter"""
 
+    name: Optional[str] = None
     filter_type: Optional[str] = None
     schema_name: Optional[str] = None
     table_name: Optional[str] = None
@@ -75,6 +77,7 @@ class DashboardFilterResponse(Schema):
 
     id: int
     dashboard_id: int
+    name: str
     filter_type: str
     schema_name: str
     table_name: str
@@ -148,6 +151,7 @@ def get_dashboard_response(dashboard: Dashboard) -> dict:
                     # Create filter if it doesn't exist
                     matching_filter = DashboardFilter.objects.create(
                         dashboard=dashboard,
+                        name=config.get("name", config.get("column_name", "")),
                         filter_type=config.get("filter_type", "value"),
                         schema_name=config.get("schema_name", ""),
                         table_name=config.get("table_name", ""),
@@ -329,6 +333,7 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
             if filter_id and filter_id in existing_filter_ids:
                 # Update existing filter
                 dashboard.filters.filter(id=filter_id).update(
+                    name=filter_data.get("name", ""),
                     filter_type=filter_data.get("filter_type", "value"),
                     schema_name=filter_data.get("schema_name", ""),
                     table_name=filter_data.get("table_name", ""),
@@ -340,6 +345,7 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
                 # Create new filter
                 new_filter = DashboardFilter.objects.create(
                     dashboard=dashboard,
+                    name=filter_data.get("name", filter_data.get("column_name", "")),
                     filter_type=filter_data.get("filter_type", "value"),
                     schema_name=filter_data.get("schema_name", ""),
                     table_name=filter_data.get("table_name", ""),
@@ -509,6 +515,7 @@ def create_filter(request, dashboard_id: int, payload: FilterCreate):
 
     filter = DashboardFilter.objects.create(
         dashboard=dashboard,
+        name=payload.name or payload.column_name,
         filter_type=payload.filter_type,
         schema_name=payload.schema_name,
         table_name=payload.table_name,
@@ -530,13 +537,16 @@ def update_filter(request, dashboard_id: int, filter_id: int, payload: FilterUpd
 
     try:
         dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
-        filter = dashboard.filters.get(id=filter_id)
+        filter: DashboardFilter = dashboard.filters.get(id=filter_id)
     except Dashboard.DoesNotExist:
         raise HttpError(404, "Dashboard not found")
     except DashboardFilter.DoesNotExist:
         raise HttpError(404, "Filter not found")
 
     # Update fields
+    if payload.name is not None:
+        filter.name = payload.name
+
     if payload.filter_type is not None:
         if payload.filter_type not in [ft.value for ft in DashboardFilterType]:
             raise HttpError(400, f"Invalid filter type: {payload.filter_type}")
