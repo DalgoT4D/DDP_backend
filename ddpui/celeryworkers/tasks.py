@@ -80,7 +80,7 @@ from ddpui.ddpprefect.prefect_service import (
     compute_dataflow_run_times_from_history,
     get_flow_run_poll,
 )
-from ddpui.ddpprefect import DBTCLIPROFILE, AIRBYTECONNECTION
+from ddpui.ddpprefect import DBTCLIPROFILE, TASK_RUN_KIND, FLOW_RUN_KIND
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.core import llm_service
 from ddpui.utils.helpers import (
@@ -808,9 +808,9 @@ def summarize_logs(
     logs_text = ""
     try:
         if type == LogsSummarizationType.DEPLOYMENT:
-            task_runs = get_flow_run_graphs(flow_run_id)
+            all_runs = get_flow_run_graphs(flow_run_id)
 
-            tasks_to_summarize = [task for task in task_runs if task["id"] == task_id]
+            tasks_to_summarize = [run for run in all_runs if run["id"] == task_id]
             if not tasks_to_summarize:
                 taskprogress.add(
                     {
@@ -822,7 +822,11 @@ def summarize_logs(
                 return
 
             task = tasks_to_summarize[0]
-            task["logs"] = recurse_flow_run_logs(flow_run_id, task_id)
+            if task.get("kind", TASK_RUN_KIND) == FLOW_RUN_KIND:
+                # this is subflow run, fetch logs from it
+                task["logs"] = recurse_flow_run_logs(flow_run_id, None)
+            else:
+                task["logs"] = recurse_flow_run_logs(flow_run_id, task_id)
             logs_text = "\n".join([log["message"] for log in task["logs"]])
 
         elif type == LogsSummarizationType.AIRBYTE_SYNC:
@@ -830,6 +834,7 @@ def summarize_logs(
                 job_id=job_id, attempt_number=attempt_number
             )
             logs_text = "\n".join(log_lines)
+
     except Exception as err:
         logger.error(err)
         taskprogress.add(
