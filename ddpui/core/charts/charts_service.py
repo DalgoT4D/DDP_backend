@@ -549,14 +549,25 @@ def transform_data_for_chart(
             agg_col_name = get_aggregate_column_name(payload.aggregate_func, payload.aggregate_col)
             value = row.get(agg_col_name, 0)
 
+            # Handle None values - show "No data" instead of trying to format None as a number
+            if value is None:
+                return {
+                    "value": None,
+                    "metric_name": get_aggregate_display_name(
+                        payload.aggregate_func, payload.aggregate_col
+                    ),
+                    "is_null": True,
+                }
+
             return {
                 "value": value,
                 "metric_name": get_aggregate_display_name(
                     payload.aggregate_func, payload.aggregate_col
                 ),
+                "is_null": False,
             }
         else:
-            return {"value": 0, "metric_name": "No data"}
+            return {"value": None, "metric_name": "No data", "is_null": True}
 
     return {}
 
