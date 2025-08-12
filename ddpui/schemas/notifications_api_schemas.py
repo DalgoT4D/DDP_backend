@@ -71,12 +71,6 @@ class NotificationDataSchema(Schema):
     category: Optional[str] = "incident"
 
 
-class DismissUrgentNotificationSchema(Schema):
-    """Schema for dismissing urgent notifications"""
-
-    notification_id: int
-
-
 class CategorySubscriptionSchema(Schema):
     """Schema for updating category subscription preferences"""
 

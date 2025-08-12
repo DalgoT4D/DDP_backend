@@ -118,8 +118,7 @@ class Command(BaseCommand):
             message=message,
             urgent=options.get("urgent", False),
             scheduled_time=scheduled_time,
-            category=options.get("category")
-            or NotificationCategory.INCIDENT,  # Default to 'incident' if not provided
+            category=options.get("category"),  # Default to None if not provided
         )
 
         if options["dry_run"]:

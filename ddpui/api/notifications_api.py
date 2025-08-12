@@ -6,7 +6,6 @@ from ddpui.schemas.notifications_api_schemas import (
     CreateNotificationPayloadSchema,
     UpdateReadStatusSchema,
     UpdateReadStatusSchemav1,
-    DismissUrgentNotificationSchema,
     CategorySubscriptionSchema,
 )
 from ddpui.models.org_user import OrgUser
@@ -268,34 +267,6 @@ def get_urgent_notifications(request):
     """
     orguser: OrgUser = request.orguser
     error, result = notifications_service.get_urgent_notifications(orguser)
-    if error is not None:
-        raise HttpError(400, error)
-
-    return result
-
-
-@notification_router.post("/urgent/dismiss")
-def dismiss_urgent_notification(request, payload: DismissUrgentNotificationSchema):
-    """
-    Dismiss an urgent notification for the authenticated user.
-
-    Marks an urgent notification as dismissed so it won't appear in the
-    urgent notifications bar anymore.
-
-    Args:
-        request: HTTP request object containing orguser authentication data
-        payload: Schema containing the notification_id to dismiss
-
-    Returns:
-        dict: Success message
-
-    Raises:
-        HttpError: 400 if dismissal fails
-    """
-    orguser: OrgUser = request.orguser
-    error, result = notifications_service.dismiss_urgent_notification(
-        orguser, payload.notification_id
-    )
     if error is not None:
         raise HttpError(400, error)
 

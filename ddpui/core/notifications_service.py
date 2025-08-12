@@ -441,8 +441,8 @@ def get_urgent_notifications(
             recipient=orguser,
             notification__urgent=True,
             notification__sent_time__isnull=False,
+            read_status=False,
         )
-        .exclude(notification__dismissed_by=orguser)
         .select_related("notification")
         .order_by("-notification__timestamp")
     )
@@ -462,21 +462,6 @@ def get_urgent_notifications(
         )
 
     return None, {"success": True, "res": notifications_list}
-
-
-# dismiss urgent notification
-def dismiss_urgent_notification(
-    orguser: OrgUser, notification_id: int
-) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
-    """
-    Dismiss an urgent notification for a specific user.
-    """
-    try:
-        notification = Notification.objects.get(id=notification_id, urgent=True)
-        notification.dismissed_by.add(orguser)
-        return None, {"success": True, "message": "Urgent notification dismissed successfully"}
-    except Notification.DoesNotExist:
-        return "Urgent notification not found", None
 
 
 # get notifications by category

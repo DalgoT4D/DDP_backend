@@ -25,14 +25,10 @@ class Notification(models.Model):
     category = models.CharField(
         max_length=20,
         choices=NotificationCategory.choices,
-        default=NotificationCategory.INCIDENT,
-        help_text="Category of the notification",
-    )
-    dismissed_by = models.ManyToManyField(
-        OrgUser,
+        null=True,
         blank=True,
-        related_name="dismissed_notifications",
-        help_text="Users who have dismissed this urgent notification",
+        default=None,
+        help_text="Category of the notification",
     )
 
 
