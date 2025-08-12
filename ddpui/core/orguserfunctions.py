@@ -376,7 +376,7 @@ def resend_invitation(invitation_id: str):
     return None, None
 
 
-def request_reset_password(email: str):
+def request_reset_password(email: str, is_v2: bool = False):
     """send the reset password email"""
     orguser = OrgUser.objects.filter(user__email=email, user__is_active=True).first()
 
@@ -394,8 +394,11 @@ def request_reset_password(email: str):
     redis.set(redis_key, orguserid_bytes)
     redis.expire(redis_key, 3600 * 24)  # 24 hours
 
-    FRONTEND_URL = os.getenv("FRONTEND_URL")
+    # To seperate the frontend urls for v1 and v2
+    FRONTEND_URL = os.getenv("FRONTEND_URL_V2") if is_v2 else os.getenv("FRONTEND_URL")
+
     reset_url = f"{FRONTEND_URL}/resetpassword/?token={token.hex}"
+
     try:
         awsses.send_password_reset_email(email, reset_url)
     except Exception:
