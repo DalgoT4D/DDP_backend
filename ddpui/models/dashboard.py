@@ -37,6 +37,7 @@ class DashboardFilterType(str, Enum):
 
     VALUE = "value"
     NUMERICAL = "numerical"
+    DATETIME = "datetime"
 
     @classmethod
     def choices(cls):

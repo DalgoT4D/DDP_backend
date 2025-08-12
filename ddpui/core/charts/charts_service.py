@@ -186,7 +186,7 @@ def apply_dashboard_filters(
                 {
                     'filter_id': str,
                     'column': str,
-                    'type': str ('value' or 'numerical'),
+                    'type': str ('value', 'numerical', or 'datetime'),
                     'value': Any,
                     'settings': dict
                 }
@@ -227,6 +227,24 @@ def apply_dashboard_filters(
             else:
                 # Single numerical value
                 query_builder.where_clause(column(column_name) == value)
+
+        elif filter_type == "datetime":
+            # NEW: Handle datetime filters
+            if isinstance(value, dict):
+                # Date range filter
+                if "start_date" in value and value["start_date"]:
+                    query_builder.where_clause(column(column_name) >= value["start_date"])
+                if "end_date" in value and value["end_date"]:
+                    # Add 1 day to end_date to include the full day
+                    end_date_inclusive = value["end_date"] + "T23:59:59"
+                    query_builder.where_clause(column(column_name) <= end_date_inclusive)
+            elif isinstance(value, str):
+                # Single date - filter for that specific day
+                start_of_day = value + "T00:00:00"
+                end_of_day = value + "T23:59:59"
+                query_builder.where_clause(
+                    and_(column(column_name) >= start_of_day, column(column_name) <= end_of_day)
+                )
 
     return query_builder
 

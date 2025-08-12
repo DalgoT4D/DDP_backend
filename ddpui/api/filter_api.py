@@ -4,11 +4,15 @@ from typing import List, Optional, Dict, Any
 from django.shortcuts import get_object_or_404
 from ninja import Router, Schema
 from ninja.errors import HttpError
+from sqlalchemy import func, column, distinct, cast, Float, Date
+from sqlalchemy.sql.expression import table
 
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgWarehouse
-from ddpui.core.charts import charts_service
+from ddpui.models.dashboard import DashboardFilterType
+from ddpui.core.charts.charts_service import execute_query, get_warehouse_client
+from ddpui.datainsights.query_builder import AggQueryBuilder
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
@@ -29,6 +33,8 @@ class TableResponse(Schema):
 class ColumnResponse(Schema):
     name: str
     type: str
+    data_type: str  # Original database data type
+    recommended_filter_type: str  # Auto-determined filter type
     nullable: bool = True
 
 
@@ -47,7 +53,34 @@ class NumericalStatsResponse(Schema):
 
 class FilterPreviewResponse(Schema):
     options: Optional[List[FilterOptionResponse]] = None
-    stats: Optional[NumericalStatsResponse] = None
+    stats: Optional[Dict[str, Any]] = None  # Can be numerical or datetime stats
+
+
+def determine_filter_type_from_column(data_type: str) -> str:
+    """Simple filter type determination based on column data type"""
+    data_type_lower = data_type.lower()
+
+    # DateTime patterns
+    datetime_patterns = ["timestamp", "datetime", "date", "timestamptz", "time"]
+    if any(pattern in data_type_lower for pattern in datetime_patterns):
+        return DashboardFilterType.DATETIME.value
+
+    # Numerical patterns
+    numerical_patterns = [
+        "integer",
+        "bigint",
+        "numeric",
+        "decimal",
+        "double",
+        "real",
+        "float",
+        "money",
+    ]
+    if any(pattern in data_type_lower for pattern in numerical_patterns):
+        return DashboardFilterType.NUMERICAL.value
+
+    # Default to value filter for text/categorical
+    return DashboardFilterType.VALUE.value
 
 
 @filter_router.get("/schemas/", response=List[SchemaResponse])
@@ -62,29 +95,32 @@ def list_schemas(request):
         raise HttpError(404, "Warehouse not configured")
 
     try:
-        warehouse_client = charts_service.get_warehouse_client(org_warehouse)
+        warehouse_client = get_warehouse_client(org_warehouse)
 
-        # Get schemas based on warehouse type
+        # Build query using AggQueryBuilder
+        query_builder = AggQueryBuilder()
+
         if org_warehouse.wtype == "postgres":
-            # For PostgreSQL, get all schemas except system ones
-            query = """
-            SELECT schema_name as name
-            FROM information_schema.schemata 
-            WHERE schema_name NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
-            ORDER BY schema_name
-            """
+            # Query information_schema using query builder
+            query_builder.add_column(column("schema_name"))
+            query_builder.fetch_from("schemata", "information_schema")
+            query_builder.where_clause(
+                ~column("schema_name").in_(["information_schema", "pg_catalog", "pg_toast"])
+            )
+            query_builder.order_cols_by([("schema_name", "asc")])
+
         elif org_warehouse.wtype == "bigquery":
-            # For BigQuery, list datasets
-            query = f"""
-            SELECT schema_name as name
-            FROM `{org_warehouse.bq_location}.INFORMATION_SCHEMA.SCHEMATA`
-            ORDER BY schema_name
-            """
+            # For BigQuery, use INFORMATION_SCHEMA
+            query_builder.add_column(column("schema_name"))
+            query_builder.fetch_from("SCHEMATA", f"{org_warehouse.bq_location}.INFORMATION_SCHEMA")
+            query_builder.order_cols_by([("schema_name", "asc")])
         else:
             raise HttpError(400, f"Unsupported warehouse type: {org_warehouse.wtype}")
 
-        results = warehouse_client.execute(query)
-        schemas = [SchemaResponse(name=row[0]) for row in results]
+        # Execute query using charts_service function
+        results = execute_query(warehouse_client, query_builder)
+
+        schemas = [SchemaResponse(name=row["schema_name"]) for row in results]
 
         logger.info(f"Found {len(schemas)} schemas for org {orguser.org.id}")
         return schemas
@@ -106,29 +142,32 @@ def list_tables(request, schema_name: str):
         raise HttpError(404, "Warehouse not configured")
 
     try:
-        warehouse_client = charts_service.get_warehouse_client(org_warehouse)
+        warehouse_client = get_warehouse_client(org_warehouse)
 
-        # Get tables based on warehouse type
+        # Build query using AggQueryBuilder
+        query_builder = AggQueryBuilder()
+
         if org_warehouse.wtype == "postgres":
-            query = """
-            SELECT table_name as name
-            FROM information_schema.tables 
-            WHERE table_schema = %s AND table_type = 'BASE TABLE'
-            ORDER BY table_name
-            """
-            results = warehouse_client.execute(query, [schema_name])
+            query_builder.add_column(column("table_name"))
+            query_builder.fetch_from("tables", "information_schema")
+            query_builder.where_clause(column("table_schema") == schema_name)
+            query_builder.where_clause(column("table_type") == "BASE TABLE")
+            query_builder.order_cols_by([("table_name", "asc")])
+
         elif org_warehouse.wtype == "bigquery":
-            query = f"""
-            SELECT table_name as name
-            FROM `{org_warehouse.bq_location}.{schema_name}.INFORMATION_SCHEMA.TABLES`
-            WHERE table_type = 'BASE TABLE'
-            ORDER BY table_name
-            """
-            results = warehouse_client.execute(query)
+            query_builder.add_column(column("table_name"))
+            query_builder.fetch_from(
+                "TABLES", f"{org_warehouse.bq_location}.{schema_name}.INFORMATION_SCHEMA"
+            )
+            query_builder.where_clause(column("table_type") == "BASE TABLE")
+            query_builder.order_cols_by([("table_name", "asc")])
         else:
             raise HttpError(400, f"Unsupported warehouse type: {org_warehouse.wtype}")
 
-        tables = [TableResponse(name=row[0]) for row in results]
+        # Execute query using charts_service function
+        results = execute_query(warehouse_client, query_builder)
+
+        tables = [TableResponse(name=row["table_name"]) for row in results]
 
         logger.info(f"Found {len(tables)} tables in schema {schema_name}")
         return tables
@@ -143,7 +182,7 @@ def list_tables(request, schema_name: str):
 )
 @has_permission(["can_view_warehouse_data"])
 def list_columns(request, schema_name: str, table_name: str):
-    """List columns in a specific table"""
+    """List columns in a specific table with recommended filter types"""
     orguser = request.orguser
 
     # Get org warehouse
@@ -152,32 +191,39 @@ def list_columns(request, schema_name: str, table_name: str):
         raise HttpError(404, "Warehouse not configured")
 
     try:
-        warehouse_client = charts_service.get_warehouse_client(org_warehouse)
+        warehouse_client = get_warehouse_client(org_warehouse)
 
-        # Get columns based on warehouse type
+        # Build query using AggQueryBuilder
+        query_builder = AggQueryBuilder()
+
         if org_warehouse.wtype == "postgres":
-            query = """
-            SELECT column_name as name, data_type as type, is_nullable
-            FROM information_schema.columns 
-            WHERE table_schema = %s AND table_name = %s
-            ORDER BY ordinal_position
-            """
-            results = warehouse_client.execute(query, [schema_name, table_name])
+            query_builder.add_column(column("column_name"))
+            query_builder.add_column(column("data_type"))
+            query_builder.add_column(column("is_nullable"))
+            query_builder.fetch_from("columns", "information_schema")
+            query_builder.where_clause(column("table_schema") == schema_name)
+            query_builder.where_clause(column("table_name") == table_name)
+            query_builder.order_cols_by([("ordinal_position", "asc")])
+
         elif org_warehouse.wtype == "bigquery":
-            query = f"""
-            SELECT column_name as name, data_type as type, is_nullable
-            FROM `{org_warehouse.bq_location}.{schema_name}.INFORMATION_SCHEMA.COLUMNS`
-            WHERE table_name = '{table_name}'
-            ORDER BY ordinal_position
-            """
-            results = warehouse_client.execute(query)
+            query_builder.add_column(column("column_name"))
+            query_builder.add_column(column("data_type"))
+            query_builder.add_column(column("is_nullable"))
+            query_builder.fetch_from(
+                "COLUMNS", f"{org_warehouse.bq_location}.{schema_name}.INFORMATION_SCHEMA"
+            )
+            query_builder.where_clause(column("table_name") == table_name)
+            query_builder.order_cols_by([("ordinal_position", "asc")])
         else:
             raise HttpError(400, f"Unsupported warehouse type: {org_warehouse.wtype}")
+
+        # Execute query using charts_service function
+        results = execute_query(warehouse_client, query_builder)
 
         columns = []
         for row in results:
             # Normalize data types
-            col_type = row[1].lower()
+            col_type = row["data_type"].lower()
             if any(t in col_type for t in ["int", "float", "decimal", "numeric", "double"]):
                 normalized_type = "number"
             elif any(t in col_type for t in ["date", "time", "timestamp"]):
@@ -185,9 +231,16 @@ def list_columns(request, schema_name: str, table_name: str):
             else:
                 normalized_type = "string"
 
+            # Determine recommended filter type
+            recommended_filter_type = determine_filter_type_from_column(row["data_type"])
+
             columns.append(
                 ColumnResponse(
-                    name=row[0], type=normalized_type, nullable=row[2] == "YES" or row[2] is True
+                    name=row["column_name"],
+                    type=normalized_type,
+                    data_type=row["data_type"],  # Original data type
+                    recommended_filter_type=recommended_filter_type,
+                    nullable=row["is_nullable"] == "YES" or row["is_nullable"] is True,
                 )
             )
 
@@ -206,10 +259,10 @@ def get_filter_preview(
     schema_name: str,
     table_name: str,
     column_name: str,
-    filter_type: str,  # 'value' or 'numerical'
+    filter_type: str,  # 'value', 'numerical', or 'datetime'
     limit: int = 100,
 ):
-    """Get preview data for a filter (values or numerical stats)"""
+    """Get preview data for a filter (values, numerical stats, or date range)"""
     orguser = request.orguser
 
     # Get org warehouse
@@ -218,35 +271,27 @@ def get_filter_preview(
         raise HttpError(404, "Warehouse not configured")
 
     try:
-        warehouse_client = charts_service.get_warehouse_client(org_warehouse)
-
-        # Build the table reference based on warehouse type
-        if org_warehouse.wtype == "postgres":
-            table_ref = f'"{schema_name}"."{table_name}"'
-            column_ref = f'"{column_name}"'
-        elif org_warehouse.wtype == "bigquery":
-            table_ref = f"`{org_warehouse.bq_location}.{schema_name}.{table_name}`"
-            column_ref = f"`{column_name}`"
-        else:
-            raise HttpError(400, f"Unsupported warehouse type: {org_warehouse.wtype}")
+        warehouse_client = get_warehouse_client(org_warehouse)
 
         if filter_type == "value":
             # Get distinct values with counts for categorical filter
-            query = f"""
-            SELECT {column_ref} as value, COUNT(*) as count
-            FROM {table_ref}
-            WHERE {column_ref} IS NOT NULL
-            GROUP BY {column_ref}
-            ORDER BY count DESC, {column_ref}
-            LIMIT {limit}
-            """
+            query_builder = AggQueryBuilder()
+            query_builder.add_column(column(column_name).label("value"))
+            query_builder.add_aggregate_column(None, "count", alias="count")
+            query_builder.fetch_from(table_name, schema_name)
+            query_builder.where_clause(column(column_name).isnot(None))
+            query_builder.group_cols_by(column_name)
+            query_builder.order_cols_by([("count", "desc"), ("value", "asc")])
+            query_builder.limit_rows(limit)
 
-            results = warehouse_client.execute(query)
+            # Execute query using charts_service function
+            results = execute_query(warehouse_client, query_builder)
+
             options = [
                 FilterOptionResponse(
-                    label=str(row[0]) if row[0] is not None else "NULL",
-                    value=str(row[0]) if row[0] is not None else "",
-                    count=int(row[1]),
+                    label=str(row["value"]) if row["value"] is not None else "NULL",
+                    value=str(row["value"]) if row["value"] is not None else "",
+                    count=int(row["count"]),
                 )
                 for row in results
             ]
@@ -255,25 +300,80 @@ def get_filter_preview(
 
         elif filter_type == "numerical":
             # Get numerical statistics for numerical filter
-            query = f"""
-            SELECT 
-                MIN({column_ref}) as min_value,
-                MAX({column_ref}) as max_value,
-                AVG(CAST({column_ref} AS FLOAT)) as avg_value,
-                COUNT(DISTINCT {column_ref}) as distinct_count
-            FROM {table_ref}
-            WHERE {column_ref} IS NOT NULL
-            """
+            query_builder = AggQueryBuilder()
+            query_builder.add_aggregate_column(column_name, "min", alias="min_value")
+            query_builder.add_aggregate_column(column_name, "max", alias="max_value")
 
-            results = warehouse_client.execute(query)
+            # For average, we need to cast to float for accurate results
+            query_builder.add_column(func.avg(cast(column(column_name), Float)).label("avg_value"))
+            query_builder.add_aggregate_column(
+                column_name, "count_distinct", alias="distinct_count"
+            )
+
+            query_builder.fetch_from(table_name, schema_name)
+            query_builder.where_clause(column(column_name).isnot(None))
+
+            # Execute query using charts_service function
+            results = execute_query(warehouse_client, query_builder)
             row = results[0]
 
-            stats = NumericalStatsResponse(
-                min_value=float(row[0]) if row[0] is not None else 0.0,
-                max_value=float(row[1]) if row[1] is not None else 100.0,
-                avg_value=float(row[2]) if row[2] is not None else 50.0,
-                distinct_count=int(row[3]) if row[3] is not None else 0,
-            )
+            stats = {
+                "min_value": float(row["min_value"]) if row["min_value"] is not None else 0.0,
+                "max_value": float(row["max_value"]) if row["max_value"] is not None else 100.0,
+                "avg_value": float(row["avg_value"]) if row["avg_value"] is not None else 50.0,
+                "distinct_count": int(row["distinct_count"])
+                if row["distinct_count"] is not None
+                else 0,
+            }
+
+            return FilterPreviewResponse(stats=stats)
+
+        elif filter_type == "datetime":
+            # Get date range for datetime filter
+            query_builder = AggQueryBuilder()
+
+            # Different handling for different warehouses
+            if org_warehouse.wtype == "postgres":
+                # PostgreSQL: cast to date
+                query_builder.add_column(
+                    func.min(cast(column(column_name), Date)).label("min_date")
+                )
+                query_builder.add_column(
+                    func.max(cast(column(column_name), Date)).label("max_date")
+                )
+                query_builder.add_column(
+                    func.count(distinct(func.date(column(column_name)))).label("distinct_days")
+                )
+            elif org_warehouse.wtype == "bigquery":
+                # BigQuery: use DATE function
+                query_builder.add_column(func.min(func.date(column(column_name))).label("min_date"))
+                query_builder.add_column(func.max(func.date(column(column_name))).label("max_date"))
+                query_builder.add_column(
+                    func.count(distinct(func.date(column(column_name)))).label("distinct_days")
+                )
+            else:
+                # Generic approach
+                query_builder.add_aggregate_column(column_name, "min", alias="min_date")
+                query_builder.add_aggregate_column(column_name, "max", alias="max_date")
+                query_builder.add_aggregate_column(
+                    column_name, "count_distinct", alias="distinct_days"
+                )
+
+            query_builder.add_aggregate_column(None, "count", alias="total_records")
+            query_builder.fetch_from(table_name, schema_name)
+            query_builder.where_clause(column(column_name).isnot(None))
+
+            # Execute query using charts_service function
+            results = execute_query(warehouse_client, query_builder)
+            row = results[0]
+
+            # Return as dictionary (not NumericalStatsResponse)
+            stats = {
+                "min_date": row["min_date"].isoformat() if row["min_date"] else None,
+                "max_date": row["max_date"].isoformat() if row["max_date"] else None,
+                "distinct_days": int(row["distinct_days"]) if row["distinct_days"] else 0,
+                "total_records": int(row["total_records"]) if row["total_records"] else 0,
+            }
 
             return FilterPreviewResponse(stats=stats)
 
