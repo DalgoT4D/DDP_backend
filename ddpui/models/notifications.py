@@ -10,6 +10,7 @@ class NotificationCategory(models.TextChoices):
     JOB_FAILURE = "job_failure", "Job Failure"
     LATE_RUNS = "late_runs", "Late Runs"
     DBT_TEST_FAILURE = "dbt_test_failure", "DBT Test Failure"
+    MAINTENANCE = "maintenance", "Maintenance"
 
 
 class Notification(models.Model):

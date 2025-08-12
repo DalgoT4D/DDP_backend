@@ -26,6 +26,7 @@ class NotificationCategoryEnum(str, Enum):
     JOB_FAILURE = "job_failure"
     LATE_RUNS = "late_runs"
     DBT_TEST_FAILURE = "dbt_test_failure"
+    MAINTENANCE = "maintenance"
 
 
 class CreateNotificationPayloadSchema(BaseModel):
@@ -39,7 +40,7 @@ class CreateNotificationPayloadSchema(BaseModel):
     user_email: Optional[str] = None
     manager_or_above: Optional[bool] = False
     org_slug: Optional[str] = None
-    category: Optional[NotificationCategoryEnum] = NotificationCategoryEnum.INCIDENT
+    category: Optional[NotificationCategoryEnum] = None
 
     class Config:
         use_enum_values = True
