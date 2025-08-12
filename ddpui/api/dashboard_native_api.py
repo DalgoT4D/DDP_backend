@@ -638,25 +638,3 @@ def get_filter_options(
     )
 
     return FilterOptionsResponse(options=options, total_count=len(options))
-
-
-# Dashboard filter data endpoint
-@dashboard_native_router.post("/{dashboard_id}/filter-data/")
-# @has_permission(["can_view_dashboards"])
-def get_filtered_dashboard_data(request, dashboard_id: int, filters: dict = {}):
-    """Apply filters and get updated chart data for dashboard"""
-    orguser: OrgUser = request.orguser
-
-    from ddpui.services.dashboard_service import DashboardService
-
-    try:
-        chart_results = DashboardService.apply_filters(
-            dashboard_id=dashboard_id, filters=filters, orguser=orguser
-        )
-
-        return {"success": True, "data": chart_results}
-    except ValueError as e:
-        raise HttpError(400, str(e))
-    except Exception as e:
-        logger.error(f"Error applying dashboard filters: {str(e)}")
-        raise HttpError(500, "Failed to apply filters")
