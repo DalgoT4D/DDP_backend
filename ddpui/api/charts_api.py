@@ -38,39 +38,7 @@ def has_schema_access(request, schema_name: str) -> bool:
     return True
 
 
-def generate_chart_render_config(chart: Chart, org_warehouse: OrgWarehouse) -> dict:
-    """Generate ECharts render config from chart's extra_config"""
-    logger.info(f"Generating render config for chart {chart.id}: {chart.title}")
-
-    try:
-        extra_config = chart.extra_config
-        logger.debug(f"Chart {chart.id} extra_config: {extra_config}")
-
-        # Get existing customizations and add chart title
-        customizations = extra_config.get("customizations", {})
-        customizations["title"] = chart.title  # Add chart title to customizations
-
-        payload = ChartDataPayload(
-            chart_type=chart.chart_type,
-            computation_type=chart.computation_type,
-            schema_name=chart.schema_name,
-            table_name=chart.table_name,
-            x_axis=extra_config.get("x_axis_column"),
-            y_axis=extra_config.get("y_axis_column"),
-            dimension_col=extra_config.get("dimension_column"),
-            aggregate_col=extra_config.get("aggregate_column"),
-            aggregate_func=extra_config.get("aggregate_function"),
-            extra_dimension=extra_config.get("extra_dimension_column"),
-            customizations=customizations,
-        )
-
-        # Use the common function to generate config and data
-        result = generate_chart_data_and_config(payload, org_warehouse, chart_id=chart.id)
-        return result.get("echarts_config", {})
-
-    except Exception as e:
-        logger.error(f"Error generating render_config for chart {chart.id}: {str(e)}")
-        return {}
+# generate_chart_render_config function removed - charts now fetch fresh config via /data endpoint
 
 
 def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, chart_id=None) -> dict:
@@ -144,7 +112,7 @@ def list_charts(request):
     if not org_warehouse:
         logger.warning(f"No warehouse configured for org {orguser.org.id}")
 
-    # Generate render_config for each chart
+    # Build response for each chart
     chart_responses = []
     for chart in charts:
         chart_dict = {
@@ -156,9 +124,7 @@ def list_charts(request):
             "schema_name": chart.schema_name,
             "table_name": chart.table_name,
             "extra_config": chart.extra_config,
-            "render_config": (
-                generate_chart_render_config(chart, org_warehouse) if org_warehouse else {}
-            ),
+            # render_config removed - charts fetch fresh config via /data endpoint
             "created_at": chart.created_at,
             "updated_at": chart.updated_at,
         }
@@ -239,7 +205,7 @@ def get_chart(request, chart_id: int):
     if not org_warehouse:
         logger.warning(f"No warehouse configured for org {orguser.org.id}")
 
-    # Build response with render_config
+    # Build response
     chart_dict = {
         "id": chart.id,
         "title": chart.title,
@@ -249,9 +215,7 @@ def get_chart(request, chart_id: int):
         "schema_name": chart.schema_name,
         "table_name": chart.table_name,
         "extra_config": chart.extra_config,
-        "render_config": (
-            generate_chart_render_config(chart, org_warehouse) if org_warehouse else {}
-        ),
+        # render_config removed - charts fetch fresh config via /data endpoint
         "created_at": chart.created_at,
         "updated_at": chart.updated_at,
     }
@@ -379,12 +343,7 @@ def create_chart(request, payload: ChartCreate):
         org=orguser.org,
     )
 
-    # Get org warehouse for render_config generation
-    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
-    if not org_warehouse:
-        logger.warning(f"No warehouse configured for org {orguser.org.id}")
-
-    # Build response with render_config
+    # Build response
     chart_dict = {
         "id": chart.id,
         "title": chart.title,
@@ -394,9 +353,7 @@ def create_chart(request, payload: ChartCreate):
         "schema_name": chart.schema_name,
         "table_name": chart.table_name,
         "extra_config": chart.extra_config,
-        "render_config": (
-            generate_chart_render_config(chart, org_warehouse) if org_warehouse else {}
-        ),
+        # render_config removed - charts fetch fresh config via /data endpoint
         "created_at": chart.created_at,
         "updated_at": chart.updated_at,
     }
@@ -457,12 +414,7 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
 
     chart.save()
 
-    # Get org warehouse for render_config generation
-    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
-    if not org_warehouse:
-        logger.warning(f"No warehouse configured for org {orguser.org.id}")
-
-    # Build response with render_config
+    # Build response
     chart_dict = {
         "id": chart.id,
         "title": chart.title,
@@ -472,9 +424,7 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
         "schema_name": chart.schema_name,
         "table_name": chart.table_name,
         "extra_config": chart.extra_config,
-        "render_config": (
-            generate_chart_render_config(chart, org_warehouse) if org_warehouse else {}
-        ),
+        # render_config removed - charts fetch fresh config via /data endpoint
         "created_at": chart.created_at,
         "updated_at": chart.updated_at,
     }

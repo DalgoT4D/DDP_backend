@@ -41,7 +41,7 @@ class ChartResponse(Schema):
     schema_name: str
     table_name: str
     extra_config: dict  # Contains all column configuration and customizations
-    render_config: dict  # Generated on-the-fly when fetching
+    # Note: render_config removed - charts fetch fresh config via /data endpoint
     created_at: datetime
     updated_at: datetime
 
