@@ -527,6 +527,25 @@ def create_filter(request, dashboard_id: int, payload: FilterCreate):
     return filter.to_json()
 
 
+@dashboard_native_router.get(
+    "/{dashboard_id}/filters/{filter_id}/", response=DashboardFilterResponse
+)
+# @has_permission(["can_view_dashboards"])
+def get_filter(request, dashboard_id: int, filter_id: int):
+    """Get a specific dashboard filter"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
+        filter: DashboardFilter = dashboard.filters.get(id=filter_id)
+    except Dashboard.DoesNotExist:
+        raise HttpError(404, "Dashboard not found")
+    except DashboardFilter.DoesNotExist:
+        raise HttpError(404, "Filter not found")
+
+    return filter.to_json()
+
+
 @dashboard_native_router.put(
     "/{dashboard_id}/filters/{filter_id}/", response=DashboardFilterResponse
 )
