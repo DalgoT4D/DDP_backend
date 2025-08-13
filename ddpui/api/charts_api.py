@@ -24,7 +24,6 @@ from ddpui.schemas.chart_schema import (
     DataPreviewResponse,
     ExecuteChartQuery,
     TransformDataForChart,
-    GeoJSONListResponse,
     GeoJSONDetailResponse,
 )
 
@@ -194,7 +193,7 @@ def list_charts(request):
     if not org_warehouse:
         logger.warning(f"No warehouse configured for org {orguser.org.id}")
 
-    # Generate render_config for each chart
+    # Build response for each chart
     chart_responses = []
     for chart in charts:
         chart_dict = {
@@ -206,9 +205,7 @@ def list_charts(request):
             "schema_name": chart.schema_name,
             "table_name": chart.table_name,
             "extra_config": chart.extra_config,
-            "render_config": (
-                generate_chart_render_config(chart, org_warehouse) if org_warehouse else {}
-            ),
+            # render_config removed - charts fetch fresh config via /data endpoint
             "created_at": chart.created_at,
             "updated_at": chart.updated_at,
         }
@@ -541,7 +538,7 @@ def get_chart(request, chart_id: int):
     if not org_warehouse:
         logger.warning(f"No warehouse configured for org {orguser.org.id}")
 
-    # Build response with render_config
+    # Build response
     chart_dict = {
         "id": chart.id,
         "title": chart.title,
@@ -551,9 +548,7 @@ def get_chart(request, chart_id: int):
         "schema_name": chart.schema_name,
         "table_name": chart.table_name,
         "extra_config": chart.extra_config,
-        "render_config": (
-            generate_chart_render_config(chart, org_warehouse) if org_warehouse else {}
-        ),
+        # render_config removed - charts fetch fresh config via /data endpoint
         "created_at": chart.created_at,
         "updated_at": chart.updated_at,
     }
@@ -562,8 +557,10 @@ def get_chart(request, chart_id: int):
 
 
 @charts_router.get("/{chart_id}/data/", response=ChartDataResponse)
-def get_chart_data_by_id(request, chart_id: int):
-    """Get chart data using saved chart configuration"""
+def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str] = None):
+    """Get chart data using saved chart configuration with optional dashboard filters"""
+    import json
+
     orguser = request.orguser
     chart = get_object_or_404(Chart, id=chart_id, org=orguser.org)
 
@@ -573,7 +570,53 @@ def get_chart_data_by_id(request, chart_id: int):
         raise HttpError(404, "Warehouse not configured")
 
     # Build payload from chart config
-    extra_config = chart.extra_config
+    extra_config = chart.extra_config.copy() if chart.extra_config else {}
+
+    # Parse and resolve dashboard filters if provided
+    resolved_dashboard_filters = None
+    if dashboard_filters:
+        try:
+            filter_values = json.loads(dashboard_filters)
+            logger.info(f"Applying dashboard filters to chart {chart_id}: {filter_values}")
+
+            # Resolve filter configurations to get column information
+            from ddpui.models.dashboard import DashboardFilter
+
+            resolved_filters = []
+
+            for filter_id, filter_value in filter_values.items():
+                if filter_value is not None:
+                    try:
+                        # Get the filter configuration from the database
+                        dashboard_filter = DashboardFilter.objects.get(id=filter_id)
+
+                        # Only apply this filter if it applies to the same table as the chart
+                        if (
+                            dashboard_filter.schema_name == chart.schema_name
+                            and dashboard_filter.table_name == chart.table_name
+                        ):
+                            resolved_filters.append(
+                                {
+                                    "filter_id": filter_id,
+                                    "column": dashboard_filter.column_name,
+                                    "type": dashboard_filter.filter_type,
+                                    "value": filter_value,
+                                    "settings": dashboard_filter.settings,
+                                }
+                            )
+                    except DashboardFilter.DoesNotExist:
+                        logger.warning(f"Dashboard filter {filter_id} not found")
+
+            resolved_dashboard_filters = resolved_filters
+
+        except json.JSONDecodeError:
+            logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
+            resolved_dashboard_filters = None
+
+    # Get existing customizations and add chart title
+    customizations = extra_config.get("customizations", {})
+    customizations["title"] = chart.title  # Add chart title to customizations
+
     payload = ChartDataPayload(
         chart_type=chart.chart_type,
         computation_type=chart.computation_type,
@@ -592,6 +635,8 @@ def get_chart_data_by_id(request, chart_id: int):
         customizations=extra_config.get("customizations", {}),
         offset=0,
         limit=100,
+        extra_config=extra_config,
+        dashboard_filters=resolved_dashboard_filters,  # Pass resolved dashboard filters
     )
 
     # Use the common function to generate data and config
@@ -635,12 +680,7 @@ def create_chart(request, payload: ChartCreate):
         org=orguser.org,
     )
 
-    # Get org warehouse for render_config generation
-    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
-    if not org_warehouse:
-        logger.warning(f"No warehouse configured for org {orguser.org.id}")
-
-    # Build response with render_config
+    # Build response
     chart_dict = {
         "id": chart.id,
         "title": chart.title,
@@ -650,6 +690,7 @@ def create_chart(request, payload: ChartCreate):
         "schema_name": chart.schema_name,
         "table_name": chart.table_name,
         "extra_config": chart.extra_config,
+        # render_config removed - charts fetch fresh config via /data endpoint
         "render_config": (
             generate_chart_render_config(chart, org_warehouse) if org_warehouse else {}
         ),
@@ -713,12 +754,7 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
 
     chart.save()
 
-    # Get org warehouse for render_config generation
-    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
-    if not org_warehouse:
-        logger.warning(f"No warehouse configured for org {orguser.org.id}")
-
-    # Build response with render_config
+    # Build response
     chart_dict = {
         "id": chart.id,
         "title": chart.title,
@@ -728,9 +764,7 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
         "schema_name": chart.schema_name,
         "table_name": chart.table_name,
         "extra_config": chart.extra_config,
-        "render_config": (
-            generate_chart_render_config(chart, org_warehouse) if org_warehouse else {}
-        ),
+        # render_config removed - charts fetch fresh config via /data endpoint
         "created_at": chart.created_at,
         "updated_at": chart.updated_at,
     }

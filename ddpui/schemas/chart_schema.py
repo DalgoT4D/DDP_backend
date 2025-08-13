@@ -41,7 +41,7 @@ class ChartResponse(Schema):
     schema_name: str
     table_name: str
     extra_config: dict  # Contains all column configuration and customizations
-    render_config: dict  # Generated on-the-fly when fetching
+    # Note: render_config removed - charts fetch fresh config via /data endpoint
     created_at: datetime
     updated_at: datetime
 
@@ -71,6 +71,12 @@ class ChartDataPayload(Schema):
 
     # Customizations
     customizations: Optional[dict] = None
+
+    # Extra config for filters and other settings
+    extra_config: Optional[dict] = None
+
+    # Dashboard filters
+    dashboard_filters: Optional[list[dict]] = None
 
     # Pagination
     offset: int = 0

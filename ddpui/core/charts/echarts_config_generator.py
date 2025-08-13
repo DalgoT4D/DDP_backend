@@ -12,6 +12,7 @@ class EChartsConfigGenerator:
 
         # Get the single value from data
         value = data.get("value", 0)
+        is_null = data.get("is_null", False)
         subtitle = customizations.get("subtitle", "")
         number_format = customizations.get("numberFormat", "default")
         decimal_places = customizations.get("decimalPlaces", 0)
@@ -19,10 +20,14 @@ class EChartsConfigGenerator:
         number_prefix = customizations.get("numberPrefix", "")
         number_suffix = customizations.get("numberSuffix", "")
 
-        # Format the value based on customizations
-        formatted_value = EChartsConfigGenerator._format_number(
-            value, number_format, decimal_places, number_prefix, number_suffix
-        )
+        # Handle None values - show "No data" instead of formatting as number
+        if is_null or value is None:
+            formatted_value = "No data"
+        else:
+            # Format the value based on customizations
+            formatted_value = EChartsConfigGenerator._format_number(
+                value, number_format, decimal_places, number_prefix, number_suffix
+            )
 
         # Map number size to font size
         size_map = {
@@ -84,6 +89,10 @@ class EChartsConfigGenerator:
         value: float, format_type: str, decimal_places: int, prefix: str = "", suffix: str = ""
     ) -> str:
         """Format number based on type, decimal places, prefix and suffix"""
+        # Handle None values
+        if value is None:
+            return "No data"
+
         # Format the number based on type
         if format_type == "percentage":
             formatted = f"{value:.{decimal_places}f}%"
