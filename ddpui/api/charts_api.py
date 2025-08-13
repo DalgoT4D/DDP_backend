@@ -59,6 +59,10 @@ def generate_chart_render_config(chart: Chart, org_warehouse: OrgWarehouse) -> d
             aggregate_col=extra_config.get("aggregate_column"),
             aggregate_func=extra_config.get("aggregate_function"),
             extra_dimension=extra_config.get("extra_dimension_column"),
+            # Map-specific fields
+            geographic_column=extra_config.get("geographic_column"),
+            value_column=extra_config.get("value_column"),
+            selected_geojson_id=extra_config.get("selected_geojson_id"),
             customizations=extra_config.get("customizations", {}),
         )
 
@@ -213,6 +217,143 @@ def list_charts(request):
     return chart_responses
 
 
+# New endpoints for separated data fetching (place before parametrized routes)
+
+
+@charts_router.get("/available-layers/", response=List[dict])
+def list_available_layers(request, layer_type: str = "country"):
+    """Get available layers (countries, states, districts, etc.) dynamically from the database"""
+    try:
+        from ddpui.models.georegion import GeoRegion
+
+        # Get regions of specified type
+        regions = GeoRegion.objects.filter(type=layer_type).values(
+            "id", "region_code", "name", "display_name", "parent_id"
+        )
+
+        result = []
+        for region in regions:
+            result.append(
+                {
+                    "id": region["id"],
+                    "code": region["region_code"],
+                    "name": region["name"],
+                    "display_name": region["display_name"],
+                    "type": layer_type,
+                    "parent_id": region["parent_id"],
+                }
+            )
+
+        return result
+    except Exception as e:
+        logger.error(f"Error fetching {layer_type} layers: {str(e)}")
+        # Fallback based on layer type
+        if layer_type == "country":
+            return [
+                {
+                    "id": 1,
+                    "code": "IND",
+                    "name": "India",
+                    "display_name": "India",
+                    "type": "country",
+                    "parent_id": None,
+                }
+            ]
+        return []
+
+
+class MapDataOverlayPayload(Schema):
+    schema_name: str
+    table_name: str
+    geographic_column: str
+    value_column: str
+    aggregate_func: str = "sum"
+    filters: dict = {}
+
+
+@charts_router.post("/map-data-overlay/", response=dict)
+@has_permission(["can_view_warehouse_data"])
+def get_map_data_overlay(request, payload: MapDataOverlayPayload):
+    """Get map data overlay (separate from GeoJSON) for data visualization"""
+    orguser = request.orguser
+
+    logger.info(f"Map data overlay request: {payload}")
+
+    try:
+        # Get org warehouse
+        org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+        if not org_warehouse:
+            raise HttpError(404, "Warehouse not configured")
+
+        # Extract required fields from payload
+        schema_name = payload.schema_name
+        table_name = payload.table_name
+        geographic_column = payload.geographic_column
+        value_column = payload.value_column
+        aggregate_func = payload.aggregate_func
+        filters = payload.filters
+
+        # Validate required fields
+        if not all([schema_name, table_name, geographic_column, value_column]):
+            raise HttpError(
+                400,
+                "Missing required fields: schema_name, table_name, geographic_column, value_column",
+            )
+
+        # Build payload for standard chart query (same as other charts)
+        chart_payload = ChartDataPayload(
+            chart_type="bar",  # We use bar chart query logic for aggregated data
+            computation_type="aggregated",
+            schema_name=schema_name,
+            table_name=table_name,
+            dimension_col=geographic_column,
+            aggregate_col=value_column,
+            aggregate_func=aggregate_func,
+        )
+
+        # Get warehouse client and build query using standard chart service
+        warehouse = charts_service.get_warehouse_client(org_warehouse)
+        query_builder = charts_service.build_chart_query(chart_payload)
+
+        # Add filters if provided
+        if filters:
+            from sqlalchemy import column
+
+            for filter_column, filter_value in filters.items():
+                query_builder.where_clause(column(filter_column) == filter_value)
+
+        # Execute query using standard chart service
+        execute_payload = ExecuteChartQuery(
+            computation_type="aggregated",
+            dimension_col=geographic_column,
+            aggregate_col=value_column,
+            aggregate_func=aggregate_func,
+        )
+
+        dict_results = charts_service.execute_chart_query(warehouse, query_builder, execute_payload)
+
+        logger.info(f"Map data overlay query returned {len(dict_results)} rows")
+
+        # Transform results for map visualization
+        # The standard chart query returns data with dimension and aggregate columns
+        map_data = []
+        for row in dict_results:
+            # Get the dimension value (geographic region name)
+            region_name = row.get(geographic_column)
+            # Get the aggregated value
+            aggregate_key = f"{aggregate_func}_{value_column}"
+            value = row.get(aggregate_key) or row.get(value_column)
+
+            if region_name and value is not None:
+                map_data.append({"name": str(region_name), "value": float(value)})
+
+        return {"success": True, "data": map_data, "count": len(map_data)}
+
+    except Exception as e:
+        logger.error(f"Error generating map data overlay: {str(e)}")
+        raise HttpError(500, f"Error generating map data overlay: {str(e)}")
+
+
 @charts_router.post("/chart-data/", response=ChartDataResponse)
 @has_permission(["can_view_warehouse_data"])
 def get_chart_data(request, payload: ChartDataPayload):
@@ -277,16 +418,33 @@ def get_chart_data_preview(request, payload: ChartDataPayload):
 # Map-specific endpoints - Must come before /{chart_id}/ routes to avoid conflicts
 
 
-@charts_router.get("/geojsons/", response=List[GeoJSONListResponse])
-def list_available_geojsons(request, country_code: str = "IND", layer_level: int = 1):
-    """List available GeoJSONs for a country and layer"""
+@charts_router.get("/regions/", response=List[dict])
+def list_available_regions(request, country_code: str = "IND", region_type: str = None):
+    """List available regions for a country"""
+    from ddpui.core.charts.maps_service import get_available_regions
+
+    regions = get_available_regions(country_code, region_type)
+    return regions
+
+
+@charts_router.get("/regions/{region_id}/children/", response=List[dict])
+def get_child_regions(request, region_id: int):
+    """Get child regions for a parent region"""
+    from ddpui.core.charts.maps_service import get_child_regions
+
+    children = get_child_regions(region_id)
+    return children
+
+
+@charts_router.get("/regions/{region_id}/geojsons/", response=List[dict])
+def list_geojsons_for_region(request, region_id: int):
+    """List available GeoJSONs for a specific region"""
     orguser = request.orguser
 
-    from ddpui.core.charts.maps_service import get_available_geojsons
+    from ddpui.core.charts.maps_service import get_available_geojsons_for_region
 
-    geojsons = get_available_geojsons(country_code, layer_level, orguser.org.id)
-
-    return [GeoJSONListResponse(**geojson) for geojson in geojsons]
+    geojsons = get_available_geojsons_for_region(region_id, orguser.org.id)
+    return geojsons
 
 
 @charts_router.get("/geojsons/{geojson_id}/", response=GeoJSONDetailResponse)
@@ -304,11 +462,72 @@ def get_geojson_data(request, geojson_id: int):
 
     return GeoJSONDetailResponse(
         id=geojson.id,
-        name=geojson.name,
-        display_name=geojson.display_name,
+        name=geojson.version_name,
+        display_name=f"{geojson.version_name} ({geojson.description or 'No description'})",
         geojson_data=geojson.geojson_data,
         properties_key=geojson.properties_key,
     )
+
+
+@charts_router.post("/map-data/", response=dict)
+@has_permission(["can_view_warehouse_data"])
+def generate_map_chart_data(request, payload: ChartDataPayload):
+    """Generate map chart data - simplified for basic map functionality"""
+    orguser = request.orguser
+
+    # Import map services
+    from ddpui.core.charts.maps_service import build_map_query, transform_data_for_map
+    from ddpui.models.geojson import GeoJSON
+
+    # Get GeoJSON data
+    geojson_id = payload.selected_geojson_id
+    if not geojson_id:
+        raise HttpError(400, "Map requires selected_geojson_id")
+
+    geojson = get_object_or_404(GeoJSON, id=geojson_id)
+
+    # Check access permissions
+    if not geojson.is_default and geojson.org_id != orguser.org.id:
+        raise HttpError(403, "Access denied to GeoJSON")
+
+    # Get warehouse and build query using existing service
+    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if not org_warehouse:
+        raise HttpError(400, "No warehouse configured for this organization")
+
+    # Get warehouse client
+    warehouse = charts_service.get_warehouse_client(org_warehouse)
+
+    # Build query using existing service
+    query_builder = build_map_query(payload)
+
+    # Execute query using existing service method
+    logger.info(f"Executing map query for geojson_id: {geojson_id}")
+    dict_results = charts_service.execute_query(warehouse, query_builder)
+    logger.info(f"Map query results: {len(dict_results)} rows")
+
+    # Transform data for map visualization
+    map_data = transform_data_for_map(
+        dict_results,
+        geojson.geojson_data,
+        payload.geographic_column,
+        payload.value_column,
+        payload.aggregate_func or "sum",
+        payload.customizations or {},
+    )
+
+    logger.info(
+        f"Map data transformed successfully with {map_data['matched_regions']}/{map_data['total_regions']} regions matched"
+    )
+
+    return {
+        "data": map_data["data"],
+        "geojson": map_data["geojson"],
+        "min_value": map_data["min_value"],
+        "max_value": map_data["max_value"],
+        "matched_regions": map_data["matched_regions"],
+        "total_regions": map_data["total_regions"],
+    }
 
 
 @charts_router.get("/{chart_id}/", response=ChartResponse)
@@ -366,6 +585,10 @@ def get_chart_data_by_id(request, chart_id: int):
         aggregate_col=extra_config.get("aggregate_column"),
         aggregate_func=extra_config.get("aggregate_function"),
         extra_dimension=extra_config.get("extra_dimension_column"),
+        # Map-specific fields
+        geographic_column=extra_config.get("geographic_column"),
+        value_column=extra_config.get("value_column"),
+        selected_geojson_id=extra_config.get("selected_geojson_id"),
         customizations=extra_config.get("customizations", {}),
         offset=0,
         limit=100,
