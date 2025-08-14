@@ -42,6 +42,7 @@ class DashboardUpdate(Schema):
     title: Optional[str] = None
     description: Optional[str] = None
     grid_columns: Optional[int] = None
+    target_screen_size: Optional[str] = None
     layout_config: Optional[list[dict]] = None
     components: Optional[dict] = None
     filters: Optional[list[dict]] = None
@@ -96,6 +97,7 @@ class DashboardResponse(Schema):
     description: Optional[str]
     dashboard_type: str
     grid_columns: int
+    target_screen_size: str
     layout_config: list[dict]
     components: dict
     is_published: bool
@@ -294,6 +296,9 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
 
     if payload.grid_columns is not None:
         dashboard.grid_columns = payload.grid_columns
+
+    if payload.target_screen_size is not None:
+        dashboard.target_screen_size = payload.target_screen_size
 
     if payload.layout_config is not None:
         dashboard.layout_config = payload.layout_config

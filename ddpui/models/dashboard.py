@@ -57,6 +57,12 @@ class Dashboard(models.Model):
 
     # Grid configuration
     grid_columns = models.IntegerField(default=12)
+    target_screen_size = models.CharField(
+        max_length=20,
+        choices=[("desktop", "Desktop"), ("tablet", "Tablet"), ("mobile", "Mobile"), ("a4", "A4")],
+        default="desktop",
+        help_text="Target screen size for dashboard design",
+    )
 
     # Layout configuration stored as JSON
     layout_config = models.JSONField(default=list, help_text="Grid layout positions and sizes")
@@ -92,6 +98,7 @@ class Dashboard(models.Model):
             "description": self.description,
             "dashboard_type": self.dashboard_type,
             "grid_columns": self.grid_columns,
+            "target_screen_size": self.target_screen_size,
             "layout_config": self.layout_config,
             "components": self.components,
             "is_published": self.is_published,
