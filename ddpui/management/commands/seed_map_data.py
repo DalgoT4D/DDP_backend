@@ -198,6 +198,7 @@ class Command(BaseCommand):
                     "geojson_data": geojson_data,
                     "properties_key": "name",
                     "is_default": region_info["is_default"],
+                    "name": region_info["name"],  # Add name field
                     "org": None,  # System defaults
                 },
             )
@@ -229,13 +230,20 @@ class Command(BaseCommand):
             if normalized_name.lower().endswith(f" {keyword}"):
                 region_name = normalized_name[: -len(f" {keyword}")].strip()
                 is_default = False
+                name = f"{region_name.title()} - {keyword.title()} Version"
                 description = f"{keyword.title()} GeoJSON for {region_name}"
                 break
         else:
             region_name = normalized_name
+            name = f"{region_name.title()} Map"
             description = f"Default GeoJSON for {region_name}"
 
-        return {"region_name": region_name, "description": description, "is_default": is_default}
+        return {
+            "region_name": region_name,
+            "name": name,
+            "description": description,
+            "is_default": is_default,
+        }
 
     def is_valid_geojson(self, data):
         """Basic GeoJSON validation"""

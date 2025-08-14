@@ -22,6 +22,7 @@ class GeoJSON(models.Model):
         blank=True,
         related_name="geojsons",
     )  # Foreign key to Org - NULL for system defaults
+    name = models.CharField(max_length=100)  # Version identifier
     description = models.TextField(null=True, blank=True)  # Optional description
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
