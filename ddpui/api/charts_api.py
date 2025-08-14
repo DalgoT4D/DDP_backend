@@ -25,11 +25,23 @@ from ddpui.schemas.chart_schema import (
     ExecuteChartQuery,
     TransformDataForChart,
     GeoJSONDetailResponse,
+    GeoJSONListResponse,
 )
 
 logger = CustomLogger("ddpui")
 
 charts_router = Router()
+
+
+@charts_router.get("/regions/{region_id}/geojsons/", response=List[dict])
+def get_geojsons_for_region(request, region_id: int):
+    """Get available GeoJSONs for a specific region"""
+    orguser = request.orguser
+
+    from ddpui.core.charts.maps_service import get_available_geojsons_for_region
+
+    geojsons = get_available_geojsons_for_region(region_id, orguser.org.id)
+    return geojsons
 
 
 def has_schema_access(request, schema_name: str) -> bool:
@@ -433,17 +445,6 @@ def get_child_regions(request, region_id: int):
     return children
 
 
-@charts_router.get("/regions/{region_id}/geojsons/", response=List[dict])
-def list_geojsons_for_region(request, region_id: int):
-    """List available GeoJSONs for a specific region"""
-    orguser = request.orguser
-
-    from ddpui.core.charts.maps_service import get_available_geojsons_for_region
-
-    geojsons = get_available_geojsons_for_region(region_id, orguser.org.id)
-    return geojsons
-
-
 @charts_router.get("/geojsons/{geojson_id}/", response=GeoJSONDetailResponse)
 def get_geojson_data(request, geojson_id: int):
     """Get specific GeoJSON data"""
@@ -459,8 +460,8 @@ def get_geojson_data(request, geojson_id: int):
 
     return GeoJSONDetailResponse(
         id=geojson.id,
-        name=geojson.version_name,
-        display_name=f"{geojson.version_name} ({geojson.description or 'No description'})",
+        name=geojson.name,
+        display_name=f"{geojson.name} ({geojson.description or 'No description'})",
         geojson_data=geojson.geojson_data,
         properties_key=geojson.properties_key,
     )
@@ -679,6 +680,9 @@ def create_chart(request, payload: ChartCreate):
         last_modified_by=orguser,
         org=orguser.org,
     )
+
+    # Get org warehouse
+    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
 
     # Build response
     chart_dict = {

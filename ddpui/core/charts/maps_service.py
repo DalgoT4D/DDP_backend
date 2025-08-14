@@ -34,28 +34,27 @@ def get_available_regions(country_code: str, region_type: str = None) -> List[Di
     ]
 
 
-def get_available_geojsons_for_region(region_id: int, org_id: int = None) -> List[Dict]:
-    """Get available GeoJSONs for a specific region"""
-    # Get default GeoJSONs for this region
-    query = GeoJSON.objects.filter(region_id=region_id)
+def get_available_geojsons_for_region(region_id: int, org_id: int) -> List[Dict]:
+    """Get available GeoJSONs for a specific region
 
-    # Include org-specific GeoJSONs if org_id provided
-    if org_id:
-        query = query.filter(models.Q(is_default=True) | models.Q(org_id=org_id))
-    else:
-        query = query.filter(is_default=True)
+    Returns both default GeoJSONs and org-specific custom GeoJSONs
+    org_id is required as it comes from authenticated token
+    """
+    # Get both default GeoJSONs AND org-specific GeoJSONs for this region
+    query = GeoJSON.objects.filter(region_id=region_id).filter(
+        models.Q(is_default=True) | models.Q(org_id=org_id)
+    )
 
-    geojsons = query.order_by("-is_default", "version_name")
+    geojsons = query.order_by("-is_default", "name")
 
     return [
         {
             "id": g.id,
-            "region_id": g.region_id,
-            "version_name": g.version_name,
-            "description": g.description,
+            "name": g.name,
+            "display_name": f"{g.name} ({g.description or 'No description'})",
             "is_default": g.is_default,
+            "layer_name": g.name,  # Using name as layer_name for now
             "properties_key": g.properties_key,
-            "file_size": g.file_size,
         }
         for g in geojsons
     ]
