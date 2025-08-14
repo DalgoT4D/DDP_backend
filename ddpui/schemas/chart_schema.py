@@ -64,6 +64,11 @@ class ChartDataPayload(Schema):
     aggregate_func: Optional[str] = None
     extra_dimension: Optional[str] = None
 
+    # Map-specific fields
+    geographic_column: Optional[str] = None
+    value_column: Optional[str] = None
+    selected_geojson_id: Optional[int] = None
+
     # Customizations
     customizations: Optional[dict] = None
 
@@ -117,4 +122,31 @@ class TransformDataForChart(Schema):
     aggregate_col: Optional[str] = None
     aggregate_func: Optional[str] = None
     extra_dimension: Optional[str] = None
+
+    # Map-specific fields
+    geographic_column: Optional[str] = None  # Column containing region names
+    value_column: Optional[str] = None  # Column with values to visualize
+    selected_geojson_id: Optional[int] = None
+
     customizations: Optional[dict] = None
+
+
+class GeoJSONListResponse(Schema):
+    """Schema for GeoJSON list response"""
+
+    id: int
+    name: str
+    display_name: str
+    is_default: bool
+    layer_name: str
+    properties_key: str
+
+
+class GeoJSONDetailResponse(Schema):
+    """Schema for GeoJSON detail response"""
+
+    id: int
+    name: str
+    display_name: str
+    geojson_data: dict
+    properties_key: str
