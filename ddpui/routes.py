@@ -61,8 +61,7 @@ def ninja_default_error_handler(
     request, exc: Exception
 ):  # pylint: disable=unused-argument # skipcq PYL-W0613
     """Handle any other exception raised in the apis"""
-    print(exc)
-    return Response({"detail": "something went wrong"}, status=500)
+    return Response({"detail": str(exc)}, status=500)
 
 
 # tag routes to specify sections in docs
