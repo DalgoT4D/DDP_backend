@@ -1,5 +1,6 @@
 """Native Dashboard API endpoints"""
 
+import copy
 from typing import Optional, List
 from datetime import datetime, timedelta
 import uuid
@@ -14,8 +15,6 @@ from ddpui.models.dashboard import (
     Dashboard,
     DashboardFilter,
     DashboardLock,
-    DashboardType,
-    DashboardComponentType,
     DashboardFilterType,
 )
 from ddpui.models.org_user import OrgUser
@@ -398,6 +397,102 @@ def delete_dashboard(request, dashboard_id: int):
     logger.info(f"Deleted dashboard {dashboard_id} for org {orguser.org.id}")
 
     return {"success": True}
+
+
+@dashboard_native_router.post("/{dashboard_id}/duplicate/", response=DashboardResponse)
+# @has_permission(["can_create_dashboards"])
+def duplicate_dashboard(request, dashboard_id: int):
+    """Duplicate a dashboard with all its configurations and filters"""
+    orguser: OrgUser = request.orguser
+
+    # Get the original dashboard
+    try:
+        original_dashboard = Dashboard.objects.prefetch_related("filters").get(
+            id=dashboard_id, org=orguser.org
+        )
+    except Dashboard.DoesNotExist:
+        raise HttpError(404, "Dashboard not found")
+
+    # Create a copy of the dashboard
+    with transaction.atomic():
+        # First create new dashboard WITHOUT layout_config and components (we'll update them later)
+        new_dashboard = Dashboard.objects.create(
+            title=f"Copy of {original_dashboard.title}",
+            description=original_dashboard.description,
+            dashboard_type=original_dashboard.dashboard_type,
+            grid_columns=original_dashboard.grid_columns,
+            target_screen_size=original_dashboard.target_screen_size,
+            layout_config=[],  # Will be updated after filter duplication
+            components={},  # Will be updated after filter duplication
+            created_by=orguser,
+            org=orguser.org,
+            last_modified_by=orguser,
+        )
+
+        # Copy all filters and create ID mapping
+        filter_id_mapping = {}  # old_filter_id -> new_filter_id
+
+        for original_filter in original_dashboard.filters.all():
+            new_filter = DashboardFilter.objects.create(
+                dashboard=new_dashboard,
+                name=original_filter.name,
+                filter_type=original_filter.filter_type,
+                schema_name=original_filter.schema_name,
+                table_name=original_filter.table_name,
+                column_name=original_filter.column_name,
+                settings=original_filter.settings,
+                order=original_filter.order,
+            )
+            filter_id_mapping[str(original_filter.id)] = str(new_filter.id)
+
+        # Now update layout_config and components with new filter IDs
+
+        # Deep copy the original data to avoid modifying it
+        new_layout_config = copy.deepcopy(original_dashboard.layout_config or [])
+        new_components = copy.deepcopy(original_dashboard.components or {})
+
+        # Update layout_config: change component IDs from "filter-{old_id}" to "filter-{new_id}"
+        for layout_item in new_layout_config:
+            item_id = layout_item.get("i", "")
+            if item_id.startswith("filter-"):
+                # Extract old filter ID and replace with new one
+                old_filter_id = item_id.replace("filter-", "")
+                if old_filter_id in filter_id_mapping:
+                    new_filter_id = filter_id_mapping[old_filter_id]
+                    layout_item["i"] = f"filter-{new_filter_id}"
+
+        # Update components: change component keys and filterId references
+        updated_components = {}
+        for component_id, component_data in new_components.items():
+            new_component_id = component_id
+            new_component_data = copy.deepcopy(component_data)
+
+            # If this is a filter component
+            if component_id.startswith("filter-"):
+                old_filter_id = component_id.replace("filter-", "")
+                if old_filter_id in filter_id_mapping:
+                    new_filter_id = filter_id_mapping[old_filter_id]
+                    new_component_id = f"filter-{new_filter_id}"
+
+                    # Update the filterId reference in the component config
+                    if (
+                        "config" in new_component_data
+                        and "filterId" in new_component_data["config"]
+                    ):
+                        new_component_data["config"]["filterId"] = int(new_filter_id)
+
+            updated_components[new_component_id] = new_component_data
+
+        # Update the dashboard with the corrected layout_config and components
+        new_dashboard.layout_config = new_layout_config
+        new_dashboard.components = updated_components
+        new_dashboard.save()
+
+        logger.info(
+            f"Duplicated dashboard {dashboard_id} as {new_dashboard.id} for org {orguser.org.id}"
+        )
+
+    return get_dashboard_response(new_dashboard)
 
 
 # Dashboard Lock endpoints
