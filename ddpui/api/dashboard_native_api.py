@@ -44,7 +44,8 @@ class DashboardUpdate(Schema):
     target_screen_size: Optional[str] = None
     layout_config: Optional[list[dict]] = None
     components: Optional[dict] = None
-    filters: Optional[list[dict]] = None
+    # filters removed - managed via separate filter endpoints
+    filter_layout: Optional[str] = None
     is_published: Optional[bool] = None
 
 
@@ -305,60 +306,12 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
     if payload.components is not None:
         dashboard.components = payload.components
 
-    # Handle filters update with intelligent sync
-    if payload.filters is not None:
-        # Extract filter IDs that are currently in components
-        filter_ids_in_components = set()
-        if payload.components:
-            for component in payload.components.values():
-                if component.get("type") == "filter":
-                    filter_id = component.get("config", {}).get("filterId")
-                    if filter_id:
-                        filter_ids_in_components.add(filter_id)
+    if payload.filter_layout is not None:
+        dashboard.filter_layout = payload.filter_layout
 
-        # Get existing filter IDs
-        existing_filter_ids = set(dashboard.filters.values_list("id", flat=True))
-
-        # Delete filters that are no longer in components
-        filters_to_delete = existing_filter_ids - filter_ids_in_components
-        if filters_to_delete:
-            dashboard.filters.filter(id__in=filters_to_delete).delete()
-            logger.info(f"Deleted filters {filters_to_delete} from dashboard {dashboard_id}")
-
-        # Update or create filters from payload
-        for filter_data in payload.filters:
-            filter_id = filter_data.get("id")
-
-            # Clean settings - remove position and name if present
-            settings = filter_data.get("settings", {}).copy()
-            settings.pop("position", None)
-            settings.pop("name", None)
-
-            if filter_id and filter_id in existing_filter_ids:
-                # Update existing filter
-                dashboard.filters.filter(id=filter_id).update(
-                    name=filter_data.get("name", ""),
-                    filter_type=filter_data.get("filter_type", "value"),
-                    schema_name=filter_data.get("schema_name", ""),
-                    table_name=filter_data.get("table_name", ""),
-                    column_name=filter_data.get("column_name", ""),
-                    settings=settings,
-                    order=filter_data.get("order", 0),
-                )
-            else:
-                # Create new filter
-                new_filter = DashboardFilter.objects.create(
-                    dashboard=dashboard,
-                    name=filter_data.get("name", filter_data.get("column_name", "")),
-                    filter_type=filter_data.get("filter_type", "value"),
-                    schema_name=filter_data.get("schema_name", ""),
-                    table_name=filter_data.get("table_name", ""),
-                    column_name=filter_data.get("column_name", ""),
-                    settings=settings,
-                    order=filter_data.get("order", 0),
-                )
-                # Update the filter_data with the new ID for response
-                filter_data["id"] = new_filter.id
+    # Note: Filters are now managed independently of components
+    # Filter CRUD operations are handled through separate endpoints
+    # No need to sync filters with components as they are no longer part of the canvas
 
     if payload.is_published is not None:
         dashboard.is_published = payload.is_published
