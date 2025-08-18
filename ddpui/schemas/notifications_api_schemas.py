@@ -69,7 +69,7 @@ class NotificationDataSchema(Schema):
     urgent: Optional[bool] = False
     scheduled_time: Optional[datetime] = None
     recipients: List[int]  # list of orguser ids
-    category: Optional[str] = "incident"
+    category: Optional[str]
 
 
 class CategorySubscriptionSchema(Schema):
