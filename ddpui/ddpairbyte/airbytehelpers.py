@@ -231,6 +231,7 @@ def create_airbyte_deployment(org: Org, org_task: OrgTask, server_block: OrgPref
 
 def create_connection(org: Org, payload: AirbyteConnectionCreate):
     """creates an airbyte connection and tracking objects in the database"""
+
     warehouse = OrgWarehouse.objects.filter(org=org).first()
     if warehouse is None:
         return None, "need to set up a warehouse first"
@@ -252,6 +253,10 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
     clear_task = Task.objects.filter(slug=TASK_AIRBYTECLEAR).first()
     if clear_task is None:
         return None, "clear task not supported"
+
+    # Validate description length
+    if payload.description and len(payload.description) > 100:
+        return None, "Description cannot exceed 100 characters"
 
     airbyte_conn = airbyte_service.create_connection(org.airbyte_workspace_id, payload)
 
@@ -638,6 +643,10 @@ def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUp
     if len(payload.streams) == 0:
         return None, "must specify stream names"
 
+    # Validate description length
+    if payload.description and len(payload.description) > 100:
+        return None, "Description cannot exceed 100 characters"
+
     # fetch connection by id from airbyte
     connection = airbyte_service.get_connection(org.airbyte_workspace_id, connection_id)
     if connection["status"] == AIRBYTE_CONNECTION_DEPRECATED:
@@ -660,7 +669,7 @@ def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUp
     update_fields = {}
     if payload.name:
         update_fields["connection_name"] = connection["name"]
-    if payload.description is not None and len(payload.description) <= 100:
+    if payload.description:
         update_fields["description"] = payload.description
 
     if update_fields:
