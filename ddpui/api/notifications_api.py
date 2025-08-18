@@ -294,6 +294,13 @@ def get_notifications_by_category(request, category: str, page: int = 1, limit: 
     error, result = notifications_service.get_notifications_by_category(
         orguser, category, page, limit
     )
+
+
+@notification_router.put("/mark_all_as_read")
+def mark_all_notifications_as_read(request):
+    """Mark all notifications as read for the user"""
+    orguser: OrgUser = request.orguser
+    error, result = notifications_service.mark_all_notifications_as_read(orguser.id)
     if error is not None:
         raise HttpError(400, error)
 

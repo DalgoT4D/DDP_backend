@@ -429,6 +429,22 @@ def get_unread_notifications_count(
     return None, {"success": True, "res": unread_count}
 
 
+def mark_all_notifications_as_read(
+    orguser_id: int,
+) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """
+    Marks all notifications as read for the given user.
+    Returns the number of notifications updated.
+    """
+    try:
+        updated_count = NotificationRecipient.objects.filter(
+            recipient__id=orguser_id, read_status=False
+        ).update(read_status=True)
+        return None, {"success": True, "updated_count": updated_count}
+    except Exception as e:
+        return str(e), None
+
+
 # get urgent notifications that haven't been dismissed
 def get_urgent_notifications(
     orguser: OrgUser,

@@ -8,10 +8,10 @@ from typing import Dict, List
 import os
 import json
 from datetime import datetime
+import pytz
 import requests
 from dotenv import load_dotenv
 from ninja.errors import HttpError
-from flags.state import flag_enabled
 from ddpui import settings
 from ddpui.ddpairbyte import schema
 from ddpui.utils.custom_logger import CustomLogger
@@ -780,6 +780,34 @@ def create_connection(
                 schema_cat["config"]["cursorField"] = []
                 schema_cat["config"]["primaryKey"] = []
 
+            if (
+                "columns" in selected_streams[stream_name]
+                and selected_streams[stream_name]["columns"]
+            ):
+                columns = selected_streams[stream_name]["columns"]
+                count = 0
+
+                for column in columns:
+                    if column.get("selected", False):
+                        count += 1
+
+                if count == len(columns):
+                    schema_cat["config"]["fieldSelectionEnabled"] = False
+                    schema_cat["config"]["selectedFields"] = []
+                else:
+                    schema_cat["config"]["fieldSelectionEnabled"] = True
+                    schema_cat["config"]["selectedFields"] = []
+
+                    for column in columns:
+                        if column.get("selected", False):
+                            schema_cat["config"]["selectedFields"].append(
+                                {"fieldPath": [column["name"]]}
+                            )
+            else:
+                # No column information or empty columns list - default to all columns selected
+                schema_cat["config"]["fieldSelectionEnabled"] = False
+                schema_cat["config"]["selectedFields"] = []
+
             payload["syncCatalog"]["streams"].append(schema_cat)
 
     res = abreq("connections/create", payload)
@@ -863,6 +891,34 @@ def update_connection(
                 schema_cat["config"]["cursorField"] = []
                 schema_cat["config"]["primaryKey"] = []
 
+            if (
+                "columns" in selected_streams[stream_name]
+                and selected_streams[stream_name]["columns"]
+            ):
+                columns = selected_streams[stream_name]["columns"]
+                count = 0
+
+                for column in columns:
+                    if column.get("selected", False):
+                        count += 1
+
+                if count == len(columns):
+                    schema_cat["config"]["fieldSelectionEnabled"] = False
+                    schema_cat["config"]["selectedFields"] = []
+                else:
+                    schema_cat["config"]["fieldSelectionEnabled"] = True
+                    schema_cat["config"]["selectedFields"] = []
+
+                    for column in columns:
+                        if column.get("selected", False):
+                            schema_cat["config"]["selectedFields"].append(
+                                {"fieldPath": [column["name"]]}
+                            )
+            else:
+                # No column information or empty columns list - default to all columns selected
+                schema_cat["config"]["fieldSelectionEnabled"] = False
+                schema_cat["config"]["selectedFields"] = []
+
             current_connection["syncCatalog"]["streams"].append(schema_cat)
 
     res = abreq("connections/update", current_connection)
@@ -916,7 +972,12 @@ def get_job_info_without_logs(job_id: str) -> dict:
 
 
 def get_jobs_for_connection(
-    connection_id: str, limit: int = 1, offset: int = 0, job_types: list[str] = ["sync"]
+    connection_id: str,
+    limit: int = 1,
+    offset: int = 0,
+    job_types: list[str] | None = None,
+    created_at_start: datetime = None,
+    created_at_end: datetime = None,
 ) -> int | None:
     """
     returns most recent job for a connection
@@ -933,13 +994,28 @@ def get_jobs_for_connection(
     if not isinstance(connection_id, str):
         raise HttpError(400, "connection_id must be a string")
 
+    if job_types is None:
+        job_types = ["sync"]
+
+    payload = {
+        "configTypes": job_types,
+        "configId": connection_id,
+        "pagination": {"rowOffset": offset, "pageSize": limit},
+    }
+
+    if created_at_start:
+        payload["createdAtStart"] = (
+            created_at_start.astimezone(pytz.UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        )
+
+    if created_at_end:
+        payload["createdAtEnd"] = (
+            created_at_end.astimezone(pytz.UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        )
+
     result = abreq(
         "jobs/list",
-        {
-            "configTypes": job_types,
-            "configId": connection_id,
-            "pagination": {"rowOffset": offset, "pageSize": limit},
-        },
+        payload,
     )
     return result
 

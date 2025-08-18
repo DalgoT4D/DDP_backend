@@ -1,3 +1,4 @@
+import os
 import shlex
 import subprocess
 import re
@@ -7,6 +8,7 @@ import hashlib
 import json
 from decimal import Decimal
 from datetime import datetime, date
+import pytz
 
 
 def runcmd(cmd: str, cwd: str):
@@ -19,7 +21,7 @@ def runcmd_with_output(cmd, cwd):
     runs a shell command in a specified working directory
     attempted to use Popen and then poll(), but poll() was blocking
     """
-    return subprocess.run(shlex.split(cmd), cwd=str(cwd), capture_output=True)
+    return subprocess.run(shlex.split(cmd), cwd=str(cwd), capture_output=True, check=False)
 
 
 def remove_nested_attribute(obj: dict, attr: str) -> dict:
@@ -117,6 +119,7 @@ def update_dict_but_not_stars(input_config: dict):
 
 
 def hash_dict(payload: dict) -> str:
+    """hash a dictionary"""
     hasher = hashlib.sha256()
 
     hasher.update(json.dumps(payload, sort_keys=True).encode("utf-8"))
@@ -192,3 +195,92 @@ def find_key_in_dictionary(dictionary: dict, key):
             if val:
                 return val
     return None
+
+
+def from_timestamp(timestamp: int) -> datetime:
+    """
+    Convert a Unix timestamp to a datetime object.
+    :param timestamp: Unix timestamp in seconds.
+    :return: Corresponding datetime object.
+    """
+    if timestamp > 0:
+        return datetime.fromtimestamp(timestamp, tz=pytz.UTC)
+    return None
+
+
+def get_integer_env_var(varname: str, default_value: int, logger, allow_negative=False):
+    """reads a var from the environment, converts to int and returns"""
+    try:
+        varvalue = int(os.getenv(varname, str(default_value)))
+        if not allow_negative and varvalue < 0:
+            if logger:
+                logger.error("%s must be >= 0", varname)
+            varvalue = default_value
+    except ValueError:
+        if logger:
+            logger.error("invalid value for " + varname + " in .env: " + os.getenv(varname))
+        varvalue = default_value
+    return varvalue
+
+
+def compare_semver(version1: str, version2: str) -> int:
+    """compares semantic versioning strings"""
+
+    def parse_version(v):
+        """Regex to parse: major.minor.patch-prerelease+build"""
+        regex = r"^(\d+)\.(\d+)\.(\d+)(?:-([\w\.-]+))?(?:\+[\w\.-]+)?$"
+        match = re.match(regex, v)
+        if not match:
+            raise ValueError(f"Invalid semver string: {v}")
+        major, minor, patch = map(int, match.groups()[:3])
+        prerelease = match.group(4)
+        return (major, minor, patch, prerelease)
+
+    def cmp(a, b):
+        """Returns 1, 0, or -1"""
+        return (a > b) - (a < b)
+
+    v1 = parse_version(version1)
+    v2 = parse_version(version2)
+
+    # Compare major, minor, patch
+    for a, b in zip(v1[:3], v2[:3], strict=True):
+        result = cmp(a, b)
+        if result != 0:
+            return result
+
+    # If all of major, minor, patch are equal, compare prerelease
+    prere1 = v1[3]
+    prere2 = v2[3]
+    if prere1 is None and prere2 is None:
+        return 0
+    if prere1 is None:
+        return 1  # version1 is a release, which is higher than prerelease
+    if prere2 is None:
+        return -1  # version2 is a release, which is higher than prerelease
+
+    def pre_release_cmp(pr1, pr2):
+        """Prerelease comparison: split by '.'"""
+        parts1 = pr1.split(".")
+        parts2 = pr2.split(".")
+        len1, len2 = len(parts1), len(parts2)
+        for i in range(max(len1, len2)):
+            if i >= len1:
+                return -1  # shorter wins
+            if i >= len2:
+                return 1
+            is_digit1 = parts1[i].isdigit()
+            is_digit2 = parts2[i].isdigit()
+            if is_digit1 and is_digit2:
+                result = cmp(int(parts1[i]), int(parts2[i]))
+            elif is_digit1:
+                return -1
+            elif is_digit2:
+                return 1
+            else:
+                result = cmp(parts1[i], parts2[i])
+            if result != 0:
+                return result
+        return 0
+
+    return pre_release_cmp(prere1, prere2)

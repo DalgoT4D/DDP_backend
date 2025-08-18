@@ -4,12 +4,10 @@ functions which work with airbyte and with the dalgo database
 
 import json
 import re
-import os
-from typing import List
+from typing import List, Tuple
 from uuid import uuid4
-from pathlib import Path
-from datetime import datetime
-import yaml
+from datetime import datetime, timedelta
+import pytz
 from ninja.errors import HttpError
 from django.utils.text import slugify
 from django.utils import timezone as djangotimezone
@@ -21,7 +19,6 @@ from django.forms.models import model_to_dict
 
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import AirbyteWorkspace
-from ddpui.ddpprefect import prefect_service, schema, DBTCORE
 from ddpui.models.org import (
     Org,
     OrgPrefectBlockv1,
@@ -29,6 +26,7 @@ from ddpui.models.org import (
     OrgWarehouseSchema,
     ConnectionMeta,
 )
+from ddpui.models.airbyte import AirbyteJob
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.custom_logger import CustomLogger
@@ -40,23 +38,24 @@ from ddpui.ddpairbyte.schema import (
     AirbyteConnectionSchemaUpdateSchedule,
     AirbyteGetConnectionsResponse,
 )
-from ddpui.ddpdbt.schema import DbtProjectParams
+from ddpui.ddpprefect import prefect_service, schema, DBTCORE, AIRBYTESERVER
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
-    PrefectDataFlowUpdateSchema3,
 )
-from ddpui.ddpprefect import AIRBYTESERVER
-from ddpui.ddpprefect import DBTCLIPROFILE
-from ddpui.core.dbtfunctions import map_airbyte_destination_spec_to_dbtcli_profile
 from ddpui.models.org import OrgDataFlowv1, OrgWarehouse
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskLockStatus
 from ddpui.utils.constants import (
     TASK_AIRBYTESYNC,
     TASK_AIRBYTECLEAR,
+    AIRBYTE_CONNECTION_DEPRECATED,
 )
+from ddpui.celeryworkers.airbytehelpertasks import delete_airbyte_connections
 from ddpui.utils.helpers import (
     generate_hash_id,
     update_dict_but_not_stars,
+    from_timestamp,
+    nice_bytes,
+    get_integer_env_var,
 )
 from ddpui.utils import secretsmanager
 from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
@@ -66,8 +65,9 @@ from ddpui.core.pipelinefunctions import (
 )
 from ddpui.core.orgtaskfunctions import fetch_orgtask_lock_v1
 from ddpui.models.tasks import TaskLock
-from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.ddpdbt.elementary_service import create_elementary_profile, elementary_setup_status
+from ddpui.ddpdbt.dbthelpers import create_or_update_org_cli_block
+from ddpui.utils.redis_client import RedisClient
 
 logger = CustomLogger("airbyte")
 
@@ -306,9 +306,57 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
     return res, None
 
 
-def get_connections(org: Org) -> List[AirbyteGetConnectionsResponse]:
-    """return connections with last run details"""
+def get_connections(org: Org) -> Tuple[List[AirbyteGetConnectionsResponse], None]:
+    """
+        Purpose:
 
+    This function returns all active Airbyte connections for a given organization (org), along with metadata such as:
+            •	sync and clear dataflows,
+            •	the most recent run,
+            •	lock status (i.e., whether a sync is queued or running),
+            •	an estimated wait time if a run is queued.
+
+    It also identifies and schedules the deletion of connections that are no longer found in Airbyte or have been deprecated.
+
+    ⸻
+
+    What It Does:
+            1.	Fetch Dataflows:
+    Filters for manual-type dataflows associated with the organization that have a corresponding clear flow configured.
+            2.	Fetch OrgTasks and TaskLocks:
+            •	Retrieves OrgTask objects linked to those dataflows.
+            •	Retrieves TaskLock entries to assess the state of each task (e.g., queued or running).
+            3.	Fetch Connections from Airbyte:
+    Retrieves a list of all Airbyte connections in the org’s workspace.
+            4.	Iterate Through Each Dataflow:
+    For each sync dataflow:
+            •	Matches it with its associated OrgTask.
+            •	Tries to find the related clear task (if present).
+            •	Looks up the corresponding connection info from Airbyte.
+            •	If a connection is not found or is marked as deprecated, it adds it to a cleanup list.
+            5.	Lock and Run Status:
+            •	Finds any task locks.
+            •	Uses the lock object to estimate if a sync is queued and how long the wait is likely to be.
+            6.	Last Run Information:
+            •	Collects all deployment IDs across all relevant org tasks.
+            •	Queries for the most recent flow runs for each deployment.
+            •	Attaches the latest run information to each connection.
+            7.	Cleanup:
+            •	If any connections were found to be missing or deprecated, it schedules them for deletion in the background via a Celery task.
+
+    ⸻
+
+    Return Value:
+
+    A list of dictionaries, one per active connection, containing:
+            •	basic connection info (name, status, source, destination),
+            •	sync deployment ID,
+            •	clear/reset deployment IDs (if present),
+            •	lock status (queued, running, etc.),
+            •	last successful run metadata,
+            •	estimated wait time if queued.
+
+    """
     sync_dataflows = (
         OrgDataFlowv1.objects.filter(
             org=org,
@@ -329,17 +377,19 @@ def get_connections(org: Org) -> List[AirbyteGetConnectionsResponse]:
     org_task_ids = all_dataflow_orgtasks.values_list("orgtask_id", flat=True)
     all_org_task_locks = TaskLock.objects.filter(orgtask_id__in=org_task_ids)
 
-    # for the above of orgtask_ids, we fetch all the dataflows of each orgtasks
-    # this will be used to find the last run of each dataflow
-    all_orgtask_dataflows = DataflowOrgTask.objects.filter(
-        orgtask_id__in=org_task_ids
-    ).select_related("dataflow")
+    # # for the above of orgtask_ids, we fetch all the dataflows of each orgtasks
+    # # this will be used to find the last run of each dataflow
+    # all_orgtask_dataflows = DataflowOrgTask.objects.filter(
+    #     orgtask_id__in=org_task_ids
+    # ).select_related("dataflow")
 
     warehouse = OrgWarehouse.objects.filter(org=org).first()
 
     airbyte_connections = airbyte_service.get_webbackend_connections(org.airbyte_workspace_id)
 
-    res = []
+    res: list[dict] = []
+    connections_to_clean_up: list[str] = []
+    redisclient = RedisClient.get_instance()
 
     for sync_dataflow in sync_dataflows:
         sync_dataflow_orgtasks = [
@@ -390,19 +440,23 @@ def get_connections(org: Org) -> List[AirbyteGetConnectionsResponse]:
         connection = [
             conn for conn in airbyte_connections if conn["connectionId"] == org_task.connection_id
         ]
+
+        def ensure_only_one_add_across_parallel_requests(connection_id: str):
+            """avoid a race condition in case get_connections() is called twice in parallel"""
+            cacheval = redisclient.get(f"deleting-{connection_id}")
+            if not cacheval or not cacheval == "true":
+                redisclient.set(f"deleting-{connection_id}", "true", 10)  # expire after 10 seconds
+                connections_to_clean_up.append(connection_id)
+
         if len(connection) == 0:
             logger.error(f"could not find connection {org_task.connection_id} in airbyte")
+            ensure_only_one_add_across_parallel_requests(org_task.connection_id)
             continue
+
         connection = connection[0]
-
-        look_up_last_run_deployment_ids = []
-
-        for df_orgtask in [
-            df_orgtask
-            for df_orgtask in all_orgtask_dataflows
-            if df_orgtask.orgtask_id == org_task.id
-        ]:
-            look_up_last_run_deployment_ids.append(df_orgtask.dataflow.deployment_id)
+        if connection["status"] == AIRBYTE_CONNECTION_DEPRECATED:
+            ensure_only_one_add_across_parallel_requests(org_task.connection_id)
+            continue
 
         clear_dataflow: OrgDataFlowv1 = sync_dataflow.clear_conn_dataflow
 
@@ -442,7 +496,7 @@ def get_connections(org: Org) -> List[AirbyteGetConnectionsResponse]:
                 "lock": lock,  # this will have the status of the flow run
                 "resetConnDeploymentId": None,
                 "clearConnDeploymentId": clear_dataflow.deployment_id if clear_dataflow else None,
-                "look_up_last_run_deployment_ids": look_up_last_run_deployment_ids,
+                # "look_up_last_run_deployment_ids": look_up_last_run_deployment_ids,
                 "queuedFlowRunWaitTime": (
                     prefect_service.estimate_time_for_next_queued_run_of_dataflow(sync_dataflow)
                     if lock and lock["status"] == TaskLockStatus.QUEUED
@@ -451,35 +505,36 @@ def get_connections(org: Org) -> List[AirbyteGetConnectionsResponse]:
             }
         )
 
-    # fetch all last runs in one go
-    all_last_run_deployment_ids = []
-    for conn in res:
-        all_last_run_deployment_ids.extend(conn["look_up_last_run_deployment_ids"])
+    connection_ids = [conn["connectionId"] for conn in res]
 
-    flow_runs_with_row_number = PrefectFlowRun.objects.filter(
-        deployment_id__in=all_last_run_deployment_ids
-    ).annotate(
+    latest_airbyte_jobs_grouped = AirbyteJob.objects.filter(config_id__in=connection_ids).annotate(
         row_number=Window(
-            expression=RowNumber(),
-            partition_by=[F("deployment_id")],
-            order_by=F("start_time").desc(),
+            expression=RowNumber(), partition_by=[F("config_id")], order_by=F("created_at").desc()
         )
     )
-    last_flow_run_per_deployment = flow_runs_with_row_number.filter(row_number=1)
 
-    # attach last run for each conn based on latest(look_up_last_run_deployment_ids)
+    latest_airbyte_jobs = latest_airbyte_jobs_grouped.filter(row_number=1)
+
+    # attach last run for each conn
     for conn in res:
-        last_runs = []
-        for run in last_flow_run_per_deployment:
-            if run.deployment_id in conn["look_up_last_run_deployment_ids"]:
-                last_runs.append(run.to_json())
+        # find the latest job for this connection
+        latest_job = latest_airbyte_jobs.filter(config_id=conn["connectionId"]).first()
 
-        last_runs.sort(
-            key=lambda run: (run["startTime"] if run["startTime"] else run["expectedStartTime"])
+        if latest_job:
+            conn["lastRun"] = {
+                "airbyteJobId": latest_job.job_id,
+                "status": latest_job.status,
+                "startTime": latest_job.created_at,
+                "expectedStartTime": latest_job.created_at,
+            }
+        else:
+            conn["lastRun"] = None
+
+    if connections_to_clean_up:
+        logger.info(f"cleaning up connections {connections_to_clean_up}")
+        delete_airbyte_connections.delay(
+            f"delete-connections-{org.slug}", org.id, connections_to_clean_up
         )
-
-        conn["lastRun"] = last_runs[-1] if len(last_runs) > 0 else None
-        del conn["look_up_last_run_deployment_ids"]
 
     return res, None
 
@@ -495,6 +550,11 @@ def get_one_connection(org: Org, connection_id: str):
 
     # fetch airbyte connection
     airbyte_conn = airbyte_service.get_connection(org.airbyte_workspace_id, org_task.connection_id)
+    if airbyte_conn["status"] == AIRBYTE_CONNECTION_DEPRECATED:
+        delete_airbyte_connections.delay(
+            f"delete-connections-{org.slug}", org.id, [org_task.connection_id]
+        )
+        return None, "connection not found"
 
     dataflow_orgtask = DataflowOrgTask.objects.filter(
         orgtask=org_task, dataflow__dataflow_type="manual"
@@ -566,6 +626,10 @@ def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUp
 
     # fetch connection by id from airbyte
     connection = airbyte_service.get_connection(org.airbyte_workspace_id, connection_id)
+    if connection["status"] == AIRBYTE_CONNECTION_DEPRECATED:
+        delete_airbyte_connections.delay(f"delete-connections-{org.slug}", org.id, [connection_id])
+        return None, "connection not found"
+
     connection["operationIds"] = []
 
     # update name
@@ -584,80 +648,6 @@ def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUp
         )
 
     return res, None
-
-
-def delete_connection(org: Org, connection_id: str):
-    """deletes an airbyte connection"""
-
-    dataflows_to_delete: list[OrgDataFlowv1] = []
-    orgtask_to_delete: list[OrgTask] = []
-
-    # delete manual-sync and manual-reset dataflows
-    for org_task in OrgTask.objects.filter(
-        org=org,
-        connection_id=connection_id,
-    ):
-        for dataflow_orgtask in DataflowOrgTask.objects.filter(
-            orgtask=org_task, dataflow__dataflow_type="manual"
-        ):
-            dataflows_to_delete.append(dataflow_orgtask.dataflow)
-            logger.info("will delete %s", dataflow_orgtask.dataflow.deployment_name)
-
-        orgtask_to_delete.append(org_task)
-
-    # delete all deployments
-    for dataflow in dataflows_to_delete:
-        logger.info("deleting prefect deployment %s", dataflow.deployment_name)
-        prefect_service.delete_deployment_by_id(dataflow.deployment_id)
-
-    # delete all dataflows
-    logger.info("deleting org dataflows from db")
-    for dataflow in dataflows_to_delete:
-        # if there is a reset and a sync then the dataflow will appear twice in this list
-        if dataflow.id:
-            dataflow.delete()
-
-    # remove from orchestration dataflows
-    for org_task in OrgTask.objects.filter(
-        org=org,
-        connection_id=connection_id,
-    ):
-        # this org_task is already in the to_delete list from above
-
-        for dataflow_orgtask in DataflowOrgTask.objects.filter(
-            orgtask=org_task, dataflow__dataflow_type="orchestrate"
-        ):
-            # fetch config from prefect
-            deployment = prefect_service.get_deployment(dataflow_orgtask.dataflow.deployment_id)
-            # { name, deploymentId, tags, cron, isScheduleActive, parameters }
-            # parameters = {config: {org_slug, tasks}}
-            # tasks = list of
-            #    {seq, slug, type, timeout, orgtask__uuid, connection_id, airbyte_server_block}
-            parameters = deployment["parameters"]
-            # logger.info(parameters)
-            for task in parameters["config"]["tasks"]:
-                if task.get("connection_id") == connection_id:
-                    logger.info(f"deleting task {task['slug']} from deployment")
-                    parameters["config"]["tasks"].remove(task)
-            # logger.info(parameters)
-            payload = PrefectDataFlowUpdateSchema3(deployment_params=parameters)
-            prefect_service.update_dataflow_v1(dataflow_orgtask.dataflow.deployment_id, payload)
-            logger.info("updated deployment %s", dataflow_orgtask.dataflow.deployment_name)
-
-    # delete all orgtasks
-    for org_task in orgtask_to_delete:
-        logger.info("deleting orgtask %s", org_task.task.slug)
-        org_task.delete()
-
-    # delete airbyte connection
-    logger.info("deleting airbyte connection %s", connection_id)
-    airbyte_service.delete_connection(org.airbyte_workspace_id, connection_id)
-
-    if OrgSchemaChange.objects.filter(connection_id=connection_id).exists():
-        OrgSchemaChange.objects.filter(connection_id=connection_id).delete()
-        logger.info(f"Deleted schema changes for connection {connection_id}")
-
-    return None, None
 
 
 def get_job_info_for_connection(org: Org, connection_id: str):
@@ -688,13 +678,12 @@ def get_sync_job_history_for_connection(
     org: Org, connection_id: str, limit: int = 10, offset: int = 0
 ):
     """
-    Get all sync jobs (paginated) for a connection
+    Get all sync jobs (paginated) for a connection using AirbyteJob model
     Returns
     - Date
     - Records synced
     - Bytes synced
     - Duration
-    - logs
 
     In case there no sync jobs, return an empty list
     """
@@ -708,16 +697,37 @@ def get_sync_job_history_for_connection(
     if org_task is None:
         return None, "connection not found"
 
-    res = {"history": [], "totalSyncs": 0}
-    result = airbyte_service.get_jobs_for_connection(
-        connection_id, limit, offset, job_types=["sync", "reset_connection"]
-    )
-    res["totalSyncs"] = result["totalJobCount"]
-    if len(result["jobs"]) == 0:
-        return [], None
+    # Query AirbyteJob model instead of calling airbyte service
+    airbyte_jobs = AirbyteJob.objects.filter(
+        config_id=connection_id, job_type__in=["sync", "reset_connection"]
+    ).order_by("-created_at")[offset : offset + limit]
 
-    for job in result["jobs"]:
-        job_info = airbyte_service.parse_job_info(job)
+    total_syncs = AirbyteJob.objects.filter(
+        config_id=connection_id, job_type__in=["sync", "reset_connection"]
+    ).count()
+
+    res = {"history": [], "totalSyncs": total_syncs}
+
+    if not airbyte_jobs.exists():
+        return res, None
+
+    for job in airbyte_jobs:
+        job_info = {
+            "job_id": job.job_id,
+            "status": job.status,
+            "job_type": job.job_type,
+            "created_at": job.created_at,
+            "started_at": job.started_at,
+            "ended_at": job.ended_at,
+            "records_emitted": job.records_emitted or 0,
+            "bytes_emitted": nice_bytes(job.bytes_emitted) or 0,
+            "records_committed": job.records_committed or 0,
+            "bytes_committed": nice_bytes(job.bytes_committed) or 0,
+            "stream_stats": job.stream_stats,
+            "reset_config": job.reset_config,
+            "duration_seconds": job.duration,
+            "last_attempt_no": job.last_attempt_no,
+        }
 
         res["history"].append(job_info)
 
@@ -866,121 +876,6 @@ def create_warehouse(org: Org, payload: OrgWarehouseSchema):
     return None, None
 
 
-def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_creds: dict):
-    """
-    Create/update the block in db and also in prefect
-    """
-
-    bqlocation = None
-    priority = None  # whether to run in "batch" mode or "interactive" mode for bigquery
-    if warehouse.wtype == "bigquery":
-        if "dataset_location" in airbyte_creds:
-            bqlocation = airbyte_creds["dataset_location"]
-            del airbyte_creds["dataset_location"]
-
-        if "transformation_priority" in airbyte_creds:
-            priority = airbyte_creds["transformation_priority"]
-            del airbyte_creds["transformation_priority"]
-
-    profile_name = None
-    target = None
-    dbt_project_params: DbtProjectParams = None
-    try:
-        dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
-
-        dbt_project_filename = str(Path(dbt_project_params.project_dir) / "dbt_project.yml")
-        if not os.path.exists(dbt_project_filename):
-            raise HttpError(400, dbt_project_filename + " is missing")
-
-        with open(dbt_project_filename, "r", encoding="utf-8") as dbt_project_file:
-            dbt_project = yaml.safe_load(dbt_project_file)
-            if "profile" not in dbt_project:
-                raise HttpError(400, "could not find 'profile:' in dbt_project.yml")
-
-        profile_name = dbt_project["profile"]
-        target = dbt_project_params.target
-    except Exception as err:
-        logger.error(
-            "Failed to fetch the dbt profile - looks like transformation has not been setup. Using 'default' as profile name and continuing"
-        )
-        logger.error(err)
-
-    dbt_creds = map_airbyte_destination_spec_to_dbtcli_profile(airbyte_creds, dbt_project_params)
-
-    dbt_creds.pop("ssl_mode", None)
-    dbt_creds.pop("ssl", None)
-
-    # set defaults to target and profile
-    # cant create a cli profile without these two
-    # idea is these should be updated when we setup transformation or update the warehouse
-    if not profile_name:
-        profile_name = "default"
-
-    if not target:
-        target = "default"
-
-    logger.info("Found org=%s profile_name=%s target=%s", org.slug, profile_name, target)
-    cli_profile_block = OrgPrefectBlockv1.objects.filter(org=org, block_type=DBTCLIPROFILE).first()
-    if cli_profile_block:
-        logger.info(
-            f"Updating the cli profile block : {cli_profile_block.block_name} for org={org.slug} with profile={profile_name} target={target}"
-        )
-        try:
-            prefect_service.update_dbt_cli_profile_block(
-                block_name=cli_profile_block.block_name,
-                wtype=warehouse.wtype,
-                credentials=dbt_creds,
-                bqlocation=bqlocation,
-                profilename=profile_name,
-                target=target,
-                priority=priority,
-            )
-        except Exception as error:
-            logger.error(
-                "Failed to update the cli profile block %s , err=%s",
-                cli_profile_block.block_name,
-                str(error),
-            )
-            return (None, None), "Failed to update the cli profile block"
-        logger.info(f"Successfully updated the cli profile block : {cli_profile_block.block_name}")
-    else:
-        logger.info(
-            "Creating a new cli profile block for %s with profile=%s & target=%s ",
-            org.slug,
-            profile_name,
-            target,
-        )
-        new_block_name = f"{org.slug}-{profile_name}"
-
-        try:
-            cli_block_response = prefect_service.create_dbt_cli_profile_block(
-                block_name=new_block_name,
-                profilename=profile_name,
-                target=target,
-                wtype=warehouse.wtype,
-                bqlocation=bqlocation,
-                credentials=dbt_creds,
-                priority=priority,
-            )
-        except Exception as error:
-            logger.error(
-                "Failed to create a new cli profile block %s , err=%s",
-                new_block_name,
-                str(error),
-            )
-            return (None, None), "Failed to update the cli profile block"
-
-        # save the cli profile block in django db
-        cli_profile_block = OrgPrefectBlockv1.objects.create(
-            org=org,
-            block_type=DBTCLIPROFILE,
-            block_id=cli_block_response["block_id"],
-            block_name=cli_block_response["block_name"],
-        )
-
-    return (cli_profile_block, dbt_project_params), None
-
-
 def get_warehouses(org: Org):
     """return list of warehouses for an Org"""
     warehouses = [
@@ -1062,11 +957,16 @@ def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
     """
     try:
         logger.info(f"Fetching schema change (catalog) for connection {org.slug}|{connection_id}")
-        connection_catalog = airbyte_service.get_connection_catalog(connection_id, timemout=60)
+        connection_catalog = airbyte_service.get_connection_catalog(
+            connection_id,
+            timeout=get_integer_env_var(
+                "AIRBYTE_FETCH_CONNECTION_CATALOG_TIMEOUT_SECONDS", 300, logger
+            ),
+        )
     except Exception as err:
         return (
             None,
-            f"Something went wrong fetching schema change (catalog) for connection {connection_id}: {err}",
+            f"Something went wrong fetching schema change (catalog) for {org.slug} connection {connection_id}: {err}",
         )
 
     # update schema change type in our db
@@ -1108,7 +1008,7 @@ def fetch_and_update_org_schema_changes(org: Org, connection_id: str):
     except Exception as err:
         return (
             None,
-            f"Something went wrong updating OrgSchemaChange {connection_id}: {err}",
+            f"Something went wrong updating OrgSchemaChange {org.slug} {connection_id}: {err}",
         )
 
     return connection_catalog, None
@@ -1206,3 +1106,127 @@ def schedule_update_connection_schema(
         raise HttpError(400, "failed to start the schema update flow run") from error
 
     return res
+
+
+def fetch_and_update_airbyte_job_details(job_id: str):
+    """Fetches the details of an Airbyte job and populates in our db."""
+    job_info = airbyte_service.get_job_info_without_logs(job_id)
+
+    job_data: dict = job_info.get("job", {})
+    attempts_data: list[dict] = job_info.get("attempts", [])
+    if not attempts_data:
+        logger.info(f"No attempts found for job_id={job_id}")
+        raise Exception(f"No attempts found for job_id={job_id}")
+
+    # attempt with the highest id is the latest attempt
+    attempts = list(map(lambda x: x["attempt"], attempts_data))
+    latest_attempt: dict = max(attempts, key=lambda x: x["id"], default=None)
+
+    if not latest_attempt:
+        logger.error("No attempts found for job_id=%s", job_id)
+        raise Exception(f"No attempts found for job_id={job_id}")
+
+    # for started_at ; take the minimum of the startedAt of all attempts
+    started_at = min(
+        [attempt.get("createdAt") for attempt in attempts if attempt.get("createdAt") is not None],
+        default=None,
+    )
+
+    if not started_at:
+        logger.error("No startedAt found for job_id=%s", job_id)
+        raise Exception(f"No startedAt found for job_id={job_id}")
+
+    # Prepare fields for AirbyteJob
+    job_fields = {
+        "job_id": job_data.get("id"),
+        "job_type": job_data.get("configType"),
+        "config_id": job_data.get("configId"),
+        "status": job_data.get("status"),
+        "reset_config": job_data.get("resetConfig"),
+        "refresh_config": job_data.get("refreshConfig"),
+        "stream_stats": job_data.get("streamAggregatedStats"),
+        "records_emitted": job_data.get("aggregatedStats", {}).get("recordsEmitted", 0),
+        "bytes_emitted": job_data.get("aggregatedStats", {}).get("bytesEmitted", 0),
+        "records_committed": job_data.get("aggregatedStats", {}).get("recordsCommitted", 0),
+        "bytes_committed": job_data.get("aggregatedStats", {}).get("bytesCommitted", 0),
+        "started_at": from_timestamp(started_at),
+        "ended_at": from_timestamp(latest_attempt.get("endedAt")),
+        "created_at": from_timestamp(job_data.get("createdAt")),
+        "attempts": attempts_data,
+    }
+
+    # Create or update the AirbyteJob entry
+    airbyte_job, is_created = AirbyteJob.objects.update_or_create(
+        job_id=job_fields["job_id"],
+        defaults=job_fields,
+    )
+
+    if is_created:
+        logger.info(f"Created new AirbyteJob with job_id={job_id}")
+
+    return model_to_dict(airbyte_job)
+
+
+def fetch_and_update_airbyte_jobs_for_all_connections(
+    last_n_days: int = 0, last_n_hours: int = 0, connection_id: str = None, org: Org = None
+):
+    """
+    Fetches and updates Airbyte job details for all connections in the given org
+    or for a specific connection if provided.
+    Args:
+        last_n_days (int): Number of days to look back for jobs.
+        connection_id (str, optional): Specific connection ID to filter jobs.
+        org (Org, optional): Organization object to filter jobs.
+    Raises:
+        ValueError: If last_n_days is not a positive integer.
+    """
+
+    if not isinstance(last_n_days, int) or last_n_days < 0:
+        raise ValueError("last_n_days must be a non-negative integer")
+
+    # figure out start datetime and end datetime based on now & last_n_days
+    start_time = datetime.now(pytz.utc) - timedelta(days=last_n_days, hours=last_n_hours)
+    end_time = datetime.now(pytz.utc)
+
+    org_tasks = OrgTask.objects.filter(connection_id__isnull=False)
+
+    if org:
+        org_tasks = org_tasks.filter(org=org)
+
+    if connection_id:
+        org_tasks = org_tasks.filter(connection_id=connection_id)
+
+    for orgtask_connection_id in org_tasks.values_list("connection_id", flat=True).distinct():
+        try:
+            logger.info("Syncing job history for connection %s", orgtask_connection_id)
+
+            offset = 0
+            limit = 20
+            curr_itr_count = 20
+            while curr_itr_count >= limit:
+                # by default the jobs are ordered by createdAt
+                jobs_dict = airbyte_service.get_jobs_for_connection(
+                    orgtask_connection_id,
+                    limit=limit,
+                    offset=offset,
+                    job_types=["sync", "reset_connection", "clear", "refresh"],
+                    created_at_start=start_time,
+                    created_at_end=end_time,
+                )
+                if len(jobs_dict.get("jobs", [])) == 0:
+                    logger.info("No jobs found for connection %s", orgtask_connection_id)
+                    break
+
+                for job in jobs_dict.get("jobs", []):
+                    curr_job = job.get("job", {})
+                    fetch_and_update_airbyte_job_details(str(curr_job.get("id")))
+
+                offset += limit
+                curr_itr_count = jobs_dict.get("totalJobCount", 0)
+
+        except Exception as e:
+            logger.error(
+                "Failed to sync job history for connection %s: %s",
+                orgtask_connection_id,
+                str(e),
+            )

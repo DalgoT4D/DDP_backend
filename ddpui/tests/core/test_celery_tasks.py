@@ -9,6 +9,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
+from ddpui.settings import PRODUCTION
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse, TransformType, OrgSchemaChange
 from ddpui.models.org_user import OrgUser
 from ddpui.models.dbt_workflow import OrgDbtModel
@@ -358,10 +359,16 @@ def test_detect_schema_changes_for_org_ensure_orphan_connections_are_deleted(
     assert OrgSchemaChange.objects.filter(org=org_without_workspace).count() == 1
     with patch(
         "ddpui.ddpairbyte.airbytehelpers.fetch_and_update_org_schema_changes"
-    ) as fetch_and_update_org_schema_changes_mock:
+    ) as fetch_and_update_org_schema_changes_mock, patch(
+        "ddpui.celeryworkers.tasks.send_text_message"
+    ) as mock_send_text_message:
         fetch_and_update_org_schema_changes_mock.return_value = None, "error"
         detect_schema_changes_for_org(org_without_workspace)
     assert OrgSchemaChange.objects.filter(org=org_without_workspace).count() == 0
+    tag = " [STAGING]" if not PRODUCTION else ""
+    mock_send_text_message.assert_called_once_with(
+        "adminemail", f"Schema change detection errors for test-org-WO-slug{tag}", "error"
+    )
 
 
 def test_get_connection_catalog_task_error(org_without_workspace: Org):
@@ -369,7 +376,9 @@ def test_get_connection_catalog_task_error(org_without_workspace: Org):
     task_key = "test-task-key"
     with patch(
         "ddpui.ddpairbyte.airbytehelpers.fetch_and_update_org_schema_changes"
-    ) as fetch_and_update_org_schema_changes_mock:
+    ) as fetch_and_update_org_schema_changes_mock, patch(
+        "ddpui.celeryworkers.tasks.send_text_message"
+    ) as mock_send_text_message:
         fetch_and_update_org_schema_changes_mock.return_value = None, "error"
         get_connection_catalog_task(task_key, org_without_workspace.id, "fake-connection-id")
     result = SingleTaskProgress.fetch(task_key)
@@ -381,6 +390,11 @@ def test_get_connection_catalog_task_error(org_without_workspace: Org):
             "result": None,
         },
     ]
+    mock_send_text_message.assert_called_once_with(
+        os.getenv("ADMIN_EMAIL"),
+        f"Unhandled schema change detection errors for {org_without_workspace.slug}",
+        "error",
+    )
 
 
 def test_get_connection_catalog_task_success(org_without_workspace: Org):

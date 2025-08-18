@@ -6,7 +6,6 @@ __pycache__/
 *.so
 
 dbt-venv/
-
 # Distribution / packaging
 .Python
 build/
