@@ -150,3 +150,13 @@ class GeoJSONDetailResponse(Schema):
     display_name: str
     geojson_data: dict
     properties_key: str
+
+
+class GeoJSONUpload(Schema):
+    """Schema for uploading custom GeoJSON"""
+
+    region_id: int
+    name: str
+    description: Optional[str] = None
+    properties_key: str
+    geojson_data: dict

@@ -26,6 +26,7 @@ from ddpui.schemas.chart_schema import (
     TransformDataForChart,
     GeoJSONDetailResponse,
     GeoJSONListResponse,
+    GeoJSONUpload,
 )
 
 logger = CustomLogger("ddpui")
@@ -443,6 +444,64 @@ def get_child_regions(request, region_id: int):
 
     children = get_child_regions(region_id)
     return children
+
+
+@charts_router.post("/geojsons/upload/", response=GeoJSONDetailResponse)
+def upload_geojson(request, payload: GeoJSONUpload):
+    """Upload a custom GeoJSON for an organization"""
+    orguser = request.orguser
+
+    from ddpui.models.geojson import GeoJSON
+    from ddpui.models.georegion import GeoRegion
+    import json
+
+    # Validate that the region exists
+    region = get_object_or_404(GeoRegion, id=payload.region_id)
+
+    # Validate GeoJSON format
+    try:
+        if not isinstance(payload.geojson_data, dict):
+            raise HttpError(400, "Invalid GeoJSON format: must be a JSON object")
+
+        if payload.geojson_data.get("type") != "FeatureCollection":
+            raise HttpError(400, "Invalid GeoJSON format: must be a FeatureCollection")
+
+        features = payload.geojson_data.get("features", [])
+        if not features:
+            raise HttpError(400, "Invalid GeoJSON: no features found")
+
+        # Validate that all features have the specified properties_key
+        for i, feature in enumerate(features):
+            properties = feature.get("properties", {})
+            if payload.properties_key not in properties:
+                raise HttpError(
+                    400, f"Feature {i+1} missing required property: {payload.properties_key}"
+                )
+
+    except Exception as e:
+        logger.error(f"GeoJSON validation error: {str(e)}")
+        raise HttpError(400, f"Invalid GeoJSON: {str(e)}")
+
+    # Create the GeoJSON record
+    geojson = GeoJSON.objects.create(
+        region=region,
+        geojson_data=payload.geojson_data,
+        properties_key=payload.properties_key,
+        is_default=False,  # Custom uploads are never default
+        org=orguser.org,
+        name=payload.name,
+        description=payload.description,
+    )
+
+    logger.info(f"Created custom GeoJSON {geojson.id} for org {orguser.org.id}")
+
+    return GeoJSONDetailResponse(
+        id=geojson.id,
+        name=geojson.name,
+        display_name=f"{geojson.name} ({geojson.description or 'No description'})",
+        geojson_data=geojson.geojson_data,
+        properties_key=geojson.properties_key,
+    )
 
 
 @charts_router.get("/geojsons/{geojson_id}/", response=GeoJSONDetailResponse)
