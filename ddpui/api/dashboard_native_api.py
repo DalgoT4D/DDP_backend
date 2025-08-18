@@ -98,6 +98,7 @@ class DashboardResponse(Schema):
     dashboard_type: str
     grid_columns: int
     target_screen_size: str
+    filter_layout: str
     layout_config: list[dict]
     components: dict
     is_published: bool
