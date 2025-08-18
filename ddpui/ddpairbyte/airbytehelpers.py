@@ -660,7 +660,7 @@ def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUp
     update_fields = {}
     if payload.name:
         update_fields["connection_name"] = connection["name"]
-    if hasattr(payload, "description"):
+    if payload.description is not None and len(payload.description) <= 100:
         update_fields["description"] = payload.description
 
     if update_fields:
