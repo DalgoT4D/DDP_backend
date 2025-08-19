@@ -398,6 +398,7 @@ def do_handle_prefect_webhook(flow_run_id: str, state: str):
             FLOW_RUN_FAILED_STATE_NAME,
             FLOW_RUN_CRASHED_STATE_NAME,
             FLOW_RUN_COMPLETED_STATE_NAME,
+            "DBT_TEST_FAILED",
         ]:
             org = get_org_from_flow_run(flow_run)
             if org:
@@ -412,6 +413,21 @@ def do_handle_prefect_webhook(flow_run_id: str, state: str):
                     # odf might be None!
                     odf = OrgDataFlowv1.objects.filter(org=org, deployment_id=deployment_id).first()
                     send_failure_emails(org, odf, flow_run, state)
+
+                elif state == "DBT_TEST_FAILED":
+                    # Handle DBT test failures specifically
+                    odf = OrgDataFlowv1.objects.filter(org=org, deployment_id=deployment_id).first()
+                    pipeline_name = odf.name if odf else "Unknown pipeline"
+
+                    message = f"To the admins of {org.name},\n\nDBT tests have failed in pipeline {pipeline_name}\n\nPlease visit {os.getenv('FRONTEND_URL')} for more details"
+                    email_subject = f"{org.name}: DBT test failure for {pipeline_name}"
+
+                    notify_org_managers(
+                        org,
+                        message,
+                        email_subject,
+                        category=NotificationCategory.DBT_TEST_FAILURE.value,
+                    )
 
                 elif state in [FLOW_RUN_COMPLETED_STATE_NAME]:
                     email_orgusers_ses_whitelisted(org, "Your pipeline completed successfully")
