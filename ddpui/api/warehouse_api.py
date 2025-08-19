@@ -50,21 +50,69 @@ logger = CustomLogger("ddpui")
 @warehouse_router.get("/tables/{schema_name}")
 @has_permission(["can_view_warehouse_data"])
 def get_table(request, schema_name: str):
-    """Fetches table names from a warehouse"""
+    """
+    Fetch all table names from a specific schema in the data warehouse.
+
+    Returns a list of table names available within the specified schema
+    of the organization's data warehouse.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+        schema_name (str): Name of the database schema to query
+
+    Returns:
+        list: List of table names in the specified schema
+
+    Raises:
+        HttpError: 403 if user lacks permission to view warehouse data
+        HttpError: 400 if warehouse connection fails or schema not found
+    """
     return get_warehouse_data(request, "tables", schema_name=schema_name)
 
 
 @warehouse_router.get("/schemas")
 @has_permission(["can_view_warehouse_data"])
 def get_schema(request):
-    """Fetches schema names from a warehouse"""
+    """
+    Fetch all schema names from the organization's data warehouse.
+
+    Returns a list of all database schemas available in the organization's
+    configured data warehouse. Schemas organize tables and views into logical groups.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+
+    Returns:
+        list: List of schema names available in the warehouse
+
+    Raises:
+        HttpError: 403 if user lacks permission to view warehouse data
+        HttpError: 400 if warehouse connection fails
+    """
     return get_warehouse_data(request, "schemas")
 
 
 @warehouse_router.get("/table_columns/{schema_name}/{table_name}")
 @has_permission(["can_view_warehouse_data"])
 def get_table_columns(request, schema_name: str, table_name: str):
-    """Fetches column names for a specific table from a warehouse"""
+    """
+    Fetch column information for a specific table in the data warehouse.
+
+    Returns detailed information about all columns in the specified table,
+    including column names, data types, and other metadata.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+        schema_name (str): Name of the database schema containing the table
+        table_name (str): Name of the table to inspect
+
+    Returns:
+        list: List of column definitions including names, types, and metadata
+
+    Raises:
+        HttpError: 403 if user lacks permission to view warehouse data
+        HttpError: 400 if warehouse connection fails or table not found
+    """
     return get_warehouse_data(
         request, "table_columns", schema_name=schema_name, table_name=table_name
     )
