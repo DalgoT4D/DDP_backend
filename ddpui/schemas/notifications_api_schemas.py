@@ -75,8 +75,6 @@ class NotificationDataSchema(Schema):
 class CategorySubscriptionSchema(Schema):
     """Schema for updating category subscription preferences"""
 
-    subscribe_incident_notifications: Optional[bool] = None
     subscribe_schema_change_notifications: Optional[bool] = None
     subscribe_job_failure_notifications: Optional[bool] = None
-    subscribe_late_runs_notifications: Optional[bool] = None
     subscribe_dbt_test_failure_notifications: Optional[bool] = None

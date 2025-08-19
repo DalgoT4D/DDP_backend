@@ -10,6 +10,7 @@ from ddpui.models.org import Org, OrgDataFlowv1, ConnectionMeta
 from ddpui.models.tasks import OrgTask
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
+from ddpui.models.notifications import NotificationCategory
 from ddpui.utils.awsses import send_text_message
 from ddpui.models.tasks import (
     TaskLock,
@@ -147,7 +148,7 @@ def email_flowrun_logs_to_superadmins(org: Org, flow_run_id: str):
     email_superadmins(org, email_body)
 
 
-def notify_org_managers(org: Org, message: str, email_subject: str):
+def notify_org_managers(org: Org, message: str, email_subject: str, category: str = None):
     """send a notification to all users in the org"""
     error, recipients = get_recipients(
         SentToEnum.ALL_ORG_USERS, org.slug, None, manager_or_above=True
@@ -157,7 +158,11 @@ def notify_org_managers(org: Org, message: str, email_subject: str):
         return
     error, response = create_notification(
         NotificationDataSchema(
-            author="Dalgo", message=message, email_subject=email_subject, recipients=recipients
+            author="Dalgo",
+            message=message,
+            email_subject=email_subject,
+            recipients=recipients,
+            category=category,
         )
     )
     if error:
@@ -368,9 +373,7 @@ def send_failure_emails(org: Org, odf: OrgDataFlowv1 | None, flow_run: dict, sta
 
     email_body.append(f"\nPlease visit {os.getenv('FRONTEND_URL')} for more details")
     notify_org_managers(
-        org,
-        "\n".join(email_body),
-        email_subject,
+        org, "\n".join(email_body), email_subject, category=NotificationCategory.JOB_FAILURE.value
     )
 
 

@@ -7,10 +7,8 @@ class CreateUserPreferencesSchema(Schema):
 
     enable_email_notifications: bool
     disclaimer_shown: Optional[bool] = None
-    subscribe_incident_notifications: Optional[bool] = True
     subscribe_schema_change_notifications: Optional[bool] = True
     subscribe_job_failure_notifications: Optional[bool] = True
-    subscribe_late_runs_notifications: Optional[bool] = True
     subscribe_dbt_test_failure_notifications: Optional[bool] = True
 
 
@@ -19,8 +17,6 @@ class UpdateUserPreferencesSchema(Schema):
 
     enable_email_notifications: Optional[bool] = None
     disclaimer_shown: Optional[bool] = None
-    subscribe_incident_notifications: Optional[bool] = None
     subscribe_schema_change_notifications: Optional[bool] = None
     subscribe_job_failure_notifications: Optional[bool] = None
-    subscribe_late_runs_notifications: Optional[bool] = None
     subscribe_dbt_test_failure_notifications: Optional[bool] = None

@@ -2,10 +2,7 @@ from typing import Tuple, Optional, Dict, Any, List
 from datetime import datetime
 from celery.result import AsyncResult
 from django.core.paginator import Paginator
-from ddpui.models.notifications import (
-    Notification,
-    NotificationRecipient,
-)
+from ddpui.models.notifications import Notification, NotificationRecipient, NotificationCategory
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
@@ -58,11 +55,9 @@ def get_recipients(
 
     # Map category string to the correct field name
     category_field_mapping = {
-        "incident": "subscribe_incident_notifications",
-        "schema_change": "subscribe_schema_change_notifications",
-        "job_failure": "subscribe_job_failure_notifications",
-        "late_runs": "subscribe_late_runs_notifications",
-        "dbt_test_failure": "subscribe_dbt_test_failure_notifications",
+        NotificationCategory.SCHEMA_CHANGE: "subscribe_schema_change_notifications",
+        NotificationCategory.JOB_FAILURE: "subscribe_job_failure_notifications",
+        NotificationCategory.DBT_TEST_FAILURE: "subscribe_dbt_test_failure_notifications",
     }
 
     preference_field = category_field_mapping.get(category)
