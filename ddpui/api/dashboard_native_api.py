@@ -121,10 +121,18 @@ class LockResponse(Schema):
     locked_by: str
 
 
+class FilterOptionResponse(Schema):
+    """Schema for individual filter option"""
+
+    label: str
+    value: str
+    count: Optional[int] = None
+
+
 class FilterOptionsResponse(Schema):
     """Response schema for filter options"""
 
-    options: List[str]
+    options: List[FilterOptionResponse]
     total_count: int
 
 
@@ -692,3 +700,121 @@ def get_filter_options(
     )
 
     return FilterOptionsResponse(options=options, total_count=len(options))
+
+
+# ===== Dashboard Sharing Endpoints =====
+
+
+class DashboardShareToggle(Schema):
+    """Schema for toggling dashboard sharing"""
+
+    is_public: bool
+
+
+class DashboardShareResponse(Schema):
+    """Schema for share response"""
+
+    is_public: bool
+    public_url: Optional[str] = None
+    public_share_token: Optional[str] = None
+    message: str
+
+
+class DashboardShareStatus(Schema):
+    """Schema for share status response"""
+
+    is_public: bool
+    public_url: Optional[str] = None
+    public_access_count: int
+    last_public_accessed: Optional[datetime] = None
+    public_shared_at: Optional[datetime] = None
+
+
+@dashboard_native_router.put("/{dashboard_id}/share/")
+def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShareToggle):
+    """Toggle public sharing for a dashboard"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
+    except Dashboard.DoesNotExist:
+        raise HttpError(404, "Dashboard not found")
+
+    # Check permissions - only dashboard creator or org admin can modify sharing
+    if dashboard.created_by != orguser:
+        # TODO: Add org admin check if needed
+        raise HttpError(403, "Only dashboard creators can modify sharing settings")
+
+    is_public = payload.is_public
+
+    if is_public:
+        # Generate token if making public
+        if not dashboard.public_share_token:
+            import secrets
+
+            dashboard.public_share_token = secrets.token_urlsafe(48)
+        dashboard.public_shared_at = timezone.now()
+        dashboard.public_disabled_at = None
+    else:
+        # Disable public sharing but keep token for audit
+        dashboard.public_disabled_at = timezone.now()
+
+    dashboard.is_public = is_public
+    dashboard.save()
+
+    # Build response
+    response_data = {
+        "is_public": dashboard.is_public,
+        "message": f'Dashboard {"made public" if is_public else "made private"}',
+    }
+
+    if dashboard.is_public and dashboard.public_share_token:
+        # Generate the full public URL
+        from django.conf import settings
+
+        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3001")
+        response_data[
+            "public_url"
+        ] = f"{frontend_url}/share/dashboard/{dashboard.public_share_token}"
+        response_data["public_share_token"] = dashboard.public_share_token
+
+    # Audit logging
+    action = "enabled_public_sharing" if is_public else "disabled_public_sharing"
+    logger.info(
+        f"Dashboard {dashboard_id} sharing {action} by user {orguser.user.email}, token: {dashboard.public_share_token}"
+    )
+
+    return DashboardShareResponse(**response_data)
+
+
+@dashboard_native_router.get("/{dashboard_id}/share/")
+def get_dashboard_sharing_status(request, dashboard_id: int):
+    """Get dashboard sharing status"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
+    except Dashboard.DoesNotExist:
+        raise HttpError(404, "Dashboard not found")
+
+    # Check permissions - only dashboard creator or org admin can view sharing status
+    if dashboard.created_by != orguser:
+        # TODO: Add org admin check if needed
+        raise HttpError(403, "Only dashboard creators can view sharing settings")
+
+    response_data = {
+        "is_public": dashboard.is_public,
+        "public_access_count": dashboard.public_access_count,
+        "last_public_accessed": dashboard.last_public_accessed,
+        "public_shared_at": dashboard.public_shared_at,
+    }
+
+    if dashboard.is_public and dashboard.public_share_token:
+        from django.conf import settings
+
+        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3001")
+        response_data[
+            "public_url"
+        ] = f"{frontend_url}/share/dashboard/{dashboard.public_share_token}"
+
+    return DashboardShareStatus(**response_data)
