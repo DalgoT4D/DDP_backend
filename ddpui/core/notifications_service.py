@@ -55,9 +55,9 @@ def get_recipients(
 
     # Map category string to the correct field name
     category_field_mapping = {
-        NotificationCategory.SCHEMA_CHANGE: "subscribe_schema_change_notifications",
-        NotificationCategory.JOB_FAILURE: "subscribe_job_failure_notifications",
-        NotificationCategory.DBT_TEST_FAILURE: "subscribe_dbt_test_failure_notifications",
+        NotificationCategory.SCHEMA_CHANGE.value: "subscribe_schema_change_notifications",
+        NotificationCategory.JOB_FAILURE.value: "subscribe_job_failure_notifications",
+        NotificationCategory.DBT_TEST_FAILURE.value: "subscribe_dbt_test_failure_notifications",
     }
 
     preference_field = category_field_mapping.get(category)
