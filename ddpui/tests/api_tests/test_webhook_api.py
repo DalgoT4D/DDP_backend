@@ -37,6 +37,7 @@ from ddpui.models.org_user import OrgUser, User, OrgUserRole, UserAttributes
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskLock
+from ddpui.models.notifications import NotificationCategory
 from ddpui.settings import PRODUCTION
 from ddpui.tests.api_tests.test_user_org_api import seed_db
 from ddpui.ddpprefect import (
@@ -235,7 +236,12 @@ def test_post_notification_v1_orchestrate():
         mock_email_flowrun_logs_to_superadmins_2.assert_not_called()
         mock_notify_platform_admins.assert_not_called()
         mock_email_orgusers_ses_whitelisted.assert_called_once()
-        mock_notify_org_managers.assert_called_once_with(org, "\n".join(email_body), email_subject)
+        mock_notify_org_managers.assert_called_once_with(
+            org,
+            "\n".join(email_body),
+            email_subject,
+            category=NotificationCategory.JOB_FAILURE.value,
+        )
 
 
 def test_post_notification_v1_manual_with_connection_id():
@@ -284,7 +290,12 @@ def test_post_notification_v1_manual_with_connection_id():
         mock_email_flowrun_logs_to_superadmins_2.assert_not_called()
         mock_notify_platform_admins.assert_not_called()
         mock_email_orgusers_ses_whitelisted.assert_called_once()
-        mock_notify_org_managers.assert_called_once_with(org, "\n".join(email_body), email_subject)
+        mock_notify_org_managers.assert_called_once_with(
+            org,
+            "\n".join(email_body),
+            email_subject,
+            category=NotificationCategory.JOB_FAILURE.value,
+        )
 
 
 def test_post_notification_v1_manual_with_orgtask_id(seed_master_tasks):
@@ -333,7 +344,12 @@ def test_post_notification_v1_manual_with_orgtask_id(seed_master_tasks):
         mock_email_flowrun_logs_to_superadmins_2.assert_not_called()
         mock_notify_platform_admins.assert_not_called()
         mock_email_orgusers_ses_whitelisted.assert_called_once()
-        mock_notify_org_managers.assert_called_once_with(org, "\n".join(email_body), email_subject)
+        mock_notify_org_managers.assert_called_once_with(
+            org,
+            "\n".join(email_body),
+            email_subject,
+            category=NotificationCategory.JOB_FAILURE.value,
+        )
 
 
 def test_post_notification_v1_manual_with_orgtask_id_generate_edr(seed_master_tasks):

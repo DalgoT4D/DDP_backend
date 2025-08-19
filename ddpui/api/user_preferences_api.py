@@ -28,10 +28,8 @@ def create_user_preferences(request, payload: CreateUserPreferencesSchema):
         orguser=orguser,
         enable_email_notifications=payload.enable_email_notifications,
         disclaimer_shown=payload.disclaimer_shown,
-        subscribe_incident_notifications=payload.subscribe_incident_notifications,
         subscribe_schema_change_notifications=payload.subscribe_schema_change_notifications,
         subscribe_job_failure_notifications=payload.subscribe_job_failure_notifications,
-        subscribe_late_runs_notifications=payload.subscribe_late_runs_notifications,
         subscribe_dbt_test_failure_notifications=payload.subscribe_dbt_test_failure_notifications,
     )
 
