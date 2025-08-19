@@ -151,7 +151,7 @@ def email_flowrun_logs_to_superadmins(org: Org, flow_run_id: str):
 def notify_org_managers(org: Org, message: str, email_subject: str, category: str = None):
     """send a notification to all users in the org"""
     error, recipients = get_recipients(
-        SentToEnum.ALL_ORG_USERS, org.slug, None, manager_or_above=True
+        SentToEnum.ALL_ORG_USERS, org.slug, None, manager_or_above=True, category=category
     )
     if error:
         logger.error(f"Error getting recipients: {error}")
