@@ -82,6 +82,25 @@ class Dashboard(models.Model):
     is_published = models.BooleanField(default=False)
     published_at = models.DateTimeField(null=True, blank=True)
 
+    # Public sharing configuration
+    is_public = models.BooleanField(
+        default=False, help_text="If True, dashboard is accessible via public URL"
+    )
+    public_share_token = models.CharField(
+        max_length=64,
+        unique=True,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Unique token for public sharing URLs",
+    )
+    public_shared_at = models.DateTimeField(null=True, blank=True)
+    public_disabled_at = models.DateTimeField(null=True, blank=True)
+
+    # Public access analytics
+    public_access_count = models.IntegerField(default=0)
+    last_public_accessed = models.DateTimeField(null=True, blank=True)
+
     # Metadata
     created_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE, db_column="created_by")
     org = models.ForeignKey(Org, on_delete=models.CASCADE)

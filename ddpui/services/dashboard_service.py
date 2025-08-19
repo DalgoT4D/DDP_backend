@@ -201,7 +201,7 @@ class DashboardService:
     @staticmethod
     def generate_filter_options(
         schema: str, table: str, column: str, org_warehouse: OrgWarehouse, limit: int = 100
-    ) -> List[str]:
+    ) -> List[Dict[str, str]]:
         """Generate filter options for categorical filters
 
         Args:
@@ -212,7 +212,7 @@ class DashboardService:
             limit: Maximum number of options to return
 
         Returns:
-            List of distinct values
+            List of filter options with label and value
         """
         # Check cache first
         cache_key = f"filter_options:{org_warehouse.org.id}:{schema}:{table}:{column}"
@@ -248,8 +248,13 @@ class DashboardService:
             # Execute query
             result = warehouse_client.execute(query)
 
-            # Extract values - result is a list of dictionaries
-            options = [str(row.get("value", "")) for row in result if row.get("value") is not None]
+            # Extract values and format as objects with label and value
+            # This matches what the frontend expects
+            options = [
+                {"label": str(row.get("value", "")), "value": str(row.get("value", ""))}
+                for row in result
+                if row.get("value") is not None
+            ]
 
             # Cache for 5 minutes
             cache.set(cache_key, options, 300)

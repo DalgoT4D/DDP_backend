@@ -22,6 +22,7 @@ from ddpui.api.webhook_api import webhook_router
 from ddpui.api.charts_api import charts_router
 from ddpui.api.dashboard_native_api import dashboard_native_router
 from ddpui.api.filter_api import filter_router
+from ddpui.api.public_api import public_router
 
 
 src_api = NinjaAPI(
@@ -83,6 +84,7 @@ webhook_router.tags = ["Webhook"]
 charts_router.tags = ["Charts"]
 dashboard_native_router.tags = ["Native Dashboards"]
 filter_router.tags = ["Filters"]
+public_router.tags = ["Public"]
 
 # mount all the module routes
 src_api.add_router("/api/airbyte/", airbyte_router)
@@ -103,6 +105,15 @@ src_api.add_router("/api/orgpreferences/", orgpreference_router)
 src_api.add_router("/api/charts/", charts_router)
 src_api.add_router("/api/dashboards/", dashboard_native_router)
 src_api.add_router("/api/filters/", filter_router)
+
+# Public API without authentication
+public_api = NinjaAPI(
+    urls_namespace="public-api",
+    title="Public Dalgo APIs",
+    description="Public endpoints for shared dashboards - no authentication required",
+    docs_url="/api/v1/public/docs",
+)
+public_api.add_router("/api/v1/public/", public_router)
 
 # Test router without authentication (development only)
 test_api = NinjaAPI(
