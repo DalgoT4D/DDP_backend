@@ -70,6 +70,14 @@ class Dashboard(models.Model):
     # Components configuration
     components = models.JSONField(default=dict, help_text="Dashboard components configuration")
 
+    # Filter layout configuration
+    filter_layout = models.CharField(
+        max_length=20,
+        choices=[("vertical", "Vertical"), ("horizontal", "Horizontal")],
+        default="vertical",
+        help_text="Layout for dashboard filters - vertical sidebar or horizontal top bar",
+    )
+
     # Publishing status
     is_published = models.BooleanField(default=False)
     published_at = models.DateTimeField(null=True, blank=True)
@@ -101,6 +109,7 @@ class Dashboard(models.Model):
             "target_screen_size": self.target_screen_size,
             "layout_config": self.layout_config,
             "components": self.components,
+            "filter_layout": self.filter_layout,
             "is_published": self.is_published,
             "published_at": self.published_at.isoformat() if self.published_at else None,
             "created_by": self.created_by.user.email if self.created_by else None,
