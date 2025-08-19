@@ -473,13 +473,3 @@ def get_urgent_notifications(
         )
 
     return None, {"success": True, "res": notifications_list}
-
-
-# get notifications by category
-def get_notifications_by_category(
-    orguser: OrgUser, category: str, page: int = 1, limit: int = 10
-) -> Tuple[Optional[None], Dict[str, Any]]:
-    """
-    Get notifications for a specific category for the user.
-    """
-    return fetch_user_notifications_v1(orguser, page, limit, category=category)

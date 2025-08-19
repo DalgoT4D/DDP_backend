@@ -273,29 +273,6 @@ def get_urgent_notifications(request):
     return result
 
 
-@notification_router.get("/categories/{category}")
-def get_notifications_by_category(request, category: str, page: int = 1, limit: int = 10):
-    """
-    Get notifications for a specific category for the authenticated user.
-
-    Args:
-        request: HTTP request object containing orguser authentication data
-        category: The notification category to filter by
-        page (int, optional): Page number for pagination. Defaults to 1
-        limit (int, optional): Number of notifications per page. Defaults to 10
-
-    Returns:
-        dict: Paginated notifications for the specified category
-
-    Raises:
-        HttpError: 400 if retrieval fails
-    """
-    orguser: OrgUser = request.orguser
-    error, result = notifications_service.get_notifications_by_category(
-        orguser, category, page, limit
-    )
-
-
 @notification_router.put("/mark_all_as_read")
 def mark_all_notifications_as_read(request):
     """Mark all notifications as read for the user"""
