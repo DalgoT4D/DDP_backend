@@ -3,7 +3,6 @@
 from typing import Optional, List
 from datetime import datetime
 
-from django.shortcuts import get_object_or_404
 from ninja import Router, Schema
 from ninja.errors import HttpError
 
@@ -532,7 +531,10 @@ def generate_map_chart_data(request, payload: ChartDataPayload):
 def get_chart(request, chart_id: int):
     """Get a specific chart"""
     orguser = request.orguser
-    chart = get_object_or_404(Chart, id=chart_id, org=orguser.org)
+    try:
+        chart = Chart.objects.get(id=chart_id, org=orguser.org)
+    except Chart.DoesNotExist:
+        raise HttpError(404, "Chart not found")
 
     # Get org warehouse
     org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
@@ -563,7 +565,10 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
     import json
 
     orguser = request.orguser
-    chart = get_object_or_404(Chart, id=chart_id, org=orguser.org)
+    try:
+        chart = Chart.objects.get(id=chart_id, org=orguser.org)
+    except Chart.DoesNotExist:
+        raise HttpError(404, "Chart not found")
 
     # Get org warehouse
     org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
@@ -709,7 +714,10 @@ def create_chart(request, payload: ChartCreate):
 def update_chart(request, chart_id: int, payload: ChartUpdate):
     """Update a chart"""
     orguser = request.orguser
-    chart = get_object_or_404(Chart, id=chart_id, org=orguser.org)
+    try:
+        chart = Chart.objects.get(id=chart_id, org=orguser.org)
+    except Chart.DoesNotExist:
+        raise HttpError(404, "Chart not found")
 
     # Prepare the updated values
     updated_chart_type = payload.chart_type if payload.chart_type is not None else chart.chart_type
@@ -780,6 +788,46 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
 def delete_chart(request, chart_id: int):
     """Delete a chart"""
     orguser = request.orguser
-    chart = get_object_or_404(Chart, id=chart_id, org=orguser.org)
+    try:
+        chart = Chart.objects.get(id=chart_id, org=orguser.org)
+    except Chart.DoesNotExist:
+        raise HttpError(404, "Chart not found")
     chart.delete()
     return {"success": True}
+
+
+@charts_router.get("/{chart_id}/dashboards/", response=List[dict])
+def get_chart_dashboards(request, chart_id: int):
+    """Get list of dashboards that use this chart"""
+    orguser = request.orguser
+
+    # Verify chart exists and belongs to org
+    try:
+        chart = Chart.objects.get(id=chart_id, org=orguser.org)
+    except Chart.DoesNotExist:
+        raise HttpError(404, "Chart not found")
+
+    # Import here to avoid circular imports
+    from ddpui.models.dashboard import Dashboard
+
+    # Find dashboards that have this chart in their components
+    dashboards_with_chart = []
+    dashboards = Dashboard.objects.filter(org=orguser.org)
+
+    for dashboard in dashboards:
+        if dashboard.components:
+            for component_id, component in dashboard.components.items():
+                if (
+                    component.get("type") == "chart"
+                    and component.get("config", {}).get("chartId") == chart_id
+                ):
+                    dashboards_with_chart.append(
+                        {
+                            "id": dashboard.id,
+                            "title": dashboard.title,
+                            "dashboard_type": dashboard.dashboard_type,
+                        }
+                    )
+                    break  # Found chart in this dashboard, no need to check other components
+
+    return dashboards_with_chart
