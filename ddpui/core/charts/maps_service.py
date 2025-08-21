@@ -91,6 +91,7 @@ def build_map_query(payload: ChartDataPayload, drill_down_filters: List[Dict] = 
         aggregate_func=payload.aggregate_func or "sum",
         limit=payload.limit or 1000,
         offset=payload.offset or 0,
+        extra_config=payload.extra_config,  # Pass through filters and other config
     )
 
     # Build base query
@@ -142,6 +143,7 @@ def build_drill_down_query_for_layer(
         aggregate_func=payload.aggregate_func,
         limit=payload.limit,
         offset=payload.offset,
+        extra_config=payload.extra_config,  # Pass through filters and other config
     )
 
     return build_map_query(layer_payload, drill_down_filters)
