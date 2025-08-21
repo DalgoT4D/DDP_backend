@@ -5,6 +5,7 @@ from datetime import datetime
 
 from ninja import Router, Schema
 from ninja.errors import HttpError
+from django.shortcuts import get_object_or_404
 
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
@@ -277,7 +278,8 @@ class MapDataOverlayPayload(Schema):
     geographic_column: str
     value_column: str
     aggregate_func: str = "sum"
-    filters: dict = {}
+    filters: dict = {}  # Drill-down filters (key-value pairs)
+    chart_filters: list = []  # Chart-level filters (list of filter objects)
 
 
 @charts_router.post("/map-data-overlay/", response=dict)
@@ -301,6 +303,7 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         value_column = payload.value_column
         aggregate_func = payload.aggregate_func
         filters = payload.filters
+        chart_filters = payload.chart_filters
 
         # Validate required fields
         if not all([schema_name, table_name, geographic_column, value_column]):
@@ -310,6 +313,10 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
             )
 
         # Build payload for standard chart query (same as other charts)
+        extra_config = {}
+        if chart_filters:
+            extra_config["filters"] = chart_filters
+
         chart_payload = ChartDataPayload(
             chart_type="bar",  # We use bar chart query logic for aggregated data
             computation_type="aggregated",
@@ -318,6 +325,7 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
             dimension_col=geographic_column,
             aggregate_col=value_column,
             aggregate_func=aggregate_func,
+            extra_config=extra_config if extra_config else None,
         )
 
         # Get warehouse client and build query using standard chart service
