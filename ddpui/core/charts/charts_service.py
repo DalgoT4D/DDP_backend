@@ -7,7 +7,7 @@ import hashlib
 import json
 
 from django.utils import timezone
-from sqlalchemy import column, and_, or_, text
+from sqlalchemy import column, func, and_, or_, text
 from sqlalchemy.dialects import postgresql
 
 from ddpui.models.org import OrgWarehouse
@@ -168,9 +168,23 @@ def build_chart_query(
     if payload.dashboard_filters:
         query_builder = apply_dashboard_filters(query_builder, payload.dashboard_filters)
 
-    # Add pagination
-    query_builder.limit_rows(payload.limit)
-    query_builder.offset_rows(payload.offset)
+    # Apply chart-level filters if provided
+    if payload.extra_config and payload.extra_config.get("filters"):
+        query_builder = apply_chart_filters(query_builder, payload.extra_config["filters"])
+
+    # Apply chart-level sorting if provided
+    if payload.extra_config and payload.extra_config.get("sort"):
+        query_builder = apply_chart_sorting(query_builder, payload.extra_config["sort"], payload)
+
+    # Apply chart-level pagination if enabled, otherwise use default pagination
+    if payload.extra_config and payload.extra_config.get("pagination", {}).get("enabled"):
+        page_size = payload.extra_config["pagination"].get("page_size", 50)
+        query_builder.limit_rows(page_size)
+        query_builder.offset_rows(payload.offset)
+    else:
+        # Default pagination
+        query_builder.limit_rows(payload.limit)
+        query_builder.offset_rows(payload.offset)
 
     return query_builder
 
@@ -245,6 +259,170 @@ def apply_dashboard_filters(
                 query_builder.where_clause(
                     and_(column(column_name) >= start_of_day, column(column_name) <= end_of_day)
                 )
+
+    return query_builder
+
+
+def apply_chart_filters(
+    query_builder: AggQueryBuilder, filters: List[Dict[str, Any]]
+) -> AggQueryBuilder:
+    """Apply chart-level filters to the query builder using WHERE clauses
+
+    Groups filters by column+operator combination and uses OR logic for same combinations
+    to handle cases like: state_name = 'A' OR state_name = 'B'
+
+    Args:
+        query_builder: The AggQueryBuilder instance to modify
+        filters: List of chart filter dictionaries with format:
+                {
+                    'column': str,
+                    'operator': str,
+                    'value': Any,
+                    'data_type': str (optional)
+                }
+
+    Returns:
+        Modified query builder with applied filters
+    """
+    if not filters:
+        return query_builder
+
+    from collections import defaultdict
+
+    # Group filters by column+operator combination
+    grouped_filters = defaultdict(list)
+    single_filters = []
+
+    for filter_config in filters:
+        column_name = filter_config["column"]
+        operator = filter_config["operator"]
+        value = filter_config["value"]
+
+        if not column_name or operator is None:
+            continue
+
+        # Operators that can be grouped (multiple values with OR)
+        if operator in ["equals", "not_equals"]:
+            grouped_filters[(column_name, operator)].append(value)
+        else:
+            # Other operators are applied individually
+            single_filters.append(filter_config)
+
+    # Apply grouped filters (multiple values with OR logic)
+    for (column_name, operator), values in grouped_filters.items():
+        if len(values) == 1:
+            # Single value, apply normally
+            value = values[0]
+            if operator == "equals":
+                query_builder.where_clause(column(column_name) == value)
+            elif operator == "not_equals":
+                query_builder.where_clause(column(column_name) != value)
+        else:
+            # Multiple values, use OR logic
+            if operator == "equals":
+                # state_name = 'A' OR state_name = 'B' OR state_name = 'C'
+                or_conditions = [column(column_name) == value for value in values]
+                query_builder.where_clause(or_(*or_conditions))
+            elif operator == "not_equals":
+                # state_name != 'A' AND state_name != 'B' AND state_name != 'C'
+                and_conditions = [column(column_name) != value for value in values]
+                query_builder.where_clause(and_(*and_conditions))
+
+    # Apply single filters (non-groupable operators)
+    for filter_config in single_filters:
+        column_name = filter_config["column"]
+        operator = filter_config["operator"]
+        value = filter_config["value"]
+
+        if operator == "greater_than":
+            query_builder.where_clause(column(column_name) > value)
+        elif operator == "less_than":
+            query_builder.where_clause(column(column_name) < value)
+        elif operator == "greater_than_equal":
+            query_builder.where_clause(column(column_name) >= value)
+        elif operator == "less_than_equal":
+            query_builder.where_clause(column(column_name) <= value)
+        elif operator == "like":
+            query_builder.where_clause(column(column_name).like(f"%{value}%"))
+        elif operator == "like_case_insensitive":
+            query_builder.where_clause(
+                func.lower(column(column_name)).like(f"%{str(value).lower()}%")
+            )
+        elif operator == "contains":  # Keep for backward compatibility
+            query_builder.where_clause(column(column_name).like(f"%{value}%"))
+        elif operator == "not_contains":  # Keep for backward compatibility
+            query_builder.where_clause(~column(column_name).like(f"%{value}%"))
+        elif operator == "in":
+            # Convert comma-separated string to list
+            if isinstance(value, str):
+                values = [v.strip() for v in value.split(",") if v.strip()]
+            else:
+                values = value if isinstance(value, list) else [value]
+            if values:
+                query_builder.where_clause(column(column_name).in_(values))
+        elif operator == "not_in":
+            # Convert comma-separated string to list
+            if isinstance(value, str):
+                values = [v.strip() for v in value.split(",") if v.strip()]
+            else:
+                values = value if isinstance(value, list) else [value]
+            if values:
+                query_builder.where_clause(~column(column_name).in_(values))
+        elif operator == "is_null":
+            query_builder.where_clause(column(column_name).is_(None))
+        elif operator == "is_not_null":
+            query_builder.where_clause(column(column_name).isnot(None))
+
+    return query_builder
+
+
+def apply_chart_sorting(
+    query_builder: AggQueryBuilder, sort_config: List[Dict[str, Any]], payload=None
+) -> AggQueryBuilder:
+    """Apply chart-level sorting to the query builder
+
+    Args:
+        query_builder: The AggQueryBuilder instance to modify
+        sort_config: List of sort dictionaries with format:
+                    {
+                        'column': str,
+                        'direction': str ('asc' or 'desc')
+                    }
+        payload: The chart data payload for context about aggregate columns
+
+    Returns:
+        Modified query builder with applied sorting
+    """
+    if not sort_config:
+        return query_builder
+
+    # Prepare sort columns as list of tuples for order_cols_by method
+    sort_cols = []
+    for sort_item in sort_config:
+        column_name = sort_item.get("column")
+        direction = sort_item.get("direction", "asc")
+
+        if not column_name:
+            continue
+
+        # For aggregated queries, if sorting by the aggregate column,
+        # use the aggregated column alias instead of the raw column
+        if (
+            payload
+            and payload.computation_type == "aggregated"
+            and hasattr(payload, "aggregate_col")
+            and column_name == payload.aggregate_col
+        ):
+            # Use the aggregated column alias pattern
+            aggregate_func = getattr(payload, "aggregate_func", "sum")
+            sort_column = f"{aggregate_func}_{column_name}"
+        else:
+            sort_column = column_name
+
+        sort_cols.append((sort_column, direction))
+
+    if sort_cols:
+        query_builder.order_cols_by(sort_cols)
 
     return query_builder
 
