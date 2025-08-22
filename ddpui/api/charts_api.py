@@ -34,6 +34,11 @@ logger = CustomLogger("ddpui")
 charts_router = Router()
 
 
+# Schema for bulk delete
+class BulkDeleteRequest(Schema):
+    chart_ids: List[int]
+
+
 @charts_router.get("/regions/{region_id}/geojsons/", response=List[dict])
 def get_geojsons_for_region(request, region_id: int):
     """Get available GeoJSONs for a specific region"""
@@ -861,6 +866,38 @@ def delete_chart(request, chart_id: int):
         raise HttpError(404, "Chart not found")
     chart.delete()
     return {"success": True}
+
+
+@charts_router.post("/bulk-delete/")
+def bulk_delete_charts(request, payload: BulkDeleteRequest):
+    """Delete multiple charts"""
+    orguser = request.orguser
+
+    if not payload.chart_ids:
+        raise HttpError(400, "No chart IDs provided")
+
+    try:
+        # Get charts that belong to this org
+        charts = Chart.objects.filter(id__in=payload.chart_ids, org=orguser.org)
+        found_ids = list(charts.values_list("id", flat=True))
+
+        # Check if all requested charts were found
+        missing_ids = set(payload.chart_ids) - set(found_ids)
+        if missing_ids:
+            logger.warning(f"Charts not found or not accessible: {missing_ids}")
+
+        # Delete the charts
+        deleted_count = charts.delete()[0]
+
+        return {
+            "success": True,
+            "deleted_count": deleted_count,
+            "requested_count": len(payload.chart_ids),
+            "missing_ids": list(missing_ids),
+        }
+    except Exception as e:
+        logger.error(f"Error in bulk delete: {str(e)}")
+        raise HttpError(500, f"Error deleting charts: {str(e)}")
 
 
 @charts_router.get("/{chart_id}/dashboards/", response=List[dict])
