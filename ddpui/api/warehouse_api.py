@@ -85,29 +85,35 @@ def get_column_values(request, schema_name: str, table_name: str, column_name: s
         from ddpui.datainsights.query_builder import AggQueryBuilder
 
         # Use query builder to fetch distinct column values
-        query_builder = AggQueryBuilder(
-            warehouse_type=org_warehouse.wtype, schema_name=schema_name, table_name=table_name
-        )
+        query_builder = AggQueryBuilder()
 
-        # Select distinct values from the column, excluding nulls and empty strings
-        query_builder = query_builder.select_cols([column_name]).distinct()
+        # Set the table to select from
+        query_builder.fetch_from(table_name, schema_name)
+
+        # Select distinct values from the column
+        from sqlalchemy import column, func, text, and_
+
+        # Add the column with DISTINCT
+        query_builder.add_column(func.distinct(column(column_name)))
 
         # Add filters to exclude null and empty values
-        from sqlalchemy import and_, func, text
-
         filters = [
             text(f"{column_name} IS NOT NULL"),
             text(f"TRIM(CAST({column_name} AS TEXT)) != ''"),
         ]
-        query_builder = query_builder.filter(and_(*filters))
+        query_builder.where_clause(and_(*filters))
 
-        # Order and limit results
-        query_builder = query_builder.order_cols_by([column_name]).limit(500)
+        # Order and limit results - fix the method signature
+        query_builder.order_cols_by([(column_name, "asc")])
+        query_builder.limit_rows(500)
 
         # Execute query
         wclient = dbtautomation_service._get_wclient(org_warehouse)
-        query = query_builder.compile()
-        results = wclient.run_query(str(query))
+        sql_stmt = query_builder.build()
+        compiled_stmt = sql_stmt.compile(
+            bind=wclient.engine, compile_kwargs={"literal_binds": True}
+        )
+        results = wclient.run_query(str(compiled_stmt))
 
         if results and len(results) > 0:
             # Extract the column values from the query results, filter out empty strings

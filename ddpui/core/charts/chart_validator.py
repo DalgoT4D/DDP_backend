@@ -16,7 +16,7 @@ class ChartValidator:
     """Validates chart configurations based on chart type and computation type"""
 
     # Valid chart types
-    VALID_CHART_TYPES = ["bar", "pie", "line", "number", "map"]
+    VALID_CHART_TYPES = ["bar", "pie", "line", "number", "map", "table"]
 
     # Valid computation types
     VALID_COMPUTATION_TYPES = ["raw", "aggregated"]
@@ -78,6 +78,8 @@ class ChartValidator:
                     extra_config.get("selected_geojson_id"),
                     customizations,
                 )
+            elif chart_type == "table":
+                ChartValidator._validate_table_chart(computation_type, schema_name, table_name)
 
             return True, None
 
@@ -384,3 +386,15 @@ class ChartValidator:
                 raise ChartValidationError(
                     f"Invalid color scheme '{color_scheme}'. Must be one of: Blues, Reds, Greens, Purples, Oranges, Greys"
                 )
+
+    @staticmethod
+    def _validate_table_chart(
+        computation_type: str,
+        schema_name: str,
+        table_name: str,
+    ) -> None:
+        """Validate table chart configuration"""
+        # Tables support both raw and aggregated data
+        # Only basic validation needed - schema and table are already validated in _validate_basic_fields
+        # No additional column requirements for table charts
+        pass
