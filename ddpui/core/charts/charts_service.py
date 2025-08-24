@@ -27,6 +27,29 @@ from ddpui.schemas.chart_schema import (
     TransformDataForChart,
 )
 
+
+def get_pagination_params(payload: ChartDataPayload):
+    """
+    Extract pagination parameters from payload.
+    Returns (limit, offset) tuple with proper defaults.
+    """
+    # Check if pagination is enabled in extra_config
+    if (
+        payload.extra_config
+        and payload.extra_config.get("pagination")
+        and payload.extra_config["pagination"].get("enabled")
+    ):
+        page_size = payload.extra_config["pagination"].get("page_size", 50)
+        # For preview/build, always start from offset 0
+        return page_size, 0
+    else:
+        # Default pagination when not explicitly set
+        # Use old payload.limit/offset if available (backward compatibility)
+        limit = getattr(payload, "limit", 100)
+        offset = getattr(payload, "offset", 0)
+        return limit, offset
+
+
 logger = CustomLogger("ddpui.charts")
 
 # Global configuration for null value handling
@@ -70,16 +93,20 @@ def get_warehouse_client(org_warehouse: OrgWarehouse) -> Warehouse:
 
 def get_aggregate_column_name(aggregate_func: str, aggregate_col: str) -> str:
     """Get the correct aggregate column name for data retrieval"""
-    if aggregate_func.lower() == "count" and aggregate_col is None:
+    if aggregate_func and aggregate_func.lower() == "count" and aggregate_col is None:
         return "count_all"
-    return f"{aggregate_func}_{aggregate_col}"
+    if aggregate_func:
+        return f"{aggregate_func}_{aggregate_col}"
+    return "unknown_metric"
 
 
 def get_aggregate_display_name(aggregate_func: str, aggregate_col: str) -> str:
     """Get the display name for aggregate columns in chart legends"""
-    if aggregate_func.lower() == "count" and aggregate_col is None:
+    if aggregate_func and aggregate_func.lower() == "count" and aggregate_col is None:
         return "Total Count"
-    return f"{aggregate_func}({aggregate_col})"
+    if aggregate_func:
+        return f"{aggregate_func}({aggregate_col})"
+    return "Unknown Metric"
 
 
 def convert_value(value: Any, preserve_none: bool = False) -> Any:
@@ -101,6 +128,50 @@ def convert_value(value: Any, preserve_none: bool = False) -> Any:
     elif isinstance(value, Decimal):
         return float(value)
     return value
+
+
+def build_multi_metric_query(
+    payload: ChartDataPayload,
+    query_builder: AggQueryBuilder,
+) -> AggQueryBuilder:
+    """Build query for multiple metrics on bar/line charts"""
+    if not payload.dimension_col:
+        raise ValueError("dimension_col is required for multiple metrics charts")
+
+    if not payload.metrics or len(payload.metrics) == 0:
+        raise ValueError("At least one metric is required for multiple metrics charts")
+
+    # Add dimension column
+    query_builder.add_column(column(payload.dimension_col))
+
+    # Add all metrics as aggregate columns
+    for metric in payload.metrics:
+        if not metric.aggregation:
+            raise ValueError(f"Aggregation function is required for metric")
+
+        # Handle count with None column case
+        if metric.aggregation.lower() == "count" and metric.column is None:
+            alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+        else:
+            if not metric.column:
+                raise ValueError(f"Column is required for {metric.aggregation} aggregation")
+            alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+
+        query_builder.add_aggregate_column(
+            metric.column,
+            metric.aggregation,
+            alias,
+        )
+
+    # Group by dimension column
+    query_builder.group_cols_by(payload.dimension_col)
+
+    # Add extra dimension if specified
+    if payload.extra_dimension:
+        query_builder.add_column(column(payload.extra_dimension))
+        query_builder.group_cols_by(payload.extra_dimension)
+
+    return query_builder
 
 
 def build_chart_query(
@@ -125,13 +196,43 @@ def build_chart_query(
             )
 
     else:  # aggregated
+        # Check if multiple metrics are provided for bar/line/table charts
+        if payload.metrics and payload.chart_type in ["bar", "line", "table"]:
+            # Use multiple metrics approach
+            query_builder = build_multi_metric_query(payload, query_builder)
+
+            # Apply chart-level filters, sorting, and pagination (same as single metric approach)
+            # Apply chart-level filters if provided
+            if payload.extra_config and payload.extra_config.get("filters"):
+                query_builder = apply_chart_filters(query_builder, payload.extra_config["filters"])
+
+            # Apply chart-level sorting if provided
+            if payload.extra_config and payload.extra_config.get("sort"):
+                query_builder = apply_chart_sorting(
+                    query_builder, payload.extra_config["sort"], payload
+                )
+
+            # Apply pagination
+            limit, offset = get_pagination_params(payload)
+            query_builder.limit_rows(limit)
+            query_builder.offset_rows(offset)
+
+            return query_builder
+
         # For number charts, we don't need dimension columns
         if payload.chart_type == "number":
             # Handle count with None column case - use "count_all" alias
-            if payload.aggregate_func.lower() == "count" and payload.aggregate_col is None:
+            if (
+                payload.aggregate_func
+                and payload.aggregate_func.lower() == "count"
+                and payload.aggregate_col is None
+            ):
                 alias = "count_all"
-            else:
+            elif payload.aggregate_func:
                 alias = f"{payload.aggregate_func}_{payload.aggregate_col}"
+            else:
+                # This shouldn't happen with proper validation, but handle gracefully
+                alias = "unknown_metric"
 
             # Just add the aggregate column without any grouping
             query_builder.add_aggregate_column(
@@ -144,10 +245,17 @@ def build_chart_query(
             query_builder.add_column(column(payload.dimension_col))
 
             # Handle count with None column case - use "count_all" alias
-            if payload.aggregate_func.lower() == "count" and payload.aggregate_col is None:
+            if (
+                payload.aggregate_func
+                and payload.aggregate_func.lower() == "count"
+                and payload.aggregate_col is None
+            ):
                 alias = "count_all"
-            else:
+            elif payload.aggregate_func:
                 alias = f"{payload.aggregate_func}_{payload.aggregate_col}"
+            else:
+                # This shouldn't happen with proper validation, but handle gracefully
+                alias = "unknown_metric"
 
             # Add aggregate column
             query_builder.add_aggregate_column(
@@ -176,15 +284,10 @@ def build_chart_query(
     if payload.extra_config and payload.extra_config.get("sort"):
         query_builder = apply_chart_sorting(query_builder, payload.extra_config["sort"], payload)
 
-    # Apply chart-level pagination if enabled, otherwise use default pagination
-    if payload.extra_config and payload.extra_config.get("pagination", {}).get("enabled"):
-        page_size = payload.extra_config["pagination"].get("page_size", 50)
-        query_builder.limit_rows(page_size)
-        query_builder.offset_rows(payload.offset)
-    else:
-        # Default pagination
-        query_builder.limit_rows(payload.limit)
-        query_builder.offset_rows(payload.offset)
+    # Apply pagination
+    limit, offset = get_pagination_params(payload)
+    query_builder.limit_rows(limit)
+    query_builder.offset_rows(offset)
 
     return query_builder
 
@@ -407,15 +510,31 @@ def apply_chart_sorting(
 
         # For aggregated queries, if sorting by the aggregate column,
         # use the aggregated column alias instead of the raw column
-        if (
-            payload
-            and payload.computation_type == "aggregated"
-            and hasattr(payload, "aggregate_col")
-            and column_name == payload.aggregate_col
-        ):
-            # Use the aggregated column alias pattern
-            aggregate_func = getattr(payload, "aggregate_func", "sum")
-            sort_column = f"{aggregate_func}_{column_name}"
+        if payload and payload.computation_type == "aggregated":
+            # Check if sorting by a metric column (multiple metrics approach)
+            if payload.metrics and len(payload.metrics) > 0:
+                # Find the first metric that matches the column name
+                matching_metric = None
+                for metric in payload.metrics:
+                    if metric.column == column_name:
+                        matching_metric = metric
+                        break
+
+                if matching_metric:
+                    # Always use the alias for sorting aggregated data
+                    sort_column = (
+                        matching_metric.alias or f"{matching_metric.aggregation}_{column_name}"
+                    )
+                else:
+                    # If no matching metric found, assume it's the dimension column
+                    sort_column = column_name
+            # Legacy single metric approach
+            elif hasattr(payload, "aggregate_col") and column_name == payload.aggregate_col:
+                # Use the aggregated column alias pattern
+                aggregate_func = getattr(payload, "aggregate_func", "sum")
+                sort_column = f"{aggregate_func}_{column_name}"
+            else:
+                sort_column = column_name
         else:
             sort_column = column_name
 
@@ -480,17 +599,34 @@ def execute_chart_query(
             column_mapping.append((payload.extra_dimension, col_index))
 
     else:  # aggregated
-        # For aggregated queries, columns are: dimension_col, aggregate_result, [extra_dimension]
         col_index = 0
         column_mapping.append((payload.dimension_col, col_index))
         col_index += 1
-        # Handle count with None column case - use "count_all" name
-        if payload.aggregate_func.lower() == "count" and payload.aggregate_col is None:
-            agg_col_name = "count_all"
+
+        # Handle multiple metrics for bar/line charts
+        if payload.metrics:
+            for metric in payload.metrics:
+                if metric.aggregation.lower() == "count" and metric.column is None:
+                    alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+                else:
+                    alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+                column_mapping.append((alias, col_index))
+                col_index += 1
         else:
-            agg_col_name = f"{payload.aggregate_func}_{payload.aggregate_col}"
-        column_mapping.append((agg_col_name, col_index))
-        col_index += 1
+            # Handle single metric (legacy approach)
+            if (
+                payload.aggregate_func
+                and payload.aggregate_func.lower() == "count"
+                and payload.aggregate_col is None
+            ):
+                agg_col_name = "count_all"
+            elif payload.aggregate_func:
+                agg_col_name = f"{payload.aggregate_func}_{payload.aggregate_col}"
+            else:
+                agg_col_name = "unknown_metric"
+            column_mapping.append((agg_col_name, col_index))
+            col_index += 1
+
         if payload.extra_dimension:
             column_mapping.append((payload.extra_dimension, col_index))
 
@@ -537,7 +673,47 @@ def transform_data_for_chart(
                 "legend": [payload.y_axis],
             }
         else:  # aggregated
-            if payload.extra_dimension:
+            # Handle multiple metrics for bar charts
+            if payload.metrics:
+                x_axis_data = [
+                    handle_null_value(
+                        safe_get_value(row, payload.dimension_col, null_label), null_label
+                    )
+                    for row in results
+                ]
+
+                series_data = []
+                legend_data = []
+
+                for metric in payload.metrics:
+                    if metric.aggregation.lower() == "count" and metric.column is None:
+                        alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+                        display_name = metric.alias or "Total Count"
+                    else:
+                        # The alias should match what was created in build_multi_metric_query
+                        # If metric.alias exists, use it as the exact alias, otherwise generate default
+                        if metric.alias:
+                            alias = metric.alias
+                        else:
+                            alias = f"{metric.aggregation}_{metric.column}"
+                        display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+
+                    metric_data = [row.get(alias, 0) for row in results]
+
+                    series_data.append(
+                        {
+                            "name": display_name,
+                            "data": metric_data,
+                        }
+                    )
+                    legend_data.append(display_name)
+
+                return {
+                    "xAxisData": x_axis_data,
+                    "series": series_data,
+                    "legend": legend_data,
+                }
+            elif payload.extra_dimension:
                 # Group by extra dimension
                 grouped_data = {}
                 x_values = set()
@@ -655,7 +831,40 @@ def transform_data_for_chart(
                 "legend": [payload.y_axis],
             }
         else:  # aggregated
-            if payload.extra_dimension:
+            # Handle multiple metrics for line charts
+            if payload.metrics:
+                x_axis_data = [
+                    handle_null_value(
+                        safe_get_value(row, payload.dimension_col, null_label), null_label
+                    )
+                    for row in results
+                ]
+
+                series_data = []
+                legend_data = []
+
+                for metric in payload.metrics:
+                    if metric.aggregation.lower() == "count" and metric.column is None:
+                        alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+                        display_name = metric.alias or "Total Count"
+                    else:
+                        alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+                        display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+
+                    series_data.append(
+                        {
+                            "name": display_name,
+                            "data": [row.get(alias, 0) for row in results],
+                        }
+                    )
+                    legend_data.append(display_name)
+
+                return {
+                    "xAxisData": x_axis_data,
+                    "series": series_data,
+                    "legend": legend_data,
+                }
+            elif payload.extra_dimension:
                 # Similar to bar chart grouping
                 grouped_data = {}
                 x_values = set()
@@ -785,10 +994,26 @@ def get_chart_data_table_preview(
         column_mapping.append((payload.dimension_col, col_index))
         columns.append(payload.dimension_col)
         col_index += 1
-        agg_col_name = get_aggregate_column_name(payload.aggregate_func, payload.aggregate_col)
-        column_mapping.append((agg_col_name, col_index))
-        columns.append(agg_col_name)
-        col_index += 1
+
+        # Handle multiple metrics
+        if payload.metrics:
+            for metric in payload.metrics:
+                if metric.aggregation.lower() == "count" and metric.column is None:
+                    alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+                    display_name = metric.alias or "Total Count"
+                else:
+                    alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+                    display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+                column_mapping.append((alias, col_index))
+                columns.append(display_name)
+                col_index += 1
+        else:
+            # Single metric (legacy approach)
+            agg_col_name = get_aggregate_column_name(payload.aggregate_func, payload.aggregate_col)
+            column_mapping.append((agg_col_name, col_index))
+            columns.append(agg_col_name)
+            col_index += 1
+
         if payload.extra_dimension:
             column_mapping.append((payload.extra_dimension, col_index))
             columns.append(payload.extra_dimension)
@@ -800,8 +1025,9 @@ def get_chart_data_table_preview(
     column_types = {col: "unknown" for col in columns}
 
     # Calculate page info
-    page_size = payload.limit
-    page = (payload.offset // page_size) + 1
+    limit, offset = get_pagination_params(payload)
+    page_size = limit
+    page = (offset // page_size) + 1 if page_size > 0 else 1
 
     # Get total count using the existing query_builder as subquery (without LIMIT/OFFSET)
     # Temporarily remove pagination from existing query builder

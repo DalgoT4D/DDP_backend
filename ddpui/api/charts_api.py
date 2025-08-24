@@ -137,6 +137,7 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
         aggregate_func=payload.aggregate_func,
         extra_dimension=payload.extra_dimension,
         customizations=payload.customizations,
+        metrics=payload.metrics,  # Add metrics field for multiple metrics support
     )
     chart_data = charts_service.transform_data_for_chart(dict_results, transform_payload)
 

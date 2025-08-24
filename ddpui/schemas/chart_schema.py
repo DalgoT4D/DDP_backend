@@ -4,6 +4,14 @@ from typing import Optional, List
 from ninja import Schema
 
 
+class ChartMetric(Schema):
+    """Schema for individual chart metric"""
+
+    column: Optional[str] = None  # Column name, null for COUNT(*) operations
+    aggregation: str  # SUM, COUNT, AVG, MAX, MIN, etc.
+    alias: Optional[str] = None  # Display name for the metric
+
+
 class ChartCreate(Schema):
     """Schema for creating a chart"""
 
@@ -64,6 +72,9 @@ class ChartDataPayload(Schema):
     aggregate_func: Optional[str] = None
     extra_dimension: Optional[str] = None
 
+    # Multiple metrics for bar/line charts
+    metrics: Optional[List[ChartMetric]] = None
+
     # Map-specific fields
     geographic_column: Optional[str] = None
     value_column: Optional[str] = None
@@ -110,6 +121,9 @@ class ExecuteChartQuery(Schema):
     aggregate_func: Optional[str] = None
     extra_dimension: Optional[str] = None
 
+    # Multiple metrics for bar/line charts
+    metrics: Optional[List[ChartMetric]] = None
+
 
 class TransformDataForChart(Schema):
     """Schema for transforming data for chart visualization"""
@@ -122,6 +136,9 @@ class TransformDataForChart(Schema):
     aggregate_col: Optional[str] = None
     aggregate_func: Optional[str] = None
     extra_dimension: Optional[str] = None
+
+    # Multiple metrics for bar/line charts
+    metrics: Optional[List[ChartMetric]] = None
 
     # Map-specific fields
     geographic_column: Optional[str] = None  # Column containing region names
