@@ -202,6 +202,11 @@ def build_chart_query(
             query_builder = build_multi_metric_query(payload, query_builder)
 
             # Apply chart-level filters, sorting, and pagination (same as single metric approach)
+
+            # Apply dashboard filters if provided
+            if payload.dashboard_filters:
+                query_builder = apply_dashboard_filters(query_builder, payload.dashboard_filters)
+
             # Apply chart-level filters if provided
             if payload.extra_config and payload.extra_config.get("filters"):
                 query_builder = apply_chart_filters(query_builder, payload.extra_config["filters"])

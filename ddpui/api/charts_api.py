@@ -755,6 +755,8 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
         aggregate_col=extra_config.get("aggregate_column"),
         aggregate_func=extra_config.get("aggregate_function"),
         extra_dimension=extra_config.get("extra_dimension_column"),
+        # Multiple metrics support - CRITICAL FIX for dashboard charts
+        metrics=extra_config.get("metrics"),
         # Map-specific fields
         geographic_column=extra_config.get("geographic_column"),
         value_column=extra_config.get("value_column"),

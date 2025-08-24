@@ -214,6 +214,8 @@ def get_public_chart_data(request, token: str, chart_id: int):
             aggregate_col=extra_config.get("aggregate_column"),
             aggregate_func=extra_config.get("aggregate_function"),
             extra_dimension=extra_config.get("extra_dimension_column"),
+            # Multiple metrics support - CRITICAL FIX for public API charts
+            metrics=extra_config.get("metrics"),
             # Map-specific fields for consistency
             geographic_column=extra_config.get("geographic_column"),
             value_column=extra_config.get("value_column"),
