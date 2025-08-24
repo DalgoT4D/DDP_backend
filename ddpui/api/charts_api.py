@@ -200,11 +200,57 @@ def generate_map_data_and_config(payload: ChartDataPayload, org_warehouse, chart
     return {"data": map_data, "echarts_config": echarts_config}
 
 
-@charts_router.get("/", response=List[ChartResponse])
-def list_charts(request):
-    """List all charts for the organization"""
+class ChartListResponse(Schema):
+    """Paginated chart list response"""
+
+    data: List[ChartResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+@charts_router.get("/", response=ChartListResponse)
+def list_charts(
+    request, page: int = 1, page_size: int = 10, search: str = None, chart_type: str = None
+):
+    """List charts for the organization with pagination and filtering"""
     orguser = request.orguser
-    charts = Chart.objects.filter(org=orguser.org).order_by("-updated_at")
+
+    # Validate pagination parameters
+    if page < 1:
+        page = 1
+    if page_size < 1 or page_size > 100:
+        page_size = 10
+
+    # Start with all charts for the organization
+    queryset = Chart.objects.filter(org=orguser.org)
+
+    # Apply search filter
+    if search:
+        from django.db.models import Q
+
+        queryset = queryset.filter(
+            Q(title__icontains=search)
+            | Q(description__icontains=search)
+            | Q(schema_name__icontains=search)
+            | Q(table_name__icontains=search)
+        )
+
+    # Apply chart type filter
+    if chart_type and chart_type != "all":
+        queryset = queryset.filter(chart_type=chart_type)
+
+    # Order by updated_at descending
+    queryset = queryset.order_by("-updated_at")
+
+    # Get total count before pagination
+    total = queryset.count()
+    total_pages = (total + page_size - 1) // page_size  # Ceiling division
+
+    # Apply pagination
+    offset = (page - 1) * page_size
+    charts = queryset[offset : offset + page_size]
 
     # Get org warehouse once for all charts
     org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
@@ -229,7 +275,9 @@ def list_charts(request):
         }
         chart_responses.append(ChartResponse(**chart_dict))
 
-    return chart_responses
+    return ChartListResponse(
+        data=chart_responses, total=total, page=page, page_size=page_size, total_pages=total_pages
+    )
 
 
 # New endpoints for separated data fetching (place before parametrized routes)
