@@ -401,10 +401,6 @@ class ChartValidator:
 
         # For partial updates, just validate what's provided
         try:
-            # If aggregate function is updated, validate it
-            if "aggregate_function" in extra_config:
-                ChartValidator._validate_aggregate_function(extra_config["aggregate_function"])
-
             # Validate number format if updated
             customizations = extra_config.get("customizations", {})
             if "numberFormat" in customizations:

@@ -102,8 +102,7 @@ def build_map_query(payload: ChartDataPayload, drill_down_filters: List[Dict] = 
             schema_name=payload.schema_name,
             table_name=payload.table_name,
             dimension_col=payload.geographic_column,
-            aggregate_col=payload.value_column,
-            aggregate_func=payload.aggregate_func or "sum",
+            metrics=payload.metrics,
             limit=payload.limit or 1000,
             offset=payload.offset or 0,
             extra_config=payload.extra_config,  # Pass through filters and other config
@@ -155,7 +154,6 @@ def build_drill_down_query_for_layer(
         table_name=payload.table_name,
         geographic_column=geographic_column,
         value_column=payload.value_column,
-        aggregate_func=payload.aggregate_func,
         metrics=payload.metrics,  # Pass through metrics for multiple metric support
         limit=payload.limit,
         offset=payload.offset,
@@ -170,7 +168,6 @@ def transform_data_for_map(
     geojson_data: Dict,
     geographic_column: str,
     value_column: str = None,
-    aggregate_func: str = "sum",
     customizations: Dict = None,
     metrics: List = None,
     selected_metric_index: int = 0,
@@ -182,7 +179,6 @@ def transform_data_for_map(
         geojson_data: GeoJSON data for map visualization
         geographic_column: Column containing region names
         value_column: Legacy single value column (for backward compatibility)
-        aggregate_func: Legacy aggregate function (for backward compatibility)
         customizations: Chart customizations
         metrics: List of metrics (new multiple metrics system)
         selected_metric_index: Which metric to display (default: first metric)
@@ -211,9 +207,6 @@ def transform_data_for_map(
                 agg_col_name = selected_metric["alias"]
             else:
                 agg_col_name = f"{selected_metric['aggregation']}_{selected_metric['column']}"
-    else:
-        # Legacy single metric system (backward compatibility)
-        agg_col_name = f"{aggregate_func}_{value_column}" if value_column else "count_all"
 
     # Create lookup for user data
     data_lookup = {}

@@ -211,8 +211,6 @@ def get_public_chart_data(request, token: str, chart_id: int):
             x_axis=extra_config.get("x_axis_column"),  # Match authenticated API field names
             y_axis=extra_config.get("y_axis_column"),
             dimension_col=extra_config.get("dimension_column"),
-            aggregate_col=extra_config.get("aggregate_column"),
-            aggregate_func=extra_config.get("aggregate_function"),
             extra_dimension=extra_config.get("extra_dimension_column"),
             # Multiple metrics support - CRITICAL FIX for public API charts
             metrics=extra_config.get("metrics"),
