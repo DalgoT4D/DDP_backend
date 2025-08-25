@@ -90,6 +90,7 @@ class ChartValidator:
                     extra_config.get("selected_geojson_id"),
                     metrics,
                     customizations,
+                    metrics,
                 )
             elif chart_type == "table":
                 ChartValidator._validate_table_chart(computation_type, schema_name, table_name)
@@ -255,6 +256,10 @@ class ChartValidator:
             if not metric_col and metric_agg != "count":
                 raise ChartValidationError("Metric requires column except for count function")
 
+            # Validate metrics count - pie charts should only have one metric
+            if metrics and len(metrics) > 1:
+                raise ChartValidationError("Pie charts support only one metric")
+
             # Ensure raw fields are not set for aggregated data
             if x_axis or y_axis:
                 raise ChartValidationError(
@@ -360,6 +365,10 @@ class ChartValidator:
         if not metric_col and metric_agg != "count":
             raise ChartValidationError("Metric requires column except for count function")
 
+        # Validate metrics count - number charts should only have one metric
+        if metrics and len(metrics) > 1:
+            raise ChartValidationError("Number charts support only one metric")
+
         # Validate customizations if present
         if customizations:
             number_format = customizations.get("numberFormat")
@@ -446,8 +455,11 @@ class ChartValidator:
         if not geographic_column:
             raise ChartValidationError("Map chart requires geographic column")
 
-        if not value_column:
-            raise ChartValidationError("Map chart requires value column")
+        # Handle both multiple metrics system and legacy single metric system
+        if metrics and len(metrics) > 0:
+            # Validate metrics count - map charts should only have one metric
+            if len(metrics) > 1:
+                raise ChartValidationError("Map charts support only one metric")
 
         # Validate metrics - map charts need exactly one metric
         if not metrics or len(metrics) == 0:

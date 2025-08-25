@@ -134,7 +134,7 @@ def build_multi_metric_query(
     payload: ChartDataPayload,
     query_builder: AggQueryBuilder,
 ) -> AggQueryBuilder:
-    """Build query for multiple metrics on bar/line charts"""
+    """Build query for multiple metrics on bar/line/pie/table/map charts"""
     if not payload.dimension_col:
         raise ValueError("dimension_col is required for multiple metrics charts")
 
@@ -728,6 +728,7 @@ def transform_data_for_chart(
                     for row in results
                 ]
 
+                # Create series for each dimension-metric combination
                 series_data = []
                 legend_data = []
 
@@ -937,6 +938,77 @@ def transform_data_for_chart(
                     "series": series_data,
                     "legend": legend_data,
                 }
+
+    elif payload.chart_type == "table":
+        # Table charts return raw data for frontend table display
+        # The frontend handles the table rendering, we just need to return the data
+
+        if payload.metrics:
+            # Multiple metrics - return structured data with all columns
+            table_data = []
+            for row in results:
+                row_data = {}
+
+                # Add dimension column
+                row_data[payload.dimension_col] = handle_null_value(
+                    safe_get_value(row, payload.dimension_col, null_label), null_label
+                )
+
+                # Add extra dimension if present
+                if payload.extra_dimension:
+                    row_data[payload.extra_dimension] = handle_null_value(
+                        safe_get_value(row, payload.extra_dimension, null_label), null_label
+                    )
+
+                # Add all metric columns
+                for metric in payload.metrics:
+                    if metric.aggregation.lower() == "count" and metric.column is None:
+                        alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+                        display_name = metric.alias or "Total Count"
+                    else:
+                        alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+                        display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+
+                    row_data[display_name] = row.get(alias, 0)
+
+                table_data.append(row_data)
+
+            return {
+                "tableData": table_data,
+                "columns": list(table_data[0].keys()) if table_data else [],
+            }
+        else:
+            # Single metric (legacy) - return structured data
+            table_data = []
+            for row in results:
+                row_data = {}
+
+                # Add dimension column
+                row_data[payload.dimension_col] = handle_null_value(
+                    safe_get_value(row, payload.dimension_col, null_label), null_label
+                )
+
+                # Add extra dimension if present
+                if payload.extra_dimension:
+                    row_data[payload.extra_dimension] = handle_null_value(
+                        safe_get_value(row, payload.extra_dimension, null_label), null_label
+                    )
+
+                # Add metric column
+                agg_col_name = get_aggregate_column_name(
+                    payload.aggregate_func, payload.aggregate_col
+                )
+                display_name = get_aggregate_display_name(
+                    payload.aggregate_func, payload.aggregate_col
+                )
+                row_data[display_name] = row.get(agg_col_name, 0)
+
+                table_data.append(row_data)
+
+            return {
+                "tableData": table_data,
+                "columns": list(table_data[0].keys()) if table_data else [],
+            }
 
     elif payload.chart_type == "number":
         # Number charts only support aggregated data and return a single value

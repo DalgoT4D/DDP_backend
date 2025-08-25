@@ -181,7 +181,10 @@ def generate_map_data_and_config(payload: ChartDataPayload, org_warehouse, chart
     dict_results = charts_service.execute_query(warehouse, query_builder)
     logger.info(f"Map query results for {chart_id_str}: {len(dict_results)} rows")
 
-    # Transform for map
+    # Transform for map - support both multiple metrics and legacy single metric
+    selected_metric_index = (
+        payload.customizations.get("selected_metric_index", 0) if payload.customizations else 0
+    )
     map_data = transform_data_for_map(
         dict_results,
         geojson.geojson_data,
@@ -189,6 +192,8 @@ def generate_map_data_and_config(payload: ChartDataPayload, org_warehouse, chart
         payload.value_column,
         payload.aggregate_func or "sum",
         payload.customizations,
+        payload.metrics,
+        selected_metric_index,
     )
 
     # Generate map config
@@ -632,7 +637,10 @@ def generate_map_chart_data(request, payload: ChartDataPayload):
     dict_results = charts_service.execute_query(warehouse, query_builder)
     logger.info(f"Map query results: {len(dict_results)} rows")
 
-    # Transform data for map visualization
+    # Transform data for map visualization - support both multiple metrics and legacy single metric
+    selected_metric_index = (
+        payload.customizations.get("selected_metric_index", 0) if payload.customizations else 0
+    )
     map_data = transform_data_for_map(
         dict_results,
         geojson.geojson_data,
@@ -640,6 +648,8 @@ def generate_map_chart_data(request, payload: ChartDataPayload):
         payload.value_column,
         payload.aggregate_func or "sum",
         payload.customizations or {},
+        payload.metrics,
+        selected_metric_index,
     )
 
     logger.info(
