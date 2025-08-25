@@ -196,86 +196,66 @@ def build_chart_query(
             )
 
     else:  # aggregated
-        # Check if multiple metrics are provided for bar/line/pie/table/map charts
-        if payload.metrics and payload.chart_type in ["bar", "line", "pie", "table", "map"]:
-            # Use multiple metrics approach
-            query_builder = build_multi_metric_query(payload, query_builder)
-
-            # Apply chart-level filters, sorting, and pagination (same as single metric approach)
-
-            # Apply dashboard filters if provided
-            if payload.dashboard_filters:
-                query_builder = apply_dashboard_filters(query_builder, payload.dashboard_filters)
-
-            # Apply chart-level filters if provided
-            if payload.extra_config and payload.extra_config.get("filters"):
-                query_builder = apply_chart_filters(query_builder, payload.extra_config["filters"])
-
-            # Apply chart-level sorting if provided
-            if payload.extra_config and payload.extra_config.get("sort"):
-                query_builder = apply_chart_sorting(
-                    query_builder, payload.extra_config["sort"], payload
-                )
-
-            # Apply pagination
-            limit, offset = get_pagination_params(payload)
-            query_builder.limit_rows(limit)
-            query_builder.offset_rows(offset)
-
-            return query_builder
+        # All aggregated charts must use metrics
+        if not payload.metrics or len(payload.metrics) == 0:
+            raise ValueError("At least one metric is required for aggregated charts")
 
         # For number charts, we don't need dimension columns
         if payload.chart_type == "number":
-            # Handle count with None column case - use "count_all" alias
-            if (
-                payload.aggregate_func
-                and payload.aggregate_func.lower() == "count"
-                and payload.aggregate_col is None
-            ):
-                alias = "count_all"
-            elif payload.aggregate_func:
-                alias = f"{payload.aggregate_func}_{payload.aggregate_col}"
+            # Use first metric for number charts
+            metric = payload.metrics[0]
+
+            # Handle count with None column case
+            if metric.aggregation.lower() == "count" and metric.column is None:
+                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
             else:
-                # This shouldn't happen with proper validation, but handle gracefully
-                alias = "unknown_metric"
+                if not metric.column:
+                    raise ValueError(f"Column is required for {metric.aggregation} aggregation")
+                alias = metric.alias or f"{metric.aggregation}_{metric.column}"
 
             # Just add the aggregate column without any grouping
             query_builder.add_aggregate_column(
-                payload.aggregate_col,
-                payload.aggregate_func,
+                metric.column,
+                metric.aggregation,
                 alias,
             )
-        else:
-            # Add dimension column for other chart types
+        elif payload.chart_type == "pie":
+            # Pie charts need dimension and one metric
+            if not payload.dimension_col:
+                raise ValueError("dimension_col is required for pie charts")
+
+            # Add dimension column
             query_builder.add_column(column(payload.dimension_col))
 
-            # Handle count with None column case - use "count_all" alias
-            if (
-                payload.aggregate_func
-                and payload.aggregate_func.lower() == "count"
-                and payload.aggregate_col is None
-            ):
-                alias = "count_all"
-            elif payload.aggregate_func:
-                alias = f"{payload.aggregate_func}_{payload.aggregate_col}"
+            # Add extra dimension if specified (for combination slices)
+            if payload.extra_dimension:
+                query_builder.add_column(column(payload.extra_dimension))
+
+            # Use first metric for pie charts
+            metric = payload.metrics[0]
+
+            # Handle count with None column case
+            if metric.aggregation.lower() == "count" and metric.column is None:
+                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
             else:
-                # This shouldn't happen with proper validation, but handle gracefully
-                alias = "unknown_metric"
+                if not metric.column:
+                    raise ValueError(f"Column is required for {metric.aggregation} aggregation")
+                alias = metric.alias or f"{metric.aggregation}_{metric.column}"
 
             # Add aggregate column
             query_builder.add_aggregate_column(
-                payload.aggregate_col,
-                payload.aggregate_func,
+                metric.column,
+                metric.aggregation,
                 alias,
             )
 
-            # Group by dimension column
+            # Group by dimension column and extra dimension if provided
             query_builder.group_cols_by(payload.dimension_col)
-
-            # Add extra dimension if specified
             if payload.extra_dimension:
-                query_builder.add_column(column(payload.extra_dimension))
                 query_builder.group_cols_by(payload.extra_dimension)
+        else:
+            # Bar, line, and other charts - use multi-metric query
+            query_builder = build_multi_metric_query(payload, query_builder)
 
     # Apply dashboard filters if provided
     if payload.dashboard_filters:
@@ -605,10 +585,12 @@ def execute_chart_query(
 
     else:  # aggregated
         col_index = 0
-        column_mapping.append((payload.dimension_col, col_index))
-        col_index += 1
+        # Only add dimension_col for non-number charts
+        if payload.chart_type != "number" and payload.dimension_col:
+            column_mapping.append((payload.dimension_col, col_index))
+            col_index += 1
 
-        # Handle multiple metrics for bar/line charts
+        # Handle metrics - metrics are required for aggregated queries
         if payload.metrics:
             for metric in payload.metrics:
                 if metric.aggregation.lower() == "count" and metric.column is None:
@@ -617,20 +599,6 @@ def execute_chart_query(
                     alias = metric.alias or f"{metric.aggregation}_{metric.column}"
                 column_mapping.append((alias, col_index))
                 col_index += 1
-        else:
-            # Handle single metric (legacy approach)
-            if (
-                payload.aggregate_func
-                and payload.aggregate_func.lower() == "count"
-                and payload.aggregate_col is None
-            ):
-                agg_col_name = "count_all"
-            elif payload.aggregate_func:
-                agg_col_name = f"{payload.aggregate_func}_{payload.aggregate_col}"
-            else:
-                agg_col_name = "unknown_metric"
-            column_mapping.append((agg_col_name, col_index))
-            col_index += 1
 
         if payload.extra_dimension:
             column_mapping.append((payload.extra_dimension, col_index))
@@ -678,126 +646,12 @@ def transform_data_for_chart(
                 "legend": [payload.y_axis],
             }
         else:  # aggregated
-            # Handle multiple metrics for bar charts
-            if payload.metrics:
-                if payload.extra_dimension:
-                    # Handle multiple metrics WITH extra dimension (grouped bars)
-                    grouped_data = {}
-                    x_values = set()
+            if not payload.metrics or len(payload.metrics) == 0:
+                return {}
 
-                    # First, collect all x values and group by extra dimension
-                    for row in results:
-                        dimension = handle_null_value(
-                            safe_get_value(row, payload.extra_dimension, null_label), null_label
-                        )
-                        x_value = handle_null_value(
-                            safe_get_value(row, payload.dimension_col, null_label), null_label
-                        )
-                        x_values.add(x_value)
-
-                        if dimension not in grouped_data:
-                            grouped_data[dimension] = {}
-
-                        # For multiple metrics, we need to handle each metric
-                        for metric in payload.metrics:
-                            if metric.aggregation.lower() == "count" and metric.column is None:
-                                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-                                display_name = metric.alias or "Total Count"
-                            else:
-                                if metric.alias:
-                                    alias = metric.alias
-                                else:
-                                    alias = f"{metric.aggregation}_{metric.column}"
-                                display_name = (
-                                    metric.alias or f"{metric.aggregation}({metric.column})"
-                                )
-
-                            # Create a unique key for this dimension-metric combination
-                            metric_dimension_key = f"{dimension}_{display_name}"
-                            if metric_dimension_key not in grouped_data:
-                                grouped_data[metric_dimension_key] = {}
-
-                            grouped_data[metric_dimension_key][x_value] = row.get(alias, 0)
-
-                    x_axis_data = sorted(list(x_values))
-
-                    # Create series for each dimension-metric combination
-                    series_data = []
-                    legend_data = []
-
-                    # Group by extra dimension for better organization
-                    dimensions = sorted(set([key.split("_")[0] for key in grouped_data.keys()]))
-
-                    for dimension in dimensions:
-                        for metric in payload.metrics:
-                            if metric.aggregation.lower() == "count" and metric.column is None:
-                                display_name = metric.alias or "Total Count"
-                            else:
-                                display_name = (
-                                    metric.alias or f"{metric.aggregation}({metric.column})"
-                                )
-
-                            metric_dimension_key = f"{dimension}_{display_name}"
-                            if metric_dimension_key in grouped_data:
-                                series_name = f"{dimension} - {display_name}"
-                                series_data.append(
-                                    {
-                                        "name": series_name,
-                                        "data": [
-                                            grouped_data[metric_dimension_key].get(x, 0)
-                                            for x in x_axis_data
-                                        ],
-                                    }
-                                )
-                                legend_data.append(series_name)
-
-                    return {
-                        "xAxisData": x_axis_data,
-                        "series": series_data,
-                        "legend": legend_data,
-                    }
-                else:
-                    # Handle multiple metrics WITHOUT extra dimension (existing logic)
-                    x_axis_data = [
-                        handle_null_value(
-                            safe_get_value(row, payload.dimension_col, null_label), null_label
-                        )
-                        for row in results
-                    ]
-
-                    series_data = []
-                    legend_data = []
-
-                    for metric in payload.metrics:
-                        if metric.aggregation.lower() == "count" and metric.column is None:
-                            alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-                            display_name = metric.alias or "Total Count"
-                        else:
-                            # The alias should match what was created in build_multi_metric_query
-                            # If metric.alias exists, use it as the exact alias, otherwise generate default
-                            if metric.alias:
-                                alias = metric.alias
-                            else:
-                                alias = f"{metric.aggregation}_{metric.column}"
-                            display_name = metric.alias or f"{metric.aggregation}({metric.column})"
-
-                        metric_data = [row.get(alias, 0) for row in results]
-
-                        series_data.append(
-                            {
-                                "name": display_name,
-                                "data": metric_data,
-                            }
-                        )
-                        legend_data.append(display_name)
-
-                    return {
-                        "xAxisData": x_axis_data,
-                        "series": series_data,
-                        "legend": legend_data,
-                    }
-            elif payload.extra_dimension:
-                # Group by extra dimension
+            # Check if we have extra_dimension for grouping
+            if payload.extra_dimension:
+                # Group by extra dimension with multiple metrics
                 grouped_data = {}
                 x_values = set()
 
@@ -813,51 +667,93 @@ def transform_data_for_chart(
                     if dimension not in grouped_data:
                         grouped_data[dimension] = {}
 
-                    agg_col_name = get_aggregate_column_name(
-                        payload.aggregate_func, payload.aggregate_col
-                    )
-                    grouped_data[dimension][x_value] = row.get(agg_col_name, 0)
+                    # Store each metric value for this dimension-x_value combination
+                    for metric in payload.metrics:
+                        if metric.aggregation.lower() == "count" and metric.column is None:
+                            alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+                        else:
+                            alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+
+                        # Create key for this metric
+                        metric_key = (
+                            metric.alias or f"{metric.aggregation}_{metric.column or 'all'}"
+                        )
+
+                        if metric_key not in grouped_data[dimension]:
+                            grouped_data[dimension][metric_key] = {}
+
+                        grouped_data[dimension][metric_key][x_value] = row.get(alias, 0)
 
                 x_axis_data = sorted(list(x_values))
 
+                series_data = []
+                legend_data = []
+
+                # If we have multiple metrics, create series for each dimension-metric combination
+                if len(payload.metrics) > 1:
+                    for dimension, metrics_data in grouped_data.items():
+                        for metric_key, values in metrics_data.items():
+                            display_name = f"{dimension} - {metric_key}"
+                            series_data.append(
+                                {
+                                    "name": display_name,
+                                    "data": [values.get(x, 0) for x in x_axis_data],
+                                }
+                            )
+                            legend_data.append(display_name)
+                else:
+                    # Single metric - just use dimension as series name
+                    for dimension, metrics_data in grouped_data.items():
+                        # Get the first (and only) metric data
+                        metric_values = next(iter(metrics_data.values()))
+                        series_data.append(
+                            {
+                                "name": dimension,
+                                "data": [metric_values.get(x, 0) for x in x_axis_data],
+                            }
+                        )
+                        legend_data.append(dimension)
+
                 return {
                     "xAxisData": x_axis_data,
-                    "series": [
-                        {
-                            "name": dimension,
-                            "data": [grouped_data[dimension].get(x, 0) for x in x_axis_data],
-                        }
-                        for dimension in grouped_data.keys()
-                    ],
-                    "legend": list(grouped_data.keys()),
+                    "series": series_data,
+                    "legend": legend_data,
                 }
             else:
-                return {
-                    "xAxisData": [
-                        handle_null_value(
-                            safe_get_value(row, payload.dimension_col, null_label), null_label
-                        )
-                        for row in results
-                    ],
-                    "series": [
+                # No extra dimension, just metrics
+                x_axis_data = [
+                    handle_null_value(
+                        safe_get_value(row, payload.dimension_col, null_label), null_label
+                    )
+                    for row in results
+                ]
+
+                # Create series for each dimension-metric combination
+                series_data = []
+                legend_data = []
+
+                for metric in payload.metrics:
+                    if metric.aggregation.lower() == "count" and metric.column is None:
+                        alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+                        display_name = metric.alias or "Total Count"
+                    else:
+                        alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+                        display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+
+                    metric_data = [row.get(alias, 0) for row in results]
+
+                    series_data.append(
                         {
-                            "name": get_aggregate_display_name(
-                                payload.aggregate_func, payload.aggregate_col
-                            ),
-                            "data": [
-                                row.get(
-                                    get_aggregate_column_name(
-                                        payload.aggregate_func, payload.aggregate_col
-                                    ),
-                                    0,
-                                )
-                                for row in results
-                            ],
+                            "name": display_name,
+                            "data": metric_data,
                         }
-                    ],
-                    "legend": [
-                        get_aggregate_display_name(payload.aggregate_func, payload.aggregate_col)
-                    ],
+                    )
+                    legend_data.append(display_name)
+
+                return {
+                    "xAxisData": x_axis_data,
+                    "series": series_data,
+                    "legend": legend_data,
                 }
 
     elif payload.chart_type == "pie":
@@ -873,93 +769,47 @@ def transform_data_for_chart(
                 "seriesName": payload.x_axis,
             }
         else:  # aggregated
-            # Handle multiple metrics for pie charts
-            if payload.metrics:
-                if payload.extra_dimension:
-                    # For pie charts with extra dimension, create separate slices for each metric-dimension-x combination
-                    pie_data = []
-                    for row in results:
-                        dimension = handle_null_value(
-                            safe_get_value(row, payload.extra_dimension, null_label), null_label
-                        )
-                        x_value = handle_null_value(
-                            safe_get_value(row, payload.dimension_col, null_label), null_label
-                        )
+            if not payload.metrics or len(payload.metrics) == 0:
+                return {}
 
-                        # Create separate pie slices for each metric (same pattern as bar/line charts)
-                        for metric in payload.metrics:
-                            if metric.aggregation.lower() == "count" and metric.column is None:
-                                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-                                display_name = metric.alias or "Total Count"
-                            else:
-                                alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-                                display_name = (
-                                    metric.alias or f"{metric.aggregation}({metric.column})"
-                                )
-
-                            metric_value = row.get(alias, 0)
-                            slice_name = (
-                                f"{dimension} - {display_name}"  # Same pattern as bar/line charts
-                            )
-
-                            pie_data.append({"value": metric_value, "name": slice_name})
-
-                    return {
-                        "pieData": pie_data,
-                        "seriesName": "Metrics by Dimension",
-                    }
-                else:
-                    # Handle multiple metrics WITHOUT extra dimension
-                    # Create separate slices for each metric-dimension combination
-                    pie_data = []
-                    for row in results:
-                        x_value = handle_null_value(
-                            safe_get_value(row, payload.dimension_col, null_label), null_label
-                        )
-
-                        # Create separate pie slices for each metric (same pattern as bar/line charts)
-                        for metric in payload.metrics:
-                            if metric.aggregation.lower() == "count" and metric.column is None:
-                                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-                                display_name = metric.alias or "Total Count"
-                            else:
-                                alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-                                display_name = (
-                                    metric.alias or f"{metric.aggregation}({metric.column})"
-                                )
-
-                            metric_value = row.get(alias, 0)
-                            slice_name = (
-                                f"{x_value} - {display_name}"  # Same pattern as bar/line charts
-                            )
-
-                            pie_data.append({"value": metric_value, "name": slice_name})
-
-                    return {
-                        "pieData": pie_data,
-                        "seriesName": "Metrics by Dimension",
-                    }
+            # Use first metric for pie charts
+            metric = payload.metrics[0]
+            if metric.aggregation.lower() == "count" and metric.column is None:
+                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+                display_name = metric.alias or "Total Count"
             else:
-                # Handle single metric (existing logic)
-                return {
-                    "pieData": [
-                        {
-                            "value": row.get(
-                                get_aggregate_column_name(
-                                    payload.aggregate_func, payload.aggregate_col
-                                ),
-                                0,
-                            ),
-                            "name": handle_null_value(
-                                safe_get_value(row, payload.dimension_col, null_label), null_label
-                            ),
-                        }
-                        for row in results
-                    ],
-                    "seriesName": get_aggregate_display_name(
-                        payload.aggregate_func, payload.aggregate_col
-                    ),
-                }
+                alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+                display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+
+            pie_data = []
+            for row in results:
+                # Create slice name based on dimension_col and extra_dimension
+                if payload.extra_dimension:
+                    # Combine both dimensions for the slice name
+                    dimension_value = handle_null_value(
+                        safe_get_value(row, payload.dimension_col, null_label), null_label
+                    )
+                    extra_dimension_value = handle_null_value(
+                        safe_get_value(row, payload.extra_dimension, null_label), null_label
+                    )
+                    slice_name = f"{dimension_value} - {extra_dimension_value}"
+                else:
+                    # Just use the main dimension
+                    slice_name = handle_null_value(
+                        safe_get_value(row, payload.dimension_col, null_label), null_label
+                    )
+
+                pie_data.append(
+                    {
+                        "value": row.get(alias, 0),
+                        "name": slice_name,
+                    }
+                )
+
+            return {
+                "pieData": pie_data,
+                "seriesName": display_name,
+            }
 
     elif payload.chart_type == "line":
         if payload.computation_type == "raw":
@@ -982,119 +832,12 @@ def transform_data_for_chart(
                 "legend": [payload.y_axis],
             }
         else:  # aggregated
-            # Handle multiple metrics for line charts
-            if payload.metrics:
-                if payload.extra_dimension:
-                    # Handle multiple metrics WITH extra dimension (grouped lines)
-                    grouped_data = {}
-                    x_values = set()
+            if not payload.metrics or len(payload.metrics) == 0:
+                return {}
 
-                    # First, collect all x values and group by extra dimension
-                    for row in results:
-                        dimension = handle_null_value(
-                            safe_get_value(row, payload.extra_dimension, null_label), null_label
-                        )
-                        x_value = handle_null_value(
-                            safe_get_value(row, payload.dimension_col, null_label), null_label
-                        )
-                        x_values.add(x_value)
-
-                        if dimension not in grouped_data:
-                            grouped_data[dimension] = {}
-
-                        # For multiple metrics, we need to handle each metric
-                        for metric in payload.metrics:
-                            if metric.aggregation.lower() == "count" and metric.column is None:
-                                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-                                display_name = metric.alias or "Total Count"
-                            else:
-                                if metric.alias:
-                                    alias = metric.alias
-                                else:
-                                    alias = f"{metric.aggregation}_{metric.column}"
-                                display_name = (
-                                    metric.alias or f"{metric.aggregation}({metric.column})"
-                                )
-
-                            # Create a unique key for this dimension-metric combination
-                            metric_dimension_key = f"{dimension}_{display_name}"
-                            if metric_dimension_key not in grouped_data:
-                                grouped_data[metric_dimension_key] = {}
-
-                            grouped_data[metric_dimension_key][x_value] = row.get(alias, 0)
-
-                    x_axis_data = sorted(list(x_values))
-
-                    # Create series for each dimension-metric combination
-                    series_data = []
-                    legend_data = []
-
-                    # Group by extra dimension for better organization
-                    dimensions = sorted(set([key.split("_")[0] for key in grouped_data.keys()]))
-
-                    for dimension in dimensions:
-                        for metric in payload.metrics:
-                            if metric.aggregation.lower() == "count" and metric.column is None:
-                                display_name = metric.alias or "Total Count"
-                            else:
-                                display_name = (
-                                    metric.alias or f"{metric.aggregation}({metric.column})"
-                                )
-
-                            metric_dimension_key = f"{dimension}_{display_name}"
-                            if metric_dimension_key in grouped_data:
-                                series_name = f"{dimension} - {display_name}"
-                                series_data.append(
-                                    {
-                                        "name": series_name,
-                                        "data": [
-                                            grouped_data[metric_dimension_key].get(x, 0)
-                                            for x in x_axis_data
-                                        ],
-                                    }
-                                )
-                                legend_data.append(series_name)
-
-                    return {
-                        "xAxisData": x_axis_data,
-                        "series": series_data,
-                        "legend": legend_data,
-                    }
-                else:
-                    # Handle multiple metrics WITHOUT extra dimension (existing logic)
-                    x_axis_data = [
-                        handle_null_value(
-                            safe_get_value(row, payload.dimension_col, null_label), null_label
-                        )
-                        for row in results
-                    ]
-
-                    series_data = []
-                    legend_data = []
-
-                    for metric in payload.metrics:
-                        if metric.aggregation.lower() == "count" and metric.column is None:
-                            alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-                            display_name = metric.alias or "Total Count"
-                        else:
-                            alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-                            display_name = metric.alias or f"{metric.aggregation}({metric.column})"
-
-                        series_data.append(
-                            {
-                                "name": display_name,
-                                "data": [row.get(alias, 0) for row in results],
-                            }
-                        )
-                        legend_data.append(display_name)
-
-                    return {
-                        "xAxisData": x_axis_data,
-                        "series": series_data,
-                        "legend": legend_data,
-                    }
-            elif payload.extra_dimension:
-                # Similar to bar chart grouping
+            # Check if we have extra_dimension for grouping
+            if payload.extra_dimension:
+                # Similar to bar chart grouping with metrics
                 grouped_data = {}
                 x_values = set()
 
@@ -1110,51 +853,90 @@ def transform_data_for_chart(
                     if dimension not in grouped_data:
                         grouped_data[dimension] = {}
 
-                    agg_col_name = get_aggregate_column_name(
-                        payload.aggregate_func, payload.aggregate_col
-                    )
-                    grouped_data[dimension][x_value] = row.get(agg_col_name, 0)
+                    # Store each metric value for this dimension-x_value combination
+                    for metric in payload.metrics:
+                        if metric.aggregation.lower() == "count" and metric.column is None:
+                            alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+                        else:
+                            alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+
+                        # Create key for this metric
+                        metric_key = (
+                            metric.alias or f"{metric.aggregation}_{metric.column or 'all'}"
+                        )
+
+                        if metric_key not in grouped_data[dimension]:
+                            grouped_data[dimension][metric_key] = {}
+
+                        grouped_data[dimension][metric_key][x_value] = row.get(alias, 0)
 
                 x_axis_data = sorted(list(x_values))
 
+                series_data = []
+                legend_data = []
+
+                # If we have multiple metrics, create series for each dimension-metric combination
+                if len(payload.metrics) > 1:
+                    for dimension, metrics_data in grouped_data.items():
+                        for metric_key, values in metrics_data.items():
+                            display_name = f"{dimension} - {metric_key}"
+                            series_data.append(
+                                {
+                                    "name": display_name,
+                                    "data": [values.get(x, 0) for x in x_axis_data],
+                                }
+                            )
+                            legend_data.append(display_name)
+                else:
+                    # Single metric - just use dimension as series name
+                    for dimension, metrics_data in grouped_data.items():
+                        # Get the first (and only) metric data
+                        metric_values = next(iter(metrics_data.values()))
+                        series_data.append(
+                            {
+                                "name": dimension,
+                                "data": [metric_values.get(x, 0) for x in x_axis_data],
+                            }
+                        )
+                        legend_data.append(dimension)
+
                 return {
                     "xAxisData": x_axis_data,
-                    "series": [
-                        {
-                            "name": dimension,
-                            "data": [grouped_data[dimension].get(x, 0) for x in x_axis_data],
-                        }
-                        for dimension in grouped_data.keys()
-                    ],
-                    "legend": list(grouped_data.keys()),
+                    "series": series_data,
+                    "legend": legend_data,
                 }
             else:
-                return {
-                    "xAxisData": [
-                        handle_null_value(
-                            safe_get_value(row, payload.dimension_col, null_label), null_label
-                        )
-                        for row in results
-                    ],
-                    "series": [
+                # No extra dimension, just metrics
+                x_axis_data = [
+                    handle_null_value(
+                        safe_get_value(row, payload.dimension_col, null_label), null_label
+                    )
+                    for row in results
+                ]
+
+                series_data = []
+                legend_data = []
+
+                for metric in payload.metrics:
+                    if metric.aggregation.lower() == "count" and metric.column is None:
+                        alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+                        display_name = metric.alias or "Total Count"
+                    else:
+                        alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+                        display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+
+                    series_data.append(
                         {
-                            "name": get_aggregate_display_name(
-                                payload.aggregate_func, payload.aggregate_col
-                            ),
-                            "data": [
-                                row.get(
-                                    get_aggregate_column_name(
-                                        payload.aggregate_func, payload.aggregate_col
-                                    ),
-                                    0,
-                                )
-                                for row in results
-                            ],
+                            "name": display_name,
+                            "data": [row.get(alias, 0) for row in results],
                         }
-                    ],
-                    "legend": [
-                        get_aggregate_display_name(payload.aggregate_func, payload.aggregate_col)
-                    ],
+                    )
+                    legend_data.append(display_name)
+
+                return {
+                    "xAxisData": x_axis_data,
+                    "series": series_data,
+                    "legend": legend_data,
                 }
 
     elif payload.chart_type == "table":
@@ -1231,26 +1013,33 @@ def transform_data_for_chart(
     elif payload.chart_type == "number":
         # Number charts only support aggregated data and return a single value
         if payload.computation_type == "aggregated" and results:
-            # Get the first (and should be only) row
+            if not payload.metrics or len(payload.metrics) == 0:
+                return {"value": None, "metric_name": "No data", "is_null": True}
+
+            # Use first metric for number charts
+            metric = payload.metrics[0]
             row = results[0] if results else {}
-            agg_col_name = get_aggregate_column_name(payload.aggregate_func, payload.aggregate_col)
-            value = row.get(agg_col_name, 0)
+
+            if metric.aggregation.lower() == "count" and metric.column is None:
+                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+                display_name = metric.alias or "Total Count"
+            else:
+                alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+                display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+
+            value = row.get(alias, 0)
 
             # Handle None values - show "No data" instead of trying to format None as a number
             if value is None:
                 return {
                     "value": None,
-                    "metric_name": get_aggregate_display_name(
-                        payload.aggregate_func, payload.aggregate_col
-                    ),
+                    "metric_name": display_name,
                     "is_null": True,
                 }
 
             return {
                 "value": value,
-                "metric_name": get_aggregate_display_name(
-                    payload.aggregate_func, payload.aggregate_col
-                ),
+                "metric_name": display_name,
                 "is_null": False,
             }
         else:

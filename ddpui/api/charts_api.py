@@ -112,13 +112,13 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
     logger.debug(f"Query built for {chart_id_str}: {query_builder}")
 
     execute_payload = ExecuteChartQuery(
+        chart_type=payload.chart_type,
         computation_type=payload.computation_type,
         x_axis=payload.x_axis,
         y_axis=payload.y_axis,
         dimension_col=payload.dimension_col,
-        aggregate_col=payload.aggregate_col,
-        aggregate_func=payload.aggregate_func,
         extra_dimension=payload.extra_dimension,
+        metrics=payload.metrics,
     )
 
     # Execute query
@@ -133,11 +133,9 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
         x_axis=payload.x_axis,
         y_axis=payload.y_axis,
         dimension_col=payload.dimension_col,
-        aggregate_col=payload.aggregate_col,
-        aggregate_func=payload.aggregate_func,
         extra_dimension=payload.extra_dimension,
         customizations=payload.customizations,
-        metrics=payload.metrics,  # Add metrics field for multiple metrics support
+        metrics=payload.metrics,
     )
     chart_data = charts_service.transform_data_for_chart(dict_results, transform_payload)
 
@@ -376,14 +374,24 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         if chart_filters:
             extra_config["filters"] = chart_filters
 
+        # Convert to metrics-based approach
+        from ddpui.schemas.chart_schema import ChartMetric
+
+        metrics = [
+            ChartMetric(
+                column=value_column,
+                aggregation=aggregate_func or "sum",
+                alias=f"{aggregate_func or 'sum'}_{value_column}",
+            )
+        ]
+
         chart_payload = ChartDataPayload(
             chart_type="bar",  # We use bar chart query logic for aggregated data
             computation_type="aggregated",
             schema_name=schema_name,
             table_name=table_name,
             dimension_col=geographic_column,
-            aggregate_col=value_column,
-            aggregate_func=aggregate_func,
+            metrics=metrics,
             extra_config=extra_config if extra_config else None,
         )
 
@@ -400,10 +408,10 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
 
         # Execute query using standard chart service
         execute_payload = ExecuteChartQuery(
+            chart_type="map",
             computation_type="aggregated",
             dimension_col=geographic_column,
-            aggregate_col=value_column,
-            aggregate_func=aggregate_func,
+            metrics=metrics,
         )
 
         dict_results = charts_service.execute_chart_query(warehouse, query_builder, execute_payload)
@@ -416,9 +424,9 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         for row in dict_results:
             # Get the dimension value (geographic region name)
             region_name = row.get(geographic_column)
-            # Get the aggregated value
-            aggregate_key = f"{aggregate_func}_{value_column}"
-            value = row.get(aggregate_key) or row.get(value_column)
+            # Get the aggregated value using the metric alias
+            metric_alias = metrics[0].alias or f"{metrics[0].aggregation}_{metrics[0].column}"
+            value = row.get(metric_alias)
 
             if region_name and value is not None:
                 map_data.append({"name": str(region_name), "value": float(value)})
