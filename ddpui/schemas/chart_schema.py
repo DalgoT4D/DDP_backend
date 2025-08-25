@@ -113,15 +113,14 @@ class DataPreviewResponse(Schema):
 
 
 class ExecuteChartQuery(Schema):
+    chart_type: str
     computation_type: str
     x_axis: Optional[str] = None
     y_axis: Optional[str] = None
     dimension_col: Optional[str] = None
-    aggregate_col: Optional[str] = None
-    aggregate_func: Optional[str] = None
     extra_dimension: Optional[str] = None
 
-    # Multiple metrics for bar/line charts
+    # Metrics for aggregated charts
     metrics: Optional[List[ChartMetric]] = None
 
 
@@ -133,11 +132,9 @@ class TransformDataForChart(Schema):
     x_axis: Optional[str] = None
     y_axis: Optional[str] = None
     dimension_col: Optional[str] = None
-    aggregate_col: Optional[str] = None
-    aggregate_func: Optional[str] = None
     extra_dimension: Optional[str] = None
 
-    # Multiple metrics for bar/line charts
+    # Metrics for aggregated charts
     metrics: Optional[List[ChartMetric]] = None
 
     # Map-specific fields
