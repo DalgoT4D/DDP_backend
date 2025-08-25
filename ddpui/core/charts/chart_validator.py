@@ -16,7 +16,7 @@ class ChartValidator:
     """Validates chart configurations based on chart type and computation type"""
 
     # Valid chart types
-    VALID_CHART_TYPES = ["bar", "pie", "line", "number", "map"]
+    VALID_CHART_TYPES = ["bar", "pie", "line", "number", "map", "table"]
 
     # Valid computation types
     VALID_COMPUTATION_TYPES = ["raw", "aggregated"]
@@ -52,10 +52,19 @@ class ChartValidator:
             aggregate_func = extra_config.get("aggregate_function")
             customizations = extra_config.get("customizations", {})
 
+            # Extract multiple metrics for bar/line charts
+            metrics = extra_config.get("metrics", [])
+
             # Validate based on chart type
             if chart_type == "bar":
                 ChartValidator._validate_bar_chart(
-                    computation_type, x_axis, y_axis, dimension_col, aggregate_col, aggregate_func
+                    computation_type,
+                    x_axis,
+                    y_axis,
+                    dimension_col,
+                    aggregate_col,
+                    aggregate_func,
+                    metrics,
                 )
             elif chart_type == "pie":
                 ChartValidator._validate_pie_chart(
@@ -63,7 +72,13 @@ class ChartValidator:
                 )
             elif chart_type == "line":
                 ChartValidator._validate_line_chart(
-                    computation_type, x_axis, y_axis, dimension_col, aggregate_col, aggregate_func
+                    computation_type,
+                    x_axis,
+                    y_axis,
+                    dimension_col,
+                    aggregate_col,
+                    aggregate_func,
+                    metrics,
                 )
             elif chart_type == "number":
                 ChartValidator._validate_number_chart(
@@ -78,6 +93,8 @@ class ChartValidator:
                     extra_config.get("selected_geojson_id"),
                     customizations,
                 )
+            elif chart_type == "table":
+                ChartValidator._validate_table_chart(computation_type, schema_name, table_name)
 
             return True, None
 
@@ -139,6 +156,7 @@ class ChartValidator:
         dimension_col: Optional[str],
         aggregate_col: Optional[str],
         aggregate_func: Optional[str],
+        metrics: Optional[List] = None,
     ) -> None:
         """Validate bar chart configuration"""
         if computation_type == "raw":
@@ -158,13 +176,36 @@ class ChartValidator:
                 raise ChartValidationError(
                     "Bar chart with aggregated data requires dimension column"
                 )
-            ChartValidator._validate_aggregate_column(aggregate_col, aggregate_func)
-            if not aggregate_func:
-                raise ChartValidationError(
-                    "Bar chart with aggregated data requires aggregate function"
-                )
 
-            ChartValidator._validate_aggregate_function(aggregate_func)
+            # Check for multiple metrics (new approach) or single metric (legacy approach)
+            if metrics and len(metrics) > 0:
+                # Multiple metrics approach - validate each metric
+                for i, metric in enumerate(metrics):
+                    if not isinstance(metric, dict):
+                        raise ChartValidationError(f"Metric {i+1} must be a dictionary")
+
+                    metric_agg = metric.get("aggregation")
+                    metric_col = metric.get("column")
+
+                    if not metric_agg:
+                        raise ChartValidationError(f"Metric {i+1} requires aggregation function")
+
+                    ChartValidator._validate_aggregate_function(metric_agg)
+
+                    # Validate column requirement (not needed for count)
+                    if not metric_col and metric_agg != "count":
+                        raise ChartValidationError(
+                            f"Metric {i+1} requires column except for count function"
+                        )
+
+            else:
+                # Legacy single metric approach
+                ChartValidator._validate_aggregate_column(aggregate_col, aggregate_func)
+                if not aggregate_func:
+                    raise ChartValidationError(
+                        "Bar chart with aggregated data requires aggregate function"
+                    )
+                ChartValidator._validate_aggregate_function(aggregate_func)
 
             # Ensure raw fields are not set for aggregated data
             if x_axis or y_axis:
@@ -221,6 +262,7 @@ class ChartValidator:
         dimension_col: Optional[str],
         aggregate_col: Optional[str],
         aggregate_func: Optional[str],
+        metrics: Optional[List] = None,
     ) -> None:
         """Validate line chart configuration"""
         if computation_type == "raw":
@@ -240,13 +282,36 @@ class ChartValidator:
                 raise ChartValidationError(
                     "Line chart with aggregated data requires dimension column"
                 )
-            ChartValidator._validate_aggregate_column(aggregate_col, aggregate_func)
-            if not aggregate_func:
-                raise ChartValidationError(
-                    "Line chart with aggregated data requires aggregate function"
-                )
 
-            ChartValidator._validate_aggregate_function(aggregate_func)
+            # Check for multiple metrics (new approach) or single metric (legacy approach)
+            if metrics and len(metrics) > 0:
+                # Multiple metrics approach - validate each metric
+                for i, metric in enumerate(metrics):
+                    if not isinstance(metric, dict):
+                        raise ChartValidationError(f"Metric {i+1} must be a dictionary")
+
+                    metric_agg = metric.get("aggregation")
+                    metric_col = metric.get("column")
+
+                    if not metric_agg:
+                        raise ChartValidationError(f"Metric {i+1} requires aggregation function")
+
+                    ChartValidator._validate_aggregate_function(metric_agg)
+
+                    # Validate column requirement (not needed for count)
+                    if not metric_col and metric_agg != "count":
+                        raise ChartValidationError(
+                            f"Metric {i+1} requires column except for count function"
+                        )
+
+            else:
+                # Legacy single metric approach
+                ChartValidator._validate_aggregate_column(aggregate_col, aggregate_func)
+                if not aggregate_func:
+                    raise ChartValidationError(
+                        "Line chart with aggregated data requires aggregate function"
+                    )
+                ChartValidator._validate_aggregate_function(aggregate_func)
 
             # Ensure raw fields are not set for aggregated data
             if x_axis or y_axis:
@@ -384,3 +449,15 @@ class ChartValidator:
                 raise ChartValidationError(
                     f"Invalid color scheme '{color_scheme}'. Must be one of: Blues, Reds, Greens, Purples, Oranges, Greys"
                 )
+
+    @staticmethod
+    def _validate_table_chart(
+        computation_type: str,
+        schema_name: str,
+        table_name: str,
+    ) -> None:
+        """Validate table chart configuration"""
+        # Tables support both raw and aggregated data
+        # Only basic validation needed - schema and table are already validated in _validate_basic_fields
+        # No additional column requirements for table charts
+        pass

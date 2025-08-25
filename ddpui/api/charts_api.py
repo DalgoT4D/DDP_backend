@@ -34,6 +34,11 @@ logger = CustomLogger("ddpui")
 charts_router = Router()
 
 
+# Schema for bulk delete
+class BulkDeleteRequest(Schema):
+    chart_ids: List[int]
+
+
 @charts_router.get("/regions/{region_id}/geojsons/", response=List[dict])
 def get_geojsons_for_region(request, region_id: int):
     """Get available GeoJSONs for a specific region"""
@@ -132,6 +137,7 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
         aggregate_func=payload.aggregate_func,
         extra_dimension=payload.extra_dimension,
         customizations=payload.customizations,
+        metrics=payload.metrics,  # Add metrics field for multiple metrics support
     )
     chart_data = charts_service.transform_data_for_chart(dict_results, transform_payload)
 
@@ -195,11 +201,57 @@ def generate_map_data_and_config(payload: ChartDataPayload, org_warehouse, chart
     return {"data": map_data, "echarts_config": echarts_config}
 
 
-@charts_router.get("/", response=List[ChartResponse])
-def list_charts(request):
-    """List all charts for the organization"""
+class ChartListResponse(Schema):
+    """Paginated chart list response"""
+
+    data: List[ChartResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+@charts_router.get("/", response=ChartListResponse)
+def list_charts(
+    request, page: int = 1, page_size: int = 10, search: str = None, chart_type: str = None
+):
+    """List charts for the organization with pagination and filtering"""
     orguser = request.orguser
-    charts = Chart.objects.filter(org=orguser.org).order_by("-updated_at")
+
+    # Validate pagination parameters
+    if page < 1:
+        page = 1
+    if page_size < 1 or page_size > 100:
+        page_size = 10
+
+    # Start with all charts for the organization
+    queryset = Chart.objects.filter(org=orguser.org)
+
+    # Apply search filter
+    if search:
+        from django.db.models import Q
+
+        queryset = queryset.filter(
+            Q(title__icontains=search)
+            | Q(description__icontains=search)
+            | Q(schema_name__icontains=search)
+            | Q(table_name__icontains=search)
+        )
+
+    # Apply chart type filter
+    if chart_type and chart_type != "all":
+        queryset = queryset.filter(chart_type=chart_type)
+
+    # Order by updated_at descending
+    queryset = queryset.order_by("-updated_at")
+
+    # Get total count before pagination
+    total = queryset.count()
+    total_pages = (total + page_size - 1) // page_size  # Ceiling division
+
+    # Apply pagination
+    offset = (page - 1) * page_size
+    charts = queryset[offset : offset + page_size]
 
     # Get org warehouse once for all charts
     org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
@@ -224,7 +276,9 @@ def list_charts(request):
         }
         chart_responses.append(ChartResponse(**chart_dict))
 
-    return chart_responses
+    return ChartListResponse(
+        data=chart_responses, total=total, page=page, page_size=page_size, total_pages=total_pages
+    )
 
 
 # New endpoints for separated data fetching (place before parametrized routes)
@@ -701,6 +755,8 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
         aggregate_col=extra_config.get("aggregate_column"),
         aggregate_func=extra_config.get("aggregate_function"),
         extra_dimension=extra_config.get("extra_dimension_column"),
+        # Multiple metrics support - CRITICAL FIX for dashboard charts
+        metrics=extra_config.get("metrics"),
         # Map-specific fields
         geographic_column=extra_config.get("geographic_column"),
         value_column=extra_config.get("value_column"),
@@ -861,6 +917,38 @@ def delete_chart(request, chart_id: int):
         raise HttpError(404, "Chart not found")
     chart.delete()
     return {"success": True}
+
+
+@charts_router.post("/bulk-delete/")
+def bulk_delete_charts(request, payload: BulkDeleteRequest):
+    """Delete multiple charts"""
+    orguser = request.orguser
+
+    if not payload.chart_ids:
+        raise HttpError(400, "No chart IDs provided")
+
+    try:
+        # Get charts that belong to this org
+        charts = Chart.objects.filter(id__in=payload.chart_ids, org=orguser.org)
+        found_ids = list(charts.values_list("id", flat=True))
+
+        # Check if all requested charts were found
+        missing_ids = set(payload.chart_ids) - set(found_ids)
+        if missing_ids:
+            logger.warning(f"Charts not found or not accessible: {missing_ids}")
+
+        # Delete the charts
+        deleted_count = charts.delete()[0]
+
+        return {
+            "success": True,
+            "deleted_count": deleted_count,
+            "requested_count": len(payload.chart_ids),
+            "missing_ids": list(missing_ids),
+        }
+    except Exception as e:
+        logger.error(f"Error in bulk delete: {str(e)}")
+        raise HttpError(500, f"Error deleting charts: {str(e)}")
 
 
 @charts_router.get("/{chart_id}/dashboards/", response=List[dict])
