@@ -48,8 +48,6 @@ class ChartValidator:
             x_axis = extra_config.get("x_axis_column")
             y_axis = extra_config.get("y_axis_column")
             dimension_col = extra_config.get("dimension_column")
-            aggregate_col = extra_config.get("aggregate_column")
-            aggregate_func = extra_config.get("aggregate_function")
             customizations = extra_config.get("customizations", {})
 
             # Extract multiple metrics for bar/line charts
@@ -62,8 +60,6 @@ class ChartValidator:
                     x_axis,
                     y_axis,
                     dimension_col,
-                    aggregate_col,
-                    aggregate_func,
                     metrics,
                 )
             elif chart_type == "pie":
@@ -76,8 +72,6 @@ class ChartValidator:
                     x_axis,
                     y_axis,
                     dimension_col,
-                    aggregate_col,
-                    aggregate_func,
                     metrics,
                 )
             elif chart_type == "number":
@@ -90,7 +84,6 @@ class ChartValidator:
                     extra_config.get("selected_geojson_id"),
                     metrics,
                     customizations,
-                    metrics,
                 )
             elif chart_type == "table":
                 ChartValidator._validate_table_chart(computation_type, schema_name, table_name)
@@ -145,8 +138,6 @@ class ChartValidator:
         x_axis: Optional[str],
         y_axis: Optional[str],
         dimension_col: Optional[str],
-        aggregate_col: Optional[str],
-        aggregate_func: Optional[str],
         metrics: Optional[List] = None,
     ) -> None:
         """Validate bar chart configuration"""
@@ -157,9 +148,9 @@ class ChartValidator:
                 raise ChartValidationError("Bar chart with raw data requires Y-axis column")
 
             # Ensure aggregated fields are not set for raw data
-            if dimension_col or aggregate_col or aggregate_func:
+            if dimension_col or metrics:
                 raise ChartValidationError(
-                    "Bar chart with raw data should not have dimension, aggregate column, or aggregate function"
+                    "Bar chart with raw data should not have dimension column or metrics"
                 )
 
         else:  # aggregated
@@ -256,10 +247,6 @@ class ChartValidator:
             if not metric_col and metric_agg != "count":
                 raise ChartValidationError("Metric requires column except for count function")
 
-            # Validate metrics count - pie charts should only have one metric
-            if metrics and len(metrics) > 1:
-                raise ChartValidationError("Pie charts support only one metric")
-
             # Ensure raw fields are not set for aggregated data
             if x_axis or y_axis:
                 raise ChartValidationError(
@@ -272,8 +259,6 @@ class ChartValidator:
         x_axis: Optional[str],
         y_axis: Optional[str],
         dimension_col: Optional[str],
-        aggregate_col: Optional[str],
-        aggregate_func: Optional[str],
         metrics: Optional[List] = None,
     ) -> None:
         """Validate line chart configuration"""
@@ -284,9 +269,9 @@ class ChartValidator:
                 raise ChartValidationError("Line chart with raw data requires Y-axis column")
 
             # Ensure aggregated fields are not set for raw data
-            if dimension_col or aggregate_col or aggregate_func:
+            if dimension_col or metrics:
                 raise ChartValidationError(
-                    "Line chart with raw data should not have dimension, aggregate column, or aggregate function"
+                    "Line chart with raw data should not have dimension column or metrics"
                 )
 
         else:  # aggregated
@@ -364,10 +349,6 @@ class ChartValidator:
         # Validate column requirement (not needed for count)
         if not metric_col and metric_agg != "count":
             raise ChartValidationError("Metric requires column except for count function")
-
-        # Validate metrics count - number charts should only have one metric
-        if metrics and len(metrics) > 1:
-            raise ChartValidationError("Number charts support only one metric")
 
         # Validate customizations if present
         if customizations:
@@ -454,12 +435,6 @@ class ChartValidator:
 
         if not geographic_column:
             raise ChartValidationError("Map chart requires geographic column")
-
-        # Handle both multiple metrics system and legacy single metric system
-        if metrics and len(metrics) > 0:
-            # Validate metrics count - map charts should only have one metric
-            if len(metrics) > 1:
-                raise ChartValidationError("Map charts support only one metric")
 
         # Validate metrics - map charts need exactly one metric
         if not metrics or len(metrics) == 0:
