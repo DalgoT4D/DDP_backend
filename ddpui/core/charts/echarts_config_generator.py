@@ -136,7 +136,7 @@ class EChartsConfigGenerator:
 
         config = {
             "title": {"text": customizations.get("title", "")},
-            "legend": {"data": data.get("legend", []), "show": show_legend},
+            "legend": {"data": data.get("legend", []), "show": show_legend, "type": "scroll"},
             "grid": {"left": "3%", "right": "4%", "bottom": "3%", "containLabel": True},
             "xAxis": {
                 "type": "category" if orientation == "vertical" else "value",
@@ -242,6 +242,7 @@ class EChartsConfigGenerator:
                 "orient": "vertical" if legend_position in ["left", "right"] else "horizontal",
                 legend_position: 10 if legend_position in ["left", "right"] else "center",
                 "data": [item["name"] for item in data.get("pieData", [])],
+                "type": "scroll",
             }
 
         return config
@@ -300,7 +301,7 @@ class EChartsConfigGenerator:
 
         # Add legend if enabled
         if show_legend:
-            config["legend"] = {"data": data.get("legend", [])}
+            config["legend"] = {"data": data.get("legend", []), "type": "scroll"}
 
         # Build series
         for series_data in data.get("series", []):
