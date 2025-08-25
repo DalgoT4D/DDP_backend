@@ -68,7 +68,13 @@ class ChartValidator:
                 )
             elif chart_type == "pie":
                 ChartValidator._validate_pie_chart(
-                    computation_type, x_axis, y_axis, dimension_col, aggregate_col, aggregate_func
+                    computation_type,
+                    x_axis,
+                    y_axis,
+                    dimension_col,
+                    aggregate_col,
+                    aggregate_func,
+                    metrics,
                 )
             elif chart_type == "line":
                 ChartValidator._validate_line_chart(
@@ -82,7 +88,7 @@ class ChartValidator:
                 )
             elif chart_type == "number":
                 ChartValidator._validate_number_chart(
-                    computation_type, aggregate_col, aggregate_func, customizations
+                    computation_type, aggregate_col, aggregate_func, customizations, metrics
                 )
             elif chart_type == "map":
                 ChartValidator._validate_map_chart(
@@ -222,6 +228,7 @@ class ChartValidator:
         dimension_col: Optional[str],
         aggregate_col: Optional[str],
         aggregate_func: Optional[str],
+        metrics: Optional[List] = None,
     ) -> None:
         """Validate pie chart configuration"""
         if computation_type == "raw":
@@ -248,6 +255,10 @@ class ChartValidator:
                 )
 
             ChartValidator._validate_aggregate_function(aggregate_func)
+
+            # Validate metrics count - pie charts should only have one metric
+            if metrics and len(metrics) > 1:
+                raise ChartValidationError("Pie charts support only one metric")
 
             # Ensure raw fields are not set for aggregated data
             if x_axis or y_axis:
@@ -326,6 +337,7 @@ class ChartValidator:
         aggregate_col: Optional[str],
         aggregate_func: Optional[str],
         customizations: Dict,
+        metrics: Optional[List] = None,
     ) -> None:
         """Validate number chart configuration"""
         # Number charts only support aggregated data
@@ -338,6 +350,10 @@ class ChartValidator:
             raise ChartValidationError("Number chart requires aggregate function")
 
         ChartValidator._validate_aggregate_function(aggregate_func)
+
+        # Validate metrics count - number charts should only have one metric
+        if metrics and len(metrics) > 1:
+            raise ChartValidationError("Number charts support only one metric")
 
         # Validate customizations if present
         if customizations:
@@ -428,6 +444,10 @@ class ChartValidator:
 
         # Handle both multiple metrics system and legacy single metric system
         if metrics and len(metrics) > 0:
+            # Validate metrics count - map charts should only have one metric
+            if len(metrics) > 1:
+                raise ChartValidationError("Map charts support only one metric")
+
             # Multiple metrics system - validate each metric
             for i, metric in enumerate(metrics):
                 if not isinstance(metric, dict):
