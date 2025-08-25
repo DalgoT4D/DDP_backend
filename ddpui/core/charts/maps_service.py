@@ -81,18 +81,33 @@ def build_map_query(payload: ChartDataPayload, drill_down_filters: List[Dict] = 
     # Maps always use aggregated data grouped by geographic column
 
     # Create a new payload that mimics aggregated bar chart structure
-    map_payload = ChartDataPayload(
-        chart_type="bar",  # Reuse bar chart query logic internally
-        computation_type="aggregated",
-        schema_name=payload.schema_name,
-        table_name=payload.table_name,
-        dimension_col=payload.geographic_column,
-        aggregate_col=payload.value_column,
-        aggregate_func=payload.aggregate_func or "sum",
-        limit=payload.limit or 1000,
-        offset=payload.offset or 0,
-        extra_config=payload.extra_config,  # Pass through filters and other config
-    )
+    if payload.metrics:
+        # Use new multiple metrics system
+        map_payload = ChartDataPayload(
+            chart_type="bar",  # Reuse bar chart query logic internally
+            computation_type="aggregated",
+            schema_name=payload.schema_name,
+            table_name=payload.table_name,
+            dimension_col=payload.geographic_column,
+            metrics=payload.metrics,  # Use metrics array
+            limit=payload.limit or 1000,
+            offset=payload.offset or 0,
+            extra_config=payload.extra_config,  # Pass through filters and other config
+        )
+    else:
+        # Fallback to legacy single metric system for backward compatibility
+        map_payload = ChartDataPayload(
+            chart_type="bar",  # Reuse bar chart query logic internally
+            computation_type="aggregated",
+            schema_name=payload.schema_name,
+            table_name=payload.table_name,
+            dimension_col=payload.geographic_column,
+            aggregate_col=payload.value_column,
+            aggregate_func=payload.aggregate_func or "sum",
+            limit=payload.limit or 1000,
+            offset=payload.offset or 0,
+            extra_config=payload.extra_config,  # Pass through filters and other config
+        )
 
     # Build base query
     query = charts_service.build_chart_query(map_payload)
@@ -141,6 +156,7 @@ def build_drill_down_query_for_layer(
         geographic_column=geographic_column,
         value_column=payload.value_column,
         aggregate_func=payload.aggregate_func,
+        metrics=payload.metrics,  # Pass through metrics for multiple metric support
         limit=payload.limit,
         offset=payload.offset,
         extra_config=payload.extra_config,  # Pass through filters and other config
@@ -153,16 +169,51 @@ def transform_data_for_map(
     results: List[Dict[str, Any]],
     geojson_data: Dict,
     geographic_column: str,
-    value_column: str,
+    value_column: str = None,
     aggregate_func: str = "sum",
     customizations: Dict = None,
+    metrics: List = None,
+    selected_metric_index: int = 0,
 ) -> Dict[str, Any]:
-    """Transform query results to map-specific format"""
+    """Transform query results to map-specific format
+
+    Args:
+        results: Query results from database
+        geojson_data: GeoJSON data for map visualization
+        geographic_column: Column containing region names
+        value_column: Legacy single value column (for backward compatibility)
+        aggregate_func: Legacy aggregate function (for backward compatibility)
+        customizations: Chart customizations
+        metrics: List of metrics (new multiple metrics system)
+        selected_metric_index: Which metric to display (default: first metric)
+    """
 
     customizations = customizations or {}
 
-    # Get aggregate column name (consistent with charts_service)
-    agg_col_name = f"{aggregate_func}_{value_column}" if value_column else "count_all"
+    # Handle multiple metrics system vs legacy single metric
+    if metrics and len(metrics) > 0:
+        # Use new multiple metrics system
+        selected_metric = (
+            metrics[selected_metric_index] if selected_metric_index < len(metrics) else metrics[0]
+        )
+
+        # Generate the column alias for the selected metric
+        if (
+            selected_metric.get("aggregation", "").lower() == "count"
+            and selected_metric.get("column") is None
+        ):
+            if selected_metric.get("alias"):
+                agg_col_name = f"count_all_{selected_metric['alias']}"
+            else:
+                agg_col_name = "count_all"
+        else:
+            if selected_metric.get("alias"):
+                agg_col_name = selected_metric["alias"]
+            else:
+                agg_col_name = f"{selected_metric['aggregation']}_{selected_metric['column']}"
+    else:
+        # Legacy single metric system (backward compatibility)
+        agg_col_name = f"{aggregate_func}_{value_column}" if value_column else "count_all"
 
     # Create lookup for user data
     data_lookup = {}
@@ -205,6 +256,26 @@ def transform_data_for_map(
     min_value = min(values) if values else 0
     max_value = max(values) if values else 100
 
+    # Prepare available metrics info for frontend
+    available_metrics = []
+    if metrics and len(metrics) > 0:
+        for i, metric in enumerate(metrics):
+            if metric.get("aggregation", "").lower() == "count" and metric.get("column") is None:
+                display_name = metric.get("alias") or "Total Count"
+            else:
+                display_name = metric.get("alias") or f"{metric['aggregation']}({metric['column']})"
+
+            available_metrics.append(
+                {
+                    "index": i,
+                    "display_name": display_name,
+                    "column": metric.get("column"),
+                    "aggregation": metric.get("aggregation"),
+                    "alias": metric.get("alias"),
+                    "is_selected": i == selected_metric_index,
+                }
+            )
+
     return {
         "geojson": geojson_data,
         "data": map_data,
@@ -212,6 +283,8 @@ def transform_data_for_map(
         "max_value": max_value,
         "matched_regions": matched_count,
         "total_regions": len(map_data),
+        "available_metrics": available_metrics,
+        "selected_metric_index": selected_metric_index,
     }
 
 

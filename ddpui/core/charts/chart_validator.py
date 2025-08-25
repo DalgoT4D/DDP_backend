@@ -68,7 +68,13 @@ class ChartValidator:
                 )
             elif chart_type == "pie":
                 ChartValidator._validate_pie_chart(
-                    computation_type, x_axis, y_axis, dimension_col, aggregate_col, aggregate_func
+                    computation_type,
+                    x_axis,
+                    y_axis,
+                    dimension_col,
+                    aggregate_col,
+                    aggregate_func,
+                    metrics,
                 )
             elif chart_type == "line":
                 ChartValidator._validate_line_chart(
@@ -82,7 +88,7 @@ class ChartValidator:
                 )
             elif chart_type == "number":
                 ChartValidator._validate_number_chart(
-                    computation_type, aggregate_col, aggregate_func, customizations
+                    computation_type, aggregate_col, aggregate_func, customizations, metrics
                 )
             elif chart_type == "map":
                 ChartValidator._validate_map_chart(
@@ -92,6 +98,7 @@ class ChartValidator:
                     extra_config.get("aggregate_function"),
                     extra_config.get("selected_geojson_id"),
                     customizations,
+                    metrics,
                 )
             elif chart_type == "table":
                 ChartValidator._validate_table_chart(computation_type, schema_name, table_name)
@@ -221,6 +228,7 @@ class ChartValidator:
         dimension_col: Optional[str],
         aggregate_col: Optional[str],
         aggregate_func: Optional[str],
+        metrics: Optional[List] = None,
     ) -> None:
         """Validate pie chart configuration"""
         if computation_type == "raw":
@@ -247,6 +255,10 @@ class ChartValidator:
                 )
 
             ChartValidator._validate_aggregate_function(aggregate_func)
+
+            # Validate metrics count - pie charts should only have one metric
+            if metrics and len(metrics) > 1:
+                raise ChartValidationError("Pie charts support only one metric")
 
             # Ensure raw fields are not set for aggregated data
             if x_axis or y_axis:
@@ -325,6 +337,7 @@ class ChartValidator:
         aggregate_col: Optional[str],
         aggregate_func: Optional[str],
         customizations: Dict,
+        metrics: Optional[List] = None,
     ) -> None:
         """Validate number chart configuration"""
         # Number charts only support aggregated data
@@ -337,6 +350,10 @@ class ChartValidator:
             raise ChartValidationError("Number chart requires aggregate function")
 
         ChartValidator._validate_aggregate_function(aggregate_func)
+
+        # Validate metrics count - number charts should only have one metric
+        if metrics and len(metrics) > 1:
+            raise ChartValidationError("Number charts support only one metric")
 
         # Validate customizations if present
         if customizations:
@@ -415,6 +432,7 @@ class ChartValidator:
         aggregate_func: Optional[str],
         selected_geojson_id: Optional[int],
         customizations: Dict,
+        metrics: List = None,
     ) -> None:
         """Validate map chart configuration"""
         # Maps only support aggregated data
@@ -424,13 +442,39 @@ class ChartValidator:
         if not geographic_column:
             raise ChartValidationError("Map chart requires geographic column")
 
-        if not value_column:
-            raise ChartValidationError("Map chart requires value column")
+        # Handle both multiple metrics system and legacy single metric system
+        if metrics and len(metrics) > 0:
+            # Validate metrics count - map charts should only have one metric
+            if len(metrics) > 1:
+                raise ChartValidationError("Map charts support only one metric")
 
-        if not aggregate_func:
-            raise ChartValidationError("Map chart requires aggregate function")
+            # Multiple metrics system - validate each metric
+            for i, metric in enumerate(metrics):
+                if not isinstance(metric, dict):
+                    raise ChartValidationError(f"Metric {i+1} must be a dictionary")
 
-        ChartValidator._validate_aggregate_function(aggregate_func)
+                metric_agg = metric.get("aggregation")
+                metric_col = metric.get("column")
+
+                if not metric_agg:
+                    raise ChartValidationError(f"Metric {i+1} requires aggregation function")
+
+                ChartValidator._validate_aggregate_function(metric_agg)
+
+                # Validate column requirement (not needed for count)
+                if not metric_col and metric_agg != "count":
+                    raise ChartValidationError(
+                        f"Metric {i+1} requires column except for count function"
+                    )
+        else:
+            # Legacy single metric system - validate value_column and aggregate_func
+            if not value_column:
+                raise ChartValidationError("Map chart requires value column")
+
+            if not aggregate_func:
+                raise ChartValidationError("Map chart requires aggregate function")
+
+            ChartValidator._validate_aggregate_function(aggregate_func)
 
         if not selected_geojson_id:
             raise ChartValidationError("Map chart requires selected GeoJSON")

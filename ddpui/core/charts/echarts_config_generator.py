@@ -136,7 +136,14 @@ class EChartsConfigGenerator:
 
         config = {
             "title": {"text": customizations.get("title", "")},
-            "legend": {"data": data.get("legend", []), "show": show_legend},
+            "legend": {
+                "data": data.get("legend", []),
+                "show": show_legend,
+                "type": "scroll",
+                "orient": "horizontal",
+                "top": 10,
+                "left": "center",
+            },
             "grid": {"left": "3%", "right": "4%", "bottom": "3%", "containLabel": True},
             "xAxis": {
                 "type": "category" if orientation == "vertical" else "value",
@@ -187,7 +194,7 @@ class EChartsConfigGenerator:
         """Generate pie chart configuration"""
         customizations = customizations or {}
         chart_style = customizations.get("chartStyle", "donut")  # Default to donut
-        show_data_labels = customizations.get("showDataLabels", True)
+        show_data_labels = customizations.get("showDataLabels", False)
         label_format = customizations.get("labelFormat", "percentage")
         data_label_position = customizations.get("dataLabelPosition", "outside")
         legend_position = customizations.get("legendPosition", "right")
@@ -239,9 +246,11 @@ class EChartsConfigGenerator:
         # Add legend if enabled
         if show_legend:
             config["legend"] = {
-                "orient": "vertical" if legend_position in ["left", "right"] else "horizontal",
-                legend_position: 10 if legend_position in ["left", "right"] else "center",
+                "orient": "horizontal",
+                "top": 10,
+                "left": "center",
                 "data": [item["name"] for item in data.get("pieData", [])],
+                "type": "scroll",
             }
 
         return config
@@ -300,7 +309,13 @@ class EChartsConfigGenerator:
 
         # Add legend if enabled
         if show_legend:
-            config["legend"] = {"data": data.get("legend", [])}
+            config["legend"] = {
+                "data": data.get("legend", []),
+                "type": "scroll",
+                "orient": "horizontal",
+                "top": 10,
+                "left": "center",
+            }
 
         # Build series
         for series_data in data.get("series", []):
