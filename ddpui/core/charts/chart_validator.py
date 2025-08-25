@@ -87,8 +87,8 @@ class ChartValidator:
                     computation_type,
                     extra_config.get("geographic_column"),
                     extra_config.get("value_column"),
-                    extra_config.get("aggregate_function"),
                     extra_config.get("selected_geojson_id"),
+                    metrics,
                     customizations,
                 )
             elif chart_type == "table":
@@ -230,7 +230,12 @@ class ChartValidator:
             # Validate metrics - pie charts need exactly one metric
             if not metrics or len(metrics) == 0:
                 raise ChartValidationError(
-                    "Pie chart with aggregated data requires at least one metric"
+                    "Pie chart with aggregated data requires exactly one metric"
+                )
+
+            if len(metrics) > 1:
+                raise ChartValidationError(
+                    "Pie charts support only one metric. Multiple metrics are not allowed."
                 )
 
             # Validate the first metric (pie charts use first metric only)
@@ -331,7 +336,12 @@ class ChartValidator:
 
         # Validate metrics - number charts need exactly one metric
         if not metrics or len(metrics) == 0:
-            raise ChartValidationError("Number chart requires at least one metric")
+            raise ChartValidationError("Number chart requires exactly one metric")
+
+        if len(metrics) > 1:
+            raise ChartValidationError(
+                "Number charts support only one metric. Multiple metrics are not allowed."
+            )
 
         # Validate the first metric (number charts use first metric only)
         metric = metrics[0]
@@ -424,9 +434,9 @@ class ChartValidator:
         computation_type: str,
         geographic_column: Optional[str],
         value_column: Optional[str],
-        aggregate_func: Optional[str],
         selected_geojson_id: Optional[int],
-        customizations: Dict,
+        metrics: Optional[List] = None,
+        customizations: Dict = None,
     ) -> None:
         """Validate map chart configuration"""
         # Maps only support aggregated data
@@ -439,10 +449,31 @@ class ChartValidator:
         if not value_column:
             raise ChartValidationError("Map chart requires value column")
 
-        if not aggregate_func:
-            raise ChartValidationError("Map chart requires aggregate function")
+        # Validate metrics - map charts need exactly one metric
+        if not metrics or len(metrics) == 0:
+            raise ChartValidationError("Map chart requires exactly one metric")
 
-        ChartValidator._validate_aggregate_function(aggregate_func)
+        if len(metrics) > 1:
+            raise ChartValidationError(
+                "Map charts support only one metric. Multiple metrics are not allowed."
+            )
+
+        # Validate the metric
+        metric = metrics[0]
+        if not isinstance(metric, dict):
+            raise ChartValidationError("Metric must be a dictionary")
+
+        metric_agg = metric.get("aggregation")
+        metric_col = metric.get("column")
+
+        if not metric_agg:
+            raise ChartValidationError("Metric requires aggregation function")
+
+        ChartValidator._validate_aggregate_function(metric_agg)
+
+        # Validate column requirement (not needed for count)
+        if not metric_col and metric_agg != "count":
+            raise ChartValidationError("Metric requires column except for count function")
 
         if not selected_geojson_id:
             raise ChartValidationError("Map chart requires selected GeoJSON")
