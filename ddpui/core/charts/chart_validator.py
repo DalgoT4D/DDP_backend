@@ -92,6 +92,7 @@ class ChartValidator:
                     extra_config.get("aggregate_function"),
                     extra_config.get("selected_geojson_id"),
                     customizations,
+                    metrics,
                 )
             elif chart_type == "table":
                 ChartValidator._validate_table_chart(computation_type, schema_name, table_name)
@@ -415,6 +416,7 @@ class ChartValidator:
         aggregate_func: Optional[str],
         selected_geojson_id: Optional[int],
         customizations: Dict,
+        metrics: List = None,
     ) -> None:
         """Validate map chart configuration"""
         # Maps only support aggregated data
@@ -424,13 +426,35 @@ class ChartValidator:
         if not geographic_column:
             raise ChartValidationError("Map chart requires geographic column")
 
-        if not value_column:
-            raise ChartValidationError("Map chart requires value column")
+        # Handle both multiple metrics system and legacy single metric system
+        if metrics and len(metrics) > 0:
+            # Multiple metrics system - validate each metric
+            for i, metric in enumerate(metrics):
+                if not isinstance(metric, dict):
+                    raise ChartValidationError(f"Metric {i+1} must be a dictionary")
 
-        if not aggregate_func:
-            raise ChartValidationError("Map chart requires aggregate function")
+                metric_agg = metric.get("aggregation")
+                metric_col = metric.get("column")
 
-        ChartValidator._validate_aggregate_function(aggregate_func)
+                if not metric_agg:
+                    raise ChartValidationError(f"Metric {i+1} requires aggregation function")
+
+                ChartValidator._validate_aggregate_function(metric_agg)
+
+                # Validate column requirement (not needed for count)
+                if not metric_col and metric_agg != "count":
+                    raise ChartValidationError(
+                        f"Metric {i+1} requires column except for count function"
+                    )
+        else:
+            # Legacy single metric system - validate value_column and aggregate_func
+            if not value_column:
+                raise ChartValidationError("Map chart requires value column")
+
+            if not aggregate_func:
+                raise ChartValidationError("Map chart requires aggregate function")
+
+            ChartValidator._validate_aggregate_function(aggregate_func)
 
         if not selected_geojson_id:
             raise ChartValidationError("Map chart requires selected GeoJSON")

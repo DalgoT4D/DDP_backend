@@ -134,7 +134,7 @@ def build_multi_metric_query(
     payload: ChartDataPayload,
     query_builder: AggQueryBuilder,
 ) -> AggQueryBuilder:
-    """Build query for multiple metrics on bar/line/pie/table charts"""
+    """Build query for multiple metrics on bar/line/pie/table/map charts"""
     if not payload.dimension_col:
         raise ValueError("dimension_col is required for multiple metrics charts")
 
@@ -196,8 +196,8 @@ def build_chart_query(
             )
 
     else:  # aggregated
-        # Check if multiple metrics are provided for bar/line/pie/table charts
-        if payload.metrics and payload.chart_type in ["bar", "line", "pie", "table"]:
+        # Check if multiple metrics are provided for bar/line/pie/table/map charts
+        if payload.metrics and payload.chart_type in ["bar", "line", "pie", "table", "map"]:
             # Use multiple metrics approach
             query_builder = build_multi_metric_query(payload, query_builder)
 
