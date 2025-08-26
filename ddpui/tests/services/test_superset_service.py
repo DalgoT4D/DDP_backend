@@ -178,7 +178,7 @@ class TestSupersetService:
                     superset_service._make_request_with_retry("GET", "https://test.com")
 
             assert exc_info.value.status_code == 503
-            assert "Failed to connect to Superset" in str(exc_info.value)
+            assert "Superset request failed: Connection failed" in str(exc_info.value)
 
         # Test 401 error after all retries
         with patch.object(superset_service, "get_access_token", return_value="test-token"):
@@ -233,11 +233,12 @@ class TestSupersetService:
     def test_dashboard_thumbnail_caching(self, superset_service, mock_redis):
         """Test dashboard thumbnail retrieval and caching."""
         dashboard_id = "123"
+        thumbnail_url = "https://superset.example.com/api/v1/dashboard/123/thumbnail/"
         thumbnail_data = b"fake-image-data"
 
         # Test cache hit
         mock_redis.get.return_value = thumbnail_data
-        result = superset_service.get_dashboard_thumbnail(dashboard_id)
+        result = superset_service.get_dashboard_thumbnail(dashboard_id, thumbnail_url)
         assert result == thumbnail_data
 
         # Test cache miss
@@ -248,7 +249,7 @@ class TestSupersetService:
                 mock_response.content = thumbnail_data
                 mock_request.return_value = mock_response
 
-                result = superset_service.get_dashboard_thumbnail(dashboard_id)
+                result = superset_service.get_dashboard_thumbnail(dashboard_id, thumbnail_url)
                 assert result == thumbnail_data
 
                 # Verify caching
