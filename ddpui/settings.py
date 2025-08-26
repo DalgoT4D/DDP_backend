@@ -58,7 +58,7 @@ ALLOWED_HOSTS = [
     "staging.dalgo.org",
     "dashboard.dalgo.org",
     "staging-app.dalgo.org",
-    "app.dalgo.org",
+    "insights.dalgo.org",
 ]
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_METHODS = [
@@ -75,6 +75,7 @@ CORS_ORIGIN_WHITELIST = (
     "http://127.0.0.1:3000",
     "https://staging.dalgo.org",
     "https://dashboard.dalgo.org",
+    "https://insights.dalgo.org",
 )
 CORS_ALLOW_HEADERS = (*default_headers, "x-dalgo-org")
 
