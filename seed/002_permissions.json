@@ -3,8 +3,8 @@
         "model": "ddpui.Permission",
         "pk": 1,
         "fields": {
-            "name": "Can View Dashboard",
-            "slug": "can_view_dashboard"
+            "name": "Can View Pipeline Overview",
+            "slug": "can_view_pipeline_overview"
         }
     },
     {

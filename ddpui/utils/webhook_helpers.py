@@ -261,8 +261,8 @@ def update_flow_run_for_deployment(deployment_id: str, state: str, flow_run: dic
         logger.info("updating the flow run in db")
         create_or_update_flowrun(flow_run, deployment_id, state)
 
-        # retry flow run if infra went down
-        if state == FLOW_RUN_CRASHED_STATE_NAME:
+        # retry flow run if infra went down or in case of failures
+        if state in [FLOW_RUN_CRASHED_STATE_NAME, FLOW_RUN_FAILED_STATE_NAME]:
             prefect_flow_run = PrefectFlowRun.objects.filter(flow_run_id=flow_run_id).first()
             retry_crashed_flow_runs = os.getenv("PREFECT_RETRY_CRASHED_FLOW_RUNS", "0").lower() in [
                 "1",
