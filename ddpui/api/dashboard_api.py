@@ -13,7 +13,7 @@ dashboard_router = Router()
 
 
 @dashboard_router.get("/v1")
-@has_permission(["can_view_dashboard"])
+@has_permission(["can_view_pipeline_overview"])
 def get_dashboard_v1(request):
     """Fetch all flows/pipelines created in an organization"""
     orguser = request.orguser
