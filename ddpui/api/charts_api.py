@@ -17,6 +17,7 @@ from ddpui.core.charts.chart_validator import ChartValidator
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.schemas.chart_schema import (
     ChartCreate,
+    ChartMetric,
     ChartUpdate,
     ChartResponse,
     ChartDataPayload,
@@ -73,8 +74,6 @@ def generate_chart_render_config(chart: Chart, org_warehouse: OrgWarehouse) -> d
             x_axis=extra_config.get("x_axis_column"),
             y_axis=extra_config.get("y_axis_column"),
             dimension_col=extra_config.get("dimension_column"),
-            aggregate_col=extra_config.get("aggregate_column"),
-            aggregate_func=extra_config.get("aggregate_function"),
             extra_dimension=extra_config.get("extra_dimension_column"),
             # Map-specific fields
             geographic_column=extra_config.get("geographic_column"),
@@ -190,7 +189,7 @@ def generate_map_data_and_config(payload: ChartDataPayload, org_warehouse, chart
         geojson.geojson_data,
         payload.geographic_column,
         payload.value_column,
-        payload.aggregate_func or "sum",
+        None,  # aggregate_func removed - using metrics
         payload.customizations,
         payload.metrics,
         selected_metric_index,
@@ -334,7 +333,7 @@ class MapDataOverlayPayload(Schema):
     table_name: str
     geographic_column: str
     value_column: str
-    aggregate_func: str = "sum"
+    metrics: List[ChartMetric]
     filters: dict = {}  # Drill-down filters (key-value pairs)
     chart_filters: list = []  # Chart-level filters (list of filter objects)
 
@@ -358,7 +357,7 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         table_name = payload.table_name
         geographic_column = payload.geographic_column
         value_column = payload.value_column
-        aggregate_func = payload.aggregate_func
+        # Use first metric for map overlay
         filters = payload.filters
         chart_filters = payload.chart_filters
 
@@ -374,16 +373,8 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         if chart_filters:
             extra_config["filters"] = chart_filters
 
-        # Convert to metrics-based approach
-        from ddpui.schemas.chart_schema import ChartMetric
-
-        metrics = [
-            ChartMetric(
-                column=value_column,
-                aggregation=aggregate_func or "sum",
-                alias=f"{aggregate_func or 'sum'}_{value_column}",
-            )
-        ]
+        # Use metrics from payload directly
+        metrics = payload.metrics
 
         chart_payload = ChartDataPayload(
             chart_type="bar",  # We use bar chart query logic for aggregated data
@@ -449,7 +440,7 @@ def get_chart_data(request, payload: ChartDataPayload):
         f"Chart data request - Type: {payload.computation_type}, Schema: {payload.schema_name}, Table: {payload.table_name}"
     )
     logger.info(
-        f"Columns - x_axis: {payload.x_axis}, y_axis: {payload.y_axis}, dimension_col: {payload.dimension_col}, aggregate_col: {payload.aggregate_col}"
+        f"Columns - x_axis: {payload.x_axis}, y_axis: {payload.y_axis}, dimension_col: {payload.dimension_col}, metrics: {payload.metrics}"
     )
 
     # Validate user has access to schema/table
@@ -646,7 +637,7 @@ def generate_map_chart_data(request, payload: ChartDataPayload):
         geojson.geojson_data,
         payload.geographic_column,
         payload.value_column,
-        payload.aggregate_func or "sum",
+        None,  # aggregate_func removed - using metrics
         payload.customizations or {},
         payload.metrics,
         selected_metric_index,
@@ -770,8 +761,6 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
         x_axis=extra_config.get("x_axis_column"),
         y_axis=extra_config.get("y_axis_column"),
         dimension_col=extra_config.get("dimension_column"),
-        aggregate_col=extra_config.get("aggregate_column"),
-        aggregate_func=extra_config.get("aggregate_function"),
         extra_dimension=extra_config.get("extra_dimension_column"),
         # Multiple metrics support - CRITICAL FIX for dashboard charts
         metrics=extra_config.get("metrics"),

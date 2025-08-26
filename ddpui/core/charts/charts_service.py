@@ -91,24 +91,6 @@ def get_warehouse_client(org_warehouse: OrgWarehouse) -> Warehouse:
     return WarehouseFactory.get_warehouse_client(org_warehouse)
 
 
-def get_aggregate_column_name(aggregate_func: str, aggregate_col: str) -> str:
-    """Get the correct aggregate column name for data retrieval"""
-    if aggregate_func and aggregate_func.lower() == "count" and aggregate_col is None:
-        return "count_all"
-    if aggregate_func:
-        return f"{aggregate_func}_{aggregate_col}"
-    return "unknown_metric"
-
-
-def get_aggregate_display_name(aggregate_func: str, aggregate_col: str) -> str:
-    """Get the display name for aggregate columns in chart legends"""
-    if aggregate_func and aggregate_func.lower() == "count" and aggregate_col is None:
-        return "Total Count"
-    if aggregate_func:
-        return f"{aggregate_func}({aggregate_col})"
-    return "Unknown Metric"
-
-
 def convert_value(value: Any, preserve_none: bool = False) -> Any:
     """Convert values to JSON-serializable format
 
@@ -513,11 +495,6 @@ def apply_chart_sorting(
                 else:
                     # If no matching metric found, assume it's the dimension column
                     sort_column = column_name
-            # Legacy single metric approach
-            elif hasattr(payload, "aggregate_col") and column_name == payload.aggregate_col:
-                # Use the aggregated column alias pattern
-                aggregate_func = getattr(payload, "aggregate_func", "sum")
-                sort_column = f"{aggregate_func}_{column_name}"
             else:
                 sort_column = column_name
         else:
@@ -977,38 +954,6 @@ def transform_data_for_chart(
                 "tableData": table_data,
                 "columns": list(table_data[0].keys()) if table_data else [],
             }
-        else:
-            # Single metric (legacy) - return structured data
-            table_data = []
-            for row in results:
-                row_data = {}
-
-                # Add dimension column
-                row_data[payload.dimension_col] = handle_null_value(
-                    safe_get_value(row, payload.dimension_col, null_label), null_label
-                )
-
-                # Add extra dimension if present
-                if payload.extra_dimension:
-                    row_data[payload.extra_dimension] = handle_null_value(
-                        safe_get_value(row, payload.extra_dimension, null_label), null_label
-                    )
-
-                # Add metric column
-                agg_col_name = get_aggregate_column_name(
-                    payload.aggregate_func, payload.aggregate_col
-                )
-                display_name = get_aggregate_display_name(
-                    payload.aggregate_func, payload.aggregate_col
-                )
-                row_data[display_name] = row.get(agg_col_name, 0)
-
-                table_data.append(row_data)
-
-            return {
-                "tableData": table_data,
-                "columns": list(table_data[0].keys()) if table_data else [],
-            }
 
     elif payload.chart_type == "number":
         # Number charts only support aggregated data and return a single value
@@ -1096,12 +1041,6 @@ def get_chart_data_table_preview(
                 column_mapping.append((alias, col_index))
                 columns.append(display_name)
                 col_index += 1
-        else:
-            # Single metric (legacy approach)
-            agg_col_name = get_aggregate_column_name(payload.aggregate_func, payload.aggregate_col)
-            column_mapping.append((agg_col_name, col_index))
-            columns.append(agg_col_name)
-            col_index += 1
 
         if payload.extra_dimension:
             column_mapping.append((payload.extra_dimension, col_index))

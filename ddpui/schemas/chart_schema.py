@@ -68,8 +68,6 @@ class ChartDataPayload(Schema):
 
     # For aggregated data
     dimension_col: Optional[str] = None
-    aggregate_col: Optional[str] = None
-    aggregate_func: Optional[str] = None
     extra_dimension: Optional[str] = None
 
     # Multiple metrics for bar/line charts
