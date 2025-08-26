@@ -1,0 +1,175 @@
+{
+    "type": "FeatureCollection",
+    "features": [
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                    [
+                        [
+                            72.8,
+                            18.9
+                        ],
+                        [
+                            73.0,
+                            18.9
+                        ],
+                        [
+                            73.0,
+                            19.2
+                        ],
+                        [
+                            72.8,
+                            19.2
+                        ],
+                        [
+                            72.8,
+                            18.9
+                        ]
+                    ]
+                ]
+            },
+            "properties": {
+                "name": "Mumbai",
+                "district_code": "MUM"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                    [
+                        [
+                            73.3,
+                            18.0
+                        ],
+                        [
+                            74.3,
+                            18.0
+                        ],
+                        [
+                            74.3,
+                            19.0
+                        ],
+                        [
+                            73.3,
+                            19.0
+                        ],
+                        [
+                            73.3,
+                            18.0
+                        ]
+                    ]
+                ]
+            },
+            "properties": {
+                "name": "Pune",
+                "district_code": "PUN"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                    [
+                        [
+                            78.5,
+                            20.5
+                        ],
+                        [
+                            79.5,
+                            20.5
+                        ],
+                        [
+                            79.5,
+                            21.5
+                        ],
+                        [
+                            78.5,
+                            21.5
+                        ],
+                        [
+                            78.5,
+                            20.5
+                        ]
+                    ]
+                ]
+            },
+            "properties": {
+                "name": "Nagpur",
+                "district_code": "NGP"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                    [
+                        [
+                            73.0,
+                            19.5
+                        ],
+                        [
+                            74.5,
+                            19.5
+                        ],
+                        [
+                            74.5,
+                            20.5
+                        ],
+                        [
+                            73.0,
+                            20.5
+                        ],
+                        [
+                            73.0,
+                            19.5
+                        ]
+                    ]
+                ]
+            },
+            "properties": {
+                "name": "Nashik",
+                "district_code": "NSK"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                    [
+                        [
+                            72.9,
+                            19.0
+                        ],
+                        [
+                            73.5,
+                            19.0
+                        ],
+                        [
+                            73.5,
+                            19.5
+                        ],
+                        [
+                            72.9,
+                            19.5
+                        ],
+                        [
+                            72.9,
+                            19.0
+                        ]
+                    ]
+                ]
+            },
+            "properties": {
+                "name": "Thane",
+                "district_code": "THN"
+            }
+        }
+    ]
+}

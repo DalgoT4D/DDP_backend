@@ -1,0 +1,193 @@
+{
+  "georegions": [
+    {
+      "id": 1,
+      "name": "India",
+      "type": "country",
+      "parent_id": null,
+      "country_code": "IND",
+      "region_code": "IND",
+      "display_name": "India"
+    },
+    {
+      "id": 2,
+      "name": "Maharashtra",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "MH",
+      "display_name": "Maharashtra"
+    },
+    {
+      "id": 3,
+      "name": "Karnataka",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "KA",
+      "display_name": "Karnataka"
+    },
+    {
+      "id": 4,
+      "name": "Tamil Nadu",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "TN",
+      "display_name": "Tamil Nadu"
+    },
+    {
+      "id": 5,
+      "name": "Gujarat",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "GJ",
+      "display_name": "Gujarat"
+    },
+    {
+      "id": 6,
+      "name": "Mumbai",
+      "type": "district",
+      "parent_id": 2,
+      "country_code": "IND",
+      "region_code": "MH-MUM",
+      "display_name": "Mumbai"
+    },
+    {
+      "id": 7,
+      "name": "Pune",
+      "type": "district",
+      "parent_id": 2,
+      "country_code": "IND",
+      "region_code": "MH-PUN",
+      "display_name": "Pune"
+    },
+    {
+      "id": 8,
+      "name": "Nashik",
+      "type": "district",
+      "parent_id": 2,
+      "country_code": "IND",
+      "region_code": "MH-NAS",
+      "display_name": "Nashik"
+    },
+    {
+      "id": 9,
+      "name": "Thane",
+      "type": "district",
+      "parent_id": 2,
+      "country_code": "IND",
+      "region_code": "MH-THA",
+      "display_name": "Thane"
+    },
+    {
+      "id": 10,
+      "name": "Nagpur",
+      "type": "district",
+      "parent_id": 2,
+      "country_code": "IND",
+      "region_code": "MH-NAG",
+      "display_name": "Nagpur"
+    },
+    {
+      "id": 11,
+      "name": "Bangalore Urban",
+      "type": "district",
+      "parent_id": 3,
+      "country_code": "IND",
+      "region_code": "KA-BLR",
+      "display_name": "Bangalore Urban"
+    },
+    {
+      "id": 12,
+      "name": "Mysore",
+      "type": "district",
+      "parent_id": 3,
+      "country_code": "IND",
+      "region_code": "KA-MYS",
+      "display_name": "Mysore"
+    },
+    {
+      "id": 13,
+      "name": "Mangalore",
+      "type": "district",
+      "parent_id": 3,
+      "country_code": "IND",
+      "region_code": "KA-MAN",
+      "display_name": "Mangalore"
+    },
+    {
+      "id": 14,
+      "name": "Hubli-Dharwad",
+      "type": "district",
+      "parent_id": 3,
+      "country_code": "IND",
+      "region_code": "KA-HUB",
+      "display_name": "Hubli-Dharwad"
+    },
+    {
+      "id": 15,
+      "name": "Belgaum",
+      "type": "district",
+      "parent_id": 3,
+      "country_code": "IND",
+      "region_code": "KA-BEL",
+      "display_name": "Belgaum"
+    },
+    {
+      "id": 16,
+      "name": "Chennai",
+      "type": "district",
+      "parent_id": 4,
+      "country_code": "IND",
+      "region_code": "TN-CHE",
+      "display_name": "Chennai"
+    },
+    {
+      "id": 17,
+      "name": "Coimbatore",
+      "type": "district",
+      "parent_id": 4,
+      "country_code": "IND",
+      "region_code": "TN-COI",
+      "display_name": "Coimbatore"
+    },
+    {
+      "id": 18,
+      "name": "Madurai",
+      "type": "district",
+      "parent_id": 4,
+      "country_code": "IND",
+      "region_code": "TN-MAD",
+      "display_name": "Madurai"
+    },
+    {
+      "id": 19,
+      "name": "Ahmedabad",
+      "type": "district",
+      "parent_id": 5,
+      "country_code": "IND",
+      "region_code": "GJ-AHM",
+      "display_name": "Ahmedabad"
+    },
+    {
+      "id": 20,
+      "name": "Surat",
+      "type": "district",
+      "parent_id": 5,
+      "country_code": "IND",
+      "region_code": "GJ-SUR",
+      "display_name": "Surat"
+    },
+    {
+      "id": 21,
+      "name": "Vadodara",
+      "type": "district",
+      "parent_id": 5,
+      "country_code": "IND",
+      "region_code": "GJ-VAD",
+      "display_name": "Vadodara"
+    }
+  ]
+}

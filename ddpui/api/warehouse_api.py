@@ -70,6 +70,67 @@ def get_table_columns(request, schema_name: str, table_name: str):
     )
 
 
+@warehouse_router.get("/column-values/{schema_name}/{table_name}/{column_name}")
+@has_permission(["can_view_warehouse_data"])
+def get_column_values(request, schema_name: str, table_name: str, column_name: str):
+    """Fetches distinct values for a specific column from a table using query builder"""
+    orguser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    try:
+        from ddpui.datainsights.query_builder import AggQueryBuilder
+
+        # Use query builder to fetch distinct column values
+        query_builder = AggQueryBuilder()
+
+        # Set the table to select from
+        query_builder.fetch_from(table_name, schema_name)
+
+        # Select distinct values from the column
+        from sqlalchemy import column, func, text, and_
+
+        # Add the column with DISTINCT
+        query_builder.add_column(func.distinct(column(column_name)))
+
+        # Add filters to exclude null and empty values
+        filters = [
+            text(f"{column_name} IS NOT NULL"),
+            text(f"TRIM(CAST({column_name} AS TEXT)) != ''"),
+        ]
+        query_builder.where_clause(and_(*filters))
+
+        # Order and limit results - fix the method signature
+        query_builder.order_cols_by([(column_name, "asc")])
+        query_builder.limit_rows(500)
+
+        # Execute query
+        wclient = dbtautomation_service._get_wclient(org_warehouse)
+        sql_stmt = query_builder.build()
+        compiled_stmt = sql_stmt.compile(
+            bind=wclient.engine, compile_kwargs={"literal_binds": True}
+        )
+        results = wclient.run_query(str(compiled_stmt))
+
+        if results and len(results) > 0:
+            # Extract the column values from the query results, filter out empty strings
+            column_values = [
+                str(row[column_name])
+                for row in results
+                if row[column_name] is not None and str(row[column_name]).strip() != ""
+            ]
+            return column_values
+        return []
+    except Exception as e:
+        logger.error(
+            f"Failed to fetch column values for {schema_name}.{table_name}.{column_name}: {e}"
+        )
+        raise HttpError(500, f"Failed to fetch column values: {str(e)}")
+
+
 @warehouse_router.get("/table_data/{schema_name}/{table_name}")
 @has_permission(["can_view_warehouse_data"])
 def get_table_data(
