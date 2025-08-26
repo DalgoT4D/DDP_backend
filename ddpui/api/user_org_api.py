@@ -42,7 +42,7 @@ from ddpui.models.org_user import (
 )
 from ddpui.models.org_plans import OrgPlanType
 from ddpui.models.org_wren import OrgWren
-from ddpui.models.role_based_access import Role, RolePermission, Permission
+from ddpui.models.role_based_access import Role, RolePermission
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.deleteorg import delete_warehouse_v1
 from ddpui.models.org import OrgWarehouse, Org, OrgType
