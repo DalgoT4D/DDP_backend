@@ -41,6 +41,7 @@ class BulkDeleteRequest(Schema):
 
 
 @charts_router.get("/regions/{region_id}/geojsons/", response=List[dict])
+@has_permission(["can_view_charts"])
 def get_geojsons_for_region(request, region_id: int):
     """Get available GeoJSONs for a specific region"""
     orguser = request.orguser
@@ -214,6 +215,7 @@ class ChartListResponse(Schema):
 
 
 @charts_router.get("/", response=ChartListResponse)
+@has_permission(["can_view_charts"])
 def list_charts(
     request, page: int = 1, page_size: int = 10, search: str = None, chart_type: str = None
 ):
@@ -287,6 +289,7 @@ def list_charts(
 
 
 @charts_router.get("/available-layers/", response=List[dict])
+@has_permission(["can_view_charts"])
 def list_available_layers(request, layer_type: str = "country"):
     """Get available layers (countries, states, districts, etc.) dynamically from the database"""
     try:
@@ -430,7 +433,7 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
 
 
 @charts_router.post("/chart-data/", response=ChartDataResponse)
-@has_permission(["can_view_warehouse_data"])
+@has_permission(["can_view_charts"])
 def get_chart_data(request, payload: ChartDataPayload):
     """Get chart data with ECharts configuration"""
     orguser = request.orguser
@@ -464,6 +467,7 @@ def get_chart_data(request, payload: ChartDataPayload):
 
 
 @charts_router.post("/chart-data-preview/", response=DataPreviewResponse)
+@has_permission(["can_view_charts"])
 def get_chart_data_preview(request, payload: ChartDataPayload):
     """Get paginated data preview for chart using the same query as chart data"""
     orguser = request.orguser
@@ -494,6 +498,7 @@ def get_chart_data_preview(request, payload: ChartDataPayload):
 
 
 @charts_router.get("/regions/", response=List[dict])
+@has_permission(["can_view_charts"])
 def list_available_regions(request, country_code: str = "IND", region_type: str = None):
     """List available regions for a country"""
     from ddpui.core.charts.maps_service import get_available_regions
@@ -503,6 +508,7 @@ def list_available_regions(request, country_code: str = "IND", region_type: str 
 
 
 @charts_router.get("/regions/{region_id}/children/", response=List[dict])
+@has_permission(["can_view_charts"])
 def get_child_regions(request, region_id: int):
     """Get child regions for a parent region"""
     from ddpui.core.charts.maps_service import get_child_regions
@@ -512,6 +518,7 @@ def get_child_regions(request, region_id: int):
 
 
 @charts_router.post("/geojsons/upload/", response=GeoJSONDetailResponse)
+@has_permission(["can_create_charts"])
 def upload_geojson(request, payload: GeoJSONUpload):
     """Upload a custom GeoJSON for an organization"""
     orguser = request.orguser
@@ -570,6 +577,7 @@ def upload_geojson(request, payload: GeoJSONUpload):
 
 
 @charts_router.get("/geojsons/{geojson_id}/", response=GeoJSONDetailResponse)
+@has_permission(["can_view_charts"])
 def get_geojson_data(request, geojson_id: int):
     """Get specific GeoJSON data"""
     orguser = request.orguser
@@ -592,7 +600,7 @@ def get_geojson_data(request, geojson_id: int):
 
 
 @charts_router.post("/map-data/", response=dict)
-@has_permission(["can_view_warehouse_data"])
+@has_permission(["can_view_charts"])
 def generate_map_chart_data(request, payload: ChartDataPayload):
     """Generate map chart data - simplified for basic map functionality"""
     orguser = request.orguser
@@ -658,6 +666,7 @@ def generate_map_chart_data(request, payload: ChartDataPayload):
 
 
 @charts_router.get("/{chart_id}/", response=ChartResponse)
+@has_permission(["can_view_charts"])
 def get_chart(request, chart_id: int):
     """Get a specific chart"""
     orguser = request.orguser
@@ -690,6 +699,7 @@ def get_chart(request, chart_id: int):
 
 
 @charts_router.get("/{chart_id}/data/", response=ChartDataResponse)
+@has_permission(["can_view_charts"])
 def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str] = None):
     """Get chart data using saved chart configuration with optional dashboard filters"""
     import json
@@ -787,6 +797,7 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
 
 
 @charts_router.post("/", response=ChartResponse)
+@has_permission(["can_create_charts"])
 def create_chart(request, payload: ChartCreate):
     """Create a new chart"""
     orguser = request.orguser
@@ -841,6 +852,7 @@ def create_chart(request, payload: ChartCreate):
 
 
 @charts_router.put("/{chart_id}/", response=ChartResponse)
+@has_permission(["can_edit_charts"])
 def update_chart(request, chart_id: int, payload: ChartUpdate):
     """Update a chart"""
     orguser = request.orguser
@@ -915,6 +927,7 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
 
 
 @charts_router.delete("/{chart_id}/")
+@has_permission(["can_delete_charts"])
 def delete_chart(request, chart_id: int):
     """Delete a chart"""
     orguser = request.orguser
@@ -927,6 +940,7 @@ def delete_chart(request, chart_id: int):
 
 
 @charts_router.post("/bulk-delete/")
+@has_permission(["can_delete_charts"])
 def bulk_delete_charts(request, payload: BulkDeleteRequest):
     """Delete multiple charts"""
     orguser = request.orguser
@@ -959,6 +973,7 @@ def bulk_delete_charts(request, payload: BulkDeleteRequest):
 
 
 @charts_router.get("/{chart_id}/dashboards/", response=List[dict])
+@has_permission(["can_view_charts"])
 def get_chart_dashboards(request, chart_id: int):
     """Get list of dashboards that use this chart"""
     orguser = request.orguser
