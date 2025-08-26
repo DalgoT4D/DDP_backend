@@ -114,12 +114,3 @@ public_api = NinjaAPI(
     docs_url="/api/v1/public/docs",
 )
 public_api.add_router("/api/v1/public/", public_router)
-
-# Test router without authentication (development only)
-test_api = NinjaAPI(
-    urls_namespace="test-api",
-    title="Test APIs",
-    description="Test endpoints without authentication",
-    docs_url="/test-api/docs",
-)
-# test_api.add_router("/test/", test_router)  # Removed test router
