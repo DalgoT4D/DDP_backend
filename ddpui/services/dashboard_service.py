@@ -14,6 +14,7 @@ from ddpui.models.dashboard import (
     DashboardComponentType,
     DashboardFilterType,
 )
+from ddpui.models.org_user import OrgUser
 from ddpui.models.visualization import Chart
 from ddpui.models.org import OrgWarehouse
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
@@ -354,3 +355,43 @@ class DashboardService:
                 errors.append(f"Filter {filter.id} has invalid type: {filter.filter_type}")
 
         return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
+
+
+def delete_dashboard_safely(dashboard_id: int, orguser: OrgUser) -> tuple[bool, str]:
+    """
+    Safely delete a dashboard with protection logic for landing pages.
+
+    Args:
+        dashboard_id: ID of dashboard to delete
+        orguser: OrgUser performing the deletion
+
+    Returns:
+        Tuple of (success, error_message)
+    """
+    try:
+        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
+    except Dashboard.DoesNotExist:
+        return False, "Dashboard not found"
+
+    # Check if this is the last dashboard in the org
+    dashboard_count = Dashboard.objects.filter(org=orguser.org).count()
+    if dashboard_count <= 1:
+        return False, "Cannot delete the last dashboard in the organization"
+
+    # If deleting org default, auto-assign new default
+    if dashboard.is_org_default:
+        new_default = Dashboard.objects.filter(org=orguser.org).exclude(id=dashboard_id).first()
+        if new_default:
+            new_default.is_org_default = True
+            new_default.save()
+            logger.info(f"Auto-assigned new org default dashboard: {new_default.title}")
+
+    # Clear any user landing page preferences pointing to this dashboard
+    OrgUser.objects.filter(landing_dashboard=dashboard).update(landing_dashboard=None)
+
+    # Delete the dashboard
+    dashboard_title = dashboard.title
+    dashboard.delete()
+
+    logger.info(f"Dashboard '{dashboard_title}' deleted by {orguser.user.email}")
+    return True, ""

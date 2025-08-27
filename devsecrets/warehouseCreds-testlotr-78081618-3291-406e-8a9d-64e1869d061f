@@ -1,0 +1,5 @@
+{
+  "Name": "warehouseCreds-testlotr-78081618-3291-406e-8a9d-64e1869d061f",
+  "SecretId": "warehouseCreds-testlotr-78081618-3291-406e-8a9d-64e1869d061f",
+  "SecretString": "{\"host\":\"dalgo-staging-warehouses.c4hvhyuxrcet.ap-south-1.rds.amazonaws.com\",\"port\":5432,\"database\":\"demowarehouse\",\"username\":\"demowarehouse\",\"password\":\"p@ssword\",\"schema\":\"public\"}"
+}

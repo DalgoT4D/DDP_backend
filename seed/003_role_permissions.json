@@ -2222,5 +2222,29 @@
       "role": 1,
       "permission": 72
     }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 275,
+    "fields": {
+      "role": 1,
+      "permission": 73
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 276,
+    "fields": {
+      "role": 4,
+      "permission": 73
+    }
+  },
+  {
+    "model": "ddpui.RolePermission",
+    "pk": 277,
+    "fields": {
+      "role": 5,
+      "permission": 69
+    }
   }
 ]
