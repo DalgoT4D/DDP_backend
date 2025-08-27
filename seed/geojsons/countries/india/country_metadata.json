@@ -1,0 +1,385 @@
+{
+  "country": {
+    "id": 1,
+    "name": "India",
+    "type": "country",
+    "parent_id": null,
+    "country_code": "IND",
+    "region_code": "IND",
+    "display_name": "India"
+  },
+  "hierarchy": {
+    "layer1": {
+      "type": "state",
+      "display_name": "States and Union Territories",
+      "description": "First-level administrative divisions of India"
+    },
+    "layer2": {
+      "type": "district", 
+      "display_name": "Districts",
+      "description": "Second-level administrative divisions within states"
+    }
+  },
+  "regions": [
+    {
+      "id": 2,
+      "name": "Maharashtra",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "MH",
+      "display_name": "Maharashtra",
+      "layer": "layer1"
+    },
+    {
+      "id": 3,
+      "name": "Karnataka",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "KA",
+      "display_name": "Karnataka",
+      "layer": "layer1"
+    },
+    {
+      "id": 4,
+      "name": "Tamil Nadu",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "TN",
+      "display_name": "Tamil Nadu",
+      "layer": "layer1"
+    },
+    {
+      "id": 22,
+      "name": "Andaman And Nicobar Islands",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "AN",
+      "display_name": "Andaman And Nicobar Islands",
+      "layer": "layer1"
+    },
+    {
+      "id": 23,
+      "name": "Andhra Pradesh",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "AP",
+      "display_name": "Andhra Pradesh",
+      "layer": "layer1"
+    },
+    {
+      "id": 24,
+      "name": "Arunachal Pradesh",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "AR",
+      "display_name": "Arunachal Pradesh",
+      "layer": "layer1"
+    },
+    {
+      "id": 25,
+      "name": "Assam",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "AS",
+      "display_name": "Assam",
+      "layer": "layer1"
+    },
+    {
+      "id": 26,
+      "name": "Bihar",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "BR",
+      "display_name": "Bihar",
+      "layer": "layer1"
+    },
+    {
+      "id": 27,
+      "name": "Chandigarh",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "CH",
+      "display_name": "Chandigarh",
+      "layer": "layer1"
+    },
+    {
+      "id": 28,
+      "name": "Chhattisgarh",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "CT",
+      "display_name": "Chhattisgarh",
+      "layer": "layer1"
+    },
+    {
+      "id": 29,
+      "name": "Dadra And Nagar Haveli",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "DN",
+      "display_name": "Dadra And Nagar Haveli",
+      "layer": "layer1"
+    },
+    {
+      "id": 30,
+      "name": "Delhi",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "DL",
+      "display_name": "Delhi",
+      "layer": "layer1"
+    },
+    {
+      "id": 31,
+      "name": "Goa",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "GA",
+      "display_name": "Goa",
+      "layer": "layer1"
+    },
+    {
+      "id": 32,
+      "name": "Haryana",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "HR",
+      "display_name": "Haryana",
+      "layer": "layer1"
+    },
+    {
+      "id": 33,
+      "name": "Himachal Pradesh",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "HP",
+      "display_name": "Himachal Pradesh",
+      "layer": "layer1"
+    },
+    {
+      "id": 34,
+      "name": "Jammu And Kashmir",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "JK",
+      "display_name": "Jammu And Kashmir",
+      "layer": "layer1"
+    },
+    {
+      "id": 35,
+      "name": "Jharkhand",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "JH",
+      "display_name": "Jharkhand",
+      "layer": "layer1"
+    },
+    {
+      "id": 36,
+      "name": "Kerala",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "KL",
+      "display_name": "Kerala",
+      "layer": "layer1"
+    },
+    {
+      "id": 37,
+      "name": "Ladakh",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "LA",
+      "display_name": "Ladakh",
+      "layer": "layer1"
+    },
+    {
+      "id": 38,
+      "name": "Lakshadweep",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "LD",
+      "display_name": "Lakshadweep",
+      "layer": "layer1"
+    },
+    {
+      "id": 39,
+      "name": "Madhya Pradesh",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "MP",
+      "display_name": "Madhya Pradesh",
+      "layer": "layer1"
+    },
+    {
+      "id": 40,
+      "name": "Manipur",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "MN",
+      "display_name": "Manipur",
+      "layer": "layer1"
+    },
+    {
+      "id": 41,
+      "name": "Meghalaya",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "ML",
+      "display_name": "Meghalaya",
+      "layer": "layer1"
+    },
+    {
+      "id": 42,
+      "name": "Mizoram",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "MZ",
+      "display_name": "Mizoram",
+      "layer": "layer1"
+    },
+    {
+      "id": 43,
+      "name": "Nagaland",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "NL",
+      "display_name": "Nagaland",
+      "layer": "layer1"
+    },
+    {
+      "id": 44,
+      "name": "Odisha",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "OR",
+      "display_name": "Odisha",
+      "layer": "layer1"
+    },
+    {
+      "id": 45,
+      "name": "Puducherry",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "PY",
+      "display_name": "Puducherry",
+      "layer": "layer1"
+    },
+    {
+      "id": 46,
+      "name": "Punjab",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "PB",
+      "display_name": "Punjab",
+      "layer": "layer1"
+    },
+    {
+      "id": 47,
+      "name": "Rajasthan",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "RJ",
+      "display_name": "Rajasthan",
+      "layer": "layer1"
+    },
+    {
+      "id": 48,
+      "name": "Sikkim",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "SK",
+      "display_name": "Sikkim",
+      "layer": "layer1"
+    },
+    {
+      "id": 49,
+      "name": "Telangana",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "TG",
+      "display_name": "Telangana",
+      "layer": "layer1"
+    },
+    {
+      "id": 50,
+      "name": "Tripura",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "TR",
+      "display_name": "Tripura",
+      "layer": "layer1"
+    },
+    {
+      "id": 51,
+      "name": "Uttarakhand",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "UT",
+      "display_name": "Uttarakhand",
+      "layer": "layer1"
+    },
+    {
+      "id": 52,
+      "name": "Uttar Pradesh",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "UP",
+      "display_name": "Uttar Pradesh",
+      "layer": "layer1"
+    },
+    {
+      "id": 53,
+      "name": "West Bengal",
+      "type": "state",
+      "parent_id": 1,
+      "country_code": "IND",
+      "region_code": "WB",
+      "display_name": "West Bengal",
+      "layer": "layer1"
+    },
+    {
+      "id": 6,
+      "name": "Mumbai District",
+      "type": "district",
+      "parent_id": 2,
+      "country_code": "IND",
+      "region_code": "MH-MUM",
+      "display_name": "Mumbai District",
+      "layer": "layer2"
+    }
+  ]
+}

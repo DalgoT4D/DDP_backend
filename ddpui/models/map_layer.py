@@ -9,8 +9,12 @@ class MapLayer(models.Model):
     id = models.BigAutoField(primary_key=True)
     country_code = models.CharField(max_length=3)  # 'IND', 'KEN'
     country_name = models.CharField(max_length=100)
-    layer_level = models.IntegerField()  # 0=country, 1=state/county, 2=district, etc.
-    layer_name = models.CharField(max_length=100)  # 'states', 'districts', 'blocks'
+    layer_level = (
+        models.IntegerField()
+    )  # 0=country, 1=first admin level, 2=second admin level, etc.
+    layer_name = models.CharField(
+        max_length=100
+    )  # 'states', 'provinces', 'counties', 'districts', etc.
     display_name = models.CharField(max_length=100)  # 'Indian States', 'Kenya Counties'
     parent_layer_id = models.IntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
