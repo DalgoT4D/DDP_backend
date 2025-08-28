@@ -339,6 +339,8 @@ class MapDataOverlayPayload(Schema):
     metrics: List[ChartMetric]
     filters: dict = {}  # Drill-down filters (key-value pairs)
     chart_filters: list = []  # Chart-level filters (list of filter objects)
+    dashboard_filters: list = []  # Dashboard-level filters (list of filter objects)
+    extra_config: dict = {}  # Additional configuration including pagination, sorting, etc.
 
 
 @charts_router.post("/map-data-overlay/", response=dict)
@@ -372,12 +374,15 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
             )
 
         # Build payload for standard chart query (same as other charts)
-        extra_config = {}
+        extra_config = payload.extra_config or {}
+
+        # Add chart filters to extra_config if provided
         if chart_filters:
             extra_config["filters"] = chart_filters
 
         # Use metrics from payload directly
         metrics = payload.metrics
+        dashboard_filters = payload.dashboard_filters
 
         chart_payload = ChartDataPayload(
             chart_type="bar",  # We use bar chart query logic for aggregated data
@@ -386,7 +391,8 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
             table_name=table_name,
             dimension_col=geographic_column,
             metrics=metrics,
-            extra_config=extra_config if extra_config else None,
+            dashboard_filters=dashboard_filters,
+            extra_config=extra_config,
         )
 
         # Get warehouse client and build query using standard chart service
