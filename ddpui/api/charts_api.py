@@ -104,26 +104,30 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
     if payload.chart_type == "map":
         return generate_map_data_and_config(payload, org_warehouse, chart_id)
 
-    # Get warehouse client
-    warehouse = charts_service.get_warehouse_client(org_warehouse)
+    try:
+        # Get warehouse client with connection pooling
+        warehouse = charts_service.get_warehouse_client(org_warehouse, enable_pooling=True)
 
-    # Build query
-    query_builder = charts_service.build_chart_query(payload)
-    logger.debug(f"Query built for {chart_id_str}: {query_builder}")
+        # Build query
+        query_builder = charts_service.build_chart_query(payload)
+        logger.debug(f"Query built for {chart_id_str}: {query_builder}")
 
-    execute_payload = ExecuteChartQuery(
-        chart_type=payload.chart_type,
-        computation_type=payload.computation_type,
-        x_axis=payload.x_axis,
-        y_axis=payload.y_axis,
-        dimension_col=payload.dimension_col,
-        extra_dimension=payload.extra_dimension,
-        metrics=payload.metrics,
-    )
+        execute_payload = ExecuteChartQuery(
+            chart_type=payload.chart_type,
+            computation_type=payload.computation_type,
+            x_axis=payload.x_axis,
+            y_axis=payload.y_axis,
+            dimension_col=payload.dimension_col,
+            extra_dimension=payload.extra_dimension,
+            metrics=payload.metrics,
+        )
 
-    # Execute query
-    logger.info(f"Executing query for {chart_id_str}")
-    dict_results = charts_service.execute_chart_query(warehouse, query_builder, execute_payload)
+        # Execute query
+        logger.info(f"Executing query for {chart_id_str}")
+        dict_results = charts_service.execute_chart_query(warehouse, query_builder, execute_payload)
+    except TimeoutError as e:
+        logger.warning(f"Connection timeout for chart query: {e}")
+        raise HttpError(503, "Service temporarily unavailable - connection pool timeout")
     logger.debug(f"Query results for {chart_id_str}: {len(dict_results)} rows")
 
     # Transform data for chart
@@ -172,8 +176,8 @@ def generate_map_data_and_config(payload: ChartDataPayload, org_warehouse, chart
 
     geojson = get_object_or_404(GeoJSON, id=geojson_id)
 
-    # Get warehouse client and build query
-    warehouse = charts_service.get_warehouse_client(org_warehouse)
+    # Get warehouse client with connection pooling and build query
+    warehouse = charts_service.get_warehouse_client(org_warehouse, enable_pooling=True)
     query_builder = build_map_query(payload)
 
     # Execute query
@@ -389,8 +393,8 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
             extra_config=extra_config if extra_config else None,
         )
 
-        # Get warehouse client and build query using standard chart service
-        warehouse = charts_service.get_warehouse_client(org_warehouse)
+        # Get warehouse client with connection pooling and build query using standard chart service
+        warehouse = charts_service.get_warehouse_client(org_warehouse, enable_pooling=True)
         query_builder = charts_service.build_chart_query(chart_payload)
 
         # Add filters if provided
@@ -625,8 +629,8 @@ def generate_map_chart_data(request, payload: ChartDataPayload):
     if not org_warehouse:
         raise HttpError(400, "No warehouse configured for this organization")
 
-    # Get warehouse client
-    warehouse = charts_service.get_warehouse_client(org_warehouse)
+    # Get warehouse client with connection pooling
+    warehouse = charts_service.get_warehouse_client(org_warehouse, enable_pooling=True)
 
     # Build query using existing service
     query_builder = build_map_query(payload)

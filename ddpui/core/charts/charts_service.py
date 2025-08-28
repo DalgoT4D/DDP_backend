@@ -86,9 +86,19 @@ def safe_get_value(row: Dict[str, Any], key: str, null_label: Optional[str] = No
     return handle_null_value(value, null_label)
 
 
-def get_warehouse_client(org_warehouse: OrgWarehouse) -> Warehouse:
-    """Get warehouse client using the standard method"""
-    return WarehouseFactory.get_warehouse_client(org_warehouse)
+def get_warehouse_client(
+    org_warehouse: OrgWarehouse, enable_pooling: bool = True, connection_tier: str = "medium"
+) -> Warehouse:
+    """Get warehouse client with optional connection pooling"""
+
+    if enable_pooling:
+        # Use connection pooled factory when enabled
+        from ddpui.datainsights.warehouse.warehouse_factory import ConnectionPooledWarehouseFactory
+
+        return ConnectionPooledWarehouseFactory.get_warehouse_client(org_warehouse, connection_tier)
+    else:
+        # Fall back to standard factory
+        return WarehouseFactory.get_warehouse_client(org_warehouse)
 
 
 def convert_value(value: Any, preserve_none: bool = False) -> Any:

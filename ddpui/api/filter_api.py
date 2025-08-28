@@ -95,7 +95,7 @@ def list_schemas(request):
         raise HttpError(404, "Warehouse not configured")
 
     try:
-        warehouse_client = get_warehouse_client(org_warehouse)
+        warehouse_client = get_warehouse_client(org_warehouse, enable_pooling=True)
 
         # Build query using AggQueryBuilder
         query_builder = AggQueryBuilder()
@@ -125,6 +125,9 @@ def list_schemas(request):
         logger.info(f"Found {len(schemas)} schemas for org {orguser.org.id}")
         return schemas
 
+    except TimeoutError as e:
+        logger.warning(f"Connection timeout for schema query: {e}")
+        raise HttpError(503, "Service temporarily unavailable - connection pool timeout")
     except Exception as e:
         logger.error(f"Error fetching schemas: {str(e)}")
         raise HttpError(500, "Error fetching schemas")
@@ -142,7 +145,7 @@ def list_tables(request, schema_name: str):
         raise HttpError(404, "Warehouse not configured")
 
     try:
-        warehouse_client = get_warehouse_client(org_warehouse)
+        warehouse_client = get_warehouse_client(org_warehouse, enable_pooling=True)
 
         # Build query using AggQueryBuilder
         query_builder = AggQueryBuilder()
@@ -172,6 +175,9 @@ def list_tables(request, schema_name: str):
         logger.info(f"Found {len(tables)} tables in schema {schema_name}")
         return tables
 
+    except TimeoutError as e:
+        logger.warning(f"Connection timeout for table query: {e}")
+        raise HttpError(503, "Service temporarily unavailable - connection pool timeout")
     except Exception as e:
         logger.error(f"Error fetching tables for schema {schema_name}: {str(e)}")
         raise HttpError(500, "Error fetching tables")
@@ -191,7 +197,7 @@ def list_columns(request, schema_name: str, table_name: str):
         raise HttpError(404, "Warehouse not configured")
 
     try:
-        warehouse_client = get_warehouse_client(org_warehouse)
+        warehouse_client = get_warehouse_client(org_warehouse, enable_pooling=True)
 
         # Build query using AggQueryBuilder
         query_builder = AggQueryBuilder()
@@ -247,6 +253,9 @@ def list_columns(request, schema_name: str, table_name: str):
         logger.info(f"Found {len(columns)} columns in table {schema_name}.{table_name}")
         return columns
 
+    except TimeoutError as e:
+        logger.warning(f"Connection timeout for column query: {e}")
+        raise HttpError(503, "Service temporarily unavailable - connection pool timeout")
     except Exception as e:
         logger.error(f"Error fetching columns for table {schema_name}.{table_name}: {str(e)}")
         raise HttpError(500, "Error fetching columns")
@@ -271,7 +280,7 @@ def get_filter_preview(
         raise HttpError(404, "Warehouse not configured")
 
     try:
-        warehouse_client = get_warehouse_client(org_warehouse)
+        warehouse_client = get_warehouse_client(org_warehouse, enable_pooling=True)
 
         if filter_type == "value":
             # Get distinct values with counts for categorical filter
@@ -380,6 +389,9 @@ def get_filter_preview(
         else:
             raise HttpError(400, f"Invalid filter type: {filter_type}")
 
+    except TimeoutError as e:
+        logger.warning(f"Connection timeout for filter preview: {e}")
+        raise HttpError(503, "Service temporarily unavailable - connection pool timeout")
     except Exception as e:
         logger.error(f"Error getting filter preview: {str(e)}")
         raise HttpError(500, "Error getting filter preview")

@@ -4,6 +4,9 @@ from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy import inspect
 from sqlalchemy.types import NullType
 from sqlalchemy_bigquery._types import _type_map
+from threading import Lock
+import hashlib
+import json
 
 from ddpui.datainsights.insights.insight_interface import MAP_TRANSLATE_TYPES
 from ddpui.datainsights.warehouse.warehouse_interface import Warehouse
@@ -14,16 +17,57 @@ _type_map["JSON"] = types.JSON
 
 
 class BigqueryClient(Warehouse):
-    def __init__(self, creds: dict):
+    # Class-level engine cache and lock
+    _engines = {}
+    _engine_lock = Lock()
+
+    @staticmethod
+    def _generate_engine_key(creds: dict, connection_config: dict = None) -> str:
+        """Generate a unique hash key from credentials and config"""
+        # Create a copy to avoid modifying original
+        key_data = creds.copy()
+
+        # Add connection config to the key if provided
+        if connection_config:
+            key_data["_connection_config"] = connection_config
+
+        # Sort keys for consistent ordering
+        key_string = json.dumps(key_data, sort_keys=True, default=str)
+
+        # Generate hash
+        return hashlib.md5(key_string.encode()).hexdigest()
+
+    def __init__(self, creds: dict, connection_config: dict = None):
         """
-        Establish connection to the postgres database using sqlalchemy engine
+        Establish connection to the BigQuery database using sqlalchemy engine
         Creds come from the secrets manager
+        connection_config: Optional dict with connection pooling parameters
         """
         connection_string = "bigquery://{project_id}".format(**creds)
 
-        self.engine = create_engine(
-            connection_string, credentials_info=creds, pool_size=5, pool_timeout=30
-        )
+        # Default connection pool configuration
+        default_pool_config = {
+            "pool_size": 5,
+            "max_overflow": 2,
+            "pool_timeout": 30,
+            "pool_recycle": 3600,
+            "pool_pre_ping": True,
+        }
+
+        # Use provided config or defaults
+        pool_config = connection_config if connection_config else default_pool_config
+
+        # Create engine key from all credentials and config
+        engine_key = self._generate_engine_key(creds, connection_config)
+
+        # Use singleton pattern for engines
+        with self._engine_lock:
+            if engine_key not in self._engines:
+                self._engines[engine_key] = create_engine(
+                    connection_string, credentials_info=creds, **pool_config
+                )
+            self.engine = self._engines[engine_key]
+
         self.inspect_obj: Inspector = inspect(
             self.engine
         )  # this will be used to fetch metadata of the database
