@@ -1,9 +1,10 @@
 """Chart API endpoints"""
 
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
+import copy
 from datetime import datetime
 
-from ninja import Router, Schema
+from ninja import Router, Schema, Field
 from ninja.errors import HttpError
 from django.shortcuts import get_object_or_404
 
@@ -337,10 +338,16 @@ class MapDataOverlayPayload(Schema):
     geographic_column: str
     value_column: str
     metrics: List[ChartMetric]
-    filters: dict = {}  # Drill-down filters (key-value pairs)
-    chart_filters: list = []  # Chart-level filters (list of filter objects)
-    dashboard_filters: list = []  # Dashboard-level filters (list of filter objects)
-    extra_config: dict = {}  # Additional configuration including pagination, sorting, etc.
+    filters: Dict[str, Any] = Field(default_factory=dict)  # Drill-down filters (key-value pairs)
+    chart_filters: Optional[List[Dict[str, Any]]] = Field(
+        default_factory=list
+    )  # Chart-level filters (list of filter objects)
+    dashboard_filters: Optional[List[Dict[str, Any]]] = Field(
+        default_factory=list
+    )  # Dashboard-level filters (list of filter objects)
+    extra_config: Optional[Dict[str, Any]] = Field(
+        default_factory=dict
+    )  # Additional configuration including pagination, sorting, etc.
 
 
 @charts_router.post("/map-data-overlay/", response=dict)
@@ -373,12 +380,21 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
                 "Missing required fields: schema_name, table_name, geographic_column, value_column",
             )
 
-        # Build payload for standard chart query (same as other charts)
-        extra_config = payload.extra_config or {}
+        # Validate metrics exist and are non-empty
+        if not payload.metrics:
+            raise HttpError(400, "Missing metrics - at least one metric is required")
 
-        # Add chart filters to extra_config if provided
+        # Build payload for standard chart query (same as other charts)
+        # Make a deep copy to avoid mutating the original payload
+        extra_config = copy.deepcopy(payload.extra_config or {})
+
+        # Merge chart filters with existing filters instead of overwriting
         if chart_filters:
-            extra_config["filters"] = chart_filters
+            existing_filters = extra_config.get("filters", [])
+            if isinstance(existing_filters, list):
+                extra_config["filters"] = existing_filters + chart_filters
+            else:
+                extra_config["filters"] = chart_filters
 
         # Use metrics from payload directly
         metrics = payload.metrics
