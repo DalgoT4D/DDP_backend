@@ -400,6 +400,47 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         metrics = payload.metrics
         dashboard_filters = payload.dashboard_filters
 
+        # Resolve dashboard filters if provided (same logic as regular charts)
+        resolved_dashboard_filters = None
+        if dashboard_filters:
+            try:
+                # Import dashboard filter model
+                from ddpui.models.dashboard import DashboardFilter
+
+                resolved_filters = []
+
+                for filter_item in dashboard_filters:
+                    filter_id = filter_item.get("filter_id")
+                    filter_value = filter_item.get("value")
+
+                    if filter_id and filter_value is not None:
+                        try:
+                            # Get the filter configuration from the database
+                            dashboard_filter = DashboardFilter.objects.get(id=filter_id)
+
+                            # Only apply this filter if it applies to the same table as the chart
+                            if (
+                                dashboard_filter.schema_name == schema_name
+                                and dashboard_filter.table_name == table_name
+                            ):
+                                resolved_filters.append(
+                                    {
+                                        "filter_id": filter_id,
+                                        "column": dashboard_filter.column_name,
+                                        "type": dashboard_filter.filter_type,
+                                        "value": filter_value,
+                                        "settings": dashboard_filter.settings,
+                                    }
+                                )
+                        except DashboardFilter.DoesNotExist:
+                            logger.warning(f"Dashboard filter {filter_id} not found")
+
+                resolved_dashboard_filters = resolved_filters
+
+            except Exception as e:
+                logger.error(f"Error resolving dashboard filters: {str(e)}")
+                resolved_dashboard_filters = None
+
         chart_payload = ChartDataPayload(
             chart_type="bar",  # We use bar chart query logic for aggregated data
             computation_type="aggregated",
@@ -407,7 +448,7 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
             table_name=table_name,
             dimension_col=geographic_column,
             metrics=metrics,
-            dashboard_filters=dashboard_filters,
+            dashboard_filters=resolved_dashboard_filters,
             extra_config=extra_config,
         )
 
