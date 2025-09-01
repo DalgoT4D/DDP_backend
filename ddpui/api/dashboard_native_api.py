@@ -21,6 +21,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.auth import has_permission
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.dashboard_service import delete_dashboard_safely
+from ddpui.auth import SUPER_ADMIN_ROLE
 
 logger = CustomLogger("ddpui")
 
@@ -275,6 +276,25 @@ def create_dashboard(request, payload: DashboardCreate):
         org=orguser.org,
         last_modified_by=orguser,
     )
+
+    # --- Custom logic for org default and landing dashboard ---
+
+    # Check if there are any org default dashboards for this org
+    has_org_default = Dashboard.objects.filter(org=orguser.org, is_org_default=True).exists()
+
+    # Check if user is admin (super-admin)
+    admin_roles = [SUPER_ADMIN_ROLE]
+    user_role_slug = orguser.new_role.slug if orguser.new_role else None
+
+    if not has_org_default:
+        if user_role_slug in admin_roles:
+            dashboard.is_org_default = True
+            dashboard.save(update_fields=["is_org_default"])
+        else:
+            # If user is not admin and has no landing_dashboard, set this as landing_dashboard
+            if not orguser.landing_dashboard:
+                orguser.landing_dashboard = dashboard
+                orguser.save(update_fields=["landing_dashboard"])
 
     logger.info(f"Created dashboard {dashboard.id} for org {orguser.org.id}")
 
