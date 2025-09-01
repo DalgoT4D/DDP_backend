@@ -372,6 +372,14 @@ def delete_dashboard(request, dashboard_id: int):
     except Dashboard.DoesNotExist:
         raise HttpError(404, "Dashboard not found")
 
+    # Prevent deletion if dashboard is org default
+    if dashboard.is_org_default:
+        raise HttpError(403, "Cannot delete the organization's default dashboard.")
+
+    # Only allow deletion if the current user is the creator
+    if dashboard.created_by != orguser:
+        raise HttpError(403, "You can only delete dashboards you created.")
+
     # Check if dashboard is locked
     if hasattr(dashboard, "lock") and dashboard.lock and not dashboard.lock.is_expired():
         raise HttpError(423, "Cannot delete a locked dashboard")
