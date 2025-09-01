@@ -277,21 +277,16 @@ def create_dashboard(request, payload: DashboardCreate):
         last_modified_by=orguser,
     )
 
-    # --- Custom logic for org default and landing dashboard ---
-
-    # Check if there are any org default dashboards for this org
+    # --- Custom logic for org default and landing dashboard (permission-driven) ---
     has_org_default = Dashboard.objects.filter(org=orguser.org, is_org_default=True).exists()
 
-    # Check if user is admin (super-admin)
-    admin_roles = [SUPER_ADMIN_ROLE]
-    user_role_slug = orguser.new_role.slug if orguser.new_role else None
-
+    # If no org default dashboard exists, assign based on permission
     if not has_org_default:
-        if user_role_slug in admin_roles:
+        if "can_manage_org_default_dashboard" in getattr(request, "permissions", []):
             dashboard.is_org_default = True
             dashboard.save(update_fields=["is_org_default"])
         else:
-            # If user is not admin and has no landing_dashboard, set this as landing_dashboard
+            # If user does not have permission and has no landing_dashboard, set this as landing_dashboard
             if not orguser.landing_dashboard:
                 orguser.landing_dashboard = dashboard
                 orguser.save(update_fields=["landing_dashboard"])
