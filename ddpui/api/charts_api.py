@@ -998,6 +998,11 @@ def delete_chart(request, chart_id: int):
         chart = Chart.objects.get(id=chart_id, org=orguser.org)
     except Chart.DoesNotExist:
         raise HttpError(404, "Chart not found")
+
+    # Only allow deletion if the current user is the creator
+    if chart.created_by != orguser:
+        raise HttpError(403, "You can only delete charts you created.")
+
     chart.delete()
     return {"success": True}
 

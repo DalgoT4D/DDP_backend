@@ -71,6 +71,14 @@ class OrgUser(models.Model):
     new_role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True)
     email_verified = models.BooleanField(default=False)
     llm_optin = models.BooleanField(default=False)  # deprecated
+    landing_dashboard = models.ForeignKey(
+        "ddpui.dashboard",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="users_with_as_landing",
+        help_text="User's personal landing dashboard",
+    )
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -123,6 +131,8 @@ class OrgUserResponse(Schema):
     new_role_slug: str | None
     permissions: list[dict]
     is_llm_active: bool = None
+    landing_dashboard_id: int | None = None
+    org_default_dashboard_id: int | None = None
 
 
 class Invitation(models.Model):

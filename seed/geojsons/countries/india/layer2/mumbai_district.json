@@ -1,0 +1,23 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature", 
+      "properties": {
+        "name": "Mumbai District",
+        "parent": "Maharashtra",
+        "country": "India"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [72.7, 19.0],
+          [72.9, 19.0],
+          [72.9, 19.3],
+          [72.7, 19.3],
+          [72.7, 19.0]
+        ]]
+      }
+    }
+  ]
+}
