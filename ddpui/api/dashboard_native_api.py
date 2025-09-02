@@ -375,6 +375,12 @@ def delete_dashboard(request, dashboard_id: int):
     if dashboard.created_by != orguser:
         raise HttpError(403, "You can only delete dashboards you created.")
 
+    # Prevent deletion if dashboard is landing page for any user
+    if OrgUser.objects.filter(landing_dashboard=dashboard).exists():
+        raise HttpError(
+            403, "Cannot delete a dashboard that is set as landing page for one or more users."
+        )
+
     # Check if dashboard is locked
     if hasattr(dashboard, "lock") and dashboard.lock and not dashboard.lock.is_expired():
         raise HttpError(423, "Cannot delete a locked dashboard")
