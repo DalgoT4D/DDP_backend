@@ -805,7 +805,9 @@ def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShare
         # Generate the full public URL
         from django.conf import settings
 
-        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3001")
+        # Use FRONTEND_URL_V2 for webapp_v2, fallback to FRONTEND_URL, then localhost
+        FRONTEND_URL_V2 = getattr(settings, "FRONTEND_URL_V2", None)
+        frontend_url = FRONTEND_URL_V2 or getattr(settings, "FRONTEND_URL", "http://localhost:3001")
         response_data[
             "public_url"
         ] = f"{frontend_url}/share/dashboard/{dashboard.public_share_token}"
@@ -846,7 +848,9 @@ def get_dashboard_sharing_status(request, dashboard_id: int):
     if dashboard.is_public and dashboard.public_share_token:
         from django.conf import settings
 
-        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3001")
+        # Use FRONTEND_URL_V2 for webapp_v2, fallback to FRONTEND_URL, then localhost
+        FRONTEND_URL_V2 = getattr(settings, "FRONTEND_URL_V2", None)
+        frontend_url = FRONTEND_URL_V2 or getattr(settings, "FRONTEND_URL", "http://localhost:3001")
         response_data[
             "public_url"
         ] = f"{frontend_url}/share/dashboard/{dashboard.public_share_token}"

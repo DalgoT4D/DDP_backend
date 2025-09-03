@@ -127,11 +127,75 @@ def get_public_dashboard(request, token: str):
 
 
 @public_router.get(
+    "/dashboards/{token}/charts/{chart_id}/",
+    response={200: dict, 404: PublicErrorResponse},
+)
+def get_public_chart_metadata(request, token: str, chart_id: int):
+    """
+    Get public chart metadata - ESSENTIAL for public dashboards
+
+    PURPOSE: In public mode, the frontend has no access to the private 'chart' object.
+    This endpoint provides the chart metadata needed for:
+    - Chart type detection (map, table, bar, etc.)
+    - Chart configuration (extra_config with layers, metrics, etc.)
+    - Schema/table information for data queries
+    - Conditional rendering logic in the frontend
+
+    WITHOUT THIS: Public dashboards cannot determine chart types or configurations,
+    breaking all specialized chart rendering (maps, tables, etc.)
+    """
+    try:
+        # Verify dashboard is public
+        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+
+        # Import required modules
+        from ddpui.models.visualization import Chart
+
+        # Get the chart and ensure it belongs to the dashboard's org
+        chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
+        if not chart:
+            raise Exception("Chart not found in dashboard's organization")
+
+        return {
+            "id": chart.id,
+            "title": chart.title,
+            "chart_type": chart.chart_type,
+            "computation_type": chart.computation_type,
+            "schema_name": chart.schema_name,
+            "table_name": chart.table_name,
+            "extra_config": chart.extra_config,
+            "description": chart.description,
+            "is_valid": True,
+        }
+
+    except Dashboard.DoesNotExist:
+        logger.warning(
+            f"Public chart metadata access failed - dashboard not found for token: {token}"
+        )
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
+        )
+    except Exception as e:
+        logger.error(f"Public chart metadata error for chart {chart_id}: {str(e)}")
+        return 404, PublicErrorResponse(error="Chart metadata unavailable", is_valid=False)
+
+
+@public_router.get(
     "/dashboards/{token}/charts/{chart_id}/data/",
     response={200: PublicChartDataResponse, 404: PublicErrorResponse},
 )
 def get_public_chart_data(request, token: str, chart_id: int):
-    """Get public chart data - reuses authenticated chart data logic"""
+    """
+    Get public chart data - OPTIONAL/REDUNDANT for most chart types
+
+    PURPOSE: Provides chart data for regular charts (bar, line, pie, etc.) in public mode.
+
+    STATUS: Most regular charts already work with existing public infrastructure.
+    This endpoint was created for completeness but may not be strictly necessary.
+
+    KEEP IT: Doesn't hurt to have it, provides a consistent API pattern.
+    It handles edge cases where the existing infrastructure might not work.
+    """
     try:
         # Verify dashboard is public
         dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
@@ -412,3 +476,292 @@ def validate_public_dashboard(request, token: str):
         return PublicValidationResponse(is_valid=True, title=dashboard.title)
     except Dashboard.DoesNotExist:
         return 404, PublicValidationResponse(is_valid=False, title=None)
+
+
+@public_router.post(
+    "/dashboards/{token}/charts/{chart_id}/data-preview/",
+    response={200: dict, 404: PublicErrorResponse},
+)
+def get_public_chart_data_preview(request, token: str, chart_id: int):
+    """
+    Get public chart data preview - ESSENTIAL for table charts
+
+    PURPOSE: Table charts use specialized data fetching with:
+    - Pagination (page size, offset)
+    - Sorting (column sorting, direction)
+    - Filtering (search within table data)
+    - Raw data display (not aggregated like regular charts)
+
+    This is completely different from regular chart data endpoints which return
+    aggregated data for visualization. Table charts need the raw tabular data
+    with pagination controls.
+
+    WITHOUT THIS: Table charts in public dashboards cannot display data
+    or handle pagination/sorting functionality.
+    """
+    try:
+        # Verify dashboard is public
+        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+
+        # Import required modules
+        from ddpui.models.visualization import Chart
+        from ddpui.models.org import OrgWarehouse
+        from ddpui.core.charts import charts_service
+        from ddpui.schemas.chart_schema import ChartDataPayload
+
+        # Get the chart and org warehouse
+        chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
+        if not chart:
+            raise Exception("Chart not found in dashboard's organization")
+
+        org_warehouse = OrgWarehouse.objects.filter(org=dashboard.org).first()
+        if not org_warehouse:
+            raise Exception("No warehouse configured for organization")
+
+        # Get payload from request body
+        import json
+
+        payload = json.loads(request.body) if request.body else {}
+
+        # Convert payload to ChartDataPayload
+        chart_payload = ChartDataPayload(**payload)
+
+        # Get table preview using same function as authenticated API
+        preview_data = charts_service.get_chart_data_table_preview(org_warehouse, chart_payload)
+
+        return {
+            "columns": preview_data["columns"],
+            "column_types": preview_data["column_types"],
+            "data": preview_data["data"],
+            "total_rows": preview_data["total_rows"],
+            "page": preview_data["page"],
+            "page_size": preview_data["page_size"],
+            "is_valid": True,
+        }
+
+    except Dashboard.DoesNotExist:
+        logger.warning(f"Public table data access failed - dashboard not found for token: {token}")
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
+        )
+    except Exception as e:
+        logger.error(f"Public table data error for chart {chart_id}: {str(e)}")
+        return 404, PublicErrorResponse(error="Table data unavailable", is_valid=False)
+
+
+@public_router.get(
+    "/dashboards/{token}/geojsons/{geojson_id}/",
+    response={200: dict, 404: PublicErrorResponse},
+)
+def get_public_geojson_data(request, token: str, geojson_id: int):
+    """
+    Get public geojson data - ESSENTIAL for map charts
+
+    PURPOSE: Map charts require geographic boundary data (GeoJSON) to render:
+    - Country/state/district boundaries
+    - Polygon coordinates for map regions
+    - Geographic feature properties
+
+    This data is completely separate from chart data - it defines the map shapes
+    while chart data provides the values to overlay on those shapes.
+
+    WITHOUT THIS: Map charts in public dashboards show no geographic boundaries,
+    appearing as blank/empty maps with no visual regions to display data on.
+    """
+    try:
+        # Verify dashboard is public
+        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+
+        # Import required modules
+        from ddpui.models.geojson import GeoJSON
+        from django.shortcuts import get_object_or_404
+
+        # Get geojson with same logic as authenticated API
+        geojson = get_object_or_404(GeoJSON, id=geojson_id)
+
+        # Check access permissions (allow default geojsons or org-specific ones)
+        if not geojson.is_default and geojson.org_id != dashboard.org.id:
+            raise Exception("Access denied to GeoJSON")
+
+        return {
+            "id": geojson.id,
+            "name": geojson.name,
+            "display_name": f"{geojson.name} ({geojson.description or 'No description'})",
+            "geojson_data": geojson.geojson_data,
+            "properties_key": geojson.properties_key,
+            "is_valid": True,
+        }
+
+    except Dashboard.DoesNotExist:
+        logger.warning(f"Public geojson access failed - dashboard not found for token: {token}")
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
+        )
+    except Exception as e:
+        logger.error(f"Public geojson error for geojson {geojson_id}: {str(e)}")
+        return 404, PublicErrorResponse(error="GeoJSON data unavailable", is_valid=False)
+
+
+@public_router.post(
+    "/dashboards/{token}/charts/{chart_id}/map-data/",
+    response={200: dict, 404: PublicErrorResponse},
+)
+def get_public_map_data_overlay(request, token: str, chart_id: int):
+    """
+    Get public map data overlay - ESSENTIAL for map charts
+
+    PURPOSE: Map charts need data values to overlay on geographic regions:
+    - Aggregated data per geographic region (state, district, etc.)
+    - Values to colorize/visualize on the map
+    - Geographic column mapping (which column contains region names)
+    - Drill-down filtering support
+
+    This endpoint performs specialized geographic data aggregation that's completely
+    different from regular chart data processing. It groups data by geographic
+    regions and applies proper aggregation functions.
+
+    Key difference from regular charts: Uses 'value' alias (not original column names)
+    to match ECharts map visualization requirements.
+
+    WITHOUT THIS: Map charts show geographic boundaries but no data overlay,
+    appearing as blank maps with no population/value visualization.
+    """
+    try:
+        # Verify dashboard is public
+        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+
+        # Import required modules
+        from ddpui.models.visualization import Chart
+        from ddpui.models.org import OrgWarehouse
+        from ddpui.api.charts_api import MapDataOverlayPayload
+        from ddpui.core.charts import charts_service
+        import copy
+
+        # Get the chart and org warehouse
+        chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
+        if not chart:
+            raise Exception("Chart not found in dashboard's organization")
+
+        org_warehouse = OrgWarehouse.objects.filter(org=dashboard.org).first()
+        if not org_warehouse:
+            raise Exception("No warehouse configured for organization")
+
+        # Get payload from request body
+        import json
+
+        payload = json.loads(request.body) if request.body else {}
+
+        # Add metrics from chart configuration if not provided
+        # IMPORTANT: Always use 'value' as alias to match private API behavior
+        if "metrics" not in payload and chart.extra_config.get("metrics"):
+            # Transform metrics to use 'value' alias (same as private API)
+            original_metrics = chart.extra_config["metrics"]
+            payload["metrics"] = [
+                {
+                    "column": original_metrics[0]["column"],
+                    "aggregation": original_metrics[0]["aggregation"],
+                    "alias": "value",  # Force alias to 'value' like private API
+                }
+            ]
+        elif "metrics" not in payload:
+            # Fallback: create a metric from value_column and aggregate_function
+            payload["metrics"] = [
+                {
+                    "column": payload.get("value_column"),
+                    "aggregation": payload.get("aggregate_function", "sum"),
+                    "alias": "value",  # Force alias to 'value' like private API
+                }
+            ]
+
+        # Convert payload to MapDataOverlayPayload
+        map_payload = MapDataOverlayPayload(**payload)
+
+        # Validate required fields
+        if not all(
+            [
+                map_payload.schema_name,
+                map_payload.table_name,
+                map_payload.geographic_column,
+                map_payload.value_column,
+            ]
+        ):
+            raise Exception("Missing required fields for map data")
+
+        if not map_payload.metrics:
+            raise Exception("Missing metrics - at least one metric is required")
+
+        # Use same logic as authenticated API
+        extra_config = copy.deepcopy(map_payload.extra_config or {})
+
+        # Merge chart filters with existing filters
+        if map_payload.chart_filters:
+            existing_filters = extra_config.get("filters", [])
+            if isinstance(existing_filters, list):
+                extra_config["filters"] = existing_filters + map_payload.chart_filters
+            else:
+                extra_config["filters"] = map_payload.chart_filters
+
+        # Build chart payload for map data query (same logic as private API)
+        from ddpui.schemas.chart_schema import ChartDataPayload, ExecuteChartQuery
+
+        chart_payload = ChartDataPayload(
+            chart_type="map",
+            computation_type="aggregated",
+            schema_name=map_payload.schema_name,
+            table_name=map_payload.table_name,
+            dimension_col=map_payload.geographic_column,
+            metrics=map_payload.metrics,
+            dashboard_filters=map_payload.dashboard_filters,
+            extra_config=extra_config,
+        )
+
+        # Get warehouse client and build query using standard chart service
+        warehouse = charts_service.get_warehouse_client(org_warehouse)
+        query_builder = charts_service.build_chart_query(chart_payload)
+
+        # Add filters if provided (drill-down filters)
+        if map_payload.filters:
+            from sqlalchemy import column
+
+            for filter_column, filter_value in map_payload.filters.items():
+                query_builder.where_clause(column(filter_column) == filter_value)
+
+        # Execute query using standard chart service
+        execute_payload = ExecuteChartQuery(
+            chart_type="map",
+            computation_type="aggregated",
+            dimension_col=map_payload.geographic_column,
+            metrics=map_payload.metrics,
+        )
+
+        dict_results = charts_service.execute_chart_query(warehouse, query_builder, execute_payload)
+
+        logger.info(f"Public map data overlay query returned {len(dict_results)} rows")
+
+        # Transform results for map visualization (same logic as private API)
+        map_data = []
+        for row in dict_results:
+            # Get the dimension value (geographic region name)
+            region_name = row.get(map_payload.geographic_column)
+            # Get the aggregated value using 'value' alias (same as private API)
+            value = row.get("value")
+
+            if region_name and value is not None:
+                map_data.append({"name": str(region_name), "value": float(value)})
+
+        # Return in same format as private API
+        map_response = {"success": True, "data": map_data, "count": len(map_data)}
+
+        return {
+            "data": map_data,
+            "is_valid": True,
+        }
+
+    except Dashboard.DoesNotExist:
+        logger.warning(f"Public map data access failed - dashboard not found for token: {token}")
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
+        )
+    except Exception as e:
+        logger.error(f"Public map data error for chart {chart_id}: {str(e)}")
+        return 404, PublicErrorResponse(error="Map data unavailable", is_valid=False)

@@ -274,3 +274,7 @@ SIMPLE_JWT = {
     "SIGNING_KEY": os.getenv("JWT_SECRET_KEY", SECRET_KEY),
     # ...add other SimpleJWT settings as needed...
 }
+
+# Frontend URLs for public sharing and email links
+FRONTEND_URL = os.getenv("FRONTEND_URL")
+FRONTEND_URL_V2 = os.getenv("FRONTEND_URL_V2")
