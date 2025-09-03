@@ -574,5 +574,13 @@
             "name": "Can Share Dashboards",
             "slug": "can_share_dashboards"
         }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 73,
+        "fields": {
+            "name": "Can Manage Organization Default Dashboard",
+            "slug": "can_manage_org_default_dashboard"
+        }
     }
 ]

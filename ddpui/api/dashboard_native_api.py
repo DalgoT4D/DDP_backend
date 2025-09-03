@@ -20,6 +20,8 @@ from ddpui.models.dashboard import (
 from ddpui.models.org_user import OrgUser
 from ddpui.auth import has_permission
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.services.dashboard_service import delete_dashboard_safely
+from ddpui.auth import SUPER_ADMIN_ROLE
 
 logger = CustomLogger("ddpui")
 
@@ -275,6 +277,20 @@ def create_dashboard(request, payload: DashboardCreate):
         last_modified_by=orguser,
     )
 
+    # --- Custom logic for org default and landing dashboard (permission-driven) ---
+    has_org_default = Dashboard.objects.filter(org=orguser.org, is_org_default=True).exists()
+
+    # If no org default dashboard exists, assign based on permission
+    if not has_org_default:
+        if "can_manage_org_default_dashboard" in getattr(request, "permissions", []):
+            dashboard.is_org_default = True
+            dashboard.save(update_fields=["is_org_default"])
+        else:
+            # If user does not have permission and has no landing_dashboard, set this as landing_dashboard
+            if not orguser.landing_dashboard:
+                orguser.landing_dashboard = dashboard
+                orguser.save(update_fields=["landing_dashboard"])
+
     logger.info(f"Created dashboard {dashboard.id} for org {orguser.org.id}")
 
     return get_dashboard_response(dashboard)
@@ -351,12 +367,28 @@ def delete_dashboard(request, dashboard_id: int):
     except Dashboard.DoesNotExist:
         raise HttpError(404, "Dashboard not found")
 
+    # Prevent deletion if dashboard is org default
+    if dashboard.is_org_default:
+        raise HttpError(403, "Cannot delete the organization's default dashboard.")
+
+    # Only allow deletion if the current user is the creator
+    if dashboard.created_by != orguser:
+        raise HttpError(403, "You can only delete dashboards you created.")
+
+    # Prevent deletion if dashboard is landing page for any user
+    if OrgUser.objects.filter(landing_dashboard=dashboard).exists():
+        raise HttpError(
+            403, "Cannot delete a dashboard that is set as landing page for one or more users."
+        )
+
     # Check if dashboard is locked
     if hasattr(dashboard, "lock") and dashboard.lock and not dashboard.lock.is_expired():
         raise HttpError(423, "Cannot delete a locked dashboard")
 
-    dashboard.delete()
-    logger.info(f"Deleted dashboard {dashboard_id} for org {orguser.org.id}")
+    # Use safe deletion function
+    success, error_message = delete_dashboard_safely(dashboard_id, orguser)
+    if not success:
+        raise HttpError(400, error_message)
 
     return {"success": True}
 
@@ -773,7 +805,9 @@ def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShare
         # Generate the full public URL
         from django.conf import settings
 
-        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3001")
+        # Use FRONTEND_URL_V2 for webapp_v2, fallback to FRONTEND_URL, then localhost
+        FRONTEND_URL_V2 = getattr(settings, "FRONTEND_URL_V2", None)
+        frontend_url = FRONTEND_URL_V2 or getattr(settings, "FRONTEND_URL", "http://localhost:3001")
         response_data[
             "public_url"
         ] = f"{frontend_url}/share/dashboard/{dashboard.public_share_token}"
@@ -814,9 +848,148 @@ def get_dashboard_sharing_status(request, dashboard_id: int):
     if dashboard.is_public and dashboard.public_share_token:
         from django.conf import settings
 
-        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3001")
+        # Use FRONTEND_URL_V2 for webapp_v2, fallback to FRONTEND_URL, then localhost
+        FRONTEND_URL_V2 = getattr(settings, "FRONTEND_URL_V2", None)
+        frontend_url = FRONTEND_URL_V2 or getattr(settings, "FRONTEND_URL", "http://localhost:3001")
         response_data[
             "public_url"
         ] = f"{frontend_url}/share/dashboard/{dashboard.public_share_token}"
 
     return DashboardShareStatus(**response_data)
+
+
+# =============================================================================
+# Landing Page Management APIs
+# =============================================================================
+
+
+class LandingPageResponse(Schema):
+    """Response schema for landing page operations"""
+
+    success: bool
+    message: str = ""
+
+
+@dashboard_native_router.post(
+    "/landing-page/set-personal/{dashboard_id}", response=LandingPageResponse
+)
+@has_permission(["can_view_dashboards", "can_create_dashboards"])
+def set_personal_landing_dashboard(request, dashboard_id: int):
+    """Set a dashboard as user's personal landing page"""
+    orguser: OrgUser = request.orguser
+
+    # Check if dashboard exists and belongs to user's org
+    try:
+        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
+    except Dashboard.DoesNotExist:
+        raise HttpError(404, "Dashboard not found")
+
+    # Set as personal landing page
+    orguser.landing_dashboard = dashboard
+    orguser.save()
+
+    logger.info(
+        f"User {orguser.user.email} set dashboard {dashboard.title} as personal landing page"
+    )
+    return LandingPageResponse(success=True, message="Dashboard set as personal landing page")
+
+
+@dashboard_native_router.delete("/landing-page/remove-personal", response=LandingPageResponse)
+@has_permission(["can_view_dashboards", "can_create_dashboards"])
+def remove_personal_landing_dashboard(request):
+    """Remove user's personal landing page preference"""
+    orguser: OrgUser = request.orguser
+
+    if orguser.landing_dashboard:
+        previous_dashboard = orguser.landing_dashboard.title
+        orguser.landing_dashboard = None
+        orguser.save()
+
+        logger.info(
+            f"User {orguser.user.email} removed personal landing page: {previous_dashboard}"
+        )
+        return LandingPageResponse(success=True, message="Personal landing page preference removed")
+    else:
+        return LandingPageResponse(success=True, message="No personal landing page was set")
+
+
+@dashboard_native_router.post(
+    "/landing-page/set-org-default/{dashboard_id}", response=LandingPageResponse
+)
+@has_permission(["can_manage_org_default_dashboard"])
+def set_org_default_dashboard(request, dashboard_id: int):
+    """Set a dashboard as organization's default landing page (Admin only)"""
+    orguser: OrgUser = request.orguser
+
+    # Check if dashboard exists and belongs to user's org
+    try:
+        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
+    except Dashboard.DoesNotExist:
+        raise HttpError(404, "Dashboard not found")
+
+    with transaction.atomic():
+        # Remove previous org default
+        Dashboard.objects.filter(org=orguser.org, is_org_default=True).update(is_org_default=False)
+
+        # Set new org default
+        dashboard.is_org_default = True
+        dashboard.save()
+
+    logger.info(
+        f"User {orguser.user.email} set dashboard {dashboard.title} as org default landing page"
+    )
+    return LandingPageResponse(
+        success=True, message="Dashboard set as organization default landing page"
+    )
+
+
+@dashboard_native_router.delete("/landing-page/remove-org-default", response=LandingPageResponse)
+@has_permission(["can_manage_org_default_dashboard"])
+def remove_org_default_dashboard(request):
+    """Remove organization's default landing page (Admin only)"""
+    orguser: OrgUser = request.orguser
+
+    org_default = Dashboard.objects.filter(org=orguser.org, is_org_default=True).first()
+    if org_default:
+        org_default.is_org_default = False
+        org_default.save()
+
+        logger.info(
+            f"User {orguser.user.email} removed org default landing page: {org_default.title}"
+        )
+        return LandingPageResponse(
+            success=True, message="Organization default landing page removed"
+        )
+    else:
+        return LandingPageResponse(
+            success=True, message="No organization default landing page was set"
+        )
+
+
+@dashboard_native_router.get("/landing-page/resolve", response=dict)
+@has_permission(["can_view_dashboards", "can_create_dashboards"])
+def resolve_user_landing_page(request):
+    """Resolve which dashboard should be the user's landing page"""
+    orguser: OrgUser = request.orguser
+
+    # 1. Check personal preference first
+    if orguser.landing_dashboard:
+        return {
+            "dashboard_id": orguser.landing_dashboard.id,
+            "dashboard_title": orguser.landing_dashboard.title,
+            "dashboard_type": orguser.landing_dashboard.dashboard_type,
+            "source": "personal",
+        }
+
+    # 2. Check org default
+    org_default = Dashboard.objects.filter(org=orguser.org, is_org_default=True).first()
+    if org_default:
+        return {
+            "dashboard_id": org_default.id,
+            "dashboard_title": org_default.title,
+            "dashboard_type": org_default.dashboard_type,
+            "source": "org_default",
+        }
+
+    # 3. No landing page set
+    return {"dashboard_id": None, "dashboard_title": None, "dashboard_type": None, "source": "none"}

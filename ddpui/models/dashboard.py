@@ -101,6 +101,12 @@ class Dashboard(models.Model):
     public_access_count = models.IntegerField(default=0)
     last_public_accessed = models.DateTimeField(null=True, blank=True)
 
+    # Landing page configuration
+    is_org_default = models.BooleanField(
+        default=False,
+        help_text="If True, this dashboard is the organization's default landing page",
+    )
+
     # Metadata
     created_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE, db_column="created_by")
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
@@ -136,11 +142,19 @@ class Dashboard(models.Model):
             "last_modified_by": self.last_modified_by.user.email if self.last_modified_by else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "is_org_default": self.is_org_default,
         }
 
     class Meta:
         db_table = "dashboard"
         ordering = ["-updated_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["org"],
+                condition=models.Q(is_org_default=True),
+                name="unique_org_default_dashboard",
+            )
+        ]
 
 
 class DashboardFilter(models.Model):

@@ -90,9 +90,8 @@ def build_map_query(payload: ChartDataPayload, drill_down_filters: List[Dict] = 
             table_name=payload.table_name,
             dimension_col=payload.geographic_column,
             metrics=payload.metrics,  # Use metrics array
-            limit=payload.limit or 1000,
-            offset=payload.offset or 0,
-            extra_config=payload.extra_config,  # Pass through filters and other config
+            dashboard_filters=payload.dashboard_filters,  # Pass through dashboard filters
+            extra_config=payload.extra_config,  # Pass through filters, pagination, sorting, and other config
         )
     else:
         # Fallback to legacy single metric system for backward compatibility
@@ -103,12 +102,11 @@ def build_map_query(payload: ChartDataPayload, drill_down_filters: List[Dict] = 
             table_name=payload.table_name,
             dimension_col=payload.geographic_column,
             metrics=payload.metrics,
-            limit=payload.limit or 1000,
-            offset=payload.offset or 0,
-            extra_config=payload.extra_config,  # Pass through filters and other config
+            dashboard_filters=payload.dashboard_filters,  # Pass through dashboard filters
+            extra_config=payload.extra_config,  # Pass through filters, pagination, sorting, and other config
         )
 
-    # Build base query
+    # Build base query using the same service as regular charts (includes filtering, pagination, sorting)
     query = charts_service.build_chart_query(map_payload)
 
     # Add drill-down WHERE filters if provided
@@ -155,9 +153,8 @@ def build_drill_down_query_for_layer(
         geographic_column=geographic_column,
         value_column=payload.value_column,
         metrics=payload.metrics,  # Pass through metrics for multiple metric support
-        limit=payload.limit,
-        offset=payload.offset,
-        extra_config=payload.extra_config,  # Pass through filters and other config
+        dashboard_filters=payload.dashboard_filters,  # Pass through dashboard filters
+        extra_config=payload.extra_config,  # Pass through filters, pagination, sorting, and other config
     )
 
     return build_map_query(layer_payload, drill_down_filters)

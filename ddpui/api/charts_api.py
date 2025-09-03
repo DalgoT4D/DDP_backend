@@ -1,9 +1,10 @@
 """Chart API endpoints"""
 
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
+import copy
 from datetime import datetime
 
-from ninja import Router, Schema
+from ninja import Router, Schema, Field
 from ninja.errors import HttpError
 from django.shortcuts import get_object_or_404
 
@@ -337,8 +338,16 @@ class MapDataOverlayPayload(Schema):
     geographic_column: str
     value_column: str
     metrics: List[ChartMetric]
-    filters: dict = {}  # Drill-down filters (key-value pairs)
-    chart_filters: list = []  # Chart-level filters (list of filter objects)
+    filters: Dict[str, Any] = Field(default_factory=dict)  # Drill-down filters (key-value pairs)
+    chart_filters: Optional[List[Dict[str, Any]]] = Field(
+        default_factory=list
+    )  # Chart-level filters (list of filter objects)
+    dashboard_filters: Optional[List[Dict[str, Any]]] = Field(
+        default_factory=list
+    )  # Dashboard-level filters (list of filter objects)
+    extra_config: Optional[Dict[str, Any]] = Field(
+        default_factory=dict
+    )  # Additional configuration including pagination, sorting, etc.
 
 
 @charts_router.post("/map-data-overlay/", response=dict)
@@ -371,13 +380,66 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
                 "Missing required fields: schema_name, table_name, geographic_column, value_column",
             )
 
+        # Validate metrics exist and are non-empty
+        if not payload.metrics:
+            raise HttpError(400, "Missing metrics - at least one metric is required")
+
         # Build payload for standard chart query (same as other charts)
-        extra_config = {}
+        # Make a deep copy to avoid mutating the original payload
+        extra_config = copy.deepcopy(payload.extra_config or {})
+
+        # Merge chart filters with existing filters instead of overwriting
         if chart_filters:
-            extra_config["filters"] = chart_filters
+            existing_filters = extra_config.get("filters", [])
+            if isinstance(existing_filters, list):
+                extra_config["filters"] = existing_filters + chart_filters
+            else:
+                extra_config["filters"] = chart_filters
 
         # Use metrics from payload directly
         metrics = payload.metrics
+        dashboard_filters = payload.dashboard_filters
+
+        # Resolve dashboard filters if provided (same logic as regular charts)
+        resolved_dashboard_filters = None
+        if dashboard_filters:
+            try:
+                # Import dashboard filter model
+                from ddpui.models.dashboard import DashboardFilter
+
+                resolved_filters = []
+
+                for filter_item in dashboard_filters:
+                    filter_id = filter_item.get("filter_id")
+                    filter_value = filter_item.get("value")
+
+                    if filter_id and filter_value is not None:
+                        try:
+                            # Get the filter configuration from the database
+                            dashboard_filter = DashboardFilter.objects.get(id=filter_id)
+
+                            # Only apply this filter if it applies to the same table as the chart
+                            if (
+                                dashboard_filter.schema_name == schema_name
+                                and dashboard_filter.table_name == table_name
+                            ):
+                                resolved_filters.append(
+                                    {
+                                        "filter_id": filter_id,
+                                        "column": dashboard_filter.column_name,
+                                        "type": dashboard_filter.filter_type,
+                                        "value": filter_value,
+                                        "settings": dashboard_filter.settings,
+                                    }
+                                )
+                        except DashboardFilter.DoesNotExist:
+                            logger.warning(f"Dashboard filter {filter_id} not found")
+
+                resolved_dashboard_filters = resolved_filters
+
+            except Exception as e:
+                logger.error(f"Error resolving dashboard filters: {str(e)}")
+                resolved_dashboard_filters = None
 
         chart_payload = ChartDataPayload(
             chart_type="bar",  # We use bar chart query logic for aggregated data
@@ -386,7 +448,8 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
             table_name=table_name,
             dimension_col=geographic_column,
             metrics=metrics,
-            extra_config=extra_config if extra_config else None,
+            dashboard_filters=resolved_dashboard_filters,
+            extra_config=extra_config,
         )
 
         # Get warehouse client and build query using standard chart service
@@ -935,6 +998,11 @@ def delete_chart(request, chart_id: int):
         chart = Chart.objects.get(id=chart_id, org=orguser.org)
     except Chart.DoesNotExist:
         raise HttpError(404, "Chart not found")
+
+    # Only allow deletion if the current user is the creator
+    if chart.created_by != orguser:
+        raise HttpError(403, "You can only delete charts you created.")
+
     chart.delete()
     return {"success": True}
 
