@@ -456,12 +456,16 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         warehouse = charts_service.get_warehouse_client(org_warehouse)
         query_builder = charts_service.build_chart_query(chart_payload)
 
-        # Add filters if provided
+        # Add filters if provided with case-insensitive matching
         if filters:
-            from sqlalchemy import column
+            from sqlalchemy import column, func
 
             for filter_column, filter_value in filters.items():
-                query_builder.where_clause(column(filter_column) == filter_value)
+                # Use case-insensitive matching for string filters
+                # Convert both database column and filter value to uppercase for comparison
+                query_builder.where_clause(
+                    func.upper(column(filter_column)) == str(filter_value).upper()
+                )
 
         # Execute query using standard chart service
         execute_payload = ExecuteChartQuery(
@@ -475,7 +479,7 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
 
         logger.info(f"Map data overlay query returned {len(dict_results)} rows")
 
-        # Transform results for map visualization
+        # Transform results for map visualization with proper case normalization
         # The standard chart query returns data with dimension and aggregate columns
         map_data = []
         for row in dict_results:
@@ -486,7 +490,10 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
             value = row.get(metric_alias)
 
             if region_name and value is not None:
-                map_data.append({"name": str(region_name), "value": float(value)})
+                # Normalize region name to proper case for frontend compatibility
+                # Convert "MAHARASHTRA" -> "Maharashtra", "gujarat" -> "Gujarat"
+                normalized_name = str(region_name).strip().title()
+                map_data.append({"name": normalized_name, "value": float(value)})
 
         return {"success": True, "data": map_data, "count": len(map_data)}
 

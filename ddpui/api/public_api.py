@@ -719,12 +719,15 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
         warehouse = charts_service.get_warehouse_client(org_warehouse)
         query_builder = charts_service.build_chart_query(chart_payload)
 
-        # Add filters if provided (drill-down filters)
+        # Add filters if provided (drill-down filters) with case-insensitive matching
         if map_payload.filters:
-            from sqlalchemy import column
+            from sqlalchemy import column, func
 
             for filter_column, filter_value in map_payload.filters.items():
-                query_builder.where_clause(column(filter_column) == filter_value)
+                # Use case-insensitive matching for string filters (same as private API)
+                query_builder.where_clause(
+                    func.upper(column(filter_column)) == str(filter_value).upper()
+                )
 
         # Execute query using standard chart service
         execute_payload = ExecuteChartQuery(
@@ -747,7 +750,10 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
             value = row.get("value")
 
             if region_name and value is not None:
-                map_data.append({"name": str(region_name), "value": float(value)})
+                # Normalize region name to proper case for frontend compatibility (same as private API)
+                # Convert "MAHARASHTRA" -> "Maharashtra", "gujarat" -> "Gujarat"
+                normalized_name = str(region_name).strip().title()
+                map_data.append({"name": normalized_name, "value": float(value)})
 
         # Return in same format as private API
         map_response = {"success": True, "data": map_data, "count": len(map_data)}
@@ -765,3 +771,68 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
     except Exception as e:
         logger.error(f"Public map data error for chart {chart_id}: {str(e)}")
         return 404, PublicErrorResponse(error="Map data unavailable", is_valid=False)
+
+
+@public_router.get("/regions/", response=List[dict])
+def get_public_regions(request, country_code: str = "IND", region_type: str = None):
+    """List available regions for a country - PUBLIC VERSION"""
+    from ddpui.core.charts.maps_service import get_available_regions
+
+    try:
+        regions = get_available_regions(country_code, region_type)
+        return regions
+    except Exception as e:
+        logger.error(f"Public regions list error: {str(e)}")
+        return []
+
+
+@public_router.get("/regions/{region_id}/children/", response=List[dict])
+def get_public_child_regions(request, region_id: int):
+    """Get child regions for a parent region - PUBLIC VERSION"""
+    from ddpui.core.charts.maps_service import get_child_regions
+
+    try:
+        children = get_child_regions(region_id)
+        return children
+    except Exception as e:
+        logger.error(f"Public child regions error for region {region_id}: {str(e)}")
+        return []
+
+
+@public_router.get("/regions/{region_id}/geojsons/", response=List[dict])
+def get_public_region_geojsons(request, region_id: int):
+    """Get available GeoJSONs for a region - PUBLIC VERSION"""
+    from ddpui.core.charts.maps_service import get_available_geojsons_for_region
+
+    try:
+        # Use org_id=None for public access to get default GeoJSONs only
+        geojsons = get_available_geojsons_for_region(region_id, org_id=None)
+        return geojsons
+    except Exception as e:
+        logger.error(f"Public region geojsons error for region {region_id}: {str(e)}")
+        return []
+
+
+@public_router.get("/geojsons/{geojson_id}/", response=dict)
+def get_public_geojson_detail(request, geojson_id: int):
+    """Get GeoJSON detail - PUBLIC VERSION"""
+    try:
+        from ddpui.models.geojson import GeoJSON
+
+        # Only allow access to default (public) GeoJSONs
+        geojson = GeoJSON.objects.get(id=geojson_id, is_default=True)
+
+        return {
+            "id": geojson.id,
+            "region_id": geojson.region.id,
+            "geojson_data": geojson.geojson_data,
+            "properties_key": geojson.properties_key,
+            "name": geojson.name,
+            "description": geojson.description,
+        }
+    except GeoJSON.DoesNotExist:
+        logger.warning(f"Public GeoJSON access failed - not found or not public: {geojson_id}")
+        return 404, {"error": "GeoJSON not found or not public"}
+    except Exception as e:
+        logger.error(f"Public GeoJSON detail error for {geojson_id}: {str(e)}")
+        return 404, {"error": "GeoJSON unavailable"}

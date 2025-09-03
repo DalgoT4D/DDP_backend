@@ -12,6 +12,13 @@ from ddpui.utils.custom_logger import CustomLogger
 logger = CustomLogger("ddpui.maps")
 
 
+def normalize_region_name(name):
+    """Normalize region name for consistent matching"""
+    if not name:
+        return ""
+    return str(name).strip().lower()
+
+
 def get_available_regions(country_code: str, region_type: str = None) -> List[Dict]:
     """Get available regions for a country"""
     query = GeoRegion.objects.filter(country_code=country_code)
@@ -23,8 +30,8 @@ def get_available_regions(country_code: str, region_type: str = None) -> List[Di
     return [
         {
             "id": region.id,
-            "name": region.name,
-            "display_name": region.display_name,
+            "name": region.name.strip().title(),  # Normalize to match map data
+            "display_name": region.display_name.strip().title(),  # Normalize to match map data
             "type": region.type,
             "parent_id": region.parent_id,
             "country_code": region.country_code,
@@ -67,8 +74,8 @@ def get_child_regions(parent_region_id: int) -> List[Dict]:
     return [
         {
             "id": child.id,
-            "name": child.name,
-            "display_name": child.display_name,
+            "name": child.name.strip().title(),  # Normalize to match map data
+            "display_name": child.display_name.strip().title(),  # Normalize to match map data
             "type": child.type,
             "region_code": child.region_code,
         }
@@ -205,15 +212,21 @@ def transform_data_for_map(
             else:
                 agg_col_name = f"{selected_metric['aggregation']}_{selected_metric['column']}"
 
-    # Create lookup for user data
-    data_lookup = {}
+    # Create normalized lookup for user data
+    data_lookup_normalized = {}
+    original_name_mapping = {}  # Keep track of original names
+
     for row in results:
         region_name = row.get(geographic_column)
         value = row.get(agg_col_name, 0)
         if region_name:
-            data_lookup[str(region_name).strip()] = value
+            normalized_key = normalize_region_name(region_name)
+            data_lookup_normalized[normalized_key] = value
+            original_name_mapping[normalized_key] = str(region_name).strip()
 
-    logger.info(f"Data lookup created with {len(data_lookup)} regions")
+    logger.info(f"Data lookup created with {len(data_lookup_normalized)} regions")
+    logger.info(f"All normalized data keys: {list(data_lookup_normalized.keys())}")
+    logger.info(f"All data values: {list(data_lookup_normalized.values())}")
 
     # Prepare data for ECharts map
     map_data = []
@@ -221,24 +234,24 @@ def transform_data_for_map(
 
     for feature in geojson_data.get("features", []):
         properties = feature.get("properties", {})
-        region_name = properties.get("name", "")
+        geojson_region_name = properties.get("name", "")
 
-        # Try exact match first, then case-insensitive
-        value = data_lookup.get(region_name)
-        if value is None:
-            # Try case-insensitive match
-            for data_region, data_value in data_lookup.items():
-                if data_region.lower() == region_name.lower():
-                    value = data_value
-                    matched_count += 1
-                    break
-        else:
+        # Normalize the GeoJSON region name for matching
+        normalized_geojson_name = normalize_region_name(geojson_region_name)
+
+        # Look up value using normalized key
+        value = data_lookup_normalized.get(normalized_geojson_name, 0)
+
+        # Debug every region
+        logger.info(
+            f"Processing: '{geojson_region_name}' → normalized: '{normalized_geojson_name}' → value: {value}"
+        )
+
+        if value > 0:
             matched_count += 1
 
-        if value is None:
-            value = 0
-
-        map_data.append({"name": region_name, "value": value})
+        # Use the original GeoJSON name for ECharts compatibility
+        map_data.append({"name": geojson_region_name, "value": value})
 
     logger.info(f"Matched {matched_count} out of {len(map_data)} regions")
 
@@ -283,7 +296,7 @@ def standardize_geojson_properties(geojson_data: dict, properties_key: str) -> d
 
     for feature in geojson_data.get("features", []):
         if "properties" in feature:
-            # Copy the specified property to 'name'
+            # Copy the specified property to 'name' (keep original case for ECharts)
             if properties_key in feature["properties"]:
                 feature["properties"]["name"] = feature["properties"][properties_key]
 
