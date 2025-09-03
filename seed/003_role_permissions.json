@@ -2235,7 +2235,7 @@
     "model": "ddpui.RolePermission",
     "pk": 276,
     "fields": {
-      "role": 4,
+      "role": 2,
       "permission": 73
     }
   },
