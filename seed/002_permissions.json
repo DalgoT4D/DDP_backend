@@ -3,8 +3,8 @@
         "model": "ddpui.Permission",
         "pk": 1,
         "fields": {
-            "name": "Can View Dashboard",
-            "slug": "can_view_dashboard"
+            "name": "Can View Pipeline Overview",
+            "slug": "can_view_pipeline_overview"
         }
     },
     {
@@ -501,6 +501,86 @@
         "fields": {
             "name": "Can request (to the higher role) llm analysis feature to be enabled",
             "slug": "can_request_llm_analysis_feature"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 64,
+        "fields": {
+            "name": "Can View Dashboards",
+            "slug": "can_view_dashboards"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 65,
+        "fields": {
+            "name": "Can View Charts",
+            "slug": "can_view_charts"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 66,
+        "fields": {
+            "name": "Can Create Charts",
+            "slug": "can_create_charts"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 67,
+        "fields": {
+            "name": "Can Edit Charts",
+            "slug": "can_edit_charts"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 68,
+        "fields": {
+            "name": "Can Delete Charts",
+            "slug": "can_delete_charts"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 69,
+        "fields": {
+            "name": "Can Create Dashboards",
+            "slug": "can_create_dashboards"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 70,
+        "fields": {
+            "name": "Can Edit Dashboards",
+            "slug": "can_edit_dashboards"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 71,
+        "fields": {
+            "name": "Can Delete Dashboards",
+            "slug": "can_delete_dashboards"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 72,
+        "fields": {
+            "name": "Can Share Dashboards",
+            "slug": "can_share_dashboards"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 73,
+        "fields": {
+            "name": "Can Manage Organization Default Dashboard",
+            "slug": "can_manage_org_default_dashboard"
         }
     }
 ]

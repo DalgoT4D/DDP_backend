@@ -72,6 +72,7 @@ class Org(models.Model):
     viz_url = models.CharField(max_length=100, null=True)
     viz_login_type = models.CharField(choices=OrgVizLoginType.choices(), max_length=50, null=True)
     ses_whitelisted_email = models.TextField(max_length=100, null=True)
+    dalgouser_superset_creds_key = models.TextField(null=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -125,7 +126,7 @@ class OrgWarehouse(models.Model):
     """A data warehouse for an org. Typically we expect exactly one"""
 
     wtype = models.CharField(max_length=25)  # postgres, bigquery, snowflake
-    name = models.CharField(max_length=25, default="", blank=True)
+    name = models.CharField(max_length=256, default="", blank=True)
     credentials = models.CharField(max_length=1000)
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     airbyte_destination_id = models.TextField(  # skipcq: PTC-W0901, PTC-W0906

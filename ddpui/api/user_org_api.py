@@ -76,6 +76,14 @@ def get_current_user_v2(request, org_slug: str = None):
     if org_preferences is None:
         org_preferences = OrgPreferences.objects.create(org=org)
 
+    # Get org default dashboard
+    org_default_dashboard = None
+    from ddpui.models.dashboard import Dashboard
+
+    org_default_dashboard_obj = Dashboard.objects.filter(org=org, is_org_default=True).first()
+    if org_default_dashboard_obj:
+        org_default_dashboard = org_default_dashboard_obj.id
+
     res = []
     for curr_orguser in curr_orgusers.prefetch_related(
         Prefetch(
@@ -114,6 +122,8 @@ def get_current_user_v2(request, org_slug: str = None):
                     curr_orguser.org.base_plan() == OrgType.DEMO if curr_orguser.org else False
                 ),
                 is_llm_active=org_preferences.llm_optin,
+                landing_dashboard_id=curr_orguser.landing_dashboard_id,
+                org_default_dashboard_id=org_default_dashboard,
             )
         )
 

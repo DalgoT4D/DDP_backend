@@ -57,6 +57,8 @@ ALLOWED_HOSTS = [
     "api.dalgo.org",
     "staging.dalgo.org",
     "dashboard.dalgo.org",
+    "staging-app.dalgo.org",
+    "insights.dalgo.org",
 ]
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_METHODS = [
@@ -73,6 +75,7 @@ CORS_ORIGIN_WHITELIST = (
     "http://127.0.0.1:3000",
     "https://staging.dalgo.org",
     "https://dashboard.dalgo.org",
+    "https://insights.dalgo.org",
 )
 CORS_ALLOW_HEADERS = (*default_headers, "x-dalgo-org")
 
@@ -271,3 +274,7 @@ SIMPLE_JWT = {
     "SIGNING_KEY": os.getenv("JWT_SECRET_KEY", SECRET_KEY),
     # ...add other SimpleJWT settings as needed...
 }
+
+# Frontend URLs for public sharing and email links
+FRONTEND_URL = os.getenv("FRONTEND_URL")
+FRONTEND_URL_V2 = os.getenv("FRONTEND_URL_V2")
