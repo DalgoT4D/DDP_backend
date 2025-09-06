@@ -836,3 +836,52 @@ def get_public_geojson_detail(request, geojson_id: int):
     except Exception as e:
         logger.error(f"Public GeoJSON detail error for {geojson_id}: {str(e)}")
         return 404, {"error": "GeoJSON unavailable"}
+
+
+@public_router.get("/regions/", response=List[dict])
+def list_available_regions_public(request, country_code: str = "IND", region_type: str = None):
+    """List available regions for a country - public access"""
+    try:
+        from ddpui.core.charts.maps_service import get_available_regions
+
+        regions = get_available_regions(country_code, region_type)
+        logger.info(
+            f"Public regions fetched for {country_code}, type: {region_type}, count: {len(regions)}"
+        )
+        return regions
+    except Exception as e:
+        logger.error(f"Public regions error for {country_code}: {str(e)}")
+        return []
+
+
+@public_router.get("/regions/{region_id}/children/", response=List[dict])
+def get_child_regions_public(request, region_id: int):
+    """Get child regions for a parent region - public access"""
+    try:
+        from ddpui.core.charts.maps_service import get_child_regions
+
+        children = get_child_regions(region_id)
+        logger.info(f"Public child regions fetched for parent {region_id}, count: {len(children)}")
+        return children
+    except Exception as e:
+        logger.error(f"Public child regions error for {region_id}: {str(e)}")
+        return []
+
+
+@public_router.get("/regions/{region_id}/geojsons/", response=List[dict])
+def get_region_geojsons_public(request, region_id: int):
+    """Get available geojsons for a region - public access"""
+    try:
+        from ddpui.models.geojson import GeoJSON
+
+        # Only return public/default geojsons
+        geojsons = GeoJSON.objects.filter(region_id=region_id, is_default=True).values(
+            "id", "name", "description", "properties_key"
+        )
+
+        geojson_list = list(geojsons)
+        logger.info(f"Public geojsons fetched for region {region_id}, count: {len(geojson_list)}")
+        return geojson_list
+    except Exception as e:
+        logger.error(f"Public region geojsons error for {region_id}: {str(e)}")
+        return []
