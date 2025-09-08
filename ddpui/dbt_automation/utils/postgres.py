@@ -44,6 +44,7 @@ class PostgresClient(WarehouseInterface):
         # ssl_mode is an alias for sslmode
         if "ssl_mode" in conn_info:
             conn_info["sslmode"] = conn_info["ssl_mode"]
+            del conn_info["ssl_mode"]
 
         if "sslmode" in conn_info:
             # sslmode can be a string or a boolean or a dict
