@@ -43,7 +43,10 @@ class PostgresClient(WarehouseInterface):
 
         # ssl_mode is an alias for sslmode
         if "ssl_mode" in conn_info:
-            conn_info["sslmode"] = conn_info["ssl_mode"]
+            # Only map alias if canonical key not already provided
+            if "sslmode" not in conn_info:
+                conn_info["sslmode"] = conn_info["ssl_mode"]
+            # Always drop the alias
             del conn_info["ssl_mode"]
 
         if "sslmode" in conn_info:
