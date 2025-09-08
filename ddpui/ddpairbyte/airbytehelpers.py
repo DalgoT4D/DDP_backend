@@ -925,20 +925,6 @@ def delete_source(org: Org, source_id: str):
     # Fetch org tasks and deployments mapped to each connection_id
     org_tasks = OrgTask.objects.filter(org=org, connection_id__in=connections_of_source).all()
 
-    # Check if source is being used in orchestrate pipelines before deletion
-    pipeline_usage = DataflowOrgTask.objects.filter(
-        orgtask__in=org_tasks, dataflow__dataflow_type="orchestrate"
-    )
-
-    if pipeline_usage.exists():
-        # Get pipeline names for better error message
-        pipeline_names = list(pipeline_usage.values_list("dataflow__name", flat=True).distinct())
-        raise HttpError(
-            403,
-            f"Cannot delete source. It's being used in pipeline(s): {', '.join(pipeline_names)}. "
-            f"Please remove the connections from the pipeline(s) first.",
-        )
-
     # Fetch dataflows(manual or pipelines) - only proceed if validation passed
     df_orgtasks = DataflowOrgTask.objects.filter(orgtask__in=org_tasks).all()
     dataflows = [df_orgtask.dataflow for df_orgtask in df_orgtasks]

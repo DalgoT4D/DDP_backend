@@ -2,6 +2,7 @@ from unittest.mock import patch, Mock, ANY
 from datetime import datetime
 import pytz
 import pytest
+from ninja.errors import HttpError
 from ddpui.ddpairbyte.airbytehelpers import (
     add_custom_airbyte_connector,
     upgrade_custom_sources,
@@ -970,15 +971,15 @@ def test_delete_source(
     mock_delete_deployment_by_id: Mock,
     mock_get_connections: Mock,
 ):
-    """test delete_source"""
+    """test delete_sourc; prevent deletion if source is used in a connection or is part of a dataflow"""
     org = Org.objects.create(name="org", slug="org")
 
-    mock_get_connections.return_value = {
-        "connections": [
-            {"sourceId": "source_id", "connectionId": "connection_id"},
-            {"sourceId": "source_id2", "connectionId": "connection_id2"},
-        ]
-    }
+    connections = [
+        {"sourceId": "source_id1", "connectionId": "connection_id", "name": "conn1"},
+        {"sourceId": "source_id2", "connectionId": "connection_id2", "name": "conn2"},
+    ]
+
+    mock_get_connections.return_value = {"connections": connections}
 
     synctask = Task.objects.create(type="airbyte", slug="airbyte-sync", label="AIRBYTE sync")
     orgtask = OrgTask.objects.create(org=org, task=synctask, connection_id="connection_id")
@@ -989,22 +990,18 @@ def test_delete_source(
     )
     DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=orgtask)
 
+    with pytest.raises(HttpError) as excinfo:
+        delete_source(org, "source_id1")
+
+    assert excinfo.value.status_code == 403
+    assert (
+        str(excinfo.value)
+        == f"Cannot delete source. It is used in connection(s): {', '.join([c['name'] for c in connections if c['sourceId'] == 'source_id1'])}. Please remove these connections first."
+    )
+
+    # check a successful deletion with no links to connections or dataflows
     delete_source(org, "source_id")
-
-    mock_delete_deployment_by_id.assert_called_once_with("deployment-id")
-
-    assert not OrgDataFlowv1.objects.filter(
-        org=org, dataflow_type="manual", deployment_id="deployment-id"
-    ).exists()
-
-    # this one was deleted
-    assert not OrgTask.objects.filter(
-        org=org, task=synctask, connection_id="connection_id"
-    ).exists()
-    # but this one was not deleted
-    assert OrgTask.objects.filter(org=org, task=synctask, connection_id="connection_id2").exists()
-
-    mock_delete_source.assert_called_once()
+    mock_delete_source.assert_called_once_with(org.airbyte_workspace_id, "source_id")
 
 
 def test_schedule_update_connection_schema_no_serverblock(orguser):
