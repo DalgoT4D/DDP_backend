@@ -512,9 +512,7 @@ def get_warehouse_llm_analysis_sessions(
 
 @warehouse_router.get("/sync_tables")
 @has_permission(["can_view_warehouse_data"])
-def get_warehouse_schemas_and_tables(
-    request,
-):
+def get_warehouse_schemas_and_tables(request, fresh: int = 0):
     """
     Get all tables under all schemas in the warehouse
     Read from warehouse directly if no cache is found
@@ -531,7 +529,7 @@ def get_warehouse_schemas_and_tables(
     redis_client = RedisClient.get_instance()
     try:
         # fetch & set response in redis asynchronously
-        if redis_client.exists(cache_key):
+        if redis_client.exists(cache_key) and not fresh:
             logger.info("Fetching warehouse tables from cache")
             res = json.loads(redis_client.get(cache_key))
             threading.Thread(
