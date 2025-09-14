@@ -54,6 +54,7 @@ from ddpui.models.llm import (
     LogsSummarizationType,
     LlmSessionStatus,
 )
+from ddpui.models.notifications import NotificationCategory
 from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess, get_integer_env_var
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
@@ -501,6 +502,7 @@ def detect_schema_changes_for_org(org: Org, delay=0):
                     f' schema changes have been detected in your Dalgo sources for "{connection_name}".'
                     f"\n\nPlease visit {connections_page} and review the Pending Actions",
                     f"{org.name}: Schema changes detected in your Dalgo sources",
+                    category=NotificationCategory.SCHEMA_CHANGE.value,
                 )
             except Exception as err:
                 logger.error(err)
