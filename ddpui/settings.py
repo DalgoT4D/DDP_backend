@@ -13,6 +13,8 @@ https://docs.djangoproject.com/en/4.1/ref/settings/
 import os
 from pathlib import Path
 import sentry_sdk
+from sentry_sdk.integrations.django import DjangoIntegration
+
 from datetime import timedelta
 
 from corsheaders.defaults import default_headers
@@ -25,6 +27,9 @@ load_dotenv()
 
 sentry_sdk.init(
     dsn=os.getenv("SENTRY_DSN"),
+    integrations=[
+        DjangoIntegration(),
+    ],
     # Set traces_sample_rate to 1.0 to capture 100%
     # of transactions for performance monitoring.
     traces_sample_rate=float(os.getenv("SENTRY_TSR", "1.0")),
@@ -32,6 +37,13 @@ sentry_sdk.init(
     # of sampled transactions.
     # We recommend adjusting this value in production.
     profiles_sample_rate=float(os.getenv("SENTRY_PSR", "1.0")),
+    # Enable logging to Sentry
+    enable_logs=True,
+    # Will not send any PII to Sentry
+    # More info - https://docs.sentry.io/platforms/python/data-management/data-collected/
+    send_default_pii=True,
+    # Environment
+    environment=os.getenv("ENVIRONMENT", "staging"),
 )
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -256,7 +268,6 @@ AIRBYTE_SOURCE_BLACKLIST = os.getenv("AIRBYTE_SOURCE_BLACKLIST", "").split(",")
 # finally set up the loggers
 setup_ddp_logger()
 setup_ab_logger()
-
 
 # Fixtures to seed data
 # python3 manage.py loaddata seed/tasks.json
