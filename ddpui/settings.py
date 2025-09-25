@@ -12,8 +12,10 @@ https://docs.djangoproject.com/en/4.1/ref/settings/
 
 import os
 from pathlib import Path
+import logging
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
+from sentry_sdk.integrations.logging import LoggingIntegration
 
 from datetime import timedelta
 
@@ -29,6 +31,9 @@ sentry_sdk.init(
     dsn=os.getenv("SENTRY_DSN"),
     integrations=[
         DjangoIntegration(),
+        # Capture logging records as breadcrumbs (INFO+) and events (WARNING+)
+        # Custom logger level overrides this configuration so ideally keep both at same level
+        LoggingIntegration(level=logging.INFO, event_level=logging.WARNING),
     ],
     # Set traces_sample_rate to 1.0 to capture 100%
     # of transactions for performance monitoring.
@@ -38,9 +43,9 @@ sentry_sdk.init(
     # We recommend adjusting this value in production.
     profiles_sample_rate=float(os.getenv("SENTRY_PSR", "1.0")),
     # Enable logging to Sentry
-    enable_logs=True,
+    enable_logs=os.getenv("SENTRY_ENABLE_LOGS", True),
     # More info - https://docs.sentry.io/platforms/python/data-management/data-collected/
-    send_default_pii=True,
+    send_default_pii=os.getenv("SENTRY_SEND_DEFAULT_PII", True),
     # Environment
     environment=os.getenv("ENVIRONMENT", "staging"),
 )
