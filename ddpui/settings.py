@@ -39,7 +39,6 @@ sentry_sdk.init(
     profiles_sample_rate=float(os.getenv("SENTRY_PSR", "1.0")),
     # Enable logging to Sentry
     enable_logs=True,
-    # Will not send any PII to Sentry
     # More info - https://docs.sentry.io/platforms/python/data-management/data-collected/
     send_default_pii=True,
     # Environment
