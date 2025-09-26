@@ -28,6 +28,9 @@ class Command(BaseCommand):
                 continue
 
             # update host and port
-            prefect_service.update_airbyte_server_block(server_block.block_name)
-
-            print(f"Updated airbyte server block for org {org.slug}")
+            try:
+                prefect_service.update_airbyte_server_block(server_block.block_name)
+                print(f"Updated airbyte server block for org {org.slug}")
+            except Exception as e:
+                print(f"Error updating airbyte server block for org {org.slug}: {e}")
+                continue
