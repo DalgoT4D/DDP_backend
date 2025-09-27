@@ -12,7 +12,11 @@ https://docs.djangoproject.com/en/4.1/ref/settings/
 
 import os
 from pathlib import Path
+import logging
 import sentry_sdk
+from sentry_sdk.integrations.django import DjangoIntegration
+from sentry_sdk.integrations.logging import LoggingIntegration
+
 from datetime import timedelta
 
 from corsheaders.defaults import default_headers
@@ -25,6 +29,12 @@ load_dotenv()
 
 sentry_sdk.init(
     dsn=os.getenv("SENTRY_DSN"),
+    integrations=[
+        DjangoIntegration(),
+        # Capture logging records as breadcrumbs (INFO+) and events (WARNING+)
+        # Custom logger level overrides this configuration so ideally keep both at same level
+        LoggingIntegration(level=logging.INFO, event_level=logging.WARNING),
+    ],
     # Set traces_sample_rate to 1.0 to capture 100%
     # of transactions for performance monitoring.
     traces_sample_rate=float(os.getenv("SENTRY_TSR", "1.0")),
@@ -32,6 +42,12 @@ sentry_sdk.init(
     # of sampled transactions.
     # We recommend adjusting this value in production.
     profiles_sample_rate=float(os.getenv("SENTRY_PSR", "1.0")),
+    # Enable logging to Sentry
+    enable_logs=os.getenv("SENTRY_ENABLE_LOGS", "True") == "True",
+    # More info - https://docs.sentry.io/platforms/python/data-management/data-collected/
+    send_default_pii=os.getenv("SENTRY_SEND_DEFAULT_PII", "True") == "True",
+    # Environment
+    environment=os.getenv("ENVIRONMENT", "staging"),
 )
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -257,14 +273,13 @@ AIRBYTE_SOURCE_BLACKLIST = os.getenv("AIRBYTE_SOURCE_BLACKLIST", "").split(",")
 setup_ddp_logger()
 setup_ab_logger()
 
-
 # Fixtures to seed data
 # python3 manage.py loaddata seed/tasks.json
 FIXTURE_DIRS = [
     "seed",
 ]
 
-PRODUCTION = os.getenv("PRODUCTION", "") == "True"
+PRODUCTION = os.getenv("ENVIRONMENT", "") == "production"
 
 
 SIMPLE_JWT = {
