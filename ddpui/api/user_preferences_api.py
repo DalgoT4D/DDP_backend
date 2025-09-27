@@ -28,6 +28,9 @@ def create_user_preferences(request, payload: CreateUserPreferencesSchema):
         orguser=orguser,
         enable_email_notifications=payload.enable_email_notifications,
         disclaimer_shown=payload.disclaimer_shown,
+        subscribe_schema_change_notifications=payload.subscribe_schema_change_notifications,
+        subscribe_job_failure_notifications=payload.subscribe_job_failure_notifications,
+        subscribe_dbt_test_failure_notifications=payload.subscribe_dbt_test_failure_notifications,
     )
 
     return {"success": True, "res": user_preferences.to_json()}
@@ -44,6 +47,19 @@ def update_user_preferences(request, payload: UpdateUserPreferencesSchema):
         user_preferences.enable_email_notifications = payload.enable_email_notifications
     if payload.disclaimer_shown is not None:
         user_preferences.disclaimer_shown = payload.disclaimer_shown
+    if payload.subscribe_schema_change_notifications is not None:
+        user_preferences.subscribe_schema_change_notifications = (
+            payload.subscribe_schema_change_notifications
+        )
+    if payload.subscribe_job_failure_notifications is not None:
+        user_preferences.subscribe_job_failure_notifications = (
+            payload.subscribe_job_failure_notifications
+        )
+    if payload.subscribe_dbt_test_failure_notifications is not None:
+        user_preferences.subscribe_dbt_test_failure_notifications = (
+            payload.subscribe_dbt_test_failure_notifications
+        )
+
     user_preferences.save()
 
     return {"success": True, "res": user_preferences.to_json()}
@@ -59,6 +75,9 @@ def get_user_preferences(request):
     res = {
         "enable_email_notifications": user_preferences.enable_email_notifications,
         "disclaimer_shown": user_preferences.disclaimer_shown,
+        "subscribe_schema_change_notifications": user_preferences.subscribe_schema_change_notifications,
+        "subscribe_job_failure_notifications": user_preferences.subscribe_job_failure_notifications,
+        "subscribe_dbt_test_failure_notifications": user_preferences.subscribe_dbt_test_failure_notifications,
         "is_llm_active": org_preferences.llm_optin,
         "enable_llm_requested": org_preferences.enable_llm_request,
     }
@@ -88,6 +107,7 @@ def post_request_llm_analysis_feature_enabled(request):
         urgent=False,
         scheduled_time=None,
         recipients=[acc_manager.id for acc_manager in acc_managers],
+        category="incident",  # Adding category field
     )
 
     error, res = create_notification(notification_data)

@@ -59,7 +59,29 @@ logger = CustomLogger("ddpui")
 @user_org_router.get("/currentuserv2", response=List[OrgUserResponse])
 @has_permission(["can_view_orgusers"])
 def get_current_user_v2(request, org_slug: str = None):
-    """return all the OrgUsers for the User making this request"""
+    """
+    Retrieve comprehensive information about the current authenticated user.
+
+    Returns detailed information about the user's organization memberships,
+    permissions, role, and organization preferences. Can be filtered by
+    organization slug to get info for a specific organization.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+        org_slug (str, optional): Filter results for a specific organization slug
+
+    Returns:
+        list: List of organization memberships with detailed user information including:
+            - User profile data
+            - Organization details and settings
+            - Role and permissions
+            - Warehouse configuration
+            - Terms and conditions acceptance status
+
+    Raises:
+        HttpError: 400 if requestor is not an OrgUser
+        HttpError: 403 if user lacks permission to view organization users
+    """
     if request.orguser is None:
         raise HttpError(400, "requestor is not an OrgUser")
     orguser: OrgUser = request.orguser
