@@ -1466,7 +1466,7 @@ requires-dist = [
     { name = "ruamel-yaml", specifier = "==0.18.6" },
     { name = "ruamel-yaml-clib", specifier = "==0.2.8" },
     { name = "s3transfer", specifier = "==0.6.0" },
-    { name = "sentry-sdk", specifier = "==2.10.0" },
+    { name = "sentry-sdk", specifier = "==2.39.0" },
     { name = "sgqlc", specifier = "==16.1" },
     { name = "six", specifier = "==1.16.0" },
     { name = "slack-sdk", specifier = "==3.29.0" },
@@ -4025,7 +4025,7 @@ wheels = [
 
 [[package]]
 name = "sentry-sdk"
-version = "2.10.0"
+version = "2.39.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "certifi" },
