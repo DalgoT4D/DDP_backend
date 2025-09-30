@@ -1466,7 +1466,7 @@ requires-dist = [
     { name = "ruamel-yaml", specifier = "==0.18.6" },
     { name = "ruamel-yaml-clib", specifier = "==0.2.8" },
     { name = "s3transfer", specifier = "==0.6.0" },
-    { name = "sentry-sdk", specifier = "==2.10.0" },
+    { name = "sentry-sdk", specifier = "==2.39.0" },
     { name = "sgqlc", specifier = "==16.1" },
     { name = "six", specifier = "==1.16.0" },
     { name = "slack-sdk", specifier = "==3.29.0" },
@@ -4025,15 +4025,15 @@ wheels = [
 
 [[package]]
 name = "sentry-sdk"
-version = "2.10.0"
+version = "2.39.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "certifi" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/34/d8/ec3e43d4ce31e4f4cb6adb7210950362d71ce87a96c89934c4ac94f7110f/sentry_sdk-2.10.0.tar.gz", hash = "sha256:545fcc6e36c335faa6d6cda84669b6e17025f31efbf3b2211ec14efe008b75d1", size = 273996, upload-time = "2024-07-15T10:32:49.374Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4c/72/43294fa4bdd75c51610b5104a3ff834459ba653abb415150aa7826a249dd/sentry_sdk-2.39.0.tar.gz", hash = "sha256:8c185854d111f47f329ab6bc35993f28f7a6b7114db64aa426b326998cfa14e9", size = 348556, upload-time = "2025-09-25T09:15:39.064Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4f/9e/9298785949269c8930e1fd3707b960da6e1a95a2442b747b8f8cca4578cb/sentry_sdk-2.10.0-py2.py3-none-any.whl", hash = "sha256:87b3d413c87d8e7f816cc9334bff255a83d8b577db2b22042651c30c19c09190", size = 302064, upload-time = "2024-07-15T10:32:44.912Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/44/4356cc64246ba7b2b920f7c97a85c3c52748e213e250b512ee8152eb559d/sentry_sdk-2.39.0-py2.py3-none-any.whl", hash = "sha256:ba655ca5e57b41569b18e2a5552cb3375209760a5d332cdd87c6c3f28f729602", size = 370851, upload-time = "2025-09-25T09:15:36.35Z" },
 ]
 
 [[package]]
