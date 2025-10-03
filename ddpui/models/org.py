@@ -237,3 +237,13 @@ class OrgSchemaChange(models.Model):
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
     schedule_job = models.ForeignKey(ConnectionJob, null=True, on_delete=models.SET_NULL)
+
+
+class OrgFeatureFlag(models.Model):
+    """A model to store feature flags enabled for an org; org specific flags override global flags"""
+
+    org = models.ForeignKey(
+        Org, on_delete=models.CASCADE, null=True
+    )  # empty or null org means global flag
+    flag_name = models.CharField(max_length=100, null=False)
+    flag_value = models.BooleanField(null=False)
