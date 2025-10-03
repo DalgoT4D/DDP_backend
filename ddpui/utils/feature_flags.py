@@ -27,7 +27,7 @@ def enable_feature_flag(flag_name: str, org: Org = None) -> bool:
         flag.flag_value = True
         flag.save()
 
-    return flag.flag_value
+    return True
 
 
 def disable_feature_flag(flag_name: str, org: Org = None) -> bool:
@@ -37,9 +37,11 @@ def disable_feature_flag(flag_name: str, org: Org = None) -> bool:
         flag = OrgFeatureFlag.objects.get(org=org, flag_name=flag_name)
         flag.flag_value = False
         flag.save()
-        return flag.flag_value
     except OrgFeatureFlag.DoesNotExist:
-        return None
+        # create an entry with disabling it
+        OrgFeatureFlag.objects.create(org=org, flag_name=flag_name, flag_value=False)
+
+    return True
 
 
 def is_feature_flag_enabled(flag_name: str, org: Org = None) -> bool:
@@ -63,24 +65,24 @@ def get_all_feature_flags_for_org(org: Org = None) -> dict:
     Returns:
         dict: {flag_name: bool} mapping of all flags and their status
     """
-    result = {}
-
     # Get both global (org=None) and org-specific flags in one query
     flags = OrgFeatureFlag.objects.filter(Q(org__isnull=True) | Q(org=org))
 
-    # Sort in memory: global flags (org=None) first, then org-specific flags
-    sorted_flags = sorted(flags, key=lambda f: (f.org is not None, f.flag_name))
+    global_flags = {}
+    for flag in flags:
+        if flag.org is None:
+            global_flags[flag.flag_name] = flag.flag_value
 
-    # Process flags - org-specific will override global due to sorting
-    for flag in sorted_flags:
-        result[flag.flag_name] = flag.flag_value
-
-    # For any flags that don't exist in DB but are in FEATURE_FLAGS, default to False
     for flag_name in FEATURE_FLAGS:
-        if flag_name not in result:
-            result[flag_name] = False
+        if flag_name not in global_flags:
+            global_flags[flag_name] = False
 
-    return result
+    org_flags = {}
+    for flag in flags:
+        if flag.org == org:
+            org_flags[flag.flag_name] = flag.flag_value
+
+    return {**global_flags, **org_flags}
 
 
 def enable_all_global_feature_flags() -> dict:

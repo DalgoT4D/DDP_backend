@@ -111,7 +111,6 @@ INSTALLED_APPS = [
     "django_prometheus",
     "django_extensions",
     "channels",
-    "flags",
 ]
 
 REST_FRAMEWORK = {
