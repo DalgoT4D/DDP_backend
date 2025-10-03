@@ -2,11 +2,12 @@ from django.db.models import Q
 from ddpui.models.org import OrgFeatureFlag, Org
 
 FEATURE_FLAGS = {
-    "EXPLORE_DATA": "Enable explore data feature",
     "DATA_QUALITY": "Elementary data quality reports",
-    "USAGE_DASHBOARD": "Usage dashboard for org",
+    "USAGE_DASHBOARD": "Superset usage dashboard for org",
     "EMBED_SUPERSET": "Embed superset dashboards",
     "LOG_SUMMARIZATION": "Summarize logs using AI",
+    "AI_DATA_ANALYSIS": "Enable data analysis using AI",
+    "DATA_STATISTICS": "Enable detailed data statistics in explore",
 }
 
 
