@@ -12,7 +12,13 @@ FEATURE_FLAGS = {
 
 
 def enable_feature_flag(flag_name: str, org: Org = None) -> bool:
-    """Create a flag for the org (or global) in the db if not exists, and return its value. If its there toggle it on."""
+    """
+    Create a flag for the org (or global) in the db if not exists, and enable it.
+
+    Returns:
+        True if the flag was enabled successfully
+        None if the flag_name is not in the allowed feature list
+    """
 
     # only allow enable of flags in the feature list
     if flag_name not in FEATURE_FLAGS.keys():
@@ -31,7 +37,18 @@ def enable_feature_flag(flag_name: str, org: Org = None) -> bool:
 
 
 def disable_feature_flag(flag_name: str, org: Org = None) -> bool:
-    """If the entry exists, toggle it off and return its value"""
+    """
+    Disable a feature flag for the org (or global).
+    Creates the entry as disabled if it doesn't exist.
+
+    Returns:
+        True if the flag was disabled successfully
+        None if the flag_name is not in the allowed feature list
+    """
+
+    # only allow disable of flags in the feature list
+    if flag_name not in FEATURE_FLAGS.keys():
+        return None
 
     try:
         flag = OrgFeatureFlag.objects.get(org=org, flag_name=flag_name)

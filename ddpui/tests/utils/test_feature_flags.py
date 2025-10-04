@@ -74,13 +74,21 @@ class TestFeatureFlags(TestCase):
         self.assertTrue(all_flags["USAGE_DASHBOARD"])  # Should be True from org-specific setting
 
     def test_invalid_flag_no_db_entry(self):
-        """Test that invalid flag names don't create DB entries"""
+        """Test that invalid flag names don't create DB entries for both enable and disable"""
         # Try to enable invalid flag
         result = enable_feature_flag("INVALID_FLAG")
         self.assertIsNone(result)
 
         # Try to enable invalid flag with org
         result = enable_feature_flag("ANOTHER_INVALID_FLAG", org=self.org)
+        self.assertIsNone(result)
+
+        # Try to disable invalid flag
+        result = disable_feature_flag("INVALID_FLAG")
+        self.assertIsNone(result)
+
+        # Try to disable invalid flag with org
+        result = disable_feature_flag("ANOTHER_INVALID_FLAG", org=self.org)
         self.assertIsNone(result)
 
         # Verify no DB entries were created
