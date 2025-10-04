@@ -237,3 +237,37 @@ class OrgSchemaChange(models.Model):
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
     schedule_job = models.ForeignKey(ConnectionJob, null=True, on_delete=models.SET_NULL)
+
+
+class OrgFeatureFlag(models.Model):
+    """A model to store feature flags enabled for an org; org specific flags override global flags"""
+
+    org = models.ForeignKey(
+        Org, on_delete=models.CASCADE, null=True
+    )  # empty or null org means global flag
+    flag_name = models.CharField(max_length=100, null=False)
+    flag_value = models.BooleanField(null=False)
+
+    class Meta:
+        unique_together = [["org", "flag_name"]]
+        indexes = [
+            models.Index(fields=["org", "flag_name"]),
+            # Unique partial index for global flags (where org is NULL)
+            models.Index(
+                fields=["flag_name"],
+                name="unique_global_flag",
+                condition=models.Q(org__isnull=True),
+            ),
+        ]
+        constraints = [
+            # Unique constraint for global flags (org=NULL)
+            models.UniqueConstraint(
+                fields=["flag_name"],
+                condition=models.Q(org__isnull=True),
+                name="unique_global_feature_flag",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        org_display = self.org.slug if self.org else "GLOBAL"
+        return f"OrgFeatureFlag[{org_display}|{self.flag_name}={self.flag_value}]"

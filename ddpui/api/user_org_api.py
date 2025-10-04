@@ -49,6 +49,7 @@ from ddpui.models.org import OrgWarehouse, Org, OrgType
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.celeryworkers.moretasks import create_free_trial_org_account
+from ddpui.utils.feature_flags import get_all_feature_flags_for_org
 from django.db import transaction
 
 user_org_router = Router()
@@ -586,8 +587,15 @@ def post_organization_accept_tnc(request):
 @user_org_router.get("/organizations/flags")
 @has_permission(["can_view_flags"])
 def get_organization_feature_flags(request):
-    """get"""
-    return {"allowLogsSummary": True}
+    """Get all feature flags for the current organization"""
+    orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "no associated org")
+
+    # Get all feature flags for this organization (includes global + org overrides)
+    feature_flags = get_all_feature_flags_for_org(orguser.org)
+
+    return feature_flags
 
 
 @user_org_router.get("/organizations/wren")

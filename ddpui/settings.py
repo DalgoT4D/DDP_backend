@@ -23,7 +23,6 @@ from corsheaders.defaults import default_headers
 from dotenv import load_dotenv
 from ddpui.utils.ddp_logger import setup_logger as setup_ddp_logger
 from ddpui.utils.ab_logger import setup_logger as setup_ab_logger
-import ddpui.utils.flags  # pylint: disable=unused-import
 
 load_dotenv()
 
@@ -112,14 +111,7 @@ INSTALLED_APPS = [
     "django_prometheus",
     "django_extensions",
     "channels",
-    "flags",
 ]
-
-# Feature flags
-# AIRBYTE_PROFILE: to get airbyte credentials through prefect block
-# LOG_SUMMARY: allow summarizing logs through open AI
-# AIRBYTE_RESET_JOB: to reset airbyte connection
-FLAGS = {"AIRBYTE_PROFILE": [], "LOG_SUMMARY": [], "AIRBYTE_RESET_JOB": []}
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [],
