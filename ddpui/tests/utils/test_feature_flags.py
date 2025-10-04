@@ -1,5 +1,6 @@
 import pytest
 from django.test import TestCase
+from django.db import IntegrityError
 from ddpui.models.org import Org, OrgFeatureFlag
 from ddpui.utils.feature_flags import (
     enable_feature_flag,
@@ -85,3 +86,33 @@ class TestFeatureFlags(TestCase):
         # Verify no DB entries were created
         self.assertEqual(OrgFeatureFlag.objects.filter(flag_name="INVALID_FLAG").count(), 0)
         self.assertEqual(OrgFeatureFlag.objects.filter(flag_name="ANOTHER_INVALID_FLAG").count(), 0)
+
+    def test_uniqueness_constraint(self):
+        """Test that the database uniqueness constraint prevents duplicate (org, flag_name) pairs"""
+        from django.db import transaction
+
+        # Create a global flag
+        OrgFeatureFlag.objects.create(org=None, flag_name="DATA_QUALITY", flag_value=True)
+
+        # Try to create duplicate global flag - should raise IntegrityError
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                OrgFeatureFlag.objects.create(org=None, flag_name="DATA_QUALITY", flag_value=False)
+
+        # Create an org-specific flag
+        OrgFeatureFlag.objects.create(org=self.org, flag_name="DATA_QUALITY", flag_value=False)
+
+        # Try to create duplicate org-specific flag - should raise IntegrityError
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                OrgFeatureFlag.objects.create(
+                    org=self.org, flag_name="DATA_QUALITY", flag_value=True
+                )
+
+        # Verify we can create same flag for different org
+        org2 = Org.objects.create(name="Test Org 2", slug="test-org-2")
+        flag = OrgFeatureFlag.objects.create(org=org2, flag_name="DATA_QUALITY", flag_value=True)
+        self.assertIsNotNone(flag)
+
+        # Clean up
+        org2.delete()
