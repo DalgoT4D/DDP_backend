@@ -231,3 +231,77 @@ If using M1-based MacBook  run this before building image
 
 -  `docker compose -p dalgo_backend -f Docker/docker-compose.yml --env-file Docker/.env.docker up -d`
 -  `docker compose -p dalgo_backend -f Docker/docker-compose.yml --env-file Docker/.env.docker down`
+
+## Feature Flags
+
+The platform supports feature flags to control the availability of features at both global and organization-specific levels. Organization-specific flags override global flags.
+
+### Available Feature Flags
+
+- `DATA_QUALITY` - Elementary data quality reports
+- `USAGE_DASHBOARD` - Superset usage dashboard for org  
+- `EMBED_SUPERSET` - Embed superset dashboards
+- `LOG_SUMMARIZATION` - Summarize logs using AI
+- `AI_DATA_ANALYSIS` - Enable data analysis using AI
+- `DATA_STATISTICS` - Enable detailed data statistics in explore
+
+### Managing Feature Flags
+
+#### 1. Creating Global Flags
+Global flags apply to all organizations by default:
+
+```python
+from ddpui.utils.feature_flags import enable_feature_flag, disable_feature_flag
+
+# Enable a global flag
+enable_feature_flag("DATA_QUALITY")  # org=None for global
+
+# Disable a global flag  
+disable_feature_flag("DATA_QUALITY")
+```
+
+#### 2. Creating Organization-Specific Flags
+Organization-specific flags override global flags for that particular org:
+
+```python
+from ddpui.models.org import Org
+from ddpui.utils.feature_flags import enable_feature_flag, disable_feature_flag
+
+# Get the organization
+org = Org.objects.get(slug="org-slug")
+
+# Enable for specific org (overrides global setting)
+enable_feature_flag("DATA_QUALITY", org=org)
+
+# Disable for specific org
+disable_feature_flag("DATA_QUALITY", org=org)
+```
+
+#### 3. Management Command
+Use the Django management command to manage flags via CLI:
+
+```bash
+# Enable all available global feature flags
+python manage.py manage_feature_flags --enable-all-global
+
+# Enable a specific flag globally
+python manage.py manage_feature_flags --enable DATA_QUALITY
+
+# Disable a specific flag globally  
+python manage.py manage_feature_flags --disable DATA_QUALITY
+
+# Enable for a specific organization
+python manage.py manage_feature_flags --enable DATA_QUALITY --org-slug org-slug
+
+# Disable for a specific organization
+python manage.py manage_feature_flags --disable DATA_QUALITY --org-slug org-slug
+```
+
+#### 4. API Endpoint
+Frontend applications can fetch the feature flags for the current organization:
+
+```
+GET /api/organizations/flags
+```
+
+This endpoint returns a JSON object with all feature flags and their status for the authenticated user's organization. The response includes both global flags and any organization-specific overrides.
