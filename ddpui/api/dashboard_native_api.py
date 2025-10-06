@@ -967,7 +967,7 @@ def remove_org_default_dashboard(request):
 
 
 @dashboard_native_router.get("/landing-page/resolve", response=dict)
-@has_permission(["can_view_dashboards", "can_create_dashboards"])
+@has_permission(["can_view_dashboards"])
 def resolve_user_landing_page(request):
     """Resolve which dashboard should be the user's landing page"""
     orguser: OrgUser = request.orguser
