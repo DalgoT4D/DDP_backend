@@ -89,6 +89,7 @@ CORS_ORIGIN_WHITELIST = (
     "http://host.docker.internal:3000",
     "http://127.0.0.1:3000",
     "https://staging.dalgo.org",
+    "https://staging-app.dalgo.org",
     "https://dashboard.dalgo.org",
     "https://insights.dalgo.org",
 )
