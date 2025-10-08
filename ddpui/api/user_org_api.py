@@ -161,6 +161,18 @@ def post_login(request, payload: LoginPayload):
     return retval
 
 
+@user_org_router.post("/login_token/")
+def post_login_token(request):
+    """This is to login user with just token. Return the same response as /login/ api"""
+    user: User = request.user
+    if not user or not user.username:
+        raise HttpError(401, "Invalid or missing token")
+
+    retval = orguserfunctions.lookup_user(user.username)
+    retval["token"] = request.token
+    return retval
+
+
 @user_org_router.post("/logout/")
 def post_logout(request, payload: LogoutPayload):
     """

@@ -167,6 +167,7 @@ class CustomJwtAuthMiddleware(HttpBearer):
                 orguser_role_id = orguser_role_map_json.get(str(orguser.id))
                 request.permissions = permissions_json.get(str(orguser_role_id), [])
                 request.orguser = orguser
+                request.token = token
                 return request
 
         raise HttpError(401, "Invalid or expired token")
