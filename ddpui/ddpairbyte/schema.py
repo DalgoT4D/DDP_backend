@@ -66,6 +66,7 @@ class AirbyteConnectionCreate(Schema):
     syncCatalog: dict
     destinationId: str = None
     destinationSchema: str = None
+    description: str = None
 
 
 class AirbyteConnectionCreateResponse(Schema):
@@ -84,6 +85,7 @@ class AirbyteConnectionCreateResponse(Schema):
     lock: Optional[dict | None]
     isRunning: bool = False
     resetConnDeploymentId: str = None
+    description: str = None
 
 
 class AirbyteGetConnectionsResponse(Schema):
@@ -102,6 +104,7 @@ class AirbyteGetConnectionsResponse(Schema):
     resetConnDeploymentId: str = None
     clearConnDeploymentId: str = None
     queuedFlowRunWaitTime: DeploymentCurrentQueueTime = None
+    description: str = None
 
 
 class AirbyteConnectionUpdate(Schema):
@@ -113,6 +116,7 @@ class AirbyteConnectionUpdate(Schema):
     catalogId: str
     destinationId: str = None
     destinationSchema: str = None
+    description: str = None
 
 
 # response schemas
