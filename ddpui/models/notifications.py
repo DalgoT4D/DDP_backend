@@ -2,6 +2,17 @@ from django.db import models
 from ddpui.models.org_user import OrgUser
 
 
+class NotificationCategory(models.TextChoices):
+    """Choices for notification categories"""
+
+    INCIDENT = "incident", "Incident"
+    SCHEMA_CHANGE = "schema_change", "Schema Change"
+    JOB_FAILURE = "job_failure", "Job Failure"
+    LATE_RUNS = "late_runs", "Late Runs"
+    DBT_TEST_FAILURE = "dbt_test_failure", "DBT Test Failure"
+    MAINTENANCE = "maintenance", "Maintenance"
+
+
 class Notification(models.Model):
     """Model to store notifications for users"""
 
@@ -12,6 +23,14 @@ class Notification(models.Model):
     urgent = models.BooleanField(default=False)
     scheduled_time = models.DateTimeField(null=True, blank=True)
     sent_time = models.DateTimeField(null=True, blank=True)
+    category = models.CharField(
+        max_length=20,
+        choices=NotificationCategory.choices,
+        null=True,
+        blank=True,
+        default=None,
+        help_text="Category of the notification",
+    )
 
 
 class NotificationRecipient(models.Model):
