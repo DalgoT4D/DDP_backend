@@ -178,34 +178,44 @@ def post_login_token(request):
 
 
 @user_org_router.post("/logout/")
-def post_logout(request, payload: LogoutPayload):
+def post_logout(request, payload: LogoutPayload = None):
     """
-    Blacklists the refresh token on logout.
-    Ensures the refresh token belongs to the current user.
-    If the refresh token is already invalid/expired, do not blacklist.
+    Blacklists the refresh token on logout and clears httpOnly cookies.
+    Supports both traditional token-based logout (with payload) and cookie-based logout.
+    """
+    refresh_token = None
 
-    Note: The 'token' field in OutstandingToken is not the raw JWT string,
-    but a re-encoded version (may differ in whitespace, order, etc).
-    Always use the refresh token string to instantiate RefreshToken and check jti/user_id.
-    """
-    refresh_token = payload.refresh
-    if not refresh_token:
-        raise HttpError(400, "Refresh token not found")
-    try:
-        token = RefreshToken(refresh_token)
-        # The actual value stored in OutstandingToken.token may not match the JWT string byte-for-byte.
-        # Instead, always check by jti and user_id.
-        token_user_id = token.payload.get("user_id")
-        if not request.user or request.user.id != token_user_id:
-            raise HttpError(403, "Token does not belong to the current user")
-        # Blacklist by token object (which uses jti under the hood)
-        token.blacklist()
-        return {"success": 1}
-    except TokenError:
-        # Token is already invalid or expired, do not blacklist
-        return {"success": 1}
-    except Exception as err:
-        raise HttpError(400, f"Logout failed: {str(err)}") from err
+    # Try to get refresh token from payload first (traditional logout)
+    if payload and payload.refresh:
+        refresh_token = payload.refresh
+    # If no payload refresh token, try to get from cookies (cookie-based logout)
+    elif not refresh_token:
+        refresh_token = request.COOKIES.get("refresh_token")
+
+    # Try to blacklist the refresh token if we have one
+    if refresh_token:
+        try:
+            token = RefreshToken(refresh_token)
+            token_user_id = token.payload.get("user_id")
+            if request.user and request.user.id == token_user_id:
+                token.blacklist()
+        except (TokenError, Exception):
+            # Token is already invalid/expired or other error, continue with logout
+            pass
+
+    # Create response
+    response = JsonResponse({"success": True})
+
+    # Always try to clear cookies (harmless if they don't exist)
+    secure_cookies = not settings.DEBUG
+    response.delete_cookie(
+        "access_token", path="/", secure=secure_cookies, samesite="lax", httponly=True
+    )
+    response.delete_cookie(
+        "refresh_token", path="/", secure=secure_cookies, samesite="lax", httponly=True
+    )
+
+    return response
 
 
 @user_org_router.post("/token/refresh", auth=None)
@@ -683,33 +693,6 @@ def post_login_v2(request, payload: LoginPayload):
         samesite="lax",
         path="/",
     )
-
-    return response
-
-
-@user_org_router.post("/v2/logout/")
-def post_logout_v2(request):
-    """Logout endpoint that clears cookies and blacklists the refresh token"""
-    # Try to get refresh token from cookie
-    refresh_token = request.COOKIES.get("refresh_token")
-
-    # If refresh token exists, blacklist it
-    if refresh_token:
-        try:
-            token = RefreshToken(refresh_token)
-            token_user_id = token.payload.get("user_id")
-            if request.user and request.user.id == token_user_id:
-                token.blacklist()
-        except (TokenError, Exception):
-            # Token is already invalid or expired, continue with logout
-            pass
-
-    # Create response
-    response = JsonResponse({"success": True})
-
-    # Clear cookies
-    response.delete_cookie("access_token", path="/")
-    response.delete_cookie("refresh_token", path="/")
 
     return response
 
