@@ -9,6 +9,8 @@ from django.utils.text import slugify
 from django.db.models import Prefetch
 from django.contrib.auth.models import User
 from django.db.models import F
+from django.http import JsonResponse
+from django.conf import settings
 from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 
 from ddpui.auth import has_permission, CustomTokenObtainSerializer, CustomTokenRefreshSerializer
@@ -624,3 +626,194 @@ def get_organization_wren(request):
     return {
         "wren_url": org_wren.wren_url,
     }
+
+
+# ============================================
+# Cookie-Based Auth Endpoints (v2)
+# ============================================
+
+
+@user_org_router.post("/v2/login/", auth=None, response={200: dict})
+def post_login_v2(request, payload: LoginPayload):
+    """Login endpoint that sets httpOnly cookies instead of returning tokens in response"""
+    serializer = CustomTokenObtainSerializer(
+        data={
+            "username": payload.username,
+            "password": payload.password,
+        }
+    )
+    serializer.is_valid(raise_exception=True)
+    token_data = serializer.validated_data
+
+    # Get user data (same as v1)
+    retval = orguserfunctions.lookup_user(payload.username)
+
+    # Don't include tokens in response body
+    response_data = {
+        "success": True,
+        "email": retval.get("email"),
+        "org_users": retval.get("org_users"),
+        "wtype": retval.get("wtype"),
+    }
+
+    # Create JsonResponse and set cookies
+    response = JsonResponse(response_data)
+
+    # Determine if we should use secure cookies (HTTPS only in production)
+    secure_cookies = not settings.DEBUG
+
+    # Set access token cookie
+    response.set_cookie(
+        "access_token",
+        token_data["access"],
+        httponly=True,
+        secure=secure_cookies,
+        samesite="lax",
+        path="/",
+    )
+
+    # Set refresh token cookie
+    response.set_cookie(
+        "refresh_token",
+        token_data["refresh"],
+        httponly=True,
+        secure=secure_cookies,
+        samesite="lax",
+        path="/",
+    )
+
+    return response
+
+
+@user_org_router.post("/v2/logout/")
+def post_logout_v2(request):
+    """Logout endpoint that clears cookies and blacklists the refresh token"""
+    # Try to get refresh token from cookie
+    refresh_token = request.COOKIES.get("refresh_token")
+
+    # If refresh token exists, blacklist it
+    if refresh_token:
+        try:
+            token = RefreshToken(refresh_token)
+            token_user_id = token.payload.get("user_id")
+            if request.user and request.user.id == token_user_id:
+                token.blacklist()
+        except (TokenError, Exception):
+            # Token is already invalid or expired, continue with logout
+            pass
+
+    # Create response
+    response = JsonResponse({"success": True})
+
+    # Clear cookies
+    response.delete_cookie("access_token", path="/")
+    response.delete_cookie("refresh_token", path="/")
+
+    return response
+
+
+@user_org_router.post("/v2/token/refresh", auth=None, response={200: dict})
+def post_token_refresh_v2(request):
+    """Refresh token endpoint that reads refresh token from cookie and sets new access token in cookie"""
+    # Get refresh token from cookie
+    refresh_token = request.COOKIES.get("refresh_token")
+
+    if not refresh_token:
+        raise HttpError(401, "Refresh token not found")
+
+    # Use the serializer to validate and get new access token
+    serializer = CustomTokenRefreshSerializer(data={"refresh": refresh_token})
+    serializer.is_valid(raise_exception=True)
+    token_data = serializer.validated_data
+
+    # Create response
+    response = JsonResponse({"success": True})
+
+    # Determine if we should use secure cookies
+    secure_cookies = not settings.DEBUG
+
+    # Set new access token cookie
+    response.set_cookie(
+        "access_token",
+        token_data["access"],
+        httponly=True,
+        secure=secure_cookies,
+        samesite="lax",
+        path="/",
+    )
+
+    return response
+
+
+@user_org_router.get("/v2/currentuser", response=List[OrgUserResponse])
+@has_permission(["can_view_orgusers"])
+def get_current_user_v2(request, org_slug: str = None):
+    """Get current user info - exact same business logic as currentuserv2"""
+    if request.orguser is None:
+        raise HttpError(400, "requestor is not an OrgUser")
+    orguser: OrgUser = request.orguser
+    user: User = request.orguser.user
+    org: Org = orguser.org
+    # warehouse
+    warehouse = OrgWarehouse.objects.filter(org=org).first()
+    curr_orgusers = OrgUser.objects.filter(user=user)
+
+    if org_slug:
+        curr_orgusers = curr_orgusers.filter(org__slug=org_slug)
+
+    org_preferences = OrgPreferences.objects.filter(org=org).first()
+    if org_preferences is None:
+        org_preferences = OrgPreferences.objects.create(org=org)
+
+    # Get org default dashboard
+    org_default_dashboard = None
+    from ddpui.models.dashboard import Dashboard
+
+    org_default_dashboard_obj = Dashboard.objects.filter(org=org, is_org_default=True).first()
+    if org_default_dashboard_obj:
+        org_default_dashboard = org_default_dashboard_obj.id
+
+    res = []
+    for curr_orguser in curr_orgusers.prefetch_related(
+        Prefetch(
+            "new_role",
+            queryset=Role.objects.prefetch_related(
+                Prefetch(
+                    "rolepermissions",
+                    queryset=RolePermission.objects.filter(role_id=F("role__id")).select_related(
+                        "permission"
+                    ),
+                )
+            ),
+        ),
+        Prefetch(
+            "org",
+            queryset=Org.objects.prefetch_related(
+                "orgtncs",  # Assuming 'orgtnc' is a related name from Org to its related model
+            ),
+        ),
+    ):
+        if curr_orguser.org.orgtncs.exists():
+            curr_orguser.org.tnc_accepted = curr_orguser.org.orgtncs.exists()
+
+        res.append(
+            OrgUserResponse(
+                email=user.email,
+                org=curr_orguser.org,
+                active=user.is_active,
+                new_role_slug=curr_orguser.new_role.slug,
+                wtype=warehouse.wtype if warehouse else None,
+                permissions=[
+                    {"slug": rolep.permission.slug, "name": rolep.permission.name}
+                    for rolep in curr_orguser.new_role.rolepermissions.all()
+                ],
+                is_demo=(
+                    curr_orguser.org.base_plan() == OrgType.DEMO if curr_orguser.org else False
+                ),
+                is_llm_active=org_preferences.llm_optin,
+                landing_dashboard_id=curr_orguser.landing_dashboard_id,
+                org_default_dashboard_id=org_default_dashboard,
+            )
+        )
+
+    return res

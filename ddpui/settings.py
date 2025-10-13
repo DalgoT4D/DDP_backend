@@ -75,7 +75,20 @@ ALLOWED_HOSTS = [
     "staging-app.dalgo.org",
     "insights.dalgo.org",
 ]
-CORS_ALLOW_ALL_ORIGINS = True
+# For cookie-based authentication, we need specific origins instead of wildcard
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://host.docker.internal:3000",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "https://staging.dalgo.org",
+    "https://staging-app.dalgo.org",
+    "https://dashboard.dalgo.org",
+    "https://insights.dalgo.org",
+]
 CORS_ALLOW_METHODS = [
     "GET",
     "POST",
@@ -84,15 +97,6 @@ CORS_ALLOW_METHODS = [
     "DELETE",
     "OPTIONS",
 ]
-CORS_ORIGIN_WHITELIST = (
-    "http://localhost:3000",
-    "http://host.docker.internal:3000",
-    "http://127.0.0.1:3000",
-    "https://staging.dalgo.org",
-    "https://staging-app.dalgo.org",
-    "https://dashboard.dalgo.org",
-    "https://insights.dalgo.org",
-)
 CORS_ALLOW_HEADERS = (*default_headers, "x-dalgo-org")
 
 # Application definition
