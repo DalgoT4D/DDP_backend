@@ -1,5 +1,6 @@
 import json
 from typing import List
+from datetime import timedelta
 
 from dotenv import load_dotenv
 from ninja import Router
@@ -11,7 +12,7 @@ from django.contrib.auth.models import User
 from django.db.models import F
 from django.http import JsonResponse
 from django.conf import settings
-from rest_framework_simplejwt.tokens import RefreshToken, TokenError
+from rest_framework_simplejwt.tokens import RefreshToken, TokenError, AccessToken
 
 from ddpui.auth import has_permission, CustomTokenObtainSerializer, CustomTokenRefreshSerializer
 from ddpui.core import orgfunctions, orguserfunctions
@@ -171,7 +172,8 @@ def post_login_token(request):
         raise HttpError(401, "Invalid or missing token")
 
     retval = orguserfunctions.lookup_user(user.username)
-    retval["token"] = request.token
+    retval["token"] = str(request.token)
+
     return retval
 
 
@@ -817,3 +819,34 @@ def get_current_user_v2(request, org_slug: str = None):
         )
 
     return res
+
+
+@user_org_router.post("/v2/iframe-token/", response={200: dict})
+@has_permission(["can_view_orgusers"])
+def get_iframe_token(request):
+    """
+    Get a short-lived token for iframe communication.
+    This endpoint validates the user's httpOnly cookie authentication
+    and returns a temporary JWT token specifically for iframe use.
+    """
+    # Current auth middleware has already validated cookies and set request.user and request.orguser
+    if request.orguser is None:
+        raise HttpError(400, "requestor is not an OrgUser")
+
+    orguser: OrgUser = request.orguser
+    user: User = request.user
+
+    # Use the same token generation logic as login to ensure all custom claims are included
+    # This creates a refresh token with custom claims (like orguser_role_key) that the middleware expects
+    refresh_token = CustomTokenObtainSerializer.get_token(user)
+    access_token = refresh_token.access_token
+
+    # Override access token expiration to 5 minutes for iframe use
+    access_token.set_exp(lifetime=timedelta(minutes=2))
+
+    return {
+        "success": True,
+        "iframe_token": str(access_token),
+        "expires_in": 300,  # 5 minutes in seconds
+        "org_slug": orguser.org.slug,
+    }

@@ -95,7 +95,16 @@ class CustomJwtAuthMiddleware(HttpBearer):
     """the authenticate() function is called on every authenticated request via django middleware"""
 
     def __call__(self, request):
-        # First try to get token from cookies
+        # For /api/login_token/ endpoint, prioritize Authorization header over cookies
+        # This is needed for iframe token validation
+        if request.path == "/api/login_token/":
+            logger.info(
+                "CustomJwtAuthMiddleware: prioritizing Authorization header for /api/login_token/"
+            )
+            # First try Authorization header
+            return super().__call__(request)
+
+        # For all other endpoints, prioritize cookies first
         cookie_token = request.COOKIES.get("access_token")
 
         # If we have a cookie token, use it directly
