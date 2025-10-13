@@ -749,7 +749,7 @@ def post_token_refresh_v2(request):
 
 @user_org_router.get("/v2/currentuser", response=List[OrgUserResponse])
 @has_permission(["can_view_orgusers"])
-def get_current_user_v2(request, org_slug: str = None):
+def get_currentuser_v2(request, org_slug: str = None):
     """Get current user info - exact same business logic as currentuserv2"""
     if request.orguser is None:
         raise HttpError(400, "requestor is not an OrgUser")
@@ -841,12 +841,12 @@ def get_iframe_token(request):
     refresh_token = CustomTokenObtainSerializer.get_token(user)
     access_token = refresh_token.access_token
 
-    # Override access token expiration to 5 minutes for iframe use
+    # Override access token expiration to 2 minutes for iframe use
     access_token.set_exp(lifetime=timedelta(minutes=2))
 
     return {
         "success": True,
         "iframe_token": str(access_token),
-        "expires_in": 300,  # 5 minutes in seconds
+        "expires_in": 120,  # 2 minutes in seconds
         "org_slug": orguser.org.slug,
     }
