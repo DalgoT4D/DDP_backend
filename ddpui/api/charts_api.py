@@ -221,7 +221,7 @@ def list_charts(
     request, page: int = 1, page_size: int = 10, search: str = None, chart_type: str = None
 ):
     """List charts for the organization with pagination and filtering"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
 
     # Validate pagination parameters
     if page < 1:
@@ -261,7 +261,7 @@ def list_charts(
     # Get org warehouse once for all charts
     org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
     if not org_warehouse:
-        logger.warning(f"No warehouse configured for org {orguser.org.id}")
+        logger.warning(f"No warehouse configured for org {orguser.org.slug}")
 
     # Build response for each chart
     chart_responses = []
@@ -739,7 +739,7 @@ def generate_map_chart_data(request, payload: ChartDataPayload):
 @has_permission(["can_view_charts"])
 def get_chart(request, chart_id: int):
     """Get a specific chart"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
     try:
         chart = Chart.objects.get(id=chart_id, org=orguser.org)
     except Chart.DoesNotExist:
@@ -748,7 +748,7 @@ def get_chart(request, chart_id: int):
     # Get org warehouse
     org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
     if not org_warehouse:
-        logger.warning(f"No warehouse configured for org {orguser.org.id}")
+        logger.warning(f"No warehouse configured for org {orguser.org.slug}")
 
     # Build response
     chart_dict = {
