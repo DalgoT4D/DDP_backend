@@ -64,7 +64,6 @@ DEBUG = os.getenv("DEBUG", "") == "True"
 
 
 # CORS
-
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
@@ -75,7 +74,20 @@ ALLOWED_HOSTS = [
     "staging-app.dalgo.org",
     "insights.dalgo.org",
 ]
-CORS_ALLOW_ALL_ORIGINS = True
+# For cookie-based authentication, we need specific origins instead of wildcard
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://host.docker.internal:3000",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "https://staging.dalgo.org",
+    "https://staging-app.dalgo.org",
+    "https://dashboard.dalgo.org",
+    "https://insights.dalgo.org",
+]
 CORS_ALLOW_METHODS = [
     "GET",
     "POST",
@@ -84,16 +96,7 @@ CORS_ALLOW_METHODS = [
     "DELETE",
     "OPTIONS",
 ]
-CORS_ORIGIN_WHITELIST = (
-    "http://localhost:3000",
-    "http://host.docker.internal:3000",
-    "http://127.0.0.1:3000",
-    "https://staging.dalgo.org",
-    "https://staging-app.dalgo.org",
-    "https://dashboard.dalgo.org",
-    "https://insights.dalgo.org",
-)
-CORS_ALLOW_HEADERS = (*default_headers, "x-dalgo-org")
+CORS_ALLOW_HEADERS = (*default_headers, "x-dalgo-org", "X-CSRFToken")
 
 # Application definition
 
@@ -121,8 +124,8 @@ REST_FRAMEWORK = {
 MIDDLEWARE = [
     "django_prometheus.middleware.PrometheusBeforeMiddleware",
     "corsheaders.middleware.CorsMiddleware",
-    "django.middleware.common.CommonMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "django.middleware.common.CommonMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -286,3 +289,9 @@ SIMPLE_JWT = {
 # Frontend URLs for public sharing and email links
 FRONTEND_URL = os.getenv("FRONTEND_URL")
 FRONTEND_URL_V2 = os.getenv("FRONTEND_URL_V2")
+
+
+# Cookie settings
+COOKIE_SECURE = os.getenv("ENVIRONMENT", "") in ["production", "staging"]
+COOKIE_SAMESITE = "Lax"
+COOKIE_HTTPONLY = True

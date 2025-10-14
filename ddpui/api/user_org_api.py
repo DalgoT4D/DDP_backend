@@ -1,5 +1,6 @@
 import json
 from typing import List
+from datetime import timedelta
 
 from dotenv import load_dotenv
 from ninja import Router
@@ -9,6 +10,8 @@ from django.utils.text import slugify
 from django.db.models import Prefetch
 from django.contrib.auth.models import User
 from django.db.models import F
+from django.http import JsonResponse
+from django.conf import settings
 from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 
 from ddpui.auth import has_permission, CustomTokenObtainSerializer, CustomTokenRefreshSerializer
@@ -163,45 +166,55 @@ def post_login(request, payload: LoginPayload):
 
 @user_org_router.post("/login_token/")
 def post_login_token(request):
-    """This is to login user with just token. Return the same response as /login/ api"""
+    """
+    Login user with token (used by embed-token provider).
+    Invalidates the current short-lived iframe token and generates a new session token with longer expiry.
+    """
     user: User = request.user
     if not user or not user.username:
         raise HttpError(401, "Invalid or missing token")
 
+    # Generate new tokens with standard expiry for the session
+    serializer = CustomTokenObtainSerializer.get_token(user)
+    access_token = serializer.access_token
+
+    # Get user data
     retval = orguserfunctions.lookup_user(user.username)
-    retval["token"] = request.token
+    retval["token"] = str(access_token)
+    retval["refresh"] = str(serializer)
+
     return retval
 
 
 @user_org_router.post("/logout/")
-def post_logout(request, payload: LogoutPayload):
+def post_logout(request):
     """
-    Blacklists the refresh token on logout.
-    Ensures the refresh token belongs to the current user.
-    If the refresh token is already invalid/expired, do not blacklist.
+    Blacklists the refresh token on logout and clears httpOnly cookies.
+    Gets refresh token from cookies for cookie-based authentication.
+    """
+    # Get refresh token from cookies
+    refresh_token = request.COOKIES.get("refresh_token")
 
-    Note: The 'token' field in OutstandingToken is not the raw JWT string,
-    but a re-encoded version (may differ in whitespace, order, etc).
-    Always use the refresh token string to instantiate RefreshToken and check jti/user_id.
-    """
-    refresh_token = payload.refresh
-    if not refresh_token:
-        raise HttpError(400, "Refresh token not found")
-    try:
-        token = RefreshToken(refresh_token)
-        # The actual value stored in OutstandingToken.token may not match the JWT string byte-for-byte.
-        # Instead, always check by jti and user_id.
-        token_user_id = token.payload.get("user_id")
-        if not request.user or request.user.id != token_user_id:
-            raise HttpError(403, "Token does not belong to the current user")
-        # Blacklist by token object (which uses jti under the hood)
-        token.blacklist()
-        return {"success": 1}
-    except TokenError:
-        # Token is already invalid or expired, do not blacklist
-        return {"success": 1}
-    except Exception as err:
-        raise HttpError(400, f"Logout failed: {str(err)}") from err
+    # Try to blacklist the refresh token if we have one
+    if refresh_token:
+        try:
+            token = RefreshToken(refresh_token)
+            token_user_id = token.payload.get("user_id")
+            if request.user and request.user.id == token_user_id:
+                token.blacklist()
+        except (TokenError, Exception):
+            # Token is already invalid/expired or other error, continue with logout
+            pass
+
+    # Create response
+    response = JsonResponse({"success": True})
+
+    # Always try to clear cookies (harmless if they don't exist)
+    # delete_cookie only accepts: key, path, domain, samesite
+    response.delete_cookie("access_token", path="/")
+    response.delete_cookie("refresh_token", path="/")
+
+    return response
 
 
 @user_org_router.post("/token/refresh", auth=None)
@@ -623,4 +636,114 @@ def get_organization_wren(request):
 
     return {
         "wren_url": org_wren.wren_url,
+    }
+
+
+# ============================================
+# Cookie-Based Auth Endpoints (v2)
+# ============================================
+
+
+@user_org_router.post("/v2/login/", auth=None)
+def post_login_v2(request, payload: LoginPayload):
+    """Login endpoint that sets httpOnly cookies instead of returning tokens in response"""
+    serializer = CustomTokenObtainSerializer(
+        data={
+            "username": payload.username,
+            "password": payload.password,
+        }
+    )
+    serializer.is_valid(raise_exception=True)
+    token_data = serializer.validated_data
+
+    # Get user data (same as v1)
+    retval = orguserfunctions.lookup_user(payload.username)
+
+    # Create JsonResponse and set cookies
+    response = JsonResponse(retval)
+
+    # Set access token cookie
+    response.set_cookie(
+        "access_token",
+        token_data["access"],
+        httponly=settings.COOKIE_HTTPONLY,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        path="/",
+    )
+
+    # Set refresh token cookie
+    response.set_cookie(
+        "refresh_token",
+        token_data["refresh"],
+        httponly=settings.COOKIE_HTTPONLY,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        path="/",
+    )
+
+    return response
+
+
+@user_org_router.post("/v2/token/refresh", auth=None, response={200: dict})
+def post_token_refresh_v2(request):
+    """Refresh token endpoint that reads refresh token from cookie and sets new access token in cookie"""
+    # Get refresh token from cookie
+    refresh_token = request.COOKIES.get("refresh_token")
+
+    if not refresh_token:
+        raise HttpError(401, "Refresh token not found")
+
+    # Use the serializer to validate and get new access token
+    serializer = CustomTokenRefreshSerializer(data={"refresh": refresh_token})
+    serializer.is_valid(raise_exception=True)
+    token_data = serializer.validated_data
+
+    # Create response
+    response = JsonResponse({"success": True})
+
+    # Determine if we should use secure cookies
+    secure_cookies = not settings.DEBUG
+
+    # Set new access token cookie
+    response.set_cookie(
+        "access_token",
+        token_data["access"],
+        httponly=settings.COOKIE_HTTPONLY,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        path="/",
+    )
+
+    return response
+
+
+@user_org_router.post("/v2/iframe-token/", response={200: dict})
+@has_permission(["can_view_orgusers"])
+def get_iframe_token(request):
+    """
+    Get a short-lived token for iframe communication.
+    This endpoint validates the user's httpOnly cookie authentication
+    and returns a temporary JWT token specifically for iframe use.
+    """
+    # Current auth middleware has already validated cookies and set request.user and request.orguser
+    if request.orguser is None:
+        raise HttpError(400, "requestor is not an OrgUser")
+
+    orguser: OrgUser = request.orguser
+    user: User = request.user
+
+    # Use the same token generation logic as login to ensure all custom claims are included
+    # This creates a refresh token with custom claims (like orguser_role_key) that the middleware expects
+    refresh_token = CustomTokenObtainSerializer.get_token(user)
+    access_token = refresh_token.access_token
+
+    # Override access token expiration to 2 minutes for iframe use
+    access_token.set_exp(lifetime=timedelta(minutes=2))
+
+    return {
+        "success": True,
+        "iframe_token": str(access_token),
+        "expires_in": 120,  # 2 minutes in seconds
+        "org_slug": orguser.org.slug,
     }

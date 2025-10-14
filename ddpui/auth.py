@@ -94,7 +94,30 @@ def set_roles_and_permissions_in_redis(
 class CustomJwtAuthMiddleware(HttpBearer):
     """the authenticate() function is called on every authenticated request via django middleware"""
 
-    def authenticate(self, request, token):
+    def __call__(self, request):
+        # For /api/login_token/ endpoint, prioritize Authorization header over cookies
+        # This is needed for iframe token validation
+        if request.path == "/api/login_token/":
+            logger.info(
+                "CustomJwtAuthMiddleware: prioritizing Authorization header for /api/login_token/"
+            )
+            # First try Authorization header
+            return super().__call__(request)
+
+        # For all other endpoints, prioritize cookies first
+        cookie_token = request.COOKIES.get("access_token")
+
+        # If we have a cookie token, use it directly
+        if cookie_token:
+            return self.authenticate(request, cookie_token)
+
+        # Otherwise, fall back to the default HttpBearer behavior (Authorization header)
+        return super().__call__(request)
+
+    def authenticate(self, request, token=None):
+        if not token:
+            raise HttpError(401, "No authentication token provided")
+
         # Validate and decode JWT using SimpleJWT's AccessToken
         token_payload = None
         try:
