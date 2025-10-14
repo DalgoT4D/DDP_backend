@@ -12,7 +12,7 @@ from django.contrib.auth.models import User
 from django.db.models import F
 from django.http import JsonResponse
 from django.conf import settings
-from rest_framework_simplejwt.tokens import RefreshToken, TokenError, AccessToken
+from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 
 from ddpui.auth import has_permission, CustomTokenObtainSerializer, CustomTokenRefreshSerializer
 from ddpui.core import orgfunctions, orguserfunctions
@@ -211,8 +211,8 @@ def post_logout(request):
 
     # Always try to clear cookies (harmless if they don't exist)
     # delete_cookie only accepts: key, path, domain, samesite
-    response.delete_cookie("access_token", path="/", samesite="lax")
-    response.delete_cookie("refresh_token", path="/", samesite="lax")
+    response.delete_cookie("access_token", path="/")
+    response.delete_cookie("refresh_token", path="/")
 
     return response
 
@@ -677,9 +677,9 @@ def post_login_v2(request, payload: LoginPayload):
     response.set_cookie(
         "access_token",
         token_data["access"],
-        httponly=True,
-        secure=secure_cookies,
-        samesite="lax",
+        httponly=settings.COOKIE_HTTPONLY,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
         path="/",
     )
 
@@ -687,9 +687,9 @@ def post_login_v2(request, payload: LoginPayload):
     response.set_cookie(
         "refresh_token",
         token_data["refresh"],
-        httponly=True,
-        secure=secure_cookies,
-        samesite="lax",
+        httponly=settings.COOKIE_HTTPONLY,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
         path="/",
     )
 
@@ -720,9 +720,9 @@ def post_token_refresh_v2(request):
     response.set_cookie(
         "access_token",
         token_data["access"],
-        httponly=True,
-        secure=secure_cookies,
-        samesite="lax",
+        httponly=settings.COOKIE_HTTPONLY,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
         path="/",
     )
 

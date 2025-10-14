@@ -64,7 +64,6 @@ DEBUG = os.getenv("DEBUG", "") == "True"
 
 
 # CORS
-
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
@@ -97,9 +96,6 @@ CORS_ALLOW_METHODS = [
     "DELETE",
     "OPTIONS",
 ]
-CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS
-CSRF_COOKIE_SECURE = not DEBUG
-CSRF_COOKIE_SAMESITE = "Lax"
 CORS_ALLOW_HEADERS = (*default_headers, "x-dalgo-org", "X-CSRFToken")
 
 # Application definition
@@ -293,3 +289,9 @@ SIMPLE_JWT = {
 # Frontend URLs for public sharing and email links
 FRONTEND_URL = os.getenv("FRONTEND_URL")
 FRONTEND_URL_V2 = os.getenv("FRONTEND_URL_V2")
+
+
+# Cookie settings
+COOKIE_SECURE = os.getenv("ENVIRONMENT", "") in ["production", "staging"]
+COOKIE_SAMESITE = "Lax"
+COOKIE_HTTPONLY = True
