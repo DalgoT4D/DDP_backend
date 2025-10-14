@@ -166,13 +166,22 @@ def post_login(request, payload: LoginPayload):
 
 @user_org_router.post("/login_token/")
 def post_login_token(request):
-    """This is to login user with just token. Return the same response as /login/ api"""
+    """
+    Login user with token (used by embed-token provider).
+    Invalidates the current short-lived iframe token and generates a new session token with longer expiry.
+    """
     user: User = request.user
     if not user or not user.username:
         raise HttpError(401, "Invalid or missing token")
 
+    # Generate new tokens with standard expiry for the session
+    serializer = CustomTokenObtainSerializer.get_token(user)
+    access_token = serializer.access_token
+
+    # Get user data
     retval = orguserfunctions.lookup_user(user.username)
-    retval["token"] = str(request.token)
+    retval["token"] = str(access_token)
+    retval["refresh"] = str(serializer)
 
     return retval
 
