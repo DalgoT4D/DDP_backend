@@ -644,7 +644,7 @@ def get_organization_wren(request):
 # ============================================
 
 
-@user_org_router.post("/v2/login/", auth=None, response={200: dict})
+@user_org_router.post("/v2/login/", auth=None)
 def post_login_v2(request, payload: LoginPayload):
     """Login endpoint that sets httpOnly cookies instead of returning tokens in response"""
     serializer = CustomTokenObtainSerializer(
@@ -659,19 +659,8 @@ def post_login_v2(request, payload: LoginPayload):
     # Get user data (same as v1)
     retval = orguserfunctions.lookup_user(payload.username)
 
-    # Don't include tokens in response body
-    response_data = {
-        "success": True,
-        "email": retval.get("email"),
-        "org_users": retval.get("org_users"),
-        "wtype": retval.get("wtype"),
-    }
-
     # Create JsonResponse and set cookies
-    response = JsonResponse(response_data)
-
-    # Determine if we should use secure cookies (HTTPS only in production)
-    secure_cookies = not settings.DEBUG
+    response = JsonResponse(retval)
 
     # Set access token cookie
     response.set_cookie(
