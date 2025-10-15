@@ -267,7 +267,10 @@ def get_sources(workspace_id: str) -> List[Dict]:
     if not isinstance(workspace_id, str):
         raise HttpError(400, "Invalid workspace ID")
 
-    res = abreq("sources/list", {"workspaceId": workspace_id})
+    # TODO: move this to paginated apis
+    res = abreq(
+        "sources/list", {"workspaceId": workspace_id, "pageSize": 100, "sortKey": "actorName_asc"}
+    )
     if "sources" not in res:
         logger.error("Sources not found for workspace: %s", workspace_id)
         raise HttpError(404, "sources not found for workspace")
@@ -528,7 +531,11 @@ def get_destinations(workspace_id: str) -> dict:
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
 
-    res = abreq("destinations/list", {"workspaceId": workspace_id})
+    # TODO: move this to paginated apis
+    res = abreq(
+        "destinations/list",
+        {"workspaceId": workspace_id, "pageSize": 100, "sortKey": "actorName_asc"},
+    )
     if "destinations" not in res:
         logger.error("Destinations not found for workspace: %s", workspace_id)
         raise HttpError(404, "destinations not found for this workspace")
@@ -677,7 +684,11 @@ def get_webbackend_connections(workspace_id: str) -> dict:
     if not isinstance(workspace_id, str):
         raise HttpError(400, "workspace_id must be a string")
 
-    res = abreq("web_backend/connections/list", {"workspaceId": workspace_id})
+    # TODO: move this to paginated apis
+    res = abreq(
+        "web_backend/connections/list",
+        {"workspaceId": workspace_id, "pageSize": 100, "sortKey": "connectionName_asc"},
+    )
     if "connections" not in res:
         error_message = f"connections not found for workspace: {workspace_id}"
         logger.error(error_message)
