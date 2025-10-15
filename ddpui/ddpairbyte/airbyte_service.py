@@ -267,6 +267,7 @@ def get_sources(workspace_id: str) -> List[Dict]:
     if not isinstance(workspace_id, str):
         raise HttpError(400, "Invalid workspace ID")
 
+    # TODO: move this to paginated apis
     res = abreq(
         "sources/list", {"workspaceId": workspace_id, "pageSize": 100, "sortKey": "actorName_asc"}
     )
