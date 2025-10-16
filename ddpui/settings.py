@@ -292,6 +292,6 @@ FRONTEND_URL_V2 = os.getenv("FRONTEND_URL_V2")
 
 
 # Cookie settings
-COOKIE_SECURE = os.getenv("ENVIRONMENT", "") in ["production", "staging"]
-COOKIE_SAMESITE = "Lax"
+COOKIE_SECURE = os.getenv("ENVIRONMENT", "") == "production"
+COOKIE_SAMESITE = "Lax" if os.getenv("ENVIRONMENT", "") == "production" else "None"
 COOKIE_HTTPONLY = True
