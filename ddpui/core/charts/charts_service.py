@@ -1,31 +1,61 @@
 """Chart service module for handling chart business logic"""
 
 from typing import Optional, List, Dict, Any, Tuple
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 from decimal import Decimal
-import hashlib
-import json
 
-from django.utils import timezone
 from sqlalchemy import column, func, and_, or_, text
-from sqlalchemy.dialects import postgresql
 
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.visualization import Chart
 from ddpui.datainsights.query_builder import AggQueryBuilder
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.datainsights.warehouse.warehouse_interface import Warehouse
-from ddpui.dbt_automation.utils.warehouseclient import get_client
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.secretsmanager import retrieve_warehouse_credentials
-from ddpui.core.dbtautomation_service import map_airbyte_keys_to_postgres_keys
 from ddpui.schemas.chart_schema import (
     ChartDataPayload,
-    ChartDataResponse,
-    DataPreviewResponse,
     ExecuteChartQuery,
     TransformDataForChart,
 )
+
+
+def apply_time_grain(column_expr, time_grain: str, warehouse_type: str = "postgres"):
+    """
+    Apply time grain to a datetime column using database-specific functions.
+
+    Args:
+        column_expr: SQLAlchemy column expression
+        time_grain: One of 'year', 'month', 'day', 'hour', 'minute', 'second'
+        warehouse_type: Type of warehouse ('postgres' or 'bigquery')
+
+    Returns:
+        SQLAlchemy expression with time grain applied
+    """
+    if not time_grain:
+        return column_expr
+
+    if warehouse_type.lower() in ["postgres", "postgresql"]:
+        # PostgreSQL uses DATE_TRUNC function
+        return func.date_trunc(time_grain, column_expr)
+    elif warehouse_type.lower() == "bigquery":
+        # BigQuery uses different functions for different time grains
+        if time_grain == "year":
+            return func.datetime_trunc(column_expr, text("YEAR"))
+        elif time_grain == "month":
+            return func.datetime_trunc(column_expr, text("MONTH"))
+        elif time_grain == "day":
+            return func.datetime_trunc(column_expr, text("DAY"))
+        elif time_grain == "hour":
+            return func.datetime_trunc(column_expr, text("HOUR"))
+        elif time_grain == "minute":
+            return func.datetime_trunc(column_expr, text("MINUTE"))
+        elif time_grain == "second":
+            return func.datetime_trunc(column_expr, text("SECOND"))
+    else:
+        # Default to PostgreSQL syntax for other databases
+        return func.date_trunc(time_grain, column_expr)
+
+    return column_expr
 
 
 def get_pagination_params(payload: ChartDataPayload):
@@ -115,6 +145,7 @@ def convert_value(value: Any, preserve_none: bool = False) -> Any:
 def build_multi_metric_query(
     payload: ChartDataPayload,
     query_builder: AggQueryBuilder,
+    org_warehouse: OrgWarehouse = None,
 ) -> AggQueryBuilder:
     """Build query for multiple metrics on bar/line/pie/table/map charts"""
     if not payload.dimension_col:
@@ -123,8 +154,18 @@ def build_multi_metric_query(
     if not payload.metrics or len(payload.metrics) == 0:
         raise ValueError("At least one metric is required for multiple metrics charts")
 
-    # Add dimension column
-    query_builder.add_column(column(payload.dimension_col))
+    # Add dimension column with time grain if specified
+    dimension_column = column(payload.dimension_col)
+
+    # Apply time grain if specified and warehouse type is available
+    time_grain = payload.extra_config.get("time_grain") if payload.extra_config else None
+    if time_grain and org_warehouse:
+        warehouse_type = org_warehouse.wtype.lower()
+        dimension_column = apply_time_grain(dimension_column, time_grain, warehouse_type)
+        # Add label to preserve original column name for data access
+        dimension_column = dimension_column.label(payload.dimension_col)
+
+    query_builder.add_column(dimension_column)
 
     # Add all metrics as aggregate columns
     for metric in payload.metrics:
@@ -145,19 +186,33 @@ def build_multi_metric_query(
             alias,
         )
 
-    # Group by dimension column
-    query_builder.group_cols_by(payload.dimension_col)
+    # Group by dimension column (use the same time grain logic)
+    if time_grain and org_warehouse:
+        # When time grain is applied, group by the time grain expression (without label)
+        warehouse_type = org_warehouse.wtype.lower()
+        time_grain_expr = apply_time_grain(
+            column(payload.dimension_col), time_grain, warehouse_type
+        )
+        query_builder.group_cols_by(time_grain_expr)
+    else:
+        # Normal grouping by column name
+        query_builder.group_cols_by(payload.dimension_col)
 
     # Add extra dimension if specified
     if payload.extra_dimension:
         query_builder.add_column(column(payload.extra_dimension))
         query_builder.group_cols_by(payload.extra_dimension)
 
+    # Add default ordering by time grain column when time grain is applied
+    if time_grain and org_warehouse:
+        # Order by the dimension column (which will have time grain applied) in ascending order (chronological)
+        query_builder.order_cols_by([(payload.dimension_col, "asc")])
+
     return query_builder
 
 
 def build_chart_query(
-    payload: ChartDataPayload,
+    payload: ChartDataPayload, org_warehouse: OrgWarehouse = None
 ) -> AggQueryBuilder:
     """Build query using unified AggQueryBuilder for both raw and aggregated queries"""
     query_builder = AggQueryBuilder()
@@ -206,8 +261,18 @@ def build_chart_query(
             if not payload.dimension_col:
                 raise ValueError("dimension_col is required for pie charts")
 
-            # Add dimension column
-            query_builder.add_column(column(payload.dimension_col))
+            # Add dimension column with time grain if specified
+            dimension_column = column(payload.dimension_col)
+
+            # Apply time grain if specified and warehouse type is available
+            time_grain = payload.extra_config.get("time_grain") if payload.extra_config else None
+            if time_grain and org_warehouse:
+                warehouse_type = org_warehouse.wtype.lower()
+                dimension_column = apply_time_grain(dimension_column, time_grain, warehouse_type)
+                # Add label to preserve original column name for data access
+                dimension_column = dimension_column.label(payload.dimension_col)
+
+            query_builder.add_column(dimension_column)
 
             # Add extra dimension if specified (for combination slices)
             if payload.extra_dimension:
@@ -232,12 +297,27 @@ def build_chart_query(
             )
 
             # Group by dimension column and extra dimension if provided
-            query_builder.group_cols_by(payload.dimension_col)
+            if time_grain and org_warehouse:
+                # When time grain is applied, group by the time grain expression (without label)
+                warehouse_type = org_warehouse.wtype.lower()
+                time_grain_expr = apply_time_grain(
+                    column(payload.dimension_col), time_grain, warehouse_type
+                )
+                query_builder.group_cols_by(time_grain_expr)
+            else:
+                # Normal grouping by column name
+                query_builder.group_cols_by(payload.dimension_col)
+
             if payload.extra_dimension:
                 query_builder.group_cols_by(payload.extra_dimension)
+
+            # Add default ordering by time grain column when time grain is applied
+            if time_grain and org_warehouse:
+                # Order by the dimension column (which will have time grain applied) in ascending order (chronological)
+                query_builder.order_cols_by([(payload.dimension_col, "asc")])
         else:
             # Bar, line, and other charts - use multi-metric query
-            query_builder = build_multi_metric_query(payload, query_builder)
+            query_builder = build_multi_metric_query(payload, query_builder, org_warehouse)
 
     # Apply dashboard filters if provided
     if payload.dashboard_filters:
@@ -1002,7 +1082,7 @@ def get_chart_data_table_preview(
     warehouse = get_warehouse_client(org_warehouse)
 
     # Use the same query builder as chart data
-    query_builder = build_chart_query(payload)
+    query_builder = build_chart_query(payload, org_warehouse)
 
     # Build column mapping based on computation type
     column_mapping = []

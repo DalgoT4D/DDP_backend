@@ -717,7 +717,7 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
 
         # Get warehouse client and build query using standard chart service
         warehouse = charts_service.get_warehouse_client(org_warehouse)
-        query_builder = charts_service.build_chart_query(chart_payload)
+        query_builder = charts_service.build_chart_query(chart_payload, org_warehouse)
 
         # Add filters if provided (drill-down filters) with case-insensitive matching
         if map_payload.filters:

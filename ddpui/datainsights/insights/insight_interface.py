@@ -131,5 +131,5 @@ class DataTypeColInsights:
         self.db_table: str = db_table
         self.db_schema: str = db_schema
         self.filter = filter_
-        self.wtype = wtype if wtype else WarehouseType.POSTGRES  # default postgres
+        self.wtype = wtype if wtype else e.POSTGRES  # default postgres
         self.insights: list[ColInsight] = []
