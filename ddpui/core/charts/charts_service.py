@@ -485,9 +485,7 @@ def apply_chart_sorting(
 
         if matching_metric:
             # It's a metric - generate the actual SQL alias that matches SELECT clause
-            if matching_metric.aggregation.lower() == "count" and (
-                matching_metric.column is None or matching_metric.column == "*"
-            ):
+            if matching_metric.aggregation.lower() == "count" and matching_metric.column is None:
                 sort_column = (
                     f"count_all_{matching_metric.alias}" if matching_metric.alias else "count_all"
                 )
