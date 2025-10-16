@@ -475,29 +475,27 @@ def apply_chart_sorting(
         if not column_name:
             continue
 
-        # For aggregated queries, if sorting by the aggregate column,
-        # use the aggregated column alias instead of the raw column
-        if payload and payload.computation_type == "aggregated":
-            # Check if sorting by a metric column (multiple metrics approach)
-            if payload.metrics and len(payload.metrics) > 0:
-                # Find the first metric that matches the column name
-                matching_metric = None
-                for metric in payload.metrics:
-                    if metric.column == column_name:
-                        matching_metric = metric
-                        break
+        # Try to match against metric aliases first (for aggregated queries)
+        matching_metric = None
+        if payload and payload.computation_type == "aggregated" and payload.metrics:
+            for metric in payload.metrics:
+                if metric.alias == column_name:
+                    matching_metric = metric
+                    break
 
-                if matching_metric:
-                    # Always use the alias for sorting aggregated data
-                    sort_column = (
-                        matching_metric.alias or f"{matching_metric.aggregation}_{column_name}"
-                    )
-                else:
-                    # If no matching metric found, assume it's the dimension column
-                    sort_column = column_name
+        if matching_metric:
+            # It's a metric - generate the actual SQL alias that matches SELECT clause
+            if matching_metric.aggregation.lower() == "count" and matching_metric.column is None:
+                sort_column = (
+                    f"count_all_{matching_metric.alias}" if matching_metric.alias else "count_all"
+                )
             else:
-                sort_column = column_name
+                sort_column = (
+                    matching_metric.alias
+                    or f"{matching_metric.aggregation}_{matching_metric.column}"
+                )
         else:
+            # It's a dimension column - use as-is
             sort_column = column_name
 
         sort_cols.append((sort_column, direction))
