@@ -702,9 +702,6 @@ def post_token_refresh_v2(request):
     # Create response
     response = JsonResponse({"success": True})
 
-    # Determine if we should use secure cookies
-    secure_cookies = not settings.DEBUG
-
     # Set new access token cookie
     response.set_cookie(
         "access_token",
