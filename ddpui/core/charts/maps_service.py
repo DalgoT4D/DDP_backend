@@ -83,7 +83,9 @@ def get_child_regions(parent_region_id: int) -> List[Dict]:
     ]
 
 
-def build_map_query(payload: ChartDataPayload, drill_down_filters: List[Dict] = None):
+def build_map_query(
+    payload: ChartDataPayload, drill_down_filters: List[Dict] = None, org_warehouse=None
+):
     """Build query for map data with optional drill-down filters"""
     # Maps always use aggregated data grouped by geographic column
 
@@ -114,7 +116,7 @@ def build_map_query(payload: ChartDataPayload, drill_down_filters: List[Dict] = 
         )
 
     # Build base query using the same service as regular charts (includes filtering, pagination, sorting)
-    query = charts_service.build_chart_query(map_payload)
+    query = charts_service.build_chart_query(map_payload, org_warehouse)
 
     # Add drill-down WHERE filters if provided
     if drill_down_filters:
@@ -136,7 +138,10 @@ def build_map_query(payload: ChartDataPayload, drill_down_filters: List[Dict] = 
 
 
 def build_drill_down_query_for_layer(
-    payload: ChartDataPayload, layer_config: Dict, parent_selections: List[Dict] = None
+    payload: ChartDataPayload,
+    layer_config: Dict,
+    parent_selections: List[Dict] = None,
+    org_warehouse=None,
 ):
     """Build query for a specific layer in drill-down hierarchy"""
 
@@ -164,7 +169,7 @@ def build_drill_down_query_for_layer(
         extra_config=payload.extra_config,  # Pass through filters, pagination, sorting, and other config
     )
 
-    return build_map_query(layer_payload, drill_down_filters)
+    return build_map_query(layer_payload, drill_down_filters, org_warehouse)
 
 
 def transform_data_for_map(

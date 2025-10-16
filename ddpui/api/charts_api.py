@@ -109,7 +109,7 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
     warehouse = charts_service.get_warehouse_client(org_warehouse)
 
     # Build query
-    query_builder = charts_service.build_chart_query(payload)
+    query_builder = charts_service.build_chart_query(payload, org_warehouse)
     logger.debug(f"Query built for {chart_id_str}: {query_builder}")
 
     execute_payload = ExecuteChartQuery(
@@ -175,7 +175,7 @@ def generate_map_data_and_config(payload: ChartDataPayload, org_warehouse, chart
 
     # Get warehouse client and build query
     warehouse = charts_service.get_warehouse_client(org_warehouse)
-    query_builder = build_map_query(payload)
+    query_builder = build_map_query(payload, org_warehouse=org_warehouse)
 
     # Execute query
     logger.info(f"Executing map query for {chart_id_str}")
@@ -454,7 +454,7 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
 
         # Get warehouse client and build query using standard chart service
         warehouse = charts_service.get_warehouse_client(org_warehouse)
-        query_builder = charts_service.build_chart_query(chart_payload)
+        query_builder = charts_service.build_chart_query(chart_payload, org_warehouse)
 
         # Add filters if provided with case-insensitive matching
         if filters:
@@ -699,7 +699,7 @@ def generate_map_chart_data(request, payload: ChartDataPayload):
     warehouse = charts_service.get_warehouse_client(org_warehouse)
 
     # Build query using existing service
-    query_builder = build_map_query(payload)
+    query_builder = build_map_query(payload, org_warehouse=org_warehouse)
 
     # Execute query using existing service method
     logger.info(f"Executing map query for geojson_id: {geojson_id}")
