@@ -22,7 +22,11 @@ def create_organization(payload: CreateOrgSchema):
     if org:
         return None, "client org with this name already exists"
 
-    org = Org(name=payload.name)
+    org = Org(
+        name=payload.name,
+        viz_url=str(payload.viz_url) if payload.viz_url else None,
+        website=str(payload.website) if payload.website else None,
+    )
     org.slug = slugify(org.name)[:20]
     org.save()
 

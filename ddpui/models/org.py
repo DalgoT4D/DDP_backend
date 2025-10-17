@@ -1,4 +1,5 @@
-from typing import Dict, Optional
+from typing import Optional
+from pydantic import HttpUrl
 from enum import Enum
 from django.db import models
 from django.utils import timezone
@@ -73,6 +74,7 @@ class Org(models.Model):
     viz_login_type = models.CharField(choices=OrgVizLoginType.choices(), max_length=50, null=True)
     ses_whitelisted_email = models.TextField(max_length=100, null=True)
     dalgouser_superset_creds_key = models.TextField(null=True)
+    website = models.CharField(max_length=1000, null=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -90,7 +92,7 @@ class OrgSchema(Schema):
     name: str
     slug: str = None
     airbyte_workspace_id: str = None
-    viz_url: str = None
+    viz_url: HttpUrl = None
     viz_login_type: str = None
     tnc_accepted: bool = None
     is_demo: bool = False
@@ -102,7 +104,7 @@ class CreateOrgSchema(Schema):
     name: str
     slug: str = None
     airbyte_workspace_id: str = None
-    viz_url: str = None
+    viz_url: HttpUrl = None
     viz_login_type: str = None
     tnc_accepted: bool = None
     is_demo: bool = False
@@ -112,6 +114,7 @@ class CreateOrgSchema(Schema):
     superset_included: bool
     start_date: Optional[str]
     end_date: Optional[str]
+    website: Optional[HttpUrl] = None
 
 
 class CreateFreeTrialOrgSchema(CreateOrgSchema):
