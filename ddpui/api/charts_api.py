@@ -513,7 +513,7 @@ def get_chart_data(request, payload: ChartDataPayload):
         f"Chart data request - Type: {payload.computation_type}, Schema: {payload.schema_name}, Table: {payload.table_name}"
     )
     logger.info(
-        f"Columns - x_axis: {payload.x_axis}, y_axis: {payload.y_axis}, dimension_col: {payload.dimension_col}, metrics: {payload.metrics}"
+        f"Columns - x_axis: {payload.x_axis}, y_axis: {payload.y_axis}, dimension_col: {payload.dimension_col}, extra_dimension: {payload.extra_dimension}, metrics: {payload.metrics}"
     )
 
     # Validate user has access to schema/table
