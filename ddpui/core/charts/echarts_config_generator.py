@@ -125,6 +125,8 @@ class EChartsConfigGenerator:
         y_axis_label_rotation = customizations.get("yAxisLabelRotation", "horizontal")
         show_tooltip = customizations.get("showTooltip", True)
         show_legend = customizations.get("showLegend", True)
+        legend_display = customizations.get("legendDisplay", "paginated")
+        legend_position = customizations.get("legendPosition", "top")
         data_label_position = customizations.get("dataLabelPosition", "top")
 
         # Convert rotation values to degrees
@@ -134,17 +136,18 @@ class EChartsConfigGenerator:
             "vertical": -90,
         }
 
+        legend_data = data.get("legend", [])
+        legend_config = EChartsConfigGenerator._build_legend_config(
+            legend_data, show_legend, legend_display, legend_position
+        )
+        grid_config = EChartsConfigGenerator._calculate_grid_spacing(
+            legend_data, show_legend, legend_display, legend_position
+        )
+
         config = {
             "title": {"text": customizations.get("title", "")},
-            "legend": {
-                "data": data.get("legend", []),
-                "show": show_legend,
-                "type": "scroll",
-                "orient": "horizontal",
-                "top": 10,
-                "left": "center",
-            },
-            "grid": {"left": "3%", "right": "4%", "bottom": "3%", "containLabel": True},
+            "legend": legend_config,
+            "grid": grid_config,
             "xAxis": {
                 "type": "category" if orientation == "vertical" else "value",
                 "data": data.get("xAxisData", []) if orientation == "vertical" else None,
@@ -201,7 +204,8 @@ class EChartsConfigGenerator:
         show_data_labels = customizations.get("showDataLabels", False)
         label_format = customizations.get("labelFormat", "percentage")
         data_label_position = customizations.get("dataLabelPosition", "outside")
-        legend_position = customizations.get("legendPosition", "right")
+        legend_position = customizations.get("legendPosition", "top")
+        legend_display = customizations.get("legendDisplay", "paginated")
         show_legend = customizations.get("showLegend", True)
         show_tooltip = customizations.get("showTooltip", True)
 
@@ -224,13 +228,49 @@ class EChartsConfigGenerator:
             "mid": "inside",
         }
 
+        # Calculate pie positioning based on legend
+        legend_data = [item["name"] for item in data.get("pieData", [])]
+        pie_center = ["50%", "50%"]  # Default center
+        pie_radius = ["40%", "70%"] if chart_style == "donut" else "70%"
+
+        # Adjust pie position and size based on legend placement when showing all legends
+        if show_legend and legend_display == "all" and legend_data:
+            num_legends = len(legend_data)
+
+            if legend_position == "left":
+                pie_center[0] = "60%"  # Move pie to the right
+                if num_legends > 10:
+                    pie_radius = ["35%", "60%"] if chart_style == "donut" else "60%"
+                elif num_legends > 5:
+                    pie_radius = ["37%", "65%"] if chart_style == "donut" else "65%"
+
+            elif legend_position == "right":
+                pie_center[0] = "40%"  # Move pie to the left
+                if num_legends > 10:
+                    pie_radius = ["35%", "60%"] if chart_style == "donut" else "60%"
+                elif num_legends > 5:
+                    pie_radius = ["37%", "65%"] if chart_style == "donut" else "65%"
+
+            elif legend_position == "top":
+                pie_center[1] = "60%"  # Move pie down
+                if num_legends > 8:  # Many legends might wrap to multiple rows
+                    pie_radius = ["35%", "60%"] if chart_style == "donut" else "60%"
+
+            elif legend_position == "bottom":
+                pie_center[1] = "40%"  # Move pie up more to avoid overlap
+                if num_legends > 8:
+                    pie_radius = ["30%", "55%"] if chart_style == "donut" else "55%"
+                elif num_legends > 4:
+                    pie_radius = ["35%", "60%"] if chart_style == "donut" else "60%"
+
         config = {
             "title": {"text": customizations.get("title", "")},
             "series": [
                 {
                     "name": data.get("seriesName", "Data"),
                     "type": "pie",
-                    "radius": ["40%", "70%"] if chart_style == "donut" else "70%",
+                    "radius": pie_radius,
+                    "center": pie_center,
                     "avoidLabelOverlap": False,
                     "label": {
                         "show": show_data_labels,
@@ -249,13 +289,10 @@ class EChartsConfigGenerator:
 
         # Add legend if enabled
         if show_legend:
-            config["legend"] = {
-                "orient": "horizontal",
-                "top": 10,
-                "left": "center",
-                "data": [item["name"] for item in data.get("pieData", [])],
-                "type": "scroll",
-            }
+            legend_data = [item["name"] for item in data.get("pieData", [])]
+            config["legend"] = EChartsConfigGenerator._build_legend_config(
+                legend_data, show_legend, legend_display, legend_position
+            )
 
         return config
 
@@ -272,6 +309,8 @@ class EChartsConfigGenerator:
         y_axis_label_rotation = customizations.get("yAxisLabelRotation", "horizontal")
         show_tooltip = customizations.get("showTooltip", True)
         show_legend = customizations.get("showLegend", True)
+        legend_display = customizations.get("legendDisplay", "paginated")
+        legend_position = customizations.get("legendPosition", "top")
         data_label_position = customizations.get("dataLabelPosition", "top")
 
         # Convert rotation values to degrees
@@ -289,9 +328,18 @@ class EChartsConfigGenerator:
             "right": "right",
         }
 
+        legend_data = data.get("legend", [])
+        legend_config = EChartsConfigGenerator._build_legend_config(
+            legend_data, show_legend, legend_display, legend_position
+        )
+        grid_config = EChartsConfigGenerator._calculate_grid_spacing(
+            legend_data, show_legend, legend_display, legend_position
+        )
+
         config = {
             "title": {"text": customizations.get("title", "")},
-            "grid": {"left": "3%", "right": "4%", "bottom": "3%", "containLabel": True},
+            "legend": legend_config,
+            "grid": grid_config,
             "xAxis": {
                 "type": "category",
                 "data": data.get("xAxisData", []),
@@ -314,16 +362,6 @@ class EChartsConfigGenerator:
         # Add tooltip if enabled
         if show_tooltip:
             config["tooltip"] = {"trigger": "axis"}
-
-        # Add legend if enabled
-        if show_legend:
-            config["legend"] = {
-                "data": data.get("legend", []),
-                "type": "scroll",
-                "orient": "horizontal",
-                "top": 10,
-                "left": "center",
-            }
 
         # Build series
         for series_data in data.get("series", []):
@@ -423,3 +461,232 @@ class EChartsConfigGenerator:
             }
 
         return config
+
+    @staticmethod
+    def _build_legend_config(
+        legend_data: List[str],
+        show_legend: bool,
+        legend_display: str = "paginated",
+        legend_position: str = "top",
+    ) -> Dict[str, Any]:
+        """Build legend configuration based on display and position options with proper spacing"""
+        if not show_legend:
+            return {"show": False}
+
+        # Ensure we have valid parameters with defaults
+        legend_display = legend_display or "paginated"
+        legend_position = legend_position or "top"
+
+        # For "all" display mode, ensure we have a valid position
+        if legend_display == "all" and not legend_position:
+            legend_position = "top"
+
+        num_legends = len(legend_data) if legend_data else 0
+
+        # Base legend configuration
+        legend_config = {
+            "data": legend_data,
+            "show": True,
+            "textStyle": {"fontSize": 12, "color": "#333"},
+            "itemGap": 15,  # Gap between legend items
+            "padding": [10, 15, 10, 15],  # [top, right, bottom, left] padding around legend
+        }
+
+        # Configure legend based on display type
+        if legend_display == "paginated":
+            # Use scrollable legend (default behavior) - always horizontal at top
+            legend_config.update(
+                {
+                    "type": "scroll",
+                    "orient": "horizontal",
+                    "top": 15,
+                    "left": "center",
+                    "pageIconColor": "#2f4554",
+                    "pageIconInactiveColor": "#aaa",
+                    "pageIconSize": 15,
+                    "pageTextStyle": {"color": "#333"},
+                    "animation": True,
+                    "pageButtonItemGap": 5,
+                }
+            )
+        else:  # legend_display == "all"
+            # Show all legends in chart area with specified position
+            legend_config["type"] = "plain"
+
+            # Estimate space needed for legends
+            avg_char_width = 8  # pixels per character
+            icon_width = 25  # legend icon + gap
+            item_gap = legend_config["itemGap"]
+
+            # Configure position and orientation based on legend_position
+            if legend_position == "top":
+                legend_config.update(
+                    {
+                        "orient": "horizontal",
+                        "top": 20,
+                        "left": "center",
+                    }
+                )
+                # For horizontal legends, calculate if they need wrapping
+                if num_legends > 0:
+                    # Estimate total width needed
+                    estimated_width = sum(
+                        len(str(item)) * avg_char_width + icon_width for item in legend_data
+                    )
+                    estimated_width += (num_legends - 1) * item_gap
+
+                    # If too wide, enable wrapping or use smaller font
+                    if estimated_width > 800:  # Assume chart width ~800px
+                        legend_config["textStyle"]["fontSize"] = 10
+                        legend_config["itemGap"] = 10
+
+            elif legend_position == "bottom":
+                legend_config.update(
+                    {
+                        "orient": "horizontal",
+                        "bottom": 30,  # More space from chart edge
+                        "left": "center",
+                    }
+                )
+                # Similar width estimation as top
+                if num_legends > 0:
+                    estimated_width = sum(
+                        len(str(item)) * avg_char_width + icon_width for item in legend_data
+                    )
+                    estimated_width += (num_legends - 1) * item_gap
+
+                    if estimated_width > 800:
+                        legend_config["textStyle"]["fontSize"] = 10
+                        legend_config["itemGap"] = 10
+                        legend_config["bottom"] = 35  # Even more space when text is smaller
+
+            elif legend_position == "left":
+                legend_config.update(
+                    {
+                        "orient": "vertical",
+                        "left": 20,
+                        "top": "center",
+                    }
+                )
+                # For vertical legends, adjust item gap based on number of items
+                if num_legends > 15:  # Many items
+                    legend_config["itemGap"] = 8
+                    legend_config["textStyle"]["fontSize"] = 10
+                elif num_legends > 8:
+                    legend_config["itemGap"] = 10
+                    legend_config["textStyle"]["fontSize"] = 11
+
+            else:  # right (default)
+                legend_config.update(
+                    {
+                        "orient": "vertical",
+                        "right": 20,
+                        "top": "center",
+                    }
+                )
+                # Similar vertical adjustments as left
+                if num_legends > 15:
+                    legend_config["itemGap"] = 8
+                    legend_config["textStyle"]["fontSize"] = 10
+                elif num_legends > 8:
+                    legend_config["itemGap"] = 10
+                    legend_config["textStyle"]["fontSize"] = 11
+
+        return legend_config
+
+    @staticmethod
+    def _calculate_grid_spacing(
+        legend_data: List[str],
+        show_legend: bool,
+        legend_display: str = "paginated",
+        legend_position: str = "top",
+    ) -> Dict[str, str]:
+        """Calculate grid spacing to accommodate legends with proper margins"""
+        # Default grid spacing
+        default_grid = {
+            "left": "3%",
+            "right": "4%",
+            "top": "60px",  # Space for title
+            "bottom": "3%",
+            "containLabel": True,
+        }
+
+        if not show_legend or not legend_data:
+            return default_grid
+
+        num_legends = len(legend_data)
+
+        # For paginated legends, minimal adjustment needed (they're compact)
+        if legend_display == "paginated":
+            default_grid["top"] = "80px"  # Extra space for pagination controls
+            return default_grid
+
+        # For "all" legends, calculate space based on position and content
+        if legend_display == "all":
+            avg_char_width = 8
+            icon_width = 25
+            item_gap = 15
+            legend_padding = 30  # padding around legend
+
+            if legend_position == "top":
+                # Estimate height needed for horizontal legend
+                estimated_width = sum(
+                    len(str(item)) * avg_char_width + icon_width for item in legend_data
+                )
+                estimated_width += (num_legends - 1) * item_gap
+
+                # Calculate number of rows needed if wrapping occurs
+                chart_width = 800  # assumed chart width
+                if estimated_width > chart_width:
+                    rows_needed = max(1, (estimated_width // chart_width) + 1)
+                    legend_height = rows_needed * 25 + legend_padding  # 25px per row
+                else:
+                    legend_height = 40 + legend_padding  # single row
+
+                default_grid["top"] = f"{60 + legend_height}px"
+
+            elif legend_position == "bottom":
+                # Similar calculation as top but with more generous spacing
+                estimated_width = sum(
+                    len(str(item)) * avg_char_width + icon_width for item in legend_data
+                )
+                estimated_width += (num_legends - 1) * item_gap
+
+                chart_width = 800
+                if estimated_width > chart_width:
+                    rows_needed = max(1, (estimated_width // chart_width) + 1)
+                    legend_height = rows_needed * 30 + legend_padding + 20  # Extra space for bottom
+                else:
+                    legend_height = 50 + legend_padding + 20  # More space for single row at bottom
+
+                default_grid["bottom"] = f"{legend_height}px"
+
+            elif legend_position == "left":
+                # Calculate width needed for vertical legend
+                max_text_width = (
+                    max(len(str(item)) * avg_char_width for item in legend_data)
+                    if legend_data
+                    else 0
+                )
+                legend_width = max_text_width + icon_width + legend_padding
+
+                # Ensure minimum and maximum widths
+                legend_width = max(120, min(legend_width, 250))  # 120px min, 250px max
+
+                default_grid["left"] = f"{legend_width}px"
+
+            else:  # right
+                # Calculate width needed for vertical legend
+                max_text_width = (
+                    max(len(str(item)) * avg_char_width for item in legend_data)
+                    if legend_data
+                    else 0
+                )
+                legend_width = max_text_width + icon_width + legend_padding
+
+                # Ensure minimum and maximum widths
+                legend_width = max(120, min(legend_width, 250))
+
+                default_grid["right"] = f"{legend_width}px"
+
+        return default_grid
