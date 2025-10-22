@@ -13,7 +13,7 @@ class SelectedStream(Schema):
     """Schema to define a selected stream"""
 
     name: str
-    namespace: Optional[str] = None
+    namespace: str = None
 
 
 class ClearSelectedStreams(Schema):
