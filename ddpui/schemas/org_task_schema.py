@@ -1,3 +1,4 @@
+from typing import Optional
 from ninja import Schema
 
 
@@ -8,11 +9,18 @@ class TaskParameters(Schema):
     options: dict | None
 
 
+class SelectedStream(Schema):
+    """Schema to define a selected stream"""
+
+    name: str
+    namespace: Optional[str] = None
+
+
 class ClearSelectedStreams(Schema):
     """Schema to define the request payload for clearing selected streams in Airbyte"""
 
     connectionId: str
-    streams: list[str]
+    streams: list[SelectedStream]
 
 
 class CreateOrgTaskPayload(Schema):

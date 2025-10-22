@@ -134,7 +134,7 @@ class PrefectAirbyteClearStreamsTaskSetup(Schema):
     flow_name: str = None
     flow_run_name: str = None
     seq: int = 0
-    streams: list
+    streams: list[dict]
 
     def to_json(self):
         """JSON serialization"""
