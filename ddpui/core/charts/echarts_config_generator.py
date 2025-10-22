@@ -565,7 +565,7 @@ class EChartsConfigGenerator:
                     {
                         "orient": "vertical",
                         "left": 20,
-                        "top": "center",
+                        "top": "middle",
                     }
                 )
                 # For vertical legends, adjust item gap based on number of items
@@ -581,7 +581,7 @@ class EChartsConfigGenerator:
                     {
                         "orient": "vertical",
                         "right": 20,
-                        "top": "center",
+                        "top": "middle",
                     }
                 )
                 # Similar vertical adjustments as left
