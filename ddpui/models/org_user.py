@@ -1,3 +1,4 @@
+from typing import Optional
 from datetime import datetime
 import uuid
 from django.utils import timezone
@@ -79,6 +80,7 @@ class OrgUser(models.Model):
         related_name="users_with_as_landing",
         help_text="User's personal landing dashboard",
     )
+    designation = models.CharField(max_length=500, null=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -169,6 +171,7 @@ class AcceptInvitationSchema(Schema):
 
     invite_code: str
     password: str = None  # the password is required only when the user has no platform account
+    designation: Optional[str] = None
 
 
 class ForgotPasswordSchema(Schema):
