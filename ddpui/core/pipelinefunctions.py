@@ -12,6 +12,7 @@ from ddpui.models.tasks import OrgTask, DataflowOrgTask, TaskLock, TaskLockStatu
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.models.org import Org, OrgPrefectBlockv1, OrgDataFlowv1
 from ddpui.models.org_user import OrgUser
+from ddpui.schemas.org_task_schema import SelectedStream
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpprefect.schema import (
     PrefectDbtTaskSetup,
@@ -68,7 +69,7 @@ def setup_airbyte_sync_task_config(
 def setup_airbyte_clear_streams_task_config(
     org_task: OrgTask,
     server_block: OrgPrefectBlockv1,
-    streams: list,
+    streams: list[SelectedStream],
     seq: int = 1,
 ):
     """constructs the prefect payload for an airbyte clear streams task config"""
@@ -80,7 +81,7 @@ def setup_airbyte_clear_streams_task_config(
         connection_id=org_task.connection_id,
         timeout=PREFECT_AIRBYTE_TASKS_TIMEOUT,
         orgtask_uuid=str(org_task.uuid),
-        streams=streams,
+        streams=[stream.dict() for stream in streams],
     )
 
 

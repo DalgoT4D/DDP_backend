@@ -8,11 +8,18 @@ class TaskParameters(Schema):
     options: dict | None
 
 
+class SelectedStream(Schema):
+    """Schema to define a selected stream"""
+
+    streamName: str
+    streamNamespace: str = None
+
+
 class ClearSelectedStreams(Schema):
     """Schema to define the request payload for clearing selected streams in Airbyte"""
 
     connectionId: str
-    streams: list[str]
+    streams: list[SelectedStream]
 
 
 class CreateOrgTaskPayload(Schema):
