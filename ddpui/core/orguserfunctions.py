@@ -310,6 +310,7 @@ def accept_invitation_v1(payload: AcceptInvitationSchema):
             user=user,
             org=invitation.invited_by.org,
             new_role=invitation.invited_new_role,
+            work_domain=payload.work_domain,
         )
     invitation.delete()
     return from_orguser(orguser), None
