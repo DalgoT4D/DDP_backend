@@ -12,8 +12,8 @@ class TaskParameters(Schema):
 class SelectedStream(Schema):
     """Schema to define a selected stream"""
 
-    name: str
-    namespace: str = None
+    streamName: str
+    streamNamespace: str = None
 
 
 class ClearSelectedStreams(Schema):
