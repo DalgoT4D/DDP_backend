@@ -10,6 +10,7 @@ from ddpui.models.org import Org, OrgDataFlowv1, ConnectionMeta
 from ddpui.models.tasks import OrgTask
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
+from ddpui.models.notifications import NotificationCategory
 from ddpui.utils.awsses import send_text_message
 from ddpui.models.tasks import (
     TaskLock,
@@ -147,17 +148,21 @@ def email_flowrun_logs_to_superadmins(org: Org, flow_run_id: str):
     email_superadmins(org, email_body)
 
 
-def notify_org_managers(org: Org, message: str, email_subject: str):
+def notify_org_managers(org: Org, message: str, email_subject: str, category: str = None):
     """send a notification to all users in the org"""
     error, recipients = get_recipients(
-        SentToEnum.ALL_ORG_USERS, org.slug, None, manager_or_above=True
+        SentToEnum.ALL_ORG_USERS, org.slug, None, manager_or_above=True, category=category
     )
     if error:
         logger.error(f"Error getting recipients: {error}")
         return
     error, response = create_notification(
         NotificationDataSchema(
-            author="Dalgo", message=message, email_subject=email_subject, recipients=recipients
+            author="Dalgo",
+            message=message,
+            email_subject=email_subject,
+            recipients=recipients,
+            category=category,
         )
     )
     if error:
@@ -368,9 +373,7 @@ def send_failure_emails(org: Org, odf: OrgDataFlowv1 | None, flow_run: dict, sta
 
     email_body.append(f"\nPlease visit {os.getenv('FRONTEND_URL')} for more details")
     notify_org_managers(
-        org,
-        "\n".join(email_body),
-        email_subject,
+        org, "\n".join(email_body), email_subject, category=NotificationCategory.JOB_FAILURE.value
     )
 
 
@@ -395,6 +398,7 @@ def do_handle_prefect_webhook(flow_run_id: str, state: str):
             FLOW_RUN_FAILED_STATE_NAME,
             FLOW_RUN_CRASHED_STATE_NAME,
             FLOW_RUN_COMPLETED_STATE_NAME,
+            "DBT_TEST_FAILED",
         ]:
             org = get_org_from_flow_run(flow_run)
             if org:
@@ -409,6 +413,21 @@ def do_handle_prefect_webhook(flow_run_id: str, state: str):
                     # odf might be None!
                     odf = OrgDataFlowv1.objects.filter(org=org, deployment_id=deployment_id).first()
                     send_failure_emails(org, odf, flow_run, state)
+
+                elif state == "DBT_TEST_FAILED":
+                    # Handle DBT test failures specifically
+                    odf = OrgDataFlowv1.objects.filter(org=org, deployment_id=deployment_id).first()
+                    pipeline_name = odf.name if odf else "Unknown pipeline"
+
+                    message = f"To the admins of {org.name},\n\nDBT tests have failed in pipeline {pipeline_name}\n\nPlease visit {os.getenv('FRONTEND_URL')} for more details"
+                    email_subject = f"{org.name}: DBT test failure for {pipeline_name}"
+
+                    notify_org_managers(
+                        org,
+                        message,
+                        email_subject,
+                        category=NotificationCategory.DBT_TEST_FAILURE.value,
+                    )
 
                 elif state in [FLOW_RUN_COMPLETED_STATE_NAME]:
                     email_orgusers_ses_whitelisted(org, "Your pipeline completed successfully")

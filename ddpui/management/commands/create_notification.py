@@ -7,6 +7,7 @@ from ddpui.schemas.notifications_api_schemas import (
     NotificationDataSchema,
 )
 from ddpui.models.org import Org
+from ddpui.models.notifications import NotificationCategory
 
 
 class Command(BaseCommand):
@@ -52,6 +53,7 @@ class Command(BaseCommand):
             help="The scheduled time of the notification in ISO 8601 format (e.g., 2024-08-30T19:51:51Z)",
         )
         parser.add_argument("--dry-run", action="store_true", help="Dry run mode")
+        parser.add_argument("--category", type=str, help="Category of the notification")
 
     def handle(self, *args, **options):
         # Parse scheduled_time
@@ -100,6 +102,14 @@ class Command(BaseCommand):
             print(f"Error in getting recipients: {error}")
             sys.exit(1)
 
+        # Validate category
+        category = options.get("category")
+        if category and category not in NotificationCategory.values:
+            print(
+                f"Invalid category: '{category}'. Must be one of: {', '.join(NotificationCategory.values)}"
+            )
+            sys.exit(1)
+
         # Create notification data
         notification_data = NotificationDataSchema(
             author=options["author"],
@@ -108,6 +118,7 @@ class Command(BaseCommand):
             message=message,
             urgent=options.get("urgent", False),
             scheduled_time=scheduled_time,
+            category=options.get("category"),  # Default to None if not provided
         )
 
         if options["dry_run"]:

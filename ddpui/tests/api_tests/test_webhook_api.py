@@ -37,6 +37,7 @@ from ddpui.models.org_user import OrgUser, User, OrgUserRole, UserAttributes
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskLock
+from ddpui.models.notifications import NotificationCategory
 from ddpui.settings import PRODUCTION
 from ddpui.tests.api_tests.test_user_org_api import seed_db
 from ddpui.ddpprefect import (
@@ -235,7 +236,12 @@ def test_post_notification_v1_orchestrate():
         mock_email_flowrun_logs_to_superadmins_2.assert_not_called()
         mock_notify_platform_admins.assert_not_called()
         mock_email_orgusers_ses_whitelisted.assert_called_once()
-        mock_notify_org_managers.assert_called_once_with(org, "\n".join(email_body), email_subject)
+        mock_notify_org_managers.assert_called_once_with(
+            org,
+            "\n".join(email_body),
+            email_subject,
+            category=NotificationCategory.JOB_FAILURE.value,
+        )
 
 
 def test_post_notification_v1_manual_with_connection_id():
@@ -284,7 +290,12 @@ def test_post_notification_v1_manual_with_connection_id():
         mock_email_flowrun_logs_to_superadmins_2.assert_not_called()
         mock_notify_platform_admins.assert_not_called()
         mock_email_orgusers_ses_whitelisted.assert_called_once()
-        mock_notify_org_managers.assert_called_once_with(org, "\n".join(email_body), email_subject)
+        mock_notify_org_managers.assert_called_once_with(
+            org,
+            "\n".join(email_body),
+            email_subject,
+            category=NotificationCategory.JOB_FAILURE.value,
+        )
 
 
 def test_post_notification_v1_manual_with_orgtask_id(seed_master_tasks):
@@ -333,7 +344,12 @@ def test_post_notification_v1_manual_with_orgtask_id(seed_master_tasks):
         mock_email_flowrun_logs_to_superadmins_2.assert_not_called()
         mock_notify_platform_admins.assert_not_called()
         mock_email_orgusers_ses_whitelisted.assert_called_once()
-        mock_notify_org_managers.assert_called_once_with(org, "\n".join(email_body), email_subject)
+        mock_notify_org_managers.assert_called_once_with(
+            org,
+            "\n".join(email_body),
+            email_subject,
+            category=NotificationCategory.JOB_FAILURE.value,
+        )
 
 
 def test_post_notification_v1_manual_with_orgtask_id_generate_edr(seed_master_tasks):
@@ -686,3 +702,40 @@ def test_get_flow_run_times_no_expected_start_time():
     start_time, expected_start_time = get_flow_run_times(flow_run)
     assert str(start_time) == flow_run["start_time"]
     assert expected_start_time is not None
+
+
+def test_post_notification_v1_dbt_test_failed():
+    """tests the api endpoint /notifications/ for DBT test failures"""
+    org = Org.objects.create(name="temp", slug="temp")
+    deployment_id = "test-deployment-id"
+    flow_run = {
+        "parameters": {
+            "config": {"org_slug": org.slug},
+        },
+        "deployment_id": deployment_id,
+        "id": "test-run-id",
+        "name": "test-flow-run-name",
+        "start_time": str(datetime.now()),
+        "expected_start_time": str(datetime.now()),
+        "total_run_time": 12,
+        "status": "COMPLETED",
+        "state_name": "DBT_TEST_FAILED",
+    }
+    odf = OrgDataFlowv1.objects.create(
+        org=org, name=deployment_id, dataflow_type="orchestrate", deployment_id=deployment_id
+    )
+    email_body = f"To the admins of {org.name},\n\nDBT tests have failed in pipeline {odf.name}\n\nPlease visit {os.getenv('FRONTEND_URL')} for more details"
+    email_subject = f"{org.name}: DBT test failure for {odf.name}"
+
+    with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
+        "ddpui.utils.webhook_helpers.notify_org_managers"
+    ) as mock_notify_org_managers:
+        mock_get_flow_run.return_value = flow_run
+        user = User.objects.create(email="email", username="username")
+        new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
+        OrgUser.objects.create(org=org, user=user, new_role=new_role)
+        do_handle_prefect_webhook(flow_run["id"], flow_run["state_name"])
+        assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
+        mock_notify_org_managers.assert_called_once_with(
+            org, email_body, email_subject, category=NotificationCategory.DBT_TEST_FAILURE.value
+        )

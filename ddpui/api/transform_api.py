@@ -50,7 +50,22 @@ logger = CustomLogger("ddpui")
 @has_permission(["can_create_dbt_workspace"])
 def create_dbt_project(request, payload: DbtProjectSchema):
     """
-    Create a new dbt project.
+    Create a new dbt (data build tool) project for the organization.
+
+    Initializes a local dbt workspace for the organization with the specified
+    default schema. Creates the necessary directory structure and configuration
+    files required for dbt transformations.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+        payload (DbtProjectSchema): Project configuration including default_schema
+
+    Returns:
+        dict: Success message confirming project creation
+
+    Raises:
+        HttpError: 422 if dbt workspace setup fails
+        HttpError: 403 if user lacks permission to create dbt workspace
     """
     orguser: OrgUser = request.orguser
     org = orguser.org

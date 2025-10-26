@@ -2,10 +2,7 @@ from typing import Tuple, Optional, Dict, Any, List
 from datetime import datetime
 from celery.result import AsyncResult
 from django.core.paginator import Paginator
-from ddpui.models.notifications import (
-    Notification,
-    NotificationRecipient,
-)
+from ddpui.models.notifications import Notification, NotificationRecipient, NotificationCategory
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
@@ -18,7 +15,11 @@ from ddpui.celeryworkers.moretasks import schedule_notification_task
 
 
 def get_recipients(
-    sent_to: str, org_slug: str, user_email: str, manager_or_above: bool
+    sent_to: str,
+    org_slug: str,
+    user_email: str,
+    manager_or_above: bool,
+    category: Optional[str] = None,
 ) -> Tuple[Optional[str], Optional[List[int]]]:
     """Returns the list of recipients based on the request parameters"""
 
@@ -52,6 +53,27 @@ def get_recipients(
             "id", flat=True
         )
 
+    # Map category string to the correct field name
+    category_field_mapping = {
+        NotificationCategory.SCHEMA_CHANGE.value: "subscribe_schema_change_notifications",
+        NotificationCategory.JOB_FAILURE.value: "subscribe_job_failure_notifications",
+        NotificationCategory.DBT_TEST_FAILURE.value: "subscribe_dbt_test_failure_notifications",
+    }
+
+    preference_field = category_field_mapping.get(category)
+
+    if preference_field:
+        #  Filter recipients by subscription preference
+        recipients = (
+            OrgUser.objects.filter(
+                id__in=recipients,
+                preferences__isnull=False,
+            )
+            .filter(**{f"preferences__{preference_field}": True})
+            .values_list("id", flat=True)
+        )
+
+    # If no recipients found, return an error message
     if not recipients:
         return "No users found for the given information", None
 
@@ -68,6 +90,11 @@ def handle_recipient(
     """
     recipient = OrgUser.objects.get(id=recipient_id)
     user_preference, created = UserPreferences.objects.get_or_create(orguser=recipient)
+
+    # Check if user is subscribed to this notification category
+    if not user_preference.is_subscribed_to_category(notification.category):
+        return None  # Skip sending notification if user is not subscribed
+
     notification_recipient = NotificationRecipient.objects.create(
         notification=notification, recipient=recipient
     )
@@ -112,6 +139,7 @@ def create_notification(
     urgent = notification_data.urgent
     scheduled_time = notification_data.scheduled_time
     recipients = notification_data.recipients
+    category = notification_data.category
 
     errors = []
     notification = Notification.objects.create(
@@ -120,6 +148,7 @@ def create_notification(
         email_subject=email_subject,
         urgent=urgent,
         scheduled_time=scheduled_time,
+        category=category,
     )
 
     if not notification:
@@ -151,6 +180,7 @@ def create_notification(
         "sent_time": notification.sent_time,
         "scheduled_time": notification.scheduled_time,
         "author": notification.author,
+        "category": notification.category,
     }
 
     return None, {
@@ -161,13 +191,16 @@ def create_notification(
 
 # get notification history
 def get_notification_history(
-    page: int, limit: int, read_status: Optional[int] = None
+    page: int, limit: int, read_status: Optional[int] = None, category: Optional[str] = None
 ) -> Tuple[Optional[None], Dict[str, Any]]:
     """returns history of sent notifications"""
     notifications = Notification.objects
 
     if read_status:
         notifications = notifications.filter(read_status=(read_status == 1))
+
+    if category:
+        notifications = notifications.filter(category=category)
 
     notifications = notifications.all().order_by("-timestamp")
 
@@ -183,6 +216,7 @@ def get_notification_history(
             "urgent": notification.urgent,
             "scheduled_time": notification.scheduled_time,
             "sent_time": notification.sent_time,
+            "category": notification.category,
         }
         for notification in paginated_notifications
     ]
@@ -264,16 +298,23 @@ def fetch_user_notifications(
 
 
 def fetch_user_notifications_v1(
-    orguser: OrgUser, page: int, limit: int, read_status: int = None
+    orguser: OrgUser, page: int, limit: int, read_status: int = None, category: Optional[str] = None
 ) -> Tuple[Optional[None], Dict[str, Any]]:
     """returns all notifications for a specific user"""
 
+    filter_kwargs = {
+        "recipient": orguser,
+        "notification__sent_time__isnull": False,
+    }
+
+    if read_status is not None:
+        filter_kwargs["read_status"] = read_status == 1
+
+    if category:
+        filter_kwargs["notification__category"] = category
+
     notifications = (
-        NotificationRecipient.objects.filter(
-            recipient=orguser,
-            notification__sent_time__isnull=False,
-            **({"read_status": read_status == 1} if read_status is not None else {}),
-        )
+        NotificationRecipient.objects.filter(**filter_kwargs)
         .select_related("notification")
         .order_by("-notification__timestamp")
     )
@@ -295,6 +336,7 @@ def fetch_user_notifications_v1(
                 "scheduled_time": notification.scheduled_time,
                 "sent_time": notification.sent_time,
                 "read_status": recipient.read_status,
+                "category": notification.category,
             }
         )
 
@@ -396,3 +438,38 @@ def mark_all_notifications_as_read(
         return None, {"success": True, "updated_count": updated_count}
     except Exception as e:
         return str(e), None
+
+
+# get urgent notifications that haven't been dismissed
+def get_urgent_notifications(
+    orguser: OrgUser,
+) -> Tuple[Optional[None], Dict[str, Any]]:
+    """
+    Returns urgent notifications that haven't been dismissed by the user.
+    """
+    urgent_notifications = (
+        NotificationRecipient.objects.filter(
+            recipient=orguser,
+            notification__urgent=True,
+            notification__sent_time__isnull=False,
+            read_status=False,
+        )
+        .select_related("notification")
+        .order_by("-notification__timestamp")
+    )
+
+    notifications_list = []
+    for recipient in urgent_notifications:
+        notification = recipient.notification
+        notifications_list.append(
+            {
+                "id": notification.id,
+                "author": notification.author,
+                "message": notification.message,
+                "timestamp": notification.timestamp,
+                "category": notification.category,
+                "read_status": recipient.read_status,
+            }
+        )
+
+    return None, {"success": True, "res": notifications_list}

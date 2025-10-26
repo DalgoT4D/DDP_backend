@@ -47,7 +47,21 @@ logger = CustomLogger("airbyte")
 @airbyte_router.get("/source_definitions")
 @has_permission(["can_view_sources"])
 def get_airbyte_source_definitions(request):
-    """Fetch airbyte source definitions in the user organization workspace"""
+    """
+    Fetch all available Airbyte source definitions for the user's organization workspace.
+
+    For demo accounts, filters the available source definitions based on the
+    DEMO_AIRBYTE_SOURCE_TYPES environment variable.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+
+    Returns:
+        list: List of source definition dictionaries containing connector metadata
+
+    Raises:
+        HttpError: 400 if no Airbyte workspace exists for the organization
+    """
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
@@ -70,8 +84,20 @@ def get_airbyte_source_definitions(request):
 @has_permission(["can_view_sources"])
 def get_airbyte_source_definition_specifications(request, sourcedef_id):
     """
-    Fetch definition specifications for a particular
-    source definition in the user organization workspace
+    Fetch configuration specifications for a specific Airbyte source definition.
+
+    Returns the JSON schema specification that defines what configuration
+    parameters are required and optional for setting up this source connector.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+        sourcedef_id (str): Unique identifier of the source definition
+
+    Returns:
+        dict: Connection specification schema for the source definition
+
+    Raises:
+        HttpError: 400 if no Airbyte workspace exists for the organization
     """
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -87,7 +113,24 @@ def get_airbyte_source_definition_specifications(request, sourcedef_id):
 @airbyte_router.post("/sources/")
 @has_permission(["can_create_source"])
 def post_airbyte_source(request, payload: AirbyteSourceCreate):
-    """Create airbyte source in the user organization workspace"""
+    """
+    Create a new Airbyte source connector in the organization's workspace.
+
+    For demo accounts, automatically replaces the provided configuration with
+    whitelisted demo configuration to prevent access to unauthorized data sources.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+        payload (AirbyteSourceCreate): Source configuration including name,
+                                     source definition ID, and connection config
+
+    Returns:
+        dict: Dictionary containing the created source's ID
+
+    Raises:
+        HttpError: 400 if no Airbyte workspace exists, or if demo account
+                      configuration validation fails
+    """
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
@@ -120,7 +163,25 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
 @airbyte_router.put("/sources/{source_id}")
 @has_permission(["can_edit_source"])
 def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
-    """Update airbyte source in the user organization workspace"""
+    """
+    Update an existing Airbyte source connector configuration.
+
+    For demo accounts, automatically replaces the provided configuration with
+    whitelisted demo configuration to maintain security restrictions.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+        source_id (str): Unique identifier of the source to update
+        payload (AirbyteSourceUpdate): Updated source configuration including
+                                     name, source definition ID, and config
+
+    Returns:
+        dict: Dictionary containing the updated source's ID
+
+    Raises:
+        HttpError: 400 if organization or Airbyte workspace doesn't exist,
+                      or if demo account configuration validation fails
+    """
     orguser: OrgUser = request.orguser
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
@@ -151,7 +212,23 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
 @airbyte_router.post("/sources/check_connection/")
 @has_permission(["can_create_source"])
 def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
-    """Test the source connection in the user organization workspace"""
+    """
+    Test connectivity to a source before creating it.
+
+    Validates that the provided source configuration can successfully establish
+    a connection. For demo accounts, uses whitelisted configuration instead
+    of the provided config.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+        payload (AirbyteSourceCreate): Source configuration to test
+
+    Returns:
+        dict: Connection test result with status ('succeeded'/'failed') and logs
+
+    Raises:
+        HttpError: 400 if no Airbyte workspace exists or demo config validation fails
+    """
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
@@ -183,7 +260,24 @@ def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
 def post_airbyte_check_source_for_update(
     request, source_id: str, payload: AirbyteSourceUpdateCheckConnection
 ):
-    """Test the source connection in the user organization workspace"""
+    """
+    Test connectivity for an existing source with updated configuration.
+
+    Validates that updated source configuration can successfully establish
+    a connection before applying the changes. For demo accounts, uses
+    whitelisted configuration.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+        source_id (str): Unique identifier of the existing source
+        payload (AirbyteSourceUpdateCheckConnection): Updated configuration to test
+
+    Returns:
+        dict: Connection test result with status ('succeeded'/'failed') and logs
+
+    Raises:
+        HttpError: 400 if no Airbyte workspace exists or demo config validation fails
+    """
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
@@ -212,7 +306,21 @@ def post_airbyte_check_source_for_update(
 @airbyte_router.get("/sources")
 @has_permission(["can_view_sources"])
 def get_airbyte_sources(request):
-    """Fetch all airbyte sources in the user organization workspace"""
+    """
+    Fetch all Airbyte sources configured in the organization's workspace.
+
+    Returns a list of all source connectors that have been created and
+    configured within the organization's Airbyte workspace.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+
+    Returns:
+        list: List of source dictionaries containing source metadata and configuration
+
+    Raises:
+        HttpError: 400 if no Airbyte workspace exists for the organization
+    """
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
@@ -225,7 +333,22 @@ def get_airbyte_sources(request):
 @airbyte_router.get("/sources/{source_id}")
 @has_permission(["can_view_source"])
 def get_airbyte_source(request, source_id):
-    """Fetch a single airbyte source in the user organization workspace"""
+    """
+    Fetch details of a specific Airbyte source by its ID.
+
+    Returns complete configuration and metadata for a single source connector
+    including its current status, configuration parameters, and connection details.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+        source_id (str): Unique identifier of the source to retrieve
+
+    Returns:
+        dict: Source details including configuration, status, and metadata
+
+    Raises:
+        HttpError: 400 if no Airbyte workspace exists for the organization
+    """
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
@@ -238,7 +361,23 @@ def get_airbyte_source(request, source_id):
 @airbyte_router.get("/sources/{source_id}/schema_catalog")
 @has_permission(["can_view_source"])
 def get_airbyte_source_schema_catalog(request, source_id):
-    """Fetch schema catalog for a source in the user organization workspace"""
+    """
+    Fetch the discovered schema catalog for a specific source.
+
+    Returns the complete data schema that Airbyte has discovered from the source,
+    including all available streams, fields, and data types. This is used to
+    configure which data to sync and how to structure it.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+        source_id (str): Unique identifier of the source
+
+    Returns:
+        dict: Schema catalog containing streams, fields, and data type information
+
+    Raises:
+        HttpError: 400 if no Airbyte workspace exists for the organization
+    """
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
@@ -365,7 +504,23 @@ def get_airbyte_destination(request, destination_id):
 @airbyte_router.get("/jobs/{job_id}")
 @has_permission(["can_view_connection"])
 def get_job_status(request, job_id):
-    """get the job info from airbyte"""
+    """
+    Retrieve the status and logs for a specific Airbyte job.
+
+    Returns comprehensive job information including current status and complete
+    log output from the latest attempt. Used for monitoring sync progress and
+    debugging connection issues.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+        job_id (str): Unique identifier of the job to query
+
+    Returns:
+        dict: Job status and log lines from the most recent attempt
+
+    Raises:
+        HttpError: 400 if user lacks permission to view connections
+    """
     result = airbyte_service.get_job_info(job_id)
     logs = result["attempts"][-1]["logs"]["logLines"]
     return {
@@ -377,7 +532,22 @@ def get_job_status(request, job_id):
 @airbyte_router.get("/jobs/{job_id}/status")
 @has_permission(["can_view_connection"])
 def get_job_status_without_logs(request, job_id):
-    """get the job info from airbyte"""
+    """
+    Retrieve only the status of a specific Airbyte job without logs.
+
+    Lightweight endpoint to check job status without downloading potentially
+    large log files. Useful for polling job completion status.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+        job_id (str): Unique identifier of the job to query
+
+    Returns:
+        dict: Job status only, without log data
+
+    Raises:
+        HttpError: 400 if user lacks permission to view connections
+    """
     result = airbyte_service.get_job_info_without_logs(job_id)
     print(result)
     return {
@@ -392,7 +562,23 @@ def get_job_status_without_logs(request, job_id):
 @airbyte_router.post("/v1/workspace/", response=AirbyteWorkspace)
 @has_permission(["can_create_org"])
 def post_airbyte_workspace_v1(request, payload: AirbyteWorkspaceCreate):
-    """Create an airbyte workspace"""
+    """
+    Create a new Airbyte workspace for the organization.
+
+    Initializes a dedicated Airbyte workspace for the organization and adds
+    custom connectors configured in system settings. Each organization can
+    have only one workspace.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+        payload (AirbyteWorkspaceCreate): Workspace configuration including name
+
+    Returns:
+        AirbyteWorkspace: Created workspace details including workspace ID
+
+    Raises:
+        HttpError: 400 if organization already has an existing workspace
+    """
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is not None:
         raise HttpError(400, "org already has a workspace")
@@ -412,7 +598,25 @@ def post_airbyte_workspace_v1(request, payload: AirbyteWorkspaceCreate):
 )
 @has_permission(["can_create_connection"])
 def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
-    """Create an airbyte connection in the user organization workspace"""
+    """
+    Create a new Airbyte connection between a source and destination.
+
+    Establishes a data pipeline connection that defines which streams to sync,
+    how frequently to sync them, and how to handle the data transformation.
+    At least one stream must be specified.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+        payload (AirbyteConnectionCreate): Connection configuration including
+                                         source, destination, streams, and sync settings
+
+    Returns:
+        AirbyteConnectionCreateResponse: Created connection details including connection ID
+
+    Raises:
+        HttpError: 400 if no Airbyte workspace exists, no streams specified,
+                      or connection creation fails
+    """
     orguser: OrgUser = request.orguser
     org = orguser.org
     if org.airbyte_workspace_id is None:
@@ -435,7 +639,22 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
 )
 @has_permission(["can_view_connections"])
 def get_airbyte_connections_v1(request):
-    """Fetch all airbyte connections in the user organization workspace"""
+    """
+    Fetch all Airbyte connections in the organization's workspace.
+
+    Returns a comprehensive list of all data pipeline connections configured
+    within the organization, including their current status, configuration,
+    and sync schedules.
+
+    Args:
+        request: HTTP request object containing orguser authentication data
+
+    Returns:
+        List[AirbyteGetConnectionsResponse]: List of all connections with their details
+
+    Raises:
+        HttpError: 400 if no Airbyte workspace exists or connection retrieval fails
+    """
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")

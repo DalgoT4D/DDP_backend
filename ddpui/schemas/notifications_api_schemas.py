@@ -16,6 +16,19 @@ class SentToEnum(str, Enum):
     SINGLE_USER = "single_user"
 
 
+class NotificationCategoryEnum(str, Enum):
+    """
+    Schema for notification categories
+    """
+
+    INCIDENT = "incident"
+    SCHEMA_CHANGE = "schema_change"
+    JOB_FAILURE = "job_failure"
+    LATE_RUNS = "late_runs"
+    DBT_TEST_FAILURE = "dbt_test_failure"
+    MAINTENANCE = "maintenance"
+
+
 class CreateNotificationPayloadSchema(BaseModel):
     """Schema for creating a new notification api."""
 
@@ -27,6 +40,7 @@ class CreateNotificationPayloadSchema(BaseModel):
     user_email: Optional[str] = None
     manager_or_above: Optional[bool] = False
     org_slug: Optional[str] = None
+    category: Optional[NotificationCategoryEnum] = None
 
     class Config:
         use_enum_values = True
@@ -55,3 +69,12 @@ class NotificationDataSchema(Schema):
     urgent: Optional[bool] = False
     scheduled_time: Optional[datetime] = None
     recipients: List[int]  # list of orguser ids
+    category: Optional[str]
+
+
+class CategorySubscriptionSchema(Schema):
+    """Schema for updating category subscription preferences"""
+
+    subscribe_schema_change_notifications: Optional[bool] = None
+    subscribe_job_failure_notifications: Optional[bool] = None
+    subscribe_dbt_test_failure_notifications: Optional[bool] = None
