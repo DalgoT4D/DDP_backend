@@ -219,12 +219,18 @@ def build_chart_query(
     query_builder.fetch_from(payload.table_name, payload.schema_name)
 
     if payload.computation_type == "raw":
+        # Collect unique columns to avoid duplicates
+        columns_to_add = set()
         if payload.x_axis:
-            query_builder.add_column(column(payload.x_axis))
+            columns_to_add.add(payload.x_axis)
         if payload.y_axis:
-            query_builder.add_column(column(payload.y_axis))
+            columns_to_add.add(payload.y_axis)
         if payload.extra_dimension:
-            query_builder.add_column(column(payload.extra_dimension))
+            columns_to_add.add(payload.extra_dimension)
+
+        # Add each unique column to the query
+        for col_name in columns_to_add:
+            query_builder.add_column(column(col_name))
 
         # Validate that at least one column is specified
         if not payload.x_axis and not payload.y_axis:
@@ -627,16 +633,26 @@ def execute_chart_query(
     column_mapping = []
 
     if payload.computation_type == "raw":
-        # For raw queries, columns are in the order they were added
-        col_index = 0
+        # For raw queries, build mapping based on unique columns
+        # Collect unique columns in the same order as in build_query
+        columns_to_add = set()
+        column_order = []  # Preserve insertion order
         if payload.x_axis:
-            column_mapping.append((payload.x_axis, col_index))
-            col_index += 1
+            if payload.x_axis not in columns_to_add:
+                columns_to_add.add(payload.x_axis)
+                column_order.append(payload.x_axis)
         if payload.y_axis:
-            column_mapping.append((payload.y_axis, col_index))
-            col_index += 1
+            if payload.y_axis not in columns_to_add:
+                columns_to_add.add(payload.y_axis)
+                column_order.append(payload.y_axis)
         if payload.extra_dimension:
-            column_mapping.append((payload.extra_dimension, col_index))
+            if payload.extra_dimension not in columns_to_add:
+                columns_to_add.add(payload.extra_dimension)
+                column_order.append(payload.extra_dimension)
+
+        # Build mapping using the unique column order
+        for col_index, col_name in enumerate(column_order):
+            column_mapping.append((col_name, col_index))
 
     else:  # aggregated
         col_index = 0
@@ -682,24 +698,63 @@ def transform_data_for_chart(
 
     if payload.chart_type == "bar":
         if payload.computation_type == "raw":
-            return {
-                "xAxisData": [
-                    convert_value(safe_get_value(row, payload.x_axis, null_label))
-                    for row in results
-                ],
-                "series": [
-                    {
-                        "name": payload.y_axis,
-                        "data": [
-                            convert_value(
-                                safe_get_value(row, payload.y_axis, null_label), preserve_none=True
-                            )
-                            for row in results
-                        ],
-                    }
-                ],
-                "legend": [payload.y_axis],
-            }
+            # Handle extra dimension for grouping/stacking in raw charts
+            if payload.extra_dimension:
+                # Group data by extra dimension
+                grouped_data = {}
+                x_values = set()
+
+                for row in results:
+                    x_val = convert_value(safe_get_value(row, payload.x_axis, null_label))
+                    y_val = convert_value(
+                        safe_get_value(row, payload.y_axis, null_label), preserve_none=True
+                    )
+                    extra_val = convert_value(
+                        safe_get_value(row, payload.extra_dimension, null_label)
+                    )
+
+                    x_values.add(x_val)
+
+                    if extra_val not in grouped_data:
+                        grouped_data[extra_val] = {}
+                    grouped_data[extra_val][x_val] = y_val
+
+                # Build series data for each extra dimension value
+                x_axis_data = sorted(list(x_values))
+                series_data = []
+                legend_data = []
+
+                for extra_val, data_dict in grouped_data.items():
+                    series_values = [data_dict.get(x_val, 0) for x_val in x_axis_data]
+                    series_data.append({"name": str(extra_val), "data": series_values})
+                    legend_data.append(str(extra_val))
+
+                return {
+                    "xAxisData": x_axis_data,
+                    "series": series_data,
+                    "legend": legend_data,
+                }
+            else:
+                # Simple raw chart without extra dimension
+                return {
+                    "xAxisData": [
+                        convert_value(safe_get_value(row, payload.x_axis, null_label))
+                        for row in results
+                    ],
+                    "series": [
+                        {
+                            "name": payload.y_axis,
+                            "data": [
+                                convert_value(
+                                    safe_get_value(row, payload.y_axis, null_label),
+                                    preserve_none=True,
+                                )
+                                for row in results
+                            ],
+                        }
+                    ],
+                    "legend": [payload.y_axis],
+                }
         else:  # aggregated
             if not payload.metrics or len(payload.metrics) == 0:
                 return {}
@@ -813,15 +868,33 @@ def transform_data_for_chart(
 
     elif payload.chart_type == "pie":
         if payload.computation_type == "raw":
-            # For raw data, count occurrences
-            value_counts = {}
-            for row in results:
-                key = handle_null_value(safe_get_value(row, payload.x_axis, null_label), null_label)
-                value_counts[key] = value_counts.get(key, 0) + 1
+            # For truly raw data, each record becomes a separate pie slice
+            pie_data = []
+            for i, row in enumerate(results):
+                x_value = handle_null_value(
+                    safe_get_value(row, payload.x_axis, null_label), null_label
+                )
 
+                if payload.y_axis:
+                    # Use Y-axis value as the slice value
+                    y_value = convert_value(
+                        safe_get_value(row, payload.y_axis, null_label), preserve_none=True
+                    )
+                    slice_value = y_value if y_value is not None else 0
+                    # Create unique slice name combining X and Y values
+                    slice_name = f"{x_value} ({slice_value})"
+                else:
+                    # If no Y-axis, each record gets value of 1
+                    slice_value = 1
+                    # Create unique slice name with index to avoid duplicates
+                    slice_name = f"{x_value} #{i+1}"
+
+                pie_data.append({"value": slice_value, "name": slice_name})
+
+            series_name = payload.y_axis if payload.y_axis else f"Records by {payload.x_axis}"
             return {
-                "pieData": [{"value": count, "name": name} for name, count in value_counts.items()],
-                "seriesName": payload.x_axis,
+                "pieData": pie_data,
+                "seriesName": series_name,
             }
         else:  # aggregated
             if not payload.metrics or len(payload.metrics) == 0:
@@ -868,24 +941,61 @@ def transform_data_for_chart(
 
     elif payload.chart_type == "line":
         if payload.computation_type == "raw":
-            return {
-                "xAxisData": [
-                    convert_value(safe_get_value(row, payload.x_axis, null_label))
-                    for row in results
-                ],
-                "series": [
-                    {
-                        "name": payload.y_axis,
-                        "data": [
-                            convert_value(
-                                safe_get_value(row, payload.y_axis, null_label), preserve_none=True
-                            )
-                            for row in results
-                        ],
-                    }
-                ],
-                "legend": [payload.y_axis],
-            }
+            # Check if we have extra_dimension for grouping
+            if payload.extra_dimension:
+                # Group data by extra dimension
+                grouped_data = {}
+                x_values = set()
+                for row in results:
+                    x_val = convert_value(safe_get_value(row, payload.x_axis, null_label))
+                    y_val = convert_value(
+                        safe_get_value(row, payload.y_axis, null_label), preserve_none=True
+                    )
+                    extra_val = convert_value(
+                        safe_get_value(row, payload.extra_dimension, null_label)
+                    )
+
+                    x_values.add(x_val)
+                    if extra_val not in grouped_data:
+                        grouped_data[extra_val] = {}
+                    grouped_data[extra_val][x_val] = y_val
+
+                # Build series data for each extra dimension value
+                x_axis_data = sorted(list(x_values))
+                series_data = []
+                legend_data = []
+
+                for extra_val, data_dict in grouped_data.items():
+                    series_values = [data_dict.get(x_val, 0) for x_val in x_axis_data]
+                    series_data.append({"name": str(extra_val), "data": series_values})
+                    legend_data.append(str(extra_val))
+
+                return {
+                    "xAxisData": x_axis_data,
+                    "series": series_data,
+                    "legend": legend_data,
+                }
+            else:
+                # Simple raw chart without extra dimension
+                return {
+                    "xAxisData": [
+                        convert_value(safe_get_value(row, payload.x_axis, null_label))
+                        for row in results
+                    ],
+                    "series": [
+                        {
+                            "name": payload.y_axis,
+                            "data": [
+                                convert_value(
+                                    safe_get_value(row, payload.y_axis, null_label),
+                                    preserve_none=True,
+                                )
+                                for row in results
+                            ],
+                        }
+                    ],
+                    "legend": [payload.y_axis],
+                }
         else:  # aggregated
             if not payload.metrics or len(payload.metrics) == 0:
                 return {}
@@ -1089,18 +1199,26 @@ def get_chart_data_table_preview(
     columns = []
 
     if payload.computation_type == "raw":
-        col_index = 0
+        # For raw queries, build mapping based on unique columns (same logic as in execute_chart_query)
+        columns_to_add = set()
+        column_order = []  # Preserve insertion order
         if payload.x_axis:
-            column_mapping.append((payload.x_axis, col_index))
-            columns.append(payload.x_axis)
-            col_index += 1
+            if payload.x_axis not in columns_to_add:
+                columns_to_add.add(payload.x_axis)
+                column_order.append(payload.x_axis)
         if payload.y_axis:
-            column_mapping.append((payload.y_axis, col_index))
-            columns.append(payload.y_axis)
-            col_index += 1
+            if payload.y_axis not in columns_to_add:
+                columns_to_add.add(payload.y_axis)
+                column_order.append(payload.y_axis)
         if payload.extra_dimension:
-            column_mapping.append((payload.extra_dimension, col_index))
-            columns.append(payload.extra_dimension)
+            if payload.extra_dimension not in columns_to_add:
+                columns_to_add.add(payload.extra_dimension)
+                column_order.append(payload.extra_dimension)
+
+        # Build mapping using the unique column order
+        for col_index, col_name in enumerate(column_order):
+            column_mapping.append((col_name, col_index))
+            columns.append(col_name)
     else:  # aggregated
         col_index = 0
         column_mapping.append((payload.dimension_col, col_index))
