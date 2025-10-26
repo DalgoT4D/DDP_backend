@@ -1,6 +1,6 @@
 from typing import Union
-from ninja import Schema
 from pathlib import Path
+from ninja import Schema
 
 
 class DbtProjectParams(Schema):
