@@ -208,6 +208,7 @@ class EChartsConfigGenerator:
         legend_display = customizations.get("legendDisplay", "paginated")
         show_legend = customizations.get("showLegend", True)
         show_tooltip = customizations.get("showTooltip", True)
+        label_threshold = customizations.get("labelThreshold", 5)  # Default 5% threshold
 
         # Determine label formatter
         formatter_map = {
@@ -276,6 +277,9 @@ class EChartsConfigGenerator:
                         "show": show_data_labels,
                         "position": position_map.get(data_label_position, "outside"),
                         "formatter": formatter_map.get(label_format, "{d}%"),
+                        # Pass threshold as a custom property for frontend processing
+                        "labelThreshold": label_threshold,
+                        "labelFormat": label_format,
                     },
                     "labelLine": {"show": show_data_labels and data_label_position == "outside"},
                     "data": data.get("pieData", []),
