@@ -151,7 +151,7 @@ def get_tools_versions(request):
     redis_client = RedisClient.get_instance()
     versions = redis_client.get(redis_key)
     if versions:
-        return {"success": True, "res": json.loads(versions), "cached": True}
+        return {"success": True, "res": json.loads(versions)}
 
     versions = []
 
