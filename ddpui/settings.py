@@ -295,3 +295,5 @@ FRONTEND_URL_V2 = os.getenv("FRONTEND_URL_V2")
 COOKIE_SECURE = True
 COOKIE_SAMESITE = "Lax" if os.getenv("ENVIRONMENT", "") == "production" else "None"
 COOKIE_HTTPONLY = True
+
+DATA_UPLOAD_MAX_MEMORY_SIZE = 5242880  # 5 MB
