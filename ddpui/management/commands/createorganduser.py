@@ -1,4 +1,4 @@
-""" Creates and Org and an OrgUser """
+"""Creates and Org and an OrgUser"""
 
 import os
 import sys
@@ -11,7 +11,8 @@ from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser, UserAttributes
 from ddpui.models.role_based_access import Role
 from ddpui.core.orgfunctions import create_organization
-from ddpui.models.org import OrgSchema
+from ddpui.models.org import CreateOrgSchema
+from ddpui.models.org_plans import OrgPlanType
 
 
 class Command(BaseCommand):
@@ -48,7 +49,14 @@ class Command(BaseCommand):
         # fetch / create the Org
         if not Org.objects.filter(name=options["orgname"]).exists():
             create_organization(
-                OrgSchema(name=options["orgname"], slug=slugify(options["orgname"]))
+                CreateOrgSchema(
+                    name=options["orgname"],
+                    slug=slugify(options["orgname"]),
+                    base_plan=OrgPlanType.INTERNAL.value,
+                    can_upgrade_plan=True,
+                    superset_included=False,
+                    subscription_duration="Monthly",
+                )
             )
             print(f"Org {options['orgname']} created")
         else:
