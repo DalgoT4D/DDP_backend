@@ -1,3 +1,4 @@
+import json
 import os
 from ninja import Router
 from ninja.errors import HttpError
@@ -23,6 +24,7 @@ from ddpui.ddpprefect import (
     prefect_service,
 )
 from ddpui.utils.awsses import send_text_message
+from ddpui.utils.redis_client import RedisClient
 
 orgpreference_router = Router()
 
@@ -145,6 +147,12 @@ def get_tools_versions(request):
 
     org_superset = OrgSupersets.objects.filter(org=org).first()
 
+    redis_key = f"org_tools_versions_{org.slug}"
+    redis_client = RedisClient.get_instance()
+    versions = redis_client.get(redis_key)
+    if versions:
+        return {"success": True, "res": json.loads(versions), "cached": True}
+
     versions = []
 
     ver = airbyte_service.get_current_airbyte_version()
@@ -170,6 +178,8 @@ def get_tools_versions(request):
             }
         }
     )
+
+    redis_client.set(redis_key, json.dumps(versions), ex=24 * 3600)
 
     return {"success": True, "res": versions}
 
