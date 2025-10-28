@@ -306,3 +306,66 @@ def standardize_geojson_properties(geojson_data: dict, properties_key: str) -> d
                 feature["properties"]["name"] = feature["properties"][properties_key]
 
     return geojson_data
+
+
+def export_region_names_json(country_code: str, region_type: str) -> List[Dict]:
+    """Export region names as JSON for a specific country and region type
+
+    Args:
+        country_code: ISO country code (e.g., 'IND', 'KEN')
+        region_type: Type of region ('state' or 'district')
+
+    Returns:
+        List of dictionaries with region data
+
+    Raises:
+        ValueError: If country_code is invalid or no regions found
+    """
+
+    # Validate country_code exists in database
+    country_exists = GeoRegion.objects.filter(country_code=country_code, type="country").exists()
+
+    if not country_exists:
+        raise ValueError(f"Invalid country code: {country_code}")
+
+    if region_type == "state":
+        # Export state names only
+        states = GeoRegion.objects.filter(country_code=country_code, type="state").order_by("name")
+
+        if not states.exists():
+            raise ValueError(f"No states found for country: {country_code}")
+
+        result = [{"state": state.name} for state in states]
+        logger.info(f"Exported {len(result)} states for country {country_code}")
+        return result
+
+    elif region_type == "district":
+        # Export state-district pairs from GeoJSON features
+        states = GeoRegion.objects.filter(country_code=country_code, type="state").order_by("name")
+
+        if not states.exists():
+            raise ValueError(f"No states found for country: {country_code}")
+
+        result = []
+        for state in states:
+            # Get GeoJSON for this state
+            geojsons = GeoJSON.objects.filter(region=state, is_default=True)
+
+            for geojson in geojsons:
+                features = geojson.geojson_data.get("features", [])
+                properties_key = geojson.properties_key
+
+                # Extract district names from GeoJSON features
+                for feature in features:
+                    district_name = feature.get("properties", {}).get(properties_key)
+                    if district_name:
+                        result.append({"state": state.name, "district": district_name})
+
+        if not result:
+            raise ValueError(f"No districts found for country: {country_code}")
+
+        logger.info(f"Exported {len(result)} districts for country {country_code}")
+        return result
+
+    else:
+        raise ValueError(f"Invalid region_type: {region_type}. Must be 'state' or 'district'")

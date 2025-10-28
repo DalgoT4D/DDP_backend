@@ -7,6 +7,7 @@ from datetime import datetime
 from ninja import Router, Schema, Field
 from ninja.errors import HttpError
 from django.shortcuts import get_object_or_404
+from django.http import HttpResponse
 
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
@@ -39,6 +40,47 @@ charts_router = Router()
 # Schema for bulk delete
 class BulkDeleteRequest(Schema):
     chart_ids: List[int]
+
+
+# Map-related endpoints - Must come before parameterized routes
+@charts_router.get("/regions/export-names/", response=List[dict])
+@has_permission(["can_view_charts"])
+def export_region_names(request, country_code: str, region_type: str):
+    """Export region names as JSON for a specific country
+
+    Args:
+        country_code: ISO country code (e.g., 'IND', 'KEN')
+        region_type: Type of region ('state' or 'district')
+
+    Returns:
+        JSON array with region data
+    """
+    from ddpui.core.charts.maps_service import export_region_names_json
+
+    # Validate query parameters
+    if not country_code:
+        raise HttpError(400, "country_code is required")
+
+    if not region_type:
+        raise HttpError(400, "region_type is required")
+
+    if region_type not in ["state", "district"]:
+        raise HttpError(400, "region_type must be 'state' or 'district'")
+
+    try:
+        # Generate JSON data with backend filtering by country
+        data = export_region_names_json(country_code, region_type)
+
+        logger.info(f"Exported {len(data)} {region_type}s for country {country_code}")
+
+        return data
+
+    except ValueError as e:
+        logger.error(f"Export error: {str(e)}")
+        raise HttpError(404, str(e))
+    except Exception as e:
+        logger.error(f"Unexpected error during export: {str(e)}")
+        raise HttpError(500, f"Failed to export region names: {str(e)}")
 
 
 @charts_router.get("/regions/{region_id}/geojsons/", response=List[dict])
