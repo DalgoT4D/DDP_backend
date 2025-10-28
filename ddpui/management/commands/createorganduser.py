@@ -40,7 +40,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         # ensure the Role exists
         role = Role.objects.filter(slug=options["role"]).first()
-        if not role:
+        if role is None:
             print(
                 f"Role with slug '{options['role']}' does not exist, please run 'python manage.py loaddata seed/*.json'"
             )
@@ -48,7 +48,7 @@ class Command(BaseCommand):
 
         # fetch / create the Org
         if not Org.objects.filter(name=options["orgname"]).exists():
-            create_organization(
+            org, error = create_organization(
                 CreateOrgSchema(
                     name=options["orgname"],
                     slug=slugify(options["orgname"]),
@@ -58,10 +58,17 @@ class Command(BaseCommand):
                     subscription_duration="Monthly",
                 )
             )
+            if error:
+                print(f"Error creating org: {error}")
+                sys.exit(1)
             print(f"Org {options['orgname']} created")
         else:
             print(f"Org {options['orgname']} already exists")
-        org = Org.objects.filter(name=options["orgname"]).first()
+            org = Org.objects.filter(name=options["orgname"]).first()
+
+        if org is None:
+            print(f"Error: Failed to create or fetch org '{options['orgname']}'")
+            sys.exit(1)
 
         # fetch / create the User
         if not User.objects.filter(email=options["email"]).exists():
@@ -85,7 +92,14 @@ class Command(BaseCommand):
             print(f"User {options['email']} already exists")
         user = User.objects.filter(email=options["email"]).first()
 
+        if user is None:
+            print(f"Error: Failed to create or fetch user '{options['email']}'")
+            sys.exit(1)
+
         if not OrgUser.objects.filter(org=org, user=user).exists():
+            if role is None:
+                print(f"Error: Role is None. This should not happen.")
+                sys.exit(1)
             OrgUser.objects.create(org=org, user=user, new_role=role, email_verified=True)
             print(f"OrgUser {user.email} created for Org {org.name} with role {role.name}")
         else:
