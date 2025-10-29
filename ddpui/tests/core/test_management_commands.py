@@ -36,7 +36,8 @@ class TestCreateOrgAndUserCommand:
 
         # Mock organization creation to avoid external dependencies
         def create_org_side_effect(org_schema):
-            return Org.objects.create(name=org_schema.name, slug=org_schema.slug)
+            org = Org.objects.create(name=org_schema.name, slug=org_schema.slug)
+            return org, None  # Return tuple (org, error) as expected
 
         mock_create_org.side_effect = create_org_side_effect
 
@@ -116,7 +117,8 @@ class TestCreateOrgAndUserCommand:
 
         # Mock organization creation to avoid external dependencies
         def create_org_side_effect(org_schema):
-            return Org.objects.create(name=org_schema.name, slug=org_schema.slug)
+            org = Org.objects.create(name=org_schema.name, slug=org_schema.slug)
+            return org, None  # Return tuple (org, error) as expected
 
         mock_create_org.side_effect = create_org_side_effect
 
@@ -165,7 +167,8 @@ class TestCreateOrgAndUserCommand:
 
         # Mock organization creation to avoid external dependencies
         def create_org_side_effect(org_schema):
-            return Org.objects.create(name=org_schema.name, slug=org_schema.slug)
+            org = Org.objects.create(name=org_schema.name, slug=org_schema.slug)
+            return org, None  # Return tuple (org, error) as expected
 
         mock_create_org.side_effect = create_org_side_effect
         # test password via environment variable
@@ -184,7 +187,8 @@ class TestCreateOrgAndUserCommand:
 
         # Mock organization creation to avoid external dependencies
         def create_org_side_effect(org_schema):
-            return Org.objects.create(name=org_schema.name, slug=org_schema.slug)
+            org = Org.objects.create(name=org_schema.name, slug=org_schema.slug)
+            return org, None  # Return tuple (org, error) as expected
 
         mock_create_org.side_effect = create_org_side_effect
 
