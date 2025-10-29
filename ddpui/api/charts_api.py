@@ -382,15 +382,12 @@ class MapDataOverlayPayload(Schema):
     value_column: str
     metrics: List[ChartMetric]
     filters: Dict[str, Any] = Field(default_factory=dict)  # Drill-down filters (key-value pairs)
-    chart_filters: Optional[List[Dict[str, Any]]] = Field(
-        default_factory=list
-    )  # Chart-level filters (list of filter objects)
-    dashboard_filters: Optional[List[Dict[str, Any]]] = Field(
-        default_factory=list
-    )  # Dashboard-level filters (list of filter objects)
+    dashboard_filters: Optional[dict[str, Any]] = Field(
+        default_factory=dict
+    )  # Dashboard-level filters (dictionary of filter objects)
     extra_config: Optional[Dict[str, Any]] = Field(
         default_factory=dict
-    )  # Additional configuration including pagination, sorting, etc.
+    )  # Additional configuration including chart-level filters, pagination, sorting, etc.
 
 
 @charts_router.post("/map-data-overlay/", response=dict)
@@ -416,7 +413,6 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         value_column = payload.value_column
         # Use first metric for map overlay
         filters = payload.filters
-        chart_filters = payload.chart_filters
 
         # Validate required fields
         if not all([schema_name, table_name, geographic_column, value_column]):
@@ -431,15 +427,8 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
 
         # Build payload for standard chart query (same as other charts)
         # Make a deep copy to avoid mutating the original payload
+        # extra_config already contains chart-level filters in extra_config.filters
         extra_config = copy.deepcopy(payload.extra_config or {})
-
-        # Merge chart filters with existing filters instead of overwriting
-        if chart_filters:
-            existing_filters = extra_config.get("filters", [])
-            if isinstance(existing_filters, list):
-                extra_config["filters"] = existing_filters + chart_filters
-            else:
-                extra_config["filters"] = chart_filters
 
         # Use metrics from payload directly
         metrics = payload.metrics
@@ -454,10 +443,7 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
 
                 resolved_filters = []
 
-                for filter_item in dashboard_filters:
-                    filter_id = filter_item.get("filter_id")
-                    filter_value = filter_item.get("value")
-
+                for filter_id, filter_value in dashboard_filters.items():
                     if filter_id and filter_value is not None:
                         try:
                             # Get the filter configuration from the database
