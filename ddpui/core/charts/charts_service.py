@@ -72,12 +72,8 @@ def get_pagination_params(payload: ChartDataPayload):
         page_size = payload.extra_config["pagination"].get("page_size", 50)
         # For preview/build, always start from offset 0
         return page_size, 0
-    else:
-        # Default pagination when not explicitly set
-        # Use old payload.limit/offset if available (backward compatibility)
-        limit = getattr(payload, "limit", 100)
-        offset = getattr(payload, "offset", 0)
-        return limit, offset
+
+    return None, None
 
 
 logger = CustomLogger("ddpui.charts")
@@ -215,9 +211,35 @@ def build_chart_query(
     payload: ChartDataPayload, org_warehouse: OrgWarehouse = None
 ) -> AggQueryBuilder:
     """Build query using unified AggQueryBuilder for both raw and aggregated queries"""
-    query_builder = AggQueryBuilder()
-    query_builder.fetch_from(payload.table_name, payload.schema_name)
 
+    # Get pagination parameters
+    limit, offset = get_pagination_params(payload)
+
+    # If pagination is enabled, create a subquery with LIMIT/OFFSET first
+    if limit is not None:
+        # Step 1: Create inner query that selects all columns with LIMIT/OFFSET
+        inner_query_builder = AggQueryBuilder()
+        inner_query_builder.fetch_from(payload.table_name, payload.schema_name)
+
+        # Add all columns from the table (SELECT * equivalent)
+        inner_query_builder.add_column(text("*"))
+
+        # Apply LIMIT/OFFSET to inner query
+        inner_query_builder.limit_rows(limit)
+        inner_query_builder.offset_rows(offset)
+
+        # Create subquery
+        inner_subquery = inner_query_builder.subquery("paginated_data")
+
+        # Step 2: Build main query on the paginated data
+        query_builder = AggQueryBuilder()
+        query_builder.fetch_from_subquery(inner_subquery)
+    else:
+        # No pagination, use original table directly
+        query_builder = AggQueryBuilder()
+        query_builder.fetch_from(payload.table_name, payload.schema_name)
+
+    # Now build the rest of the query logic on top of the (possibly paginated) data source
     if payload.computation_type == "raw":
         if payload.x_axis:
             query_builder.add_column(column(payload.x_axis))
@@ -330,11 +352,6 @@ def build_chart_query(
     # Apply chart-level sorting if provided
     if payload.extra_config and payload.extra_config.get("sort"):
         query_builder = apply_chart_sorting(query_builder, payload.extra_config["sort"], payload)
-
-    # Apply pagination
-    limit, offset = get_pagination_params(payload)
-    query_builder.limit_rows(limit)
-    query_builder.offset_rows(offset)
 
     return query_builder
 
@@ -1074,6 +1091,8 @@ def transform_data_for_chart(
 def get_chart_data_table_preview(
     org_warehouse: OrgWarehouse,
     payload: ChartDataPayload,
+    page: int = 0,
+    limit: int = 100,
 ) -> Dict[str, Any]:
     """Get paginated table preview with column information
 
@@ -1112,17 +1131,20 @@ def get_chart_data_table_preview(
             for metric in payload.metrics:
                 if metric.aggregation.lower() == "count" and metric.column is None:
                     alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-                    display_name = metric.alias or "Total Count"
                 else:
                     alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-                    display_name = metric.alias or f"{metric.aggregation}({metric.column})"
                 column_mapping.append((alias, col_index))
-                columns.append(display_name)
+                columns.append(alias)
                 col_index += 1
 
         if payload.extra_dimension:
             column_mapping.append((payload.extra_dimension, col_index))
             columns.append(payload.extra_dimension)
+
+    # apply the pagination limits on the query
+    offset = page * limit
+    query_builder.limit_records = limit
+    query_builder.offset_records = offset
 
     # Execute query with column mapping
     data_dicts = execute_query(warehouse, query_builder, column_mapping)
@@ -1130,34 +1152,30 @@ def get_chart_data_table_preview(
     # For chart preview, we don't need column types for specific columns
     column_types = {col: "unknown" for col in columns}
 
-    # Calculate page info
-    limit, offset = get_pagination_params(payload)
-    page_size = limit
-    page = (offset // page_size) + 1 if page_size > 0 else 1
+    return {
+        "columns": columns,
+        "column_types": column_types,
+        "data": data_dicts,
+        "page": page,
+        "limit": limit,
+    }
 
-    # Get total count using the existing query_builder as subquery (without LIMIT/OFFSET)
-    # Temporarily remove pagination from existing query builder
-    original_limit = query_builder.limit_records
-    original_offset = query_builder.offset_records
-    query_builder.limit_records = None
-    query_builder.offset_records = 0
+
+def get_chart_data_total_rows(
+    org_warehouse: OrgWarehouse,
+    payload: ChartDataPayload,
+) -> int:
+    """Get total number of rows for the chart data query"""
+    warehouse = get_warehouse_client(org_warehouse)
+
+    # Use the same query builder as chart data
+    query_builder = build_chart_query(payload, org_warehouse)
 
     # Build the original query as subquery and wrap with COUNT(*)
     original_subquery = query_builder.build()
     count_sql = f"SELECT COUNT(*) as total FROM ({original_subquery.compile(bind=warehouse.engine, compile_kwargs={'literal_binds': True})}) as subquery"
 
-    # Restore original pagination settings
-    query_builder.limit_records = original_limit
-    query_builder.offset_records = original_offset
-
     count_result = warehouse.execute(count_sql)
     total_rows = count_result[0]["total"] if count_result else 0
 
-    return {
-        "columns": columns,
-        "column_types": column_types,
-        "data": data_dicts,
-        "total_rows": total_rows,
-        "page": page,
-        "page_size": page_size,
-    }
+    return total_rows
