@@ -31,6 +31,7 @@ from ddpui.schemas.chart_schema import (
     GeoJSONListResponse,
     GeoJSONUpload,
 )
+from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 
 logger = CustomLogger("ddpui")
 
@@ -406,6 +407,8 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         if not org_warehouse:
             raise HttpError(404, "Warehouse not configured")
 
+        warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+
         # Extract required fields from payload
         schema_name = payload.schema_name
         table_name = payload.table_name
@@ -461,9 +464,8 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
                             dashboard_filter = DashboardFilter.objects.get(id=filter_id)
 
                             # Only apply this filter if it applies to the same table as the chart
-                            if (
-                                dashboard_filter.schema_name == schema_name
-                                and dashboard_filter.table_name == table_name
+                            if warehouse_client.column_exists(
+                                schema_name, table_name, dashboard_filter.column_name
                             ):
                                 resolved_filters.append(
                                     {
@@ -827,6 +829,9 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
     if not org_warehouse:
         raise HttpError(404, "Warehouse not configured")
 
+    # warehouse client
+    warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+
     # Build payload from chart config
     extra_config = chart.extra_config.copy() if chart.extra_config else {}
 
@@ -849,9 +854,8 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
                         dashboard_filter = DashboardFilter.objects.get(id=filter_id)
 
                         # Only apply this filter if it applies to the same table as the chart
-                        if (
-                            dashboard_filter.schema_name == chart.schema_name
-                            and dashboard_filter.table_name == chart.table_name
+                        if warehouse_client.column_exists(
+                            chart.schema_name, chart.table_name, dashboard_filter.column_name
                         ):
                             resolved_filters.append(
                                 {

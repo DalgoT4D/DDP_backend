@@ -27,3 +27,7 @@ class Warehouse(ABC):
     @abstractmethod
     def get_wtype(self):
         pass
+
+    @abstractmethod
+    def column_exists(self, db_schema: str, db_table: str, column_name: str) -> bool:
+        pass
