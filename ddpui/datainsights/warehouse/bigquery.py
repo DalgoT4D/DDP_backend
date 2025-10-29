@@ -4,6 +4,7 @@ from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy import inspect
 from sqlalchemy.types import NullType
 from sqlalchemy_bigquery._types import _type_map
+from sqlalchemy.exc import NoSuchTableError
 
 from ddpui.datainsights.insights.insight_interface import MAP_TRANSLATE_TYPES
 from ddpui.datainsights.warehouse.warehouse_interface import Warehouse
@@ -87,3 +88,20 @@ class BigqueryClient(Warehouse):
 
     def get_wtype(self):
         return WarehouseType.BIGQUERY
+
+    def column_exists(self, db_schema: str, db_table: str, column_name: str) -> bool:
+        """
+        Check whether a column exists in the given schema.table.
+        Uses SQLAlchemy Inspector to list columns for the table.
+        """
+        try:
+            cols = self.inspect_obj.get_columns(table_name=db_table, schema=db_schema)
+        except NoSuchTableError:
+            return False
+        except Exception:
+            return False
+
+        for col in cols:
+            if col.get("name") == column_name:
+                return True
+        return False

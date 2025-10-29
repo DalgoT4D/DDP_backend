@@ -36,6 +36,9 @@ class DummyWarehouse(Warehouse):
     def get_wtype(self):
         pass
 
+    def column_exists(self, db_schema, db_table, column_name):
+        pass
+
 
 def test_unimplemented_methods_warehouse_interface():
     """Each warehouse client should implement all abstract methods in Warehouse interface"""

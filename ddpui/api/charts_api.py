@@ -31,6 +31,7 @@ from ddpui.schemas.chart_schema import (
     GeoJSONListResponse,
     GeoJSONUpload,
 )
+from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 
 logger = CustomLogger("ddpui")
 
@@ -381,15 +382,12 @@ class MapDataOverlayPayload(Schema):
     value_column: str
     metrics: List[ChartMetric]
     filters: Dict[str, Any] = Field(default_factory=dict)  # Drill-down filters (key-value pairs)
-    chart_filters: Optional[List[Dict[str, Any]]] = Field(
-        default_factory=list
-    )  # Chart-level filters (list of filter objects)
-    dashboard_filters: Optional[List[Dict[str, Any]]] = Field(
-        default_factory=list
-    )  # Dashboard-level filters (list of filter objects)
+    dashboard_filters: Optional[dict[str, Any]] = Field(
+        default_factory=dict
+    )  # Dashboard-level filters (dictionary of filter objects)
     extra_config: Optional[Dict[str, Any]] = Field(
         default_factory=dict
-    )  # Additional configuration including pagination, sorting, etc.
+    )  # Additional configuration including chart-level filters, pagination, sorting, etc.
 
 
 @charts_router.post("/map-data-overlay/", response=dict)
@@ -406,6 +404,8 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         if not org_warehouse:
             raise HttpError(404, "Warehouse not configured")
 
+        warehouse_client = charts_service.get_warehouse_client(org_warehouse)
+
         # Extract required fields from payload
         schema_name = payload.schema_name
         table_name = payload.table_name
@@ -413,7 +413,6 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         value_column = payload.value_column
         # Use first metric for map overlay
         filters = payload.filters
-        chart_filters = payload.chart_filters
 
         # Validate required fields
         if not all([schema_name, table_name, geographic_column, value_column]):
@@ -428,15 +427,8 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
 
         # Build payload for standard chart query (same as other charts)
         # Make a deep copy to avoid mutating the original payload
+        # extra_config already contains chart-level filters in extra_config.filters
         extra_config = copy.deepcopy(payload.extra_config or {})
-
-        # Merge chart filters with existing filters instead of overwriting
-        if chart_filters:
-            existing_filters = extra_config.get("filters", [])
-            if isinstance(existing_filters, list):
-                extra_config["filters"] = existing_filters + chart_filters
-            else:
-                extra_config["filters"] = chart_filters
 
         # Use metrics from payload directly
         metrics = payload.metrics
@@ -451,19 +443,15 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
 
                 resolved_filters = []
 
-                for filter_item in dashboard_filters:
-                    filter_id = filter_item.get("filter_id")
-                    filter_value = filter_item.get("value")
-
+                for filter_id, filter_value in dashboard_filters.items():
                     if filter_id and filter_value is not None:
                         try:
                             # Get the filter configuration from the database
                             dashboard_filter = DashboardFilter.objects.get(id=filter_id)
 
                             # Only apply this filter if it applies to the same table as the chart
-                            if (
-                                dashboard_filter.schema_name == schema_name
-                                and dashboard_filter.table_name == table_name
+                            if warehouse_client.column_exists(
+                                schema_name, table_name, dashboard_filter.column_name
                             ):
                                 resolved_filters.append(
                                     {
@@ -495,7 +483,6 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         )
 
         # Get warehouse client and build query using standard chart service
-        warehouse = charts_service.get_warehouse_client(org_warehouse)
         query_builder = charts_service.build_chart_query(chart_payload, org_warehouse)
 
         # Add filters if provided with case-insensitive matching
@@ -517,7 +504,9 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
             metrics=metrics,
         )
 
-        dict_results = charts_service.execute_chart_query(warehouse, query_builder, execute_payload)
+        dict_results = charts_service.execute_chart_query(
+            warehouse_client, query_builder, execute_payload
+        )
 
         logger.info(f"Map data overlay query returned {len(dict_results)} rows")
 
@@ -845,6 +834,9 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
     if not org_warehouse:
         raise HttpError(404, "Warehouse not configured")
 
+    # warehouse client
+    warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+
     # Build payload from chart config
     extra_config = chart.extra_config.copy() if chart.extra_config else {}
 
@@ -867,9 +859,8 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
                         dashboard_filter = DashboardFilter.objects.get(id=filter_id)
 
                         # Only apply this filter if it applies to the same table as the chart
-                        if (
-                            dashboard_filter.schema_name == chart.schema_name
-                            and dashboard_filter.table_name == chart.table_name
+                        if warehouse_client.column_exists(
+                            chart.schema_name, chart.table_name, dashboard_filter.column_name
                         ):
                             resolved_filters.append(
                                 {
