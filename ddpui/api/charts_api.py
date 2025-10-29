@@ -580,7 +580,7 @@ def get_chart_data(request, payload: ChartDataPayload):
 
 @charts_router.post("/chart-data-preview/", response=DataPreviewResponse)
 @has_permission(["can_view_charts"])
-def get_chart_data_preview(request, payload: ChartDataPayload):
+def get_chart_data_preview(request, payload: ChartDataPayload, page: int = 0, limit: int = 100):
     """Get paginated data preview for chart using the same query as chart data"""
     orguser = request.orguser
 
@@ -594,16 +594,34 @@ def get_chart_data_preview(request, payload: ChartDataPayload):
 
     # Get table preview using the same query builder as chart data
     # This ensures preview shows exactly what will be used for the chart
-    preview_data = charts_service.get_chart_data_table_preview(org_warehouse, payload)
+    preview_data = charts_service.get_chart_data_table_preview(org_warehouse, payload, page, limit)
 
     return DataPreviewResponse(
         columns=preview_data["columns"],
         column_types=preview_data["column_types"],
         data=preview_data["data"],
-        total_rows=preview_data["total_rows"],
         page=preview_data["page"],
-        page_size=preview_data["page_size"],
+        limit=preview_data["limit"],
     )
+
+
+@charts_router.post("/chart-data-preview/total-rows/", response=int)
+def get_chart_data_preview_total_rows(request, payload: ChartDataPayload):
+    """Get total rows for chart data preview"""
+    orguser = request.orguser
+
+    # Validate user has access to schema/table
+    if not has_schema_access(request, payload.schema_name):
+        raise HttpError(403, "Access denied to schema")
+
+    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Warehouse not configured")
+
+    # Get total rows using the same query builder as chart data
+    total_rows = charts_service.get_chart_data_total_rows(org_warehouse, payload)
+
+    return total_rows
 
 
 # Map-specific endpoints - Must come before /{chart_id}/ routes to avoid conflicts

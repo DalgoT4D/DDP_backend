@@ -1091,6 +1091,8 @@ def transform_data_for_chart(
 def get_chart_data_table_preview(
     org_warehouse: OrgWarehouse,
     payload: ChartDataPayload,
+    page: int = 0,
+    limit: int = 100,
 ) -> Dict[str, Any]:
     """Get paginated table preview with column information
 
@@ -1139,42 +1141,41 @@ def get_chart_data_table_preview(
             column_mapping.append((payload.extra_dimension, col_index))
             columns.append(payload.extra_dimension)
 
+    # apply the pagination limits on the query
+    offset = page * limit
+    query_builder.limit_records = limit
+    query_builder.offset_records = offset
+
     # Execute query with column mapping
     data_dicts = execute_query(warehouse, query_builder, column_mapping)
 
     # For chart preview, we don't need column types for specific columns
     column_types = {col: "unknown" for col in columns}
 
-    # Calculate page info
-    limit, offset = get_pagination_params(payload)
-    limit = limit if limit is not None else 100
-    offset = offset if offset is not None else 0
-    page_size = limit
-    page = (offset // page_size) + 1 if page_size > 0 else 1
+    return {
+        "columns": columns,
+        "column_types": column_types,
+        "data": data_dicts,
+        "page": page,
+        "limit": limit,
+    }
 
-    # Get total count using the existing query_builder as subquery (without LIMIT/OFFSET)
-    # Temporarily remove pagination from existing query builder
-    original_limit = query_builder.limit_records
-    original_offset = query_builder.offset_records
-    query_builder.limit_records = None
-    query_builder.offset_records = 0
+
+def get_chart_data_total_rows(
+    org_warehouse: OrgWarehouse,
+    payload: ChartDataPayload,
+) -> int:
+    """Get total number of rows for the chart data query"""
+    warehouse = get_warehouse_client(org_warehouse)
+
+    # Use the same query builder as chart data
+    query_builder = build_chart_query(payload, org_warehouse)
 
     # Build the original query as subquery and wrap with COUNT(*)
     original_subquery = query_builder.build()
     count_sql = f"SELECT COUNT(*) as total FROM ({original_subquery.compile(bind=warehouse.engine, compile_kwargs={'literal_binds': True})}) as subquery"
 
-    # Restore original pagination settings
-    query_builder.limit_records = original_limit
-    query_builder.offset_records = original_offset
-
     count_result = warehouse.execute(count_sql)
     total_rows = count_result[0]["total"] if count_result else 0
 
-    return {
-        "columns": columns,
-        "column_types": column_types,
-        "data": data_dicts,
-        "total_rows": total_rows,
-        "page": page,
-        "page_size": page_size,
-    }
+    return total_rows
