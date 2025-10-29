@@ -740,7 +740,6 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
         )
 
         # Get warehouse client and build query using standard chart service
-        warehouse = charts_service.get_warehouse_client(org_warehouse)
         query_builder = charts_service.build_chart_query(chart_payload, org_warehouse)
 
         # Add filters if provided (drill-down filters) with case-insensitive matching
@@ -761,7 +760,9 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
             metrics=map_payload.metrics,
         )
 
-        dict_results = charts_service.execute_chart_query(warehouse, query_builder, execute_payload)
+        dict_results = charts_service.execute_chart_query(
+            warehouse_client, query_builder, execute_payload
+        )
 
         logger.info(f"Public map data overlay query returned {len(dict_results)} rows")
 

@@ -404,7 +404,7 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         if not org_warehouse:
             raise HttpError(404, "Warehouse not configured")
 
-        warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+        warehouse_client = charts_service.get_warehouse_client(org_warehouse)
 
         # Extract required fields from payload
         schema_name = payload.schema_name
@@ -483,7 +483,6 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         )
 
         # Get warehouse client and build query using standard chart service
-        warehouse = charts_service.get_warehouse_client(org_warehouse)
         query_builder = charts_service.build_chart_query(chart_payload, org_warehouse)
 
         # Add filters if provided with case-insensitive matching
@@ -505,7 +504,9 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
             metrics=metrics,
         )
 
-        dict_results = charts_service.execute_chart_query(warehouse, query_builder, execute_payload)
+        dict_results = charts_service.execute_chart_query(
+            warehouse_client, query_builder, execute_payload
+        )
 
         logger.info(f"Map data overlay query returned {len(dict_results)} rows")
 
