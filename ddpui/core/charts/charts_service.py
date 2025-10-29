@@ -836,8 +836,36 @@ def transform_data_for_chart(
                 key = handle_null_value(safe_get_value(row, payload.x_axis, null_label), null_label)
                 value_counts[key] = value_counts.get(key, 0) + 1
 
+            pie_data = [{"value": count, "name": name} for name, count in value_counts.items()]
+
+            # Apply slice limiting if configured
+            max_slices = None
+            if payload.customizations and "maxSlices" in payload.customizations:
+                max_slices = payload.customizations["maxSlices"]
+
+            if (
+                max_slices
+                and isinstance(max_slices, int)
+                and max_slices > 0
+                and len(pie_data) > max_slices
+            ):
+                # Sort pie data by value in descending order
+                pie_data_sorted = sorted(pie_data, key=lambda x: x["value"], reverse=True)
+
+                # Take top N slices
+                top_slices = pie_data_sorted[:max_slices]
+
+                # Group remaining slices under "Other"
+                remaining_slices = pie_data_sorted[max_slices:]
+                other_value = sum(slice_data["value"] for slice_data in remaining_slices)
+
+                if other_value > 0:
+                    top_slices.append({"value": other_value, "name": "Other"})
+
+                pie_data = top_slices
+
             return {
-                "pieData": [{"value": count, "name": name} for name, count in value_counts.items()],
+                "pieData": pie_data,
                 "seriesName": payload.x_axis,
             }
         else:  # aggregated
@@ -877,6 +905,32 @@ def transform_data_for_chart(
                         "name": slice_name,
                     }
                 )
+
+            # Apply slice limiting if configured
+            max_slices = None
+            if payload.customizations and "maxSlices" in payload.customizations:
+                max_slices = payload.customizations["maxSlices"]
+
+            if (
+                max_slices
+                and isinstance(max_slices, int)
+                and max_slices > 0
+                and len(pie_data) > max_slices
+            ):
+                # Sort pie data by value in descending order
+                pie_data_sorted = sorted(pie_data, key=lambda x: x["value"], reverse=True)
+
+                # Take top N slices
+                top_slices = pie_data_sorted[:max_slices]
+
+                # Group remaining slices under "Other"
+                remaining_slices = pie_data_sorted[max_slices:]
+                other_value = sum(slice_data["value"] for slice_data in remaining_slices)
+
+                if other_value > 0:
+                    top_slices.append({"value": other_value, "name": "Other"})
+
+                pie_data = top_slices
 
             return {
                 "pieData": pie_data,
