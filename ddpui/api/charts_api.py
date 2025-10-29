@@ -595,6 +595,7 @@ def get_chart_data_preview(request, payload: ChartDataPayload, page: int = 0, li
 
 
 @charts_router.post("/chart-data-preview/total-rows/", response=int)
+@has_permission(["can_view_charts"])
 def get_chart_data_preview_total_rows(request, payload: ChartDataPayload):
     """Get total rows for chart data preview"""
     orguser = request.orguser
