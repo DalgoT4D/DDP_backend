@@ -1129,12 +1129,10 @@ def get_chart_data_table_preview(
             for metric in payload.metrics:
                 if metric.aggregation.lower() == "count" and metric.column is None:
                     alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-                    display_name = metric.alias or "Total Count"
                 else:
                     alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-                    display_name = metric.alias or f"{metric.aggregation}({metric.column})"
                 column_mapping.append((alias, col_index))
-                columns.append(display_name)
+                columns.append(alias)
                 col_index += 1
 
         if payload.extra_dimension:
