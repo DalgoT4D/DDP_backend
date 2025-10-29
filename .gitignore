@@ -155,3 +155,5 @@ Docker/.env*
 
 # ignore platform notification messages
 notifications/
+
+.vscode/

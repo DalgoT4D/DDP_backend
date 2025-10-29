@@ -2,22 +2,23 @@
 
 import json
 from typing import Optional, List
-from datetime import datetime
+import copy
 
 from ninja import Router, Schema
-from ninja.errors import HttpError
 from django.utils import timezone
 from django.db.models import F
 
-from ddpui.models.dashboard import Dashboard, DashboardFilter
-from ddpui.models.org import Org
+from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
+from ddpui.models.dashboard import Dashboard
 from ddpui.utils.custom_logger import CustomLogger
 
-# Import schemas and helper functions from authenticated APIs for consistency
+from ddpui.models.visualization import Chart
+from ddpui.models.org import OrgWarehouse
+from ddpui.api.charts_api import MapDataOverlayPayload
+from ddpui.core.charts import charts_service
+
 from ddpui.api.dashboard_native_api import (
     DashboardResponse,
-    DashboardFilterResponse,
-    FilterOptionResponse,
     FilterOptionsResponse,
     get_dashboard_response,
 )
@@ -396,9 +397,9 @@ def get_public_filter_preview(
                 "min_value": float(row["min_value"]) if row["min_value"] is not None else 0.0,
                 "max_value": float(row["max_value"]) if row["max_value"] is not None else 100.0,
                 "avg_value": float(row["avg_value"]) if row["avg_value"] is not None else 50.0,
-                "distinct_count": int(row["distinct_count"])
-                if row["distinct_count"] is not None
-                else 0,
+                "distinct_count": (
+                    int(row["distinct_count"]) if row["distinct_count"] is not None else 0
+                ),
             }
 
             response_data = {"options": None, "stats": stats, "is_valid": True}
@@ -630,13 +631,6 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
         # Verify dashboard is public
         dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
 
-        # Import required modules
-        from ddpui.models.visualization import Chart
-        from ddpui.models.org import OrgWarehouse
-        from ddpui.api.charts_api import MapDataOverlayPayload
-        from ddpui.core.charts import charts_service
-        import copy
-
         # Get the chart and org warehouse
         chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
         if not chart:
@@ -646,8 +640,7 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
         if not org_warehouse:
             raise Exception("No warehouse configured for organization")
 
-        # Get payload from request body
-        import json
+        warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
 
         payload = json.loads(request.body) if request.body else {}
 
@@ -693,13 +686,44 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
         # Use same logic as authenticated API
         extra_config = copy.deepcopy(map_payload.extra_config or {})
 
-        # Merge chart filters with existing filters
-        if map_payload.chart_filters:
-            existing_filters = extra_config.get("filters", [])
-            if isinstance(existing_filters, list):
-                extra_config["filters"] = existing_filters + map_payload.chart_filters
-            else:
-                extra_config["filters"] = map_payload.chart_filters
+        # Handle dashboard filters (same logic as private API)
+        resolved_dashboard_filters = None
+        if map_payload.dashboard_filters:
+            try:
+                # Import dashboard filter model
+                from ddpui.models.dashboard import DashboardFilter
+
+                resolved_filters = []
+
+                for filter_id, filter_value in map_payload.dashboard_filters.items():
+                    if filter_id and filter_value is not None:
+                        try:
+                            dashboard_filter = DashboardFilter.objects.get(
+                                id=filter_id, dashboard__org=dashboard.org
+                            )
+                            # Only apply this filter if it applies to the same table as the chart
+                            if warehouse_client.column_exists(
+                                map_payload.schema_name,
+                                map_payload.table_name,
+                                dashboard_filter.column_name,
+                            ):
+                                resolved_filters.append(
+                                    {
+                                        "filter_id": filter_id,
+                                        "column": dashboard_filter.column_name,
+                                        "type": dashboard_filter.filter_type,
+                                        "value": filter_value,
+                                        "settings": dashboard_filter.settings or {},
+                                    }
+                                )
+                        except DashboardFilter.DoesNotExist:
+                            logger.warning(f"Dashboard filter {filter_id} not found")
+
+                resolved_dashboard_filters = resolved_filters
+
+            except Exception as e:
+                logger.error(f"Error resolving dashboard filters: {str(e)}")
+                resolved_dashboard_filters = None
 
         # Build chart payload for map data query (same logic as private API)
         from ddpui.schemas.chart_schema import ChartDataPayload, ExecuteChartQuery
@@ -711,12 +735,11 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
             table_name=map_payload.table_name,
             dimension_col=map_payload.geographic_column,
             metrics=map_payload.metrics,
-            dashboard_filters=map_payload.dashboard_filters,
+            dashboard_filters=resolved_dashboard_filters,
             extra_config=extra_config,
         )
 
         # Get warehouse client and build query using standard chart service
-        warehouse = charts_service.get_warehouse_client(org_warehouse)
         query_builder = charts_service.build_chart_query(chart_payload, org_warehouse)
 
         # Add filters if provided (drill-down filters) with case-insensitive matching
@@ -737,7 +760,9 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
             metrics=map_payload.metrics,
         )
 
-        dict_results = charts_service.execute_chart_query(warehouse, query_builder, execute_payload)
+        dict_results = charts_service.execute_chart_query(
+            warehouse_client, query_builder, execute_payload
+        )
 
         logger.info(f"Public map data overlay query returned {len(dict_results)} rows")
 
@@ -755,13 +780,7 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
                 normalized_name = str(region_name).strip().title()
                 map_data.append({"name": normalized_name, "value": float(value)})
 
-        # Return in same format as private API
-        map_response = {"success": True, "data": map_data, "count": len(map_data)}
-
-        return {
-            "data": map_data,
-            "is_valid": True,
-        }
+        return {"data": map_data, "is_valid": True, "count": len(map_data)}
 
     except Dashboard.DoesNotExist:
         logger.warning(f"Public map data access failed - dashboard not found for token: {token}")
