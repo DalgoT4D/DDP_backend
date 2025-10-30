@@ -793,6 +793,11 @@ def download_chart_data_csv(request, payload: ChartDataPayload):
     """Stream and download chart data as CSV with all filters/aggregations applied"""
 
     orguser: OrgUser = request.orguser
+
+    # Validate user has access to schema/table
+    if not has_schema_access(request, payload.schema_name):
+        raise HttpError(403, "Access to schema denied")
+
     org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
 
     if not org_warehouse:
@@ -848,10 +853,10 @@ def download_chart_data_csv(request, payload: ChartDataPayload):
             output.close()
 
         except Exception as error:
-            logger.exception(f"Error streaming chart data: {error}")
-            # Write error to stream
-            yield f"Error: {str(error)}\n"
-            return
+            logger.exception(
+                f"Error streaming chart data for schema {payload.schema_name}.{payload.table_name}: {str(error)}"
+            )
+            raise HttpError(500, "Internal server error")
 
     # Generate filename from chart configuration
     chart_type = payload.chart_type or "chart"
