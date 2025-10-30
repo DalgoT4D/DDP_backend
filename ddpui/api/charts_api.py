@@ -816,16 +816,21 @@ def download_chart_data_csv(request, payload: ChartDataPayload):
                 logger.warning("No columns found in chart data")
                 return
 
+            # Create CSV writer and write headers immediately
             writer = csv.DictWriter(output, fieldnames=columns)
+            writer.writeheader()
+            header_written = True
+
+            # Yield header
+            yield output.getvalue()
+            output.truncate(0)
+            output.seek(0)
 
             # Stream pages until no more data
             while len(data) > 0:
                 logger.info(f"Streaming chart data page {page} with {len(data)} rows")
 
-                for i, row in enumerate(data):
-                    if i == 0 and not header_written:
-                        writer.writeheader()
-                        header_written = True
+                for row in data:
                     writer.writerow(row)
 
                 # Yield current chunk
