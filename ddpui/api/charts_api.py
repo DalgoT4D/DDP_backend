@@ -2,12 +2,14 @@
 
 from typing import Optional, List, Dict, Any
 import copy
+import csv
 from datetime import datetime
+from io import StringIO
 
 from ninja import Router, Schema, Field
 from ninja.errors import HttpError
 from django.shortcuts import get_object_or_404
-from django.http import HttpResponse
+from django.http import HttpResponse, StreamingHttpResponse
 
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
@@ -783,6 +785,93 @@ def generate_map_chart_data(request, payload: ChartDataPayload):
         "matched_regions": map_data["matched_regions"],
         "total_regions": map_data["total_regions"],
     }
+
+
+@charts_router.post("/download-csv/")
+@has_permission(["can_view_charts"])
+def download_chart_data_csv(request, payload: ChartDataPayload):
+    """Stream and download chart data as CSV with all filters/aggregations applied"""
+
+    orguser: OrgUser = request.orguser
+
+    # Validate user has access to schema/table
+    if not has_schema_access(request, payload.schema_name):
+        raise HttpError(403, "Access to schema denied")
+
+    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    def stream_chart_data(org_warehouse, payload, page_size=5000):
+        """Generator that yields CSV data in chunks"""
+        page = 0
+        header_written = False
+        output = StringIO()
+
+        # Fetch first page
+        try:
+            preview_data = charts_service.get_chart_data_table_preview(
+                org_warehouse, payload, page=page, limit=page_size
+            )
+            data = preview_data["data"]
+            columns = preview_data["columns"]
+
+            if not columns:
+                logger.warning("No columns found in chart data")
+                return
+
+            # Create CSV writer and write headers immediately
+            writer = csv.DictWriter(output, fieldnames=columns)
+            writer.writeheader()
+            header_written = True
+
+            # Yield header
+            yield output.getvalue()
+            output.truncate(0)
+            output.seek(0)
+
+            # Stream pages until no more data
+            while len(data) > 0:
+                logger.info(f"Streaming chart data page {page} with {len(data)} rows")
+
+                for row in data:
+                    writer.writerow(row)
+
+                # Yield current chunk
+                yield output.getvalue()
+                output.truncate(0)
+                output.seek(0)
+
+                # Fetch next page
+                page += 1
+                preview_data = charts_service.get_chart_data_table_preview(
+                    org_warehouse, payload, page=page, limit=page_size
+                )
+                data = preview_data["data"]
+
+            output.close()
+
+        except Exception as error:
+            logger.exception(
+                f"Error streaming chart data for schema {payload.schema_name}.{payload.table_name}: {str(error)}"
+            )
+            raise HttpError(500, "Internal server error")
+
+    # Generate filename from chart configuration
+    chart_type = payload.chart_type or "chart"
+    table_name = payload.table_name or "data"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{chart_type}_{table_name}_{timestamp}.csv"
+
+    # Stream response
+    response = StreamingHttpResponse(
+        stream_chart_data(org_warehouse, payload, page_size=5000),
+        content_type="application/octet-stream",
+    )
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+
+    return response
 
 
 @charts_router.get("/{chart_id}/", response=ChartResponse)
