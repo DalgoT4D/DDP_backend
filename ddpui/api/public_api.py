@@ -3,10 +3,13 @@
 import json
 from typing import Optional, List
 import copy
+from datetime import datetime
 
 from ninja import Router, Schema
 from django.utils import timezone
 from django.db.models import F
+from django.http import StreamingHttpResponse
+from ninja.errors import HttpError
 
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.models.dashboard import Dashboard
@@ -26,7 +29,7 @@ from ddpui.api.filter_api import (
     FilterPreviewResponse,
     FilterOptionResponse as AuthFilterOptionResponse,
 )
-from ddpui.schemas.chart_schema import ChartDataResponse
+from ddpui.schemas.chart_schema import ChartDataResponse, ChartDataPayload
 
 logger = CustomLogger("ddpui")
 
@@ -903,3 +906,63 @@ def get_region_geojsons_public(request, region_id: int):
     except Exception as e:
         logger.error(f"Public region geojsons error for {region_id}: {str(e)}")
         return []
+
+
+@public_router.post("/dashboards/{token}/charts/{chart_id}/download-csv/")
+def download_public_chart_data_csv(request, token: str, chart_id: int, payload: ChartDataPayload):
+    """
+    Stream and download chart data as CSV for public dashboards
+
+    PURPOSE: Enables CSV export functionality on public dashboards without authentication.
+    This is essential for users viewing shared dashboards who want to download the data.
+
+    Args:
+        token: Public dashboard share token
+        chart_id: Chart ID to export data from
+        payload: ChartDataPayload containing chart configuration and filters
+
+    Returns:
+        StreamingHttpResponse with CSV data
+    """
+    try:
+        # Verify dashboard is public and get organization
+        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+
+        # Get the chart and verify it belongs to the dashboard's organization
+        chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
+        if not chart:
+            raise HttpError(404, "Chart not found in dashboard's organization")
+
+        # Get organization warehouse
+        org_warehouse = OrgWarehouse.objects.filter(org=dashboard.org).first()
+        if not org_warehouse:
+            raise HttpError(404, "No warehouse configured for organization")
+
+        # Import the common CSV streaming function
+        from ddpui.api.charts_api import stream_chart_data_csv
+
+        # Generate filename from chart configuration
+        chart_type = payload.chart_type or "chart"
+        table_name = payload.table_name or "data"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{chart_type}_{table_name}_{timestamp}.csv"
+
+        # Stream response using the same common function as authenticated endpoint
+        response = StreamingHttpResponse(
+            stream_chart_data_csv(org_warehouse, payload, page_size=5000),
+            content_type="application/octet-stream",
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+
+        logger.info(
+            f"Public CSV download for chart {chart_id} on dashboard {dashboard.id} ({dashboard.title})"
+        )
+
+        return response
+
+    except Dashboard.DoesNotExist:
+        logger.warning(f"Public CSV download failed - dashboard not found for token: {token}")
+        raise HttpError(404, "Dashboard not found or no longer public")
+    except Exception as e:
+        logger.error(f"Public CSV download error for chart {chart_id}: {str(e)}")
+        raise HttpError(500, f"CSV download failed: {str(e)}")
