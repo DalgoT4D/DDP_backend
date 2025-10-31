@@ -40,18 +40,33 @@ class EChartsConfigGenerator:
 
         # Create a custom configuration for displaying a single metric
         # Using a gauge series with custom text display
-        # Position the number higher to reduce whitespace between title and number
+        # Center all content vertically as a unit using offsetCenter for positioning
+
+        # Calculate offset to position chart title above the number
+        # Title should be positioned above the number value
+        title_offset_y = -(font_size // 2 + 30)  # Position title above number
+        subtitle_offset_y = font_size // 2 + 25  # Position subtitle below number
+
         config = {
             "title": {
                 "text": customizations.get("title", ""),
                 "left": "center",
-                "top": "15%",  # Moved down from 10% to be closer to number
-                "textStyle": {"fontSize": 16, "fontWeight": "normal", "color": "#666"},
+                "top": "middle",  # Use middle positioning
+                "textStyle": {
+                    "fontSize": 16,
+                    "fontWeight": "normal",
+                    "color": "#666",
+                    "lineHeight": 20,
+                },
+                # Offset the title upward to sit above the number
+                "subtextStyle": {"fontSize": 14},
+                # Use padding to create space
+                "padding": [0, 0, font_size + 60, 0],  # [top, right, bottom, left]
             },
             "series": [
                 {
                     "type": "gauge",
-                    "center": ["50%", "45%"],  # Moved up from 50% to reduce whitespace
+                    "center": ["50%", "50%"],  # Always center
                     "radius": "0%",
                     "startAngle": 0,
                     "endAngle": 0,
@@ -70,12 +85,9 @@ class EChartsConfigGenerator:
                     },
                     "title": {
                         "show": True,
-                        "offsetCenter": [
-                            0,
-                            font_size + 20,
-                        ],  # Position subtitle below number based on size
-                        "fontSize": 16,
-                        "color": "#666",
+                        "offsetCenter": [0, subtitle_offset_y],
+                        "fontSize": 14,
+                        "color": "#999",
                         "fontWeight": "normal",
                     },
                     "data": [{"value": value, "name": subtitle}],
