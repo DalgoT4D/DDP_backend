@@ -40,17 +40,18 @@ class EChartsConfigGenerator:
 
         # Create a custom configuration for displaying a single metric
         # Using a gauge series with custom text display
+        # Position the number higher to reduce whitespace between title and number
         config = {
             "title": {
                 "text": customizations.get("title", ""),
                 "left": "center",
-                "top": "10%",
-                "textStyle": {"fontSize": 16, "fontWeight": "normal"},
+                "top": "15%",  # Moved down from 10% to be closer to number
+                "textStyle": {"fontSize": 16, "fontWeight": "normal", "color": "#666"},
             },
             "series": [
                 {
                     "type": "gauge",
-                    "center": ["50%", "50%"],
+                    "center": ["50%", "45%"],  # Moved up from 50% to reduce whitespace
                     "radius": "0%",
                     "startAngle": 0,
                     "endAngle": 0,
