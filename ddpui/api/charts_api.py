@@ -803,11 +803,10 @@ def stream_chart_data_csv(org_warehouse, payload: ChartDataPayload, page_size=50
         CSV data chunks as strings
     """
     page = 0
-    header_written = False
     output = StringIO()
 
-    # Fetch first page
     try:
+        # Fetch first page
         preview_data = charts_service.get_chart_data_table_preview(
             org_warehouse, payload, page=page, limit=page_size
         )
@@ -821,7 +820,6 @@ def stream_chart_data_csv(org_warehouse, payload: ChartDataPayload, page_size=50
         # Create CSV writer and write headers immediately
         writer = csv.DictWriter(output, fieldnames=columns)
         writer.writeheader()
-        header_written = True
 
         # Yield header
         yield output.getvalue()
@@ -847,13 +845,13 @@ def stream_chart_data_csv(org_warehouse, payload: ChartDataPayload, page_size=50
             )
             data = preview_data["data"]
 
-        output.close()
-
     except Exception as error:
         logger.exception(
-            f"Error streaming chart data for schema {payload.schema_name}.{payload.table_name}: {str(error)}"
+            f"Error streaming chart data for schema {payload.schema_name}.{payload.table_name}"
         )
-        raise HttpError(500, "Internal server error")
+        raise HttpError(500, "Internal server error") from error
+    finally:
+        output.close()
 
 
 @charts_router.post("/download-csv/")
