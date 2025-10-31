@@ -534,9 +534,8 @@ def get_public_chart_data_preview(request, token: str, chart_id: int):
             "columns": preview_data["columns"],
             "column_types": preview_data["column_types"],
             "data": preview_data["data"],
-            "total_rows": preview_data["total_rows"],
             "page": preview_data["page"],
-            "page_size": preview_data["page_size"],
+            "limit": preview_data["limit"],
             "is_valid": True,
         }
 
