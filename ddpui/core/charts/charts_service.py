@@ -699,11 +699,14 @@ def transform_data_for_chart(
 
     if payload.chart_type == "bar":
         if payload.computation_type == "raw":
+            # Get category data (bar names)
+            category_data = [
+                convert_value(safe_get_value(row, payload.x_axis, null_label)) for row in results
+            ]
+
             return {
-                "xAxisData": [
-                    convert_value(safe_get_value(row, payload.x_axis, null_label))
-                    for row in results
-                ],
+                "xAxisData": category_data,  # For vertical bars
+                "yAxisData": category_data,  # For horizontal bars
                 "series": [
                     {
                         "name": payload.y_axis,
@@ -787,7 +790,8 @@ def transform_data_for_chart(
                         legend_data.append(dimension)
 
                 return {
-                    "xAxisData": x_axis_data,
+                    "xAxisData": x_axis_data,  # For vertical bars
+                    "yAxisData": x_axis_data,  # For horizontal bars
                     "series": series_data,
                     "legend": legend_data,
                 }
@@ -823,7 +827,8 @@ def transform_data_for_chart(
                     legend_data.append(display_name)
 
                 return {
-                    "xAxisData": x_axis_data,
+                    "xAxisData": x_axis_data,  # For vertical bars
+                    "yAxisData": x_axis_data,  # For horizontal bars
                     "series": series_data,
                     "legend": legend_data,
                 }
