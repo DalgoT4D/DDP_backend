@@ -486,7 +486,9 @@ def validate_public_dashboard(request, token: str):
     "/dashboards/{token}/charts/{chart_id}/data-preview/",
     response={200: dict, 404: PublicErrorResponse},
 )
-def get_public_chart_data_preview(request, token: str, chart_id: int):
+def get_public_chart_data_preview(
+    request, token: str, chart_id: int, page: int = 0, limit: int = 100
+):
     """
     Get public chart data preview - ESSENTIAL for table charts
 
@@ -507,12 +509,6 @@ def get_public_chart_data_preview(request, token: str, chart_id: int):
         # Verify dashboard is public
         dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
 
-        # Import required modules
-        from ddpui.models.visualization import Chart
-        from ddpui.models.org import OrgWarehouse
-        from ddpui.core.charts import charts_service
-        from ddpui.schemas.chart_schema import ChartDataPayload
-
         # Get the chart and org warehouse
         chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
         if not chart:
@@ -530,8 +526,10 @@ def get_public_chart_data_preview(request, token: str, chart_id: int):
         # Convert payload to ChartDataPayload
         chart_payload = ChartDataPayload(**payload)
 
-        # Get table preview using same function as authenticated API
-        preview_data = charts_service.get_chart_data_table_preview(org_warehouse, chart_payload)
+        # Get table preview using same function as authenticated API with pagination
+        preview_data = charts_service.get_chart_data_table_preview(
+            org_warehouse, chart_payload, page, limit
+        )
 
         return {
             "columns": preview_data["columns"],
@@ -966,3 +964,48 @@ def download_public_chart_data_csv(request, token: str, chart_id: int, payload: 
     except Exception as e:
         logger.error(f"Public CSV download error for chart {chart_id}: {str(e)}")
         raise HttpError(500, f"CSV download failed: {str(e)}")
+
+
+@public_router.post(
+    "/dashboards/{token}/charts/{chart_id}/data-preview/total-rows/",
+    response={200: dict, 404: PublicErrorResponse},
+)
+def get_public_chart_data_preview_total_rows(request, token: str, chart_id: int):
+    """
+    Get total row count for public chart data preview
+    This is essential for proper pagination in table charts
+    """
+    try:
+        # Verify dashboard is public
+        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+
+        # Get the chart and org warehouse
+        chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
+        if not chart:
+            raise Exception("Chart not found in dashboard's organization")
+
+        org_warehouse = OrgWarehouse.objects.filter(org=dashboard.org).first()
+        if not org_warehouse:
+            raise Exception("No warehouse configured for organization")
+
+        # Get payload from request body
+        import json
+
+        payload = json.loads(request.body) if request.body else {}
+
+        # Convert payload to ChartDataPayload
+        chart_payload = ChartDataPayload(**payload)
+
+        # Get total rows using same function as authenticated API
+        total_rows = charts_service.get_chart_data_total_rows(org_warehouse, chart_payload)
+
+        return {"total_rows": total_rows, "is_valid": True}
+
+    except Dashboard.DoesNotExist:
+        logger.warning(f"Public total rows access failed - dashboard not found for token: {token}")
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
+        )
+    except Exception as e:
+        logger.error(f"Public total rows error for chart {chart_id}: {str(e)}")
+        return 404, PublicErrorResponse(error="Total rows unavailable", is_valid=False)
