@@ -12,7 +12,7 @@ from django.http import StreamingHttpResponse
 from ninja.errors import HttpError
 
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
-from ddpui.models.dashboard import Dashboard
+from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.models.visualization import Chart
@@ -236,8 +236,6 @@ def get_public_chart_data(request, token: str, chart_id: int):
         resolved_dashboard_filters = None
         if filters:
             # Resolve filter configurations to get column information - same as authenticated API
-            from ddpui.models.dashboard import DashboardFilter
-
             resolved_filters = []
 
             for filter_id, value in filters.items():
@@ -486,7 +484,14 @@ def validate_public_dashboard(request, token: str):
     "/dashboards/{token}/charts/{chart_id}/data-preview/",
     response={200: dict, 404: PublicErrorResponse},
 )
-def get_public_chart_data_preview(request, token: str, chart_id: int):
+def get_public_chart_data_preview(
+    request,
+    token: str,
+    chart_id: int,
+    page: int = 0,
+    limit: int = 100,
+    dashboard_filters: Optional[str] = None,
+):
     """
     Get public chart data preview - ESSENTIAL for table charts
 
@@ -507,12 +512,6 @@ def get_public_chart_data_preview(request, token: str, chart_id: int):
         # Verify dashboard is public
         dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
 
-        # Import required modules
-        from ddpui.models.visualization import Chart
-        from ddpui.models.org import OrgWarehouse
-        from ddpui.core.charts import charts_service
-        from ddpui.schemas.chart_schema import ChartDataPayload
-
         # Get the chart and org warehouse
         chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
         if not chart:
@@ -527,11 +526,50 @@ def get_public_chart_data_preview(request, token: str, chart_id: int):
 
         payload = json.loads(request.body) if request.body else {}
 
-        # Convert payload to ChartDataPayload
-        chart_payload = ChartDataPayload(**payload)
+        # Parse and resolve dashboard filters if provided (same logic as public chart data endpoint)
+        resolved_dashboard_filters = None
+        if dashboard_filters:
+            # Resolve filter configurations to get column information
+            filter_values = json.loads(dashboard_filters)
 
-        # Get table preview using same function as authenticated API
-        preview_data = charts_service.get_chart_data_table_preview(org_warehouse, chart_payload)
+            warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+            resolved_filters = []
+
+            for filter_id, filter_value in filter_values.items():
+                if filter_value is not None:
+                    try:
+                        # Get the filter configuration from the database
+                        dashboard_filter = DashboardFilter.objects.get(id=filter_id)
+
+                        # Only apply this filter if it applies to the same table as the chart
+                        # Use warehouse client to check column existence
+                        if warehouse_client.column_exists(
+                            chart.schema_name, chart.table_name, dashboard_filter.column_name
+                        ):
+                            resolved_filters.append(
+                                {
+                                    "filter_id": filter_id,
+                                    "column": dashboard_filter.column_name,
+                                    "type": dashboard_filter.filter_type,
+                                    "value": filter_value,
+                                    "settings": dashboard_filter.settings,
+                                }
+                            )
+                    except (DashboardFilter.DoesNotExist, ValueError):
+                        logger.warning(f"Public API: Dashboard filter {filter_id} not found")
+
+            resolved_dashboard_filters = resolved_filters
+
+        # Convert payload to ChartDataPayload with resolved dashboard filters
+        chart_payload = ChartDataPayload(
+            **payload,
+        )
+        chart_payload.dashboard_filters = resolved_dashboard_filters
+
+        # Get table preview using same function as authenticated API with pagination
+        preview_data = charts_service.get_chart_data_table_preview(
+            org_warehouse, chart_payload, page, limit
+        )
 
         return {
             "columns": preview_data["columns"],
@@ -966,3 +1004,93 @@ def download_public_chart_data_csv(request, token: str, chart_id: int, payload: 
     except Exception as e:
         logger.error(f"Public CSV download error for chart {chart_id}: {str(e)}")
         raise HttpError(500, f"CSV download failed: {str(e)}")
+
+
+@public_router.post(
+    "/dashboards/{token}/charts/{chart_id}/data-preview/total-rows/",
+    response={200: dict, 404: PublicErrorResponse},
+)
+def get_public_chart_data_preview_total_rows(request, token: str, chart_id: int):
+    """
+    Get total row count for public chart data preview
+    This is essential for proper pagination in table charts
+    """
+    import json
+
+    try:
+        # Verify dashboard is public
+        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+
+        # Get the chart and org warehouse
+        chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
+        if not chart:
+            raise Exception("Chart not found in dashboard's organization")
+
+        org_warehouse = OrgWarehouse.objects.filter(org=dashboard.org).first()
+        if not org_warehouse:
+            raise Exception("No warehouse configured for organization")
+
+        # Get dashboard filters from query params (same logic as public chart data endpoint)
+        filters = {}
+        filters_param = request.GET.get("dashboard_filters")
+        if filters_param:
+            try:
+                filters = json.loads(filters_param)
+            except json.JSONDecodeError:
+                logger.warning(f"Invalid dashboard filters JSON: {filters_param}")
+
+        payload = json.loads(request.body) if request.body else {}
+
+        # Parse and resolve dashboard filters if provided (same logic as public chart data endpoint)
+        resolved_dashboard_filters = None
+        if filters:
+            # Resolve filter configurations to get column information
+            from ddpui.models.dashboard import DashboardFilter
+
+            resolved_filters = []
+
+            for filter_id, filter_value in filters.items():
+                if filter_value is not None:
+                    try:
+                        # Get the filter configuration from the database
+                        dashboard_filter = DashboardFilter.objects.get(id=filter_id)
+
+                        # Only apply this filter if it applies to the same table as the chart
+                        # Use warehouse client to check column existence
+                        warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+                        if warehouse_client.column_exists(
+                            chart.schema_name, chart.table_name, dashboard_filter.column_name
+                        ):
+                            resolved_filters.append(
+                                {
+                                    "filter_id": filter_id,
+                                    "column": dashboard_filter.column_name,
+                                    "type": dashboard_filter.filter_type,
+                                    "value": filter_value,
+                                    "settings": dashboard_filter.settings,
+                                }
+                            )
+                    except (DashboardFilter.DoesNotExist, ValueError):
+                        logger.warning(f"Public API: Dashboard filter {filter_id} not found")
+
+            resolved_dashboard_filters = resolved_filters
+
+        # Convert payload to ChartDataPayload
+        chart_payload = ChartDataPayload(**payload)
+        chart_payload.dashboard_filters = (
+            resolved_dashboard_filters  # Add resolved dashboard filters
+        )
+
+        # Get total rows using same function as authenticated API
+        total_rows = charts_service.get_chart_data_total_rows(org_warehouse, chart_payload)
+
+        return {"total_rows": total_rows, "is_valid": True}
+
+    except Dashboard.DoesNotExist:
+        logger.warning(f"Public total rows access failed - dashboard not found for token: {token}")
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
+        )
+    except Exception as e:
+        logger.error(f"Public total rows error for chart {chart_id}: {str(e)}")
+        return 404, PublicErrorResponse(error="Total rows unavailable", is_valid=False)
