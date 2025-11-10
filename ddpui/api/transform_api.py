@@ -887,7 +887,7 @@ def validate_operation_config_v2(payload: CreateDbtModelPayload, orgdbt, is_mult
 
 
 # V2 CRUD operations for CanvasNode
-@transform_router.post("/v2/dbt_project/{dbtmodel_uuid}/node/")
+@transform_router.post("/v2/dbt_project/models/{dbtmodel_uuid}/nodes/")
 @has_permission(["can_create_dbt_model"])
 def post_create_src_model_node(request, dbtmodel_uuid: str):
     """
@@ -934,7 +934,7 @@ def post_create_src_model_node(request, dbtmodel_uuid: str):
         raise HttpError(500, f"Failed to create node: {str(e)}")
 
 
-@transform_router.post("/v2/dbt_project/operations/")
+@transform_router.post("/v2/dbt_project/operations/nodes/")
 @has_permission(["can_create_dbt_model"])
 def post_construct_operation_node(request, payload: CreateOperationNodePayload):
     """
@@ -957,6 +957,8 @@ def post_construct_operation_node(request, payload: CreateOperationNodePayload):
         # TODO: compute the output cols
 
         # TODO: apply canvas locking logic
+
+        # TODO: update the dbt model on file if needed
 
         is_multi_input_op = payload.op_type in ["join", "unionall"]
 
@@ -1003,7 +1005,7 @@ def post_construct_operation_node(request, payload: CreateOperationNodePayload):
         raise HttpError(500, f"Failed to create operation: {str(e)}")
 
 
-@transform_router.put("/v2/dbt_project/operations/{node_uuid}/")
+@transform_router.put("/v2/dbt_project/operations/nodes/{node_uuid}/")
 @has_permission(["can_create_dbt_model"])
 def put_operation_node(request, node_uuid: str, payload: EditOperationNodePayload):
     """
@@ -1015,12 +1017,11 @@ def put_operation_node(request, node_uuid: str, payload: EditOperationNodePayloa
     Simplifies the complex operation creation by using unified CanvasNode model.
     No more sequence tracking or implicit relationships - everything is explicit via edges.
 
-    This operation is atomic - if any step fails, all changes are rolled back.
     """
     orguser: OrgUser = request.orguser
     orgdbt = orguser.org.dbt
 
-    logger.info(f"V2 creating operation: {payload.op_type}")
+    logger.info(f"creating operation: {payload.op_type}")
 
     is_multi_input_op = payload.op_type in ["join", "unionall"]
 
@@ -1030,6 +1031,8 @@ def put_operation_node(request, node_uuid: str, payload: EditOperationNodePayloa
         # TODO: compute the output cols
 
         # TODO: apply canvas locking logic
+
+        # TODO: update the dbt model on file if needed
 
         with transaction.atomic():
             # get the current operation node
@@ -1064,9 +1067,79 @@ def put_operation_node(request, node_uuid: str, payload: EditOperationNodePayloa
             return convert_canvas_node_to_frontend_format(operation_node)
 
     except CanvasNode.DoesNotExist:
-        logger.error(f"Base node {payload.base_node_uuid} not found")
+        logger.error(f"Base node {node_uuid} not found")
         raise HttpError(404, "input node not found")
     except Exception as e:
         logger.error(f"Failed to create V2 operation: {str(e)}")
         # Transaction will automatically rollback due to the exception
         raise HttpError(500, f"Failed to create operation: {str(e)}")
+
+
+@transform_router.put("/v2/dbt_project/operations/nodes/{node_uuid}/terminate/")
+@has_permission(["can_create_dbt_model"])
+def put_terminate_operation_node(request, node_uuid: str):
+    """
+    V2 API: Terminate the chain at this operation node by adding a model node at the end.
+    Basically materialize the chain into a model.
+    """
+    orguser: OrgUser = request.orguser
+    orgdbt = orguser.org.dbt
+
+    try:
+        operation_node = CanvasNode.objects.get(uuid=node_uuid, orgdbt=orgdbt)
+
+        if operation_node.node_type != CanvasNodeType.OPERATION:
+            raise HttpError(422, "only operation nodes can be terminated")
+
+        # TODO: apply canvas locking logic
+
+        # TODO: create the dbt model in db and on disk by merging all the operations
+
+        # create the node representing the model
+        model_node = CanvasNode.objects.create(
+            orgdbt=orgdbt,
+            node_type=CanvasNodeType.MODEL,
+            name="",  # TODO: get this from the merged operation
+            output_cols=[],  # TODO: get this from the merged operation
+            dbtmodel=None,  # TODO: link to the created dbt model
+        )
+
+        logger.info(f"V2 operation node terminated successfully: {node_uuid}")
+        return convert_canvas_node_to_frontend_format(model_node)
+
+    except CanvasNode.DoesNotExist:
+        logger.error(f"Canvas node {node_uuid} not found")
+        raise HttpError(404, "canvas node not found")
+    except Exception as e:
+        logger.error(f"Failed to terminate V2 operation node: {str(e)}")
+        # Transaction will automatically rollback due to the exception
+        raise HttpError(500, f"Failed to terminate operation node: {str(e)}")
+
+
+@transform_router.delete("/dbt_project/nodes/{node_uuid}/")
+@has_permission(["can_create_dbt_model"])
+def delete_canvas_node(request, node_uuid: str):
+    """
+    V2 API: Delete a CanvasNode by uuid.
+    This will also delete all associated edges.
+
+    This operation is atomic - if any step fails, all changes are rolled back.
+    """
+    orguser: OrgUser = request.orguser
+    orgdbt = orguser.org.dbt
+
+    try:
+        # TODO: if this is a model node, delete from disk also
+
+        canvas_node = CanvasNode.objects.get(uuid=node_uuid, orgdbt=orgdbt)
+        canvas_node.delete()
+
+        logger.info(f"V2 canvas node deleted successfully: {node_uuid}")
+        return {"success": 1}
+    except CanvasNode.DoesNotExist:
+        logger.error(f"Canvas node {node_uuid} not found")
+        raise HttpError(404, "canvas node not found")
+    except Exception as e:
+        logger.error(f"Failed to delete V2 canvas node: {str(e)}")
+        # Transaction will automatically rollback due to the exception
+        raise HttpError(500, f"Failed to delete canvas node: {str(e)}")
