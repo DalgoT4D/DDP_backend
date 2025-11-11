@@ -327,85 +327,119 @@ class DashboardContextAnalyzer:
                     f"Chart {chart_id} found {len(table_columns)} columns: {table_columns[:10]}"
                 )
 
-                # Build simple SELECT query with LIMIT
-                limit = min(self.max_rows, 100)
+                # Try multiple query approaches
+                limit = min(self.max_rows, 20)  # Start with smaller limit
+                select_columns = table_columns[:5]  # Start with just 5 columns
 
-                # Create column list (limit to first 20 columns to avoid issues)
-                select_columns = table_columns[:20]
-                columns_str = ", ".join([f'"{col}"' for col in select_columns])
-
-                # Build simple query
-                query = f"""
-                    SELECT {columns_str}
-                    FROM "{chart.schema_name}"."{chart.table_name}"
-                    LIMIT {limit}
-                """
-
-                self.logger.info(f"Chart {chart_id} executing query: {query[:200]}...")
-
-                # Execute query
-                results = warehouse.execute_query(query)
-
-                # Format results
-                if results and len(results) > 0:
-                    # Convert results to list of dicts
-                    rows = []
-                    for row in results:
-                        row_dict = {}
-                        for i, col_name in enumerate(select_columns):
-                            if i < len(row):
-                                value = row[i]
-                                # Handle special values
-                                if value is None:
-                                    value = "NULL"
-                                elif isinstance(value, (int, float, str, bool)):
-                                    value = value
-                                else:
-                                    value = str(value)
-                                row_dict[col_name] = value
-                        rows.append(row_dict)
-
-                    self.logger.info(f"Chart {chart_id} successfully fetched {len(rows)} rows")
-
-                    return {
-                        "rows": rows,
-                        "total_rows": len(rows),
-                        "columns": [{"name": col, "type": "string"} for col in select_columns],
-                        "source": "raw_table_query",
-                    }
-                else:
-                    self.logger.info(f"Chart {chart_id} query returned no data")
-                    return {
-                        "rows": [],
-                        "total_rows": 0,
-                        "columns": [{"name": col, "type": "string"} for col in select_columns],
-                        "source": "raw_table_query_empty",
-                    }
-
-            except Exception as query_error:
-                self.logger.error(f"Chart {chart_id} query failed: {query_error}")
-
-                # Even simpler fallback - just get column info
+                # Approach 1: Simple SELECT with quoted identifiers
                 try:
-                    table_columns = warehouse.get_table_columns(chart.schema_name, chart.table_name)
-                    if table_columns:
-                        self.logger.info(f"Chart {chart_id} fallback: returning column schema only")
-                        return {
-                            "rows": [],
-                            "total_rows": 0,
-                            "columns": [
-                                {"name": col, "type": "string"} for col in table_columns[:20]
-                            ],
-                            "error": f"Could not fetch data but found {len(table_columns)} columns",
-                        }
-                except:
-                    pass
+                    columns_str = ", ".join([f'"{col}"' for col in select_columns])
+                    query1 = f'SELECT {columns_str} FROM "{chart.schema_name}"."{chart.table_name}" LIMIT {limit}'
 
+                    self.logger.info(f"Chart {chart_id} trying approach 1: {query1}")
+                    results = warehouse.execute_query(query1)
+
+                    if results and len(results) > 0:
+                        rows = self._format_query_results(results, select_columns)
+                        self.logger.info(f"Chart {chart_id} approach 1 success: {len(rows)} rows")
+                        return {
+                            "rows": rows,
+                            "total_rows": len(rows),
+                            "columns": [{"name": col, "type": "string"} for col in select_columns],
+                            "source": "simple_query",
+                        }
+                except Exception as e1:
+                    self.logger.warning(f"Chart {chart_id} approach 1 failed: {e1}")
+
+                # Approach 2: SELECT without quotes
+                try:
+                    columns_str = ", ".join(select_columns)
+                    query2 = f"SELECT {columns_str} FROM {chart.schema_name}.{chart.table_name} LIMIT {limit}"
+
+                    self.logger.info(f"Chart {chart_id} trying approach 2: {query2}")
+                    results = warehouse.execute_query(query2)
+
+                    if results and len(results) > 0:
+                        rows = self._format_query_results(results, select_columns)
+                        self.logger.info(f"Chart {chart_id} approach 2 success: {len(rows)} rows")
+                        return {
+                            "rows": rows,
+                            "total_rows": len(rows),
+                            "columns": [{"name": col, "type": "string"} for col in select_columns],
+                            "source": "unquoted_query",
+                        }
+                except Exception as e2:
+                    self.logger.warning(f"Chart {chart_id} approach 2 failed: {e2}")
+
+                # Approach 3: SELECT COUNT(*) to verify table exists and has data
+                try:
+                    count_query = f'SELECT COUNT(*) FROM "{chart.schema_name}"."{chart.table_name}"'
+                    self.logger.info(f"Chart {chart_id} trying count query: {count_query}")
+                    count_result = warehouse.execute_query(count_query)
+
+                    if count_result and len(count_result) > 0:
+                        total_rows = count_result[0][0] if count_result[0] else 0
+                        self.logger.info(f"Chart {chart_id} table has {total_rows} total rows")
+
+                        if total_rows == 0:
+                            return {
+                                "rows": [],
+                                "total_rows": 0,
+                                "columns": [
+                                    {"name": col, "type": "string"} for col in select_columns
+                                ],
+                                "source": "empty_table",
+                                "info": f"Table exists but is empty (0 rows)",
+                            }
+                except Exception as e3:
+                    self.logger.warning(f"Chart {chart_id} count query failed: {e3}")
+
+                # Approach 4: Very simple SELECT *
+                try:
+                    simple_query = (
+                        f'SELECT * FROM "{chart.schema_name}"."{chart.table_name}" LIMIT 5'
+                    )
+                    self.logger.info(f"Chart {chart_id} trying SELECT *: {simple_query}")
+                    results = warehouse.execute_query(simple_query)
+
+                    if results and len(results) > 0:
+                        # Use only first few columns from actual results
+                        actual_columns = (
+                            select_columns[: len(results[0])] if results[0] else select_columns
+                        )
+                        rows = self._format_query_results(results, actual_columns)
+                        self.logger.info(f"Chart {chart_id} SELECT * success: {len(rows)} rows")
+                        return {
+                            "rows": rows,
+                            "total_rows": len(rows),
+                            "columns": [{"name": col, "type": "string"} for col in actual_columns],
+                            "source": "select_star",
+                        }
+                except Exception as e4:
+                    self.logger.error(f"Chart {chart_id} SELECT * failed: {e4}")
+
+                # All approaches failed - return column info with detailed error
+                self.logger.error(f"Chart {chart_id} all query approaches failed")
+                return {
+                    "rows": [],
+                    "total_rows": 0,
+                    "columns": [{"name": col, "type": "string"} for col in table_columns[:10]],
+                    "error": f"All query approaches failed. Table: {chart.schema_name}.{chart.table_name}",
+                    "debug_info": {
+                        "table_columns_found": len(table_columns),
+                        "sample_columns": table_columns[:10],
+                        "schema_name": chart.schema_name,
+                        "table_name": chart.table_name,
+                    },
+                }
+
+            except Exception as outer_error:
+                self.logger.error(f"Chart {chart_id} outer query block failed: {outer_error}")
                 return {
                     "rows": [],
                     "total_rows": 0,
                     "columns": [],
-                    "error": f"Failed to fetch table data: {str(query_error)}",
+                    "error": f"Failed to connect to table: {str(outer_error)}",
                 }
 
         except Exception as e:
@@ -416,6 +450,29 @@ class DashboardContextAnalyzer:
                 "columns": [],
                 "error": f"Data fetch error: {str(e)}",
             }
+
+    def _format_query_results(self, results, columns):
+        """Format raw query results into list of dicts."""
+        try:
+            rows = []
+            for row in results:
+                row_dict = {}
+                for i, col_name in enumerate(columns):
+                    if i < len(row):
+                        value = row[i]
+                        # Handle special values
+                        if value is None:
+                            value = "NULL"
+                        elif isinstance(value, (int, float, str, bool)):
+                            value = value
+                        else:
+                            value = str(value)
+                        row_dict[col_name] = value
+                rows.append(row_dict)
+            return rows
+        except Exception as e:
+            self.logger.error(f"Error formatting query results: {e}")
+            return []
 
 
 @router.post("/{dashboard_id}/context")
