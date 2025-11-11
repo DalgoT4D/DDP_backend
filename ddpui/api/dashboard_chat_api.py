@@ -305,14 +305,33 @@ class DashboardContextAnalyzer:
                 self.logger.info(f"Chart {chart_id} full extra_config: {extra_config}")
 
                 # Check if this is a problematic chart and force raw mode for debugging
+                should_force_raw = False
+
+                # Force raw if no metrics/aggregate functions
                 if (
                     chart.computation_type == "aggregated"
                     and not extra_config.get("metrics")
                     and not extra_config.get("aggregate_functions")
                 ):
+                    should_force_raw = True
                     self.logger.warning(
-                        f"Chart {chart_id} has aggregated type but no metrics/aggregate_functions - forcing raw mode for debugging"
+                        f"Chart {chart_id} has aggregated type but no metrics/aggregate_functions - forcing raw mode"
                     )
+
+                # Also force raw for chart types that typically need dimension_col but don't have it
+                elif (
+                    chart.computation_type == "aggregated"
+                    and chart.chart_type.lower()
+                    in ["table", "pie", "doughnut", "map", "choropleth"]
+                    and not extra_config.get("dimension_col")
+                    and not extra_config.get("columns")  # No columns available for inference
+                ):
+                    should_force_raw = True
+                    self.logger.warning(
+                        f"Chart {chart_id} is {chart.chart_type} type without dimension_col or columns - forcing raw mode"
+                    )
+
+                if should_force_raw:
                     forced_computation_type = "raw"
                 else:
                     forced_computation_type = chart.computation_type
@@ -406,24 +425,60 @@ class DashboardContextAnalyzer:
                         if not available_columns and schema_info.get("schema", {}).get("columns"):
                             available_columns = schema_info["schema"]["columns"]
 
-                        # Try to find a suitable dimension column
+                        self.logger.info(
+                            f"Chart {chart_id} available columns for dimension inference: {available_columns}"
+                        )
+
+                        # Try to find a suitable dimension column - be more aggressive
                         dimension_candidates = []
+
+                        # First pass: look for obvious dimension columns
                         for col in available_columns:
                             col_name = col.get("name") if isinstance(col, dict) else str(col)
-                            # Skip numeric columns that are likely metrics
-                            if not any(
-                                keyword in col_name.lower()
+                            col_lower = col_name.lower()
+
+                            # Prefer common dimension column names
+                            if any(
+                                keyword in col_lower
                                 for keyword in [
-                                    "id",
-                                    "count",
+                                    "category",
+                                    "region",
+                                    "type",
+                                    "status",
+                                    "name",
+                                    "group",
+                                ]
+                            ):
+                                dimension_candidates.insert(
+                                    0, col_name
+                                )  # Insert at beginning (higher priority)
+                            # Skip obvious metric columns
+                            elif not any(
+                                keyword in col_lower
+                                for keyword in [
                                     "sum",
+                                    "count",
                                     "total",
                                     "amount",
-                                    "value",
-                                    "number",
+                                    "avg",
+                                    "revenue",
+                                    "sales",
+                                    "cost",
                                 ]
                             ):
                                 dimension_candidates.append(col_name)
+
+                        # If no good candidates found, just use the first available column
+                        if not dimension_candidates and available_columns:
+                            first_col = available_columns[0]
+                            dimension_candidates.append(
+                                first_col.get("name")
+                                if isinstance(first_col, dict)
+                                else str(first_col)
+                            )
+                            self.logger.info(
+                                f"Chart {chart_id} no ideal dimension candidates, using first column as fallback"
+                            )
 
                         if dimension_candidates:
                             inferred_dimension = dimension_candidates[0]
@@ -433,8 +488,16 @@ class DashboardContextAnalyzer:
                             payload_kwargs["dimension_col"] = inferred_dimension
                         else:
                             self.logger.warning(
-                                f"Chart {chart_id} could not infer suitable dimension_col, will try without"
+                                f"Chart {chart_id} could not infer suitable dimension_col from {len(available_columns)} columns, forcing to single metric"
                             )
+                            # If we can't find dimension, ensure we only have one metric to avoid the requirement
+                            if len(payload_kwargs.get("metrics", [])) > 1:
+                                payload_kwargs["metrics"] = payload_kwargs["metrics"][
+                                    :1
+                                ]  # Keep only first metric
+                                self.logger.info(
+                                    f"Chart {chart_id} reduced to single metric to avoid dimension requirement"
+                                )
 
                 # Handle map-specific fields
                 if chart.chart_type.lower() in ["map", "choropleth"]:
@@ -488,10 +551,13 @@ class DashboardContextAnalyzer:
                         f"Chart {chart_id} payload failed: {error_msg}, trying raw data fallback"
                     )
 
-                    # Special handling for dimension_col errors
-                    if "dimension_col" in error_msg.lower():
+                    # Special handling for dimension_col errors - be more aggressive
+                    if any(
+                        keyword in error_msg.lower()
+                        for keyword in ["dimension_col", "dimension", "multiple metrics"]
+                    ):
                         self.logger.info(
-                            f"Chart {chart_id} failed due to missing dimension_col, forcing raw data fallback"
+                            f"Chart {chart_id} failed due to dimension/metrics issue, forcing raw data fallback"
                         )
 
                     try:
@@ -968,3 +1034,71 @@ def test_single_chart(request, dashboard_id: int, chart_id: int):
     except Exception as e:
         logger.error(f"Error testing chart {chart_id}: {e}")
         return JsonResponse({"error": f"Test error: {str(e)}", "chart_id": chart_id}, status=500)
+
+
+@router.get("/{dashboard_id}/debug-chart-config/{chart_id}")
+@has_permission(["can_view_dashboards"])
+def debug_chart_config(request, dashboard_id: int, chart_id: int):
+    """
+    Debug endpoint to see chart configuration details.
+    """
+    try:
+        orguser_obj = request.orguser
+        if not orguser_obj:
+            return JsonResponse({"error": "Unauthorized"}, status=401)
+
+        from ddpui.models.visualization import Chart
+
+        chart = Chart.objects.filter(id=chart_id, org=orguser_obj.org).first()
+        if not chart:
+            return JsonResponse({"error": "Chart not found"}, status=404)
+
+        extra_config = chart.extra_config or {}
+
+        debug_info = {
+            "chart_id": chart_id,
+            "dashboard_id": dashboard_id,
+            "chart_details": {
+                "title": chart.title,
+                "chart_type": chart.chart_type,
+                "computation_type": chart.computation_type,
+                "schema_name": chart.schema_name,
+                "table_name": chart.table_name,
+            },
+            "extra_config": extra_config,
+            "config_analysis": {
+                "has_metrics": bool(extra_config.get("metrics")),
+                "has_aggregate_functions": bool(extra_config.get("aggregate_functions")),
+                "has_dimension_col": bool(extra_config.get("dimension_col")),
+                "has_columns": bool(extra_config.get("columns")),
+                "metrics_count": len(extra_config.get("metrics", [])),
+                "columns_count": len(extra_config.get("columns", [])),
+            },
+            "recommended_action": "unknown",
+        }
+
+        # Determine recommended action
+        if chart.computation_type == "aggregated":
+            if not extra_config.get("metrics") and not extra_config.get("aggregate_functions"):
+                debug_info["recommended_action"] = "force_raw_mode_no_metrics"
+            elif chart.chart_type.lower() in [
+                "table",
+                "pie",
+                "doughnut",
+                "map",
+                "choropleth",
+            ] and not extra_config.get("dimension_col"):
+                if not extra_config.get("columns"):
+                    debug_info["recommended_action"] = "force_raw_mode_no_dimension_data"
+                else:
+                    debug_info["recommended_action"] = "infer_dimension_col"
+            else:
+                debug_info["recommended_action"] = "use_as_configured"
+        else:
+            debug_info["recommended_action"] = "use_raw_mode"
+
+        return JsonResponse(debug_info)
+
+    except Exception as e:
+        logger.error(f"Error debugging chart config {chart_id}: {e}")
+        return JsonResponse({"error": f"Debug error: {str(e)}", "chart_id": chart_id}, status=500)
