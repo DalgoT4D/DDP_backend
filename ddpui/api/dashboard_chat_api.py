@@ -301,12 +301,26 @@ class DashboardContextAnalyzer:
 
                 # Build chart data payload from chart configuration
                 extra_config = chart.extra_config or {}
-                self.logger.info(f"Chart {chart_id} extra_config: {extra_config}")
+                self.logger.info(f"Chart {chart_id} extra_config keys: {list(extra_config.keys())}")
+                self.logger.info(f"Chart {chart_id} full extra_config: {extra_config}")
+
+                # Check if this is a problematic chart and force raw mode for debugging
+                if (
+                    chart.computation_type == "aggregated"
+                    and not extra_config.get("metrics")
+                    and not extra_config.get("aggregate_functions")
+                ):
+                    self.logger.warning(
+                        f"Chart {chart_id} has aggregated type but no metrics/aggregate_functions - forcing raw mode for debugging"
+                    )
+                    forced_computation_type = "raw"
+                else:
+                    forced_computation_type = chart.computation_type
 
                 # Extract required fields from extra_config based on computation type
                 payload_kwargs = {
                     "chart_type": chart.chart_type,
-                    "computation_type": chart.computation_type,
+                    "computation_type": forced_computation_type,  # Use forced type if needed
                     "schema_name": chart.schema_name,
                     "table_name": chart.table_name,
                     "extra_config": extra_config,
@@ -314,14 +328,19 @@ class DashboardContextAnalyzer:
                 }
 
                 # Add fields specific to computation type
-                if chart.computation_type == "raw":
+                if forced_computation_type == "raw":
                     # For raw data charts
                     if extra_config.get("x_axis"):
                         payload_kwargs["x_axis"] = extra_config["x_axis"]
                     if extra_config.get("y_axis"):
                         payload_kwargs["y_axis"] = extra_config["y_axis"]
 
-                elif chart.computation_type == "aggregated":
+                    # If no x_axis/y_axis specified for raw data, we'll let the fallback handle it
+                    self.logger.info(
+                        f"Chart {chart_id} using raw mode with x_axis={payload_kwargs.get('x_axis')} y_axis={payload_kwargs.get('y_axis')}"
+                    )
+
+                elif forced_computation_type == "aggregated":
                     # For aggregated charts - these are required
                     if extra_config.get("dimension_col"):
                         payload_kwargs["dimension_col"] = extra_config["dimension_col"]
@@ -330,10 +349,15 @@ class DashboardContextAnalyzer:
 
                     # Metrics are required for aggregated charts
                     metrics = extra_config.get("metrics", [])
+                    self.logger.info(f"Chart {chart_id} original metrics from config: {metrics}")
+
                     if not metrics and extra_config.get("aggregate_functions"):
                         # Try to build metrics from aggregate_functions if available
                         metrics = []
-                        for agg_func in extra_config.get("aggregate_functions", []):
+                        agg_functions = extra_config.get("aggregate_functions", [])
+                        self.logger.info(f"Chart {chart_id} aggregate_functions: {agg_functions}")
+
+                        for agg_func in agg_functions:
                             if isinstance(agg_func, dict):
                                 metrics.append(
                                     {
@@ -342,12 +366,75 @@ class DashboardContextAnalyzer:
                                         "alias": agg_func.get("alias"),
                                     }
                                 )
+                        self.logger.info(
+                            f"Chart {chart_id} metrics built from aggregate_functions: {metrics}"
+                        )
 
                     if metrics:
                         payload_kwargs["metrics"] = metrics
+                        self.logger.info(f"Chart {chart_id} using metrics: {metrics}")
                     else:
                         # Fallback: create a basic COUNT metric if none found
-                        payload_kwargs["metrics"] = [{"aggregation": "COUNT", "alias": "count"}]
+                        fallback_metrics = [
+                            {"aggregation": "COUNT", "alias": "count", "column": None}
+                        ]
+                        payload_kwargs["metrics"] = fallback_metrics
+                        self.logger.warning(
+                            f"Chart {chart_id} no metrics found, using fallback: {fallback_metrics}"
+                        )
+
+                    # Check if dimension_col is required for this chart type and metrics combination
+                    chart_type_lower = chart.chart_type.lower()
+                    requires_dimension = chart_type_lower in [
+                        "table",
+                        "pie",
+                        "doughnut",
+                        "map",
+                        "choropleth",
+                    ] or (
+                        len(payload_kwargs.get("metrics", [])) > 1
+                    )  # Multiple metrics need dimension
+
+                    if requires_dimension and not payload_kwargs.get("dimension_col"):
+                        # Try to find a suitable dimension column from available columns
+                        self.logger.warning(
+                            f"Chart {chart_id} ({chart_type_lower}) needs dimension_col but none specified. Attempting to infer..."
+                        )
+
+                        # Get available columns from the schema
+                        available_columns = extra_config.get("columns", [])
+                        if not available_columns and schema_info.get("schema", {}).get("columns"):
+                            available_columns = schema_info["schema"]["columns"]
+
+                        # Try to find a suitable dimension column
+                        dimension_candidates = []
+                        for col in available_columns:
+                            col_name = col.get("name") if isinstance(col, dict) else str(col)
+                            # Skip numeric columns that are likely metrics
+                            if not any(
+                                keyword in col_name.lower()
+                                for keyword in [
+                                    "id",
+                                    "count",
+                                    "sum",
+                                    "total",
+                                    "amount",
+                                    "value",
+                                    "number",
+                                ]
+                            ):
+                                dimension_candidates.append(col_name)
+
+                        if dimension_candidates:
+                            inferred_dimension = dimension_candidates[0]
+                            self.logger.info(
+                                f"Chart {chart_id} using inferred dimension_col: {inferred_dimension}"
+                            )
+                            payload_kwargs["dimension_col"] = inferred_dimension
+                        else:
+                            self.logger.warning(
+                                f"Chart {chart_id} could not infer suitable dimension_col, will try without"
+                            )
 
                 # Handle map-specific fields
                 if chart.chart_type.lower() in ["map", "choropleth"]:
@@ -362,8 +449,13 @@ class DashboardContextAnalyzer:
                 if extra_config.get("customizations"):
                     payload_kwargs["customizations"] = extra_config["customizations"]
 
+                self.logger.info(f"Chart {chart_id} final payload_kwargs: {payload_kwargs}")
+                self.logger.info(
+                    f"Chart {chart_id} final metrics in payload: {payload_kwargs.get('metrics')}"
+                )
+
                 payload = ChartDataPayload(**payload_kwargs)
-                self.logger.info(f"Chart {chart_id} built payload: {payload_kwargs}")
+                self.logger.info(f"Chart {chart_id} ChartDataPayload created successfully")
 
                 # Get limited sample data for AI analysis
                 try:
@@ -391,9 +483,16 @@ class DashboardContextAnalyzer:
                         self.logger.warning(f"Chart {chart_id} preview_data is None/empty")
                 except Exception as payload_error:
                     # If the configured payload fails, try a simpler raw data approach
+                    error_msg = str(payload_error)
                     self.logger.warning(
-                        f"Chart {chart_id} payload failed, trying raw data fallback: {payload_error}"
+                        f"Chart {chart_id} payload failed: {error_msg}, trying raw data fallback"
                     )
+
+                    # Special handling for dimension_col errors
+                    if "dimension_col" in error_msg.lower():
+                        self.logger.info(
+                            f"Chart {chart_id} failed due to missing dimension_col, forcing raw data fallback"
+                        )
 
                     try:
                         # Fallback: try getting raw data without complex configurations
