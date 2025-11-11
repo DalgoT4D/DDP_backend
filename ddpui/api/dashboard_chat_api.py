@@ -265,6 +265,8 @@ class DashboardContextAnalyzer:
 
     def _get_chart_data_context(self, chart_id: int) -> Dict[str, Any]:
         """Get chart data and schema information."""
+        self.logger.info(f"=== Starting data fetch for chart {chart_id} ===")
+
         try:
             # Get schema first
             schema_info = self._get_chart_schema_context(chart_id)
@@ -281,15 +283,25 @@ class DashboardContextAnalyzer:
                 chart = Chart.objects.filter(id=chart_id, org=self.orguser.org).first()
 
                 if not chart:
+                    self.logger.error(f"Chart {chart_id} not found in database")
                     raise Exception("Chart not found")
+
+                self.logger.info(f"Chart {chart_id} found: {chart.title}")
+                self.logger.info(f"Chart {chart_id} type: {chart.chart_type}")
+                self.logger.info(f"Chart {chart_id} computation: {chart.computation_type}")
+                self.logger.info(f"Chart {chart_id} table: {chart.schema_name}.{chart.table_name}")
 
                 # Get org warehouse
                 org_warehouse = OrgWarehouse.objects.filter(org=self.orguser.org).first()
                 if not org_warehouse:
+                    self.logger.error(f"No warehouse found for org {self.orguser.org.slug}")
                     raise Exception("Organization warehouse not configured")
+
+                self.logger.info(f"Using warehouse: {org_warehouse.name} ({org_warehouse.wh_type})")
 
                 # Build chart data payload from chart configuration
                 extra_config = chart.extra_config or {}
+                self.logger.info(f"Chart {chart_id} extra_config: {extra_config}")
 
                 # Extract required fields from extra_config based on computation type
                 payload_kwargs = {
@@ -351,19 +363,32 @@ class DashboardContextAnalyzer:
                     payload_kwargs["customizations"] = extra_config["customizations"]
 
                 payload = ChartDataPayload(**payload_kwargs)
+                self.logger.info(f"Chart {chart_id} built payload: {payload_kwargs}")
 
                 # Get limited sample data for AI analysis
                 try:
+                    self.logger.info(f"Chart {chart_id} calling get_chart_data_table_preview...")
                     preview_data = get_chart_data_table_preview(
                         org_warehouse, payload, page=0, limit=min(self.max_rows, 500)
                     )
+                    self.logger.info(
+                        f"Chart {chart_id} preview_data keys: {list(preview_data.keys()) if preview_data else 'None'}"
+                    )
 
                     if preview_data:
+                        data_rows = preview_data.get("data", [])
+                        columns = preview_data.get("columns", [])
+                        self.logger.info(
+                            f"Chart {chart_id} got {len(data_rows)} rows, {len(columns)} columns"
+                        )
+
                         sample_data = {
-                            "rows": preview_data.get("data", []),
-                            "total_rows": len(preview_data.get("data", [])),
-                            "columns": preview_data.get("columns", []),
+                            "rows": data_rows,
+                            "total_rows": len(data_rows),
+                            "columns": columns,
                         }
+                    else:
+                        self.logger.warning(f"Chart {chart_id} preview_data is None/empty")
                 except Exception as payload_error:
                     # If the configured payload fails, try a simpler raw data approach
                     self.logger.warning(
@@ -372,6 +397,7 @@ class DashboardContextAnalyzer:
 
                     try:
                         # Fallback: try getting raw data without complex configurations
+                        self.logger.info(f"Chart {chart_id} trying raw data fallback...")
                         simple_payload = ChartDataPayload(
                             chart_type="table",  # Use simple table type
                             computation_type="raw",
@@ -380,19 +406,29 @@ class DashboardContextAnalyzer:
                             extra_config={},
                             limit=min(self.max_rows, 100),  # Smaller limit for fallback
                         )
+                        self.logger.info(
+                            f"Chart {chart_id} fallback payload: {simple_payload.__dict__}"
+                        )
 
                         preview_data = get_chart_data_table_preview(
                             org_warehouse, simple_payload, page=0, limit=min(self.max_rows, 100)
                         )
 
                         if preview_data:
+                            fallback_rows = preview_data.get("data", [])
+                            fallback_columns = preview_data.get("columns", [])
+                            self.logger.info(
+                                f"Chart {chart_id} fallback success: {len(fallback_rows)} rows, {len(fallback_columns)} columns"
+                            )
+
                             sample_data = {
-                                "rows": preview_data.get("data", []),
-                                "total_rows": len(preview_data.get("data", [])),
-                                "columns": preview_data.get("columns", []),
+                                "rows": fallback_rows,
+                                "total_rows": len(fallback_rows),
+                                "columns": fallback_columns,
                                 "fallback": True,  # Indicate this is fallback data
                             }
                         else:
+                            self.logger.error(f"Chart {chart_id} raw data fallback returned None")
                             raise Exception("Raw data fallback also failed")
 
                     except Exception:
@@ -744,3 +780,92 @@ def update_chat_settings(request, dashboard_id: int):
     except Exception as e:
         logger.error(f"Error updating chat settings: {e}")
         return JsonResponse({"error": "Internal server error"}, status=500)
+
+
+@router.post("/{dashboard_id}/debug")
+@has_permission(["can_view_dashboards"])
+def debug_dashboard_context(request, dashboard_id: int, payload: DashboardContextRequest):
+    """
+    Debug endpoint to see detailed context information for troubleshooting.
+    Returns the full context with all debug information.
+    """
+    try:
+        orguser_obj = request.orguser
+        if not orguser_obj:
+            return JsonResponse({"error": "Unauthorized"}, status=401)
+
+        analyzer = DashboardContextAnalyzer(
+            dashboard_id=dashboard_id,
+            orguser_obj=orguser_obj,
+            include_data=payload.include_data,
+            max_rows=payload.max_rows,
+        )
+
+        # Get the context with detailed logging
+        context = analyzer.get_dashboard_context()
+
+        # Add extra debug info
+        debug_info = {
+            "dashboard_id": dashboard_id,
+            "user_org": orguser_obj.org.slug,
+            "include_data": payload.include_data,
+            "max_rows": payload.max_rows,
+            "context": context,
+            "timestamp": time.time(),
+        }
+
+        # Add warehouse info for debugging
+        from ddpui.models.org import OrgWarehouse
+
+        org_warehouse = OrgWarehouse.objects.filter(org=orguser_obj.org).first()
+        if org_warehouse:
+            debug_info["warehouse"] = {
+                "name": org_warehouse.name,
+                "type": org_warehouse.wh_type,
+                "credentials_available": bool(org_warehouse.credentials),
+            }
+        else:
+            debug_info["warehouse"] = None
+
+        return JsonResponse(debug_info)
+
+    except Exception as e:
+        logger.error(f"Error in debug dashboard context: {e}")
+        return JsonResponse(
+            {"error": f"Debug error: {str(e)}", "dashboard_id": dashboard_id}, status=500
+        )
+
+
+@router.get("/{dashboard_id}/test-chart/{chart_id}")
+@has_permission(["can_view_dashboards"])
+def test_single_chart(request, dashboard_id: int, chart_id: int):
+    """
+    Test endpoint to debug a single chart's data fetching.
+    """
+    try:
+        orguser_obj = request.orguser
+        if not orguser_obj:
+            return JsonResponse({"error": "Unauthorized"}, status=401)
+
+        analyzer = DashboardContextAnalyzer(
+            dashboard_id=dashboard_id,
+            orguser_obj=orguser_obj,
+            include_data=True,  # Always include data for testing
+            max_rows=10,  # Small sample for testing
+        )
+
+        # Test just this chart
+        result = analyzer._get_chart_data_context(chart_id)
+
+        return JsonResponse(
+            {
+                "chart_id": chart_id,
+                "dashboard_id": dashboard_id,
+                "result": result,
+                "timestamp": time.time(),
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error testing chart {chart_id}: {e}")
+        return JsonResponse({"error": f"Test error: {str(e)}", "chart_id": chart_id}, status=500)
