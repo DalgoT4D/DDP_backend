@@ -297,7 +297,7 @@ class DashboardContextAnalyzer:
                     self.logger.error(f"No warehouse found for org {self.orguser.org.slug}")
                     raise Exception("Organization warehouse not configured")
 
-                self.logger.info(f"Using warehouse: {org_warehouse.name} ({org_warehouse.wh_type})")
+                self.logger.info(f"Using warehouse: {org_warehouse.name} ({org_warehouse.wtype})")
 
                 # Build chart data payload from chart configuration
                 extra_config = chart.extra_config or {}
@@ -821,7 +821,7 @@ def debug_dashboard_context(request, dashboard_id: int, payload: DashboardContex
         if org_warehouse:
             debug_info["warehouse"] = {
                 "name": org_warehouse.name,
-                "type": org_warehouse.wh_type,
+                "type": org_warehouse.wtype,
                 "credentials_available": bool(org_warehouse.credentials),
             }
         else:
