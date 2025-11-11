@@ -307,7 +307,7 @@ class DashboardContextAnalyzer:
                 }
 
             # Get warehouse client
-            warehouse = WarehouseFactory.create(org_warehouse)
+            warehouse = WarehouseFactory.get_warehouse_client(org_warehouse)
 
             # First, get the table columns to know what we're working with
             try:
