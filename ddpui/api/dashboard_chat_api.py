@@ -285,6 +285,7 @@ class DashboardContextAnalyzer:
             from ddpui.models.visualization import Chart
             from ddpui.models.org import OrgWarehouse
             from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
+            from sqlalchemy import text
 
             # Get chart object
             chart = Chart.objects.filter(id=chart_id, org=self.orguser.org).first()
@@ -311,8 +312,10 @@ class DashboardContextAnalyzer:
 
             # First, get the table columns to know what we're working with
             try:
-                table_columns = warehouse.get_table_columns(chart.schema_name, chart.table_name)
-                if not table_columns:
+                table_columns_list = warehouse.get_table_columns(
+                    chart.schema_name, chart.table_name
+                )
+                if not table_columns_list:
                     self.logger.warning(
                         f"Chart {chart_id} no columns found for table {chart.schema_name}.{chart.table_name}"
                     )
@@ -323,13 +326,30 @@ class DashboardContextAnalyzer:
                         "error": "No columns found in table",
                     }
 
+                # Extract column names from dict format
+                column_names = [
+                    col["name"]
+                    for col in table_columns_list
+                    if isinstance(col, dict) and "name" in col
+                ]
+                if not column_names:
+                    self.logger.error(
+                        f"Chart {chart_id} could not extract column names from: {table_columns_list[:5]}"
+                    )
+                    return {
+                        "rows": [],
+                        "total_rows": 0,
+                        "columns": [],
+                        "error": "Could not extract column names from table metadata",
+                    }
+
                 self.logger.info(
-                    f"Chart {chart_id} found {len(table_columns)} columns: {table_columns[:10]}"
+                    f"Chart {chart_id} found {len(column_names)} columns: {column_names[:10]}"
                 )
 
                 # Try multiple query approaches
                 limit = min(self.max_rows, 20)  # Start with smaller limit
-                select_columns = table_columns[:5]  # Start with just 5 columns
+                select_columns = column_names[:5]  # Start with just 5 columns
 
                 # Approach 1: Simple SELECT with quoted identifiers
                 try:
@@ -337,7 +357,7 @@ class DashboardContextAnalyzer:
                     query1 = f'SELECT {columns_str} FROM "{chart.schema_name}"."{chart.table_name}" LIMIT {limit}'
 
                     self.logger.info(f"Chart {chart_id} trying approach 1: {query1}")
-                    results = warehouse.execute_query(query1)
+                    results = warehouse.execute(text(query1))
 
                     if results and len(results) > 0:
                         rows = self._format_query_results(results, select_columns)
@@ -357,7 +377,7 @@ class DashboardContextAnalyzer:
                     query2 = f"SELECT {columns_str} FROM {chart.schema_name}.{chart.table_name} LIMIT {limit}"
 
                     self.logger.info(f"Chart {chart_id} trying approach 2: {query2}")
-                    results = warehouse.execute_query(query2)
+                    results = warehouse.execute(text(query2))
 
                     if results and len(results) > 0:
                         rows = self._format_query_results(results, select_columns)
@@ -375,10 +395,14 @@ class DashboardContextAnalyzer:
                 try:
                     count_query = f'SELECT COUNT(*) FROM "{chart.schema_name}"."{chart.table_name}"'
                     self.logger.info(f"Chart {chart_id} trying count query: {count_query}")
-                    count_result = warehouse.execute_query(count_query)
+                    count_result = warehouse.execute(text(count_query))
 
                     if count_result and len(count_result) > 0:
-                        total_rows = count_result[0][0] if count_result[0] else 0
+                        total_rows = (
+                            count_result[0]["count"]
+                            if "count" in count_result[0]
+                            else count_result[0].get("COUNT(*)", 0)
+                        )
                         self.logger.info(f"Chart {chart_id} table has {total_rows} total rows")
 
                         if total_rows == 0:
@@ -400,13 +424,17 @@ class DashboardContextAnalyzer:
                         f'SELECT * FROM "{chart.schema_name}"."{chart.table_name}" LIMIT 5'
                     )
                     self.logger.info(f"Chart {chart_id} trying SELECT *: {simple_query}")
-                    results = warehouse.execute_query(simple_query)
+                    results = warehouse.execute(text(simple_query))
 
                     if results and len(results) > 0:
-                        # Use only first few columns from actual results
-                        actual_columns = (
-                            select_columns[: len(results[0])] if results[0] else select_columns
-                        )
+                        # Use column names from results keys
+                        if isinstance(results[0], dict):
+                            actual_columns = list(results[0].keys())[
+                                :5
+                            ]  # Use first 5 columns from results
+                        else:
+                            actual_columns = select_columns  # Fallback to original selection
+
                         rows = self._format_query_results(results, actual_columns)
                         self.logger.info(f"Chart {chart_id} SELECT * success: {len(rows)} rows")
                         return {
@@ -423,11 +451,11 @@ class DashboardContextAnalyzer:
                 return {
                     "rows": [],
                     "total_rows": 0,
-                    "columns": [{"name": col, "type": "string"} for col in table_columns[:10]],
-                    "error": f"All query approaches failed. Table: {chart.schema_name}.{chart.table_name}",
+                    "columns": [{"name": col, "type": "string"} for col in column_names[:10]],
+                    "error": f"Could not fetch data but found {len(column_names)} columns",
                     "debug_info": {
-                        "table_columns_found": len(table_columns),
-                        "sample_columns": table_columns[:10],
+                        "table_columns_found": len(column_names),
+                        "sample_columns": column_names[:10],
                         "schema_name": chart.schema_name,
                         "table_name": chart.table_name,
                     },
@@ -457,21 +485,45 @@ class DashboardContextAnalyzer:
             rows = []
             for row in results:
                 row_dict = {}
-                for i, col_name in enumerate(columns):
-                    if i < len(row):
-                        value = row[i]
-                        # Handle special values
-                        if value is None:
-                            value = "NULL"
-                        elif isinstance(value, (int, float, str, bool)):
-                            value = value
+
+                # Handle different result formats
+                if isinstance(row, dict):
+                    # Results are already in dict format (most common case)
+                    for col_name in columns:
+                        if col_name in row:
+                            value = row[col_name]
+                            # Handle special values
+                            if value is None:
+                                value = "NULL"
+                            elif isinstance(value, (int, float, str, bool)):
+                                value = value
+                            else:
+                                value = str(value)
+                            row_dict[col_name] = value
                         else:
-                            value = str(value)
-                        row_dict[col_name] = value
+                            row_dict[col_name] = "N/A"
+                else:
+                    # Results are in tuple/list format (fallback)
+                    for i, col_name in enumerate(columns):
+                        if i < len(row):
+                            value = row[i]
+                            # Handle special values
+                            if value is None:
+                                value = "NULL"
+                            elif isinstance(value, (int, float, str, bool)):
+                                value = value
+                            else:
+                                value = str(value)
+                            row_dict[col_name] = value
+                        else:
+                            row_dict[col_name] = "N/A"
+
                 rows.append(row_dict)
             return rows
         except Exception as e:
             self.logger.error(f"Error formatting query results: {e}")
+            self.logger.error(f"Results sample: {results[:2] if results else 'None'}")
+            self.logger.error(f"Columns: {columns}")
             return []
 
 
