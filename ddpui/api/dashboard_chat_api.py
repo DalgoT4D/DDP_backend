@@ -289,37 +289,135 @@ class DashboardContextAnalyzer:
                     raise Exception("Organization warehouse not configured")
 
                 # Build chart data payload from chart configuration
-                payload = ChartDataPayload(
-                    chart_type=chart.chart_type,
-                    computation_type=chart.computation_type,
-                    schema_name=chart.schema_name,
-                    table_name=chart.table_name,
-                    extra_config=chart.extra_config or {},
-                    limit=min(self.max_rows, 500),  # Cap at 500 for performance
-                )
+                extra_config = chart.extra_config or {}
+
+                # Extract required fields from extra_config based on computation type
+                payload_kwargs = {
+                    "chart_type": chart.chart_type,
+                    "computation_type": chart.computation_type,
+                    "schema_name": chart.schema_name,
+                    "table_name": chart.table_name,
+                    "extra_config": extra_config,
+                    "limit": min(self.max_rows, 500),  # Cap at 500 for performance
+                }
+
+                # Add fields specific to computation type
+                if chart.computation_type == "raw":
+                    # For raw data charts
+                    if extra_config.get("x_axis"):
+                        payload_kwargs["x_axis"] = extra_config["x_axis"]
+                    if extra_config.get("y_axis"):
+                        payload_kwargs["y_axis"] = extra_config["y_axis"]
+
+                elif chart.computation_type == "aggregated":
+                    # For aggregated charts - these are required
+                    if extra_config.get("dimension_col"):
+                        payload_kwargs["dimension_col"] = extra_config["dimension_col"]
+                    if extra_config.get("extra_dimension"):
+                        payload_kwargs["extra_dimension"] = extra_config["extra_dimension"]
+
+                    # Metrics are required for aggregated charts
+                    metrics = extra_config.get("metrics", [])
+                    if not metrics and extra_config.get("aggregate_functions"):
+                        # Try to build metrics from aggregate_functions if available
+                        metrics = []
+                        for agg_func in extra_config.get("aggregate_functions", []):
+                            if isinstance(agg_func, dict):
+                                metrics.append(
+                                    {
+                                        "column": agg_func.get("column"),
+                                        "aggregation": agg_func.get("function", "COUNT"),
+                                        "alias": agg_func.get("alias"),
+                                    }
+                                )
+
+                    if metrics:
+                        payload_kwargs["metrics"] = metrics
+                    else:
+                        # Fallback: create a basic COUNT metric if none found
+                        payload_kwargs["metrics"] = [{"aggregation": "COUNT", "alias": "count"}]
+
+                # Handle map-specific fields
+                if chart.chart_type.lower() in ["map", "choropleth"]:
+                    if extra_config.get("geographic_column"):
+                        payload_kwargs["geographic_column"] = extra_config["geographic_column"]
+                    if extra_config.get("value_column"):
+                        payload_kwargs["value_column"] = extra_config["value_column"]
+                    if extra_config.get("selected_geojson_id"):
+                        payload_kwargs["selected_geojson_id"] = extra_config["selected_geojson_id"]
+
+                # Add customizations if available
+                if extra_config.get("customizations"):
+                    payload_kwargs["customizations"] = extra_config["customizations"]
+
+                payload = ChartDataPayload(**payload_kwargs)
 
                 # Get limited sample data for AI analysis
-                preview_data = get_chart_data_table_preview(
-                    org_warehouse, payload, page=0, limit=min(self.max_rows, 500)
-                )
+                try:
+                    preview_data = get_chart_data_table_preview(
+                        org_warehouse, payload, page=0, limit=min(self.max_rows, 500)
+                    )
 
-                if preview_data:
-                    sample_data = {
-                        "rows": preview_data.get("data", []),
-                        "total_rows": len(preview_data.get("data", [])),
-                        "columns": preview_data.get("columns", []),
-                    }
+                    if preview_data:
+                        sample_data = {
+                            "rows": preview_data.get("data", []),
+                            "total_rows": len(preview_data.get("data", [])),
+                            "columns": preview_data.get("columns", []),
+                        }
+                except Exception as payload_error:
+                    # If the configured payload fails, try a simpler raw data approach
+                    self.logger.warning(
+                        f"Chart {chart_id} payload failed, trying raw data fallback: {payload_error}"
+                    )
+
+                    try:
+                        # Fallback: try getting raw data without complex configurations
+                        simple_payload = ChartDataPayload(
+                            chart_type="table",  # Use simple table type
+                            computation_type="raw",
+                            schema_name=chart.schema_name,
+                            table_name=chart.table_name,
+                            extra_config={},
+                            limit=min(self.max_rows, 100),  # Smaller limit for fallback
+                        )
+
+                        preview_data = get_chart_data_table_preview(
+                            org_warehouse, simple_payload, page=0, limit=min(self.max_rows, 100)
+                        )
+
+                        if preview_data:
+                            sample_data = {
+                                "rows": preview_data.get("data", []),
+                                "total_rows": len(preview_data.get("data", [])),
+                                "columns": preview_data.get("columns", []),
+                                "fallback": True,  # Indicate this is fallback data
+                            }
+                        else:
+                            raise Exception("Raw data fallback also failed")
+
+                    except Exception:
+                        # If even the fallback fails, raise the original error
+                        raise payload_error
 
             except Exception as data_error:
                 self.logger.warning(
                     f"Could not fetch sample data for chart {chart_id}: {data_error}"
                 )
+                self.logger.debug(f"Chart {chart_id} config: {chart.extra_config}")
+                self.logger.debug(f"Chart {chart_id} computation_type: {chart.computation_type}")
+
                 # Continue without sample data
+                error_msg = str(data_error)
+                if "At least one metric is required" in error_msg:
+                    error_msg = "Chart configuration missing required metrics for aggregated data"
+                elif "column" in error_msg.lower() and "not found" in error_msg.lower():
+                    error_msg = "Chart references columns that don't exist in the data source"
+
                 sample_data = {
                     "rows": [],
                     "total_rows": 0,
                     "columns": schema_info.get("schema", {}).get("columns", []),
-                    "error": f"Could not fetch sample data: {str(data_error)}",
+                    "error": f"Data fetch error: {error_msg}",
                 }
 
             return {"schema": schema_info["schema"], "sample_data": sample_data}
@@ -492,7 +590,12 @@ def _build_dashboard_system_prompt(
             sample_data = chart.get("sample_data")
             if sample_data:
                 if sample_data.get("rows"):
-                    chart_info += f" - Sample data: {len(sample_data['rows'])} rows available"
+                    if sample_data.get("fallback"):
+                        chart_info += (
+                            f" - Sample data: {len(sample_data['rows'])} rows (raw table data)"
+                        )
+                    else:
+                        chart_info += f" - Sample data: {len(sample_data['rows'])} rows available"
                 elif sample_data.get("error"):
                     chart_info += f" - Data fetch error: {sample_data['error']}"
 
@@ -519,9 +622,14 @@ def _build_dashboard_system_prompt(
         # Count charts with actual data
         charts_with_data = sum(1 for chart in charts if chart.get("sample_data", {}).get("rows"))
         charts_with_errors = sum(1 for chart in charts if chart.get("sample_data", {}).get("error"))
+        charts_with_fallback = sum(
+            1 for chart in charts if chart.get("sample_data", {}).get("fallback")
+        )
 
         if charts_with_data > 0:
             data_info += f"\n  - {charts_with_data} charts have sample data available"
+            if charts_with_fallback > 0:
+                data_info += f"\n  - {charts_with_fallback} charts using raw table data (chart config issues)"
         if charts_with_errors > 0:
             data_info += f"\n  - {charts_with_errors} charts had data fetch errors"
     else:
@@ -546,6 +654,11 @@ def _build_dashboard_system_prompt(
     # Add specific instructions based on data availability
     if summary.get("data_included"):
         charts_with_data = sum(1 for chart in charts if chart.get("sample_data", {}).get("rows"))
+        charts_with_errors = sum(1 for chart in charts if chart.get("sample_data", {}).get("error"))
+        charts_with_fallback = sum(
+            1 for chart in charts if chart.get("sample_data", {}).get("fallback")
+        )
+
         if charts_with_data > 0:
             prompt_parts.extend(
                 [
@@ -556,6 +669,19 @@ def _build_dashboard_system_prompt(
                     "- Suggest data-driven insights based on the chart configurations and actual values",
                     "- Explain what the actual data shows about business metrics",
                     "- Recommend filters or views based on data patterns",
+                ]
+            )
+
+            if charts_with_fallback > 0:
+                prompt_parts.append("- Some charts show raw table data due to configuration issues")
+
+            if charts_with_errors > 0:
+                prompt_parts.append(
+                    "- Some charts had data fetch errors - explain based on schema/structure"
+                )
+
+            prompt_parts.extend(
+                [
                     "",
                     "IMPORTANT: You have access to actual sample data for analysis. Use the real data values to provide specific, data-driven insights.",
                 ]
@@ -565,12 +691,13 @@ def _build_dashboard_system_prompt(
                 [
                     "\nYou can help users:",
                     "- Understand the dashboard structure and chart configurations",
-                    "- Explain what each chart is designed to show",
-                    "- Suggest insights based on the chart configurations",
+                    "- Explain what each chart is designed to show based on schema",
+                    "- Suggest insights based on the chart configurations and column types",
                     "- Explain how to interpret visualizations",
                     "- Recommend filters or views that might be helpful",
+                    "- Identify potential configuration issues that prevented data loading",
                     "",
-                    "Note: Data sharing is enabled but there were errors fetching the actual data. Focus on schema and configuration analysis.",
+                    "Note: Data sharing is enabled but there were errors fetching the actual data. Focus on schema and configuration analysis. Mention that charts may need configuration fixes.",
                 ]
             )
     else:

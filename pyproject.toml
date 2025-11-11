@@ -162,6 +162,7 @@ dependencies = [
     "nodeenv==1.9.1",
     "numpy>=2.2.4",
     "oauthlib==3.2.2",
+    "openai>=2.7.2",
     "ordered-set==4.1.0",
     "orjson==3.8.8",
     "packaging==23.0",
