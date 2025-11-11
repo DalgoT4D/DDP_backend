@@ -92,10 +92,10 @@ class OrgSchema(Schema):
     name: str
     slug: str = None
     airbyte_workspace_id: str = None
-    viz_url: HttpUrl = None
+    viz_url: Optional[str] = None
     viz_login_type: str = None
-    tnc_accepted: bool = None
-    is_demo: bool = False
+    tnc_accepted: Optional[bool] = None
+    is_demo: Optional[bool] = False
 
 
 class CreateOrgSchema(Schema):
@@ -104,7 +104,7 @@ class CreateOrgSchema(Schema):
     name: str
     slug: str = None
     airbyte_workspace_id: str = None
-    viz_url: HttpUrl = None
+    viz_url: Optional[str] = None
     viz_login_type: str = None
     tnc_accepted: bool = None
     is_demo: bool = False
@@ -114,7 +114,7 @@ class CreateOrgSchema(Schema):
     superset_included: bool
     start_date: Optional[str]
     end_date: Optional[str]
-    website: Optional[HttpUrl] = None
+    website: Optional[str] = None
 
 
 class CreateFreeTrialOrgSchema(CreateOrgSchema):
