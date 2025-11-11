@@ -95,7 +95,7 @@ class CreateOperationNodePayload(Schema):
         str  # The CanvasNode (source/model/operation) on which this operation is applied
     )
     op_type: str
-    source_columns: list[str] = []
+    source_columns: list[str]
     other_inputs: list[
         ModelSrcNodeInputPayload
     ] = []  # List of other CanvasNode inputs for multi-input operations

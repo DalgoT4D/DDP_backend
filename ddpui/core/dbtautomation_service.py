@@ -522,3 +522,20 @@ def json_columnspec(warehouse: OrgWarehouse, source_schema, input_name, json_col
     """Get json keys of a table in warehouse"""
     wclient = _get_wclient(warehouse)
     return wclient.get_json_columnspec(source_schema, input_name, json_column)
+
+
+# ==============================================================================
+# UI4T V2 API - New unified architecture using CanvasNode and CanvasEdge
+# ==============================================================================
+
+
+def update_output_cols_of_dbt_model(
+    org_warehouse: OrgWarehouse,
+    dbtmodel: OrgDbtModel,
+):
+    # Get the latest output columns for a dbt model from the warehouse
+
+    wclient = _get_wclient(org_warehouse)
+    output_cols = wclient.get_table_columns(dbtmodel.schema, dbtmodel.name)
+
+    return [col["name"] for col in output_cols]
