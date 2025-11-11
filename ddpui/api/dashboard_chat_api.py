@@ -264,552 +264,158 @@ class DashboardContextAnalyzer:
             return {"schema": {}, "sample_data": None}
 
     def _get_chart_data_context(self, chart_id: int) -> Dict[str, Any]:
-        """Get chart data and schema information."""
-        self.logger.info(f"=== Starting data fetch for chart {chart_id} ===")
+        """Get chart data and schema information using simplified approach."""
+        self.logger.info(f"=== Starting simplified data fetch for chart {chart_id} ===")
 
         try:
             # Get schema first
             schema_info = self._get_chart_schema_context(chart_id)
 
-            # Try to get sample data using chart data API
-            sample_data = None
-            try:
-                from ddpui.core.charts.charts_service import get_chart_data_table_preview
-                from ddpui.schemas.chart_schema import ChartDataPayload
-                from ddpui.models.visualization import Chart
-                from ddpui.models.org import OrgWarehouse
-
-                # Get chart object to build proper payload
-                chart = Chart.objects.filter(id=chart_id, org=self.orguser.org).first()
-
-                if not chart:
-                    self.logger.error(f"Chart {chart_id} not found in database")
-                    raise Exception("Chart not found")
-
-                self.logger.info(f"Chart {chart_id} found: {chart.title}")
-                self.logger.info(f"Chart {chart_id} type: {chart.chart_type}")
-                self.logger.info(f"Chart {chart_id} computation: {chart.computation_type}")
-                self.logger.info(f"Chart {chart_id} table: {chart.schema_name}.{chart.table_name}")
-
-                # Get org warehouse
-                org_warehouse = OrgWarehouse.objects.filter(org=self.orguser.org).first()
-                if not org_warehouse:
-                    self.logger.error(f"No warehouse found for org {self.orguser.org.slug}")
-                    raise Exception("Organization warehouse not configured")
-
-                self.logger.info(f"Using warehouse: {org_warehouse.name} ({org_warehouse.wtype})")
-
-                # Build chart data payload from chart configuration
-                extra_config = chart.extra_config or {}
-                self.logger.info(f"Chart {chart_id} extra_config keys: {list(extra_config.keys())}")
-                self.logger.info(f"Chart {chart_id} full extra_config: {extra_config}")
-
-                # Check if this is a problematic chart and force raw mode for debugging
-                should_force_raw = False
-
-                # Force raw if no metrics/aggregate functions
-                if (
-                    chart.computation_type == "aggregated"
-                    and not extra_config.get("metrics")
-                    and not extra_config.get("aggregate_functions")
-                ):
-                    should_force_raw = True
-                    self.logger.warning(
-                        f"Chart {chart_id} has aggregated type but no metrics/aggregate_functions - forcing raw mode"
-                    )
-
-                # Also force raw for chart types that typically need dimension_col but don't have it
-                elif (
-                    chart.computation_type == "aggregated"
-                    and chart.chart_type.lower()
-                    in ["table", "pie", "doughnut", "map", "choropleth"]
-                    and not extra_config.get("dimension_col")
-                    and not extra_config.get("columns")  # No columns available for inference
-                ):
-                    should_force_raw = True
-                    self.logger.warning(
-                        f"Chart {chart_id} is {chart.chart_type} type without dimension_col or columns - forcing raw mode"
-                    )
-
-                if should_force_raw:
-                    forced_computation_type = "raw"
-                else:
-                    forced_computation_type = chart.computation_type
-
-                # Extract required fields from extra_config based on computation type
-                payload_kwargs = {
-                    "chart_type": chart.chart_type,
-                    "computation_type": forced_computation_type,  # Use forced type if needed
-                    "schema_name": chart.schema_name,
-                    "table_name": chart.table_name,
-                    "extra_config": extra_config,
-                    "limit": min(self.max_rows, 500),  # Cap at 500 for performance
-                }
-
-                # Add fields specific to computation type
-                if forced_computation_type == "raw":
-                    # For raw data charts
-                    if extra_config.get("x_axis"):
-                        payload_kwargs["x_axis"] = extra_config["x_axis"]
-                    if extra_config.get("y_axis"):
-                        payload_kwargs["y_axis"] = extra_config["y_axis"]
-
-                    # If no x_axis/y_axis specified for raw data, try to infer them
-                    if not payload_kwargs.get("x_axis") and not payload_kwargs.get("y_axis"):
-                        self.logger.warning(
-                            f"Chart {chart_id} raw mode missing x_axis/y_axis, attempting to infer..."
-                        )
-
-                        # Get available columns for inference
-                        available_columns = extra_config.get("columns", [])
-                        if not available_columns and schema_info.get("schema", {}).get("columns"):
-                            available_columns = schema_info["schema"]["columns"]
-
-                        # Last resort: try to get columns from database schema introspection
-                        if not available_columns:
-                            try:
-                                from ddpui.datainsights.warehouse.warehouse_factory import (
-                                    WarehouseFactory,
-                                )
-
-                                warehouse = WarehouseFactory.create(org_warehouse)
-                                table_columns = warehouse.get_table_columns(
-                                    chart.schema_name, chart.table_name
-                                )
-                                if table_columns:
-                                    available_columns = [
-                                        {"name": col} for col in table_columns[:10]
-                                    ]  # Limit to first 10
-                                    self.logger.info(
-                                        f"Chart {chart_id} fetched {len(available_columns)} columns from database schema"
-                                    )
-                            except Exception as col_fetch_error:
-                                self.logger.warning(
-                                    f"Chart {chart_id} failed to fetch columns from database: {col_fetch_error}"
-                                )
-
-                        self.logger.info(
-                            f"Chart {chart_id} available columns for x/y axis inference: {available_columns}"
-                        )
-
-                        if available_columns:
-                            # Try to infer x_axis (prefer non-numeric columns for categories)
-                            x_axis_candidates = []
-                            y_axis_candidates = []
-
-                            for col in available_columns:
-                                col_name = col.get("name") if isinstance(col, dict) else str(col)
-                                col_lower = col_name.lower()
-
-                                # Y-axis candidates (numeric columns)
-                                if any(
-                                    keyword in col_lower
-                                    for keyword in [
-                                        "count",
-                                        "sum",
-                                        "total",
-                                        "amount",
-                                        "value",
-                                        "revenue",
-                                        "sales",
-                                        "price",
-                                        "cost",
-                                    ]
-                                ):
-                                    y_axis_candidates.append(col_name)
-                                # X-axis candidates (categorical/date columns)
-                                elif any(
-                                    keyword in col_lower
-                                    for keyword in [
-                                        "date",
-                                        "time",
-                                        "category",
-                                        "type",
-                                        "name",
-                                        "region",
-                                        "status",
-                                        "id",
-                                    ]
-                                ):
-                                    x_axis_candidates.append(col_name)
-                                else:
-                                    # Default: add to both lists
-                                    x_axis_candidates.append(col_name)
-                                    y_axis_candidates.append(col_name)
-
-                            # Assign inferred columns
-                            if x_axis_candidates:
-                                payload_kwargs["x_axis"] = x_axis_candidates[0]
-                                self.logger.info(
-                                    f"Chart {chart_id} inferred x_axis: {x_axis_candidates[0]}"
-                                )
-
-                            if y_axis_candidates:
-                                # For y_axis, prefer a different column than x_axis if possible
-                                y_axis = y_axis_candidates[0]
-                                if len(y_axis_candidates) > 1 and y_axis == payload_kwargs.get(
-                                    "x_axis"
-                                ):
-                                    y_axis = y_axis_candidates[1]
-                                payload_kwargs["y_axis"] = y_axis
-                                self.logger.info(f"Chart {chart_id} inferred y_axis: {y_axis}")
-
-                            # Fallback: use first two columns if no smart inference worked
-                            if not payload_kwargs.get("x_axis") and not payload_kwargs.get(
-                                "y_axis"
-                            ):
-                                first_col = available_columns[0]
-                                first_col_name = (
-                                    first_col.get("name")
-                                    if isinstance(first_col, dict)
-                                    else str(first_col)
-                                )
-                                payload_kwargs["x_axis"] = first_col_name
-                                self.logger.info(
-                                    f"Chart {chart_id} fallback: using first column as x_axis: {first_col_name}"
-                                )
-
-                                if len(available_columns) > 1:
-                                    second_col = available_columns[1]
-                                    second_col_name = (
-                                        second_col.get("name")
-                                        if isinstance(second_col, dict)
-                                        else str(second_col)
-                                    )
-                                    payload_kwargs["y_axis"] = second_col_name
-                                    self.logger.info(
-                                        f"Chart {chart_id} fallback: using second column as y_axis: {second_col_name}"
-                                    )
-
-                    # If no x_axis/y_axis specified for raw data, we'll let the fallback handle it
-                    self.logger.info(
-                        f"Chart {chart_id} using raw mode with x_axis={payload_kwargs.get('x_axis')} y_axis={payload_kwargs.get('y_axis')}"
-                    )
-
-                elif forced_computation_type == "aggregated":
-                    # For aggregated charts - these are required
-                    if extra_config.get("dimension_col"):
-                        payload_kwargs["dimension_col"] = extra_config["dimension_col"]
-                    if extra_config.get("extra_dimension"):
-                        payload_kwargs["extra_dimension"] = extra_config["extra_dimension"]
-
-                    # Metrics are required for aggregated charts
-                    metrics = extra_config.get("metrics", [])
-                    self.logger.info(f"Chart {chart_id} original metrics from config: {metrics}")
-
-                    if not metrics and extra_config.get("aggregate_functions"):
-                        # Try to build metrics from aggregate_functions if available
-                        metrics = []
-                        agg_functions = extra_config.get("aggregate_functions", [])
-                        self.logger.info(f"Chart {chart_id} aggregate_functions: {agg_functions}")
-
-                        for agg_func in agg_functions:
-                            if isinstance(agg_func, dict):
-                                metrics.append(
-                                    {
-                                        "column": agg_func.get("column"),
-                                        "aggregation": agg_func.get("function", "COUNT"),
-                                        "alias": agg_func.get("alias"),
-                                    }
-                                )
-                        self.logger.info(
-                            f"Chart {chart_id} metrics built from aggregate_functions: {metrics}"
-                        )
-
-                    if metrics:
-                        payload_kwargs["metrics"] = metrics
-                        self.logger.info(f"Chart {chart_id} using metrics: {metrics}")
-                    else:
-                        # Fallback: create a basic COUNT metric if none found
-                        fallback_metrics = [
-                            {"aggregation": "COUNT", "alias": "count", "column": None}
-                        ]
-                        payload_kwargs["metrics"] = fallback_metrics
-                        self.logger.warning(
-                            f"Chart {chart_id} no metrics found, using fallback: {fallback_metrics}"
-                        )
-
-                    # Check if dimension_col is required for this chart type and metrics combination
-                    chart_type_lower = chart.chart_type.lower()
-                    requires_dimension = chart_type_lower in [
-                        "table",
-                        "pie",
-                        "doughnut",
-                        "map",
-                        "choropleth",
-                    ] or (
-                        len(payload_kwargs.get("metrics", [])) > 1
-                    )  # Multiple metrics need dimension
-
-                    if requires_dimension and not payload_kwargs.get("dimension_col"):
-                        # Try to find a suitable dimension column from available columns
-                        self.logger.warning(
-                            f"Chart {chart_id} ({chart_type_lower}) needs dimension_col but none specified. Attempting to infer..."
-                        )
-
-                        # Get available columns from the schema
-                        available_columns = extra_config.get("columns", [])
-                        if not available_columns and schema_info.get("schema", {}).get("columns"):
-                            available_columns = schema_info["schema"]["columns"]
-
-                        self.logger.info(
-                            f"Chart {chart_id} available columns for dimension inference: {available_columns}"
-                        )
-
-                        # Try to find a suitable dimension column - be more aggressive
-                        dimension_candidates = []
-
-                        # First pass: look for obvious dimension columns
-                        for col in available_columns:
-                            col_name = col.get("name") if isinstance(col, dict) else str(col)
-                            col_lower = col_name.lower()
-
-                            # Prefer common dimension column names
-                            if any(
-                                keyword in col_lower
-                                for keyword in [
-                                    "category",
-                                    "region",
-                                    "type",
-                                    "status",
-                                    "name",
-                                    "group",
-                                ]
-                            ):
-                                dimension_candidates.insert(
-                                    0, col_name
-                                )  # Insert at beginning (higher priority)
-                            # Skip obvious metric columns
-                            elif not any(
-                                keyword in col_lower
-                                for keyword in [
-                                    "sum",
-                                    "count",
-                                    "total",
-                                    "amount",
-                                    "avg",
-                                    "revenue",
-                                    "sales",
-                                    "cost",
-                                ]
-                            ):
-                                dimension_candidates.append(col_name)
-
-                        # If no good candidates found, just use the first available column
-                        if not dimension_candidates and available_columns:
-                            first_col = available_columns[0]
-                            dimension_candidates.append(
-                                first_col.get("name")
-                                if isinstance(first_col, dict)
-                                else str(first_col)
-                            )
-                            self.logger.info(
-                                f"Chart {chart_id} no ideal dimension candidates, using first column as fallback"
-                            )
-
-                        if dimension_candidates:
-                            inferred_dimension = dimension_candidates[0]
-                            self.logger.info(
-                                f"Chart {chart_id} using inferred dimension_col: {inferred_dimension}"
-                            )
-                            payload_kwargs["dimension_col"] = inferred_dimension
-                        else:
-                            self.logger.warning(
-                                f"Chart {chart_id} could not infer suitable dimension_col from {len(available_columns)} columns, forcing to single metric"
-                            )
-                            # If we can't find dimension, ensure we only have one metric to avoid the requirement
-                            if len(payload_kwargs.get("metrics", [])) > 1:
-                                payload_kwargs["metrics"] = payload_kwargs["metrics"][
-                                    :1
-                                ]  # Keep only first metric
-                                self.logger.info(
-                                    f"Chart {chart_id} reduced to single metric to avoid dimension requirement"
-                                )
-
-                # Handle map-specific fields
-                if chart.chart_type.lower() in ["map", "choropleth"]:
-                    if extra_config.get("geographic_column"):
-                        payload_kwargs["geographic_column"] = extra_config["geographic_column"]
-                    if extra_config.get("value_column"):
-                        payload_kwargs["value_column"] = extra_config["value_column"]
-                    if extra_config.get("selected_geojson_id"):
-                        payload_kwargs["selected_geojson_id"] = extra_config["selected_geojson_id"]
-
-                # Add customizations if available
-                if extra_config.get("customizations"):
-                    payload_kwargs["customizations"] = extra_config["customizations"]
-
-                self.logger.info(f"Chart {chart_id} final payload_kwargs: {payload_kwargs}")
-                self.logger.info(
-                    f"Chart {chart_id} final metrics in payload: {payload_kwargs.get('metrics')}"
-                )
-
-                payload = ChartDataPayload(**payload_kwargs)
-                self.logger.info(f"Chart {chart_id} ChartDataPayload created successfully")
-
-                # Get limited sample data for AI analysis
-                try:
-                    self.logger.info(f"Chart {chart_id} calling get_chart_data_table_preview...")
-                    preview_data = get_chart_data_table_preview(
-                        org_warehouse, payload, page=0, limit=min(self.max_rows, 500)
-                    )
-                    self.logger.info(
-                        f"Chart {chart_id} preview_data keys: {list(preview_data.keys()) if preview_data else 'None'}"
-                    )
-
-                    if preview_data:
-                        data_rows = preview_data.get("data", [])
-                        columns = preview_data.get("columns", [])
-                        self.logger.info(
-                            f"Chart {chart_id} got {len(data_rows)} rows, {len(columns)} columns"
-                        )
-
-                        sample_data = {
-                            "rows": data_rows,
-                            "total_rows": len(data_rows),
-                            "columns": columns,
-                        }
-                    else:
-                        self.logger.warning(f"Chart {chart_id} preview_data is None/empty")
-                except Exception as payload_error:
-                    # If the configured payload fails, try a simpler raw data approach
-                    error_msg = str(payload_error)
-                    self.logger.warning(
-                        f"Chart {chart_id} payload failed: {error_msg}, trying raw data fallback"
-                    )
-
-                    # Special handling for dimension_col errors - be more aggressive
-                    if any(
-                        keyword in error_msg.lower()
-                        for keyword in ["dimension_col", "dimension", "multiple metrics"]
-                    ):
-                        self.logger.info(
-                            f"Chart {chart_id} failed due to dimension/metrics issue, forcing raw data fallback"
-                        )
-
-                    try:
-                        # Fallback: try getting raw data without complex configurations
-                        self.logger.info(f"Chart {chart_id} trying raw data fallback...")
-
-                        # For raw data fallback, try to get at least some basic columns
-                        fallback_kwargs = {
-                            "chart_type": "table",  # Use simple table type
-                            "computation_type": "raw",
-                            "schema_name": chart.schema_name,
-                            "table_name": chart.table_name,
-                            "extra_config": {},
-                            "limit": min(self.max_rows, 100),  # Smaller limit for fallback
-                        }
-
-                        # Try to infer x_axis and y_axis for the fallback too
-                        available_columns = extra_config.get("columns", [])
-                        if not available_columns and schema_info.get("schema", {}).get("columns"):
-                            available_columns = schema_info["schema"]["columns"]
-
-                        # Last resort: try to get columns from database schema introspection
-                        if not available_columns:
-                            try:
-                                from ddpui.datainsights.warehouse.warehouse_factory import (
-                                    WarehouseFactory,
-                                )
-
-                                warehouse = WarehouseFactory.create(org_warehouse)
-                                table_columns = warehouse.get_table_columns(
-                                    chart.schema_name, chart.table_name
-                                )
-                                if table_columns:
-                                    available_columns = [
-                                        {"name": col} for col in table_columns[:10]
-                                    ]  # Limit to first 10
-                                    self.logger.info(
-                                        f"Chart {chart_id} fetched {len(available_columns)} columns from database schema"
-                                    )
-                            except Exception as col_fetch_error:
-                                self.logger.warning(
-                                    f"Chart {chart_id} failed to fetch columns from database: {col_fetch_error}"
-                                )
-
-                        if available_columns and len(available_columns) > 0:
-                            # Use first column as x_axis for fallback
-                            first_col = available_columns[0]
-                            first_col_name = (
-                                first_col.get("name")
-                                if isinstance(first_col, dict)
-                                else str(first_col)
-                            )
-                            fallback_kwargs["x_axis"] = first_col_name
-                            self.logger.info(
-                                f"Chart {chart_id} fallback using x_axis: {first_col_name}"
-                            )
-
-                            # Use second column as y_axis if available
-                            if len(available_columns) > 1:
-                                second_col = available_columns[1]
-                                second_col_name = (
-                                    second_col.get("name")
-                                    if isinstance(second_col, dict)
-                                    else str(second_col)
-                                )
-                                fallback_kwargs["y_axis"] = second_col_name
-                                self.logger.info(
-                                    f"Chart {chart_id} fallback using y_axis: {second_col_name}"
-                                )
-
-                        simple_payload = ChartDataPayload(**fallback_kwargs)
-                        self.logger.info(
-                            f"Chart {chart_id} fallback payload: {simple_payload.__dict__}"
-                        )
-
-                        preview_data = get_chart_data_table_preview(
-                            org_warehouse, simple_payload, page=0, limit=min(self.max_rows, 100)
-                        )
-
-                        if preview_data:
-                            fallback_rows = preview_data.get("data", [])
-                            fallback_columns = preview_data.get("columns", [])
-                            self.logger.info(
-                                f"Chart {chart_id} fallback success: {len(fallback_rows)} rows, {len(fallback_columns)} columns"
-                            )
-
-                            sample_data = {
-                                "rows": fallback_rows,
-                                "total_rows": len(fallback_rows),
-                                "columns": fallback_columns,
-                                "fallback": True,  # Indicate this is fallback data
-                            }
-                        else:
-                            self.logger.error(f"Chart {chart_id} raw data fallback returned None")
-                            raise Exception("Raw data fallback also failed")
-
-                    except Exception:
-                        # If even the fallback fails, raise the original error
-                        raise payload_error
-
-            except Exception as data_error:
-                self.logger.warning(
-                    f"Could not fetch sample data for chart {chart_id}: {data_error}"
-                )
-                self.logger.debug(f"Chart {chart_id} config: {chart.extra_config}")
-                self.logger.debug(f"Chart {chart_id} computation_type: {chart.computation_type}")
-
-                # Continue without sample data
-                error_msg = str(data_error)
-                if "At least one metric is required" in error_msg:
-                    error_msg = "Chart configuration missing required metrics for aggregated data"
-                elif "column" in error_msg.lower() and "not found" in error_msg.lower():
-                    error_msg = "Chart references columns that don't exist in the data source"
-
-                sample_data = {
-                    "rows": [],
-                    "total_rows": 0,
-                    "columns": schema_info.get("schema", {}).get("columns", []),
-                    "error": f"Data fetch error: {error_msg}",
-                }
+            # Simple approach: always try to get raw table data first
+            sample_data = self._get_simple_table_data(chart_id)
 
             return {"schema": schema_info["schema"], "sample_data": sample_data}
         except Exception as e:
             self.logger.error(f"Error getting chart data for {chart_id}: {e}")
             return {"schema": {}, "sample_data": None}
+
+    def _get_simple_table_data(self, chart_id: int) -> Dict[str, Any]:
+        """Get simple raw table data for any chart."""
+        try:
+            from ddpui.models.visualization import Chart
+            from ddpui.models.org import OrgWarehouse
+            from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
+
+            # Get chart object
+            chart = Chart.objects.filter(id=chart_id, org=self.orguser.org).first()
+            if not chart:
+                self.logger.error(f"Chart {chart_id} not found in database")
+                return {"rows": [], "total_rows": 0, "columns": [], "error": "Chart not found"}
+
+            self.logger.info(f"Chart {chart_id} found: {chart.title}")
+            self.logger.info(f"Chart {chart_id} table: {chart.schema_name}.{chart.table_name}")
+
+            # Get warehouse
+            org_warehouse = OrgWarehouse.objects.filter(org=self.orguser.org).first()
+            if not org_warehouse:
+                self.logger.error(f"No warehouse found for org {self.orguser.org.slug}")
+                return {
+                    "rows": [],
+                    "total_rows": 0,
+                    "columns": [],
+                    "error": "No warehouse configured",
+                }
+
+            # Get warehouse client
+            warehouse = WarehouseFactory.create(org_warehouse)
+
+            # First, get the table columns to know what we're working with
+            try:
+                table_columns = warehouse.get_table_columns(chart.schema_name, chart.table_name)
+                if not table_columns:
+                    self.logger.warning(
+                        f"Chart {chart_id} no columns found for table {chart.schema_name}.{chart.table_name}"
+                    )
+                    return {
+                        "rows": [],
+                        "total_rows": 0,
+                        "columns": [],
+                        "error": "No columns found in table",
+                    }
+
+                self.logger.info(
+                    f"Chart {chart_id} found {len(table_columns)} columns: {table_columns[:10]}"
+                )
+
+                # Build simple SELECT query with LIMIT
+                limit = min(self.max_rows, 100)
+
+                # Create column list (limit to first 20 columns to avoid issues)
+                select_columns = table_columns[:20]
+                columns_str = ", ".join([f'"{col}"' for col in select_columns])
+
+                # Build simple query
+                query = f"""
+                    SELECT {columns_str}
+                    FROM "{chart.schema_name}"."{chart.table_name}"
+                    LIMIT {limit}
+                """
+
+                self.logger.info(f"Chart {chart_id} executing query: {query[:200]}...")
+
+                # Execute query
+                results = warehouse.execute_query(query)
+
+                # Format results
+                if results and len(results) > 0:
+                    # Convert results to list of dicts
+                    rows = []
+                    for row in results:
+                        row_dict = {}
+                        for i, col_name in enumerate(select_columns):
+                            if i < len(row):
+                                value = row[i]
+                                # Handle special values
+                                if value is None:
+                                    value = "NULL"
+                                elif isinstance(value, (int, float, str, bool)):
+                                    value = value
+                                else:
+                                    value = str(value)
+                                row_dict[col_name] = value
+                        rows.append(row_dict)
+
+                    self.logger.info(f"Chart {chart_id} successfully fetched {len(rows)} rows")
+
+                    return {
+                        "rows": rows,
+                        "total_rows": len(rows),
+                        "columns": [{"name": col, "type": "string"} for col in select_columns],
+                        "source": "raw_table_query",
+                    }
+                else:
+                    self.logger.info(f"Chart {chart_id} query returned no data")
+                    return {
+                        "rows": [],
+                        "total_rows": 0,
+                        "columns": [{"name": col, "type": "string"} for col in select_columns],
+                        "source": "raw_table_query_empty",
+                    }
+
+            except Exception as query_error:
+                self.logger.error(f"Chart {chart_id} query failed: {query_error}")
+
+                # Even simpler fallback - just get column info
+                try:
+                    table_columns = warehouse.get_table_columns(chart.schema_name, chart.table_name)
+                    if table_columns:
+                        self.logger.info(f"Chart {chart_id} fallback: returning column schema only")
+                        return {
+                            "rows": [],
+                            "total_rows": 0,
+                            "columns": [
+                                {"name": col, "type": "string"} for col in table_columns[:20]
+                            ],
+                            "error": f"Could not fetch data but found {len(table_columns)} columns",
+                        }
+                except:
+                    pass
+
+                return {
+                    "rows": [],
+                    "total_rows": 0,
+                    "columns": [],
+                    "error": f"Failed to fetch table data: {str(query_error)}",
+                }
+
+        except Exception as e:
+            self.logger.error(f"Chart {chart_id} simple data fetch failed: {e}")
+            return {
+                "rows": [],
+                "total_rows": 0,
+                "columns": [],
+                "error": f"Data fetch error: {str(e)}",
+            }
 
 
 @router.post("/{dashboard_id}/context")
