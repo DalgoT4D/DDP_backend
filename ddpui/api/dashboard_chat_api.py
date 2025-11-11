@@ -354,6 +354,133 @@ class DashboardContextAnalyzer:
                     if extra_config.get("y_axis"):
                         payload_kwargs["y_axis"] = extra_config["y_axis"]
 
+                    # If no x_axis/y_axis specified for raw data, try to infer them
+                    if not payload_kwargs.get("x_axis") and not payload_kwargs.get("y_axis"):
+                        self.logger.warning(
+                            f"Chart {chart_id} raw mode missing x_axis/y_axis, attempting to infer..."
+                        )
+
+                        # Get available columns for inference
+                        available_columns = extra_config.get("columns", [])
+                        if not available_columns and schema_info.get("schema", {}).get("columns"):
+                            available_columns = schema_info["schema"]["columns"]
+
+                        # Last resort: try to get columns from database schema introspection
+                        if not available_columns:
+                            try:
+                                from ddpui.datainsights.warehouse.warehouse_factory import (
+                                    WarehouseFactory,
+                                )
+
+                                warehouse = WarehouseFactory.create(org_warehouse)
+                                table_columns = warehouse.get_table_columns(
+                                    chart.schema_name, chart.table_name
+                                )
+                                if table_columns:
+                                    available_columns = [
+                                        {"name": col} for col in table_columns[:10]
+                                    ]  # Limit to first 10
+                                    self.logger.info(
+                                        f"Chart {chart_id} fetched {len(available_columns)} columns from database schema"
+                                    )
+                            except Exception as col_fetch_error:
+                                self.logger.warning(
+                                    f"Chart {chart_id} failed to fetch columns from database: {col_fetch_error}"
+                                )
+
+                        self.logger.info(
+                            f"Chart {chart_id} available columns for x/y axis inference: {available_columns}"
+                        )
+
+                        if available_columns:
+                            # Try to infer x_axis (prefer non-numeric columns for categories)
+                            x_axis_candidates = []
+                            y_axis_candidates = []
+
+                            for col in available_columns:
+                                col_name = col.get("name") if isinstance(col, dict) else str(col)
+                                col_lower = col_name.lower()
+
+                                # Y-axis candidates (numeric columns)
+                                if any(
+                                    keyword in col_lower
+                                    for keyword in [
+                                        "count",
+                                        "sum",
+                                        "total",
+                                        "amount",
+                                        "value",
+                                        "revenue",
+                                        "sales",
+                                        "price",
+                                        "cost",
+                                    ]
+                                ):
+                                    y_axis_candidates.append(col_name)
+                                # X-axis candidates (categorical/date columns)
+                                elif any(
+                                    keyword in col_lower
+                                    for keyword in [
+                                        "date",
+                                        "time",
+                                        "category",
+                                        "type",
+                                        "name",
+                                        "region",
+                                        "status",
+                                        "id",
+                                    ]
+                                ):
+                                    x_axis_candidates.append(col_name)
+                                else:
+                                    # Default: add to both lists
+                                    x_axis_candidates.append(col_name)
+                                    y_axis_candidates.append(col_name)
+
+                            # Assign inferred columns
+                            if x_axis_candidates:
+                                payload_kwargs["x_axis"] = x_axis_candidates[0]
+                                self.logger.info(
+                                    f"Chart {chart_id} inferred x_axis: {x_axis_candidates[0]}"
+                                )
+
+                            if y_axis_candidates:
+                                # For y_axis, prefer a different column than x_axis if possible
+                                y_axis = y_axis_candidates[0]
+                                if len(y_axis_candidates) > 1 and y_axis == payload_kwargs.get(
+                                    "x_axis"
+                                ):
+                                    y_axis = y_axis_candidates[1]
+                                payload_kwargs["y_axis"] = y_axis
+                                self.logger.info(f"Chart {chart_id} inferred y_axis: {y_axis}")
+
+                            # Fallback: use first two columns if no smart inference worked
+                            if not payload_kwargs.get("x_axis") and not payload_kwargs.get(
+                                "y_axis"
+                            ):
+                                first_col = available_columns[0]
+                                first_col_name = (
+                                    first_col.get("name")
+                                    if isinstance(first_col, dict)
+                                    else str(first_col)
+                                )
+                                payload_kwargs["x_axis"] = first_col_name
+                                self.logger.info(
+                                    f"Chart {chart_id} fallback: using first column as x_axis: {first_col_name}"
+                                )
+
+                                if len(available_columns) > 1:
+                                    second_col = available_columns[1]
+                                    second_col_name = (
+                                        second_col.get("name")
+                                        if isinstance(second_col, dict)
+                                        else str(second_col)
+                                    )
+                                    payload_kwargs["y_axis"] = second_col_name
+                                    self.logger.info(
+                                        f"Chart {chart_id} fallback: using second column as y_axis: {second_col_name}"
+                                    )
+
                     # If no x_axis/y_axis specified for raw data, we'll let the fallback handle it
                     self.logger.info(
                         f"Chart {chart_id} using raw mode with x_axis={payload_kwargs.get('x_axis')} y_axis={payload_kwargs.get('y_axis')}"
@@ -563,14 +690,72 @@ class DashboardContextAnalyzer:
                     try:
                         # Fallback: try getting raw data without complex configurations
                         self.logger.info(f"Chart {chart_id} trying raw data fallback...")
-                        simple_payload = ChartDataPayload(
-                            chart_type="table",  # Use simple table type
-                            computation_type="raw",
-                            schema_name=chart.schema_name,
-                            table_name=chart.table_name,
-                            extra_config={},
-                            limit=min(self.max_rows, 100),  # Smaller limit for fallback
-                        )
+
+                        # For raw data fallback, try to get at least some basic columns
+                        fallback_kwargs = {
+                            "chart_type": "table",  # Use simple table type
+                            "computation_type": "raw",
+                            "schema_name": chart.schema_name,
+                            "table_name": chart.table_name,
+                            "extra_config": {},
+                            "limit": min(self.max_rows, 100),  # Smaller limit for fallback
+                        }
+
+                        # Try to infer x_axis and y_axis for the fallback too
+                        available_columns = extra_config.get("columns", [])
+                        if not available_columns and schema_info.get("schema", {}).get("columns"):
+                            available_columns = schema_info["schema"]["columns"]
+
+                        # Last resort: try to get columns from database schema introspection
+                        if not available_columns:
+                            try:
+                                from ddpui.datainsights.warehouse.warehouse_factory import (
+                                    WarehouseFactory,
+                                )
+
+                                warehouse = WarehouseFactory.create(org_warehouse)
+                                table_columns = warehouse.get_table_columns(
+                                    chart.schema_name, chart.table_name
+                                )
+                                if table_columns:
+                                    available_columns = [
+                                        {"name": col} for col in table_columns[:10]
+                                    ]  # Limit to first 10
+                                    self.logger.info(
+                                        f"Chart {chart_id} fetched {len(available_columns)} columns from database schema"
+                                    )
+                            except Exception as col_fetch_error:
+                                self.logger.warning(
+                                    f"Chart {chart_id} failed to fetch columns from database: {col_fetch_error}"
+                                )
+
+                        if available_columns and len(available_columns) > 0:
+                            # Use first column as x_axis for fallback
+                            first_col = available_columns[0]
+                            first_col_name = (
+                                first_col.get("name")
+                                if isinstance(first_col, dict)
+                                else str(first_col)
+                            )
+                            fallback_kwargs["x_axis"] = first_col_name
+                            self.logger.info(
+                                f"Chart {chart_id} fallback using x_axis: {first_col_name}"
+                            )
+
+                            # Use second column as y_axis if available
+                            if len(available_columns) > 1:
+                                second_col = available_columns[1]
+                                second_col_name = (
+                                    second_col.get("name")
+                                    if isinstance(second_col, dict)
+                                    else str(second_col)
+                                )
+                                fallback_kwargs["y_axis"] = second_col_name
+                                self.logger.info(
+                                    f"Chart {chart_id} fallback using y_axis: {second_col_name}"
+                                )
+
+                        simple_payload = ChartDataPayload(**fallback_kwargs)
                         self.logger.info(
                             f"Chart {chart_id} fallback payload: {simple_payload.__dict__}"
                         )
