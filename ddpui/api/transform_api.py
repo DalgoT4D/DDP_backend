@@ -794,6 +794,9 @@ def convert_canvas_node_to_frontend_format(canvas_node: CanvasNode):
     }
 
 
+# def
+
+
 @transform_router.get("/v2/dbt_project/graph/")
 @has_permission(["can_view_dbt_workspace"])
 def get_dbt_project_DAG_v2(request):
@@ -853,54 +856,8 @@ def get_dbt_project_DAG_v2(request):
         return {"nodes": nodes, "edges": edges}
 
     except Exception as e:
-        logger.error(f"Error generating V2 DAG for org {org.slug}: {str(e)}")
+        logger.error(f"Error generating DAG for org {org.slug}: {str(e)}")
         raise HttpError(500, f"Failed to generate DAG: {str(e)}")
-
-
-def validate_operation_config_v2(payload: CreateDbtModelPayload, orgdbt, is_multi_input_op: bool):
-    """
-    V2 validation: Much simpler since edges handle relationships explicitly.
-    No more sequence tracking or implicit chains - everything is explicit via edges.
-    """
-    # Validate primary input exists (if provided)
-    input_nodes = []
-    if payload.input_uuid:
-        try:
-            input_node = CanvasNode.objects.get(uuid=payload.input_uuid, orgdbt=orgdbt)
-            input_nodes.append(input_node)
-        except CanvasNode.DoesNotExist:
-            raise HttpError(404, "input not found")
-
-    # Validate multi-inputs for operations like joins, unions
-    if is_multi_input_op:
-        if len(payload.other_inputs) == 0:
-            raise HttpError(422, "at least 2 inputs are required for this operation")
-
-        for other_input in payload.other_inputs:
-            try:
-                input_node = CanvasNode.objects.get(uuid=other_input.uuid, orgdbt=orgdbt)
-                input_nodes.append(input_node)
-            except CanvasNode.DoesNotExist:
-                raise HttpError(404, f"input {other_input.uuid} not found")
-
-    # Build clean operation config (no relationship data stored here!)
-    operation_config = {
-        "operation_type": payload.op_type,
-        "config": payload.config.dict() if payload.config else {},
-        "source_columns": payload.source_columns,
-    }
-
-    # Add multi-input data if needed (but no model references - edges handle that)
-    if is_multi_input_op and payload.other_inputs:
-        operation_config["other_inputs"] = [
-            {
-                "source_columns": other_input.columns,
-                "seq": other_input.seq,
-            }
-            for other_input in payload.other_inputs
-        ]
-
-    return operation_config, input_nodes
 
 
 # V2 CRUD operations for CanvasNode
@@ -1061,18 +1018,24 @@ def put_operation_node(request, node_uuid: str, payload: EditOperationNodePayloa
 
     """
     orguser: OrgUser = request.orguser
+
+    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
     orgdbt = orguser.org.dbt
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
 
-    logger.info(f"creating operation: {payload.op_type}")
+    logger.info(f"updating operation: {payload.op_type}")
 
-    is_multi_input_op = payload.op_type in ["join", "unionall"]
+    # TODO: apply canvas locking logic
 
     try:
+        is_multi_input_op = payload.op_type in ["join", "unionall"]
         # TODO: validate operation config
 
         # TODO: compute the output cols
-
-        # TODO: apply canvas locking logic
 
         # TODO: update the dbt model on file if needed
 
@@ -1105,14 +1068,14 @@ def put_operation_node(request, node_uuid: str, payload: EditOperationNodePayloa
                         from_node=src_model_node, to_node=operation_node, seq=edge_seq
                     )
 
-            logger.info(f"V2 operation created successfully: {operation_node.uuid}")
+            logger.info(f"operation created successfully: {operation_node.uuid}")
             return convert_canvas_node_to_frontend_format(operation_node)
 
     except CanvasNode.DoesNotExist:
         logger.error(f"Base node {node_uuid} not found")
         raise HttpError(404, "input node not found")
     except Exception as e:
-        logger.error(f"Failed to create V2 operation: {str(e)}")
+        logger.error(f"Failed to create operation: {str(e)}")
         # Transaction will automatically rollback due to the exception
         raise HttpError(500, f"Failed to create operation: {str(e)}")
 
@@ -1153,7 +1116,7 @@ def put_terminate_operation_node(request, node_uuid: str):
         logger.error(f"Canvas node {node_uuid} not found")
         raise HttpError(404, "canvas node not found")
     except Exception as e:
-        logger.error(f"Failed to terminate V2 operation node: {str(e)}")
+        logger.error(f"Failed to terminate operation node: {str(e)}")
         # Transaction will automatically rollback due to the exception
         raise HttpError(500, f"Failed to terminate operation node: {str(e)}")
 
@@ -1176,12 +1139,12 @@ def delete_canvas_node(request, node_uuid: str):
         canvas_node = CanvasNode.objects.get(uuid=node_uuid, orgdbt=orgdbt)
         canvas_node.delete()
 
-        logger.info(f"V2 canvas node deleted successfully: {node_uuid}")
+        logger.info(f"canvas node deleted successfully: {node_uuid}")
         return {"success": 1}
     except CanvasNode.DoesNotExist:
         logger.error(f"Canvas node {node_uuid} not found")
         raise HttpError(404, "canvas node not found")
     except Exception as e:
-        logger.error(f"Failed to delete V2 canvas node: {str(e)}")
+        logger.error(f"Failed to delete canvas node: {str(e)}")
         # Transaction will automatically rollback due to the exception
         raise HttpError(500, f"Failed to delete canvas node: {str(e)}")
