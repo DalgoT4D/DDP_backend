@@ -31,6 +31,8 @@ from ddpui.dbt_automation.operations.regexextraction import (
 from ddpui.dbt_automation.operations.mergeoperations import (
     merge_operations,
     merge_operations_sql,
+    merge_operations_sql_v2,
+    merge_operations_v2,
 )
 from ddpui.dbt_automation.operations.syncsources import (
     sync_sources,
@@ -522,3 +524,36 @@ def json_columnspec(warehouse: OrgWarehouse, source_schema, input_name, json_col
     """Get json keys of a table in warehouse"""
     wclient = _get_wclient(warehouse)
     return wclient.get_json_columnspec(source_schema, input_name, json_column)
+
+
+# ==============================================================================
+# UI4T V2 API - New unified architecture using CanvasNode and CanvasEdge
+# ==============================================================================
+
+
+def update_output_cols_of_dbt_model(
+    org_warehouse: OrgWarehouse,
+    dbtmodel: OrgDbtModel,
+):
+    # Get the latest output columns for a dbt model from the warehouse
+
+    wclient = _get_wclient(org_warehouse)
+    output_cols = wclient.get_table_columns(dbtmodel.schema, dbtmodel.name)
+
+    return [col["name"] for col in output_cols]
+
+
+def create_or_update_dbt_model_in_project_v2(
+    org_warehouse: OrgWarehouse, config: dict, orgdbt: OrgDbt
+):
+    """
+    Create or update a dbt model in the project for the list of operations
+    """
+
+    wclient = _get_wclient(org_warehouse)
+
+    model_sql_path, output_cols = merge_operations_v2(
+        config, wclient, Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+    )
+
+    return model_sql_path, output_cols
