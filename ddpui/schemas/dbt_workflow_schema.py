@@ -286,28 +286,6 @@ class WhereFilterOperationConfig(Schema):
     sql_snippet: str = ""
 
 
-OperationConfigType = Union[
-    AggregateOperationConfig,
-    ArithmeticOperationConfig,
-    CaseWhenOperationConfig,
-    CastDatatypesOperationConfig,
-    CoalesceColumnsOperationConfig,
-    ConcatColumnsOperationConfig,
-    DropColumnOperationConfig,
-    RenameColumnOperationConfig,
-    FlattenJsonOperationConfig,
-    GenericColumnOperationConfig,
-    GroupByOperationConfig,
-    JoinOperationConfig,
-    UnionTablesOperationConfig,
-    PivotOperationConfig,
-    GenericSqlOperationConfig,
-    RegexExtractionOperationConfig,
-    ReplaceValueOperationConfig,
-    UnpivotOperationConfig,
-    WhereFilterOperationConfig,
-]
-
 op_config_mapping = {
     "aggregate": AggregateOperationConfig,
     "arithmetic": ArithmeticOperationConfig,
@@ -331,19 +309,17 @@ op_config_mapping = {
 }
 
 
-def validate_operation_config(op_type: str, config: dict):
+def validate_operation_config_v2(op_type: str, config: dict) -> None:
     """Validate config based on operation type"""
 
-    if op_type in op_config_mapping:
-        # Validate using the specific schema
-        try:
-            op_config_mapping[op_type](**config)
-        except Exception as e:
-            raise ValueError(f"Invalid config for {op_type} operation: {str(e)}")
-    else:
+    if op_type not in op_config_mapping:
         raise ValueError(f"Unsupported operation type: {op_type}")
 
-    return config
+    # Validate using the specific schema
+    try:
+        op_config_mapping[op_type](**config)
+    except Exception as e:
+        raise ValueError(f"Invalid config for {op_type} operation: {str(e)}")
 
 
 # Operation-specific config schemas end here
@@ -352,7 +328,7 @@ def validate_operation_config(op_type: str, config: dict):
 class ModelSrcNodeInputPayload(Schema):
     """Schema to define inputs for a multi input operation. The node_uuid refers to a CanvasNode"""
 
-    node_uuid: str
+    input_node_uuid: str
     columns: list[str] = []
     seq: int = 1
 
@@ -362,8 +338,8 @@ class CreateOperationNodePayload(Schema):
     schema to define the payload required to create a custom org task
     """
 
-    config: OperationConfigType
-    base_node_uuid: (
+    config: dict
+    input_node_uuid: (
         str  # The CanvasNode (source/model/operation) on which this operation is applied
     )
     op_type: str
@@ -379,9 +355,19 @@ class EditOperationNodePayload(Schema):
     schema to define the payload required to edit a dbt operation
     """
 
-    config: OperationConfigType
+    config: dict
     op_type: str
     source_columns: list[str] = []
     other_inputs: list[
         ModelSrcNodeInputPayload
     ] = []  # List of other CanvasNode inputs for multi-input operations
+
+
+class TerminateChainAndCreateModelPayload(Schema):
+    """
+    schema to define the payload required to terminate an operation chain into a model
+    """
+
+    name: str
+    display_name: str
+    dest_schema: str

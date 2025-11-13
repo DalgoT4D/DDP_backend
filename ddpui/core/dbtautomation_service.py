@@ -31,6 +31,8 @@ from ddpui.dbt_automation.operations.regexextraction import (
 from ddpui.dbt_automation.operations.mergeoperations import (
     merge_operations,
     merge_operations_sql,
+    merge_operations_sql_v2,
+    merge_operations_v2,
 )
 from ddpui.dbt_automation.operations.syncsources import (
     sync_sources,
@@ -539,3 +541,19 @@ def update_output_cols_of_dbt_model(
     output_cols = wclient.get_table_columns(dbtmodel.schema, dbtmodel.name)
 
     return [col["name"] for col in output_cols]
+
+
+def create_or_update_dbt_model_in_project_v2(
+    org_warehouse: OrgWarehouse, config: dict, orgdbt: OrgDbt
+):
+    """
+    Create or update a dbt model in the project for the list of operations
+    """
+
+    wclient = _get_wclient(org_warehouse)
+
+    model_sql_path, output_cols = merge_operations_v2(
+        config, wclient, Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+    )
+
+    return model_sql_path, output_cols
