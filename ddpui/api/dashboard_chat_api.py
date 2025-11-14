@@ -362,6 +362,10 @@ class DashboardContextAnalyzer:
                     if results and len(results) > 0:
                         rows = self._format_query_results(results, select_columns)
                         self.logger.info(f"Chart {chart_id} approach 1 success: {len(rows)} rows")
+                        # DEBUG: Log actual data being fetched
+                        self.logger.info(
+                            f"Chart {chart_id} sample data preview: {rows[:2] if rows else 'No rows'}"
+                        )
                         return {
                             "rows": rows,
                             "total_rows": len(rows),
@@ -592,6 +596,23 @@ def dashboard_chat(request, dashboard_id: int, payload: DashboardChatRequest):
 
         # Add system message with dashboard context
         system_prompt = _build_dashboard_system_prompt(context, payload.selected_chart_id)
+
+        # DEBUG: Log what data is being sent to AI
+        if payload.include_data:
+            charts_with_data = [
+                chart
+                for chart in context.get("charts", [])
+                if chart.get("sample_data", {}).get("rows")
+            ]
+            logger.info(
+                f"Dashboard {dashboard_id} - Sending {len(charts_with_data)} charts with data to AI"
+            )
+            for chart in charts_with_data[:2]:  # Log first 2 charts
+                sample_data = chart.get("sample_data", {})
+                logger.info(
+                    f"Chart {chart.get('title', 'Unknown')}: {len(sample_data.get('rows', []))} rows, sample: {sample_data.get('rows', [])[:2] if sample_data.get('rows') else 'No rows'}"
+                )
+
         ai_messages.append(AIMessage(role="system", content=system_prompt))
 
         # Add conversation history
@@ -672,6 +693,17 @@ def _build_dashboard_system_prompt(
         "You are an AI assistant helping users analyze their dashboard data.",
         f"Current Dashboard: '{dashboard.get('title', 'Untitled Dashboard')}'",
         f"Description: {dashboard.get('description', 'No description available')}",
+        "",
+        "FORMATTING GUIDELINES:",
+        "- Use clear headings and bullet points for better readability",
+        "- Use emojis to make responses engaging: 📊 for charts, 📈 for trends, 💡 for insights, 🔍 for analysis",
+        "- Format numbers with proper separators (e.g., 1,234 instead of 1234)",
+        "- Use **bold** for important terms and chart names",
+        "- Use bullet points (-) or numbered lists for multiple items",
+        "- Keep responses conversational and user-friendly",
+        "- For chart listings, use format: **📊 Chart Name** (Type) - Brief description",
+        "- Add line breaks between sections for better readability",
+        "- Use > for important callouts or insights",
     ]
 
     if dashboard.get("dashboard_type"):
@@ -679,45 +711,88 @@ def _build_dashboard_system_prompt(
 
     # Add chart information
     if charts:
-        prompt_parts.append(f"\nDashboard contains {len(charts)} charts:")
-        for chart in charts[:10]:  # Limit to first 10 charts
-            chart_info = (
-                f"- {chart.get('title', 'Untitled Chart')} (Type: {chart.get('type', 'unknown')})"
+        prompt_parts.append(f"\n## 📊 Dashboard Charts ({len(charts)} total):")
+        prompt_parts.append("")
+        for i, chart in enumerate(charts[:10], 1):  # Limit to first 10 charts
+            chart_type = chart.get("type", "unknown")
+            chart_emoji = (
+                "📊"
+                if chart_type == "table"
+                else "📈"
+                if chart_type == "bar"
+                else "🥧"
+                if chart_type == "pie"
+                else "🗺️"
+                if chart_type == "map"
+                else "📋"
             )
+
+            chart_info = (
+                f"{i}. **{chart_emoji} {chart.get('title', 'Untitled Chart')}** ({chart_type})"
+            )
+
             if chart.get("schema", {}).get("columns"):
-                chart_info += f" - Columns: {', '.join(chart['schema']['columns'][:5])}"
+                columns = chart["schema"]["columns"][:3]  # Show first 3 columns
+                chart_info += f"\n   - Columns: {', '.join(columns)}" + (
+                    f" (+{len(chart['schema']['columns'])-3} more)"
+                    if len(chart["schema"]["columns"]) > 3
+                    else ""
+                )
 
             # Add sample data info if available
             sample_data = chart.get("sample_data")
             if sample_data:
                 if sample_data.get("rows"):
+                    rows = sample_data["rows"]
                     if sample_data.get("fallback"):
-                        chart_info += (
-                            f" - Sample data: {len(sample_data['rows'])} rows (raw table data)"
-                        )
+                        chart_info += f"\n   - 📋 Sample data: {len(rows)} rows (raw table data)"
                     else:
-                        chart_info += f" - Sample data: {len(sample_data['rows'])} rows available"
+                        chart_info += f"\n   - ✅ Sample data: {len(rows)} rows available"
+
+                    # Include actual data values for AI analysis
+                    if len(rows) > 0:
+                        chart_info += f"\n   - **Sample Values:**"
+                        # Show first 3-5 rows with actual data
+                        for idx, row in enumerate(rows[:3], 1):
+                            if isinstance(row, dict):
+                                # Format row data nicely
+                                row_preview = ", ".join(
+                                    [f"{k}: {v}" for k, v in list(row.items())[:4]]
+                                )  # First 4 columns
+                                chart_info += f"\n     Row {idx}: {row_preview}"
+                                if len(row.items()) > 4:
+                                    chart_info += f" (+ {len(row.items())-4} more columns)"
+
+                        if len(rows) > 3:
+                            chart_info += f"\n     ... and {len(rows)-3} more rows"
+
                 elif sample_data.get("error"):
-                    chart_info += f" - Data fetch error: {sample_data['error']}"
+                    chart_info += f"\n   - ❌ Data fetch error: {sample_data['error']}"
 
             prompt_parts.append(chart_info)
+            prompt_parts.append("")  # Add space between charts
 
         if len(charts) > 10:
             prompt_parts.append(f"... and {len(charts) - 10} more charts")
 
     # Add filter information
     if filters:
-        prompt_parts.append(f"\nAvailable filters ({len(filters)}):")
+        prompt_parts.append(f"\n## 🔧 Available Filters ({len(filters)}):")
+        prompt_parts.append("")
         for filter_obj in filters[:5]:
             prompt_parts.append(
-                f"- {filter_obj.get('name', 'Unnamed Filter')} ({filter_obj.get('filter_type', 'unknown')})"
+                f"- **🔍 {filter_obj.get('name', 'Unnamed Filter')}** ({filter_obj.get('filter_type', 'unknown')})"
             )
+        if len(filters) > 5:
+            prompt_parts.append(f"... and {len(filters) - 5} more filters")
+        prompt_parts.append("")
 
     # Add data availability info with detailed status
-    data_info = "\nData Access: "
+    prompt_parts.append("\n## 📊 Data Access Status:")
+    prompt_parts.append("")
     if summary.get("data_included"):
-        data_info += (
-            f"User has enabled data sharing (up to {summary.get('max_rows', 0)} rows per chart)"
+        prompt_parts.append(
+            f"✅ **Data sharing enabled** - Up to {summary.get('max_rows', 0):,} rows per chart"
         )
 
         # Count charts with actual data
@@ -728,15 +803,24 @@ def _build_dashboard_system_prompt(
         )
 
         if charts_with_data > 0:
-            data_info += f"\n  - {charts_with_data} charts have sample data available"
+            prompt_parts.append(
+                f"- 📈 **{charts_with_data}** charts have sample data available for analysis"
+            )
             if charts_with_fallback > 0:
-                data_info += f"\n  - {charts_with_fallback} charts using raw table data (chart config issues)"
+                prompt_parts.append(
+                    f"- 📋 **{charts_with_fallback}** charts using raw table data (due to configuration)"
+                )
         if charts_with_errors > 0:
-            data_info += f"\n  - {charts_with_errors} charts had data fetch errors"
+            prompt_parts.append(f"- ❌ **{charts_with_errors}** charts had data fetch errors")
     else:
-        data_info += "Only schema information is available (user has not enabled data sharing)"
+        prompt_parts.append(
+            "🔒 **Schema-only mode** - Only table structure and column names available"
+        )
+        prompt_parts.append(
+            "💡 *User can enable data sharing in chat settings for detailed analysis*"
+        )
 
-    prompt_parts.append(data_info)
+    prompt_parts.append("")
 
     # Add specific chart context if selected
     if selected_chart_id:
@@ -763,55 +847,71 @@ def _build_dashboard_system_prompt(
         if charts_with_data > 0:
             prompt_parts.extend(
                 [
-                    "\nYou can help users:",
-                    "- Analyze actual data values and trends from the sample data provided",
-                    "- Identify patterns, outliers, and insights in the real data",
-                    "- Provide specific statistics and data-driven observations",
-                    "- Suggest data-driven insights based on the chart configurations and actual values",
-                    "- Explain what the actual data shows about business metrics",
-                    "- Recommend filters or views based on data patterns",
+                    "## 💡 How You Can Help:",
+                    "",
+                    "✅ **Data Analysis Capabilities:**",
+                    "- 📊 Analyze actual data values and trends from sample data",
+                    "- 🔍 Identify patterns, outliers, and insights in real data",
+                    "- 📈 Provide specific statistics and data-driven observations",
+                    "- 💡 Suggest actionable insights based on chart data and values",
+                    "- 📋 Explain what the data reveals about business metrics",
+                    "- 🎯 Recommend filters or views based on data patterns",
+                    "",
                 ]
             )
 
             if charts_with_fallback > 0:
-                prompt_parts.append("- Some charts show raw table data due to configuration issues")
+                prompt_parts.append(
+                    "📋 *Note: Some charts show raw table data due to configuration issues*"
+                )
 
             if charts_with_errors > 0:
                 prompt_parts.append(
-                    "- Some charts had data fetch errors - explain based on schema/structure"
+                    "⚠️ *Note: Some charts had data fetch errors - provide schema-based analysis*"
                 )
 
             prompt_parts.extend(
                 [
+                    "> 🎯 **CRITICAL**: You have access to actual sample data values shown above! When users ask about data:",
+                    "> - Use the EXACT values, numbers, and text from the sample data provided",
+                    "> - Calculate actual sums, averages, trends from the real data shown",
+                    "> - Reference specific customer names, dates, amounts, categories from the samples",
+                    "> - NEVER say 'likely' or 'probably' - state what you can see in the actual data",
+                    "> - If asked to show data, display the actual rows and values provided",
                     "",
-                    "IMPORTANT: You have access to actual sample data for analysis. Use the real data values to provide specific, data-driven insights.",
                 ]
             )
         else:
             prompt_parts.extend(
                 [
-                    "\nYou can help users:",
-                    "- Understand the dashboard structure and chart configurations",
-                    "- Explain what each chart is designed to show based on schema",
-                    "- Suggest insights based on the chart configurations and column types",
-                    "- Explain how to interpret visualizations",
-                    "- Recommend filters or views that might be helpful",
-                    "- Identify potential configuration issues that prevented data loading",
+                    "## ⚠️ Data Issues Detected:",
                     "",
-                    "Note: Data sharing is enabled but there were errors fetching the actual data. Focus on schema and configuration analysis. Mention that charts may need configuration fixes.",
+                    "🔧 **You can still help with:**",
+                    "- 📋 Understanding dashboard structure and chart configurations",
+                    "- 💡 Explaining what each chart is designed to show based on schema",
+                    "- 🎯 Suggesting insights based on chart configurations and column types",
+                    "- 📊 Explaining how to interpret visualizations",
+                    "- 🔍 Recommending filters or views that might be helpful",
+                    "- 🛠️ Identifying potential configuration issues that prevented data loading",
+                    "",
+                    "> ⚠️ **Note**: Data sharing is enabled but there were errors fetching the actual data. Focus on schema and configuration analysis. Mention that charts may need configuration fixes.",
+                    "",
                 ]
             )
     else:
         prompt_parts.extend(
             [
-                "\nYou can help users:",
-                "- Understand what data is shown in the dashboard based on schema",
-                "- Explain the structure and purpose of each chart",
-                "- Suggest insights based on the chart configurations and column types",
-                "- Explain how to interpret visualizations",
-                "- Recommend filters or views that might be helpful",
+                "## 💡 How You Can Help:",
                 "",
-                "IMPORTANT: You only have schema information, not actual data values. If the user wants data-driven insights, let them know they can enable data sharing in the chat settings to get access to sample data.",
+                "🔒 **Schema-Only Analysis:**",
+                "- 📋 Understand dashboard structure based on table schemas",
+                "- 💡 Explain the purpose and structure of each chart",
+                "- 🎯 Suggest insights based on chart configurations and column types",
+                "- 📊 Explain how to interpret different visualization types",
+                "- 🔍 Recommend useful filters or views",
+                "",
+                "> 💡 **Tip**: For detailed data-driven insights, the user can enable data sharing in the chat settings to provide access to sample data.",
+                "",
             ]
         )
 
