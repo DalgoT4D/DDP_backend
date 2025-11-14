@@ -87,6 +87,12 @@ class ChartDataPayload(Schema):
     # Dashboard filters
     dashboard_filters: Optional[list[dict]] = None
 
+    # Drill-down fields for hierarchical table navigation
+    drill_down_level: Optional[int] = 0  # Current level (0 = top level)
+    drill_down_path: Optional[
+        List[dict]
+    ] = None  # Breadcrumb trail: [{"level": 0, "column": "state", "value": "Maharashtra"}]
+
     # Pagination
     offset: int = 0
     limit: int = 100

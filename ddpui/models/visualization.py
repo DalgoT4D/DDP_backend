@@ -14,6 +14,7 @@ CHART_TYPE_CHOICES = [
     ("line", "Line Chart"),
     ("number", "Number Chart"),
     ("map", "Map Chart"),
+    ("table", "Table"),
 ]
 
 COMPUTATION_TYPE_CHOICES = [

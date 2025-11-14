@@ -57,13 +57,20 @@ class BaseConsumer(WebsocketConsumer):
         self.send(text_data=json.dumps(message.dict()))
 
     def connect(self):
+        logger.info(f"WebSocket connection attempt from {self.scope.get('client', 'unknown')}")
         query_string = parse_qs(self.scope["query_string"].decode())
+        logger.info(f"Query string parameters: {query_string}")
         token = query_string.get("token", [None])[0]
         orgslug = query_string.get("orgslug", [None])[0]
+        logger.info(
+            f"Extracted token (first 20 chars): {token[:20] if token else 'None'}, orgslug: {orgslug}"
+        )
 
         if self.authenticate_user(token, orgslug):
-            logger.info("User authenticated, establishing connection")
+            logger.info(
+                f"User authenticated successfully for orgslug: {orgslug}, establishing connection"
+            )
             self.accept()
         else:
-            logger.info("Authentication failed, closing connection")
+            logger.error(f"Authentication failed for orgslug: {orgslug}, closing connection")
             self.close()
