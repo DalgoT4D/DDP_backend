@@ -808,17 +808,37 @@ def _build_dashboard_system_prompt(
 
                 # Show chart-specific columns if different from table columns
                 chart_columns = schema.get("chart_columns", [])
-                if chart_columns and chart_columns != [col.get("name") for col in table_columns]:
-                    chart_info += f"\n   - 📊 **Chart uses columns:** {', '.join(chart_columns[:5])}"
-                    if len(chart_columns) > 5:
-                        chart_info += f" (+{len(chart_columns)-5} more)"
+                if chart_columns:
+                    # Ensure chart_columns are strings
+                    chart_column_names = []
+                    for col in chart_columns:
+                        if isinstance(col, dict):
+                            chart_column_names.append(col.get("name", "unknown"))
+                        else:
+                            chart_column_names.append(str(col))
+
+                    table_column_names = [col.get("name") for col in table_columns]
+                    if chart_column_names and chart_column_names != table_column_names:
+                        chart_info += (
+                            f"\n   - 📊 **Chart uses columns:** {', '.join(chart_column_names[:5])}"
+                        )
+                        if len(chart_column_names) > 5:
+                            chart_info += f" (+{len(chart_column_names)-5} more)"
 
                 # Show metrics if available
                 metrics = schema.get("metrics", [])
                 if metrics:
-                    chart_info += f"\n   - 📈 **Metrics:** {', '.join(metrics[:3])}"
-                    if len(metrics) > 3:
-                        chart_info += f" (+{len(metrics)-3} more)"
+                    # Ensure metrics are strings
+                    metric_names = []
+                    for metric in metrics:
+                        if isinstance(metric, dict):
+                            metric_names.append(metric.get("name", str(metric)))
+                        else:
+                            metric_names.append(str(metric))
+
+                    chart_info += f"\n   - 📈 **Metrics:** {', '.join(metric_names[:3])}"
+                    if len(metric_names) > 3:
+                        chart_info += f" (+{len(metric_names)-3} more)"
 
             # Add sample data info if available
             sample_data = chart.get("sample_data")
