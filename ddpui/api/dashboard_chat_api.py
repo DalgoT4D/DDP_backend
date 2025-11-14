@@ -236,6 +236,8 @@ class DashboardContextAnalyzer:
         """Get chart schema information without actual data."""
         try:
             from ddpui.models.visualization import Chart
+            from ddpui.models.org import OrgWarehouse
+            from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 
             chart = Chart.objects.filter(id=chart_id, org=self.orguser.org).first()
 
@@ -245,18 +247,54 @@ class DashboardContextAnalyzer:
             # Extract schema information from chart configuration
             extra_config = chart.extra_config or {}
 
+            # Get actual table schema from database
+            actual_columns = []
+            try:
+                # Get warehouse connection
+                org_warehouse = OrgWarehouse.objects.filter(org=self.orguser.org).first()
+                if org_warehouse:
+                    warehouse = WarehouseFactory.get_warehouse_client(org_warehouse)
+                    table_columns_list = warehouse.get_table_columns(
+                        chart.schema_name, chart.table_name
+                    )
+
+                    # Extract column information with types
+                    for col in table_columns_list:
+                        if isinstance(col, dict):
+                            actual_columns.append(
+                                {
+                                    "name": col.get("name", "unknown"),
+                                    "data_type": col.get("data_type", "unknown"),
+                                    "nullable": col.get("nullable", True),
+                                    "translated_type": col.get("translated_type", "string"),
+                                }
+                            )
+
+                    self.logger.info(
+                        f"Chart {chart_id} schema: found {len(actual_columns)} columns from database"
+                    )
+                else:
+                    self.logger.warning(f"Chart {chart_id} schema: no warehouse found")
+            except Exception as schema_error:
+                self.logger.error(f"Chart {chart_id} schema fetch error: {schema_error}")
+
+            # Build comprehensive schema info
+            schema_info = {
+                "schema_name": chart.schema_name,
+                "table_name": chart.table_name,
+                "chart_type": chart.chart_type,
+                "computation_type": chart.computation_type,
+                # Use actual columns if available, fallback to config
+                "table_columns": actual_columns if actual_columns else [],
+                "chart_columns": extra_config.get("columns", []),
+                "metrics": extra_config.get("metrics", []),
+                "dimensions": extra_config.get("dimensions", []),
+                "filters": extra_config.get("filters", []),
+                "aggregate_functions": extra_config.get("aggregate_functions", []),
+            }
+
             return {
-                "schema": {
-                    "schema_name": chart.schema_name,
-                    "table_name": chart.table_name,
-                    "chart_type": chart.chart_type,
-                    "computation_type": chart.computation_type,
-                    "columns": extra_config.get("columns", []),
-                    "metrics": extra_config.get("metrics", []),
-                    "dimensions": extra_config.get("dimensions", []),
-                    "filters": extra_config.get("filters", []),
-                    "aggregate_functions": extra_config.get("aggregate_functions", []),
-                },
+                "schema": schema_info,
                 "sample_data": None,
             }
         except Exception as e:
@@ -612,6 +650,20 @@ def dashboard_chat(request, dashboard_id: int, payload: DashboardChatRequest):
                 logger.info(
                     f"Chart {chart.get('title', 'Unknown')}: {len(sample_data.get('rows', []))} rows, sample: {sample_data.get('rows', [])[:2] if sample_data.get('rows') else 'No rows'}"
                 )
+        else:
+            # DEBUG: Log schema information being sent
+            charts_with_schema = [
+                chart for chart in context.get("charts", []) if chart.get("schema")
+            ]
+            logger.info(
+                f"Dashboard {dashboard_id} - Sending {len(charts_with_schema)} charts with schema to AI"
+            )
+            for chart in charts_with_schema[:2]:  # Log first 2 charts
+                schema = chart.get("schema", {})
+                table_columns = schema.get("table_columns", [])
+                logger.info(
+                    f"Chart {chart.get('title', 'Unknown')} schema: {len(table_columns)} columns: {[col.get('name') for col in table_columns[:5]]}"
+                )
 
         ai_messages.append(AIMessage(role="system", content=system_prompt))
 
@@ -731,13 +783,42 @@ def _build_dashboard_system_prompt(
                 f"{i}. **{chart_emoji} {chart.get('title', 'Untitled Chart')}** ({chart_type})"
             )
 
-            if chart.get("schema", {}).get("columns"):
-                columns = chart["schema"]["columns"][:3]  # Show first 3 columns
-                chart_info += f"\n   - Columns: {', '.join(columns)}" + (
-                    f" (+{len(chart['schema']['columns'])-3} more)"
-                    if len(chart["schema"]["columns"]) > 3
-                    else ""
-                )
+            # Display actual table schema information
+            schema = chart.get("schema", {})
+            if schema:
+                # Show table information
+                if schema.get("schema_name") and schema.get("table_name"):
+                    chart_info += (
+                        f"\n   - 🗄️ Source: {schema['schema_name']}.{schema['table_name']}"
+                    )
+
+                # Show actual table columns with types (from database)
+                table_columns = schema.get("table_columns", [])
+                if table_columns:
+                    chart_info += f"\n   - 📋 **Table Schema ({len(table_columns)} columns):**"
+                    # Show first 4-5 columns with their data types
+                    for col in table_columns[:4]:
+                        col_name = col.get("name", "unknown")
+                        col_type = col.get("data_type", "unknown")
+                        nullable = " (nullable)" if col.get("nullable", True) else " (required)"
+                        chart_info += f"\n     • **{col_name}** ({col_type}){nullable}"
+
+                    if len(table_columns) > 4:
+                        chart_info += f"\n     • ... and {len(table_columns)-4} more columns"
+
+                # Show chart-specific columns if different from table columns
+                chart_columns = schema.get("chart_columns", [])
+                if chart_columns and chart_columns != [col.get("name") for col in table_columns]:
+                    chart_info += f"\n   - 📊 **Chart uses columns:** {', '.join(chart_columns[:5])}"
+                    if len(chart_columns) > 5:
+                        chart_info += f" (+{len(chart_columns)-5} more)"
+
+                # Show metrics if available
+                metrics = schema.get("metrics", [])
+                if metrics:
+                    chart_info += f"\n   - 📈 **Metrics:** {', '.join(metrics[:3])}"
+                    if len(metrics) > 3:
+                        chart_info += f" (+{len(metrics)-3} more)"
 
             # Add sample data info if available
             sample_data = chart.get("sample_data")
@@ -903,14 +984,17 @@ def _build_dashboard_system_prompt(
             [
                 "## 💡 How You Can Help:",
                 "",
-                "🔒 **Schema-Only Analysis:**",
-                "- 📋 Understand dashboard structure based on table schemas",
-                "- 💡 Explain the purpose and structure of each chart",
-                "- 🎯 Suggest insights based on chart configurations and column types",
-                "- 📊 Explain how to interpret different visualization types",
-                "- 🔍 Recommend useful filters or views",
+                "🔒 **Schema-Based Analysis:**",
+                "- 📋 Analyze the actual table structures and column types shown above",
+                "- 💡 Explain what each chart represents based on real column names and data types",
+                "- 🎯 Suggest potential insights based on column combinations (e.g., date + revenue columns suggest time series analysis)",
+                "- 📊 Recommend chart types that would work well with the available columns",
+                "- 🔍 Identify relationships between tables and suggest useful joins/filters",
+                "- 🛠️ Recommend which columns would make good dimensions vs metrics",
                 "",
-                "> 💡 **Tip**: For detailed data-driven insights, the user can enable data sharing in the chat settings to provide access to sample data.",
+                "> 🎯 **Key Focus**: You have access to real table schemas with actual column names and data types. Use these to provide specific, meaningful analysis about what insights are possible.",
+                "",
+                "> 💡 **Tip**: For detailed data-driven insights with actual values, the user can enable data sharing in the chat settings.",
                 "",
             ]
         )
