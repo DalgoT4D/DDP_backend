@@ -776,153 +776,119 @@ def _build_dashboard_system_prompt(
         "✅ USE: 'This table contains customer transaction data with 8 columns'",
         "❌ AVOID: 'This table might contain customer data with what looks like 8 columns'",
         "",
-        "FORMATTING GUIDELINES:",
-        "- Use clear headings and bullet points for better readability",
-        "- Use emojis strategically: 📊 for charts, 📈 for trends, 💡 for insights, 🔍 for analysis",
-        "- Format numbers with proper separators (e.g., 1,234 instead of 1234)",
-        "- Use **bold** for important terms and chart names",
-        "- Use bullet points (-) or numbered lists for multiple items",
-        "- For chart listings, use format: **📊 Chart Name** (Type) - Brief description",
-        "- Add line breaks between sections for better readability",
-        "- Use > for important callouts or insights",
+        "FORMATTING REQUIREMENTS:",
+        "- Write in clear, professional business language without excessive formatting",
+        "- NO markdown headers (###, ##) or excessive emojis in responses",
+        "- Format numbers clearly (e.g., 1,234 instead of 1234)",
+        "- Use simple bullet points for lists when needed",
+        "- Write in paragraphs that flow naturally, like a business analyst explaining to colleagues",
+        "- Focus on insights and explanations, not technical data structure",
     ]
 
     if dashboard.get("dashboard_type"):
         prompt_parts.append(f"Dashboard Type: {dashboard['dashboard_type']}")
 
-    # Add chart information
+    # Add chart information for business analysis
     if charts:
-        prompt_parts.append(f"\n## 📊 Dashboard Charts ({len(charts)} total):")
+        prompt_parts.append(f"\nDASHBOARD CONTENT: {len(charts)} charts available for analysis")
         prompt_parts.append("")
+
         for i, chart in enumerate(charts[:10], 1):  # Limit to first 10 charts
             chart_type = chart.get("type", "unknown")
-            chart_emoji = (
-                "📊"
-                if chart_type == "table"
-                else "📈"
-                if chart_type == "bar"
-                else "🥧"
-                if chart_type == "pie"
-                else "🗺️"
-                if chart_type == "map"
-                else "📋"
-            )
+            chart_title = chart.get("title", "Untitled Chart")
 
-            chart_info = (
-                f"{i}. **{chart_emoji} {chart.get('title', 'Untitled Chart')}** ({chart_type})"
-            )
+            # Build business-focused chart description
+            chart_info = f"Chart {i}: {chart_title} ({chart_type} chart)"
 
-            # Display actual table schema information
+            # Add data source information simply
             schema = chart.get("schema", {})
             if schema:
-                # Show table information
                 if schema.get("schema_name") and schema.get("table_name"):
-                    chart_info += (
-                        f"\n   - 🗄️ Source: {schema['schema_name']}.{schema['table_name']}"
-                    )
+                    chart_info += f" - Data from {schema['schema_name']}.{schema['table_name']}"
 
-                # Show actual table columns with types (from database)
+                # Summarize data availability without technical details
                 table_columns = schema.get("table_columns", [])
                 if table_columns:
-                    chart_info += f"\n   - 📋 **Table Schema ({len(table_columns)} columns):**"
-                    # Show first 4-5 columns with their data types
-                    for col in table_columns[:4]:
-                        col_name = col.get("name", "unknown")
-                        col_type = col.get("data_type", "unknown")
-                        nullable = " (nullable)" if col.get("nullable", True) else " (required)"
-                        chart_info += f"\n     • **{col_name}** ({col_type}){nullable}"
+                    # Focus on business insight potential, not technical schema
+                    column_count = len(table_columns)
+                    chart_info += f" with {column_count} data fields"
 
-                    if len(table_columns) > 4:
-                        chart_info += f"\n     • ... and {len(table_columns)-4} more columns"
+                    # Identify key business columns by name patterns
+                    business_cols = []
+                    for col in table_columns:
+                        col_name = col.get("name", "").lower()
+                        if any(
+                            term in col_name
+                            for term in [
+                                "revenue",
+                                "sales",
+                                "customer",
+                                "price",
+                                "cost",
+                                "profit",
+                                "amount",
+                                "quantity",
+                                "date",
+                                "time",
+                                "name",
+                                "id",
+                            ]
+                        ):
+                            business_cols.append(col.get("name", "unknown"))
 
-                # Show chart-specific columns if different from table columns
-                chart_columns = schema.get("chart_columns", [])
-                if chart_columns:
-                    # Ensure chart_columns are strings
-                    chart_column_names = []
-                    for col in chart_columns:
-                        if isinstance(col, dict):
-                            chart_column_names.append(col.get("name", "unknown"))
-                        else:
-                            chart_column_names.append(str(col))
+                    if business_cols:
+                        chart_info += f" including {', '.join(business_cols[:4])}"
+                        if len(business_cols) > 4:
+                            chart_info += f" and {len(business_cols)-4} more"
 
-                    table_column_names = [col.get("name") for col in table_columns]
-                    if chart_column_names and chart_column_names != table_column_names:
-                        chart_info += (
-                            f"\n   - 📊 **Chart uses columns:** {', '.join(chart_column_names[:5])}"
-                        )
-                        if len(chart_column_names) > 5:
-                            chart_info += f" (+{len(chart_column_names)-5} more)"
-
-                # Show metrics if available
-                metrics = schema.get("metrics", [])
-                if metrics:
-                    # Ensure metrics are strings
-                    metric_names = []
-                    for metric in metrics:
-                        if isinstance(metric, dict):
-                            metric_names.append(metric.get("name", str(metric)))
-                        else:
-                            metric_names.append(str(metric))
-
-                    chart_info += f"\n   - 📈 **Metrics:** {', '.join(metric_names[:3])}"
-                    if len(metric_names) > 3:
-                        chart_info += f" (+{len(metric_names)-3} more)"
-
-            # Add sample data info if available
+            # Add data status without technical dump
             sample_data = chart.get("sample_data")
             if sample_data:
                 if sample_data.get("rows"):
                     rows = sample_data["rows"]
-                    if sample_data.get("fallback"):
-                        chart_info += f"\n   - 📋 Sample data: {len(rows)} rows (raw table data)"
-                    else:
-                        chart_info += f"\n   - ✅ Sample data: {len(rows)} rows available"
+                    chart_info += f" - Contains {len(rows)} sample records"
 
-                    # Include actual data values for AI analysis
+                    # Include key insights from data without raw dump
                     if len(rows) > 0:
-                        chart_info += f"\n   - **Sample Values:**"
-                        # Show first 3-5 rows with actual data
-                        for idx, row in enumerate(rows[:3], 1):
-                            if isinstance(row, dict):
-                                # Format row data nicely
-                                row_preview = ", ".join(
-                                    [f"{k}: {v}" for k, v in list(row.items())[:4]]
-                                )  # First 4 columns
-                                chart_info += f"\n     Row {idx}: {row_preview}"
-                                if len(row.items()) > 4:
-                                    chart_info += f" (+ {len(row.items())-4} more columns)"
-
-                        if len(rows) > 3:
-                            chart_info += f"\n     ... and {len(rows)-3} more rows"
-
+                        # Extract business insights from first few rows
+                        sample_row = rows[0] if isinstance(rows[0], dict) else {}
+                        if sample_row:
+                            # Identify interesting values
+                            key_fields = []
+                            for key, value in list(sample_row.items())[:3]:
+                                if value is not None and str(value).strip():
+                                    key_fields.append(f"{key}")
+                            if key_fields:
+                                chart_info += f" with data on {', '.join(key_fields)}"
                 elif sample_data.get("error"):
-                    chart_info += f"\n   - ❌ Data fetch error: {sample_data['error']}"
+                    chart_info += f" - Data unavailable due to configuration issue"
 
             prompt_parts.append(chart_info)
-            prompt_parts.append("")  # Add space between charts
 
+        # Add summary line if there are more charts
         if len(charts) > 10:
-            prompt_parts.append(f"... and {len(charts) - 10} more charts")
+            prompt_parts.append(f"Plus {len(charts) - 10} additional charts")
+
+        prompt_parts.append("")
 
     # Add filter information
     if filters:
-        prompt_parts.append(f"\n## 🔧 Available Filters ({len(filters)}):")
-        prompt_parts.append("")
+        prompt_parts.append(
+            f"\nAVAILABLE FILTERS: {len(filters)} filters can be used to segment the data"
+        )
         for filter_obj in filters[:5]:
-            prompt_parts.append(
-                f"- **🔍 {filter_obj.get('name', 'Unnamed Filter')}** ({filter_obj.get('filter_type', 'unknown')})"
-            )
+            filter_name = filter_obj.get("name", "Unnamed Filter")
+            filter_type = filter_obj.get("filter_type", "unknown")
+            prompt_parts.append(f"- {filter_name} ({filter_type})")
         if len(filters) > 5:
-            prompt_parts.append(f"... and {len(filters) - 5} more filters")
+            prompt_parts.append(f"Plus {len(filters) - 5} additional filters")
         prompt_parts.append("")
 
     # Add data availability info with detailed status
-    prompt_parts.append("\n## 📊 Data Access Status:")
-    prompt_parts.append("")
+    prompt_parts.append("\nDATA ACCESS STATUS:")
     if summary.get("data_included"):
         prompt_parts.append(
-            f"✅ **Data sharing enabled** - Up to {summary.get('max_rows', 0):,} rows per chart"
+            f"Data sharing is enabled - Up to {summary.get('max_rows', 0):,} rows per chart are available"
         )
 
         # Count charts with actual data
@@ -934,21 +900,15 @@ def _build_dashboard_system_prompt(
 
         if charts_with_data > 0:
             prompt_parts.append(
-                f"- 📈 **{charts_with_data}** charts have sample data available for analysis"
+                f"{charts_with_data} charts have sample data available for analysis"
             )
             if charts_with_fallback > 0:
-                prompt_parts.append(
-                    f"- 📋 **{charts_with_fallback}** charts using raw table data (due to configuration)"
-                )
+                prompt_parts.append(f"{charts_with_fallback} charts are using raw table data")
         if charts_with_errors > 0:
-            prompt_parts.append(f"- ❌ **{charts_with_errors}** charts had data fetch errors")
+            prompt_parts.append(f"{charts_with_errors} charts had data fetch errors")
     else:
-        prompt_parts.append(
-            "🔒 **Schema-only mode** - Only table structure and column names available"
-        )
-        prompt_parts.append(
-            "💡 *User can enable data sharing in chat settings for detailed analysis*"
-        )
+        prompt_parts.append("Schema-only mode - Only table structure and column names available")
+        prompt_parts.append("User can enable data sharing in chat settings for detailed analysis")
 
     prompt_parts.append("")
 
@@ -977,83 +937,78 @@ def _build_dashboard_system_prompt(
         if charts_with_data > 0:
             prompt_parts.extend(
                 [
-                    "## 💡 How You Can Help:",
-                    "",
-                    "✅ **Data Analysis Capabilities:**",
-                    "- 📊 Analyze actual data values and trends from sample data",
-                    "- 🔍 Identify patterns, outliers, and insights in real data",
-                    "- 📈 Provide specific statistics and data-driven observations",
-                    "- 💡 Suggest actionable insights based on chart data and values",
-                    "- 📋 Explain what the data reveals about business metrics",
-                    "- 🎯 Recommend filters or views based on data patterns",
+                    "\nYOUR ANALYSIS CAPABILITIES WITH DATA:",
+                    "- Analyze actual data values and trends from the sample data provided above",
+                    "- Identify patterns, outliers, and insights in the real data",
+                    "- Provide specific statistics and data-driven observations",
+                    "- Suggest actionable insights based on chart data and actual values",
+                    "- Explain what the data reveals about business metrics",
+                    "- Recommend filters or views based on data patterns you observe",
                     "",
                 ]
             )
 
             if charts_with_fallback > 0:
                 prompt_parts.append(
-                    "📋 *Note: Some charts show raw table data due to configuration issues*"
+                    "Note: Some charts show raw table data due to configuration issues"
                 )
 
             if charts_with_errors > 0:
                 prompt_parts.append(
-                    "⚠️ *Note: Some charts had data fetch errors - provide schema-based analysis*"
+                    "Note: Some charts had data fetch errors - provide schema-based analysis for those"
                 )
 
             prompt_parts.extend(
                 [
-                    "> 🎯 **CRITICAL INSTRUCTION**: You have access to actual sample data values shown above! When responding:",
+                    "\nCRITICAL: You have access to actual sample data values shown above. When responding:",
                     "",
-                    "> **DEFINITIVE ANALYSIS REQUIREMENTS:**",
-                    "> - STATE FACTS: 'This data shows X customers with Y total revenue'",
-                    "> - USE EXACT VALUES: Reference specific numbers, names, dates from the sample data",
-                    "> - CALCULATE PRECISELY: Provide actual sums, averages, counts from the real data",
-                    "> - BE SPECIFIC: 'Customer John Doe has $1,500 revenue' not 'customers appear to have revenue'",
-                    "> - IDENTIFY PATTERNS: 'Revenue increased 15% from Jan to Feb' not 'revenue might be growing'",
-                    "> - MAKE DEFINITIVE STATEMENTS: 'The data contains 5 Premium customers' not 'there are probably 5 customers'",
-                    "",
-                    "> **FORBIDDEN PHRASES**: Never use uncertain language like:",
-                    "> - 'might be', 'could be', 'probably', 'possibly', 'seems like', 'appears to be'",
-                    "> - 'likely', 'perhaps', 'maybe', 'I think', 'it looks like'",
+                    "ANALYSIS REQUIREMENTS:",
+                    "- State facts: 'This data shows X customers with Y total revenue'",
+                    "- Use exact values: Reference specific numbers, names, dates from the sample data",
+                    "- Calculate precisely: Provide actual sums, averages, counts from the real data",
+                    "- Be specific: 'Customer John Doe has $1,500 revenue' not 'customers appear to have revenue'",
+                    "- Identify patterns: 'Revenue increased 15% from Jan to Feb' not 'revenue might be growing'",
+                    "- Make definitive statements: 'The data contains 5 Premium customers' not 'there are probably 5 customers'",
                     "",
                 ]
             )
         else:
             prompt_parts.extend(
                 [
-                    "## ⚠️ Data Issues Detected:",
+                    "\nDATA ISSUES DETECTED:",
                     "",
-                    "🔧 **You can still help with:**",
-                    "- 📋 Understanding dashboard structure and chart configurations",
-                    "- 💡 Explaining what each chart is designed to show based on schema",
-                    "- 🎯 Suggesting insights based on chart configurations and column types",
-                    "- 📊 Explaining how to interpret visualizations",
-                    "- 🔍 Recommending filters or views that might be helpful",
-                    "- 🛠️ Identifying potential configuration issues that prevented data loading",
+                    "You can still provide valuable analysis with:",
+                    "- Understanding dashboard structure and chart configurations",
+                    "- Explaining what each chart is designed to show based on schema",
+                    "- Suggesting insights based on chart configurations and column types",
+                    "- Explaining how to interpret visualizations",
+                    "- Recommending filters or views that might be helpful",
+                    "- Identifying potential configuration issues that prevented data loading",
                     "",
-                    "> ⚠️ **Note**: Data sharing is enabled but there were errors fetching the actual data. Focus on schema and configuration analysis. Mention that charts may need configuration fixes.",
+                    "Note: Data sharing is enabled but there were errors fetching the actual data. Focus on schema and configuration analysis and mention that charts may need configuration fixes.",
                     "",
                 ]
             )
     else:
         prompt_parts.extend(
             [
-                "## 💡 How You Can Help:",
+                "\nSCHEMA-BASED ANALYSIS CAPABILITIES:",
                 "",
-                "🔒 **Schema-Based Analysis:**",
-                "- 📋 Analyze the actual table structures and column types shown above",
-                "- 💡 Explain what each chart represents based on the real column names and data types",
-                "- 🎯 Identify specific insights possible with these column combinations",
-                "- 📊 Recommend optimal chart types based on the available data types",
-                "- 🔍 Suggest useful filters and groupings based on the column structure",
-                "- 🛠️ Categorize columns as dimensions vs metrics based on their data types",
+                "You can provide valuable insights using the table structures and column information:",
+                "- Analyze the actual table structures and column types shown above",
+                "- Explain what each chart represents based on the real column names and data types",
+                "- Identify specific insights possible with these column combinations",
+                "- Recommend optimal chart types based on the available data types",
+                "- Suggest useful filters and groupings based on the column structure",
+                "- Categorize columns as dimensions vs metrics based on their data types",
                 "",
-                "> 🎯 **DEFINITIVE SCHEMA ANALYSIS**: You have access to real table schemas with actual column names and data types.",
-                "> **STATE FACTS**: 'This table contains 8 columns including customer_name (VARCHAR) and revenue (INTEGER)'",
-                "> **BE SPECIFIC**: 'The date column enables time-series analysis' not 'date columns might allow temporal analysis'",
-                "> **MAKE RECOMMENDATIONS**: 'Use customer_name for grouping and revenue for aggregation' not 'these columns could potentially be used'",
+                "SCHEMA ANALYSIS REQUIREMENTS:",
+                "You have access to real table schemas with actual column names and data types.",
+                "State facts: 'This table contains 8 columns including customer_name and revenue'",
+                "Be specific: 'The date column enables time-series analysis' not 'date columns might allow temporal analysis'",
+                "Make recommendations: 'Use customer_name for grouping and revenue for aggregation' not 'these columns could potentially be used'",
                 "",
-                "> 💡 **Note**: Enable data sharing in chat settings to analyze actual values and calculate precise metrics.",
+                "Note: User can enable data sharing in chat settings to analyze actual values and calculate precise metrics.",
                 "",
             ]
         )
