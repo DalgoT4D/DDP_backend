@@ -1,8 +1,10 @@
-import os, uuid, time
+import uuid
 from pathlib import Path
 from collections import deque
 
 from django.db.models import Q
+from ninja.errors import HttpError
+from django.forms.models import model_to_dict
 from ddpui.dbt_automation.operations.arithmetic import arithmetic, arithmetic_dbt_sql
 from ddpui.dbt_automation.operations.castdatatypes import cast_datatypes, cast_datatypes_sql
 from ddpui.dbt_automation.operations.coalescecolumns import (
@@ -53,9 +55,10 @@ from ddpui.dbt_automation.operations.unpivot import unpivot, unpivot_dbt_sql
 from ddpui.dbt_automation.operations.generic import generic_function, generic_function_dbt_sql
 from ddpui.dbt_automation.operations.rawsql import generic_sql_function, raw_generic_dbt_sql
 
-from ddpui.schemas.dbt_workflow_schema import CompleteDbtModelPayload
+from ddpui.schemas.dbt_workflow_schema import CompleteDbtModelPayload, ModelSrcNodeInputPayload
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation, DbtEdge, OrgDbtModelType
+from ddpui.models.canvas_models import CanvasNode, CanvasNodeType, CanvasEdge
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils.helpers import map_airbyte_keys_to_postgres_keys
@@ -557,3 +560,174 @@ def create_or_update_dbt_model_in_project_v2(
     )
 
     return model_sql_path, output_cols
+
+
+def convert_canvas_node_to_frontend_format(canvas_node: CanvasNode):
+    """
+    Convert CanvasNode to dict
+    """
+
+    return {
+        "uuid": str(canvas_node.uuid),
+        "type": canvas_node.node_type,
+        "name": canvas_node.name,
+        "operation_config": canvas_node.operation_config,
+        "output_columns": canvas_node.output_cols,
+        "dbtmodel": (
+            model_to_dict(
+                canvas_node.dbtmodel,
+                fields=[
+                    "schema",
+                    "sql_path",
+                    "name",
+                    "display_name",
+                    "uuid",
+                    "type",
+                    "source_name",
+                ],
+            )
+            if canvas_node.dbtmodel
+            else None
+        ),
+    }
+
+
+def validate_and_return_inputs_for_multi_input_op(
+    extra_input_models: list[ModelSrcNodeInputPayload], orgdbt: OrgDbt
+) -> list[CanvasNode]:
+    """
+    Validate inputs for multi input operation
+    Note that the first or the main input is validated separately
+    At least two input models are required for multi-input operations
+    """
+    if len(extra_input_models) < 1:
+        raise HttpError(422, "At least two input models are required for this operation")
+
+    input_nodes = []
+    for input_node in sorted(extra_input_models, key=lambda x: x.seq):
+        try:
+            src_node = CanvasNode.objects.select_related("dbtmodel").get(
+                uuid=input_node.input_node_uuid,
+                orgdbt=orgdbt,
+                type__in=[CanvasNodeType.SOURCE, CanvasNodeType.MODEL],
+            )
+            input_nodes.append(src_node)
+        except CanvasNode.DoesNotExist:
+            raise HttpError(404, f"input node {input_node.input_node_uuid} not found")
+
+    return input_nodes
+
+
+def tranverse_graph_and_return_operations_list(terminal_op_node: CanvasNode) -> list[dict]:
+    """
+    Traverse the graph upstream from the terminal node to get all connected nodes and operations
+    Returns the list of operations with its input in the order they must be applied
+    The operation dict is in the format expected by the dbt_automation package
+
+    We traverse upstream till the operation node has edges from only source/model nodes going into it
+
+    case 1
+    src/model -> op1 -> op2 -> ... -> terminal_op_node
+
+    case 2
+    src/model -> op1 -> op2 -> op3 ->... -> terminal_op_node
+                     model2 -> op3
+
+    """
+
+    operations_list = []
+    current_op_node = terminal_op_node
+
+    cte_n = 1  # counter for cte naming
+    while True:
+        operation_dict = {
+            "uuid": str(current_op_node.uuid),
+            "type": current_op_node.operation_config.get("type"),
+            "config": current_op_node.operation_config.get("config", {}),
+        }
+
+        operation_dict["config"]["input"] = None  # main input
+        operation_dict["config"]["other_inputs"] = []  # other inputs for multi-input operations
+
+        # get all incoming edges to the current node
+        # if there are multiple src/model nodes, the one with seq=1 is the main input
+        incoming_edges = (
+            CanvasEdge.objects.filter(to_node=current_op_node)
+            .select_related("from_node")
+            .order_by("seq")
+        )
+
+        input_models: list[CanvasNode] = []
+        upstream_op_nodes = []
+        for incoming_edge in incoming_edges:
+            from_node = incoming_edge.from_node
+            if from_node.node_type in [CanvasNodeType.SOURCE, CanvasNodeType.MODEL]:
+                input_models.append(from_node)
+            elif from_node.node_type == CanvasNodeType.OPERATION:
+                upstream_op_nodes.append(from_node)
+
+        # check if the node is intermediate or terminal
+        is_intermediate_node = len(upstream_op_nodes) > 0
+
+        # main input
+        if not is_intermediate_node:
+            operation_dict["config"]["input"] = (
+                {
+                    "input_type": input_models[0].dbtmodel.type,
+                    "input_name": (
+                        input_models[0].dbtmodel.name
+                        if input_models[0].dbtmodel.type == "model"
+                        else input_models[0].dbtmodel.display_name
+                    ),
+                    "source_name": input_models[0].dbtmodel.source_name,
+                }
+                if len(input_models) > 0 and input_models[0].dbtmodel
+                else None
+            )
+        else:
+            operation_dict["config"]["input"] = {
+                "input_type": "cte",
+                "input_name": f"cte{cte_n+1}",
+                "source_name": None,
+            }
+
+        # cte numbering for merging
+        operation_dict["as_cte"] = f"cte{cte_n}"
+        cte_n += 1
+
+        # other inputs for multi-input operations
+        if len(input_models) > 1:
+            for i, extra_input_model in enumerate(input_models[1:]):
+                operation_dict["config"]["other_inputs"].append(
+                    {
+                        "input": {
+                            "input_type": extra_input_model.dbtmodel.type,
+                            "input_name": (
+                                extra_input_model.dbtmodel.name
+                                if extra_input_model.dbtmodel.type == "model"
+                                else extra_input_model.dbtmodel.display_name
+                            ),
+                            "source_name": extra_input_model.dbtmodel.source_name,
+                        },
+                        "source_columns": extra_input_model.output_cols,
+                        "seq": i + 1,
+                    }
+                )
+
+        operations_list.append(operation_dict)
+
+        # we stop when there are no upstream operation nodes
+        if len(upstream_op_nodes) == 0:
+            break
+
+        if len(upstream_op_nodes) > 1:
+            raise Exception(
+                "Invalid graph state: multiple upstream operation nodes found for operation node "
+                + str(current_op_node.uuid)
+            )
+
+        current_op_node = upstream_op_nodes[0]
+
+    operations_list.reverse()
+
+    return operations_list
