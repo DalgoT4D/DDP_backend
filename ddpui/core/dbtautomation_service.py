@@ -569,7 +569,7 @@ def convert_canvas_node_to_frontend_format(canvas_node: CanvasNode):
 
     return {
         "uuid": str(canvas_node.uuid),
-        "type": canvas_node.node_type,
+        "node_type": canvas_node.node_type,
         "name": canvas_node.name,
         "operation_config": canvas_node.operation_config,
         "output_columns": canvas_node.output_cols,

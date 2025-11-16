@@ -1146,6 +1146,9 @@ def delete_canvas_node(request, node_uuid: str):
     orguser: OrgUser = request.orguser
     orgdbt = orguser.org.dbt
 
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
     try:
         canvas_node = CanvasNode.objects.get(uuid=node_uuid, orgdbt=orgdbt)
 
@@ -1163,3 +1166,29 @@ def delete_canvas_node(request, node_uuid: str):
         logger.error(f"Failed to delete canvas node: {str(e)}")
         # Transaction will automatically rollback due to the exception
         raise HttpError(500, f"Failed to delete canvas node: {str(e)}")
+
+
+@transform_router.get("/v2/dbt_project/nodes/{node_uuid}/")
+@has_permission(["can_view_dbt_workspace"])
+def get_canvas_node(request, node_uuid: str):
+    """
+    Fetch a single CanvasNode by UUID (v2 API).
+    """
+    orguser: OrgUser = request.orguser
+    orgdbt = orguser.org.dbt
+
+    # ensure dbt workspace exists for org
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    try:
+        canvas_node = CanvasNode.objects.select_related("dbtmodel").get(
+            uuid=node_uuid, orgdbt=orgdbt
+        )
+        return convert_canvas_node_to_frontend_format(canvas_node)
+    except CanvasNode.DoesNotExist:
+        logger.error(f"Canvas node {node_uuid} not found")
+        raise HttpError(404, "canvas node not found")
+    except Exception as e:
+        logger.error(f"Failed to fetch canvas node {node_uuid}: {str(e)}")
+        raise HttpError(500, f"Failed to fetch canvas node: {str(e)}")
