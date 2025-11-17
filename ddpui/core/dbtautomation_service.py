@@ -55,7 +55,12 @@ from ddpui.dbt_automation.operations.unpivot import unpivot, unpivot_dbt_sql
 from ddpui.dbt_automation.operations.generic import generic_function, generic_function_dbt_sql
 from ddpui.dbt_automation.operations.rawsql import generic_sql_function, raw_generic_dbt_sql
 
-from ddpui.schemas.dbt_workflow_schema import CompleteDbtModelPayload, ModelSrcNodeInputPayload
+from ddpui.schemas.dbt_workflow_schema import (
+    CompleteDbtModelPayload,
+    ModelSrcOtherInputPayload,
+    ModelSrcInputsForMultiInputOp,
+    SequencedNode,
+)
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation, DbtEdge, OrgDbtModelType
 from ddpui.models.canvas_models import CanvasNode, CanvasNodeType, CanvasEdge
@@ -430,10 +435,22 @@ def sync_sources_for_warehouse(
             logger.info(f"reading sources for schema {schema} for warehouse")
             sync_tables = []
             for table in wclient.get_tables(schema):
-                if not OrgDbtModel.objects.filter(
+                dbtmodel = OrgDbtModel.objects.filter(
                     orgdbt=org_dbt, schema=schema, name=table, type=OrgDbtModelType.MODEL
-                ).first():
+                ).first()
+                if not dbtmodel:
                     sync_tables.append(table)
+                else:
+                    # update the cols though
+                    try:
+                        dbtmodel.output_cols = [
+                            col["name"] for col in wclient.get_table_columns(schema, table)
+                        ]
+                        dbtmodel.save()
+                    except Exception as e:
+                        logger.error(
+                            f"Error updating output cols for existing model {dbtmodel.name} in schema {schema}: {e}"
+                        )
 
             taskprogress.add(
                 {
@@ -502,6 +519,15 @@ def sync_sources_for_warehouse(
 
         orgdbt_source.schema = source["schema"]
         orgdbt_source.sql_path = source["sql_path"]
+        try:
+            orgdbt_source.output_cols = [
+                col["name"]
+                for col in wclient.get_table_columns(source["schema"], source["input_name"])
+            ]
+        except Exception as e:
+            logger.error(
+                f"Error fetching output cols for source {source['input_name']} in schema {source['schema']}: {e}"
+            )
 
         orgdbt_source.save()
 
@@ -566,6 +592,10 @@ def convert_canvas_node_to_frontend_format(canvas_node: CanvasNode):
     """
     Convert CanvasNode to dict
     """
+    is_last_in_chain = True  # you can always build chains on a model/source node
+    if canvas_node.node_type == CanvasNodeType.OPERATION:
+        outgoing_edges = CanvasEdge.objects.filter(from_node=canvas_node).count()
+        is_last_in_chain = outgoing_edges == 0
 
     return {
         "uuid": str(canvas_node.uuid),
@@ -574,27 +604,26 @@ def convert_canvas_node_to_frontend_format(canvas_node: CanvasNode):
         "operation_config": canvas_node.operation_config,
         "output_columns": canvas_node.output_cols,
         "dbtmodel": (
-            model_to_dict(
-                canvas_node.dbtmodel,
-                fields=[
-                    "schema",
-                    "sql_path",
-                    "name",
-                    "display_name",
-                    "uuid",
-                    "type",
-                    "source_name",
-                ],
-            )
+            {
+                "schema": canvas_node.dbtmodel.schema,
+                "sql_path": canvas_node.dbtmodel.sql_path,
+                "name": canvas_node.dbtmodel.name,
+                "display_name": canvas_node.dbtmodel.display_name,
+                "uuid": str(canvas_node.dbtmodel.uuid),
+                "type": canvas_node.dbtmodel.type,
+                "source_name": canvas_node.dbtmodel.source_name,
+                "output_cols": canvas_node.dbtmodel.output_cols,
+            }
             if canvas_node.dbtmodel
             else None
         ),
+        "is_last_in_chain": is_last_in_chain,
     }
 
 
 def validate_and_return_inputs_for_multi_input_op(
-    extra_input_models: list[ModelSrcNodeInputPayload], orgdbt: OrgDbt
-) -> list[CanvasNode]:
+    extra_input_models: list[ModelSrcOtherInputPayload], orgdbt: OrgDbt
+) -> list[ModelSrcInputsForMultiInputOp]:
     """
     Validate inputs for multi input operation
     Note that the first or the main input is validated separately
@@ -603,19 +632,18 @@ def validate_and_return_inputs_for_multi_input_op(
     if len(extra_input_models) < 1:
         raise HttpError(422, "At least two input models are required for this operation")
 
-    input_nodes = []
-    for input_node in sorted(extra_input_models, key=lambda x: x.seq):
+    input_models: list[ModelSrcInputsForMultiInputOp] = []
+    for input_model in extra_input_models:
         try:
-            src_node = CanvasNode.objects.select_related("dbtmodel").get(
-                uuid=input_node.input_node_uuid,
-                orgdbt=orgdbt,
-                type__in=[CanvasNodeType.SOURCE, CanvasNodeType.MODEL],
-            )
-            input_nodes.append(src_node)
-        except CanvasNode.DoesNotExist:
-            raise HttpError(404, f"input node {input_node.input_node_uuid} not found")
+            dbtmodel = OrgDbtModel.objects.get(uuid=input_model.input_model_uuid, orgdbt=orgdbt)
 
-    return input_nodes
+            input_models.append(
+                ModelSrcInputsForMultiInputOp(seq=input_model.seq, src_model=dbtmodel)
+            )
+        except OrgDbtModel.DoesNotExist:
+            raise HttpError(404, f"Dbt model {input_model.input_model_uuid} not found")
+
+    return input_models
 
 
 def tranverse_graph_and_return_operations_list(terminal_op_node: CanvasNode) -> list[dict]:
@@ -657,33 +685,39 @@ def tranverse_graph_and_return_operations_list(terminal_op_node: CanvasNode) -> 
             .order_by("seq")
         )
 
-        input_models: list[CanvasNode] = []
+        sequenced_model_nodes: list[SequencedNode] = []
+
         upstream_op_nodes = []
         for incoming_edge in incoming_edges:
             from_node = incoming_edge.from_node
             if from_node.node_type in [CanvasNodeType.SOURCE, CanvasNodeType.MODEL]:
-                input_models.append(from_node)
+                sequenced_model_nodes.append(SequencedNode(seq=incoming_edge.seq, node=from_node))
             elif from_node.node_type == CanvasNodeType.OPERATION:
                 upstream_op_nodes.append(from_node)
 
-        # check if the node is intermediate or terminal
-        is_intermediate_node = len(upstream_op_nodes) > 0
-
-        # main input
-        if not is_intermediate_node:
+        # if the node is first in the chain, we need to push this as input in the config
+        # get the seq = 1 model node as main input
+        main_model_node: SequencedNode = next(
+            (node for node in sequenced_model_nodes if node.seq == 1), None
+        )
+        if main_model_node:
             operation_dict["config"]["input"] = (
                 {
-                    "input_type": input_models[0].dbtmodel.type,
+                    "input_type": main_model_node.node.dbtmodel.type,
                     "input_name": (
-                        input_models[0].dbtmodel.name
-                        if input_models[0].dbtmodel.type == "model"
-                        else input_models[0].dbtmodel.display_name
+                        main_model_node.node.dbtmodel.name
+                        if main_model_node.node.dbtmodel.type == "model"
+                        else main_model_node.node.dbtmodel.display_name
                     ),
-                    "source_name": input_models[0].dbtmodel.source_name,
+                    "source_name": main_model_node.node.dbtmodel.source_name,
                 }
-                if len(input_models) > 0 and input_models[0].dbtmodel
+                if main_model_node and main_model_node.node.dbtmodel
                 else None
             )
+
+            # pop this node from the sequenced_model_nodes
+            # these will go as other_inputs
+            sequenced_model_nodes = [node for node in sequenced_model_nodes if node.seq != 1]
         else:
             operation_dict["config"]["input"] = {
                 "input_type": "cte",
@@ -696,23 +730,22 @@ def tranverse_graph_and_return_operations_list(terminal_op_node: CanvasNode) -> 
         cte_n += 1
 
         # other inputs for multi-input operations
-        if len(input_models) > 1:
-            for i, extra_input_model in enumerate(input_models[1:]):
-                operation_dict["config"]["other_inputs"].append(
-                    {
-                        "input": {
-                            "input_type": extra_input_model.dbtmodel.type,
-                            "input_name": (
-                                extra_input_model.dbtmodel.name
-                                if extra_input_model.dbtmodel.type == "model"
-                                else extra_input_model.dbtmodel.display_name
-                            ),
-                            "source_name": extra_input_model.dbtmodel.source_name,
-                        },
-                        "source_columns": extra_input_model.output_cols,
-                        "seq": i + 1,
-                    }
-                )
+        for extra_input_model in sequenced_model_nodes:
+            operation_dict["config"]["other_inputs"].append(
+                {
+                    "input": {
+                        "input_type": extra_input_model.node.dbtmodel.type,
+                        "input_name": (
+                            extra_input_model.node.dbtmodel.name
+                            if extra_input_model.node.dbtmodel.type == "model"
+                            else extra_input_model.node.dbtmodel.display_name
+                        ),
+                        "source_name": extra_input_model.node.dbtmodel.source_name,
+                    },
+                    "source_columns": extra_input_model.node.dbtmodel.output_cols,
+                    "seq": extra_input_model.seq,
+                }
+            )
 
         operations_list.append(operation_dict)
 

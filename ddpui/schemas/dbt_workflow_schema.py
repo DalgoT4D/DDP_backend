@@ -1,6 +1,9 @@
 from ninja import Field, Schema
 from typing import Union, Any, Literal
 
+from ddpui.models.dbt_workflow import OrgDbtModel
+from ddpui.models.canvas_models import CanvasNode
+
 
 class InputModelPayload(Schema):
     """
@@ -325,12 +328,34 @@ def validate_operation_config_v2(op_type: str, config: dict) -> None:
 # Operation-specific config schemas end here
 
 
-class ModelSrcNodeInputPayload(Schema):
-    """Schema to define inputs for a multi input operation. The node_uuid refers to a CanvasNode"""
+class ModelSrcOtherInputPayload(Schema):
+    """Schema to define inputs for a multi input operation. The uuid refers to the dbtmodel"""
 
-    input_node_uuid: str
+    input_model_uuid: str
     columns: list[str] = []
     seq: int = 1
+
+
+class ModelSrcInputsForMultiInputOp(Schema):
+    """Schema to process inputs of multi input operations"""
+
+    seq: int
+    src_model: OrgDbtModel
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class SequencedNode(Schema):
+    """
+    Schema to process sequenced nodes
+    """
+
+    seq: int
+    node: CanvasNode
+
+    class Config:
+        arbitrary_types_allowed = True
 
 
 class CreateOperationNodePayload(Schema):
@@ -345,7 +370,7 @@ class CreateOperationNodePayload(Schema):
     op_type: str
     source_columns: list[str]
     other_inputs: list[
-        ModelSrcNodeInputPayload
+        ModelSrcOtherInputPayload
     ] = []  # List of other CanvasNode inputs for multi-input operations
     canvas_lock_id: str = None
 
@@ -359,7 +384,7 @@ class EditOperationNodePayload(Schema):
     op_type: str
     source_columns: list[str] = []
     other_inputs: list[
-        ModelSrcNodeInputPayload
+        ModelSrcOtherInputPayload
     ] = []  # List of other CanvasNode inputs for multi-input operations
 
 
