@@ -1306,12 +1306,10 @@ def get_canvas_node(request, node_uuid: str):
 
         return_canvas_node = convert_canvas_node_to_frontend_format(canvas_node)
 
-        # get the other inputs for the operation node if applicable
-        # based on the edges going into the node with seq > 1; because seq = 1 is the main input
-        # the input nodes should be of type model or source
+        # get the input nodes of type model or source
         if canvas_node.node_type == CanvasNodeType.OPERATION and canvas_node.operation_config.get(
             "type", ""
-        ) in ["join", "unionall"]:
+        ):
             incoming_edges = (
                 CanvasEdge.objects.filter(
                     to_node=canvas_node,

@@ -200,6 +200,7 @@ class GroupByOperationConfig(Schema):
     """Config for group by operations"""
 
     aggregate_on: list[AggregateMetricConfig]
+    dimension_columns: list[str]
 
 
 class JoinOnConditionConfig(Schema):
@@ -230,7 +231,7 @@ class PivotOperationConfig(Schema):
     pivot_column_values: list[str]
 
 
-class GenericSqlOperationConfig(Schema):
+class RawSqlOperationConfig(Schema):
     """Config for raw/generic SQL operations"""
 
     sql_statement_1: str  # select part
@@ -299,12 +300,12 @@ op_config_mapping = {
     "dropcolumns": DropColumnOperationConfig,
     "renamecolumns": RenameColumnOperationConfig,
     "flattenjson": FlattenJsonOperationConfig,
-    "genericcolumn": GenericColumnOperationConfig,
+    "generic": GenericColumnOperationConfig,
     "groupby": GroupByOperationConfig,
     "join": JoinOperationConfig,
     "union_tables": UnionTablesOperationConfig,
     "pivot": PivotOperationConfig,
-    "genericsql": GenericSqlOperationConfig,
+    "rawsql": RawSqlOperationConfig,
     "regexextraction": RegexExtractionOperationConfig,
     "replace": ReplaceValueOperationConfig,
     "unpivot": UnpivotOperationConfig,
