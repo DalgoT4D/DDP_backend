@@ -25,6 +25,7 @@ from ddpui.api.filter_api import filter_router
 from ddpui.api.public_api import public_router
 from ddpui.api.ai_api import router as ai_router
 from ddpui.api.dashboard_chat_api import router as dashboard_chat_router
+from ddpui.api.org_settings_api import router as org_settings_router
 
 
 src_api = NinjaAPI(
@@ -89,6 +90,7 @@ filter_router.tags = ["Filters"]
 public_router.tags = ["Public"]
 ai_router.tags = ["AI"]
 dashboard_chat_router.tags = ["Dashboard Chat"]
+org_settings_router.tags = ["Organization Settings"]
 
 # mount all the module routes
 src_api.add_router("/api/airbyte/", airbyte_router)
@@ -111,6 +113,7 @@ src_api.add_router("/api/dashboards/", dashboard_native_router)
 src_api.add_router("/api/filters/", filter_router)
 src_api.add_router("/api/ai/", ai_router)
 src_api.add_router("/api/ai/dashboard/", dashboard_chat_router)
+src_api.add_router("/api/org-settings/", org_settings_router)
 
 # Public API without authentication
 public_api = NinjaAPI(

@@ -6,7 +6,9 @@ Provides context-aware chat functionality for dashboard insights.
 import json
 import asyncio
 import time
+import uuid
 from typing import Optional, List, Dict, Any, Union
+from django.utils import timezone
 from django.http import JsonResponse, StreamingHttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -20,6 +22,8 @@ from ddpui.utils.custom_logger import CustomLogger
 from ddpui.core.ai.factory import get_default_ai_provider
 from ddpui.core.ai.interfaces import AIMessage
 from ddpui.models.dashboard import Dashboard
+from ddpui.models.org_settings import OrgSettings
+from ddpui.models.ai_chat_logging import AIChatLog, AIChatMetering
 
 # Remove unused import - orguser is accessed via request.orguser
 
@@ -60,6 +64,112 @@ class DashboardChatResponse(Schema):
     context_included: bool
     data_included: bool
     metadata: Optional[Dict[str, Any]] = None
+
+
+def log_ai_chat_conversation(
+    org,
+    user,
+    user_prompt,
+    ai_response,
+    request_timestamp,
+    response_timestamp,
+    dashboard_id=None,
+    chart_id=None,
+    session_id=None,
+):
+    """
+    Log complete AI chat conversation (request-response pair) when ai_logging_acknowledged is enabled.
+
+    Args:
+        org: Organization object
+        user: User object
+        user_prompt: The user's original question/prompt
+        ai_response: The AI's complete response
+        request_timestamp: When the user sent the request
+        response_timestamp: When the AI response was completed
+        dashboard_id: Dashboard ID if applicable
+        chart_id: Chart ID if applicable
+        session_id: Chat session identifier
+    """
+    try:
+        # Check if logging is enabled for this organization
+        org_settings = OrgSettings.objects.filter(org=org).first()
+        if not org_settings or not org_settings.ai_logging_acknowledged:
+            return  # Skip logging if not acknowledged
+
+        # Create the log entry
+        AIChatLog.objects.create(
+            org=org,
+            user=user,
+            dashboard_id=dashboard_id,
+            chart_id=chart_id,
+            session_id=session_id or str(uuid.uuid4()),
+            user_prompt=user_prompt[:10000],  # Limit content to 10k characters
+            ai_response=ai_response[:10000],  # Limit content to 10k characters
+            request_timestamp=request_timestamp,
+            response_timestamp=response_timestamp,
+        )
+        logger.info(
+            f"Logged conversation for org {org.slug} user {user.email} session {session_id}"
+        )
+
+    except Exception as e:
+        logger.error(f"Error logging AI chat conversation: {e}")
+
+
+def log_ai_chat_metering(
+    org,
+    user,
+    model_used,
+    prompt_tokens,
+    completion_tokens,
+    response_time_ms,
+    include_data,
+    max_rows=None,
+    dashboard_id=None,
+    chart_id=None,
+    session_id=None,
+):
+    """
+    Log AI chat usage metrics for billing and monitoring.
+    This is always logged regardless of user logging preferences.
+
+    Args:
+        org: Organization object
+        user: User object
+        model_used: AI model identifier (e.g., 'openai-gpt-4')
+        prompt_tokens: Number of tokens in prompt
+        completion_tokens: Number of tokens in completion
+        response_time_ms: Response time in milliseconds
+        include_data: Whether data was included in the request
+        max_rows: Maximum rows if data sharing enabled
+        dashboard_id: Dashboard ID if applicable
+        chart_id: Chart ID if applicable
+        session_id: Chat session identifier
+    """
+    try:
+        total_tokens = prompt_tokens + completion_tokens
+
+        AIChatMetering.objects.create(
+            org=org,
+            user=user,
+            dashboard_id=dashboard_id,
+            chart_id=chart_id,
+            session_id=session_id or str(uuid.uuid4()),
+            model_used=model_used,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            response_time_ms=response_time_ms,
+            include_data=include_data,
+            max_rows=max_rows if include_data else None,
+        )
+        logger.info(
+            f"Logged AI metering for org {org.slug}: {total_tokens} tokens, {response_time_ms}ms"
+        )
+
+    except Exception as e:
+        logger.error(f"Error logging AI chat metering: {e}")
 
 
 class DashboardContextAnalyzer:
@@ -671,16 +781,75 @@ def dashboard_chat(request, dashboard_id: int, payload: DashboardChatRequest):
         for msg in payload.messages:
             ai_messages.append(AIMessage(role=msg.role, content=msg.content, metadata=msg.metadata))
 
+        # Generate session ID for this request
+        session_id = str(uuid.uuid4())
+        request_time = timezone.now()
+
+        # Get the latest user message for logging
+        user_message = None
+        for msg in reversed(payload.messages):
+            if msg.role == "user":
+                user_message = msg.content
+                break
+
         # Handle streaming vs non-streaming
         if payload.stream:
             return StreamingHttpResponse(
-                _stream_dashboard_chat(provider, ai_messages, context),
+                _stream_dashboard_chat(
+                    provider,
+                    ai_messages,
+                    context,
+                    orguser_obj,
+                    dashboard_id,
+                    payload,
+                    session_id,
+                    user_message,
+                    request_time,
+                ),
                 content_type="text/event-stream",
             )
         else:
-            # Generate AI response
+            # Generate AI response with timing
+            start_time = time.time()
             response = provider.chat_completion(
                 messages=ai_messages, temperature=0.7, max_tokens=2000
+            )
+            end_time = time.time()
+            response_time_ms = int((end_time - start_time) * 1000)
+            response_time = timezone.now()
+
+            # Log complete conversation if both user message and response exist
+            if user_message:
+                log_ai_chat_conversation(
+                    org=orguser_obj.org,
+                    user=orguser_obj.user,
+                    user_prompt=user_message,
+                    ai_response=response.content,
+                    request_timestamp=request_time,
+                    response_timestamp=response_time,
+                    dashboard_id=dashboard_id,
+                    chart_id=payload.selected_chart_id,
+                    session_id=session_id,
+                )
+
+            # Always log metering data
+            usage = response.usage or {}
+            model_name = getattr(response, "provider", "unknown")
+            if hasattr(response, "model"):
+                model_name = response.model
+
+            log_ai_chat_metering(
+                org=orguser_obj.org,
+                user=orguser_obj.user,
+                model_used=model_name,
+                prompt_tokens=usage.get("prompt_tokens", 0),
+                completion_tokens=usage.get("completion_tokens", 0),
+                response_time_ms=response_time_ms,
+                include_data=payload.include_data,
+                max_rows=payload.max_rows if payload.include_data else None,
+                dashboard_id=dashboard_id,
+                chart_id=payload.selected_chart_id,
+                session_id=session_id,
             )
 
             return JsonResponse(
@@ -695,6 +864,7 @@ def dashboard_chat(request, dashboard_id: int, payload: DashboardChatRequest):
                         "filters_available": len(context.get("filters", [])),
                         "selected_chart": payload.selected_chart_id,
                         "provider": response.provider,
+                        "session_id": session_id,
                     },
                 }
             )
@@ -704,9 +874,23 @@ def dashboard_chat(request, dashboard_id: int, payload: DashboardChatRequest):
         return JsonResponse({"error": "Internal server error"}, status=500)
 
 
-async def _stream_dashboard_chat(provider, ai_messages, context):
+async def _stream_dashboard_chat(
+    provider,
+    ai_messages,
+    context,
+    orguser_obj,
+    dashboard_id,
+    payload,
+    session_id,
+    user_message,
+    request_time,
+):
     """Generate streaming chat response with dashboard context."""
     try:
+        start_time = time.time()
+        full_response = ""
+        final_usage = None
+
         async for chunk in provider.stream_chat_completion(ai_messages):
             data = {
                 "content": chunk.content,
@@ -716,12 +900,55 @@ async def _stream_dashboard_chat(provider, ai_messages, context):
                 "timestamp": asyncio.get_event_loop().time(),
             }
 
+            # Accumulate the full response for logging
+            if chunk.content:
+                full_response += chunk.content
+
             if chunk.usage:
                 data["usage"] = chunk.usage
+                final_usage = chunk.usage
 
             yield f"data: {json.dumps(data)}\n\n"
 
             if chunk.is_complete:
+                end_time = time.time()
+                response_time_ms = int((end_time - start_time) * 1000)
+                response_time = timezone.now()
+
+                # Log complete conversation if both user message and response exist
+                if user_message:
+                    log_ai_chat_conversation(
+                        org=orguser_obj.org,
+                        user=orguser_obj.user,
+                        user_prompt=user_message,
+                        ai_response=full_response,
+                        request_timestamp=request_time,
+                        response_timestamp=response_time,
+                        dashboard_id=dashboard_id,
+                        chart_id=payload.selected_chart_id,
+                        session_id=session_id,
+                    )
+
+                # Always log metering data
+                usage = final_usage or {}
+                model_name = getattr(chunk, "provider", "unknown")
+                if hasattr(chunk, "model"):
+                    model_name = chunk.model
+
+                log_ai_chat_metering(
+                    org=orguser_obj.org,
+                    user=orguser_obj.user,
+                    model_used=model_name,
+                    prompt_tokens=usage.get("prompt_tokens", 0),
+                    completion_tokens=usage.get("completion_tokens", 0),
+                    response_time_ms=response_time_ms,
+                    include_data=payload.include_data,
+                    max_rows=payload.max_rows if payload.include_data else None,
+                    dashboard_id=dashboard_id,
+                    chart_id=payload.selected_chart_id,
+                    session_id=session_id,
+                )
+
                 yield "data: [DONE]\n\n"
                 break
 
