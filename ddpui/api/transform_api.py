@@ -1047,7 +1047,7 @@ def post_add_operation_node(request, payload: CreateOperationNodePayload):
             return convert_canvas_node_to_frontend_format(canvas_node)
 
     except CanvasNode.DoesNotExist:
-        logger.error(f"Base node {payload.base_node_uuid} not found")
+        logger.error(f"input node {payload.input_node_uuid} not found")
         raise HttpError(404, "input node not found")
     except Exception as e:
         logger.error(f"Failed to create operation: {str(e)}")
@@ -1197,6 +1197,11 @@ def post_terminate_operation_node(
 
     # TODO: apply canvas locking logic
 
+    if OrgDbtModel.objects.filter(
+        orgdbt=orgdbt, name=payload.name, schema=payload.dest_schema
+    ).exists():
+        raise HttpError(422, "model with the same name already exists in the schema")
+
     try:
         terminal_node = CanvasNode.objects.get(
             uuid=node_uuid, orgdbt=orgdbt, node_type=CanvasNodeType.OPERATION
@@ -1226,6 +1231,7 @@ def post_terminate_operation_node(
                 display_name=payload.display_name,
                 schema=payload.dest_schema,
                 sql_path=str(model_sql_path),
+                uuid=uuid.uuid4(),
             )
 
             # create the node representing the model

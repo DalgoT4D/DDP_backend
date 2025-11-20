@@ -304,7 +304,7 @@ op_config_mapping = {
     "generic": GenericColumnOperationConfig,
     "groupby": GroupByOperationConfig,
     "join": JoinOperationConfig,
-    "union_tables": UnionTablesOperationConfig,
+    "unionall": UnionTablesOperationConfig,
     "pivot": PivotOperationConfig,
     "rawsql": RawSqlOperationConfig,
     "regexextraction": RegexExtractionOperationConfig,
