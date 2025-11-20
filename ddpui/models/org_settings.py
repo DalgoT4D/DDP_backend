@@ -59,7 +59,7 @@ class OrgSettings(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "org_settings"
+        db_table = "ddpui_org_settings"
         verbose_name = "Organization Settings"
         verbose_name_plural = "Organization Settings"
 

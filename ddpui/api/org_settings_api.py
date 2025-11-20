@@ -153,7 +153,7 @@ def get_org_settings(request):
         return {"success": True, "res": org_data.dict()}
 
     except ProgrammingError as e:
-        if 'relation "org_settings" does not exist' in str(e):
+        if 'relation "ddpui_org_settings" does not exist' in str(e):
             logger.info("OrgSettings table does not exist. Attempting to create it...")
             if ensure_org_settings_table_exists():
                 # Table created successfully, retry the operation
@@ -280,7 +280,7 @@ def update_org_settings(request, payload: UpdateOrgSettingsSchema):
         return {"success": True, "res": update_org_data.dict()}
 
     except ProgrammingError as e:
-        if 'relation "org_settings" does not exist' in str(e):
+        if 'relation "ddpui_org_settings" does not exist' in str(e):
             logger.info("OrgSettings table does not exist. Attempting to create it...")
             if ensure_org_settings_table_exists():
                 # Table created successfully, retry the operation
@@ -515,7 +515,7 @@ def upload_organization_logo(request, logo_file: UploadedFile = File(...)):
                 },
             )
         except ProgrammingError as e:
-            if 'relation "org_settings" does not exist' in str(e):
+            if 'relation "ddpui_org_settings" does not exist' in str(e):
                 logger.info(
                     "OrgSettings table does not exist. Attempting to create it for upload..."
                 )
