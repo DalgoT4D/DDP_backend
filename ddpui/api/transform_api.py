@@ -913,6 +913,12 @@ def post_create_src_model_node(request, dbtmodel_uuid: str):
             )
             return convert_canvas_node_to_frontend_format(existing_node)
 
+        output_cols = dbtautomation_service.update_output_cols_of_dbt_model(
+            warehouse, org_dbt_model
+        )
+        org_dbt_model.output_cols = output_cols
+        org_dbt_model.save()
+
         canvas_node = CanvasNode.objects.create(
             orgdbt=orgdbt,
             node_type=(
@@ -1197,11 +1203,6 @@ def post_terminate_operation_node(
 
     # TODO: apply canvas locking logic
 
-    if OrgDbtModel.objects.filter(
-        orgdbt=orgdbt, name=payload.name, schema=payload.dest_schema
-    ).exists():
-        raise HttpError(422, "model with the same name already exists in the schema")
-
     try:
         terminal_node = CanvasNode.objects.get(
             uuid=node_uuid, orgdbt=orgdbt, node_type=CanvasNodeType.OPERATION
@@ -1225,14 +1226,25 @@ def post_terminate_operation_node(
             # create the dbt model in django db
             # Fields under_construction & output_cols will be invalid and will be dropped eventually
             # output_cols is saved in the canvas node now
-            dbtmodel = OrgDbtModel.objects.create(
-                orgdbt=orgdbt,
-                name=payload.name,
-                display_name=payload.display_name,
-                schema=payload.dest_schema,
-                sql_path=str(model_sql_path),
-                uuid=uuid.uuid4(),
-            )
+            dbtmodel = OrgDbtModel.objects.filter(
+                orgdbt=orgdbt, name=payload.name, schema=payload.dest_schema
+            ).first()
+
+            if dbtmodel:
+                logger.info(f"dbt model already exists, updating: {dbtmodel.uuid}")
+                dbtmodel.display_name = payload.display_name
+                dbtmodel.sql_path = str(model_sql_path)
+                dbtmodel.save()
+            else:
+                logger.info(f"Creating new dbt model: {payload.dest_schema}.{payload.name}")
+                dbtmodel = OrgDbtModel.objects.create(
+                    orgdbt=orgdbt,
+                    name=payload.name,
+                    display_name=payload.display_name,
+                    schema=payload.dest_schema,
+                    sql_path=str(model_sql_path),
+                    uuid=uuid.uuid4(),
+                )
 
             # create the node representing the model
             model_node = CanvasNode.objects.create(
