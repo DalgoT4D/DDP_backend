@@ -285,7 +285,6 @@ class FilterClauseConfig(Schema):
 class WhereFilterOperationConfig(Schema):
     """Config for where filter operations"""
 
-    condition: str
     where_type: Literal["and", "or", "sql"] = "and"
     clauses: list[FilterClauseConfig]
     sql_snippet: str = ""
