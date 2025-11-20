@@ -10,6 +10,7 @@ from django.db.models import Q
 from ddpui.models.dbt_workflow import DbtEdge, OrgDbtModel, OrgDbtOperation
 from ddpui.models.canvas_models import CanvasNode, CanvasEdge, CanvasNodeType
 from ddpui.models.org import Org, OrgDbt
+from ddpui.schemas.dbt_workflow_schema import SequencedNode
 
 
 class Command(BaseCommand):
@@ -72,10 +73,7 @@ class Command(BaseCommand):
         try:
             with transaction.atomic():
                 # Perform migration
-                stats = self._migrate_data(orgdbt, verbose)
-
-                # Display results
-                self._display_results(stats, dry_run)
+                self._migrate_data(orgdbt)
 
                 if dry_run:
                     # Rollback transaction in dry-run mode
@@ -88,185 +86,100 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR(f"Migration failed: {str(e)}"))
             raise
 
-    def _migrate_data(self, orgdbt, verbose):
+    def _migrate_data(self, orgdbt):
         """Perform the actual migration of data from v1 to v2 using edge-first approach."""
-        stats = {
-            "total_edges": 0,
-            "migrated_models": 0,
-            "migrated_operations": 0,
-            "created_canvas_nodes": 0,
-            "created_canvas_edges": 0,
-            "skipped_edges": 0,
-        }
-
-        # Mapping dictionaries to track old to new
-        model_to_canvas_node_map = {}  # OrgDbtModel.id -> CanvasNode
-        operation_to_canvas_node_map = {}  # OrgDbtOperation.id -> CanvasNode
-
         # Step 1: Get all edges for this orgdbt
         self.stdout.write("Step 1: Processing edges and building graph...")
-        edges = DbtEdge.objects.filter(
+        old_edges = DbtEdge.objects.filter(
             Q(from_node__orgdbt=orgdbt) | Q(to_node__orgdbt=orgdbt)
         ).select_related("from_node", "to_node")
 
-        stats["total_edges"] = edges.count()
-
-        if verbose:
-            self.stdout.write(f"  Found {stats['total_edges']} edges to process")
-
         # Step 2: Process each edge
-        for edge_num, edge in enumerate(edges, 1):
-            if verbose:
-                self.stdout.write(
-                    f"\nProcessing edge {edge_num}/{stats['total_edges']}: {edge.from_node.name} -> {edge.to_node.name}"
-                )
-
-            # Step 2a: Create CanvasNode for source if doesn't exist
-            if edge.from_node.id not in model_to_canvas_node_map:
-                source_canvas_node = self._create_canvas_node_for_model(edge.from_node, orgdbt)
-                model_to_canvas_node_map[edge.from_node.id] = source_canvas_node
-                stats["migrated_models"] += 1
-                stats["created_canvas_nodes"] += 1
-                if verbose:
-                    self.stdout.write(f"  Created source node: {edge.from_node.name}")
-            else:
-                source_canvas_node = model_to_canvas_node_map[edge.from_node.id]
-
-            # Step 2b: Create CanvasNode for target if doesn't exist
-            if edge.to_node.id not in model_to_canvas_node_map:
-                target_canvas_node = self._create_canvas_node_for_model(edge.to_node, orgdbt)
-                model_to_canvas_node_map[edge.to_node.id] = target_canvas_node
-                stats["migrated_models"] += 1
-                stats["created_canvas_nodes"] += 1
-                if verbose:
-                    self.stdout.write(f"  Created target node: {edge.to_node.name}")
-            else:
-                target_canvas_node = model_to_canvas_node_map[edge.to_node.id]
-
-            # Step 2c: Get all operations for the target model
-            target_operations = OrgDbtOperation.objects.filter(dbtmodel=edge.to_node).order_by(
-                "seq"
+        for edge_num, edge in enumerate(old_edges, 1):
+            self.stdout.write(
+                f"\nProcessing edge {edge_num}/{len(old_edges)}: {edge.from_node.name} -> {edge.to_node.name}"
             )
 
-            if target_operations.exists():
+            source_canvas_node = self._create_canvas_node_for_model(edge.from_node, orgdbt)
+
+            target_canvas_node = self._create_canvas_node_for_model(edge.to_node, orgdbt)
+
+            # Step 2c: Get all operations for the target model
+            target_operations: list[OrgDbtOperation] = OrgDbtOperation.objects.filter(
+                dbtmodel=edge.to_node
+            ).order_by("seq")
+
+            if target_operations:
                 # There are operations between source and target
-                if verbose:
-                    self.stdout.write(
-                        f"  Found {target_operations.count()} operations for target model"
-                    )
+                self.stdout.write(
+                    f"  Found {target_operations.count()} operations for target model"
+                )
 
                 # Create CanvasNodes for operations if they don't exist
-                operation_nodes = []
+                prev_op_canvas_node: CanvasNode = source_canvas_node
                 for op in target_operations:
-                    if op.id not in operation_to_canvas_node_map:
-                        op_canvas_node = self._create_canvas_node_for_operation(op, orgdbt)
-                        operation_to_canvas_node_map[op.id] = op_canvas_node
-                        stats["migrated_operations"] += 1
-                        stats["created_canvas_nodes"] += 1
-                        if verbose:
-                            op_type = op.config.get("type", "unknown")
-                            self.stdout.write(
-                                f"    Created operation node: {op_type} (seq: {op.seq})"
+                    op_type = op.config.get("type", "unknown")
+                    other_inputs = op.config.get("config", {}).get("other_inputs", [])
+
+                    other_input_model_nodes: list[SequencedNode] = []
+                    input_models = op.config.get("input_models", [])
+                    for other_input, input_model in zip(other_inputs, input_models[1:]):
+                        seq = other_input.get("seq")
+                        model_uuid = input_model.get("uuid", "")
+                        try:
+                            dbtmodel = OrgDbtModel.objects.get(uuid=model_uuid)
+                        except OrgDbtModel.DoesNotExist:
+                            self.stderr.write(
+                                f"Other input model with UUID {model_uuid} not found for operation {op.uuid}"
                             )
-                    else:
-                        op_canvas_node = operation_to_canvas_node_map[op.id]
-                    operation_nodes.append((op.seq, op_canvas_node))
+                            continue
+                        model_canvas_node = self._create_canvas_node_for_model(dbtmodel, orgdbt)
+                        other_input_model_nodes.append(
+                            SequencedNode(seq=seq, node=model_canvas_node)
+                        )
 
-                # Sort operations by sequence
-                operation_nodes.sort(key=lambda x: x[0])
+                    # curr op node
+                    op_canvas_node = self._create_canvas_node_for_operation(op, orgdbt)
+                    self.stdout.write(f"Created operation node: {op_type} (seq: {op.seq})")
 
-                # Step 2d: Create edges maintaining operation sequence
-                # First edge: source -> first operation
-                first_op_node = operation_nodes[0][1]
-                self._create_canvas_edge(source_canvas_node, first_op_node, seq=1)
-                stats["created_canvas_edges"] += 1
-                if verbose:
-                    self.stdout.write(f"    Created edge: source -> operation 1")
+                    # create canvas edges
+                    # main edge
+                    self._create_canvas_edge(prev_op_canvas_node, op_canvas_node, seq=1)
 
-                # Intermediate edges: operation -> operation
-                for i in range(len(operation_nodes) - 1):
-                    from_op = operation_nodes[i][1]
-                    to_op = operation_nodes[i + 1][1]
-                    seq = operation_nodes[i + 1][0]  # Use the seq from the next operation
-                    self._create_canvas_edge(from_op, to_op, seq=seq)
-                    stats["created_canvas_edges"] += 1
-                    if verbose:
-                        self.stdout.write(f"    Created edge: operation {i+1} -> operation {i+2}")
+                    # edges for other inputs
+                    for other_input_model_node in other_input_model_nodes:
+                        self._create_canvas_edge(
+                            other_input_model_node.node,
+                            op_canvas_node,
+                            seq=other_input_model_node.seq,
+                        )
 
-                # Last edge: last operation -> target model
-                last_op_node = operation_nodes[-1][1]
-                self._create_canvas_edge(
-                    last_op_node, target_canvas_node, seq=len(operation_nodes) + 1
-                )
-                stats["created_canvas_edges"] += 1
-                if verbose:
-                    self.stdout.write(
-                        f"    Created edge: operation {len(operation_nodes)} -> target"
-                    )
-            else:
-                # No operations, direct edge from source to target
-                self._create_canvas_edge(source_canvas_node, target_canvas_node, seq=edge.seq or 1)
-                stats["created_canvas_edges"] += 1
-                if verbose:
-                    self.stdout.write(f"  Created direct edge: source -> target")
+                    prev_op_canvas_node = op_canvas_node
 
-        # Step 3: Handle operations that might have multiple input models (join, union)
-        self.stdout.write("\nStep 3: Processing multi-input operations...")
-        multi_input_operations = OrgDbtOperation.objects.filter(
-            id__in=operation_to_canvas_node_map.keys()
-        ).filter(config__type__in=["join", "unionall"])
+                # crete the last edge to target model
+                self._create_canvas_edge(prev_op_canvas_node, target_canvas_node, seq=1)
 
-        for op in multi_input_operations:
-            op_canvas_node = operation_to_canvas_node_map[op.id]
-            input_models_data = op.config.get("input_models", [])
-
-            if verbose and len(input_models_data) > 1:
-                self.stdout.write(f"  Processing multi-input operation: {op.config.get('type')}")
-
-            # Create edges from all input models to this operation
-            for idx, input_data in enumerate(input_models_data):
-                input_uuid = input_data.get("uuid")
-                if input_uuid:
-                    try:
-                        input_model = OrgDbtModel.objects.get(uuid=input_uuid)
-                        if input_model.id in model_to_canvas_node_map:
-                            input_canvas_node = model_to_canvas_node_map[input_model.id]
-                            # Check if edge already exists
-                            if not CanvasEdge.objects.filter(
-                                from_node=input_canvas_node, to_node=op_canvas_node
-                            ).exists():
-                                self._create_canvas_edge(
-                                    input_canvas_node, op_canvas_node, seq=idx + 1
-                                )
-                                stats["created_canvas_edges"] += 1
-                                if verbose:
-                                    self.stdout.write(
-                                        f"    Connected additional input: {input_model.name}"
-                                    )
-                    except OrgDbtModel.DoesNotExist:
-                        if verbose:
-                            self.stdout.write(
-                                self.style.WARNING(f"    Input model {input_uuid} not found")
-                            )
-
-        return stats
-
-    def _create_canvas_node_for_model(self, model: OrgDbtModel, orgdbt):
+    def _create_canvas_node_for_model(self, model: OrgDbtModel, orgdbt) -> CanvasNode:
         """Create a CanvasNode for an OrgDbtModel."""
-        node_type = self._determine_node_type(model)
-        return CanvasNode.objects.create(
-            orgdbt=orgdbt,
-            uuid=uuid.uuid4(),
-            node_type=node_type,
-            name=model.name,
-            output_cols=model.output_cols or [],
-            dbtmodel=model,
-        )
+        node = CanvasNode.objects.filter(orgdbt=orgdbt, dbtmodel=model).first()
+        if not node:
+            node_type = self._determine_node_type(model)
+            node = CanvasNode.objects.create(
+                orgdbt=orgdbt,
+                uuid=uuid.uuid4(),
+                node_type=node_type,
+                name=model.name,
+                output_cols=model.output_cols or [],
+                dbtmodel=model,
+            )
+
+        return node
 
     def _create_canvas_node_for_operation(self, operation: OrgDbtOperation, orgdbt):
         """Create a CanvasNode for an OrgDbtOperation."""
         op_type = operation.config.get("type", "unknown")
         op_name = f"op_{operation.uuid}"
+        op_config = operation.config.get("config", {})
 
         return CanvasNode.objects.create(
             orgdbt=orgdbt,
@@ -274,12 +187,8 @@ class Command(BaseCommand):
             node_type=CanvasNodeType.OPERATION,
             name=op_name,
             operation_config={
-                "operation_type": op_type,
-                "config": operation.config.get("config", {}),
-                "input_models": operation.config.get("input_models", []),
-                "seq": operation.seq,
-                "original_uuid": str(operation.uuid),
-                "original_model_id": (str(operation.dbtmodel.uuid) if operation.dbtmodel else None),
+                "type": op_type,
+                "config": op_config,
             },
             output_cols=operation.output_cols or [],
         )
@@ -293,7 +202,7 @@ class Command(BaseCommand):
             return CanvasEdge.objects.create(from_node=from_node, to_node=to_node, seq=seq)
         return existing_edge
 
-    def _determine_node_type(self, model):
+    def _determine_node_type(self, model: OrgDbtModel):
         """Determine the CanvasNodeType based on OrgDbtModel type."""
         if model.type == "source":
             return CanvasNodeType.SOURCE

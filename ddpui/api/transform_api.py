@@ -1224,15 +1224,13 @@ def post_terminate_operation_node(
 
         with transaction.atomic():
             # create the dbt model in django db
-            # Fields under_construction & output_cols will be invalid and will be dropped eventually
-            # output_cols is saved in the canvas node now
-            dbtmodel = OrgDbtModel.objects.filter(
-                orgdbt=orgdbt, name=payload.name, schema=payload.dest_schema
-            ).first()
+            # name should be unique since dbt doesn't allow 2 models using the name in ref()
+            dbtmodel = OrgDbtModel.objects.filter(orgdbt=orgdbt, name=payload.name).first()
 
             if dbtmodel:
                 logger.info(f"dbt model already exists, updating: {dbtmodel.uuid}")
                 dbtmodel.display_name = payload.display_name
+                dbtmodel.schema = payload.dest_schema
                 dbtmodel.sql_path = str(model_sql_path)
                 dbtmodel.save()
             else:
