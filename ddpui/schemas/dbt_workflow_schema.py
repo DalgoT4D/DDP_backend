@@ -229,6 +229,7 @@ class PivotOperationConfig(Schema):
 
     pivot_column_name: str
     pivot_column_values: list[str]
+    groupby_columns: list[str]
 
 
 class RawSqlOperationConfig(Schema):

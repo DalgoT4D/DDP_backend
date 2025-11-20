@@ -58,11 +58,8 @@ def groupby_dbt_sql(
     """
     Generate SQL code for the coalesce_columns operation.
     """
-    # make sure its backward compatible
     # moved storing dimension from source_columns to dimension_columns
-    dimension_columns = config["source_columns"]
-    if "dimension_columns" in config:
-        dimension_columns = config["dimension_columns"]
+    dimension_columns = config["dimension_columns"]
     aggregate_on: list[dict] = config.get("aggregate_on", [])
     input_table = config["input"]
 
