@@ -625,7 +625,7 @@ class TestBigqueryOperations:
         assert "SPOC C" not in spoc_values
 
     def test_pivot(self):
-        """test casewhen operation"""
+        """test pivot operation"""
         wc_client = TestBigqueryOperations.wc_client
         output_name = "pivot_op"
 
@@ -637,7 +637,8 @@ class TestBigqueryOperations:
             },
             "dest_schema": "pytest_intermediate",
             "output_name": output_name,
-            "source_columns": ["SPOC"],
+            "source_columns": ["NGO", "Month", "measure1", "measure2", "Indicator", "SPOC"],
+            "groupby_columns": ["SPOC"],
             "pivot_column_name": "NGO",
             "pivot_column_values": ["IMAGE", "FDSR", "CRC", "BAMANEH", "JTS"],
         }
@@ -654,7 +655,7 @@ class TestBigqueryOperations:
             col_dict["name"]
             for col_dict in wc_client.get_table_columns("pytest_intermediate", output_name)
         ]
-        assert sorted(cols) == sorted(config["pivot_column_values"] + config["source_columns"])
+        assert sorted(cols) == sorted(config["pivot_column_values"] + config["groupby_columns"])
         table_data = wc_client.get_table_data("pytest_intermediate", output_name, 10)
         assert len(table_data) == 3
 
