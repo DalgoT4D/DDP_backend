@@ -289,21 +289,3 @@ class Command(BaseCommand):
             return CanvasNodeType.SOURCE
         else:
             return CanvasNodeType.MODEL
-
-    def _display_results(self, stats, dry_run):
-        """Display migration results."""
-        self.stdout.write("\n" + "=" * 50)
-        self.stdout.write("Migration Summary:")
-        self.stdout.write("=" * 50)
-        self.stdout.write(f"Total DbtEdges processed: {stats['total_edges']}")
-        self.stdout.write(f"Migrated models: {stats['migrated_models']}")
-        self.stdout.write(f"Migrated operations: {stats['migrated_operations']}")
-        self.stdout.write(f"Created CanvasNodes: {stats['created_canvas_nodes']}")
-        self.stdout.write(f"Created CanvasEdges: {stats['created_canvas_edges']}")
-
-        if not dry_run and stats["created_canvas_nodes"] > 0:
-            self.stdout.write(self.style.SUCCESS("\n✓ Migration completed successfully!"))
-        elif dry_run:
-            self.stdout.write(self.style.WARNING("\nDry-run completed - review the summary above"))
-        else:
-            self.stdout.write(self.style.WARNING("\nNo data was migrated"))

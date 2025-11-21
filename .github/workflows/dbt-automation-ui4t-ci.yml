@@ -59,8 +59,8 @@ jobs:
       - name: Seed data in test warehouse
         run: |
           export PYTHONPATH=$(pwd)
-          uv run python3 -m ddpui.dbt_automation.seeds.seed ddpui/dbt_automation/seeds/seed.py --warehouse postgres
-          uv run python3 -m ddpui.dbt_automation.seeds.seed ddpui/dbt_automation/seeds/seed.py --warehouse bigquery
+          uv run python3 -m ddpui.dbt_automation.seeds.seed --warehouse postgres
+          uv run python3 -m ddpui.dbt_automation.seeds.seed --warehouse bigquery
 
       - name: Run dbt automation (ui4t) integration tests
         run: |
