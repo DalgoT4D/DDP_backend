@@ -1061,10 +1061,16 @@ def post_add_operation_node(request, payload: CreateOperationNodePayload):
     except CanvasNode.DoesNotExist:
         logger.error(f"input node {payload.input_node_uuid} not found")
         raise HttpError(404, "input node not found")
-    except Exception as e:
-        logger.error(f"Failed to create operation: {str(e)}")
+    except HttpError:
+        # let domain errors propagate (422/404 from validation helpers)
+        raise
+    except ValueError as err:
+        logger.error(f"Validation error while creating operation: {str(err)}")
+        raise HttpError(422, str(err)) from err
+    except Exception as err:
+        logger.error(f"Failed to create operation: {str(err)}")
         # Transaction will automatically rollback due to the exception
-        raise HttpError(500, f"Failed to create operation: {str(e)}")
+        raise HttpError(500, f"Failed to create operation: {str(err)}") from err
 
 
 @transform_router.put("/v2/dbt_project/operations/nodes/{node_uuid}/")
