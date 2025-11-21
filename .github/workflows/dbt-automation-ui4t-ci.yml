@@ -63,5 +63,7 @@ jobs:
           uv run python3 -m ddpui.dbt_automation.seeds.seed --warehouse bigquery
 
       - name: Run dbt automation (ui4t) integration tests
+        env:
+          DJANGOSECRET: "some-secret-key"
         run: |
           uv run pytest ddpui/tests/integration_tests/dbt_automation/*.py -s 
