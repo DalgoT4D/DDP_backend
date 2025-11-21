@@ -323,7 +323,7 @@ def validate_operation_config_v2(op_type: str, config: dict) -> None:
     try:
         op_config_mapping[op_type](**config)
     except Exception as e:
-        raise ValueError(f"Invalid config for {op_type} operation: {str(e)}")
+        raise ValueError(f"Invalid config for {op_type} operation: {str(e)}") from e
 
 
 # Operation-specific config schemas end here
