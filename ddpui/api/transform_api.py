@@ -774,7 +774,7 @@ def post_unlock_canvas(request, payload: LockCanvasRequestSchema):
 
 @transform_router.get("/v2/dbt_project/sources_models/")
 @has_permission(["can_view_dbt_models"])
-def get_input_sources_and_models(request, schema_name: str = None):
+def get_input_sources_and_models_v2(request, schema_name: str = None):
     """
     Fetches all sources and models in a dbt project
     """
