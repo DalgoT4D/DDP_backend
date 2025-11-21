@@ -64,4 +64,4 @@ jobs:
 
       - name: Run dbt automation (ui4t) integration tests
         run: |
-          pytest ddpui/tests/integration_tests/dbt_automation/*.py -s 
+          uv run pytest ddpui/tests/integration_tests/dbt_automation/*.py -s 
