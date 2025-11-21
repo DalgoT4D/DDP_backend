@@ -1243,7 +1243,9 @@ def post_terminate_operation_node(
         with transaction.atomic():
             # create the dbt model in django db
             # name should be unique since dbt doesn't allow 2 models using the name in ref()
-            dbtmodel = OrgDbtModel.objects.filter(orgdbt=orgdbt, name=payload.name).first()
+            dbtmodel = OrgDbtModel.objects.filter(
+                orgdbt=orgdbt, name=payload.name, type=OrgDbtModelType.MODEL
+            ).first()
 
             if dbtmodel:
                 logger.info(f"dbt model already exists, updating: {dbtmodel.uuid}")
@@ -1263,13 +1265,20 @@ def post_terminate_operation_node(
                 )
 
             # create the node representing the model
-            model_node = CanvasNode.objects.create(
-                orgdbt=orgdbt,
-                node_type=CanvasNodeType.MODEL,
-                name=f"{dbtmodel.schema}.{dbtmodel.name}",
-                output_cols=output_cols,
-                dbtmodel=dbtmodel,
+            model_node: CanvasNode = CanvasNode.objects.get_or_create(
+                defaults={"orgdbt": orgdbt, "dbtmodel": dbtmodel}
             )
+            if not model_node:
+                model_node = CanvasNode.objects.create(
+                    orgdbt=orgdbt,
+                    node_type=CanvasNodeType.MODEL,
+                    name=f"{dbtmodel.schema}.{dbtmodel.name}",
+                    output_cols=output_cols,
+                    dbtmodel=dbtmodel,
+                )
+            else:
+                model_node.output_cols = output_cols
+                model_node.save()
 
             # create the edge from the terminal operation node to the model node
             CanvasEdge.objects.create(from_node=terminal_node, to_node=model_node, seq=1)
@@ -1280,6 +1289,9 @@ def post_terminate_operation_node(
     except CanvasNode.DoesNotExist:
         logger.error(f"Operation node {node_uuid} not found")
         raise HttpError(404, "operation node not found")
+    except HttpError:
+        # let domain errors propagate (422/404 from validation helpers)
+        raise
     except Exception as e:
         logger.error(f"Failed to terminate operation node: {str(e)}")
         # Transaction will automatically rollback due to the exception
