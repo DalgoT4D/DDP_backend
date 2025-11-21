@@ -834,12 +834,12 @@ def get_dbt_project_DAG_v2(request):
     # Validate org has warehouse setup
     org_warehouse = OrgWarehouse.objects.filter(org=org).first()
     if not org_warehouse:
-        raise HttpError(404, "please setup your warehouse first")
+        raise HttpError(422, "please setup your warehouse first")
 
     # Validate org has dbt workspace
     orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
     if not orgdbt:
-        raise HttpError(404, "dbt workspace not setup")
+        raise HttpError(422, "dbt workspace not setup")
 
     try:
         # Get all canvas nodes for this org with related dbtmodel - much simpler than before!
@@ -873,6 +873,9 @@ def get_dbt_project_DAG_v2(request):
 
         return {"nodes": nodes, "edges": edges}
 
+    except HttpError:
+        # propagate API errors unchanged
+        raise
     except Exception as e:
         logger.error(f"Error generating DAG for org {org.slug}: {str(e)}")
         raise HttpError(500, f"Failed to generate DAG: {str(e)}")
