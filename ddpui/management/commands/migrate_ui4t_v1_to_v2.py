@@ -75,6 +75,9 @@ class Command(BaseCommand):
                 # Perform migration
                 self._migrate_data(orgdbt)
 
+                # handle the operations whose schema has been changed
+                self._handle_breaking_operations(orgdbt)
+
                 if dry_run:
                     # Rollback transaction in dry-run mode
                     transaction.set_rollback(True)
@@ -95,6 +98,7 @@ class Command(BaseCommand):
         ).select_related("from_node", "to_node")
 
         # Step 2: Process each edge
+        processed_old_operation_nodes = set()
         for edge_num, edge in enumerate(old_edges, 1):
             self.stdout.write(
                 f"\nProcessing edge {edge_num}/{len(old_edges)}: {edge.from_node.name} -> {edge.to_node.name}"
@@ -117,7 +121,11 @@ class Command(BaseCommand):
 
                 # Create CanvasNodes for operations if they don't exist
                 prev_op_canvas_node: CanvasNode = source_canvas_node
-                for op in target_operations:
+                for idx, op in enumerate(target_operations):
+                    if op.uuid in processed_old_operation_nodes:
+                        self.stdout.write(f"OrgDbtOperation {op.uuid} has already been processed")
+                        continue
+
                     op_type = op.config.get("type", "unknown")
                     other_inputs = op.config.get("config", {}).get("other_inputs", [])
 
@@ -127,7 +135,7 @@ class Command(BaseCommand):
                         seq = other_input.get("seq")
                         model_uuid = input_model.get("uuid", "")
                         try:
-                            dbtmodel = OrgDbtModel.objects.get(uuid=model_uuid)
+                            dbtmodel = OrgDbtModel.objects.get(uuid=model_uuid, orgdbt=orgdbt)
                         except OrgDbtModel.DoesNotExist:
                             self.stderr.write(
                                 f"Other input model with UUID {model_uuid} not found for operation {op.uuid}"
@@ -156,8 +164,53 @@ class Command(BaseCommand):
 
                     prev_op_canvas_node = op_canvas_node
 
-                # crete the last edge to target model
-                self._create_canvas_edge(prev_op_canvas_node, target_canvas_node, seq=1)
+                    # create the last edge to target model
+                    if idx == len(target_operations) - 1:
+                        self._create_canvas_edge(prev_op_canvas_node, target_canvas_node, seq=1)
+
+                    processed_old_operation_nodes.add(op.uuid)
+
+    def _handle_breaking_operations(self, orgdbt):
+        for op_node in CanvasNode.objects.filter(orgdbt=orgdbt):
+            if op_node.node_type != CanvasNodeType.OPERATION:
+                self.stdout.write("Skipping this canvas node since its not an operation node")
+                continue
+
+            operation_config = op_node.operation_config.copy()
+
+            op_type = operation_config.get("type", "unknown")
+
+            op_config = operation_config.get("config", None)
+
+            if not op_config:
+                self.stdout.write(f"Config for canvas node {op_node.name}|{op_node.uuid} not found")
+                continue
+
+            # update the source columns from the previous node's output
+            incoming_edge = CanvasEdge.objects.filter(to_node=op_node, seq=1).first()
+
+            if op_type == "groupby":
+                # move source_columns to dimension_columns
+                op_config["dimension_columns"] = op_config["source_columns"]
+
+                if incoming_edge:
+                    self.stdout.write(
+                        "Found the incoming edge; going use its output cols and update source_columns"
+                    )
+                    op_config["source_columns"] = incoming_edge.from_node.output_cols
+
+            if op_type == "pivot":
+                # move source_columns to groupby_columns
+                op_config["groupby_columns"] = op_config["source_columns"]
+
+                if incoming_edge:
+                    self.stdout.write(
+                        "Found the incoming edge; going use its output cols and update source_columns"
+                    )
+                    op_config["source_columns"] = incoming_edge.from_node.output_cols
+
+            op_node.operation_config = operation_config
+            op_node.save()
 
     def _create_canvas_node_for_model(self, model: OrgDbtModel, orgdbt) -> CanvasNode:
         """Create a CanvasNode for an OrgDbtModel."""
