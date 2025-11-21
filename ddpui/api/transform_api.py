@@ -888,8 +888,7 @@ def post_create_src_model_node(request, dbtmodel_uuid: str):
     """
     Create a new CanvasNode representing a source/model node.
 
-     Simplifies the complex source/model creation by using unified CanvasNode.
-     This operation is atomic - if any step fails, all changes are rolled back.
+    Simplifies the complex source/model creation by using unified CanvasNode.
     """
     orguser: OrgUser = request.orguser
 
@@ -936,6 +935,10 @@ def post_create_src_model_node(request, dbtmodel_uuid: str):
 
         logger.info(f"source/model node created successfully: {canvas_node.uuid}")
         return convert_canvas_node_to_frontend_format(canvas_node)
+
+    except HttpError:
+        # propagate API errors unchanged
+        raise
 
     except Exception as e:
         logger.error(f"Failed to create source/model node: {str(e)}")
