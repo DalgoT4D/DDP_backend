@@ -1188,6 +1188,12 @@ def put_operation_node(request, node_uuid: str, payload: EditOperationNodePayloa
     except CanvasNode.DoesNotExist:
         logger.error(f"Operation node {node_uuid} not found")
         raise HttpError(404, "input node not found")
+    except HttpError:
+        # let domain errors propagate (422/404 from validation helpers)
+        raise
+    except ValueError as e:
+        logger.error(f"Validation error while updating operation: {str(e)}")
+        raise HttpError(422, str(e)) from e
     except Exception as e:
         logger.error(f"Failed to update operation: {str(e)}")
         # Transaction will automatically rollback due to the exception
