@@ -892,8 +892,8 @@ def post_create_src_model_node(request, dbtmodel_uuid: str):
     """
     orguser: OrgUser = request.orguser
 
-    warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
-    if not warehouse:
+    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if not org_warehouse:
         raise HttpError(404, "please setup your warehouse first")
 
     orgdbt = orguser.org.dbt
@@ -916,7 +916,7 @@ def post_create_src_model_node(request, dbtmodel_uuid: str):
             return convert_canvas_node_to_frontend_format(existing_node)
 
         output_cols = dbtautomation_service.update_output_cols_of_dbt_model(
-            warehouse, org_dbt_model
+            org_warehouse, org_dbt_model
         )
         org_dbt_model.output_cols = output_cols
         org_dbt_model.save()
