@@ -9,21 +9,29 @@ from ninja.errors import HttpError
 
 from django.db.models import Q
 from django.utils.text import slugify
+from django.db import transaction
+from django.forms import model_to_dict
 
-from ddpui import auth
+from ddpui.datainsights import warehouse
 from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgDbt, OrgWarehouse, TransformType
 from ddpui.models.dbt_workflow import OrgDbtModel, DbtEdge, OrgDbtOperation, OrgDbtModelType
 from ddpui.models.canvaslock import CanvasLock
+from ddpui.models.canvas_models import CanvasNode, CanvasEdge, CanvasNodeType
 
 from ddpui.schemas.org_task_schema import DbtProjectSchema
 from ddpui.schemas.dbt_workflow_schema import (
     CreateDbtModelPayload,
     CompleteDbtModelPayload,
+    CreateOperationNodePayload,
     EditDbtOperationPayload,
     LockCanvasRequestSchema,
     LockCanvasResponseSchema,
+    EditOperationNodePayload,
+    ModelSrcInputsForMultiInputOp,
+    validate_operation_config_v2,
+    TerminateChainAndCreateModelPayload,
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.utils.taskprogress import TaskProgress
@@ -32,7 +40,13 @@ from ddpui.api.warehouse_api import get_warehouse_data
 from ddpui.models.tasks import TaskProgressHashPrefix
 
 from ddpui.core import dbtautomation_service
-from ddpui.core.dbtautomation_service import sync_sources_for_warehouse
+from ddpui.core.dbtautomation_service import (
+    create_or_update_dbt_model_in_project_v2,
+    sync_sources_for_warehouse,
+    convert_canvas_node_to_frontend_format,
+    tranverse_graph_and_return_operations_list,
+    validate_and_return_inputs_for_multi_input_op,
+)
 from ddpui.auth import has_permission
 
 from ddpui.utils.custom_logger import CustomLogger
@@ -751,3 +765,621 @@ def post_unlock_canvas(request, payload: LockCanvasRequestSchema):
     canvas_lock.delete()
 
     return {"success": 1}
+
+
+# ==============================================================================
+# UI4T V2 API - New unified architecture using CanvasNode and CanvasEdge
+# ==============================================================================
+
+
+@transform_router.get("/v2/dbt_project/sources_models/")
+@has_permission(["can_view_dbt_models"])
+def get_input_sources_and_models_v2(request, schema_name: str = None):
+    """
+    Fetches all sources and models in a dbt project
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    # make sure the orgdbt here is the one we create locally
+    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    query = OrgDbtModel.objects.filter(orgdbt=orgdbt)
+
+    if schema_name:
+        query = query.filter(schema=schema_name)
+
+    res = []
+    for orgdbt_model in query.all():
+        if not orgdbt_model.under_construction:
+            orgdbt_model.uuid = str(orgdbt_model.uuid)
+            res.append(
+                {
+                    "schema": orgdbt_model.schema,
+                    "sql_path": orgdbt_model.sql_path,
+                    "name": orgdbt_model.name,
+                    "display_name": orgdbt_model.display_name,
+                    "uuid": str(orgdbt_model.uuid),
+                    "type": orgdbt_model.type,
+                    "source_name": orgdbt_model.source_name,
+                    "output_cols": orgdbt_model.output_cols,
+                }
+            )
+
+    return res
+
+
+@transform_router.get("/v2/dbt_project/graph/")
+@has_permission(["can_view_dbt_workspace"])
+def get_dbt_project_DAG_v2(request):
+    """
+    V2 API: Simplified DAG generation using unified CanvasNode and CanvasEdge models.
+
+    This replaces the complex get_dbt_project_DAG function with a much simpler approach:
+    1. Get all canvas nodes for the org
+    2. Get all canvas edges for the org
+    3. Convert to frontend format
+
+    Returns same format as v1 API for backward compatibility.
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    # Validate org has warehouse setup
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(422, "please setup your warehouse first")
+
+    # Validate org has dbt workspace
+    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    if not orgdbt:
+        raise HttpError(422, "dbt workspace not setup")
+
+    try:
+        # Get all canvas nodes for this org with related dbtmodel - much simpler than before!
+        canvas_nodes = CanvasNode.objects.filter(orgdbt=orgdbt).select_related("dbtmodel")
+
+        # Get all canvas edges for this org
+        canvas_edges = CanvasEdge.objects.filter(from_node__orgdbt=orgdbt).select_related(
+            "from_node", "to_node"
+        )
+
+        # Convert nodes to frontend format (backward compatible)
+        nodes = []
+        for canvas_node in canvas_nodes:
+            frontend_node = convert_canvas_node_to_frontend_format(canvas_node)
+            nodes.append(frontend_node)
+
+        # Convert edges to frontend format (same as before)
+        edges = []
+        for canvas_edge in canvas_edges:
+            edges.append(
+                {
+                    "id": f"{canvas_edge.from_node.uuid}_{canvas_edge.to_node.uuid}",
+                    "source": str(canvas_edge.from_node.uuid),
+                    "target": str(canvas_edge.to_node.uuid),
+                }
+            )
+
+        logger.info(
+            f"DAG generated successfully for org {org.slug}: {len(nodes)} nodes, {len(edges)} edges"
+        )
+
+        return {"nodes": nodes, "edges": edges}
+
+    except HttpError:
+        # propagate API errors unchanged
+        raise
+    except Exception as e:
+        logger.error(f"Error generating DAG for org {org.slug}: {str(e)}")
+        raise HttpError(500, f"Failed to generate DAG: {str(e)}")
+
+
+# V2 CRUD operations for CanvasNode
+@transform_router.post("/v2/dbt_project/models/{dbtmodel_uuid}/nodes/")
+@has_permission(["can_create_dbt_model"])
+def post_create_src_model_node(request, dbtmodel_uuid: str):
+    """
+    Create a new CanvasNode representing a source/model node.
+
+    Simplifies the complex source/model creation by using unified CanvasNode.
+    """
+    orguser: OrgUser = request.orguser
+
+    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    orgdbt = orguser.org.dbt
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    try:
+        # TODO: apply canvas locking logic
+
+        org_dbt_model = OrgDbtModel.objects.filter(uuid=dbtmodel_uuid, orgdbt=orgdbt).first()
+        if not org_dbt_model:
+            raise HttpError(404, "model not found")
+
+        # create only if the canvas node for the model doesn't already exist
+        existing_node = CanvasNode.objects.filter(dbtmodel=org_dbt_model, orgdbt=orgdbt).first()
+        if existing_node:
+            logger.info(
+                f"source/model node already exists: {existing_node.uuid} for model {dbtmodel_uuid}"
+            )
+            return convert_canvas_node_to_frontend_format(existing_node)
+
+        output_cols = dbtautomation_service.update_output_cols_of_dbt_model(
+            org_warehouse, org_dbt_model
+        )
+        org_dbt_model.output_cols = output_cols
+        org_dbt_model.save()
+
+        canvas_node = CanvasNode.objects.create(
+            orgdbt=orgdbt,
+            node_type=(
+                CanvasNodeType.SOURCE
+                if org_dbt_model.type == OrgDbtModelType.SOURCE
+                else CanvasNodeType.MODEL
+            ),
+            name=f"{org_dbt_model.schema}.{org_dbt_model.name}",
+            dbtmodel=org_dbt_model,
+            output_cols=org_dbt_model.output_cols,
+        )
+
+        logger.info(f"source/model node created successfully: {canvas_node.uuid}")
+        return convert_canvas_node_to_frontend_format(canvas_node)
+
+    except HttpError:
+        # propagate API errors unchanged
+        raise
+
+    except Exception as e:
+        logger.error(f"Failed to create source/model node: {str(e)}")
+        # Transaction will automatically rollback due to the exception
+        raise HttpError(500, f"Failed to create node: {str(e)}")
+
+
+@transform_router.post("/v2/dbt_project/operations/nodes/")
+@has_permission(["can_create_dbt_model"])
+def post_add_operation_node(request, payload: CreateOperationNodePayload):
+    """
+    V2 API: Create a new CanvasNode representing an operation on the node with node_uuid.
+    The node_uuid can be any CanvasNode (source/model/operation).
+
+    Simplifies the complex operation creation by using unified CanvasNode model.
+    No more sequence tracking or implicit relationships - everything is explicit via edges.
+    """
+    orguser: OrgUser = request.orguser
+
+    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    orgdbt = orguser.org.dbt
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    logger.info(f"creating operation: {payload.op_type}")
+
+    # TODO: apply canvas locking logic
+
+    try:
+        main_input_node: CanvasNode = CanvasNode.objects.select_related("dbtmodel").get(
+            uuid=payload.input_node_uuid, orgdbt=orgdbt
+        )
+
+        is_multi_input_op = payload.op_type in ["join", "unionall"]
+
+        # validate operation config
+        validate_operation_config_v2(payload.op_type, payload.config)
+
+        # validate other inputs for the multi input operation
+        other_input_models: list[ModelSrcInputsForMultiInputOp] = []
+        if is_multi_input_op:
+            other_input_models = validate_and_return_inputs_for_multi_input_op(
+                payload.other_inputs, orgdbt
+            )
+
+        final_op_config = {}
+        final_op_config["config"] = payload.config
+        final_op_config["config"]["source_columns"] = payload.source_columns
+        if is_multi_input_op:
+            # only needed for dbt automation package to compute the output columns
+            final_op_config["config"]["other_inputs"] = [
+                {
+                    "input": {
+                        "input_type": dbtmodel_input.src_model.type,
+                        "input_name": (
+                            dbtmodel_input.src_model.name
+                            if dbtmodel_input.src_model.type == "model"
+                            else dbtmodel_input.src_model.display_name
+                        ),
+                        "source_name": dbtmodel_input.src_model.source_name,
+                    },
+                    "source_columns": dbtmodel_input.src_model.output_cols,
+                    "seq": dbtmodel_input.seq,
+                }
+                for dbtmodel_input in other_input_models
+            ]
+        final_op_config["type"] = payload.op_type
+
+        output_cols = dbtautomation_service.get_output_cols_for_operation(
+            org_warehouse, payload.op_type, final_op_config["config"].copy()
+        )
+
+        if "other_inputs" in final_op_config["config"]:
+            del final_op_config["config"]["other_inputs"]  # clean up before saving
+
+        with transaction.atomic():
+            # Create the operation canvas node
+            canvas_node = CanvasNode.objects.create(
+                orgdbt=orgdbt,
+                operation_config=final_op_config,
+                node_type=CanvasNodeType.OPERATION,
+                name=payload.op_type,
+                output_cols=output_cols,
+            )
+
+            # Create edge from the main input node to the newly created operation node
+            CanvasEdge.objects.create(from_node=main_input_node, to_node=canvas_node, seq=1)
+
+            # Create edges from all other input nodes in case of multi-input operations
+            if is_multi_input_op:
+                for dbtmodel_input in other_input_models:
+                    # check if corresponding canvas node is already created
+                    # create if its not there
+                    src_model_node = CanvasNode.objects.filter(
+                        dbtmodel=dbtmodel_input.src_model, orgdbt=orgdbt
+                    ).first()
+                    if not src_model_node:
+                        src_model_node = CanvasNode.objects.create(
+                            dbtmodel=dbtmodel_input.src_model,
+                            orgdbt=orgdbt,
+                            node_type=(
+                                CanvasNodeType.SOURCE
+                                if dbtmodel_input.src_model.type == OrgDbtModelType.SOURCE
+                                else CanvasNodeType.MODEL
+                            ),
+                            output_cols=dbtmodel_input.src_model.output_cols,
+                            name=f"{dbtmodel_input.src_model.schema}.{dbtmodel_input.src_model.name}",
+                        )
+
+                    CanvasEdge.objects.create(
+                        from_node=src_model_node, to_node=canvas_node, seq=dbtmodel_input.seq
+                    )
+
+            logger.info(f"operation created successfully: {canvas_node.uuid}")
+            return convert_canvas_node_to_frontend_format(canvas_node)
+
+    except CanvasNode.DoesNotExist:
+        logger.error(f"input node {payload.input_node_uuid} not found")
+        raise HttpError(404, "input node not found")
+    except HttpError:
+        # let domain errors propagate (422/404 from validation helpers)
+        raise
+    except ValueError as err:
+        logger.error(f"Validation error while creating operation: {str(err)}")
+        raise HttpError(422, str(err)) from err
+    except Exception as err:
+        logger.error(f"Failed to create operation: {str(err)}")
+        # Transaction will automatically rollback due to the exception
+        raise HttpError(500, f"Failed to create operation: {str(err)}") from err
+
+
+@transform_router.put("/v2/dbt_project/operations/nodes/{node_uuid}/")
+@has_permission(["can_create_dbt_model"])
+def put_operation_node(request, node_uuid: str, payload: EditOperationNodePayload):
+    """
+    V2 API: Create a new CanvasNode representing an operation on the node with node_uuid.
+    The node_uuid can be any CanvasNode (source/model/operation).
+
+    The base node & the edge for this operation node will not change.
+
+    Simplifies the complex operation creation by using unified CanvasNode model.
+    No more sequence tracking or implicit relationships - everything is explicit via edges.
+
+    """
+    orguser: OrgUser = request.orguser
+
+    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    orgdbt = orguser.org.dbt
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    logger.info(f"updating operation: {payload.op_type}")
+
+    # TODO: apply canvas locking logic
+
+    try:
+        curr_operation_node: CanvasNode = CanvasNode.objects.select_related("dbtmodel").get(
+            uuid=node_uuid, orgdbt=orgdbt, node_type=CanvasNodeType.OPERATION
+        )
+
+        is_multi_input_op = payload.op_type in ["join", "unionall"]
+        # validate operation config
+        validate_operation_config_v2(payload.op_type, payload.config)
+
+        # validate other inputs for the multi input operation
+        other_input_models: list[ModelSrcInputsForMultiInputOp] = []
+        if is_multi_input_op:
+            other_input_models = validate_and_return_inputs_for_multi_input_op(
+                payload.other_inputs, orgdbt
+            )
+
+        final_op_config = {}
+        final_op_config["config"] = payload.config
+        final_op_config["config"]["source_columns"] = payload.source_columns
+        if is_multi_input_op:
+            # only needed for dbt automation package to compute the output columns
+            final_op_config["config"]["other_inputs"] = [
+                {
+                    "input": {
+                        "input_type": dbtmodel_input.src_model.type,
+                        "input_name": (
+                            dbtmodel_input.src_model.name
+                            if dbtmodel_input.src_model.type == "model"
+                            else dbtmodel_input.src_model.display_name
+                        ),
+                        "source_name": dbtmodel_input.src_model.source_name,
+                    },
+                    "source_columns": dbtmodel_input.src_model.output_cols,
+                    "seq": dbtmodel_input.seq,
+                }
+                for dbtmodel_input in other_input_models
+            ]
+        final_op_config["type"] = payload.op_type
+
+        output_cols = dbtautomation_service.get_output_cols_for_operation(
+            org_warehouse, payload.op_type, final_op_config["config"].copy()
+        )
+
+        if "other_inputs" in final_op_config["config"]:
+            del final_op_config["config"]["other_inputs"]  # clean up before saving
+
+        with transaction.atomic():
+            # Create the operation canvas node
+            curr_operation_node.operation_config = final_op_config
+            curr_operation_node.name = payload.op_type
+            curr_operation_node.output_cols = output_cols
+            curr_operation_node.save()
+
+            # remove the edges from other input nodes first
+            if is_multi_input_op:
+                CanvasEdge.objects.filter(to_node=curr_operation_node).exclude(seq=1).delete()
+
+                for dbtmodel_input in other_input_models:
+                    # check if corresponding canvas node is already created
+                    # create if its not there
+                    src_model_node = CanvasNode.objects.filter(
+                        dbtmodel=dbtmodel_input.src_model, orgdbt=orgdbt
+                    ).first()
+                    if not src_model_node:
+                        src_model_node = CanvasNode.objects.create(
+                            dbtmodel=dbtmodel_input.src_model,
+                            orgdbt=orgdbt,
+                            node_type=(
+                                CanvasNodeType.SOURCE
+                                if dbtmodel_input.src_model.type == OrgDbtModelType.SOURCE
+                                else CanvasNodeType.MODEL
+                            ),
+                            output_cols=dbtmodel_input.src_model.output_cols,
+                            name=f"{dbtmodel_input.src_model.schema}.{dbtmodel_input.src_model.name}",
+                        )
+
+                    CanvasEdge.objects.create(
+                        from_node=src_model_node,
+                        to_node=curr_operation_node,
+                        seq=dbtmodel_input.seq,
+                    )
+
+            logger.info(f"operation created successfully: {curr_operation_node.uuid}")
+            return convert_canvas_node_to_frontend_format(curr_operation_node)
+
+    except CanvasNode.DoesNotExist:
+        logger.error(f"Operation node {node_uuid} not found")
+        raise HttpError(404, "input node not found")
+    except HttpError:
+        # let domain errors propagate (422/404 from validation helpers)
+        raise
+    except ValueError as e:
+        logger.error(f"Validation error while updating operation: {str(e)}")
+        raise HttpError(422, str(e)) from e
+    except Exception as e:
+        logger.error(f"Failed to update operation: {str(e)}")
+        # Transaction will automatically rollback due to the exception
+        raise HttpError(500, f"Failed to create operation: {str(e)}")
+
+
+@transform_router.post("/v2/dbt_project/operations/nodes/{node_uuid}/terminate/")
+@has_permission(["can_create_dbt_model"])
+def post_terminate_operation_node(
+    request, node_uuid: str, payload: TerminateChainAndCreateModelPayload
+):
+    """
+    Terminate the chain at this operation node by adding a model node at the end.
+    Basically materialize the chain into a model.
+    """
+    orguser: OrgUser = request.orguser
+
+    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    orgdbt = orguser.org.dbt
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    # TODO: apply canvas locking logic
+
+    try:
+        terminal_node = CanvasNode.objects.get(
+            uuid=node_uuid, orgdbt=orgdbt, node_type=CanvasNodeType.OPERATION
+        )
+
+        # get all operations upstream from this node
+        operations_list = tranverse_graph_and_return_operations_list(terminal_node)
+
+        merge_config = {
+            "operations": operations_list,
+            "dest_schema": payload.dest_schema,
+            "output_name": payload.name,
+        }
+
+        # create the dbt model on disk by merging all the operations
+        model_sql_path, output_cols = create_or_update_dbt_model_in_project_v2(
+            org_warehouse, merge_config, orgdbt
+        )
+
+        with transaction.atomic():
+            # create the dbt model in django db
+            # name should be unique since dbt doesn't allow 2 models using the name in ref()
+            dbtmodel = OrgDbtModel.objects.filter(
+                orgdbt=orgdbt, name=payload.name, type=OrgDbtModelType.MODEL
+            ).first()
+
+            if dbtmodel:
+                logger.info(f"dbt model already exists, updating: {dbtmodel.uuid}")
+                dbtmodel.display_name = payload.display_name
+                dbtmodel.schema = payload.dest_schema
+                dbtmodel.sql_path = str(model_sql_path)
+                dbtmodel.save()
+            else:
+                logger.info(f"Creating new dbt model: {payload.dest_schema}.{payload.name}")
+                dbtmodel = OrgDbtModel.objects.create(
+                    orgdbt=orgdbt,
+                    name=payload.name,
+                    display_name=payload.display_name,
+                    schema=payload.dest_schema,
+                    sql_path=str(model_sql_path),
+                    uuid=uuid.uuid4(),
+                )
+
+            # create the node representing the model
+            model_node: CanvasNode = CanvasNode.objects.get_or_create(
+                defaults={"orgdbt": orgdbt, "dbtmodel": dbtmodel}
+            )
+            if not model_node:
+                model_node = CanvasNode.objects.create(
+                    orgdbt=orgdbt,
+                    node_type=CanvasNodeType.MODEL,
+                    name=f"{dbtmodel.schema}.{dbtmodel.name}",
+                    output_cols=output_cols,
+                    dbtmodel=dbtmodel,
+                )
+            else:
+                model_node.output_cols = output_cols
+                model_node.save()
+
+            # create the edge from the terminal operation node to the model node
+            CanvasEdge.objects.create(from_node=terminal_node, to_node=model_node, seq=1)
+
+        logger.info(f"V2 operation node terminated successfully: {node_uuid}")
+        return convert_canvas_node_to_frontend_format(model_node)
+
+    except CanvasNode.DoesNotExist:
+        logger.error(f"Operation node {node_uuid} not found")
+        raise HttpError(404, "operation node not found")
+    except HttpError:
+        # let domain errors propagate (422/404 from validation helpers)
+        raise
+    except Exception as e:
+        logger.error(f"Failed to terminate operation node: {str(e)}")
+        # Transaction will automatically rollback due to the exception
+        raise HttpError(500, f"Failed to terminate operation node: {str(e)}")
+
+
+@transform_router.delete("/v2/dbt_project/nodes/{node_uuid}/")
+@has_permission(["can_create_dbt_model"])
+def delete_canvas_node(request, node_uuid: str):
+    """
+    Delete a CanvasNode by uuid.
+    This will also delete all associated edges.
+
+    This operation is atomic - if any step fails, all changes are rolled back.
+    """
+    orguser: OrgUser = request.orguser
+    orgdbt = orguser.org.dbt
+
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    try:
+        canvas_node = CanvasNode.objects.get(uuid=node_uuid, orgdbt=orgdbt)
+
+        if canvas_node.dbtmodel:
+            dbtautomation_service.delete_dbt_model_in_project(canvas_node.dbtmodel)
+
+        canvas_node.delete()
+
+        logger.info(f"canvas node deleted successfully: {node_uuid}")
+        return {"success": 1}
+    except CanvasNode.DoesNotExist:
+        logger.error(f"Canvas node {node_uuid} not found")
+        raise HttpError(404, "canvas node not found")
+    except HttpError:
+        # let domain errors propagate (422/404 from validation helpers)
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete canvas node: {str(e)}")
+        # Transaction will automatically rollback due to the exception
+        raise HttpError(500, f"Failed to delete canvas node: {str(e)}")
+
+
+@transform_router.get("/v2/dbt_project/nodes/{node_uuid}/")
+@has_permission(["can_view_dbt_workspace"])
+def get_canvas_node(request, node_uuid: str):
+    """
+    Fetch a single CanvasNode by UUID (v2 API).
+    """
+    orguser: OrgUser = request.orguser
+    orgdbt = orguser.org.dbt
+
+    # ensure dbt workspace exists for org
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    try:
+        canvas_node = CanvasNode.objects.select_related("dbtmodel").get(
+            uuid=node_uuid, orgdbt=orgdbt
+        )
+
+        return_canvas_node = convert_canvas_node_to_frontend_format(canvas_node)
+
+        # get the input nodes of type model or source
+        if canvas_node.node_type == CanvasNodeType.OPERATION and canvas_node.operation_config.get(
+            "type", ""
+        ):
+            incoming_edges = (
+                CanvasEdge.objects.filter(
+                    to_node=canvas_node,
+                    from_node__node_type__in=[CanvasNodeType.MODEL, CanvasNodeType.SOURCE],
+                )
+                .order_by("seq")
+                .select_related("from_node")
+            )
+            other_inputs = []
+            for edge in incoming_edges:
+                nn = convert_canvas_node_to_frontend_format(edge.from_node)
+                nn["seq"] = edge.seq
+                other_inputs.append(nn)
+
+            if other_inputs:
+                return_canvas_node["input_nodes"] = other_inputs
+
+        return return_canvas_node
+    except CanvasNode.DoesNotExist:
+        logger.error(f"Canvas node {node_uuid} not found")
+        raise HttpError(404, "canvas node not found")
+    except Exception as e:
+        logger.error(f"Failed to fetch canvas node {node_uuid}: {str(e)}")
+        raise HttpError(500, f"Failed to fetch canvas node: {str(e)}")

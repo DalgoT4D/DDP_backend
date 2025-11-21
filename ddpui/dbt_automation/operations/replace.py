@@ -26,16 +26,28 @@ def replace_dbt_sql(config: dict, warehouse: WarehouseInterface):
 
     dbt_code = "SELECT\n"
 
+    cols_to_be_replaced: list[str] = []
+    cols_to_be_replaced_with: list[str] = []
+    replace_ops: list[list[dict]] = []
+    for col_dict in columns:
+        col_name = col_dict["col_name"]
+        output_col_name = col_dict["output_column_name"]
+        cols_to_be_replaced.append(col_name)
+        cols_to_be_replaced_with.append(output_col_name)
+        if not col_dict["replace_ops"]:
+            raise ValueError(f"No replace operations provided for column {col_name}")
+        replace_ops.append(col_dict["replace_ops"])
+
     for col_name in source_columns:
-        dbt_code += f"{quote_columnname(col_name, warehouse.name)},\n"
+        if col_name not in cols_to_be_replaced:
+            dbt_code += f"{quote_columnname(col_name, warehouse.name)},\n"
 
-    for column_dict in columns:
-        col_name = column_dict["col_name"]
-        output_col_name = column_dict["output_column_name"]
-
+    for col_name, output_col_name, replace_ops in zip(
+        cols_to_be_replaced, cols_to_be_replaced_with, replace_ops
+    ):
         """REPLACE(REPLACE( ... ), "find" , "replace") As output_name"""
         replace_sql_str = f"{quote_columnname(col_name, warehouse.name)}"
-        for op in column_dict["replace_ops"]:
+        for op in replace_ops:
             replace_sql_str = f"REPLACE({replace_sql_str}, {quote_constvalue(op['find'], warehouse.name)}, {quote_constvalue(op['replace'], warehouse.name)})"
         replace_sql_str += f" AS {quote_columnname(output_col_name, warehouse.name)}, "
 
