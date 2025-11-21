@@ -9,8 +9,9 @@ from django.db import transaction
 from django.db.models import Q
 from ddpui.models.dbt_workflow import DbtEdge, OrgDbtModel, OrgDbtOperation
 from ddpui.models.canvas_models import CanvasNode, CanvasEdge, CanvasNodeType
-from ddpui.models.org import Org, OrgDbt
+from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.schemas.dbt_workflow_schema import SequencedNode
+from ddpui.core import dbtautomation_service
 
 
 class Command(BaseCommand):
@@ -37,6 +38,15 @@ class Command(BaseCommand):
             org = Org.objects.get(slug=org_slug)
         except Org.DoesNotExist:
             self.stdout.write(self.style.ERROR(f"Organization with slug '{org_slug}' not found"))
+            return
+
+        # Get warehouse
+        try:
+            warehouse = OrgWarehouse.objects.get(org=org)
+        except OrgWarehouse.DoesNotExist:
+            self.stdout.write(
+                self.style.ERROR(f"No warehouse configured for organization '{org_slug}'")
+            )
             return
 
         # Get OrgDbt
@@ -72,6 +82,9 @@ class Command(BaseCommand):
 
         try:
             with transaction.atomic():
+                # population outcols for orgdbtmodels if not already present
+                self._sync_output_cols_for_orgdbtmodels(warehouse, orgdbt)
+
                 # Perform migration
                 self._migrate_data(orgdbt)
 
@@ -88,6 +101,21 @@ class Command(BaseCommand):
         except Exception as e:
             self.stdout.write(self.style.ERROR(f"Migration failed: {str(e)}"))
             raise
+
+    def _sync_output_cols_for_orgdbtmodels(self, warehouse, orgdbt):
+        """Populate output_cols for OrgDbtModels if not already set."""
+
+        self.stdout.write("Syncing output_cols for OrgDbtModels...")
+        for model in OrgDbtModel.objects.filter(orgdbt=orgdbt):
+            if model.output_cols and len(model.output_cols) > 0:
+                continue  # already populated
+
+            # Logic to populate output_cols can be customized as needed
+            model.output_cols = dbtautomation_service.update_output_cols_of_dbt_model(
+                warehouse, model
+            )
+            model.save()
+            self.stdout.write(f"  Populated output_cols for model: {model.name}")
 
     def _migrate_data(self, orgdbt):
         """Perform the actual migration of data from v1 to v2 using edge-first approach."""
