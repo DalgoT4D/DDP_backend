@@ -24,14 +24,10 @@ class Command(BaseCommand):
             action="store_true",
             help="Run migration in dry-run mode (no database changes)",
         )
-        parser.add_argument(
-            "--verbose", action="store_true", help="Show detailed migration progress"
-        )
 
     def handle(self, *args, **options):
         org_slug = options["org"]
         dry_run = options["dry_run"]
-        verbose = options["verbose"]
 
         # Get organization
         try:
