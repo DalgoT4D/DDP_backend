@@ -1326,6 +1326,9 @@ def delete_canvas_node(request, node_uuid: str):
     except CanvasNode.DoesNotExist:
         logger.error(f"Canvas node {node_uuid} not found")
         raise HttpError(404, "canvas node not found")
+    except HttpError:
+        # let domain errors propagate (422/404 from validation helpers)
+        raise
     except Exception as e:
         logger.error(f"Failed to delete canvas node: {str(e)}")
         # Transaction will automatically rollback due to the exception
