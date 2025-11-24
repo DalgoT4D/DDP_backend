@@ -1019,6 +1019,94 @@ def dashboard_chat(request, dashboard_id: int, payload: DashboardChatRequest):
                 user_message = msg.content
                 break
 
+        # ENHANCED: Try smart query execution first if data sharing is enabled
+        org_settings = OrgSettings.objects.filter(org=orguser_obj.org).first()
+        if user_message and org_settings and org_settings.ai_data_sharing_enabled:
+            try:
+                from ddpui.core.ai.smart_chat_processor import SmartChatProcessor
+
+                # Initialize smart chat processor
+                smart_processor = SmartChatProcessor()
+
+                # Process the message with enhanced capabilities
+                enhanced_response = smart_processor.process_enhanced_chat_message(
+                    message=user_message,
+                    org=orguser_obj.org,
+                    dashboard_id=dashboard_id,
+                    dashboard_context=context,
+                    user_context={},
+                    enable_data_query=True,
+                )
+
+                # If query was executed successfully, return the enhanced response
+                if enhanced_response.query_executed and enhanced_response.data_results:
+                    logger.info(
+                        f"Dashboard {dashboard_id} - Smart query executed successfully for: {user_message[:100]}"
+                    )
+
+                    # Log the interaction
+                    log_ai_chat_conversation(
+                        org=orguser_obj.org,
+                        user=orguser_obj.user,
+                        user_prompt=user_message,
+                        ai_response=enhanced_response.content,
+                        request_timestamp=request_time,
+                        response_timestamp=timezone.now(),
+                        dashboard_id=dashboard_id,
+                        chart_id=payload.selected_chart_id,
+                        session_id=session_id,
+                    )
+
+                    # Log metering
+                    log_ai_chat_metering(
+                        org=orguser_obj.org,
+                        user=orguser_obj.user,
+                        model_used="smart_query_processor",
+                        prompt_tokens=len(user_message.split()) * 1.3,  # Rough estimate
+                        completion_tokens=len(enhanced_response.content.split())
+                        * 1.3,  # Rough estimate
+                        response_time_ms=enhanced_response.data_results.get("analytics", {})
+                        .get("performance_metrics", {})
+                        .get("total_time_ms", 0),
+                        include_data=payload.include_data,
+                        max_rows=payload.max_rows if payload.include_data else None,
+                        dashboard_id=dashboard_id,
+                        chart_id=payload.selected_chart_id,
+                        session_id=session_id,
+                    )
+
+                    return JsonResponse(
+                        {
+                            "content": enhanced_response.content,
+                            "enhanced_features": {
+                                "intent_detected": enhanced_response.intent_detected.value,
+                                "data_query_executed": True,
+                                "query_results": enhanced_response.data_results,
+                                "confidence_score": enhanced_response.confidence_score,
+                                "recommendations": enhanced_response.recommendations,
+                            },
+                            "context_included": True,
+                            "data_included": True,
+                            "dashboard_id": dashboard_id,
+                            "metadata": {
+                                "smart_processing": True,
+                                "charts_analyzed": len(context.get("charts", [])),
+                                "filters_available": len(context.get("filters", [])),
+                                "selected_chart": payload.selected_chart_id,
+                                "session_id": session_id,
+                            },
+                        }
+                    )
+                else:
+                    logger.info(
+                        f"Dashboard {dashboard_id} - Smart processor did not execute query, falling back to regular chat"
+                    )
+
+            except Exception as e:
+                logger.error(
+                    f"Dashboard {dashboard_id} - Smart processing failed: {e}, falling back to regular chat"
+                )
+
         # Handle streaming vs non-streaming
         if payload.stream:
             return StreamingHttpResponse(
@@ -1200,6 +1288,10 @@ def _build_dashboard_system_prompt(
         "Your role is to translate technical data information into clear, actionable business insights that anyone can understand.",
         f"Current Dashboard: '{dashboard.get('title', 'Untitled Dashboard')}'",
         f"Description: {dashboard.get('description', 'No description available')}",
+        "",
+        "🚫 CRITICAL: NEVER suggest SQL queries, table queries, or tell users to 'run a query'",
+        "🚫 CRITICAL: You have direct access to data - answer questions immediately with exact numbers",
+        "🚫 CRITICAL: If you cannot answer from available data, say so directly - never suggest queries",
         "",
         "YOUR COMMUNICATION STYLE:",
         "- Business Translator: Convert technical data details into clear business insights",
@@ -1496,11 +1588,21 @@ def _build_dashboard_system_prompt(
                     "- 'sample data', 'sample values', 'one moment please'",
                     "- 'let me check', 'based on available data', 'appears to show'",
                     "- 'I have access to sample data' - you have ACTUAL dashboard data",
+                    "- 'you may need to perform a query', 'I can help you formulate the query'",
+                    "- 'To calculate X, you need to run', 'Let me help you write a query'",
+                    "- ANY form of query suggestion or asking users to run SQL",
+                    "- 'run a query using the data available', 'perform a query'",
                     "",
                     "✅ ALWAYS SAY:",
                     "- 'The data shows', 'Karnataka population is', 'Total revenue is'",
                     "- Give exact numbers: '61,130,704 people', '$1.2M revenue'",
                     "- Answer immediately without hedging or checking",
+                    "",
+                    "❓ IF DATA IS NOT AVAILABLE:",
+                    "- 'The available dashboard data does not include information about X'",
+                    "- 'This specific metric is not available in the current dashboard'",
+                    "- 'The data shown focuses on Y instead of X'",
+                    "- NEVER say 'you can query' or 'run a query' or 'I can help formulate'",
                     "",
                 ]
             )
