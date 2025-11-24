@@ -15,13 +15,7 @@ class OrgSettings(models.Model):
 
     org = models.OneToOneField(Org, on_delete=models.CASCADE, related_name="settings")
 
-    # Organization details
-    organization_name = models.CharField(
-        max_length=200, null=True, blank=True, help_text="Display name for the organization"
-    )
-    website = models.URLField(
-        max_length=500, null=True, blank=True, help_text="Organization website URL"
-    )
+    # Organization details are now referenced from the related Org model
     organization_logo = models.BinaryField(
         null=True, blank=True, help_text="Organization logo image data"
     )
@@ -64,15 +58,14 @@ class OrgSettings(models.Model):
         verbose_name_plural = "Organization Settings"
 
     def __str__(self) -> str:
-        org_name = self.organization_name or self.org.name
-        return f"OrgSettings[{self.org.slug}|{org_name}]"
+        return f"OrgSettings[{self.org.slug}|{self.org.name}]"
 
 
 class OrgSettingsSchema(Schema):
     """Schema for organization settings API responses"""
 
-    organization_name: Optional[str] = None
-    website: Optional[str] = None
+    organization_name: Optional[str] = None  # Read-only, from org.name
+    website: Optional[str] = None  # Read-only, from org.website
     organization_logo_filename: Optional[str] = None
     ai_data_sharing_enabled: bool
     ai_logging_acknowledged: bool
@@ -83,8 +76,6 @@ class OrgSettingsSchema(Schema):
 class CreateOrgSettingsSchema(Schema):
     """Schema for creating/updating organization settings"""
 
-    organization_name: Optional[str] = None
-    website: Optional[str] = None
     ai_data_sharing_enabled: bool = False
     ai_logging_acknowledged: bool = False
 
@@ -92,7 +83,5 @@ class CreateOrgSettingsSchema(Schema):
 class UpdateOrgSettingsSchema(Schema):
     """Schema for partial updates to organization settings"""
 
-    organization_name: Optional[str] = None
-    website: Optional[str] = None
     ai_data_sharing_enabled: Optional[bool] = None
     ai_logging_acknowledged: Optional[bool] = None

@@ -21,6 +21,9 @@ from ddpui.auth import has_permission
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.core.ai.factory import get_default_ai_provider
 from ddpui.core.ai.interfaces import AIMessage
+from ddpui.core.ai.data_intelligence import DataIntelligenceService
+from ddpui.core.ai.query_executor import DynamicQueryExecutor, QueryExecutionResult
+from ddpui.core.ai.smart_chat_processor import SmartChatProcessor, MessageIntent
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.org_settings import OrgSettings
 from ddpui.models.ai_chat_logging import AIChatLog, AIChatMetering
@@ -175,6 +178,7 @@ def log_ai_chat_metering(
 class DashboardContextAnalyzer:
     """
     Analyzes dashboard context to provide AI with relevant information.
+    Enhanced with DataIntelligenceService for richer data context.
     """
 
     def __init__(
@@ -185,6 +189,7 @@ class DashboardContextAnalyzer:
         self.include_data = include_data
         self.max_rows = max_rows
         self.logger = CustomLogger("dashboard_context")
+        self.data_intelligence = DataIntelligenceService()
 
     def get_dashboard_context(self) -> Dict[str, Any]:
         """
@@ -227,6 +232,9 @@ class DashboardContextAnalyzer:
                 context.update(self._get_native_dashboard_context(dashboard))
             else:
                 context.update(self._get_superset_dashboard_context(dashboard))
+
+            # Enhanced: Add rich data intelligence context
+            context.update(self._get_data_intelligence_context(dashboard, context))
 
             return context
 
@@ -677,6 +685,112 @@ class DashboardContextAnalyzer:
             self.logger.error(f"Results sample: {results[:2] if results else 'None'}")
             self.logger.error(f"Columns: {columns}")
             return []
+
+    def _get_data_intelligence_context(
+        self, dashboard, existing_context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Enhanced context using DataIntelligenceService for richer AI understanding.
+
+        This provides comprehensive data catalog information that helps AI understand:
+        - Available tables and their business context
+        - Column types and sample data
+        - Relationships between data sources
+        - Query patterns and possibilities
+        """
+        enhanced_context = {
+            "data_catalog": None,
+            "ai_data_context": "",
+            "enhanced_analysis": {
+                "tables_analyzed": 0,
+                "business_context_available": False,
+                "sample_data_included": False,
+                "query_suggestions_available": False,
+            },
+        }
+
+        try:
+            # Only enhance if data sharing is enabled
+            org_settings = OrgSettings.objects.filter(org=self.orguser.org).first()
+            if not org_settings or not org_settings.ai_data_sharing_enabled:
+                self.logger.info(
+                    f"Data intelligence enhancement skipped - data sharing disabled for org {self.orguser.org.slug}"
+                )
+                return enhanced_context
+
+            self.logger.info(
+                f"Building enhanced data intelligence context for dashboard {self.dashboard_id}"
+            )
+
+            # Get data catalog for the organization
+            catalog = self.data_intelligence.get_org_data_catalog(self.orguser.org)
+
+            if catalog.total_tables == 0:
+                self.logger.warning(
+                    f"No tables found in data catalog for org {self.orguser.org.slug}"
+                )
+                return enhanced_context
+
+            # Build AI-friendly data context focused on this dashboard
+            ai_data_context = self.data_intelligence.build_ai_data_context(
+                org=self.orguser.org, dashboard_id=self.dashboard_id
+            )
+
+            # Update enhanced context
+            enhanced_context.update(
+                {
+                    "data_catalog": {
+                        "total_tables": catalog.total_tables,
+                        "total_charts": catalog.total_charts,
+                        "tables_with_data": len([t for t in catalog.tables.values() if t.columns]),
+                        "generated_at": catalog.generated_at.isoformat(),
+                    },
+                    "ai_data_context": ai_data_context,
+                    "enhanced_analysis": {
+                        "tables_analyzed": catalog.total_tables,
+                        "business_context_available": any(
+                            table.business_description for table in catalog.tables.values()
+                        ),
+                        "sample_data_included": any(
+                            any(col.sample_values for col in table.columns)
+                            for table in catalog.tables.values()
+                        ),
+                        "query_suggestions_available": True,
+                    },
+                }
+            )
+
+            # Add table summaries to existing context data_sources
+            if "data_sources" in existing_context:
+                for table_key, table_info in catalog.tables.items():
+                    enhanced_context.setdefault("data_sources", []).append(
+                        {
+                            "table_key": table_key,
+                            "schema_name": table_info.schema_name,
+                            "table_name": table_info.table_name,
+                            "business_description": table_info.business_description,
+                            "column_count": len(table_info.columns),
+                            "charts_using_table": len(table_info.charts_using_table),
+                            "dimension_columns": [
+                                col.name for col in table_info.columns if col.is_dimension
+                            ],
+                            "metric_columns": [
+                                col.name for col in table_info.columns if col.is_metric
+                            ],
+                        }
+                    )
+
+            self.logger.info(
+                f"Enhanced context built: {catalog.total_tables} tables, "
+                f"{len([t for t in catalog.tables.values() if t.columns])} with column data"
+            )
+
+        except Exception as e:
+            self.logger.error(f"Error building enhanced data intelligence context: {e}")
+            # Don't fail the entire context building - just log and continue
+            enhanced_context["enhanced_analysis"]["error"] = str(e)
+
+        return enhanced_context
 
 
 @router.post("/{dashboard_id}/context")
@@ -1137,6 +1251,45 @@ def _build_dashboard_system_prompt(
         prompt_parts.append("Schema-only mode - Only table structure and column names available")
         prompt_parts.append("User can enable data sharing in chat settings for detailed analysis")
 
+    # Enhanced: Add data intelligence context if available
+    enhanced_analysis = context.get("enhanced_analysis", {})
+    ai_data_context = context.get("ai_data_context", "")
+
+    if enhanced_analysis.get("tables_analyzed", 0) > 0:
+        prompt_parts.append("\nENHANCED DATA INTELLIGENCE AVAILABLE:")
+        prompt_parts.append(
+            f"Comprehensive analysis of {enhanced_analysis['tables_analyzed']} data tables completed."
+        )
+
+        if enhanced_analysis.get("business_context_available"):
+            prompt_parts.append(
+                "Business context and column descriptions are available for intelligent analysis."
+            )
+
+        if enhanced_analysis.get("sample_data_included"):
+            prompt_parts.append("Sample data values are included to help understand data patterns.")
+
+        if enhanced_analysis.get("query_suggestions_available"):
+            prompt_parts.append(
+                "Query guidelines and examples are available for complex analysis needs."
+            )
+
+        # Include the rich AI data context
+        if ai_data_context and len(ai_data_context) > 100:  # Only include if substantial
+            prompt_parts.append("\nCOMPREHENSIVE DATA CATALOG:")
+            prompt_parts.append(ai_data_context)
+
+        prompt_parts.append("\nWith this enhanced data intelligence, you can provide:")
+        prompt_parts.extend(
+            [
+                "- Detailed explanations of available data sources and their business purpose",
+                "- Specific insights about column types, sample values, and data patterns",
+                "- Intelligent recommendations for data analysis and exploration",
+                "- Business-focused interpretations of technical data structures",
+                "- Contextual understanding of how data relates to business metrics",
+            ]
+        )
+
     prompt_parts.append("")
 
     # Add specific chart context if selected
@@ -1361,6 +1514,55 @@ def test_single_chart(request, dashboard_id: int, chart_id: int):
         return JsonResponse({"error": f"Test error: {str(e)}", "chart_id": chart_id}, status=500)
 
 
+@router.get("/{dashboard_id}/test-data-intelligence")
+@has_permission(["can_view_dashboards"])
+def test_data_intelligence(request, dashboard_id: int):
+    """
+    Test endpoint for Layer 1: DataIntelligenceService
+    Returns data catalog and enhanced context for debugging
+    """
+    try:
+        orguser_obj = request.orguser
+        if not orguser_obj:
+            return JsonResponse({"error": "Unauthorized"}, status=401)
+
+        # Initialize data intelligence service
+        data_intelligence = DataIntelligenceService()
+
+        # Test data catalog building
+        catalog = data_intelligence.get_org_data_catalog(orguser_obj.org)
+
+        # Test AI context building
+        ai_context = data_intelligence.build_ai_data_context(
+            org=orguser_obj.org, dashboard_id=dashboard_id
+        )
+
+        return JsonResponse(
+            {
+                "success": True,
+                "dashboard_id": dashboard_id,
+                "org": orguser_obj.org.slug,
+                "catalog_summary": {
+                    "total_tables": catalog.total_tables,
+                    "total_charts": catalog.total_charts,
+                    "table_keys": list(catalog.tables.keys()),
+                    "chart_mappings_count": len(catalog.chart_table_mappings),
+                },
+                "ai_context_preview": ai_context[:1000] + "..."
+                if len(ai_context) > 1000
+                else ai_context,
+                "ai_context_length": len(ai_context),
+                "timestamp": timezone.now().isoformat(),
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error testing data intelligence: {e}")
+        return JsonResponse(
+            {"error": f"Test failed: {str(e)}", "dashboard_id": dashboard_id}, status=500
+        )
+
+
 @router.get("/{dashboard_id}/debug-chart-config/{chart_id}")
 @has_permission(["can_view_dashboards"])
 def debug_chart_config(request, dashboard_id: int, chart_id: int):
@@ -1427,3 +1629,466 @@ def debug_chart_config(request, dashboard_id: int, chart_id: int):
     except Exception as e:
         logger.error(f"Error debugging chart config {chart_id}: {e}")
         return JsonResponse({"error": f"Debug error: {str(e)}", "chart_id": chart_id}, status=500)
+
+
+# Layer 4: Enhanced Dashboard Chat API Integration
+
+
+class EnhancedDashboardChatRequest(Schema):
+    messages: List[DashboardChatMessage]
+    include_data: bool = False
+    max_rows: int = 100
+    enable_smart_queries: bool = True
+    selected_chart_id: Optional[str] = None
+    user_preferences: Optional[Dict[str, Any]] = None
+
+
+@router.post("/{dashboard_id}/enhanced-chat")
+@has_permission(["can_view_dashboards"])
+def enhanced_dashboard_chat(request, dashboard_id: int, payload: EnhancedDashboardChatRequest):
+    """
+    Layer 4: Enhanced Dashboard Chat with Intelligent Data Query Capabilities
+
+    Automatically detects data queries in chat messages and executes them through
+    the natural language query system while maintaining conversational flow.
+    """
+    try:
+        orguser_obj = request.orguser
+        if not orguser_obj:
+            return JsonResponse({"error": "Unauthorized"}, status=401)
+
+        # Check organization settings for AI features
+        org_settings = OrgSettings.objects.filter(org=orguser_obj.org).first()
+        if not org_settings or not org_settings.ai_consent:
+            return JsonResponse(
+                {
+                    "error": "AI features must be enabled in organization settings",
+                    "requires_consent": True,
+                },
+                status=400,
+            )
+
+        # Get the latest user message
+        user_messages = [msg for msg in payload.messages if msg.role == "user"]
+        if not user_messages:
+            return JsonResponse({"error": "No user message found"}, status=400)
+
+        latest_message = user_messages[-1].content
+        session_id = str(uuid.uuid4())
+        request_time = timezone.now()
+
+        # Get dashboard context for enhanced AI capabilities
+        analyzer = DashboardContextAnalyzer(
+            dashboard_id=dashboard_id,
+            orguser_obj=orguser_obj,
+            include_data=payload.include_data,
+            max_rows=payload.max_rows,
+        )
+        dashboard_context = analyzer.get_dashboard_context()
+
+        # Initialize smart chat processor
+        smart_processor = SmartChatProcessor()
+
+        # Process the message with enhanced capabilities
+        enhanced_response = smart_processor.process_enhanced_chat_message(
+            message=latest_message,
+            org=orguser_obj.org,
+            dashboard_id=dashboard_id,
+            dashboard_context=dashboard_context,
+            user_context=payload.user_preferences or {},
+            enable_data_query=payload.enable_smart_queries and org_settings.ai_data_sharing_enabled,
+        )
+
+        # Build response based on whether data query was executed
+        if enhanced_response.query_executed and enhanced_response.data_results:
+            # Data query was successfully executed
+            response_content = {
+                "content": enhanced_response.content,
+                "enhanced_features": {
+                    "intent_detected": enhanced_response.intent_detected.value,
+                    "data_query_executed": True,
+                    "query_results": enhanced_response.data_results,
+                    "confidence_score": enhanced_response.confidence_score,
+                    "recommendations": enhanced_response.recommendations,
+                },
+                "context_included": True,
+                "data_included": True,
+                "dashboard_id": dashboard_id,
+                "metadata": {
+                    "smart_processing": True,
+                    "charts_analyzed": len(dashboard_context.get("charts", [])),
+                    "filters_available": len(dashboard_context.get("filters", [])),
+                    "selected_chart": payload.selected_chart_id,
+                    "session_id": session_id,
+                    "processing_time_ms": enhanced_response.data_results.get("analytics", {})
+                    .get("performance_metrics", {})
+                    .get("total_time_ms", 0),
+                },
+            }
+
+        else:
+            # Standard chat response or data query failed
+            # Fall back to standard AI chat with enhanced context
+            system_prompt = _build_dashboard_system_prompt(
+                dashboard_context, payload.selected_chart_id
+            )
+
+            # Add smart processing context
+            if enhanced_response.intent_detected != MessageIntent.GENERAL_CONVERSATION:
+                system_prompt += (
+                    f"\n\nUser Intent Detected: {enhanced_response.intent_detected.value}"
+                )
+                if enhanced_response.fallback_used:
+                    system_prompt += (
+                        "\nNote: A data query was attempted but failed. Provide helpful guidance."
+                    )
+
+            ai_messages = [AIMessage(role="system", content=system_prompt)]
+
+            # Add conversation history
+            for msg in payload.messages:
+                ai_messages.append(AIMessage(role=msg.role, content=msg.content))
+
+            # Get AI provider and generate response
+            provider = get_default_ai_provider()
+            start_time = time.time()
+            response = provider.chat_completion(
+                messages=ai_messages, temperature=0.7, max_tokens=2000
+            )
+            end_time = time.time()
+            response_time_ms = int((end_time - start_time) * 1000)
+
+            # Use enhanced response content if available, otherwise use AI response
+            final_content = (
+                enhanced_response.content if enhanced_response.content else response.content
+            )
+
+            response_content = {
+                "content": final_content,
+                "enhanced_features": {
+                    "intent_detected": enhanced_response.intent_detected.value,
+                    "data_query_executed": False,
+                    "fallback_used": enhanced_response.fallback_used,
+                    "recommendations": enhanced_response.recommendations,
+                },
+                "usage": response.usage,
+                "context_included": True,
+                "data_included": payload.include_data,
+                "dashboard_id": dashboard_id,
+                "metadata": {
+                    "smart_processing": True,
+                    "charts_analyzed": len(dashboard_context.get("charts", [])),
+                    "filters_available": len(dashboard_context.get("filters", [])),
+                    "selected_chart": payload.selected_chart_id,
+                    "provider": response.provider,
+                    "session_id": session_id,
+                    "ai_response_time_ms": response_time_ms,
+                },
+            }
+
+        # Log the interaction
+        log_ai_chat_conversation(
+            org=orguser_obj.org,
+            user=orguser_obj.user,
+            user_prompt=latest_message,
+            ai_response=response_content["content"],
+            request_timestamp=request_time,
+            response_timestamp=timezone.now(),
+            dashboard_id=dashboard_id,
+            chart_id=payload.selected_chart_id,
+            session_id=session_id,
+        )
+
+        # Log metering data
+        usage = response_content.get("usage", {}) or {}
+        log_ai_chat_metering(
+            org=orguser_obj.org,
+            user=orguser_obj.user,
+            model_used=response_content.get("metadata", {}).get("provider", "enhanced_processor"),
+            prompt_tokens=usage.get("prompt_tokens", 0),
+            completion_tokens=usage.get("completion_tokens", 0),
+            response_time_ms=response_content.get("metadata", {}).get("processing_time_ms", 0),
+            include_data=payload.include_data,
+            max_rows=payload.max_rows if payload.include_data else None,
+            dashboard_id=dashboard_id,
+            chart_id=payload.selected_chart_id,
+            session_id=session_id,
+        )
+
+        return JsonResponse(response_content)
+
+    except Exception as e:
+        logger.error(f"Error in enhanced dashboard chat: {e}")
+        return JsonResponse({"error": "Internal server error"}, status=500)
+
+
+# Layer 2 Test Endpoints for Natural Language Query Processing
+
+
+class NaturalLanguageQueryRequest(Schema):
+    question: str
+    test_mode: bool = True
+
+
+@router.post("/{dashboard_id}/test-layer2-query-generation")
+@has_permission(["can_view_dashboards"])
+def test_layer2_query_generation(request, dashboard_id: int, payload: NaturalLanguageQueryRequest):
+    """
+    Test endpoint for Layer 2: Natural Language Query Generation
+    Tests AI-powered conversion of natural language to SQL without execution
+    """
+    try:
+        orguser_obj = request.orguser
+        if not orguser_obj:
+            return JsonResponse({"error": "Unauthorized"}, status=401)
+
+        from ddpui.core.ai.query_generator import NaturalLanguageQueryService
+
+        # Initialize query generator
+        query_service = NaturalLanguageQueryService()
+
+        # Generate query plan from the natural language question
+        query_plan = query_service.generate_query_from_question(
+            question=payload.question, org=orguser_obj.org, dashboard_id=dashboard_id
+        )
+
+        # Format response for testing
+        return JsonResponse(
+            {
+                "success": True,
+                "dashboard_id": dashboard_id,
+                "org": orguser_obj.org.slug,
+                "test_request": {"question": payload.question, "test_mode": payload.test_mode},
+                "query_plan": {
+                    "original_question": query_plan.original_question,
+                    "generated_sql": query_plan.generated_sql,
+                    "explanation": query_plan.explanation,
+                    "confidence_score": query_plan.confidence_score,
+                    "expected_result_type": query_plan.expected_result_type,
+                    "requires_execution": query_plan.requires_execution,
+                    "fallback_to_existing_data": query_plan.fallback_to_existing_data,
+                    "ai_reasoning": query_plan.ai_reasoning,
+                },
+                "validation_result": {
+                    "is_valid": query_plan.validation_result.is_valid
+                    if query_plan.validation_result
+                    else None,
+                    "error_message": query_plan.validation_result.error_message
+                    if query_plan.validation_result
+                    else None,
+                    "warnings": query_plan.validation_result.warnings
+                    if query_plan.validation_result
+                    else [],
+                    "complexity_score": query_plan.validation_result.complexity_score
+                    if query_plan.validation_result
+                    else None,
+                    "tables_accessed": query_plan.validation_result.tables_accessed
+                    if query_plan.validation_result
+                    else [],
+                    "columns_accessed": query_plan.validation_result.columns_accessed
+                    if query_plan.validation_result
+                    else [],
+                },
+                "timestamp": timezone.now().isoformat(),
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error testing Layer 2 query generation: {e}")
+        return JsonResponse(
+            {
+                "error": f"Test failed: {str(e)}",
+                "dashboard_id": dashboard_id,
+                "question": payload.question,
+            },
+            status=500,
+        )
+
+
+@router.post("/{dashboard_id}/test-layer2-full-execution")
+@has_permission(["can_view_dashboards"])
+def test_layer2_full_execution(request, dashboard_id: int, payload: NaturalLanguageQueryRequest):
+    """
+    Test endpoint for Layer 2: Complete Natural Language Query Execution
+    Tests the full flow from question to executed results (with safety limits)
+    """
+    try:
+        orguser_obj = request.orguser
+        if not orguser_obj:
+            return JsonResponse({"error": "Unauthorized"}, status=401)
+
+        from ddpui.core.ai.query_executor import DynamicQueryExecutor
+
+        # Check if data sharing is enabled
+        org_settings = OrgSettings.objects.filter(org=orguser_obj.org).first()
+        if not org_settings or not org_settings.ai_data_sharing_enabled:
+            return JsonResponse(
+                {
+                    "error": "Data sharing must be enabled in organization settings for query execution",
+                    "dashboard_id": dashboard_id,
+                    "requires_data_sharing": True,
+                },
+                status=400,
+            )
+
+        # Initialize executor
+        executor = DynamicQueryExecutor()
+
+        # Execute the natural language query
+        execution_result = executor.execute_natural_language_query(
+            question=payload.question,
+            org=orguser_obj.org,
+            dashboard_id=dashboard_id,
+            user_context={
+                "test_mode": payload.test_mode,
+                "user_id": orguser_obj.user.id,
+                "dashboard_id": dashboard_id,
+            },
+        )
+
+        # Format response for testing
+        response_data = {
+            "success": execution_result.success,
+            "dashboard_id": dashboard_id,
+            "org": orguser_obj.org.slug,
+            "test_request": {"question": payload.question, "test_mode": payload.test_mode},
+            "execution_result": {
+                "success": execution_result.success,
+                "row_count": execution_result.row_count,
+                "execution_time_ms": execution_result.execution_time_ms,
+                "columns": execution_result.columns,
+                "data_preview": execution_result.data[:5]
+                if execution_result.data
+                else [],  # First 5 rows for preview
+                "total_data_rows": len(execution_result.data),
+                "error_message": execution_result.error_message,
+                "warnings": execution_result.warnings,
+                "was_query_modified": execution_result.was_query_modified,
+                "executed_at": execution_result.executed_at.isoformat(),
+            },
+            "query_details": {
+                "original_query": execution_result.original_query,
+                "executed_query": execution_result.executed_query,
+                "confidence_score": execution_result.query_plan.confidence_score
+                if execution_result.query_plan
+                else None,
+                "ai_explanation": execution_result.query_plan.explanation
+                if execution_result.query_plan
+                else None,
+            },
+            "resource_usage": execution_result.resource_usage,
+            "timestamp": timezone.now().isoformat(),
+        }
+
+        # Add full data if requested and result set is small
+        if payload.test_mode and len(execution_result.data) <= 20:
+            response_data["execution_result"]["full_data"] = execution_result.data
+
+        return JsonResponse(response_data)
+
+    except Exception as e:
+        logger.error(f"Error testing Layer 2 full execution: {e}")
+        return JsonResponse(
+            {
+                "error": f"Execution test failed: {str(e)}",
+                "dashboard_id": dashboard_id,
+                "question": payload.question,
+            },
+            status=500,
+        )
+
+
+@router.get("/{dashboard_id}/layer2-execution-stats")
+@has_permission(["can_view_dashboards"])
+def get_layer2_execution_stats(request, dashboard_id: int):
+    """
+    Get execution statistics for Layer 2 query processing for this organization
+    """
+    try:
+        orguser_obj = request.orguser
+        if not orguser_obj:
+            return JsonResponse({"error": "Unauthorized"}, status=401)
+
+        from ddpui.core.ai.query_executor import DynamicQueryExecutor
+
+        # Initialize executor to get stats
+        executor = DynamicQueryExecutor()
+
+        # Get stats for this org
+        stats = executor.get_execution_stats(org_id=orguser_obj.org.id)
+
+        return JsonResponse(
+            {
+                "success": True,
+                "dashboard_id": dashboard_id,
+                "org": orguser_obj.org.slug,
+                "stats": stats,
+                "safety_limits": {
+                    "max_execution_time_seconds": executor.safety_limits.max_execution_time_seconds,
+                    "max_result_rows": executor.safety_limits.max_result_rows,
+                    "max_queries_per_minute": executor.safety_limits.max_queries_per_minute,
+                    "max_queries_per_hour": executor.safety_limits.max_queries_per_hour,
+                },
+                "timestamp": timezone.now().isoformat(),
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error getting Layer 2 execution stats: {e}")
+        return JsonResponse(
+            {"error": f"Stats retrieval failed: {str(e)}", "dashboard_id": dashboard_id}, status=500
+        )
+
+
+# Example questions for testing Layer 2
+EXAMPLE_LAYER2_QUESTIONS = [
+    "How many students attended school in 2021 in Maharashtra?",
+    "What is the total revenue by state for last year?",
+    "Show me the top 5 schools by performance score",
+    "Count of customers by region in 2023",
+    "Average sales amount per month",
+    "Which products have the highest profit margins?",
+    "List all customers with revenue greater than 10000",
+    "Show enrollment trends over the past 3 years",
+    "What is the distribution of students by grade level?",
+    "Compare performance scores between different states",
+]
+
+
+@router.get("/{dashboard_id}/layer2-example-questions")
+@has_permission(["can_view_dashboards"])
+def get_layer2_example_questions(request, dashboard_id: int):
+    """
+    Get example questions that can be used to test Layer 2 functionality
+    """
+    try:
+        orguser_obj = request.orguser
+        if not orguser_obj:
+            return JsonResponse({"error": "Unauthorized"}, status=401)
+
+        # Check data sharing status
+        org_settings = OrgSettings.objects.filter(org=orguser_obj.org).first()
+        data_sharing_enabled = org_settings and org_settings.ai_data_sharing_enabled
+
+        return JsonResponse(
+            {
+                "success": True,
+                "dashboard_id": dashboard_id,
+                "org": orguser_obj.org.slug,
+                "data_sharing_enabled": data_sharing_enabled,
+                "example_questions": EXAMPLE_LAYER2_QUESTIONS,
+                "usage_instructions": {
+                    "query_generation_test": f"POST /{dashboard_id}/test-layer2-query-generation",
+                    "full_execution_test": f"POST /{dashboard_id}/test-layer2-full-execution",
+                    "stats_endpoint": f"GET /{dashboard_id}/layer2-execution-stats",
+                    "note": "Full execution requires data sharing to be enabled in org settings",
+                },
+                "timestamp": timezone.now().isoformat(),
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error getting example questions: {e}")
+        return JsonResponse(
+            {"error": f"Failed to get examples: {str(e)}", "dashboard_id": dashboard_id}, status=500
+        )

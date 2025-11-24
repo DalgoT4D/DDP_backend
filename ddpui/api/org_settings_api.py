@@ -124,8 +124,6 @@ def get_org_settings(request):
         org_settings, created = OrgSettings.objects.get_or_create(
             org=orguser.org,
             defaults={
-                "organization_name": orguser.org.name,
-                "website": getattr(orguser.org, "website", None),
                 "ai_data_sharing_enabled": False,
                 "ai_logging_acknowledged": False,
             },
@@ -137,8 +135,8 @@ def get_org_settings(request):
             logger.info(f"Found existing org settings for org {orguser.org.slug}")
 
         org_data = OrgSettingsSchema(
-            organization_name=org_settings.organization_name,
-            website=org_settings.website,
+            organization_name=org_settings.org.name,  # Reference from org model
+            website=org_settings.org.website,  # Reference from org model
             organization_logo_filename=org_settings.organization_logo_filename,
             ai_data_sharing_enabled=org_settings.ai_data_sharing_enabled,
             ai_logging_acknowledged=org_settings.ai_logging_acknowledged,
@@ -169,8 +167,8 @@ def get_org_settings(request):
                     )
 
                     retry_org_data = OrgSettingsSchema(
-                        organization_name=org_settings.organization_name,
-                        website=org_settings.website,
+                        organization_name=org_settings.org.name,  # Reference from org model
+                        website=org_settings.org.website,  # Reference from org model
                         organization_logo_filename=org_settings.organization_logo_filename,
                         ai_data_sharing_enabled=org_settings.ai_data_sharing_enabled,
                         ai_logging_acknowledged=org_settings.ai_logging_acknowledged,
@@ -217,8 +215,6 @@ def update_org_settings(request, payload: UpdateOrgSettingsSchema):
         org_settings, created = OrgSettings.objects.get_or_create(
             org=orguser.org,
             defaults={
-                "organization_name": orguser.org.name,
-                "website": getattr(orguser.org, "website", None),
                 "ai_data_sharing_enabled": False,
                 "ai_logging_acknowledged": False,
             },
@@ -228,13 +224,7 @@ def update_org_settings(request, payload: UpdateOrgSettingsSchema):
         ai_settings_changed = False
         ai_chat_being_enabled = False
 
-        # Update only provided fields
-        if payload.organization_name is not None:
-            org_settings.organization_name = payload.organization_name
-
-        if payload.website is not None:
-            org_settings.website = payload.website
-
+        # Update only AI settings fields (organization_name and website are read-only)
         if payload.ai_data_sharing_enabled is not None:
             # Check if AI chat is being enabled (changing from False to True)
             if not org_settings.ai_data_sharing_enabled and payload.ai_data_sharing_enabled:
@@ -264,8 +254,8 @@ def update_org_settings(request, payload: UpdateOrgSettingsSchema):
         logger.info(f"Updated org settings for org {orguser.org.slug} by user {orguser.user.email}")
 
         update_org_data = OrgSettingsSchema(
-            organization_name=org_settings.organization_name,
-            website=org_settings.website,
+            organization_name=org_settings.org.name,  # Reference from org model
+            website=org_settings.org.website,  # Reference from org model
             organization_logo_filename=org_settings.organization_logo_filename,
             ai_data_sharing_enabled=org_settings.ai_data_sharing_enabled,
             ai_logging_acknowledged=org_settings.ai_logging_acknowledged,
@@ -337,8 +327,8 @@ def update_org_settings(request, payload: UpdateOrgSettingsSchema):
                         )
 
                     retry_update_org_data = OrgSettingsSchema(
-                        organization_name=org_settings.organization_name,
-                        website=org_settings.website,
+                        organization_name=org_settings.org.name,  # Reference from org model
+                        website=org_settings.org.website,  # Reference from org model
                         organization_logo_filename=org_settings.organization_logo_filename,
                         ai_data_sharing_enabled=org_settings.ai_data_sharing_enabled,
                         ai_logging_acknowledged=org_settings.ai_logging_acknowledged,
@@ -388,8 +378,7 @@ def create_org_settings(request, payload: CreateOrgSettingsSchema):
         # Create new org settings
         org_settings = OrgSettings.objects.create(
             org=orguser.org,
-            organization_name=payload.organization_name or orguser.org.name,
-            website=payload.website,
+            # organization_name and website are referenced from org model
             # organization_logo is set separately via upload endpoint
             ai_data_sharing_enabled=payload.ai_data_sharing_enabled,
             ai_logging_acknowledged=payload.ai_logging_acknowledged,
@@ -398,8 +387,8 @@ def create_org_settings(request, payload: CreateOrgSettingsSchema):
         logger.info(f"Created org settings for org {orguser.org.slug} by user {orguser.user.email}")
 
         create_org_data = OrgSettingsSchema(
-            organization_name=org_settings.organization_name,
-            website=org_settings.website,
+            organization_name=org_settings.org.name,  # Reference from org model
+            website=org_settings.org.website,  # Reference from org model
             organization_logo_filename=org_settings.organization_logo_filename,
             ai_data_sharing_enabled=org_settings.ai_data_sharing_enabled,
             ai_logging_acknowledged=org_settings.ai_logging_acknowledged,
@@ -436,8 +425,6 @@ def update_ai_data_sharing(request):
         org_settings, created = OrgSettings.objects.get_or_create(
             org=orguser.org,
             defaults={
-                "organization_name": orguser.org.name,
-                "website": getattr(orguser.org, "website", None),
                 "ai_data_sharing_enabled": False,
                 "ai_logging_acknowledged": False,
             },
@@ -592,7 +579,7 @@ def get_organization_logo(request):
         raise HttpError(500, "Failed to retrieve organization logo")
 
 
-@router.get("/ai-status", response=dict, auth=CustomJwtAuthMiddleware())
+@router.get("/ai-status", response=dict)
 def check_ai_status(request):
     """
     Check if AI features are enabled for the organization.

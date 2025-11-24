@@ -21,8 +21,7 @@ def populate_org_settings(apps, schema_editor):
         if not OrgSettings.objects.filter(org=org).exists():
             org_settings = OrgSettings(
                 org=org,
-                organization_name=org.name,  # Copy name to organization_name
-                website=org.website,  # Copy website if it exists
+                # organization_name and website are now referenced from org model
                 ai_data_sharing_enabled=False,  # Default to False for security
                 ai_logging_acknowledged=False,  # Default to False for compliance
                 created_at=timezone.now(),
@@ -47,12 +46,9 @@ def reverse_populate_org_settings(apps, schema_editor):
     Org = apps.get_model("ddpui", "Org")
     OrgSettings = apps.get_model("ddpui", "OrgSettings")
 
-    # Find OrgSettings where organization_name matches org.name (indicating auto-created)
-    deleted_count = 0
-    for org_settings in OrgSettings.objects.select_related("org").all():
-        if org_settings.organization_name == org_settings.org.name:
-            org_settings.delete()
-            deleted_count += 1
+    # Delete all OrgSettings records (since we can't distinguish auto-created ones anymore)
+    deleted_count = OrgSettings.objects.count()
+    OrgSettings.objects.all().delete()
 
     print(f"🗑️  Deleted {deleted_count} auto-created OrgSettings records")
 
