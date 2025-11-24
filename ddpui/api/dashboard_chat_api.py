@@ -420,20 +420,133 @@ class DashboardContextAnalyzer:
             return {"schema": {}, "sample_data": None}
 
     def _get_chart_data_context(self, chart_id: int) -> Dict[str, Any]:
-        """Get chart data and schema information using simplified approach."""
-        self.logger.info(f"=== Starting simplified data fetch for chart {chart_id} ===")
+        """Get chart data and schema information using enhanced approach with actual chart execution."""
+        self.logger.info(f"=== Starting enhanced data fetch for chart {chart_id} ===")
 
         try:
             # Get schema first
             schema_info = self._get_chart_schema_context(chart_id)
 
-            # Simple approach: always try to get raw table data first
-            sample_data = self._get_simple_table_data(chart_id)
+            # Enhanced approach: Try to get actual chart data first, fallback to raw data
+            chart_data = self._get_actual_chart_data(chart_id)
+
+            if chart_data and chart_data.get("rows") and len(chart_data["rows"]) > 0:
+                self.logger.info(
+                    f"Chart {chart_id} - Using actual chart data: {len(chart_data['rows'])} rows"
+                )
+                sample_data = chart_data
+            else:
+                self.logger.warning(
+                    f"Chart {chart_id} - Chart data unavailable, falling back to raw table data"
+                )
+                sample_data = self._get_simple_table_data(chart_id)
 
             return {"schema": schema_info["schema"], "sample_data": sample_data}
         except Exception as e:
             self.logger.error(f"Error getting chart data for {chart_id}: {e}")
             return {"schema": {}, "sample_data": None}
+
+    def _get_actual_chart_data(self, chart_id: int) -> Dict[str, Any]:
+        """Get actual chart data using the chart's configuration and execution logic."""
+        try:
+            from ddpui.models.visualization import Chart
+            from ddpui.models.org import OrgWarehouse
+            from ddpui.core.charts import charts_service
+            from ddpui.schemas.chart_schema import ChartDataPayload
+
+            # Get chart object
+            chart = Chart.objects.filter(id=chart_id, org=self.orguser.org).first()
+            if not chart:
+                self.logger.error(f"Chart {chart_id} not found in database")
+                return {"rows": [], "total_rows": 0, "columns": [], "error": "Chart not found"}
+
+            self.logger.info(f"Chart {chart_id} found: {chart.title} ({chart.chart_type})")
+
+            # Get warehouse
+            org_warehouse = OrgWarehouse.objects.filter(org=self.orguser.org).first()
+            if not org_warehouse:
+                self.logger.error(f"No warehouse found for org {self.orguser.org.slug}")
+                return {
+                    "rows": [],
+                    "total_rows": 0,
+                    "columns": [],
+                    "error": "No warehouse configured",
+                }
+
+            # Build chart data payload from the chart configuration
+            extra_config = chart.extra_config or {}
+
+            # Create ChartDataPayload from chart configuration
+            payload = ChartDataPayload(
+                chart_type=chart.chart_type,
+                schema_name=chart.schema_name,
+                table_name=chart.table_name,
+                computation_type=chart.computation_type,
+                x_axis=extra_config.get("x_axis"),
+                y_axis=extra_config.get("y_axis"),
+                dimension_col=extra_config.get("dimension_col"),
+                metrics=extra_config.get("metrics", []),
+                dimensions=extra_config.get("dimensions", []),
+                filters=extra_config.get("filters", []),
+                sort=extra_config.get("sort", []),
+                time_grain=extra_config.get("time_grain"),
+                # Limit data for AI context
+                extra_config={
+                    "pagination": {
+                        "enabled": True,
+                        "page_size": min(self.max_rows, 50),  # Limit for AI context
+                    }
+                },
+            )
+
+            # Use the same logic as the charts API to generate chart data
+            self.logger.info(
+                f"Chart {chart_id} - Executing with payload: computation_type={payload.computation_type}"
+            )
+
+            # Get warehouse client
+            warehouse = charts_service.get_warehouse_client(org_warehouse)
+
+            # Build query using chart service
+            query_builder = charts_service.build_chart_query(payload, org_warehouse)
+
+            # Execute query
+            results = charts_service.execute_query(warehouse, query_builder)
+
+            if results:
+                # Format results for AI context
+                columns = list(results[0].keys()) if results else []
+
+                self.logger.info(
+                    f"Chart {chart_id} - Successfully executed chart query: {len(results)} rows, {len(columns)} columns"
+                )
+
+                return {
+                    "rows": results,
+                    "total_rows": len(results),
+                    "columns": [{"name": col, "type": "chart_result"} for col in columns],
+                    "source": "chart_execution",
+                    "chart_type": chart.chart_type,
+                    "computation_type": chart.computation_type,
+                }
+            else:
+                self.logger.warning(f"Chart {chart_id} - Chart execution returned no results")
+                return {
+                    "rows": [],
+                    "total_rows": 0,
+                    "columns": [],
+                    "source": "chart_execution_empty",
+                }
+
+        except Exception as e:
+            self.logger.error(f"Chart {chart_id} - Error executing actual chart data: {e}")
+            return {
+                "rows": [],
+                "total_rows": 0,
+                "columns": [],
+                "error": f"Chart execution failed: {str(e)}",
+                "source": "chart_execution_failed",
+            }
 
     def _get_simple_table_data(self, chart_id: int) -> Dict[str, Any]:
         """Get simple raw table data for any chart."""
@@ -1182,12 +1295,24 @@ def _build_dashboard_system_prompt(
                         if len(business_cols) > 4:
                             chart_info += f" and {len(business_cols)-4} more"
 
-            # Add data status without technical dump
+            # Add data status with enhanced chart vs raw data distinction
             sample_data = chart.get("sample_data")
             if sample_data:
                 if sample_data.get("rows"):
                     rows = sample_data["rows"]
-                    chart_info += f" - Contains {len(rows)} sample records"
+                    data_source = sample_data.get("source", "unknown")
+
+                    if data_source == "chart_execution":
+                        # This is actual processed chart data
+                        chart_info += f" - Contains {len(rows)} processed chart results"
+                        chart_computation = sample_data.get("computation_type", "unknown")
+                        if chart_computation == "aggregated":
+                            chart_info += " (aggregated)"
+                        elif chart_computation == "raw":
+                            chart_info += " (filtered)"
+                    else:
+                        # This is raw table data fallback
+                        chart_info += f" - Contains {len(rows)} raw table samples"
 
                     # Include key insights from data without raw dump
                     if len(rows) > 0:
@@ -1200,7 +1325,7 @@ def _build_dashboard_system_prompt(
                                 if value is not None and str(value).strip():
                                     key_fields.append(f"{key}")
                             if key_fields:
-                                chart_info += f" with data on {', '.join(key_fields)}"
+                                chart_info += f" showing {', '.join(key_fields)}"
                 elif sample_data.get("error"):
                     chart_info += f" - Data unavailable due to configuration issue"
 
@@ -1310,8 +1435,14 @@ def _build_dashboard_system_prompt(
     if summary.get("data_included"):
         charts_with_data = sum(1 for chart in charts if chart.get("sample_data", {}).get("rows"))
         charts_with_errors = sum(1 for chart in charts if chart.get("sample_data", {}).get("error"))
-        charts_with_fallback = sum(
-            1 for chart in charts if chart.get("sample_data", {}).get("fallback")
+        charts_with_chart_data = sum(
+            1 for chart in charts if chart.get("sample_data", {}).get("source") == "chart_execution"
+        )
+        charts_with_raw_fallback = sum(
+            1
+            for chart in charts
+            if chart.get("sample_data", {}).get("source") not in ["chart_execution", None]
+            and chart.get("sample_data", {}).get("rows")
         )
 
         if charts_with_data > 0:
@@ -1328,14 +1459,20 @@ def _build_dashboard_system_prompt(
                 ]
             )
 
-            if charts_with_fallback > 0:
+            # Provide enhanced context about data types
+            if charts_with_chart_data > 0:
                 prompt_parts.append(
-                    "Note: Some charts show raw table data due to configuration issues"
+                    f"✅ EXCELLENT: {charts_with_chart_data} charts provide processed chart results - these show exactly what users see on dashboard"
+                )
+
+            if charts_with_raw_fallback > 0:
+                prompt_parts.append(
+                    f"⚠️  FALLBACK: {charts_with_raw_fallback} charts show raw table data due to chart execution issues"
                 )
 
             if charts_with_errors > 0:
                 prompt_parts.append(
-                    "Note: Some charts had data fetch errors - provide schema-based analysis for those"
+                    f"❌ ERRORS: {charts_with_errors} charts had data fetch errors - provide schema-based analysis for those"
                 )
 
             prompt_parts.extend(
@@ -1343,12 +1480,21 @@ def _build_dashboard_system_prompt(
                     "\nCRITICAL: You have access to actual sample data values shown above. When responding:",
                     "",
                     "ANALYSIS REQUIREMENTS:",
-                    "- State facts: 'This data shows X customers with Y total revenue'",
-                    "- Use exact values: Reference specific numbers, names, dates from the sample data",
-                    "- Calculate precisely: Provide actual sums, averages, counts from the real data",
+                    "✅ FOR CHART-PROCESSED DATA (marked as 'processed chart results'):",
+                    "- These represent exactly what users see in their dashboard charts",
+                    "- State facts directly: 'This chart shows Karnataka has 61M total population'",
+                    "- Use exact values from aggregated results: 'Total revenue: $1.2M across 50 customers'",
+                    "- Answer questions immediately without suggesting queries",
+                    "",
+                    "⚠️  FOR RAW TABLE DATA (marked as 'raw table samples'):",
+                    "- This is unprocessed data that may need aggregation",
+                    "- Analyze patterns but note if aggregation is needed",
+                    "- State facts: 'The sample shows district-level population data that sums to X for the state'",
+                    "",
+                    "🎯 ALWAYS ANSWER DIRECTLY when you have the data:",
+                    "- Calculate from available data: Sum populations, count records, find totals",
                     "- Be specific: 'Customer John Doe has $1,500 revenue' not 'customers appear to have revenue'",
-                    "- Identify patterns: 'Revenue increased 15% from Jan to Feb' not 'revenue might be growing'",
-                    "- Make definitive statements: 'The data contains 5 Premium customers' not 'there are probably 5 customers'",
+                    "- State definitive results: 'Karnataka population: 61,130,704' not 'you can query to find Karnataka population'",
                     "",
                 ]
             )
