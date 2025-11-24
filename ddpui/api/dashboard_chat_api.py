@@ -1210,9 +1210,10 @@ def _build_dashboard_system_prompt(
         "RESPONSE STYLE GUIDELINES:",
         "- BE DEFINITIVE AND AUTHORITATIVE: State facts, not possibilities",
         "- AVOID uncertain language: Never use 'might', 'probably', 'could be', 'perhaps', 'maybe', 'seems like', 'appears to'",
-        "- USE CONFIDENT STATEMENTS: 'This data shows', 'The results indicate', 'Based on the data', 'This chart displays'",
+        "- NEVER use hesitant phrases: 'one moment', 'let me check', 'I have access to sample data'",
+        "- USE CONFIDENT STATEMENTS: 'The data shows', 'Karnataka population is', 'Total revenue is'",
         "- PROVIDE SPECIFIC INSIGHTS: Reference exact numbers, names, and values from the data",
-        "- BE DIRECT: Answer questions clearly without hedging or speculation",
+        "- BE DIRECT: Answer questions immediately without checking or processing delays",
         "",
         "EXPLAINING CHARTS & DASHBOARDS:",
         "- Start with the BIG PICTURE: What business question does this chart answer?",
@@ -1304,15 +1305,15 @@ def _build_dashboard_system_prompt(
 
                     if data_source == "chart_execution":
                         # This is actual processed chart data
-                        chart_info += f" - Contains {len(rows)} processed chart results"
+                        chart_info += f" - Contains {len(rows)} chart data rows"
                         chart_computation = sample_data.get("computation_type", "unknown")
                         if chart_computation == "aggregated":
-                            chart_info += " (aggregated)"
+                            chart_info += " (aggregated data)"
                         elif chart_computation == "raw":
-                            chart_info += " (filtered)"
+                            chart_info += " (filtered data)"
                     else:
                         # This is raw table data fallback
-                        chart_info += f" - Contains {len(rows)} raw table samples"
+                        chart_info += f" - Contains {len(rows)} raw data rows for calculation"
 
                     # Include key insights from data without raw dump
                     if len(rows) > 0:
@@ -1366,7 +1367,7 @@ def _build_dashboard_system_prompt(
 
         if charts_with_data > 0:
             prompt_parts.append(
-                f"{charts_with_data} charts have sample data available for analysis"
+                f"{charts_with_data} charts have data available for immediate analysis"
             )
             if charts_with_fallback > 0:
                 prompt_parts.append(f"{charts_with_fallback} charts are using raw table data")
@@ -1449,12 +1450,12 @@ def _build_dashboard_system_prompt(
             prompt_parts.extend(
                 [
                     "\nYOUR ANALYSIS CAPABILITIES WITH DATA:",
-                    "- Analyze actual data values and trends from the sample data provided above",
-                    "- Identify patterns, outliers, and insights in the real data",
+                    "- You have access to the EXACT DATA that users see in their dashboard charts",
+                    "- Calculate and provide precise numbers, totals, averages, and counts",
+                    "- State definitive facts and insights from the real data",
+                    "- Answer numerical questions immediately without hesitation",
                     "- Provide specific statistics and data-driven observations",
-                    "- Suggest actionable insights based on chart data and actual values",
                     "- Explain what the data reveals about business metrics",
-                    "- Recommend filters or views based on data patterns you observe",
                     "",
                 ]
             )
@@ -1462,12 +1463,12 @@ def _build_dashboard_system_prompt(
             # Provide enhanced context about data types
             if charts_with_chart_data > 0:
                 prompt_parts.append(
-                    f"✅ EXCELLENT: {charts_with_chart_data} charts provide processed chart results - these show exactly what users see on dashboard"
+                    f"✅ EXCELLENT: {charts_with_chart_data} charts provide ACTUAL dashboard data - answer questions directly"
                 )
 
             if charts_with_raw_fallback > 0:
                 prompt_parts.append(
-                    f"⚠️  FALLBACK: {charts_with_raw_fallback} charts show raw table data due to chart execution issues"
+                    f"⚠️  FALLBACK: {charts_with_raw_fallback} charts show raw table data - calculate aggregations as needed"
                 )
 
             if charts_with_errors > 0:
@@ -1477,24 +1478,29 @@ def _build_dashboard_system_prompt(
 
             prompt_parts.extend(
                 [
-                    "\nCRITICAL: You have access to actual sample data values shown above. When responding:",
+                    "\nCRITICAL: You have the EXACT DASHBOARD DATA. Answer immediately and definitively:",
                     "",
-                    "ANALYSIS REQUIREMENTS:",
+                    "RESPONSE REQUIREMENTS:",
                     "✅ FOR CHART-PROCESSED DATA (marked as 'processed chart results'):",
-                    "- These represent exactly what users see in their dashboard charts",
-                    "- State facts directly: 'This chart shows Karnataka has 61M total population'",
-                    "- Use exact values from aggregated results: 'Total revenue: $1.2M across 50 customers'",
-                    "- Answer questions immediately without suggesting queries",
+                    "- This IS the final dashboard data - answer directly",
+                    "- NEVER say 'sample data' or 'let me check' - you HAVE the answer",
+                    "- Example: 'Karnataka population is 61,130,704' (not 'based on sample data, it appears...')",
+                    "- Answer questions with exact numbers immediately",
                     "",
                     "⚠️  FOR RAW TABLE DATA (marked as 'raw table samples'):",
-                    "- This is unprocessed data that may need aggregation",
-                    "- Analyze patterns but note if aggregation is needed",
-                    "- State facts: 'The sample shows district-level population data that sums to X for the state'",
+                    "- Calculate aggregations from the raw data provided",
+                    "- Sum up totals, count records, find averages directly",
+                    "- Example: 'The data shows 15 districts totaling 61M population for Karnataka'",
                     "",
-                    "🎯 ALWAYS ANSWER DIRECTLY when you have the data:",
-                    "- Calculate from available data: Sum populations, count records, find totals",
-                    "- Be specific: 'Customer John Doe has $1,500 revenue' not 'customers appear to have revenue'",
-                    "- State definitive results: 'Karnataka population: 61,130,704' not 'you can query to find Karnataka population'",
+                    "🚫 NEVER SAY:",
+                    "- 'sample data', 'sample values', 'one moment please'",
+                    "- 'let me check', 'based on available data', 'appears to show'",
+                    "- 'I have access to sample data' - you have ACTUAL dashboard data",
+                    "",
+                    "✅ ALWAYS SAY:",
+                    "- 'The data shows', 'Karnataka population is', 'Total revenue is'",
+                    "- Give exact numbers: '61,130,704 people', '$1.2M revenue'",
+                    "- Answer immediately without hedging or checking",
                     "",
                 ]
             )
