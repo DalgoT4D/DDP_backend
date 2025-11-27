@@ -582,5 +582,13 @@
             "name": "Can Manage Organization Default Dashboard",
             "slug": "can_manage_org_default_dashboard"
         }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 74,
+        "fields": {
+            "name": "Can manage organization settings",
+            "slug": "can_manage_org_settings"
+        }
     }
 ]
