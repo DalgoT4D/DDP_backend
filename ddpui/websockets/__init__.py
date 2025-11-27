@@ -24,13 +24,11 @@ class BaseConsumer(WebsocketConsumer):
 
             user_id = token_payload.get("user_id")
             if not user_id:
-                logger.error("No user_id found in JWT token payload")
                 return False
 
             # Get the user from the token payload
             user = User.objects.filter(id=user_id).first()
             if not user:
-                logger.error(f"User with id {user_id} not found")
                 return False
 
             self.user = user
@@ -43,34 +41,22 @@ class BaseConsumer(WebsocketConsumer):
             orguser = q_orguser.first()
             if orguser is not None:
                 self.orguser = orguser
-                logger.info(f"JWT authentication successful for user {user.email}")
                 return True
             else:
-                logger.error(f"No orguser found for user {user.email} with orgslug {orgslug}")
                 return False
 
         except Exception as err:
-            logger.error(f"JWT authentication failed: {err}")
             return False
 
     def respond(self, message: WebsocketResponse):
         self.send(text_data=json.dumps(message.dict()))
 
     def connect(self):
-        logger.info(f"WebSocket connection attempt from {self.scope.get('client', 'unknown')}")
         query_string = parse_qs(self.scope["query_string"].decode())
-        logger.info(f"Query string parameters: {query_string}")
         token = query_string.get("token", [None])[0]
         orgslug = query_string.get("orgslug", [None])[0]
-        logger.info(
-            f"Extracted token (first 20 chars): {token[:20] if token else 'None'}, orgslug: {orgslug}"
-        )
 
         if self.authenticate_user(token, orgslug):
-            logger.info(
-                f"User authenticated successfully for orgslug: {orgslug}, establishing connection"
-            )
             self.accept()
         else:
-            logger.error(f"Authentication failed for orgslug: {orgslug}, closing connection")
             self.close()
