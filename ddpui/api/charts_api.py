@@ -186,7 +186,12 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
     )
     chart_data = charts_service.transform_data_for_chart(dict_results, transform_payload)
 
-    # Generate ECharts config
+    # Table charts don't need ECharts config, just return the data
+    if payload.chart_type == "table":
+        logger.info(f"Successfully generated data for table {chart_id_str}")
+        return {"data": chart_data, "echarts_config": {}}
+
+    # Generate ECharts config for other chart types
     config_generators = {
         "bar": EChartsConfigGenerator.generate_bar_config,
         "pie": EChartsConfigGenerator.generate_pie_config,
@@ -1043,6 +1048,16 @@ def get_chart(request, chart_id: int):
     if not org_warehouse:
         logger.warning(f"No warehouse configured for org {orguser.org.slug}")
 
+    # ✅ DEBUG: Log what we're returning
+    logger.info(f"📤 [GET-CHART] Returning chart {chart_id}: {chart.title}")
+    logger.info(f"📤 [GET-CHART] Chart type: {chart.chart_type}")
+    logger.info(
+        f"📤 [GET-CHART] Extra config keys: {list(chart.extra_config.keys()) if chart.extra_config else 'None'}"
+    )
+    logger.info(
+        f"📤 [GET-CHART] Drill-down config: {chart.extra_config.get('drill_down_config') if chart.extra_config else 'None'}"
+    )
+
     # Build response
     chart_dict = {
         "id": chart.id,
@@ -1271,6 +1286,16 @@ def get_chart_data_with_drilldown(request, chart_id: int, payload: ChartDataPayl
 def create_chart(request, payload: ChartCreate):
     """Create a new chart"""
     orguser = request.orguser
+
+    # ✅ DEBUG: Log what we received
+    logger.info(f"📥 [CREATE-CHART] Received payload for chart: {payload.title}")
+    logger.info(f"📥 [CREATE-CHART] Chart type: {payload.chart_type}")
+    logger.info(
+        f"📥 [CREATE-CHART] Extra config keys: {list(payload.extra_config.keys()) if payload.extra_config else 'None'}"
+    )
+    logger.info(
+        f"📥 [CREATE-CHART] Drill-down config: {payload.extra_config.get('drill_down_config') if payload.extra_config else 'None'}"
+    )
 
     # Validate chart configuration using ChartValidator
     is_valid, error_message = ChartValidator.validate_chart_config(
