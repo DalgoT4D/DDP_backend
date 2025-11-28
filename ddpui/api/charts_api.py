@@ -1174,7 +1174,7 @@ def get_chart_data_with_drilldown(request, chart_id: int, payload: ChartDataPayl
     try:
         chart = Chart.objects.get(id=chart_id, org=orguser.org)
     except Chart.DoesNotExist:
-        raise HttpError(404, "Chart not found")
+        raise HttpError(404, "Chart not found") from None
 
     # Get org warehouse
     org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
@@ -1198,6 +1198,8 @@ def get_chart_data_with_drilldown(request, chart_id: int, payload: ChartDataPayl
         drill_down_filters = []
         if payload.drill_down_path:
             for step in payload.drill_down_path:
+                if not isinstance(step, dict) or "column" not in step or "value" not in step:
+                    raise HttpError(400, f"Invalid drill-down path step: {step}") from None
                 drill_down_filters.append(
                     {"column": step["column"], "operator": "equals", "value": step["value"]}
                 )
@@ -1262,9 +1264,11 @@ def get_chart_data_with_drilldown(request, chart_id: int, payload: ChartDataPayl
         result = generate_chart_data_and_config(full_payload, org_warehouse, chart_id=chart.id)
         return ChartDataResponse(data=result["data"], echarts_config=result["echarts_config"])
     except ValueError as e:
-        raise HttpError(400, str(e))
+        raise HttpError(400, str(e)) from e
+    except HttpError:
+        raise
     except Exception as e:
-        raise HttpError(500, f"Error generating drill-down data: {str(e)}")
+        raise HttpError(500, f"Error generating drill-down data: {e!r}") from e
 
 
 @charts_router.post("/", response=ChartResponse)
