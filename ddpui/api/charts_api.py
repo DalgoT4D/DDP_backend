@@ -1274,10 +1274,6 @@ def get_chart_data_with_drilldown(request, chart_id: int, payload: ChartDataPayl
     except ValueError as e:
         raise HttpError(400, str(e))
     except Exception as e:
-        logger.error(f"Error generating drill-down data for chart {chart.id}: {str(e)}")
-        logger.error(
-            f"Drill-down level: {payload.drill_down_level}, path: {payload.drill_down_path}"
-        )
         raise HttpError(500, f"Error generating drill-down data: {str(e)}")
 
 
@@ -1286,16 +1282,6 @@ def get_chart_data_with_drilldown(request, chart_id: int, payload: ChartDataPayl
 def create_chart(request, payload: ChartCreate):
     """Create a new chart"""
     orguser = request.orguser
-
-    # ✅ DEBUG: Log what we received
-    logger.info(f"📥 [CREATE-CHART] Received payload for chart: {payload.title}")
-    logger.info(f"📥 [CREATE-CHART] Chart type: {payload.chart_type}")
-    logger.info(
-        f"📥 [CREATE-CHART] Extra config keys: {list(payload.extra_config.keys()) if payload.extra_config else 'None'}"
-    )
-    logger.info(
-        f"📥 [CREATE-CHART] Drill-down config: {payload.extra_config.get('drill_down_config') if payload.extra_config else 'None'}"
-    )
 
     # Validate chart configuration using ChartValidator
     is_valid, error_message = ChartValidator.validate_chart_config(
