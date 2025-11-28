@@ -1048,16 +1048,6 @@ def get_chart(request, chart_id: int):
     if not org_warehouse:
         logger.warning(f"No warehouse configured for org {orguser.org.slug}")
 
-    # ✅ DEBUG: Log what we're returning
-    logger.info(f"📤 [GET-CHART] Returning chart {chart_id}: {chart.title}")
-    logger.info(f"📤 [GET-CHART] Chart type: {chart.chart_type}")
-    logger.info(
-        f"📤 [GET-CHART] Extra config keys: {list(chart.extra_config.keys()) if chart.extra_config else 'None'}"
-    )
-    logger.info(
-        f"📤 [GET-CHART] Drill-down config: {chart.extra_config.get('drill_down_config') if chart.extra_config else 'None'}"
-    )
-
     # Build response
     chart_dict = {
         "id": chart.id,
