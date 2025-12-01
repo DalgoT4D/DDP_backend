@@ -186,7 +186,12 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
     )
     chart_data = charts_service.transform_data_for_chart(dict_results, transform_payload)
 
-    # Generate ECharts config
+    # Table charts don't need ECharts config, just return the data
+    if payload.chart_type == "table":
+        logger.info(f"Successfully generated data for table {chart_id_str}")
+        return {"data": chart_data, "echarts_config": {}}
+
+    # Generate ECharts config for other chart types
     config_generators = {
         "bar": EChartsConfigGenerator.generate_bar_config,
         "pie": EChartsConfigGenerator.generate_pie_config,
@@ -1159,6 +1164,111 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
     except Exception as e:
         logger.error(f"Error generating chart data for chart {chart.id}: {str(e)}")
         raise HttpError(500, "Error generating chart data")
+
+
+@charts_router.post("/{chart_id}/data/", response=ChartDataResponse)
+@has_permission(["can_view_charts"])
+def get_chart_data_with_drilldown(request, chart_id: int, payload: ChartDataPayload):
+    """Get chart data with drill-down support - POST version that accepts drill_down_level and drill_down_path"""
+    orguser = request.orguser
+    try:
+        chart = Chart.objects.get(id=chart_id, org=orguser.org)
+    except Chart.DoesNotExist:
+        raise HttpError(404, "Chart not found") from None
+
+    # Get org warehouse
+    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Warehouse not configured")
+
+    # Build payload from chart config and merge with request payload
+    extra_config = chart.extra_config.copy() if chart.extra_config else {}
+
+    # Check if drill-down is configured
+    drill_down_config = extra_config.get("drill_down_config", {})
+    drill_down_enabled = drill_down_config.get("enabled", False)
+
+    # Process drill-down if enabled
+    if drill_down_enabled and (payload.drill_down_level > 0 or payload.drill_down_path):
+        logger.info(
+            f"Processing drill-down for chart {chart_id} at level {payload.drill_down_level}"
+        )
+
+        # Convert drill-down path to filters
+        drill_down_filters = []
+        if payload.drill_down_path:
+            for step in payload.drill_down_path:
+                if not isinstance(step, dict) or "column" not in step or "value" not in step:
+                    raise HttpError(400, f"Invalid drill-down path step: {step}") from None
+                drill_down_filters.append(
+                    {"column": step["column"], "operator": "equals", "value": step["value"]}
+                )
+                logger.debug(f"Added drill-down filter: {step['column']} = {step['value']}")
+
+        # Merge drill-down filters with existing filters
+        existing_filters = extra_config.get("filters", [])
+        all_filters = drill_down_filters + existing_filters
+        extra_config["filters"] = all_filters
+
+        # Determine current level configuration
+        hierarchy = drill_down_config.get("hierarchy", [])
+        if payload.drill_down_level < len(hierarchy):
+            level_config = hierarchy[payload.drill_down_level]
+
+            # For aggregated drill-down levels, modify the dimension column
+            if level_config.get("aggregation_columns"):
+                extra_config["dimension_column"] = level_config["column"]
+
+                # Set metrics from aggregation columns if specified
+                if not payload.metrics:
+                    aggregation_columns = level_config.get("aggregation_columns", [])
+                    metrics = [
+                        {"column": col, "aggregation": "sum", "alias": col}
+                        for col in aggregation_columns
+                    ]
+                    extra_config["metrics"] = metrics
+        else:
+            # At leaf level or beyond, show raw data with filters applied
+            # No aggregation needed
+            pass
+
+    # Get existing customizations and add chart title
+    customizations = extra_config.get("customizations", {})
+    customizations["title"] = chart.title
+
+    # Build the full payload
+    full_payload = ChartDataPayload(
+        chart_type=chart.chart_type,
+        computation_type=chart.computation_type,
+        schema_name=chart.schema_name,
+        table_name=chart.table_name,
+        x_axis=extra_config.get("x_axis_column"),
+        y_axis=extra_config.get("y_axis_column"),
+        dimension_col=extra_config.get("dimension_column"),
+        extra_dimension=extra_config.get("extra_dimension_column"),
+        metrics=extra_config.get("metrics") or payload.metrics,
+        geographic_column=extra_config.get("geographic_column"),
+        value_column=extra_config.get("value_column"),
+        selected_geojson_id=extra_config.get("selected_geojson_id"),
+        customizations=customizations,
+        offset=payload.offset,
+        limit=payload.limit,
+        extra_config=extra_config,
+        dashboard_filters=payload.dashboard_filters,
+        drill_down_level=payload.drill_down_level,
+        drill_down_path=payload.drill_down_path,
+    )
+
+    # Use the common function to generate data and config
+    try:
+        result = generate_chart_data_and_config(full_payload, org_warehouse, chart_id=chart.id)
+        return ChartDataResponse(data=result["data"], echarts_config=result["echarts_config"])
+    except ValueError as e:
+        raise HttpError(400, str(e)) from e
+    except HttpError:
+        raise
+    except Exception as e:
+        raise HttpError(500, f"Error generating drill-down data: {e!r}") from e
 
 
 @charts_router.post("/", response=ChartResponse)
