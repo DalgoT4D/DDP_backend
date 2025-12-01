@@ -107,11 +107,18 @@ class Command(BaseCommand):
                 continue  # already populated
 
             # Logic to populate output_cols can be customized as needed
-            model.output_cols = dbtautomation_service.update_output_cols_of_dbt_model(
-                warehouse, model
-            )
-            model.save()
-            self.stdout.write(f"  Populated output_cols for model: {model.name}")
+            try:
+                model.output_cols = dbtautomation_service.update_output_cols_of_dbt_model(
+                    warehouse, model
+                )
+                model.save()
+                self.stdout.write(f"Populated output_cols for model: {model.name}")
+            except Exception as e:
+                self.stderr.write(
+                    f"Failed to populate output_cols for model {model.name}: {str(e)}"
+                )
+                continue
+            self.stdout.write(f"Populated output_cols for model: {model.name}")
 
     def _migrate_data(self, orgdbt):
         """Perform the actual migration of data from v1 to v2 using edge-first approach."""
@@ -128,9 +135,13 @@ class Command(BaseCommand):
                 f"\nProcessing edge {edge_num}/{len(old_edges)}: {edge.from_node.name} -> {edge.to_node.name}"
             )
 
-            source_canvas_node = self._create_canvas_node_for_model(edge.from_node, orgdbt)
+            if edge.from_node.under_construction:
+                self.stdout.write(
+                    "  Source node is under construction; skipping edges/chain from it"
+                )
+                continue  # skip edges from under construction nodes
 
-            target_canvas_node = self._create_canvas_node_for_model(edge.to_node, orgdbt)
+            source_canvas_node = self._create_canvas_node_for_model(edge.from_node, orgdbt)
 
             # Step 2c: Get all operations for the target model
             target_operations: list[OrgDbtOperation] = OrgDbtOperation.objects.filter(
@@ -190,7 +201,12 @@ class Command(BaseCommand):
 
                     # create the last edge to target model
                     if idx == len(target_operations) - 1:
-                        self._create_canvas_edge(prev_op_canvas_node, target_canvas_node, seq=1)
+                        if not edge.to_node.under_construction:
+                            target_canvas_node = self._create_canvas_node_for_model(
+                                edge.to_node, orgdbt
+                            )
+
+                            self._create_canvas_edge(prev_op_canvas_node, target_canvas_node, seq=1)
 
                     processed_old_operation_nodes.add(op.uuid)
 
