@@ -137,8 +137,6 @@ class Command(BaseCommand):
 
             source_canvas_node = self._create_canvas_node_for_model(edge.from_node, orgdbt)
 
-            target_canvas_node = self._create_canvas_node_for_model(edge.to_node, orgdbt)
-
             # Step 2c: Get all operations for the target model
             target_operations: list[OrgDbtOperation] = OrgDbtOperation.objects.filter(
                 dbtmodel=edge.to_node
@@ -197,7 +195,12 @@ class Command(BaseCommand):
 
                     # create the last edge to target model
                     if idx == len(target_operations) - 1:
-                        self._create_canvas_edge(prev_op_canvas_node, target_canvas_node, seq=1)
+                        if not edge.to_node.under_construction:
+                            target_canvas_node = self._create_canvas_node_for_model(
+                                edge.to_node, orgdbt
+                            )
+
+                            self._create_canvas_edge(prev_op_canvas_node, target_canvas_node, seq=1)
 
                     processed_old_operation_nodes.add(op.uuid)
 
