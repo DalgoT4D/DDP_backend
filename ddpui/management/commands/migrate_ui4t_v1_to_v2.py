@@ -112,6 +112,7 @@ class Command(BaseCommand):
                     warehouse, model
                 )
                 model.save()
+                self.stdout.write(f"Populated output_cols for model: {model.name}")
             except Exception as e:
                 self.stderr.write(
                     f"Failed to populate output_cols for model {model.name}: {str(e)}"
