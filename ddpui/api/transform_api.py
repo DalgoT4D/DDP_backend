@@ -845,7 +845,7 @@ def delete_orgdbtmodel(request, model_uuid, canvas_lock_id: str = None, cascade:
     if orgdbt_model.type == OrgDbtModelType.SOURCE:
         raise HttpError(422, "Cannot delete source model")
 
-    dbtautomation_service.delete_org_dbt_model(orgdbt_model, cascade)
+    dbtautomation_service.delete_org_dbt_model_v2(orgdbt_model, cascade)
 
     return {"success": 1}
 
