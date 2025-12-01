@@ -374,344 +374,357 @@ class WorkflowVisualDesignerV2E2ETests(TestCase):
             # Step 1: Setup workspace
             orgdbt = self._setup_dbt_workspace(tmp_path)
 
-        # Step 2: Sync sources
-        self.api_client.post("/api/transform/dbt_project/sync_sources/")
-        sources_response = self.api_client.get("/api/transform/v2/dbt_project/sources_models/")
-        sources = sources_response.json()
+            # Step 2: Sync sources
+            self.api_client.post("/api/transform/dbt_project/sync_sources/")
+            sources_response = self.api_client.get("/api/transform/v2/dbt_project/sources_models/")
+            sources = sources_response.json()
 
-        # Find source tables
-        customers_source = None
-        orders_source = None
+            # Find source tables
+            customers_source = None
+            orders_source = None
 
-        for source in sources:
-            if source["name"] == "customers":
-                customers_source = source
-            elif source["name"] == "orders":
-                orders_source = source
+            for source in sources:
+                if source["name"] == "customers":
+                    customers_source = source
+                elif source["name"] == "orders":
+                    orders_source = source
 
-        self.assertIsNotNone(customers_source)
-        self.assertIsNotNone(orders_source)
+            self.assertIsNotNone(customers_source)
+            self.assertIsNotNone(orders_source)
 
-        # Step 3: Create source nodes
-        customers_node_response = self.api_client.post(
-            f"/api/transform/v2/dbt_project/models/{customers_source['uuid']}/nodes/"
-        )
-        customers_node = customers_node_response.json()
-
-        orders_node_response = self.api_client.post(
-            f"/api/transform/v2/dbt_project/models/{orders_source['uuid']}/nodes/"
-        )
-        orders_node = orders_node_response.json()
-
-        # Step 4: Filter completed orders first
-        filter_orders_payload = {
-            "config": {"where": [{"column": "status", "operator": "=", "value": "completed"}]},
-            "input_node_uuid": orders_node["uuid"],
-            "op_type": "filter",
-            "source_columns": [
-                "order_id",
-                "customer_id",
-                "product_name",
-                "amount",
-                "status",
-                "order_date",
-            ],
-            "canvas_lock_id": str(self.canvas_lock.lock_id),
-        }
-
-        filter_orders_response = self.api_client.post(
-            "/api/transform/v2/dbt_project/operations/nodes/", filter_orders_payload, format="json"
-        )
-        filter_orders_node = filter_orders_response.json()
-
-        # Step 5: Join customers with filtered orders
-        join_payload = {
-            "config": {
-                "join_type": "inner",
-                "join_on": {"left": "customer_id", "right": "customer_id"},
-            },
-            "input_node_uuid": customers_node["uuid"],
-            "op_type": "join",
-            "source_columns": ["customer_id", "name", "email", "country", "signup_date"],
-            "other_inputs": [
-                {
-                    "uuid": filter_orders_node["uuid"],
-                    "columns": [
-                        "order_id",
-                        "customer_id",
-                        "product_name",
-                        "amount",
-                        "status",
-                        "order_date",
-                    ],
-                }
-            ],
-            "canvas_lock_id": str(self.canvas_lock.lock_id),
-        }
-
-        join_response = self.api_client.post(
-            "/api/transform/v2/dbt_project/operations/nodes/", join_payload, format="json"
-        )
-        join_node = join_response.json()
-
-        # Step 6: Aggregate by customer to get total order amounts
-        aggregate_payload = {
-            "config": {
-                "groupby_cols": ["customer_id", "name", "email"],
-                "aggregate_on": [
-                    {
-                        "column": "amount",
-                        "operation": "sum",
-                        "output_column_name": "total_order_amount",
-                    },
-                    {
-                        "column": "order_id",
-                        "operation": "count",
-                        "output_column_name": "order_count",
-                    },
-                ],
-            },
-            "input_node_uuid": join_node["uuid"],
-            "op_type": "aggregate",
-            "source_columns": [
-                "customer_id",
-                "name",
-                "email",
-                "country",
-                "signup_date",
-                "order_id",
-                "product_name",
-                "amount",
-                "status",
-                "order_date",
-            ],
-            "canvas_lock_id": str(self.canvas_lock.lock_id),
-        }
-
-        aggregate_response = self.api_client.post(
-            "/api/transform/v2/dbt_project/operations/nodes/", aggregate_payload, format="json"
-        )
-        aggregate_node = aggregate_response.json()
-
-        # Step 7: Terminate and create final model
-        terminate_payload = {
-            "name": "customer_order_summary",
-            "display_name": "Customer Order Summary",
-            "dest_schema": "analytics",
-        }
-
-        terminate_response = self.api_client.post(
-            f"/api/transform/v2/dbt_project/operations/nodes/{aggregate_node['uuid']}/terminate/",
-            terminate_payload,
-            format="json",
-        )
-        final_model = terminate_response.json()
-
-        # Step 8: Verify complex DAG
-        dag_response = self.api_client.get("/api/transform/v2/dbt_project/graph/")
-        dag = dag_response.json()
-
-        nodes = dag["nodes"]
-        edges = dag["edges"]
-
-        # Should have multiple nodes and edges representing the complex workflow
-        self.assertTrue(len(nodes) >= 6)  # 2 sources + 3 operations + 1 model
-        self.assertTrue(len(edges) >= 4)  # Multiple connections
-
-        # Step 9: Run DBT and validate complex output
-        try:
-            self._execute_dbt_command("deps")
-            self._execute_dbt_command("run", select_model="customer_order_summary")
-
-            # Verify aggregated results
-            result = self.wc_client.execute(
-                "SELECT * FROM analytics.customer_order_summary ORDER BY customer_id"
+            # Step 3: Create source nodes
+            customers_node_response = self.api_client.post(
+                f"/api/transform/v2/dbt_project/models/{customers_source['uuid']}/nodes/"
             )
+            customers_node = customers_node_response.json()
 
-            # Should have customer aggregates
-            self.assertTrue(len(result) > 0)
+            orders_node_response = self.api_client.post(
+                f"/api/transform/v2/dbt_project/models/{orders_source['uuid']}/nodes/"
+            )
+            orders_node = orders_node_response.json()
 
-            # Verify we have the expected columns (customer_id, name, email, total_order_amount, order_count)
-            if result:
-                self.assertEqual(len(result[0]), 5)
+            # Step 4: Filter completed orders first
+            filter_orders_payload = {
+                "config": {"where": [{"column": "status", "operator": "=", "value": "completed"}]},
+                "input_node_uuid": orders_node["uuid"],
+                "op_type": "filter",
+                "source_columns": [
+                    "order_id",
+                    "customer_id",
+                    "product_name",
+                    "amount",
+                    "status",
+                    "order_date",
+                ],
+                "canvas_lock_id": str(self.canvas_lock.lock_id),
+            }
 
-        except subprocess.CalledProcessError as e:
-            self.fail(f"DBT execution failed: {e}")
-        except Exception as e:
-            print(f"Warning: Could not validate complex output: {e}")
+            filter_orders_response = self.api_client.post(
+                "/api/transform/v2/dbt_project/operations/nodes/",
+                filter_orders_payload,
+                format="json",
+            )
+            filter_orders_node = filter_orders_response.json()
 
-    def test_03_user_journey_with_editing_and_deletion(self, tmpdir):
+            # Step 5: Join customers with filtered orders
+            join_payload = {
+                "config": {
+                    "join_type": "inner",
+                    "join_on": {"left": "customer_id", "right": "customer_id"},
+                },
+                "input_node_uuid": customers_node["uuid"],
+                "op_type": "join",
+                "source_columns": ["customer_id", "name", "email", "country", "signup_date"],
+                "other_inputs": [
+                    {
+                        "uuid": filter_orders_node["uuid"],
+                        "columns": [
+                            "order_id",
+                            "customer_id",
+                            "product_name",
+                            "amount",
+                            "status",
+                            "order_date",
+                        ],
+                    }
+                ],
+                "canvas_lock_id": str(self.canvas_lock.lock_id),
+            }
+
+            join_response = self.api_client.post(
+                "/api/transform/v2/dbt_project/operations/nodes/", join_payload, format="json"
+            )
+            join_node = join_response.json()
+
+            # Step 6: Aggregate by customer to get total order amounts
+            aggregate_payload = {
+                "config": {
+                    "groupby_cols": ["customer_id", "name", "email"],
+                    "aggregate_on": [
+                        {
+                            "column": "amount",
+                            "operation": "sum",
+                            "output_column_name": "total_order_amount",
+                        },
+                        {
+                            "column": "order_id",
+                            "operation": "count",
+                            "output_column_name": "order_count",
+                        },
+                    ],
+                },
+                "input_node_uuid": join_node["uuid"],
+                "op_type": "aggregate",
+                "source_columns": [
+                    "customer_id",
+                    "name",
+                    "email",
+                    "country",
+                    "signup_date",
+                    "order_id",
+                    "product_name",
+                    "amount",
+                    "status",
+                    "order_date",
+                ],
+                "canvas_lock_id": str(self.canvas_lock.lock_id),
+            }
+
+            aggregate_response = self.api_client.post(
+                "/api/transform/v2/dbt_project/operations/nodes/", aggregate_payload, format="json"
+            )
+            aggregate_node = aggregate_response.json()
+
+            # Step 7: Terminate and create final model
+            terminate_payload = {
+                "name": "customer_order_summary",
+                "display_name": "Customer Order Summary",
+                "dest_schema": "analytics",
+            }
+
+            terminate_response = self.api_client.post(
+                f"/api/transform/v2/dbt_project/operations/nodes/{aggregate_node['uuid']}/terminate/",
+                terminate_payload,
+                format="json",
+            )
+            final_model = terminate_response.json()
+
+            # Step 8: Verify complex DAG
+            dag_response = self.api_client.get("/api/transform/v2/dbt_project/graph/")
+            dag = dag_response.json()
+
+            nodes = dag["nodes"]
+            edges = dag["edges"]
+
+            # Should have multiple nodes and edges representing the complex workflow
+            self.assertTrue(len(nodes) >= 6)  # 2 sources + 3 operations + 1 model
+            self.assertTrue(len(edges) >= 4)  # Multiple connections
+
+            # Step 9: Run DBT and validate complex output
+            try:
+                self._execute_dbt_command("deps")
+                self._execute_dbt_command("run", select_model="customer_order_summary")
+
+                # Verify aggregated results
+                result = self.wc_client.execute(
+                    "SELECT * FROM analytics.customer_order_summary ORDER BY customer_id"
+                )
+
+                # Should have customer aggregates
+                self.assertTrue(len(result) > 0)
+
+                # Verify we have the expected columns (customer_id, name, email, total_order_amount, order_count)
+                if result:
+                    self.assertEqual(len(result[0]), 5)
+
+            except subprocess.CalledProcessError as e:
+                self.fail(f"DBT execution failed: {e}")
+            except Exception as e:
+                print(f"Warning: Could not validate complex output: {e}")
+
+    def test_03_user_journey_with_editing_and_deletion(self):
         """
         Test user journey with editing operations and deleting nodes
 
         Scenario: User creates workflow, then modifies it by editing operations and deleting nodes
         """
-        # Setup workspace and sync sources
-        orgdbt = self._setup_dbt_workspace(tmpdir)
-        self.api_client.post("/api/transform/dbt_project/sync_sources/")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
 
-        sources_response = self.api_client.get("/api/transform/v2/dbt_project/sources_models/")
-        sources = sources_response.json()
+            # Setup workspace and sync sources
+            orgdbt = self._setup_dbt_workspace(tmp_path)
+            self.api_client.post("/api/transform/dbt_project/sync_sources/")
 
-        customers_source = next(s for s in sources if s["name"] == "customers")
+            sources_response = self.api_client.get("/api/transform/v2/dbt_project/sources_models/")
+            sources = sources_response.json()
 
-        # Create source node
-        source_node_response = self.api_client.post(
-            f"/api/transform/v2/dbt_project/models/{customers_source['uuid']}/nodes/"
-        )
-        source_node = source_node_response.json()
+            customers_source = next(s for s in sources if s["name"] == "customers")
 
-        # Create initial filter operation
-        filter_payload = {
-            "config": {
-                "where": [
-                    {
-                        "column": "country",
-                        "operator": "=",
-                        "value": "CA",  # Initially filter for Canada
-                    }
-                ]
-            },
-            "input_node_uuid": source_node["uuid"],
-            "op_type": "filter",
-            "source_columns": ["customer_id", "name", "email", "country", "signup_date"],
-            "canvas_lock_id": str(self.canvas_lock.lock_id),
-        }
+            # Create source node
+            source_node_response = self.api_client.post(
+                f"/api/transform/v2/dbt_project/models/{customers_source['uuid']}/nodes/"
+            )
+            source_node = source_node_response.json()
 
-        filter_response = self.api_client.post(
-            "/api/transform/v2/dbt_project/operations/nodes/", filter_payload, format="json"
-        )
-        filter_node = filter_response.json()
+            # Create initial filter operation
+            filter_payload = {
+                "config": {
+                    "where": [
+                        {
+                            "column": "country",
+                            "operator": "=",
+                            "value": "CA",  # Initially filter for Canada
+                        }
+                    ]
+                },
+                "input_node_uuid": source_node["uuid"],
+                "op_type": "filter",
+                "source_columns": ["customer_id", "name", "email", "country", "signup_date"],
+                "canvas_lock_id": str(self.canvas_lock.lock_id),
+            }
 
-        # Edit the filter operation to change country to US
-        edit_payload = {
-            "config": {
-                "where": [{"column": "country", "operator": "=", "value": "US"}]  # Change to US
-            },
-            "op_type": "filter",
-            "source_columns": ["customer_id", "name", "email", "country", "signup_date"],
-        }
+            filter_response = self.api_client.post(
+                "/api/transform/v2/dbt_project/operations/nodes/", filter_payload, format="json"
+            )
+            filter_node = filter_response.json()
 
-        edit_response = self.api_client.put(
-            f"/api/transform/v2/dbt_project/operations/nodes/{filter_node['uuid']}/",
-            edit_payload,
-            format="json",
-        )
-        self.assertEqual(edit_response.status_code, 200)
+            # Edit the filter operation to change country to US
+            edit_payload = {
+                "config": {
+                    "where": [{"column": "country", "operator": "=", "value": "US"}]  # Change to US
+                },
+                "op_type": "filter",
+                "source_columns": ["customer_id", "name", "email", "country", "signup_date"],
+            }
 
-        # Add a select operation
-        select_payload = {
-            "config": {"columns": ["customer_id", "name", "email"]},
-            "input_node_uuid": filter_node["uuid"],
-            "op_type": "select",
-            "source_columns": ["customer_id", "name", "email", "country", "signup_date"],
-            "canvas_lock_id": str(self.canvas_lock.lock_id),
-        }
+            edit_response = self.api_client.put(
+                f"/api/transform/v2/dbt_project/operations/nodes/{filter_node['uuid']}/",
+                edit_payload,
+                format="json",
+            )
+            self.assertEqual(edit_response.status_code, 200)
 
-        select_response = self.api_client.post(
-            "/api/transform/v2/dbt_project/operations/nodes/", select_payload, format="json"
-        )
-        select_node = select_response.json()
+            # Add a select operation
+            select_payload = {
+                "config": {"columns": ["customer_id", "name", "email"]},
+                "input_node_uuid": filter_node["uuid"],
+                "op_type": "select",
+                "source_columns": ["customer_id", "name", "email", "country", "signup_date"],
+                "canvas_lock_id": str(self.canvas_lock.lock_id),
+            }
 
-        # Verify we have the expected nodes before deletion
-        dag_response = self.api_client.get("/api/transform/v2/dbt_project/graph/")
-        initial_dag = dag_response.json()
-        initial_node_count = len(initial_dag["nodes"])
+            select_response = self.api_client.post(
+                "/api/transform/v2/dbt_project/operations/nodes/", select_payload, format="json"
+            )
+            select_node = select_response.json()
 
-        # Delete the select operation (user changed their mind)
-        delete_response = self.api_client.delete(
-            f"/api/transform/v2/dbt_project/nodes/{select_node['uuid']}/"
-        )
-        self.assertEqual(delete_response.status_code, 200)
+            # Verify we have the expected nodes before deletion
+            dag_response = self.api_client.get("/api/transform/v2/dbt_project/graph/")
+            initial_dag = dag_response.json()
+            initial_node_count = len(initial_dag["nodes"])
 
-        # Verify the select node was deleted
-        dag_response = self.api_client.get("/api/transform/v2/dbt_project/graph/")
-        updated_dag = dag_response.json()
+            # Delete the select operation (user changed their mind)
+            delete_response = self.api_client.delete(
+                f"/api/transform/v2/dbt_project/nodes/{select_node['uuid']}/"
+            )
+            self.assertEqual(delete_response.status_code, 200)
 
-        self.assertEqual(len(updated_dag["nodes"]), initial_node_count - 1)
+            # Verify the select node was deleted
+            dag_response = self.api_client.get("/api/transform/v2/dbt_project/graph/")
+            updated_dag = dag_response.json()
 
-        # Terminate the remaining chain
-        terminate_payload = {
-            "name": "us_customers_filtered",
-            "display_name": "US Customers Filtered",
-            "dest_schema": "analytics",
-        }
+            self.assertEqual(len(updated_dag["nodes"]), initial_node_count - 1)
 
-        terminate_response = self.api_client.post(
-            f"/api/transform/v2/dbt_project/operations/nodes/{filter_node['uuid']}/terminate/",
-            terminate_payload,
-            format="json",
-        )
-        self.assertEqual(terminate_response.status_code, 200)
+            # Terminate the remaining chain
+            terminate_payload = {
+                "name": "us_customers_filtered",
+                "display_name": "US Customers Filtered",
+                "dest_schema": "analytics",
+            }
 
-    def test_04_canvas_locking_workflow(self, tmpdir):
+            terminate_response = self.api_client.post(
+                f"/api/transform/v2/dbt_project/operations/nodes/{filter_node['uuid']}/terminate/",
+                terminate_payload,
+                format="json",
+            )
+            self.assertEqual(terminate_response.status_code, 200)
+
+    def test_04_canvas_locking_workflow(self):
         """
         Test canvas locking mechanism during workflow creation
 
         Scenario: Multiple users trying to work on the same workflow
         """
-        # Create another user
-        other_user = User.objects.create_user(
-            username="other_user", email="other@example.com", password="testpass123"
-        )
-        other_orguser = OrgUser.objects.create(user=other_user, org=self.org, new_role=self.role)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
 
-        # Setup workspace
-        orgdbt = self._setup_dbt_workspace(tmpdir)
-        self.api_client.post("/api/transform/dbt_project/sync_sources/")
+            # Create another user
+            other_user = User.objects.create_user(
+                username="other_user", email="other@example.com", password="testpass123"
+            )
+            other_orguser = OrgUser.objects.create(
+                user=other_user, org=self.org, new_role=self.role
+            )
 
-        # First user (self.api_client) already has lock via setUp
-        sources_response = self.api_client.get("/api/transform/v2/dbt_project/sources_models/")
-        sources = sources_response.json()
-        customers_source = next(s for s in sources if s["name"] == "customers")
+            # Setup workspace
+            orgdbt = self._setup_dbt_workspace(tmp_path)
+            self.api_client.post("/api/transform/dbt_project/sync_sources/")
 
-        # First user can create operations (has lock)
-        source_node_response = self.api_client.post(
-            f"/api/transform/v2/dbt_project/models/{customers_source['uuid']}/nodes/"
-        )
-        self.assertEqual(source_node_response.status_code, 200)
+            # First user (self.api_client) already has lock via setUp
+            sources_response = self.api_client.get("/api/transform/v2/dbt_project/sources_models/")
+            sources = sources_response.json()
+            customers_source = next(s for s in sources if s["name"] == "customers")
 
-        # Second user tries to create operations without lock (should fail)
-        other_api_client = APIClient()
-        other_api_client.post(
-            "/api/v2/login/",
-            {"username": other_user.email, "password": "testpass123"},
-            format="json",
-        )
-        other_api_client.defaults.update(
-            {
-                "HTTP_X_DALGO_ORG": self.org.slug,
+            # First user can create operations (has lock)
+            source_node_response = self.api_client.post(
+                f"/api/transform/v2/dbt_project/models/{customers_source['uuid']}/nodes/"
+            )
+            self.assertEqual(source_node_response.status_code, 200)
+
+            # Second user tries to create operations without lock (should fail)
+            other_api_client = APIClient()
+            other_api_client.post(
+                "/api/login/",
+                {"username": other_user.email, "password": "testpass123"},
+                format="json",
+            )
+            other_api_client.defaults.update(
+                {
+                    "HTTP_X_DALGO_ORG": self.org.slug,
+                }
+            )
+
+            filter_payload = {
+                "config": {"where": [{"column": "country", "operator": "=", "value": "US"}]},
+                "input_node_uuid": source_node_response.json()["uuid"],
+                "op_type": "filter",
+                "source_columns": ["customer_id", "name", "email", "country", "signup_date"],
+                "canvas_lock_id": str(uuid.uuid4()),  # Wrong lock ID
             }
-        )
 
-        filter_payload = {
-            "config": {"where": [{"column": "country", "operator": "=", "value": "US"}]},
-            "input_node_uuid": source_node_response.json()["uuid"],
-            "op_type": "filter",
-            "source_columns": ["customer_id", "name", "email", "country", "signup_date"],
-            "canvas_lock_id": str(uuid.uuid4()),  # Wrong lock ID
-        }
+            unauthorized_response = other_api_client.post(
+                "/api/transform/v2/dbt_project/operations/nodes/", filter_payload, format="json"
+            )
+            # Should fail due to canvas lock
+            self.assertNotEqual(unauthorized_response.status_code, 200)
 
-        unauthorized_response = other_api_client.post(
-            "/api/transform/v2/dbt_project/operations/nodes/", filter_payload, format="json"
-        )
-        # Should fail due to canvas lock
-        self.assertNotEqual(unauthorized_response.status_code, 200)
+            # First user can still create operations with correct lock
+            filter_payload["canvas_lock_id"] = str(self.canvas_lock.lock_id)
+            authorized_response = self.api_client.post(
+                "/api/transform/v2/dbt_project/operations/nodes/", filter_payload, format="json"
+            )
+            self.assertEqual(authorized_response.status_code, 200)
 
-        # First user can still create operations with correct lock
-        filter_payload["canvas_lock_id"] = str(self.canvas_lock.lock_id)
-        authorized_response = self.api_client.post(
-            "/api/transform/v2/dbt_project/operations/nodes/", filter_payload, format="json"
-        )
-        self.assertEqual(authorized_response.status_code, 200)
-
-    def test_05_error_handling_and_validation(self, tmpdir):
+    def test_05_error_handling_and_validation(self):
         """
         Test error handling and validation in the workflow
 
         Scenario: User makes various mistakes and the system handles them gracefully
         """
-        orgdbt = self._setup_dbt_workspace(tmpdir)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+
+            orgdbt = self._setup_dbt_workspace(tmp_path)
         self.api_client.post("/api/transform/dbt_project/sync_sources/")
 
         sources_response = self.api_client.get("/api/transform/v2/dbt_project/sources_models/")
