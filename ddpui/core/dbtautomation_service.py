@@ -560,6 +560,24 @@ def json_columnspec(warehouse: OrgWarehouse, source_schema, input_name, json_col
 # ==============================================================================
 
 
+def delete_org_dbt_model_v2(orgdbt_model: OrgDbtModel, cascade: bool = False):
+    """
+    Delete the org dbt model
+    Only delete org dbt model of type "model"
+    """
+    if orgdbt_model.type == OrgDbtModelType.SOURCE:
+        raise ValueError("Cannot delete a source as a model")
+
+    # if this orgdbt_model is being used anywhere in the graph, we cannot delete it
+    canvas_node_cnt = CanvasNode.objects.filter(dbtmodel=orgdbt_model).count()
+    logger.info(f"Canvas node count for model {orgdbt_model.name} is {canvas_node_cnt}")
+    if canvas_node_cnt > 0:
+        raise ValueError("Cannot delete the model as it is being used in the workflow")
+
+    # delete the model file is present
+    delete_dbt_model_in_project(orgdbt_model)
+
+
 def update_output_cols_of_dbt_model(
     org_warehouse: OrgWarehouse,
     dbtmodel: OrgDbtModel,
