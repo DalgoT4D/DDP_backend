@@ -107,11 +107,17 @@ class Command(BaseCommand):
                 continue  # already populated
 
             # Logic to populate output_cols can be customized as needed
-            model.output_cols = dbtautomation_service.update_output_cols_of_dbt_model(
-                warehouse, model
-            )
-            model.save()
-            self.stdout.write(f"  Populated output_cols for model: {model.name}")
+            try:
+                model.output_cols = dbtautomation_service.update_output_cols_of_dbt_model(
+                    warehouse, model
+                )
+                model.save()
+            except Exception as e:
+                self.stderr.write(
+                    f"Failed to populate output_cols for model {model.name}: {str(e)}"
+                )
+                continue
+            self.stdout.write(f"Populated output_cols for model: {model.name}")
 
     def _migrate_data(self, orgdbt):
         """Perform the actual migration of data from v1 to v2 using edge-first approach."""
