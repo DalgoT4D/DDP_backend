@@ -135,6 +135,12 @@ class Command(BaseCommand):
                 f"\nProcessing edge {edge_num}/{len(old_edges)}: {edge.from_node.name} -> {edge.to_node.name}"
             )
 
+            if edge.from_node.under_construction:
+                self.stdout.write(
+                    "  Source node is under construction; skipping edges/chain from it"
+                )
+                continue  # skip edges from under construction nodes
+
             source_canvas_node = self._create_canvas_node_for_model(edge.from_node, orgdbt)
 
             # Step 2c: Get all operations for the target model
