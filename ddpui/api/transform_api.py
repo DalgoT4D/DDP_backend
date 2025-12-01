@@ -838,7 +838,7 @@ def delete_orgdbtmodel(request, model_uuid, canvas_lock_id: str = None, cascade:
 
     check_canvas_locked(orguser, canvas_lock_id)
 
-    orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid, type=OrgDbtModelType.MODEL).first()
+    orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid).first()
     if not orgdbt_model:
         raise HttpError(404, "model not found")
 
