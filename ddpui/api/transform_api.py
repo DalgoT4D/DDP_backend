@@ -1265,19 +1265,16 @@ def post_terminate_operation_node(
                 )
 
             # create the node representing the model
-            model_node: CanvasNode = CanvasNode.objects.get(
+            model_node, created = CanvasNode.objects.get_or_create(
                 dbtmodel=dbtmodel,
                 orgdbt=orgdbt,
+                defaults={
+                    "node_type": CanvasNodeType.MODEL,
+                    "name": f"{dbtmodel.schema}.{dbtmodel.name}",
+                    "output_cols": output_cols,
+                },
             )
-            if not model_node:
-                model_node = CanvasNode.objects.create(
-                    orgdbt=orgdbt,
-                    node_type=CanvasNodeType.MODEL,
-                    name=f"{dbtmodel.schema}.{dbtmodel.name}",
-                    output_cols=output_cols,
-                    dbtmodel=dbtmodel,
-                )
-            else:
+            if not created:
                 model_node.output_cols = output_cols
                 model_node.save()
 
