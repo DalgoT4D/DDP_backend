@@ -58,14 +58,15 @@ def groupby_dbt_sql(
     """
     Generate SQL code for the coalesce_columns operation.
     """
-    source_columns = config["source_columns"]
+    # moved storing dimension from source_columns to dimension_columns
+    dimension_columns = config["dimension_columns"]
     aggregate_on: list[dict] = config.get("aggregate_on", [])
     input_table = config["input"]
 
     dbt_code = "SELECT\n"
 
     dbt_code += ",\n".join(
-        [quote_columnname(col_name, warehouse.name) for col_name in source_columns]
+        [quote_columnname(col_name, warehouse.name) for col_name in dimension_columns]
     )
 
     for agg_col in aggregate_on:
@@ -85,13 +86,13 @@ def groupby_dbt_sql(
     else:
         dbt_code += f"FROM {{{{{select_from}}}}}\n"
 
-    if len(source_columns) > 0:
+    if len(dimension_columns) > 0:
         dbt_code += "GROUP BY "
         dbt_code += ",".join(
-            [quote_columnname(col_name, warehouse.name) for col_name in source_columns]
+            [quote_columnname(col_name, warehouse.name) for col_name in dimension_columns]
         )
 
-    output_columns = source_columns + [col["output_column_name"] for col in aggregate_on]
+    output_columns = dimension_columns + [col["output_column_name"] for col in aggregate_on]
 
     return dbt_code, output_columns
 
