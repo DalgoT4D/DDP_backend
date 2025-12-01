@@ -1265,8 +1265,9 @@ def post_terminate_operation_node(
                 )
 
             # create the node representing the model
-            model_node: CanvasNode = CanvasNode.objects.get_or_create(
-                defaults={"orgdbt": orgdbt, "dbtmodel": dbtmodel}
+            model_node: CanvasNode = CanvasNode.objects.get(
+                dbtmodel=dbtmodel,
+                orgdbt=orgdbt,
             )
             if not model_node:
                 model_node = CanvasNode.objects.create(
