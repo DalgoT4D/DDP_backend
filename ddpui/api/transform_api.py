@@ -815,6 +815,41 @@ def get_input_sources_and_models_v2(request, schema_name: str = None):
     return res
 
 
+@transform_router.delete("/v2/dbt_project/model/{model_uuid}/")
+@has_permission(["can_delete_dbt_model"])
+def delete_orgdbtmodel(request, model_uuid, canvas_lock_id: str = None, cascade: bool = False):
+    """
+    Delete a model if it does not have any operations chained
+    """
+    if cascade:
+        raise NotImplementedError()
+
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        raise HttpError(404, "please setup your warehouse first")
+
+    # make sure the orgdbt here is the one we create locally
+    orgdbt = OrgDbt.objects.filter(org=org, transform_type=TransformType.UI).first()
+    if not orgdbt:
+        raise HttpError(404, "dbt workspace not setup")
+
+    check_canvas_locked(orguser, canvas_lock_id)
+
+    orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid, type=OrgDbtModelType.MODEL).first()
+    if not orgdbt_model:
+        raise HttpError(404, "model not found")
+
+    if orgdbt_model.type == OrgDbtModelType.SOURCE:
+        raise HttpError(422, "Cannot delete source model")
+
+    dbtautomation_service.delete_org_dbt_model(orgdbt_model, cascade)
+
+    return {"success": 1}
+
+
 @transform_router.get("/v2/dbt_project/graph/")
 @has_permission(["can_view_dbt_workspace"])
 def get_dbt_project_DAG_v2(request):
