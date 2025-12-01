@@ -3,6 +3,8 @@ name: Dalgo UI4T Integration Tests
 on:
   push:
     branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
 
 jobs:
   tests:
@@ -42,10 +44,14 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          uv sync
           
       - name: Create logs directory
         run: mkdir -p ddpui/logs
@@ -53,9 +59,11 @@ jobs:
       - name: Seed data in test warehouse
         run: |
           export PYTHONPATH=$(pwd)
-          python ddpui/dbt_automation/seeds/seed.py --warehouse postgres
-          python ddpui/dbt_automation/seeds/seed.py --warehouse bigquery
+          uv run python3 -m ddpui.dbt_automation.seeds.seed --warehouse postgres
+          uv run python3 -m ddpui.dbt_automation.seeds.seed --warehouse bigquery
 
       - name: Run dbt automation (ui4t) integration tests
+        env:
+          DJANGOSECRET: "some-secret-key"
         run: |
-          pytest ddpui/tests/integration_tests/dbt_automation/*.py -s 
+          uv run pytest ddpui/tests/integration_tests/dbt_automation/*.py -s 

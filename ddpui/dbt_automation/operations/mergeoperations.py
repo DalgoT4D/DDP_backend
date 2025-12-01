@@ -1,4 +1,3 @@
-from typing import List
 from ddpui.dbt_automation.operations.arithmetic import arithmetic_dbt_sql
 from ddpui.dbt_automation.operations.coalescecolumns import (
     coalesce_columns_dbt_sql,
@@ -131,6 +130,101 @@ def merge_operations(
 
     select_statement, output_cols = merge_operations_sql(
         config,
+        warehouse,
+    )
+    dbt_sql += select_statement
+
+    dbt_project = dbtProject(project_dir)
+    dbt_project.ensure_models_dir(config["dest_schema"])
+
+    model_sql_path = dbt_project.write_model(config["dest_schema"], config["output_name"], dbt_sql)
+
+    return model_sql_path, output_cols
+
+
+def merge_operations_sql_v2(operations: list[dict], warehouse: WarehouseInterface):
+    """
+    Generate SQL code and merge them using cte sequentially
+    """
+
+    cte_sql_list = []
+    output_cols = []  # return the last operations output columns
+
+    # push select statements into the queue
+    for cte_counter, operation in enumerate(operations):
+        if operation["type"] == "castdatatypes":
+            op_select_statement, out_cols = cast_datatypes_sql(operation["config"], warehouse)
+        elif operation["type"] == "arithmetic":
+            op_select_statement, out_cols = arithmetic_dbt_sql(operation["config"], warehouse)
+        elif operation["type"] == "coalescecolumns":
+            op_select_statement, out_cols = coalesce_columns_dbt_sql(operation["config"], warehouse)
+        elif operation["type"] == "concat":
+            op_select_statement, out_cols = concat_columns_dbt_sql(operation["config"], warehouse)
+        elif operation["type"] == "dropcolumns":
+            op_select_statement, out_cols = drop_columns_dbt_sql(operation["config"], warehouse)
+        elif operation["type"] == "renamecolumns":
+            op_select_statement, out_cols = rename_columns_dbt_sql(operation["config"], warehouse)
+        elif operation["type"] == "flattenjson":
+            op_select_statement, out_cols = flattenjson_dbt_sql(operation["config"], warehouse)
+        elif operation["type"] == "regexextraction":
+            op_select_statement, out_cols = regex_extraction_sql(operation["config"], warehouse)
+        elif operation["type"] == "union_tables":
+            op_select_statement, out_cols = union_tables_sql(operation["config"], warehouse)
+        elif operation["type"] == "replace":
+            op_select_statement, out_cols = replace_dbt_sql(operation["config"], warehouse)
+        elif operation["type"] == "join":
+            op_select_statement, out_cols = joins_sql(operation["config"], warehouse)
+        elif operation["type"] == "where":
+            op_select_statement, out_cols = where_filter_sql(operation["config"], warehouse)
+        elif operation["type"] == "groupby":
+            op_select_statement, out_cols = groupby_dbt_sql(operation["config"], warehouse)
+        elif operation["type"] == "aggregate":
+            op_select_statement, out_cols = aggregate_dbt_sql(operation["config"], warehouse)
+        elif operation["type"] == "casewhen":
+            op_select_statement, out_cols = casewhen_dbt_sql(operation["config"], warehouse)
+        elif operation["type"] == "unionall":
+            op_select_statement, out_cols = union_tables_sql(operation["config"], warehouse)
+        elif operation["type"] == "pivot":
+            op_select_statement, out_cols = pivot_dbt_sql(operation["config"], warehouse)
+        elif operation["type"] == "unpivot":
+            op_select_statement, out_cols = unpivot_dbt_sql(operation["config"], warehouse)
+        elif operation["type"] == "generic":
+            op_select_statement, out_cols = generic_function_dbt_sql(operation["config"], warehouse)
+        elif operation["type"] == "rawsql":
+            op_select_statement, out_cols = raw_generic_dbt_sql(operation["config"], warehouse)
+
+        output_cols = out_cols
+
+        cte_sql = f" , {operation['as_cte']} as (\n"
+        if cte_counter == 0:
+            cte_sql = f"WITH {operation['as_cte']} as (\n"
+        cte_sql += op_select_statement
+        cte_sql += f")"
+
+        # last step
+        if cte_counter == len(operations) - 1:
+            prev_as_cte = operations[cte_counter]["as_cte"]
+            cte_sql += "\n-- Final SELECT statement combining the outputs of all CTEs\n"
+            cte_sql += f"SELECT *\nFROM {prev_as_cte}"
+
+        cte_sql_list.append(cte_sql)
+
+    return "".join(cte_sql_list), output_cols
+
+
+def merge_operations_v2(
+    config: dict,
+    warehouse: WarehouseInterface,
+    project_dir: str,
+):
+    """
+    Perform merging of operations and generate a DBT model.
+    """
+
+    dbt_sql = "{{ config(materialized='table', schema='" + config["dest_schema"] + "') }}\n"
+
+    select_statement, output_cols = merge_operations_sql_v2(
+        config["operations"],
         warehouse,
     )
     dbt_sql += select_statement

@@ -10,7 +10,9 @@ class Command(BaseCommand):
     help = "Updates the timeout parameter in Prefect deployments for Airbyte tasks"
 
     def add_arguments(self, parser):
-        parser.add_argument("--timeout", type=int, help="New timeout value in seconds")
+        parser.add_argument(
+            "--timeout", type=int, help="New timeout value in seconds", required=True
+        )
         parser.add_argument(
             "--deployment_id",
             type=str,
@@ -28,12 +30,14 @@ class Command(BaseCommand):
         deployment_id = options.get("deployment_id")
         orgslug = options.get("orgslug")
 
-        if not deployment_id and not orgslug:
-            raise CommandError("You must provide either a deployment ID or an organization slug.")
+        if not orgslug:
+            raise CommandError(
+                "You must provide an organization slug. Use 'all' for all organizations."
+            )
 
         dataflows = OrgDataFlowv1.objects
 
-        if orgslug:
+        if orgslug and orgslug != "all":
             dataflows = dataflows.filter(org__slug=orgslug)
 
         if deployment_id:
@@ -42,7 +46,7 @@ class Command(BaseCommand):
         if not dataflows.exists():
             raise CommandError(f"No deployments found for organization slug: {orgslug}")
 
-        for dataflow in dataflows:
+        for dataflow in dataflows.all():
             deployment = prefect_service.get_deployment(
                 dataflow.deployment_id,
             )
@@ -51,10 +55,8 @@ class Command(BaseCommand):
             for task in parameters.get("config", {}).get("tasks", []):
                 task_slug = task.get("slug", "")
                 if task_slug in [
-                    TASK_AIRBYTECLEAR,
-                    TASK_AIRBYTERESET,
                     TASK_AIRBYTESYNC,
-                ] or task.get("connection_id", None):
+                ] and task.get("connection_id", None):
                     self.stdout.write(
                         f"updating timeout for task {task_slug} in deployment {dataflow.deployment_name}|{dataflow.deployment_id} "
                     )

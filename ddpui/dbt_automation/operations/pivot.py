@@ -30,7 +30,8 @@ def pivot_dbt_sql(
     """
     Generate SQL code for the coalesce_columns operation.
     """
-    source_columns = config.get("source_columns", [])
+    # source_columns = config.get("source_columns", [])
+    groupby_columns = config.get("groupby_columns", [])
     pivot_column_values = config.get("pivot_column_values", [])
     pivot_column_name = config.get("pivot_column_name", None)
     input_table = config["input"]
@@ -40,9 +41,9 @@ def pivot_dbt_sql(
 
     dbt_code = "SELECT\n"
 
-    if len(source_columns) > 0:
+    if len(groupby_columns) > 0:
         dbt_code += ",\n".join(
-            [quote_columnname(col_name, warehouse.name) for col_name in source_columns]
+            [quote_columnname(col_name, warehouse.name) for col_name in groupby_columns]
         )
         dbt_code += ",\n"
 
@@ -61,13 +62,13 @@ def pivot_dbt_sql(
     dbt_code += ")}}\n"
 
     dbt_code += select_from(input_table)
-    if len(source_columns) > 0:
+    if len(groupby_columns) > 0:
         dbt_code += "GROUP BY "
         dbt_code += ",".join(
-            [quote_columnname(col_name, warehouse.name) for col_name in source_columns]
+            [quote_columnname(col_name, warehouse.name) for col_name in groupby_columns]
         )
 
-    return dbt_code, source_columns + pivot_column_values
+    return dbt_code, groupby_columns + pivot_column_values
 
 
 def pivot(config: dict, warehouse: WarehouseInterface, project_dir: str):
