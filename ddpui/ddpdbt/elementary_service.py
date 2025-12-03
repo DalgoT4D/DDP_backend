@@ -12,7 +12,7 @@ from ninja.errors import HttpError
 from django.utils import timezone as djantotimezone
 
 from ddpui import settings
-from ddpui.models.org import Org
+from ddpui.models.org import Org, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import OrgDataFlowv1
 
@@ -30,7 +30,7 @@ from ddpui.utils.helpers import generate_hash_id, compare_semver
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
 )
-from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE
+from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE, DBTCLIPROFILE
 from ddpui.utils.timezone import as_ist
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.custom_logger import CustomLogger
@@ -243,9 +243,23 @@ def create_elementary_profile(org: Org):
 
     # now we have to fix up the auth section by copying the dbt profile's auth section
     dbt_profile_file = Path(dbt_project_params.project_dir) / "profiles/profiles.yml"
-    with open(dbt_profile_file, "r", encoding="utf-8") as dbt_profile_file_f:
-        dbt_profile = yaml.safe_load(dbt_profile_file_f)
-        logger.info("read dbt profile from %s", dbt_profile_file)
+    dbt_profile = {}
+    if not os.path.exists(dbt_profile_file):
+        # fetch from the cli profile block in prefect
+        logger.info("fetching dbt profile from prefect block")
+        dbt_cli_profile = OrgPrefectBlockv1.objects.filter(
+            org=org, block_type=DBTCLIPROFILE
+        ).first()
+        if dbt_cli_profile is None:
+            raise HttpError(400, f"{dbt_profile_file} is missing")
+
+        dbt_profile = prefect_service.get_dbt_cli_profile_block(dbt_cli_profile.block_name)[
+            "profile"
+        ]
+    else:
+        with open(dbt_profile_file, "r", encoding="utf-8") as dbt_profile_file_f:
+            dbt_profile = yaml.safe_load(dbt_profile_file_f)
+            logger.info("read dbt profile from %s", dbt_profile_file)
 
     target = elementary_profile["elementary"].get("target", "default")
     if elementary_profile["elementary"]["outputs"][target]["type"] == "bigquery":
@@ -253,9 +267,9 @@ def create_elementary_profile(org: Org):
             "elementary"
         ]["outputs"][target]["dataset"]
     elementary_schema = elementary_profile["elementary"]["outputs"][target]["schema"]
-    elementary_profile["elementary"]["outputs"][target] = dbt_profile[dbt_profile_name]["outputs"][
-        dbt_profiles_target
-    ]
+    elementary_profile["elementary"]["outputs"][target] = (
+        dbt_profile.get(dbt_profile_name, {}).get("outputs", {}).get(dbt_profiles_target, {})
+    )
 
     # set schema to what the elementary.generate_elementary_cli_profile macro computed
     elementary_profile["elementary"]["outputs"][target]["schema"] = elementary_schema
