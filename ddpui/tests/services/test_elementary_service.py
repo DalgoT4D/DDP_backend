@@ -1,6 +1,7 @@
 import os
 import yaml
 from pathlib import Path
+from ninja.errors import HttpError
 from unittest.mock import patch, Mock, mock_open, MagicMock, ANY
 import pytest
 from django.contrib.auth.models import User
@@ -21,12 +22,11 @@ from ddpui.ddpdbt.elementary_service import (
     create_edr_sendreport_dataflow,
     create_elementary_profile,
 )
-from ddpui.utils.constants import TASK_GENERATE_EDR, DBTCLIPROFILE
-from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE
+from ddpui.utils.constants import TASK_GENERATE_EDR
+from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE, DBTCLIPROFILE
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
 )
-from ddpui.core.exceptions import HttpError
 
 pytestmark = pytest.mark.django_db
 
