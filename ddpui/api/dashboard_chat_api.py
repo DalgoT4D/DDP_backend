@@ -1133,13 +1133,40 @@ def dashboard_chat(request, dashboard_id: int, payload: DashboardChatRequest):
             response_time_ms = int((end_time - start_time) * 1000)
             response_time = timezone.now()
 
+            # Post-process content to append Source line when possible
+            content = response.content
+            source_tables: List[str] = []
+
+            # If a specific chart is selected, derive its table source from context
+            if payload.selected_chart_id:
+                try:
+                    for chart in context.get("charts", []):
+                        if str(chart.get("id")) == str(payload.selected_chart_id):
+                            schema = chart.get("schema") or {}
+                            schema_name = schema.get("schema_name")
+                            table_name = schema.get("table_name")
+                            if schema_name and table_name:
+                                source_tables.append(f"{schema_name}.{table_name}")
+                            break
+                except Exception as e:
+                    logger.error(
+                        f"Error deriving source tables for chart {payload.selected_chart_id}: {e}"
+                    )
+
+            if source_tables:
+                if len(source_tables) == 1:
+                    source_line = f"Source: {source_tables[0]}"
+                else:
+                    source_line = "Source: " + ", ".join(source_tables)
+                content = content.rstrip() + "\n\n" + source_line
+
             # Log complete conversation if both user message and response exist
             if user_message:
                 log_ai_chat_conversation(
                     org=orguser_obj.org,
                     user=orguser_obj.user,
                     user_prompt=user_message,
-                    ai_response=response.content,
+                    ai_response=content,
                     request_timestamp=request_time,
                     response_timestamp=response_time,
                     dashboard_id=dashboard_id,
@@ -1169,7 +1196,7 @@ def dashboard_chat(request, dashboard_id: int, payload: DashboardChatRequest):
 
             return JsonResponse(
                 {
-                    "content": response.content,
+                    "content": content,
                     "usage": response.usage,
                     "context_included": True,
                     "data_included": payload.include_data,
@@ -1289,6 +1316,13 @@ def _build_dashboard_system_prompt(
         f"Current Dashboard: '{dashboard.get('title', 'Untitled Dashboard')}'",
         f"Description: {dashboard.get('description', 'No description available')}",
         "",
+        "🚫 HARD CONSTRAINTS (DATA TRUST & SCOPE):",
+        "- You MUST use ONLY the data, schemas, and query results explicitly provided in this dashboard context as your source of truth.",
+        "- You MUST NOT use the public internet, external datasets, or general world knowledge (for example: typical population of a state or country).",
+        "- If the dashboard data does not contain the specific metric, state, region, time period, or entity requested, you MUST clearly say that this information is not available in the current dashboard data.",
+        "- In those cases, DO NOT guess, approximate, or fill in values from outside knowledge.",
+        "- For any answer where you provide a specific numeric value derived from the dashboard data, you MUST end your answer with a new line in the format: 'Source: <schema.table>' or 'Source: <schema1.table1, schema2.table2>'. If you cannot identify the table, you MUST NOT provide the numeric value.",
+        "",
         "🚫 CRITICAL DATA BEHAVIOUR:",
         "- When REAL DATA rows or query results are available in this context, use them as the single source of truth.",
         "- When data access is enabled, you MUST answer quantitative questions (counts, totals, averages) directly from the dashboard data, not from outside knowledge.",
@@ -1305,7 +1339,7 @@ def _build_dashboard_system_prompt(
         "- BE DEFINITIVE AND AUTHORITATIVE: State facts, not possibilities",
         "- AVOID uncertain language: Never use 'might', 'probably', 'could be', 'perhaps', 'maybe', 'seems like', 'appears to'",
         "- NEVER use hesitant phrases: 'one moment', 'let me check', 'I have access to sample data'",
-        "- USE CONFIDENT STATEMENTS: 'The data shows', 'Karnataka population is', 'Total revenue is'",
+        "- USE CONFIDENT STATEMENTS: 'The data shows', 'Karnataka population is', 'Total revenue is' — but ONLY when those values are present in the dashboard data.",
         "- PROVIDE SPECIFIC INSIGHTS: Reference exact numbers, names, and values from the data",
         "- BE DIRECT: Answer questions immediately without checking or processing delays",
         "",
@@ -2032,6 +2066,30 @@ def enhanced_dashboard_chat(request, dashboard_id: int, payload: EnhancedDashboa
             final_content = (
                 enhanced_response.content if enhanced_response.content else response.content
             )
+
+            # Post-process to append Source line for selected chart when possible
+            source_tables: List[str] = []
+            if payload.selected_chart_id:
+                try:
+                    for chart in dashboard_context.get("charts", []):
+                        if str(chart.get("id")) == str(payload.selected_chart_id):
+                            schema = chart.get("schema") or {}
+                            schema_name = schema.get("schema_name")
+                            table_name = schema.get("table_name")
+                            if schema_name and table_name:
+                                source_tables.append(f"{schema_name}.{table_name}")
+                            break
+                except Exception as e:
+                    logger.error(
+                        f"Error deriving source tables for enhanced chat chart {payload.selected_chart_id}: {e}"
+                    )
+
+            if source_tables:
+                if len(source_tables) == 1:
+                    source_line = f"Source: {source_tables[0]}"
+                else:
+                    source_line = "Source: " + ", ".join(source_tables)
+                final_content = final_content.rstrip() + "\n\n" + source_line
 
             response_content = {
                 "content": final_content,
