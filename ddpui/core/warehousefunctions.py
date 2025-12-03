@@ -5,6 +5,7 @@ from ddpui.core import dbtautomation_service
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.helpers import convert_to_standard_types
 from ddpui.models.org import OrgWarehouse
+from ddpui.models.dbt_workflow import OrgDbtModelType
 from ddpui.utils.redis_client import RedisClient
 
 logger = CustomLogger("ddpui")
@@ -60,8 +61,8 @@ def fetch_warehouse_tables(request, org_warehouse, cache_key=None):
             res.append(
                 {
                     "schema": schema,
-                    "input_name": table,
-                    "type": "src_model_node",
+                    "name": table,
+                    "type": OrgDbtModelType.SOURCE.value,
                     "id": schema + "-" + table,
                 }
             )
