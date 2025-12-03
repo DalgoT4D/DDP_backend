@@ -81,11 +81,11 @@ jobs:
           PGPASSWORD: password
         run: |
           # create test database if it doesn't exist
-          psql -h localhost -U ddp -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'pytest_warehouse'" | grep -q 1 || \
-            psql -h localhost -U ddp -d postgres -c "CREATE DATABASE pytest_warehouse;"
+          psql -h localhost -U postgres -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'pytest_warehouse'" | grep -q 1 || \
+            psql -h localhost -U postgres -d postgres -c "CREATE DATABASE pytest_warehouse;"
 
           # create schema in the test database (used by tests)
-          psql -h localhost -U ddp -d pytest_warehouse -c "CREATE SCHEMA IF NOT EXISTS staging AUTHORIZATION ddp;"
+          psql -h localhost -U postgres -d pytest_warehouse -c "CREATE SCHEMA IF NOT EXISTS staging AUTHORIZATION postgres;"
 
       - name: Test with pytest
         env:
