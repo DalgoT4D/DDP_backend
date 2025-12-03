@@ -70,7 +70,7 @@ jobs:
           DBHOST: localhost
           DBPORT: 5432
           DBNAME: postgres
-          DBUSER: ddp
+          DBUSER: postgres
           DBPASSWORD: password
           DJANGOSECRET: "some-secret-key"
         run: |
