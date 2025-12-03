@@ -753,6 +753,12 @@ def test_create_elementary_profile_with_existing_profiles_yml(
     with open(profiles_file, "w") as f:
         yaml.safe_dump(dbt_profile_content, f)
 
+    # Create dbt_project.yml
+    dbt_project_file = project_dir / "dbt_project.yml"
+    dbt_project_content = {"name": "test_project", "version": "1.0.0", "profile": "test_profile"}
+    with open(dbt_project_file, "w") as f:
+        yaml.safe_dump(dbt_project_content, f)
+
     # Setup mocks
     mock_gather_params.return_value = Mock(
         project_dir=str(project_dir), dbt_binary="test-dbt", target="test-target"
@@ -786,6 +792,12 @@ def test_create_elementary_profile_without_profiles_yml_fetch_from_prefect(
     # Create temporary project directory (no profiles.yml)
     project_dir = tmp_path / "project"
     project_dir.mkdir()
+
+    # Create dbt_project.yml
+    dbt_project_file = project_dir / "dbt_project.yml"
+    dbt_project_content = {"name": "test_project", "version": "1.0.0", "profile": "test_profile"}
+    with open(dbt_project_file, "w") as f:
+        yaml.safe_dump(dbt_project_content, f)
 
     # Setup mocks
     mock_gather_params.return_value = Mock(
@@ -826,6 +838,12 @@ def test_create_elementary_profile_missing_prefect_block(mock_gather_params, org
     project_dir = tmp_path / "project"
     project_dir.mkdir()
 
+    # Create dbt_project.yml
+    dbt_project_file = project_dir / "dbt_project.yml"
+    dbt_project_content = {"name": "test_project", "version": "1.0.0", "profile": "test_profile"}
+    with open(dbt_project_file, "w") as f:
+        yaml.safe_dump(dbt_project_content, f)
+
     mock_gather_params.return_value = Mock(project_dir=str(project_dir))
 
     # No OrgPrefectBlockv1 created, so it should raise HttpError
@@ -858,6 +876,12 @@ def test_create_elementary_profile_elementary_dir_already_exists(
     }
     with open(profiles_file, "w") as f:
         yaml.safe_dump(dbt_profile_content, f)
+
+    # Create dbt_project.yml
+    dbt_project_file = project_dir / "dbt_project.yml"
+    dbt_project_content = {"name": "test_project", "version": "1.0.0", "profile": "test_profile"}
+    with open(dbt_project_file, "w") as f:
+        yaml.safe_dump(dbt_project_content, f)
 
     # Setup mocks
     mock_gather_params.return_value = Mock(
