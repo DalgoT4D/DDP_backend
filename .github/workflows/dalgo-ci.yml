@@ -96,7 +96,7 @@ jobs:
           DBHOST: localhost
           DBPORT: 5432
           DBNAME: postgres
-          DBUSER: ddp
+          DBUSER: postgres
           DBPASSWORD: password
           PREFECT_PROXY_API_URL: http://localhost:8080
           DEV_SECRETS_DIR: /tmp/
