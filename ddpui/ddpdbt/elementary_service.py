@@ -213,6 +213,36 @@ def create_elementary_profile(org: Org):
 
     dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
 
+    # read profiles.yml is created either from disk or from the prefect block
+    dbt_profile_file = Path(dbt_project_params.project_dir) / "profiles/profiles.yml"
+    dbt_profile = {}
+    if not os.path.exists(dbt_profile_file):
+        # fetch from the cli profile block in prefect
+        logger.info("fetching dbt profile from prefect block")
+        dbt_cli_profile = OrgPrefectBlockv1.objects.filter(
+            org=org, block_type=DBTCLIPROFILE
+        ).first()
+        if dbt_cli_profile is None:
+            raise HttpError(400, f"{dbt_profile_file} is missing")
+
+        dbt_profile = prefect_service.get_dbt_cli_profile_block(dbt_cli_profile.block_name)[
+            "profile"
+        ]
+
+        # write the dbt profile to disk also since elementary cli will reference it while generating its profile
+        profile_dirname = Path(dbt_project_params.project_dir) / "profiles"
+        os.makedirs(profile_dirname, exist_ok=True)
+        profile_filename = profile_dirname / "profiles.yml"
+        logger.info("writing dbt profile to " + str(profile_filename))
+        with open(profile_filename, "w", encoding="utf-8") as f:
+            yaml.safe_dump(dbt_profile, f)
+        logger.info("wrote dbt profile to %s", profile_filename)
+    else:
+        with open(dbt_profile_file, "r", encoding="utf-8") as dbt_profile_file_f:
+            dbt_profile = yaml.safe_load(dbt_profile_file_f)
+            logger.info("read dbt profile from %s", dbt_profile_file)
+
+    # now we have to fix up the auth section by copying the dbt profile's auth section
     r = subprocess.check_output(
         [
             dbt_project_params.dbt_binary,
@@ -240,26 +270,6 @@ def create_elementary_profile(org: Org):
 
     dbt_profile_name = dbt_project["profile"]
     dbt_profiles_target = dbt_project_params.target
-
-    # now we have to fix up the auth section by copying the dbt profile's auth section
-    dbt_profile_file = Path(dbt_project_params.project_dir) / "profiles/profiles.yml"
-    dbt_profile = {}
-    if not os.path.exists(dbt_profile_file):
-        # fetch from the cli profile block in prefect
-        logger.info("fetching dbt profile from prefect block")
-        dbt_cli_profile = OrgPrefectBlockv1.objects.filter(
-            org=org, block_type=DBTCLIPROFILE
-        ).first()
-        if dbt_cli_profile is None:
-            raise HttpError(400, f"{dbt_profile_file} is missing")
-
-        dbt_profile = prefect_service.get_dbt_cli_profile_block(dbt_cli_profile.block_name)[
-            "profile"
-        ]
-    else:
-        with open(dbt_profile_file, "r", encoding="utf-8") as dbt_profile_file_f:
-            dbt_profile = yaml.safe_load(dbt_profile_file_f)
-            logger.info("read dbt profile from %s", dbt_profile_file)
 
     target = elementary_profile["elementary"].get("target", "default")
     if elementary_profile["elementary"]["outputs"][target]["type"] == "bigquery":

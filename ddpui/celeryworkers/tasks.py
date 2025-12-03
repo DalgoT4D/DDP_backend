@@ -165,6 +165,7 @@ def clone_github_repo(
     )
 
     # note that here we are only setting up the profile for elementary, not the entire elementary setup
+    # entire setup should be done separately
     if setup_elementary_profile:
         org = Org.objects.filter(slug=org_slug).first()
         taskprogress.add(
