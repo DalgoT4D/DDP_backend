@@ -76,6 +76,23 @@ jobs:
         run: |
           uv run python manage.py migrate
 
+      - name: Start Django server
+        env:
+          DBHOST: localhost
+          DBPORT: 5432
+          DBNAME: postgres
+          DBUSER: postgres
+          DBPASSWORD: password
+          DEV_SECRETS_DIR: /tmp/
+          CLIENTDBT_ROOT: /tmp
+          DJANGOSECRET: "some-secret-key"
+        run: |
+          uv run python manage.py runserver 0.0.0.0:8002 &
+          # Wait for the server to start
+          sleep 5
+          # Verify server is running
+          curl --retry 5 --retry-delay 2 --retry-connrefused http://localhost:8002/healthcheck || echo "Server health check endpoint not available, continuing..."
+      
       - name: Create test warehouse DB & schema for e2e tests
         env:
           PGPASSWORD: password
@@ -86,6 +103,7 @@ jobs:
 
           # create schema in the test database (used by tests)
           psql -h localhost -U postgres -d pytest_warehouse -c "CREATE SCHEMA IF NOT EXISTS staging AUTHORIZATION postgres;"
+
 
       - name: Test with pytest
         env:
