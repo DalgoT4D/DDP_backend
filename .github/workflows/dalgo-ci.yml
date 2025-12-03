@@ -41,7 +41,7 @@ jobs:
       - name: Install psql client
         run: |
           sudo apt-get update
-          sudo apt-get install -y postgresql-client-15
+          sudo apt install postgresql-15 postgresql-client-15
 
       - name: Install dependencies
         run: |
