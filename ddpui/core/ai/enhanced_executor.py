@@ -231,6 +231,7 @@ class EnhancedDynamicExecutor(DynamicQueryExecutor):
                             "execution_time_ms": result.execution_time_ms,
                             "warnings": result.warnings,
                             "executed_at": result.executed_at.isoformat(),
+                            "source_tables": result.source_tables,
                         }
                     ),
                     "cache_info": QueryCacheInfo(

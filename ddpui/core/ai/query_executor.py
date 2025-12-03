@@ -48,6 +48,7 @@ class QueryExecutionResult:
     original_query: str = ""
     executed_query: str = ""
     resource_usage: Dict[str, Any] = field(default_factory=dict)
+    source_tables: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -202,6 +203,11 @@ class DynamicQueryExecutor:
                     f"Results limited to {self.safety_limits.max_result_rows} rows"
                 )
 
+            # Capture source tables from validation if available
+            source_tables: List[str] = []
+            if query_plan.validation_result and query_plan.validation_result.tables_accessed:
+                source_tables = list(query_plan.validation_result.tables_accessed)
+
             return QueryExecutionResult(
                 success=True,
                 data=formatted_data,
@@ -218,6 +224,7 @@ class DynamicQueryExecutor:
                     "result_rows": len(formatted_data),
                     "result_columns": len(columns),
                 },
+                source_tables=source_tables,
             )
 
         except SQLTimeoutError:

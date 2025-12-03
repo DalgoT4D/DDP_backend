@@ -428,6 +428,24 @@ class SmartChatProcessor:
                 if confidence < 0.7:
                     content += f"\n\n*Note: This analysis has moderate confidence ({confidence:.1f}). You may want to verify the results.*"
 
+            # Add explicit data source information so users can trace back
+            source_tables = getattr(execution_result, "source_tables", None) or []
+            if source_tables:
+                # Deduplicate while preserving order
+                seen = set()
+                unique_sources = []
+                for tbl in source_tables:
+                    if tbl and tbl not in seen:
+                        seen.add(tbl)
+                        unique_sources.append(tbl)
+
+                if unique_sources:
+                    if len(unique_sources) == 1:
+                        source_line = f"Source: {unique_sources[0]}"
+                    else:
+                        source_line = "Source: " + ", ".join(unique_sources)
+                    content += f"\n\n{source_line}"
+
             return content
 
         except Exception as e:
