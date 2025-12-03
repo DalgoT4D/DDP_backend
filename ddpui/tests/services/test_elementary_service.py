@@ -763,7 +763,12 @@ def test_create_elementary_profile_with_existing_profiles_yml(
     mock_gather_params.return_value = Mock(
         project_dir=str(project_dir), dbt_binary="test-dbt", target="test-target"
     )
-    mock_subprocess.return_value = "elementary:\n  schema: elementary_schema"
+    mock_subprocess.return_value = """elementary:
+  target: test-target
+  outputs:
+    test-target:
+      type: postgres
+      schema: elementary_schema"""
 
     result = create_elementary_profile(org)
 
@@ -810,7 +815,12 @@ def test_create_elementary_profile_without_profiles_yml_fetch_from_prefect(
             }
         }
     }
-    mock_subprocess.return_value = "elementary:\n  schema: elementary_schema"
+    mock_subprocess.return_value = """elementary:
+  target: test-target
+  outputs:
+    test-target:
+      type: postgres
+      schema: elementary_schema"""
 
     result = create_elementary_profile(org)
 
@@ -887,7 +897,12 @@ def test_create_elementary_profile_elementary_dir_already_exists(
     mock_gather_params.return_value = Mock(
         project_dir=str(project_dir), dbt_binary="test-dbt", target="test-target"
     )
-    mock_subprocess.return_value = "elementary:\n  schema: elementary_schema"
+    mock_subprocess.return_value = """elementary:
+  target: test-target
+  outputs:
+    test-target:
+      type: postgres
+      schema: elementary_schema"""
 
     result = create_elementary_profile(org)
 
