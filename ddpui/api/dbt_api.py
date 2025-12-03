@@ -118,12 +118,17 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
 
     org_dir = DbtProjectManager.get_org_dir(org)
 
+    # check if elementary is setup
+    elementary_status_resp = elementary_service.elementary_setup_status(org)
+
     task = clone_github_repo.delay(
         org.slug,
         org.dbt.gitrepo_url,
         org.dbt.gitrepo_access_token_secret,
         org_dir,
         None,
+        elementary_status_resp["status"]
+        == "set-up",  # setup_elementary if it was setup in the old repo
     )
 
     return {"task_id": task.id}
