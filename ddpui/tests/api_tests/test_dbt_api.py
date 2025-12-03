@@ -209,6 +209,7 @@ def test_put_dbt_github(orguser):
             "new-access-token",
             os.getenv("CLIENTDBT_ROOT") + "/org-slug",
             None,
+            False,
         )
         assert request.orguser.org.dbt.gitrepo_url == "new-url"
         assert request.orguser.org.dbt.gitrepo_access_token_secret == "new-access-token"
