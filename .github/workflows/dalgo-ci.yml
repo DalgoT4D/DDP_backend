@@ -104,7 +104,7 @@ jobs:
           DJANGOSECRET: "some-secret-key"
           TEST_PG_DBHOST: localhost
           TEST_PG_DBPORT: 5432
-          TEST_PG_DBUSER: ddp
+          TEST_PG_DBUSER: postgres
           TEST_PG_DBNAME: pytest_warehouse
           TEST_PG_DBPASSWORD: password
           TEST_PG_DBSCHEMA_SRC: staging
