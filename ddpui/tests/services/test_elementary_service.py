@@ -1,10 +1,12 @@
 import os
+import yaml
 from pathlib import Path
+from ninja.errors import HttpError
 from unittest.mock import patch, Mock, mock_open, MagicMock, ANY
 import pytest
 from django.contrib.auth.models import User
 from ddpui import settings
-from ddpui.models.org import Org, OrgDbt, OrgDataFlowv1
+from ddpui.models.org import Org, OrgDbt, OrgDataFlowv1, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask, TaskProgressHashPrefix
 from ddpui.ddpdbt.elementary_service import (
@@ -18,9 +20,10 @@ from ddpui.ddpdbt.elementary_service import (
     get_dbt_version,
     get_edr_version,
     create_edr_sendreport_dataflow,
+    create_elementary_profile,
 )
 from ddpui.utils.constants import TASK_GENERATE_EDR
-from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE
+from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE, DBTCLIPROFILE
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
 )
@@ -720,3 +723,190 @@ def test_create_edr_sendreport_dataflow(
         ),
         MANUL_DBT_WORK_QUEUE,
     )
+
+
+def test_create_elementary_profile_no_dbt(org):
+    """tests create_elementary_profile when dbt is not configured"""
+    org.dbt = None
+
+    result = create_elementary_profile(org)
+    assert result == {"error": "dbt is not configured for this client"}
+
+
+@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
+@patch("ddpui.ddpdbt.elementary_service.subprocess.check_output")
+def test_create_elementary_profile_with_existing_profiles_yml(
+    mock_subprocess, mock_gather_params, org, tmp_path
+):
+    """tests create_elementary_profile when profiles.yml exists on disk"""
+    # Create temporary directories and files
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    profiles_dir = project_dir / "profiles"
+    profiles_dir.mkdir()
+    profiles_file = profiles_dir / "profiles.yml"
+
+    # Write existing profiles.yml
+    dbt_profile_content = {
+        "test_profile": {"outputs": {"test-target": {"schema": "test_schema", "host": "localhost"}}}
+    }
+    with open(profiles_file, "w") as f:
+        yaml.safe_dump(dbt_profile_content, f)
+
+    # Create dbt_project.yml
+    dbt_project_file = project_dir / "dbt_project.yml"
+    dbt_project_content = {"name": "test_project", "version": "1.0.0", "profile": "test_profile"}
+    with open(dbt_project_file, "w") as f:
+        yaml.safe_dump(dbt_project_content, f)
+
+    # Setup mocks
+    mock_gather_params.return_value = Mock(
+        project_dir=str(project_dir), dbt_binary="test-dbt", target="test-target"
+    )
+    mock_subprocess.return_value = """elementary:
+  target: test-target
+  outputs:
+    test-target:
+      type: postgres
+      schema: elementary_schema"""
+
+    result = create_elementary_profile(org)
+
+    assert result == {"status": "success"}
+    mock_subprocess.assert_called_once()
+
+    # Verify elementary profile was created
+    elementary_dir = project_dir / "elementary_profiles"
+    assert elementary_dir.exists()
+    elementary_file = elementary_dir / "profiles.yml"
+    assert elementary_file.exists()
+
+
+@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
+@patch("ddpui.ddpdbt.elementary_service.subprocess.check_output")
+@patch("ddpui.ddpdbt.elementary_service.prefect_service.get_dbt_cli_profile_block")
+def test_create_elementary_profile_without_profiles_yml_fetch_from_prefect(
+    mock_get_block, mock_subprocess, mock_gather_params, org, tmp_path
+):
+    """tests create_elementary_profile when profiles.yml doesn't exist, fetches from Prefect blocks"""
+    # Create Prefect block
+    OrgPrefectBlockv1.objects.create(
+        org=org, block_type=DBTCLIPROFILE, block_name="test-cli-profile"
+    )
+
+    # Create temporary project directory (no profiles.yml)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+
+    # Create dbt_project.yml
+    dbt_project_file = project_dir / "dbt_project.yml"
+    dbt_project_content = {"name": "test_project", "version": "1.0.0", "profile": "test_profile"}
+    with open(dbt_project_file, "w") as f:
+        yaml.safe_dump(dbt_project_content, f)
+
+    # Setup mocks
+    mock_gather_params.return_value = Mock(
+        project_dir=str(project_dir), dbt_binary="test-dbt", target="test-target"
+    )
+    mock_get_block.return_value = {
+        "profile": {
+            "test_profile": {
+                "outputs": {"test-target": {"schema": "test_schema", "host": "localhost"}}
+            }
+        }
+    }
+    mock_subprocess.return_value = """elementary:
+  target: test-target
+  outputs:
+    test-target:
+      type: postgres
+      schema: elementary_schema"""
+
+    result = create_elementary_profile(org)
+
+    assert result == {"status": "success"}
+    mock_get_block.assert_called_once_with("test-cli-profile")
+    mock_subprocess.assert_called_once()
+
+    # Verify profiles directory and file were created
+    profiles_dir = project_dir / "profiles"
+    assert profiles_dir.exists()
+    profiles_file = profiles_dir / "profiles.yml"
+    assert profiles_file.exists()
+
+    # Verify elementary profile was created
+    elementary_dir = project_dir / "elementary_profiles"
+    assert elementary_dir.exists()
+    elementary_file = elementary_dir / "profiles.yml"
+    assert elementary_file.exists()
+
+
+@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
+def test_create_elementary_profile_missing_prefect_block(mock_gather_params, org, tmp_path):
+    """tests create_elementary_profile when profiles.yml doesn't exist and no Prefect block found"""
+    # Create temporary project directory (no profiles.yml)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+
+    # Create dbt_project.yml
+    dbt_project_file = project_dir / "dbt_project.yml"
+    dbt_project_content = {"name": "test_project", "version": "1.0.0", "profile": "test_profile"}
+    with open(dbt_project_file, "w") as f:
+        yaml.safe_dump(dbt_project_content, f)
+
+    mock_gather_params.return_value = Mock(project_dir=str(project_dir))
+
+    # No OrgPrefectBlockv1 created, so it should raise HttpError
+    with pytest.raises(HttpError) as exc_info:
+        create_elementary_profile(org)
+
+    assert "is missing" in str(exc_info.value)
+
+
+@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
+@patch("ddpui.ddpdbt.elementary_service.subprocess.check_output")
+def test_create_elementary_profile_elementary_dir_already_exists(
+    mock_subprocess, mock_gather_params, org, tmp_path
+):
+    """tests create_elementary_profile when elementary_profiles directory already exists"""
+    # Create temporary directories and files
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    profiles_dir = project_dir / "profiles"
+    profiles_dir.mkdir()
+    profiles_file = profiles_dir / "profiles.yml"
+
+    # Create elementary_profiles directory that already exists
+    elementary_dir = project_dir / "elementary_profiles"
+    elementary_dir.mkdir()
+
+    # Write existing profiles.yml
+    dbt_profile_content = {
+        "test_profile": {"outputs": {"test-target": {"schema": "test_schema", "host": "localhost"}}}
+    }
+    with open(profiles_file, "w") as f:
+        yaml.safe_dump(dbt_profile_content, f)
+
+    # Create dbt_project.yml
+    dbt_project_file = project_dir / "dbt_project.yml"
+    dbt_project_content = {"name": "test_project", "version": "1.0.0", "profile": "test_profile"}
+    with open(dbt_project_file, "w") as f:
+        yaml.safe_dump(dbt_project_content, f)
+
+    # Setup mocks
+    mock_gather_params.return_value = Mock(
+        project_dir=str(project_dir), dbt_binary="test-dbt", target="test-target"
+    )
+    mock_subprocess.return_value = """elementary:
+  target: test-target
+  outputs:
+    test-target:
+      type: postgres
+      schema: elementary_schema"""
+
+    result = create_elementary_profile(org)
+
+    assert result == {"status": "success"}
+    # Verify elementary profile was still created (overwrites existing)
+    elementary_file = elementary_dir / "profiles.yml"
+    assert elementary_file.exists()

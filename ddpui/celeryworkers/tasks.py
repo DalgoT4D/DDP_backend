@@ -24,6 +24,7 @@ from ddpui.utils.webhook_helpers import (
     get_org_from_flow_run,
 )
 
+from ddpui.ddpdbt import elementary_service
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.awsses import send_text_message
 from ddpui.models.org_plans import OrgPlans, OrgPlanType
@@ -100,6 +101,7 @@ def clone_github_repo(
     gitrepo_access_token: str | None,
     org_dir: str,
     taskprogress: TaskProgress | None,
+    setup_elementary_profile: bool = False,
 ) -> bool:
     """clones an org's github repo"""
     if taskprogress is None:
@@ -161,6 +163,37 @@ def clone_github_repo(
             "status": "running" if child else "completed",
         }
     )
+
+    # note that here we are only setting up the profile for elementary, not the entire elementary setup
+    # entire setup should be done separately
+    if setup_elementary_profile:
+        org = Org.objects.filter(slug=org_slug).first()
+        taskprogress.add(
+            {
+                "message": "setting up elementary profile",
+                "status": "running",
+            }
+        )
+
+        try:
+            elementary_service.create_elementary_profile(org)
+        except Exception as error:
+            taskprogress.add(
+                {
+                    "message": "elementary setup failed",
+                    "error": str(error),
+                    "status": "failed",
+                }
+            )
+            logger.exception(error)
+
+        taskprogress.add(
+            {
+                "message": "finished setting up elementary profile",
+                "status": "completed",
+            }
+        )
+
     return dbtrepo_dir
 
 
