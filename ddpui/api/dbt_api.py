@@ -238,7 +238,7 @@ def put_dbt_schema_v1(request, payload: OrgDbtTarget):
     org.dbt.save()
     logger.info("updated orgdbt")
 
-    cli_profile_block = OrgPrefectBlockv1.objects.filter(org=org, block_type=DBTCLIPROFILE).first()
+    cli_profile_block: OrgPrefectBlockv1 = org.dbt.cli_profile_block
 
     if cli_profile_block:
         logger.info(f"Updating the cli profile block's schema : {cli_profile_block.block_name}")

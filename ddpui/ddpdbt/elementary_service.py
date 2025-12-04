@@ -219,9 +219,7 @@ def create_elementary_profile(org: Org):
     if not os.path.exists(dbt_profile_file):
         # fetch from the cli profile block in prefect
         logger.info("fetching dbt profile from prefect block")
-        dbt_cli_profile = OrgPrefectBlockv1.objects.filter(
-            org=org, block_type=DBTCLIPROFILE
-        ).first()
+        dbt_cli_profile: OrgPrefectBlockv1 = org.dbt.cli_profile_block if org.dbt else None
         if dbt_cli_profile is None:
             raise HttpError(400, f"{dbt_profile_file} is missing")
 

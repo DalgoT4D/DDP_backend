@@ -15,7 +15,7 @@ from ddpui.ddpprefect import (
 )
 from ddpui.models.org import OrgDbt, OrgPrefectBlockv1, OrgWarehouse, TransformType
 from ddpui.models.org_user import Org
-from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask
+from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskType
 from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.utils import secretsmanager
 from ddpui.utils.constants import (
@@ -37,7 +37,9 @@ def delete_dbt_workspace(org: Org):
 
     # remove transform tasks
     org_tasks_delete = []
-    for org_task in OrgTask.objects.filter(org=org, task__type__in=["dbt", "git"]).all():
+    for org_task in OrgTask.objects.filter(
+        org=org, task__type__in=[TaskType.DBT, TaskType.GIT]
+    ).all():
         if (
             DataflowOrgTask.objects.filter(
                 orgtask=org_task, dataflow__dataflow_type="orchestrate"
@@ -54,7 +56,8 @@ def delete_dbt_workspace(org: Org):
         org_task.delete()
 
     logger.info("deleting dbt cli profile")
-    for dbt_cli_block in OrgPrefectBlockv1.objects.filter(org=org, block_type=DBTCLIPROFILE).all():
+    if org.dbt and org.dbt.cli_profile_block:
+        dbt_cli_block: OrgPrefectBlockv1 = org.dbt.cli_profile_block
         try:
             prefect_service.delete_dbt_cli_profile_block(dbt_cli_block.block_id)
         except Exception:  # pylint:disable=broad-exception-caught

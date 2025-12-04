@@ -33,7 +33,7 @@ from ddpui.ddpprefect.schema import DbtProfile, OrgDbtGitHub, OrgDbtSchema, OrgD
 from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Permission, Role, RolePermission
-from ddpui.models.tasks import Task, OrgTask, TaskLock
+from ddpui.models.tasks import Task, OrgTask, TaskLock, TaskType
 from ddpui.tests.api_tests.test_user_org_api import mock_request, seed_db
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.schemas.org_task_schema import TaskParameters
@@ -105,17 +105,21 @@ def f_dbt_tasks():
 
     # Create the three tasks that post_run_dbt_commands looks for
     task_clean = Task.objects.create(
-        type="dbt", slug=TASK_DBTCLEAN, label="dbt clean", command="dbt clean", is_system=True
+        type=TaskType.DBT,
+        slug=TASK_DBTCLEAN,
+        label="dbt clean",
+        command="dbt clean",
+        is_system=True,
     )
     tasks.append(task_clean)
 
     task_deps = Task.objects.create(
-        type="dbt", slug=TASK_DBTDEPS, label="dbt deps", command="dbt deps", is_system=True
+        type=TaskType.DBT, slug=TASK_DBTDEPS, label="dbt deps", command="dbt deps", is_system=True
     )
     tasks.append(task_deps)
 
     task_run = Task.objects.create(
-        type="dbt", slug=TASK_DBTRUN, label="dbt run", command="dbt run", is_system=True
+        type=TaskType.DBT, slug=TASK_DBTRUN, label="dbt run", command="dbt run", is_system=True
     )
     tasks.append(task_run)
 
@@ -608,7 +612,11 @@ def test_post_run_dbt_commands_task_filtering(orguser: OrgUser, f_org_tasks):
 
     # Create an additional non-system task that should be ignored
     extra_task = Task.objects.create(
-        type="dbt", slug=TASK_DBTRUN, label="dbt run user", command="dbt run", is_system=False
+        type=TaskType.DBT,
+        slug=TASK_DBTRUN,
+        label="dbt run user",
+        command="dbt run",
+        is_system=False,
     )
     extra_org_task = OrgTask.objects.create(org=orguser.org, task=extra_task, generated_by="client")
 

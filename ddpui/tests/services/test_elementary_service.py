@@ -8,7 +8,7 @@ from django.contrib.auth.models import User
 from ddpui import settings
 from ddpui.models.org import Org, OrgDbt, OrgDataFlowv1, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask, TaskProgressHashPrefix
+from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask, TaskProgressHashPrefix, TaskType
 from ddpui.ddpdbt.elementary_service import (
     elementary_setup_status,
     get_elementary_target_schema,
@@ -62,7 +62,7 @@ def orguser(org, authuser):
 @pytest.fixture
 def task():
     """task of type generate-edr"""
-    edrtask = Task.objects.create(type="edr", slug=TASK_GENERATE_EDR, label="EDR generate")
+    edrtask = Task.objects.create(type=TaskType.EDR, slug=TASK_GENERATE_EDR, label="EDR generate")
     yield edrtask
     edrtask.delete()
 
@@ -78,7 +78,7 @@ def orgtask(org, task):
 @pytest.fixture
 def edr_deployment_org():
     """org task of type generate-edr"""
-    edrtask = Task.objects.create(type="edr", slug=TASK_GENERATE_EDR, label="EDR generate")
+    edrtask = Task.objects.create(type=TaskType.EDR, slug=TASK_GENERATE_EDR, label="EDR generate")
     dbt = OrgDbt.objects.create(
         project_dir="test-project-dir",
         target_type="tgt_type",
