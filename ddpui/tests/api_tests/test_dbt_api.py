@@ -444,7 +444,13 @@ def test_put_dbt_schema_v1_success(
     orguser: OrgUser, f_orgwarehouse: OrgWarehouse, f_dbtcliprofileblock: OrgPrefectBlockv1
 ):
     """test put_dbt_schema_v1 success flow"""
-    orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
+    orguser.org.dbt = OrgDbt(
+        gitrepo_url="A",
+        target_type="B",
+        default_schema="C",
+        cli_profile_block=f_dbtcliprofileblock,
+    )
+    orguser.org.dbt.save()
     payload = OrgDbtTarget(target_configs_schema="new-target")
     request = mock_request(orguser)
     with patch(

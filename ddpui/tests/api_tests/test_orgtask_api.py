@@ -156,12 +156,15 @@ def org_with_transformation_tasks(tmpdir_factory, seed_master_tasks_db):
     )
 
     # create cli block
-    OrgPrefectBlockv1.objects.create(
+    cli_block = OrgPrefectBlockv1.objects.create(
         org=org,
         block_type=DBTCLIPROFILE,
         block_id="cliprofile-blk-id",
         block_name="cliprofile-blk-name",
     )
+    # Set the relationship on dbt
+    dbt.cli_profile_block = cli_block
+    dbt.save()
 
     for task in Task.objects.filter(type__in=[TaskType.DBT, TaskType.GIT]).all():
         org_task = OrgTask.objects.create(org=org, task=task, uuid=uuid.uuid4(), dbt=org.dbt)

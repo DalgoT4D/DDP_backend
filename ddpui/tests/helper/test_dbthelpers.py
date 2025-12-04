@@ -92,6 +92,7 @@ def test_create_or_update_org_cli_block_update_case(
         target_type="postgres",
         default_schema="default",
         transform_type=TransformType.GIT,
+        cli_profile_block=cli_profile_block,
     )
     org.dbt = dbt
     org.save()

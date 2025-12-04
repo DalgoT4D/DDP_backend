@@ -790,9 +790,12 @@ def test_create_elementary_profile_without_profiles_yml_fetch_from_prefect(
 ):
     """tests create_elementary_profile when profiles.yml doesn't exist, fetches from Prefect blocks"""
     # Create Prefect block
-    OrgPrefectBlockv1.objects.create(
+    cli_block = OrgPrefectBlockv1.objects.create(
         org=org, block_type=DBTCLIPROFILE, block_name="test-cli-profile"
     )
+    # Link it to the org's dbt
+    org.dbt.cli_profile_block = cli_block
+    org.dbt.save()
 
     # Create temporary project directory (no profiles.yml)
     project_dir = tmp_path / "project"

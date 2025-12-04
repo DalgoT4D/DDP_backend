@@ -1,4 +1,5 @@
 import re
+import json
 
 import glob
 import os
@@ -219,3 +220,30 @@ def check_repo_exists(gitrepo_url: str, gitrepo_access_token: str | None) -> boo
         return False
 
     return response.status_code == 200
+
+
+def generate_manifest_json_for_dbt_project(orgdbt: OrgDbt) -> dict:
+    """Generates the manifest.json for a given OrgDbt project."""
+    try:
+        project_dir: Path = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+
+        subprocess.run(
+            ["dbt", "compile", "--profiles-dir", "profiles/"],
+            cwd=project_dir,
+            check=True,  # Same as check_call behavior
+            capture_output=True,  # Capture stdout/stderr if needed
+            text=True,  # Return strings instead of bytes
+        )
+
+    except Exception as err:
+        logger.error(f"dbt compile failed with {str(err)}")
+        raise Exception(f"Something went wrong while generating manifest.json: {str(err)}")
+
+    if not os.path.exists(project_dir / "target" / "manifest.json"):
+        logger.error("dbt compile did not generate manifest.json")
+        raise Exception("dbt compile did not generate manifest.json")
+
+    with open(project_dir / "target" / "manifest.json", "r") as manifest_file:
+        manifest_json = json.load(manifest_file)
+
+    return manifest_json

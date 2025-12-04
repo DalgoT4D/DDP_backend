@@ -26,22 +26,23 @@ def test_delete_dbt_workspace():
     """tests the delete_dbt_workspace function"""
     org = Org.objects.create(name="temp", slug="temp")
 
-    org.dbt = OrgDbt.objects.create(
-        gitrepo_url="gitrepo_url",
-        project_dir="project-dir",
-        target_type="tgt",
-        default_schema="default_schema",
-    )
-    org.save()
-
-    assert OrgDbt.objects.filter(gitrepo_url="gitrepo_url").count() == 1
-
-    OrgPrefectBlockv1.objects.create(
+    cli_block = OrgPrefectBlockv1.objects.create(
         org=org,
         block_type=DBTCLIPROFILE,
         block_id="dbtcli-block-id",
         block_name="dbtcli-block-id",
     )
+
+    org.dbt = OrgDbt.objects.create(
+        gitrepo_url="gitrepo_url",
+        project_dir="project-dir",
+        target_type="tgt",
+        default_schema="default_schema",
+        cli_profile_block=cli_block,
+    )
+    org.save()
+
+    assert OrgDbt.objects.filter(gitrepo_url="gitrepo_url").count() == 1
     OrgPrefectBlockv1.objects.create(
         org=org,
         block_type=SECRET,
