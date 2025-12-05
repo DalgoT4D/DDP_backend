@@ -1419,7 +1419,7 @@ def get_canvas_node(request, node_uuid: str):
 
 
 @transform_router.post("/v2/dbt_project/sync_manifest_to_canvas/")
-@has_permission(["can_view_analysis"])
+@has_permission(["can_create_dbt_model"])
 def sync_manifest_to_canvas(request):
     """
     Parse dbt manifest.json and sync it to canvas (create/update CanvasNodes and CanvasEdges)
