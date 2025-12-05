@@ -13,7 +13,7 @@ from django.db import transaction
 from django.forms import model_to_dict
 
 from ddpui.datainsights import warehouse
-from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
+from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace, parse_dbt_manifest_to_canvas
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgDbt, OrgWarehouse, TransformType
 from ddpui.models.dbt_workflow import OrgDbtModel, DbtEdge, OrgDbtOperation, OrgDbtModelType
@@ -1416,3 +1416,34 @@ def get_canvas_node(request, node_uuid: str):
     except Exception as e:
         logger.error(f"Failed to fetch canvas node {node_uuid}: {str(e)}")
         raise HttpError(500, f"Failed to fetch canvas node: {str(e)}")
+
+
+@transform_router.post("/v2/dbt_project/sync_manifest_to_canvas/")
+@has_permission(["can_view_analysis"])
+def sync_manifest_to_canvas(request):
+    """
+    Parse dbt manifest.json and sync it to canvas (create/update CanvasNodes and CanvasEdges)
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    if not org.dbt:
+        raise HttpError(400, "Organization does not have a dbt workspace configured")
+
+    # Get warehouse
+    try:
+        warehouse_obj = OrgWarehouse.objects.get(org=org)
+    except OrgWarehouse.DoesNotExist:
+        raise HttpError(400, "Organization does not have a warehouse configured")
+
+    try:
+        # Parse manifest to canvas
+        stats = parse_dbt_manifest_to_canvas(org.dbt, warehouse_obj)
+
+        logger.info(f"Manifest sync completed for org {org.name}. Stats: {stats}")
+
+        return {"success": True, "message": "Manifest sync completed successfully", "stats": stats}
+
+    except Exception as e:
+        logger.error(f"Failed to sync manifest for org {org.name}: {str(e)}")
+        raise HttpError(500, f"Failed to sync manifest: {str(e)}")

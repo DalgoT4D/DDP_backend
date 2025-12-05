@@ -1,5 +1,7 @@
 import re
+import uuid
 import json
+from django.db import transaction
 
 import glob
 import os
@@ -11,13 +13,13 @@ from django.utils.text import slugify
 from ddpui.dbt_automation import assets
 from ddpui.ddpprefect import (
     prefect_service,
-    DBTCLIPROFILE,
     SECRET,
 )
 from ddpui.models.org import OrgDbt, OrgPrefectBlockv1, OrgWarehouse, TransformType
 from ddpui.models.org_user import Org
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskType
-from ddpui.models.dbt_workflow import OrgDbtModel
+from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtModelType
+from ddpui.models.canvas_models import CanvasNode, CanvasNodeType, CanvasEdge
 from ddpui.utils import secretsmanager
 from ddpui.utils.constants import (
     TASK_DOCSGENERATE,
@@ -28,6 +30,7 @@ from ddpui.utils.constants import (
     TASK_DBTCLOUD_JOB,
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager
+from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
@@ -247,3 +250,246 @@ def generate_manifest_json_for_dbt_project(orgdbt: OrgDbt) -> dict:
         manifest_json = json.load(manifest_file)
 
     return manifest_json
+
+
+def parse_dbt_manifest_to_canvas(
+    orgdbt: OrgDbt, org_warehouse: OrgWarehouse, manifest_json: dict = None
+) -> dict:
+    """
+    Parse dbt manifest.json and create/update CanvasNodes and CanvasEdges.
+
+    Args:
+        orgdbt: The OrgDbt instance
+        org_warehouse: OrgWarehouse instance to fetch column info from warehouse
+        manifest_json: Optional pre-fetched manifest.json. If not provided, will generate it.
+
+    Returns:
+        dict: Summary of created/updated nodes and edges
+    """
+    logger.info(f"Starting manifest parsing for orgdbt {orgdbt.project_dir}")
+
+    # Generate manifest if not provided
+    if manifest_json is None:
+        logger.info("Generating manifest.json...")
+        manifest_json = generate_manifest_json_for_dbt_project(orgdbt)
+
+    # Track created/updated objects
+    stats = {
+        "models_processed": 0,
+        "sources_processed": 0,
+        "nodes_created": 0,
+        "nodes_updated": 0,
+        "edges_created": 0,
+        "edges_skipped": 0,
+        "orgdbtmodels_created": 0,
+        "orgdbtmodels_updated": 0,
+    }
+
+    # Maps to track nodes for edge creation
+    node_map = {}  # unique_id -> CanvasNode
+
+    try:
+        with transaction.atomic():
+            # Process sources from manifest
+            sources = manifest_json.get("sources", {})
+            logger.info(f"Processing {len(sources)} sources from manifest")
+
+            for source_id, source_data in sources.items():
+                # Extract source information
+                source_name = source_data.get("source_name", "")
+                table_name = source_data.get("name", "")
+                database = source_data.get("database", "")
+                schema = source_data.get("schema", "")
+
+                # Create display name for source
+                display_name = f"{source_name}.{table_name}"
+
+                # Try to fetch columns from warehouse first
+                output_cols = []
+                try:
+                    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+                    wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
+                    warehouse_cols = wclient.get_table_columns(schema, table_name)
+                    output_cols = [col["name"] for col in warehouse_cols]
+                    logger.info(
+                        f"Fetched {len(output_cols)} columns from warehouse for source {display_name}"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to fetch columns from warehouse for {display_name}: {str(e)}"
+                    )
+                    # Fallback to manifest columns
+                    columns = source_data.get("columns", {})
+                    output_cols = [col_name for col_name in columns.keys()]
+                    logger.info(
+                        f"Using {len(output_cols)} columns from manifest for source {display_name}"
+                    )
+
+                # Check if OrgDbtModel already exists
+                orgdbt_model, model_created = OrgDbtModel.objects.get_or_create(
+                    orgdbt=orgdbt,
+                    name=table_name,
+                    source_name=source_name,
+                    type=OrgDbtModelType.SOURCE,
+                    defaults={
+                        "uuid": uuid.uuid4(),
+                        "display_name": display_name,
+                        "schema": schema,
+                        "output_cols": output_cols,
+                        "under_construction": False,
+                    },
+                )
+
+                if not model_created and output_cols:
+                    # Update output_cols if model exists
+                    orgdbt_model.output_cols = output_cols
+                    orgdbt_model.save()
+                    stats["orgdbtmodels_updated"] += 1
+                else:
+                    stats["orgdbtmodels_created"] += 1
+
+                # Check if CanvasNode already exists
+                canvas_node, node_created = CanvasNode.objects.get_or_create(
+                    orgdbt=orgdbt,
+                    dbtmodel=orgdbt_model,
+                    defaults={
+                        "uuid": uuid.uuid4(),
+                        "node_type": CanvasNodeType.SOURCE,
+                        "name": display_name,
+                        "output_cols": output_cols,
+                    },
+                )
+
+                if node_created:
+                    stats["nodes_created"] += 1
+                else:
+                    # Update output_cols if node exists
+                    canvas_node.output_cols = output_cols
+                    canvas_node.save()
+                    stats["nodes_updated"] += 1
+
+                # Store in map for edge creation
+                node_map[source_id] = canvas_node
+                stats["sources_processed"] += 1
+
+                logger.info(f"Processed source: {display_name} (created: {node_created})")
+
+            # Process models from manifest
+            nodes = manifest_json.get("nodes", {})
+            model_nodes = {k: v for k, v in nodes.items() if v.get("resource_type") == "model"}
+            logger.info(f"Processing {len(model_nodes)} models from manifest")
+
+            for node_id, node_data in model_nodes.items():
+                # Extract model information
+                model_name = node_data.get("name", "")
+                database = node_data.get("database", "")
+                schema = node_data.get("schema", "")
+                path = node_data.get("path", "")
+                original_file_path = node_data.get("original_file_path", "")
+
+                # Try to fetch columns from warehouse first
+                output_cols = []
+                try:
+                    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+                    wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
+                    warehouse_cols = wclient.get_table_columns(schema, model_name)
+                    output_cols = [col["name"] for col in warehouse_cols]
+                    logger.info(
+                        f"Fetched {len(output_cols)} columns from warehouse for model {model_name}"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to fetch columns from warehouse for {model_name}: {str(e)}"
+                    )
+                    # Fallback to manifest columns
+                    columns = node_data.get("columns", {})
+                    output_cols = [col_name for col_name in columns.keys()]
+                    logger.info(
+                        f"Using {len(output_cols)} columns from manifest for model {model_name}"
+                    )
+
+                # Check if OrgDbtModel already exists
+                orgdbt_model, model_created = OrgDbtModel.objects.get_or_create(
+                    orgdbt=orgdbt,
+                    name=model_name,
+                    type=OrgDbtModelType.MODEL,
+                    defaults={
+                        "uuid": uuid.uuid4(),
+                        "display_name": model_name,
+                        "schema": schema,
+                        "sql_path": original_file_path or path,
+                        "output_cols": output_cols,
+                        "under_construction": False,
+                    },
+                )
+
+                if not model_created:
+                    # Update fields if model exists
+                    orgdbt_model.schema = schema
+                    orgdbt_model.sql_path = original_file_path or path
+                    if output_cols:
+                        orgdbt_model.output_cols = output_cols
+                    orgdbt_model.save()
+                    stats["orgdbtmodels_updated"] += 1
+                else:
+                    stats["orgdbtmodels_created"] += 1
+
+                # Check if CanvasNode already exists
+                canvas_node, node_created = CanvasNode.objects.get_or_create(
+                    orgdbt=orgdbt,
+                    dbtmodel=orgdbt_model,
+                    defaults={
+                        "uuid": uuid.uuid4(),
+                        "node_type": CanvasNodeType.MODEL,
+                        "name": model_name,
+                        "output_cols": output_cols,
+                    },
+                )
+
+                if node_created:
+                    stats["nodes_created"] += 1
+                else:
+                    # Update output_cols if node exists
+                    canvas_node.output_cols = output_cols
+                    canvas_node.save()
+                    stats["nodes_updated"] += 1
+
+                # Store in map for edge creation
+                node_map[node_id] = canvas_node
+                stats["models_processed"] += 1
+
+                logger.info(f"Processed model: {model_name} (created: {node_created})")
+
+            # Create edges based on dependencies
+            logger.info("Creating edges based on dependencies...")
+
+            for node_id, node_data in model_nodes.items():
+                if node_id not in node_map:
+                    continue
+
+                to_node = node_map[node_id]
+                depends_on = node_data.get("depends_on", {})
+                depends_on_nodes = depends_on.get("nodes", [])
+
+                for dependency_id in depends_on_nodes:
+                    if dependency_id in node_map:
+                        from_node = node_map[dependency_id]
+
+                        # Check if edge already exists
+                        edge_exists = CanvasEdge.objects.filter(
+                            from_node=from_node, to_node=to_node
+                        ).exists()
+
+                        if not edge_exists:
+                            CanvasEdge.objects.create(from_node=from_node, to_node=to_node, seq=1)
+                            stats["edges_created"] += 1
+                            logger.info(f"Created edge: {from_node.name} -> {to_node.name}")
+                        else:
+                            stats["edges_skipped"] += 1
+
+    except Exception as e:
+        logger.error(f"Error parsing manifest: {str(e)}")
+        raise Exception(f"Failed to parse manifest: {str(e)}")
+
+    logger.info(f"Manifest parsing complete. Stats: {stats}")
+    return stats
