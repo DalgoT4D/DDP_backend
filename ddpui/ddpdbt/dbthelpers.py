@@ -64,7 +64,7 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
         target = "default"
 
     logger.info("Found org=%s profile_name=%s target=%s", org.slug, profile_name, target)
-    cli_profile_block = OrgPrefectBlockv1.objects.filter(org=org, block_type=DBTCLIPROFILE).first()
+    cli_profile_block: OrgPrefectBlockv1 = org.dbt.cli_profile_block if org.dbt else None
     if cli_profile_block:
         logger.info(
             f"Updating the cli profile block : {cli_profile_block.block_name} for org={org.slug} with profile={profile_name} target={target}"
