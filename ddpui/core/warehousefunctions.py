@@ -61,7 +61,7 @@ def fetch_warehouse_tables(request, org_warehouse, cache_key=None):
             res.append(
                 {
                     "schema": schema,
-                    "name": table,
+                    "input_name": table,
                     "type": OrgDbtModelType.SOURCE.value,
                     "id": schema + "-" + table,
                 }
