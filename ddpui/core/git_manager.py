@@ -2,6 +2,15 @@ import os
 import subprocess
 
 
+class GitManagerError(Exception):
+    """Exception raised when a git command fails"""
+
+    def __init__(self, message: str, error: str = ""):
+        self.message = message
+        self.error = error
+        super().__init__(f"{message}: {error}" if error else message)
+
+
 class GitManager:
     def __init__(self, repo_local_path: str, pat: str = None):
         self.repo_local_path = repo_local_path
@@ -9,58 +18,57 @@ class GitManager:
             raise ValueError("Repository path does not exist")
         self.pat = pat  # Personal Access Token for authentication if needed
 
-    def init_repo(self, default_branch: str = "main"):
+    def _run_command(self, cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
+        """
+        Run a git command and return the full result.
+        If check=True (default), raises GitManagerError on failure.
+        If check=False, returns result even on failure.
+        """
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=self.repo_local_path,
+                capture_output=True,
+                text=True,
+            )
+        except Exception as e:
+            raise GitManagerError(
+                message="Failed to execute command",
+                error=str(e),
+            )
+
+        if check and result.returncode != 0:
+            raise GitManagerError(
+                message=result.stdout.strip() or "Command failed",
+                error=result.stderr.strip(),
+            )
+        return result
+
+    def init_repo(self, default_branch: str = "main") -> str:
         """Initialize a git repository with a specified default branch"""
-        subprocess.run(["git", "init"], cwd=self.repo_local_path, check=True)
-        # Rename the default branch if needed
-        subprocess.run(
-            ["git", "branch", "-M", default_branch],
-            cwd=self.repo_local_path,
-            check=True,
-        )
+        self._run_command(["git", "init"])
+        result = self._run_command(["git", "branch", "-M", default_branch])
+        return result.stdout.strip()
 
     def is_git_initialized(self) -> bool:
         """Check if the folder is a git repository"""
-        try:
-            subprocess.run(
-                ["git", "rev-parse", "--git-dir"],
-                cwd=self.repo_local_path,
-                check=True,
-                capture_output=True,
-            )
-            return True
-        except subprocess.CalledProcessError:
-            return False
+        result = self._run_command(["git", "rev-parse", "--git-dir"], check=False)
+        return result.returncode == 0
 
     def get_current_branch(self) -> str:
         """Get the name of the current branch (works even with no commits)"""
         # Try symbolic-ref first (works for new repos with no commits)
-        result = subprocess.run(
-            ["git", "symbolic-ref", "--short", "HEAD"],
-            cwd=self.repo_local_path,
-            capture_output=True,
-            text=True,
-        )
+        result = self._run_command(["git", "symbolic-ref", "--short", "HEAD"], check=False)
         if result.returncode == 0:
             return result.stdout.strip()
 
         # Fallback to rev-parse (works after first commit)
-        result = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=self.repo_local_path,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+        result = self._run_command(["git", "rev-parse", "--abbrev-ref", "HEAD"])
         return result.stdout.strip()
 
     def has_commits(self) -> bool:
         """Check if the repository has any commits"""
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=self.repo_local_path,
-            capture_output=True,
-        )
+        result = self._run_command(["git", "rev-parse", "HEAD"], check=False)
         return result.returncode == 0
 
     def get_ahead_behind(self, remote: str = "origin", branch: str = None) -> tuple[int, int]:
@@ -75,13 +83,11 @@ class GitManager:
             branch = self.get_current_branch()
 
         # Fetch latest from remote first (optional, but recommended for accurate count)
-        # subprocess.run(["git", "fetch", remote], cwd=self.repo_local_path, check=True)
+        # self._run_command(["git", "fetch", remote], check=False)
 
-        result = subprocess.run(
+        result = self._run_command(
             ["git", "rev-list", "--left-right", "--count", f"{branch}...{remote}/{branch}"],
-            cwd=self.repo_local_path,
-            capture_output=True,
-            text=True,
+            check=False,
         )
 
         if result.returncode != 0:
@@ -89,11 +95,16 @@ class GitManager:
             return (0, 0)
 
         # Output format: "ahead\tbehind"
-        parts = result.stdout.strip().split()
-        ahead = int(parts[0]) if len(parts) > 0 else 0
-        behind = int(parts[1]) if len(parts) > 1 else 0
-
-        return (ahead, behind)
+        try:
+            parts = result.stdout.strip().split()
+            ahead = int(parts[0]) if len(parts) > 0 else 0
+            behind = int(parts[1]) if len(parts) > 1 else 0
+            return (ahead, behind)
+        except (ValueError, IndexError) as e:
+            raise GitManagerError(
+                message="Failed to parse ahead/behind count",
+                error=f"Unexpected output format: {result.stdout.strip()}",
+            )
 
     def generate_oauth_url(self, repo_url: str) -> str:
         """
@@ -119,31 +130,21 @@ class GitManager:
         else:
             raise ValueError(f"Unsupported URL format: {repo_url}")
 
-    def set_remote(self, remote_url: str, remote_name: str = "origin"):
+    def set_remote(self, remote_url: str, remote_name: str = "origin") -> str:
         """Set or update the remote repository URL"""
         # Check if remote already exists
-        result = subprocess.run(
-            ["git", "remote", "get-url", remote_name],
-            cwd=self.repo_local_path,
-            capture_output=True,
-        )
+        result = self._run_command(["git", "remote", "get-url", remote_name], check=False)
 
         if result.returncode == 0:
             # Remote exists, update it
-            subprocess.run(
-                ["git", "remote", "set-url", remote_name, remote_url],
-                cwd=self.repo_local_path,
-                check=True,
-            )
+            result = self._run_command(["git", "remote", "set-url", remote_name, remote_url])
+            return result.stdout.strip()
         else:
             # Remote doesn't exist, add it
-            subprocess.run(
-                ["git", "remote", "add", remote_name, remote_url],
-                cwd=self.repo_local_path,
-                check=True,
-            )
+            result = self._run_command(["git", "remote", "add", remote_name, remote_url])
+            return result.stdout.strip()
 
-    def set_branch_upstream(self, remote: str = "origin", branch: str = None):
+    def set_branch_upstream(self, remote: str = "origin", branch: str = None) -> str:
         """
         Set the upstream tracking branch for the current local branch.
         If branch is not specified, uses the current branch name.
@@ -151,23 +152,27 @@ class GitManager:
         if branch is None:
             branch = self.get_current_branch()
 
-        subprocess.run(
-            ["git", "branch", "--set-upstream-to", f"{remote}/{branch}"],
-            cwd=self.repo_local_path,
-            check=True,
-        )
+        result = self._run_command(["git", "branch", "--set-upstream-to", f"{remote}/{branch}"])
+        return result.stdout.strip()
 
     def commit_changes(
         self,
         message: str,
         user_name: str = "support@dalgo.org",
         user_email: str = "support@dalgo.org",
-    ):
+    ) -> str:
         """
         Commit changes with specified user name and email.
+        Returns the commit output message.
         """
-        subprocess.run(["git", "add", "."], cwd=self.repo_local_path, check=True)
-        subprocess.run(
+        self._run_command(["git", "add", "."])
+
+        # Check if there are changes to commit
+        result = self._run_command(["git", "diff", "--cached", "--quiet"], check=False)
+        if result.returncode == 0:
+            return "Nothing to commit, working tree clean"
+
+        result = self._run_command(
             [
                 "git",
                 "-c",
@@ -177,16 +182,18 @@ class GitManager:
                 "commit",
                 "-m",
                 message,
-            ],
-            cwd=self.repo_local_path,
-            check=True,
+            ]
         )
+        return result.stdout.strip()
 
-    def push_changes(self, remote: str = "origin", branch: str = None, set_upstream: bool = None):
+    def push_changes(
+        self, remote: str = "origin", branch: str = None, set_upstream: bool = None
+    ) -> str:
         """
         Push changes to the remote repository.
         If set_upstream is None, automatically sets upstream on first push (when upstream is not set).
         If set_upstream is True/False, uses that value explicitly.
+        Returns the push output message.
         """
         if branch is None:
             branch = self.get_current_branch()
@@ -194,10 +201,9 @@ class GitManager:
         # Determine if we need to set upstream
         if set_upstream is None:
             # Check if upstream is already set
-            result = subprocess.run(
+            result = self._run_command(
                 ["git", "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"],
-                cwd=self.repo_local_path,
-                capture_output=True,
+                check=False,
             )
             needs_upstream = result.returncode != 0
         else:
@@ -205,13 +211,7 @@ class GitManager:
 
         if self.pat:
             # Get the current remote URL and convert to authenticated URL
-            result = subprocess.run(
-                ["git", "remote", "get-url", remote],
-                cwd=self.repo_local_path,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
+            result = self._run_command(["git", "remote", "get-url", remote])
             remote_url = result.stdout.strip()
             auth_url = self.generate_oauth_url(remote_url)
 
@@ -225,26 +225,22 @@ class GitManager:
                 cmd.append("-u")
             cmd.extend([remote, branch])
 
-        subprocess.run(cmd, cwd=self.repo_local_path, check=True)
+        result = self._run_command(cmd)
+        return result.stdout.strip()
 
-    def pull_changes(self, remote: str = "origin", branch: str = None):
-        """Pull changes from the remote repository"""
+    def pull_changes(self, remote: str = "origin", branch: str = None) -> str:
+        """Pull changes from the remote repository. Returns the pull output message."""
         if branch is None:
             branch = self.get_current_branch()
 
         if self.pat:
             # Get the current remote URL and convert to authenticated URL
-            result = subprocess.run(
-                ["git", "remote", "get-url", remote],
-                cwd=self.repo_local_path,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
+            result = self._run_command(["git", "remote", "get-url", remote])
             remote_url = result.stdout.strip()
             auth_url = self.generate_oauth_url(remote_url)
             cmd = ["git", "pull", auth_url, branch]
         else:
             cmd = ["git", "pull", remote, branch]
 
-        subprocess.run(cmd, cwd=self.repo_local_path, check=True)
+        result = self._run_command(cmd)
+        return result.stdout.strip()
