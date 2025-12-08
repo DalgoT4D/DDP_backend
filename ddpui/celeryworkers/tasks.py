@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 from datetime import datetime, timedelta
 from time import sleep
-from subprocess import CompletedProcess
+import subprocess
 import pytz
 from django.core.management import call_command
 from django.utils.text import slugify
@@ -55,7 +55,7 @@ from ddpui.models.llm import (
     LogsSummarizationType,
     LlmSessionStatus,
 )
-from ddpui.utils.helpers import runcmd, subprocess, get_integer_env_var
+from ddpui.utils.helpers import get_integer_env_var
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.singletaskprogress import SingleTaskProgress
@@ -350,10 +350,10 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
                     "status": "running",
                 }
             )
-            process: CompletedProcess = DbtProjectManager.run_dbt_command(
+            process: subprocess.CompletedProcess = DbtProjectManager.run_dbt_command(
                 org, orgdbt, ["clean", "--profiles-dir=profiles"]
             )
-            command_output = process.stdout.decode("utf-8").split("\n")
+            command_output = process.stdout.split("\n")
             for cmd_out in command_output:
                 taskprogress.add(
                     {
@@ -380,10 +380,10 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
         # dbt deps
         try:
             taskprogress.add({"message": "starting dbt deps", "status": "running"})
-            process: CompletedProcess = DbtProjectManager.run_dbt_command(
+            process: subprocess.CompletedProcess = DbtProjectManager.run_dbt_command(
                 org, orgdbt, ["deps", "--profiles-dir=profiles"]
             )
-            command_output = process.stdout.decode("utf-8").split("\n")
+            command_output = process.stdout.split("\n")
             taskprogress.add(
                 {
                     "message": "dbt deps output",
@@ -424,11 +424,11 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
                     keyval_args.append(f"--{optname} {optval}")
 
             taskprogress.add({"message": "starting dbt run", "status": "running"})
-            process: CompletedProcess = DbtProjectManager.run_dbt_command(
+            process: subprocess.CompletedProcess = DbtProjectManager.run_dbt_command(
                 org, orgdbt, ["run", "--profiles-dir=profiles"] + flags + keyval_args
             )
 
-            command_output = process.stdout.decode("utf-8").split("\n")
+            command_output = process.stdout.split("\n")
             taskprogress.add(
                 {
                     "message": "dbt run output",

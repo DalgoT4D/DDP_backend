@@ -23,16 +23,15 @@ from ddpui.utils.constants import (
     TASK_DBTDEPS,
 )
 from ddpui.ddpdbt import dbt_service, elementary_service
-from ddpui.ddpprefect import DBTCLIPROFILE, SECRET, prefect_service
+from ddpui.ddpprefect import SECRET, prefect_service
 from ddpui.ddpprefect.schema import OrgDbtGitHub, OrgDbtSchema, OrgDbtTarget, PrefectSecretBlockEdit
 from ddpui.models.org import OrgPrefectBlockv1, Org, OrgWarehouse, OrgDbt
 from ddpui.models.org_user import OrgUser, OrgUserResponse
 from ddpui.core.orgdbt_manager import DbtProjectManager
-from ddpui.core.git_manager import GitManager, GitManagerError
+from ddpui.core.git_manager import GitManager
 from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.dbtdocs import create_single_html
-from ddpui.utils.helpers import runcmd
 from ddpui.utils.orguserhelpers import from_orguser
 from ddpui.utils.redis_client import RedisClient
 from ddpui.schemas.org_task_schema import TaskParameters

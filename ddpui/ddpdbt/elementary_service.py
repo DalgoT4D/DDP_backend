@@ -174,6 +174,7 @@ def create_elementary_tracking_tables(org: Org):
     # executes clean, deps, run
     run_dbt_commands.delay(
         org.id,
+        org.dbt.id,
         task_id,
         {
             # run parameters
