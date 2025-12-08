@@ -55,7 +55,7 @@ from ddpui.models.llm import (
     LogsSummarizationType,
     LlmSessionStatus,
 )
-from ddpui.utils.helpers import runcmd, runcmd_with_output, subprocess, get_integer_env_var
+from ddpui.utils.helpers import runcmd, subprocess, get_integer_env_var
 from ddpui.utils import secretsmanager
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.singletaskprogress import SingleTaskProgress
@@ -66,9 +66,12 @@ from ddpui.utils.constants import (
     AIRBYTE_CONNECTION_DEPRECATED,
     AIRBYTE_JOB_STATUS_FAILED,
     TASK_DBTRUN,
+    TASK_DBTCLEAN,
+    TASK_DBTDEPS,
     SYSTEM_USER_EMAIL,
 )
-from ddpui.core.orgdbt_manager import DbtProjectManager
+from ddpui.core.orgdbt_manager import DbtProjectManager, DbtCommandError
+from ddpui.core.git_manager import GitManager, GitManagerError
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 from ddpui.ddpprefect.prefect_service import (
@@ -122,10 +125,10 @@ def clone_github_repo(
     # clone the client's dbt repo into "dbtrepo/" under the project_dir
     # if we have an access token with the "contents" and "metadata" permissions then
     #   git clone https://oauth2:[TOKEN]@github.com/[REPO-OWNER]/[REPO-NAME]
-    if gitrepo_access_token is not None:
-        gitrepo_url = gitrepo_url.replace(
-            "github.com", "oauth2:" + gitrepo_access_token + "@github.com"
-        )
+    # if gitrepo_access_token is not None:
+    #     gitrepo_url = gitrepo_url.replace(
+    #         "github.com", "oauth2:" + gitrepo_access_token + "@github.com"
+    #     )
 
     org_dir: Path = Path(org_dir)
     dbtrepo_dir = org_dir / "dbtrepo"
@@ -142,10 +145,8 @@ def clone_github_repo(
     elif dbtrepo_dir.exists():
         shutil.rmtree(str(dbtrepo_dir))
 
-    cmd = f"git clone {gitrepo_url} dbtrepo"
-
     try:
-        runcmd(cmd, org_dir)
+        GitManager.clone(org_dir, gitrepo_url, "dbtrepo", gitrepo_access_token)
     except Exception as error:
         taskprogress.add(
             {
@@ -272,18 +273,27 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
 
 
 @app.task(bind=True)
-def run_dbt_commands(self, org_id: int, task_id: str, dbt_run_params: dict = None):
+def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_params: dict = None):
     """run a dbt command via celery instead of via prefect"""
-    dbtrun_orgtask = OrgTask.objects.filter(org__id=org_id, task__slug=TASK_DBTRUN).first()
+    org: Org = Org.objects.filter(id=org_id).first()
     system_user = OrgUser.objects.filter(user__email=SYSTEM_USER_EMAIL).first()
-    task_lock = TaskLock.objects.create(
-        orgtask=dbtrun_orgtask,
-        locked_by=system_user,
+
+    # Lock all dbt tasks that will be run
+    task_locks: list[TaskLock] = []
+    orgtasks = OrgTask.objects.filter(
+        dbt__id=orgdbt_id, task__slug__in=[TASK_DBTCLEAN, TASK_DBTDEPS, TASK_DBTRUN]
     )
+    for orgtask in orgtasks:
+        task_lock, task_lock_created = TaskLock.objects.get_or_create(
+            orgtask=orgtask, locked_by=system_user, celery_task_id=task_id
+        )
+        if not task_lock_created:
+            task_lock.locked_at = datetime.now()
+            task_lock.save()
+
+        task_locks.append(task_lock)
 
     try:
-        org: Org = Org.objects.filter(id=org_id).first()
-
         logger.info("found org %s", org.name)
 
         taskprogress = TaskProgress(
@@ -297,7 +307,7 @@ def run_dbt_commands(self, org_id: int, task_id: str, dbt_run_params: dict = Non
             }
         )
 
-        orgdbt = OrgDbt.objects.filter(org=org).first()
+        orgdbt = org.dbt
         if orgdbt is None:
             taskprogress.add(
                 {
@@ -306,11 +316,9 @@ def run_dbt_commands(self, org_id: int, task_id: str, dbt_run_params: dict = Non
                 }
             )
             logger.error("need to set up a dbt workspace first for org %s", org.name)
-            return
+            raise Exception("need to set up a dbt workspace first for org %s" % org.name)
 
-        dbt_cli_profile = OrgPrefectBlockv1.objects.filter(
-            org=org, block_type=DBTCLIPROFILE
-        ).first()
+        dbt_cli_profile: OrgPrefectBlockv1 = orgdbt.cli_profile_block
         if dbt_cli_profile is None:
             taskprogress.add(
                 {
@@ -319,7 +327,7 @@ def run_dbt_commands(self, org_id: int, task_id: str, dbt_run_params: dict = Non
                 }
             )
             logger.error("need to set up a dbt cli profile first for org %s", org.name)
-            return
+            raise Exception("need to set up a dbt cli profile first for org %s" % org.name)
 
         dbt_project_params: DbtProjectParams = DbtProjectManager.gather_dbt_project_params(
             org, orgdbt
@@ -333,22 +341,19 @@ def run_dbt_commands(self, org_id: int, task_id: str, dbt_run_params: dict = Non
         with open(profile_filename, "w", encoding="utf-8") as f:
             yaml.safe_dump(profile, f)
 
-        dbt_binary = dbt_project_params.dbt_binary
-        project_dir = dbt_project_params.project_dir
-
         # dbt clean
         taskprogress.add({"message": "starting dbt clean", "status": "running"})
         try:
-            process: CompletedProcess = runcmd_with_output(
-                f"{dbt_binary} clean --profiles-dir=profiles", project_dir
-            )
-            command_output = process.stdout.decode("utf-8").split("\n")
             taskprogress.add(
                 {
                     "message": "dbt clean output",
                     "status": "running",
                 }
             )
+            process: CompletedProcess = DbtProjectManager.run_dbt_command(
+                org, orgdbt, ["clean", "--profiles-dir=profiles"]
+            )
+            command_output = process.stdout.decode("utf-8").split("\n")
             for cmd_out in command_output:
                 taskprogress.add(
                     {
@@ -356,7 +361,7 @@ def run_dbt_commands(self, org_id: int, task_id: str, dbt_run_params: dict = Non
                         "status": "running",
                     }
                 )
-        except subprocess.CalledProcessError as error:
+        except DbtCommandError as error:
             taskprogress.add(
                 {
                     "message": "dbt clean failed",
@@ -370,13 +375,13 @@ def run_dbt_commands(self, org_id: int, task_id: str, dbt_run_params: dict = Non
                 }
             )
             logger.exception(error)
-            raise Exception("Dbt clean failed")
+            raise Exception("Dbt clean failed") from error
 
         # dbt deps
         try:
             taskprogress.add({"message": "starting dbt deps", "status": "running"})
-            process: CompletedProcess = runcmd_with_output(
-                f"{dbt_binary} deps --profiles-dir=profiles", project_dir
+            process: CompletedProcess = DbtProjectManager.run_dbt_command(
+                org, orgdbt, ["deps", "--profiles-dir=profiles"]
             )
             command_output = process.stdout.decode("utf-8").split("\n")
             taskprogress.add(
@@ -392,7 +397,7 @@ def run_dbt_commands(self, org_id: int, task_id: str, dbt_run_params: dict = Non
                         "status": "running",
                     }
                 )
-        except subprocess.CalledProcessError as error:
+        except DbtCommandError as error:
             taskprogress.add(
                 {
                     "message": "dbt deps failed",
@@ -410,17 +415,19 @@ def run_dbt_commands(self, org_id: int, task_id: str, dbt_run_params: dict = Non
 
         # dbt run
         try:
-            cmd = f"{dbt_binary} run"
+            flags = []
+            keyval_args = []
             if dbt_run_params is not None:
                 for flag in dbt_run_params.get("flags") or []:
-                    cmd += " --" + flag
+                    flags.append(f"--{flag}")
                 for optname, optval in (dbt_run_params.get("options") or {}).items():
-                    cmd += f" --{optname} {optval}"
+                    keyval_args.append(f"--{optname} {optval}")
 
             taskprogress.add({"message": "starting dbt run", "status": "running"})
-            process: CompletedProcess = runcmd_with_output(
-                f"{cmd} --profiles-dir=profiles", project_dir
+            process: CompletedProcess = DbtProjectManager.run_dbt_command(
+                org, orgdbt, ["run", "--profiles-dir=profiles"] + flags + keyval_args
             )
+
             command_output = process.stdout.decode("utf-8").split("\n")
             taskprogress.add(
                 {
@@ -457,7 +464,8 @@ def run_dbt_commands(self, org_id: int, task_id: str, dbt_run_params: dict = Non
         logger.error(e)
 
     finally:
-        task_lock.delete()
+        for task_lock in task_locks:
+            task_lock.delete()
 
 
 def detect_schema_changes_for_org(org: Org, delay=0):

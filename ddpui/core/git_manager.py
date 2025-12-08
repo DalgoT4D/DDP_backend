@@ -12,11 +12,22 @@ class GitManagerError(Exception):
 
 
 class GitManager:
-    def __init__(self, repo_local_path: str, pat: str = None):
+    def __init__(self, repo_local_path: str, pat: str = None, validate_git: bool = False):
+        """
+        Validate if the folder is a git repository if validate_git is True.
+        :param repo_local_path: Local path to the git repository
+        :param pat: Personal Access Token for authentication if needed
+        :param validate_git: If True, checks if the folder is a git repository
+        """
         self.repo_local_path = repo_local_path
         if not os.path.exists(repo_local_path):
             raise ValueError("Repository path does not exist")
         self.pat = pat  # Personal Access Token for authentication if needed
+        if validate_git and not self.is_git_initialized():
+            raise GitManagerError(
+                message="Not a git repository",
+                error=f"The folder {repo_local_path} is not a git repository",
+            )
 
     def _run_command(self, cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
         """
@@ -106,7 +117,8 @@ class GitManager:
                 error=f"Unexpected output format: {result.stdout.strip()}",
             )
 
-    def generate_oauth_url(self, repo_url: str) -> str:
+    @staticmethod
+    def _generate_oauth_url(repo_url: str, pat: str) -> str:
         """
         Generate a Git URL with OAuth token embedded for authentication.
 
@@ -115,20 +127,65 @@ class GitManager:
         To:
           https://<token>@github.com/user/repo.git
         """
-        if not self.pat:
+        if not pat:
             raise ValueError("PAT (Personal Access Token) is not set")
 
         # Handle both https:// and git@ formats
         if repo_url.startswith("https://"):
             # Insert token after https://
-            return repo_url.replace("https://", f"https://{self.pat}@")
+            return repo_url.replace("https://", f"https://{pat}@")
         elif repo_url.startswith("git@"):
             # Convert git@github.com:user/repo.git to https://<token>@github.com/user/repo.git
             # git@github.com:user/repo.git -> github.com/user/repo.git
             url_part = repo_url.replace("git@", "").replace(":", "/")
-            return f"https://{self.pat}@{url_part}"
+            return f"https://{pat}@{url_part}"
         else:
             raise ValueError(f"Unsupported URL format: {repo_url}")
+
+    @classmethod
+    def clone(
+        cls, cwd: str, remote_repo_url: str, relative_path: str, pat: str = None
+    ) -> "GitManager":
+        """
+        Clone a repository and return a GitManager instance for it.
+
+        :param cwd: Working directory where the clone command will be executed
+        :param remote_repo_url: URL of the repository to clone
+        :param pat: Personal Access Token for authentication
+        :param relative_path: Relative path (from cwd) where the repo will be cloned
+        :return: GitManager instance for the cloned repository
+        """
+        # Build authenticated URL if PAT provided
+        clone_url = cls._generate_oauth_url(remote_repo_url, pat) if pat else remote_repo_url
+
+        try:
+            result = subprocess.run(
+                ["git", "clone", clone_url, relative_path],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+            )
+        except Exception as e:
+            raise GitManagerError(
+                message="Failed to clone repository",
+                error=str(e),
+            )
+
+        if result.returncode != 0:
+            raise GitManagerError(
+                message="Failed to clone repository",
+                error=result.stderr.strip(),
+            )
+
+        target_path = os.path.join(cwd, relative_path)
+        return cls(repo_local_path=target_path, pat=pat)
+
+    def generate_oauth_url(self, repo_url: str) -> str:
+        """
+        Generate a Git URL with OAuth token embedded for authentication.
+        Instance method wrapper around _generate_oauth_url.
+        """
+        return self._generate_oauth_url(repo_url, self.pat)
 
     def set_remote(self, remote_url: str, remote_name: str = "origin") -> str:
         """Set or update the remote repository URL"""
