@@ -30,6 +30,7 @@ from ddpui.utils.constants import (
     TASK_DBTCLOUD_JOB,
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager
+from ddpui.core.git_manager import GitManager
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -123,7 +124,29 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
         org.slug = slugify(org.name)
         org.save()
 
-    # this client'a dbt setup happens here
+    orgdbt = org.dbt
+    if not orgdbt:
+        dbt = OrgDbt(
+            project_dir=DbtProjectManager.get_dbt_repo_relative_path(dbtrepo_dir),
+            dbt_venv=DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH,
+            target_type=warehouse.wtype,
+            default_schema=default_schema,
+            transform_type=TransformType.UI,
+        )
+        dbt.save()
+        logger.info("created orgdbt for org %s", org.name)
+        org.dbt = dbt
+        org.save()
+        logger.info("set org.dbt for org %s", org.name)
+    else:
+        orgdbt.project_dir = DbtProjectManager.get_dbt_repo_relative_path(dbtrepo_dir)
+        orgdbt.target_type = warehouse.wtype
+        orgdbt.default_schema = default_schema
+        orgdbt.transform_type = TransformType.UI
+        orgdbt.dbt_venv = DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH
+        orgdbt.save()
+
+    # this client's dbt setup happens here
     project_dir: Path = Path(DbtProjectManager.get_org_dir(org))
     dbtrepo_dir: Path = project_dir / project_name
 
@@ -138,15 +161,14 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
 
     # dbt init
     try:
-        subprocess.check_call(
+        DbtProjectManager.run_dbt_command(
+            org,
+            orgdbt,
             [
-                DbtProjectManager.dbt_venv_base_dir()
-                / f"{DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH}/bin/dbt",
                 "init",
                 project_name,
                 "--skip-profile-setup",
             ],
-            cwd=project_dir,
         )
 
         # Delete example models
@@ -154,9 +176,11 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
         if example_models_dir.exists():
             shutil.rmtree(example_models_dir)
 
-    except subprocess.CalledProcessError as e:
-        logger.error(f"dbt init failed with {e.returncode}")
-        return None, "Something went wrong while setting up workspace"
+    except Exception as err:
+        logger.error(f"dbt init failed: {str(err)}")
+        if dbtrepo_dir.exists():
+            shutil.rmtree(dbtrepo_dir)
+        return None, f"Something went wrong while setting up workspace: {str(err)}"
 
     # copy packages.yml
     logger.info("copying packages.yml from assets")
@@ -179,20 +203,16 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
         # Log the creation of the file
         logger.info("created %s", target_path)
 
-    dbt = OrgDbt(
-        project_dir=DbtProjectManager.get_dbt_repo_relative_path(dbtrepo_dir),
-        dbt_venv=DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH,
-        target_type=warehouse.wtype,
-        default_schema=default_schema,
-        transform_type=TransformType.UI,
-    )
-    dbt.save()
-    logger.info("created orgdbt for org %s", org.name)
-    org.dbt = dbt
-    org.save()
-    logger.info("set org.dbt for org %s", org.name)
-
     logger.info("set dbt workspace completed for org %s", org.name)
+
+    # initializing it as git repo
+    logger.info("initializing dbt workspace as git repo")
+    try:
+        git_manager = GitManager(repo_local_path=dbtrepo_dir)
+        git_manager.init_repo()
+    except Exception as err:
+        logger.error(f"Failed to initialize git repo: {str(err)}")
+        return None, f"Failed to initialize git repo: {str(err)}"
 
     return None, None
 

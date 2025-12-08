@@ -10,7 +10,6 @@ from ninja.errors import HttpError
 from django.db.models import Q
 from django.utils.text import slugify
 from django.db import transaction
-from django.forms import model_to_dict
 
 from ddpui.datainsights import warehouse
 from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace, parse_dbt_manifest_to_canvas
