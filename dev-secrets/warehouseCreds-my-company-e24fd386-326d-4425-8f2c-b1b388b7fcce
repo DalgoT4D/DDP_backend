@@ -1,0 +1,5 @@
+{
+  "Name": "warehouseCreds-my-company-e24fd386-326d-4425-8f2c-b1b388b7fcce",
+  "SecretId": "warehouseCreds-my-company-e24fd386-326d-4425-8f2c-b1b388b7fcce",
+  "SecretString": "{\"host\": \"dalgo-staging-warehouses.c4hvhyuxrcet.ap-south-1.rds.amazonaws.com\", \"port\": 5432, \"database\": \"postgres\", \"username\": \"postgres\", \"password\": \"**********\", \"ssl\": false, \"ssl_mode\": {\"mode\": \"disable\"}, \"tunnel_method\": {\"tunnel_method\": \"NO_TUNNEL\"}}"
+}
