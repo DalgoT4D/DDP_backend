@@ -138,16 +138,22 @@ def retrieve_github_token(org_dbt: OrgDbt) -> str | None:
     return None
 
 
-def delete_github_token(org: Org):
+def delete_github_pat(pat_secret_name: str):
     """deletes a secret corresponding to a github auth token for an org, if it exists"""
-    if org.dbt and org.dbt.gitrepo_access_token_secret:
+    if pat_secret_name:
         aws_sm = get_client()
-        secret_name = org.dbt.gitrepo_access_token_secret
         try:
-            aws_sm.delete_secret(SecretId=secret_name)
+            aws_sm.delete_secret(SecretId=pat_secret_name)
         except Exception:  # skipcq PYL-W0703
             # no secret to delete, carry on
             pass
+
+
+def delete_github_token(org: Org):
+    """deletes a secret corresponding to a github auth token for an org, if it exists"""
+    if org.dbt and org.dbt.gitrepo_access_token_secret:
+        secret_name = org.dbt.gitrepo_access_token_secret
+        delete_github_pat(secret_name)
         org.dbt.gitrepo_access_token_secret = None
         org.dbt.save()
 
