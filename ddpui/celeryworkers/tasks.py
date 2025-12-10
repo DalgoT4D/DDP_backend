@@ -277,7 +277,29 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
         }
     )
     saved_creds = secretsmanager.retrieve_warehouse_credentials(warehouse)
-    create_or_update_org_cli_block(org, warehouse, saved_creds)
+    if saved_creds is None:
+        taskprogress.add(
+            {
+                "message": "failed to retrieve warehouse credentials",
+                "status": "failed",
+            }
+        )
+        logger.error("failed to retrieve warehouse credentials for org %s", org.name)
+        raise Exception("failed to retrieve warehouse credentials for org %s" % org.name)
+
+    (cli_profile_block, dbt_project_params), error = create_or_update_org_cli_block(
+        org, warehouse, saved_creds
+    )
+
+    if error:
+        taskprogress.add(
+            {
+                "message": f"failed to create dbt cli profile: {error}",
+                "status": "failed",
+            }
+        )
+        logger.error("failed to create dbt cli profile for org %s: %s", org.name, error)
+        raise Exception(f"failed to create dbt cli profile for org {org.name}: {error}")
 
     taskprogress.add(
         {
