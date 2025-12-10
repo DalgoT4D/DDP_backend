@@ -11,10 +11,7 @@ from pathlib import Path
 import requests
 from django.utils.text import slugify
 from ddpui.dbt_automation import assets
-from ddpui.ddpprefect import (
-    prefect_service,
-    SECRET,
-)
+from ddpui.ddpprefect import prefect_service, SECRET, DBTCLIPROFILE
 from ddpui.models.org import OrgDbt, OrgPrefectBlockv1, OrgWarehouse, TransformType
 from ddpui.models.org_user import Org
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskType
@@ -68,6 +65,16 @@ def delete_dbt_workspace(org: Org):
         except Exception:  # pylint:disable=broad-exception-caught
             pass
         dbt_cli_block.delete()
+
+    # we should remove this when we have sandbox envs & mutliple orgdbts per org
+    for dbt_cli_profile_block in OrgPrefectBlockv1.objects.filter(
+        org=org, block_type=DBTCLIPROFILE
+    ).all():
+        try:
+            prefect_service.delete_dbt_cli_profile_block(dbt_cli_profile_block.block_id)
+        except Exception:  # pylint:disable=broad-exception-caught
+            pass
+        dbt_cli_profile_block.delete()
 
     logger.info("deleting git secret block")
     # remove git token uri block

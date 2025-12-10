@@ -68,6 +68,10 @@ class GitManager:
         if not pat:
             raise ValueError("PAT (Personal Access Token) is not set")
 
+        # If URL already has oauth2 credentials, return as-is
+        if "oauth2:" in repo_url:
+            return repo_url
+
         # Handle both https:// and git@ formats
         if repo_url.startswith("https://"):
             # Insert oauth2:token after https://
@@ -178,7 +182,13 @@ class GitManager:
             )
 
         target_path = os.path.join(cwd, relative_path)
-        return cls(repo_local_path=target_path, pat=pat)
+        instance = cls(repo_local_path=target_path, pat=pat)
+
+        # Reset remote to clean URL (without credentials) if PAT was used
+        if pat:
+            instance.set_remote(remote_repo_url)
+
+        return instance
 
     def generate_oauth_url(self, repo_url: str) -> str:
         """
