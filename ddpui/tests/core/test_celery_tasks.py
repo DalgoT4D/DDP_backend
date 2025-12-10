@@ -115,7 +115,7 @@ def test_post_dbt_workspace_success(orguser, tmp_path):
         "ddpui.utils.secretsmanager.retrieve_warehouse_credentials",
         return_value={},
     ) as retrieve_warehouse_credentials_mock, patch(
-        "ddpui.celeryworkers.tasks.create_or_update_org_cli_block"
+        "ddpui.celeryworkers.tasks.create_or_update_org_cli_block", return_value=(("", ""), None)
     ) as create_or_update_org_cli_block_mock:
         assert OrgDbt.objects.filter(org=orguser.org).count() == 0
         setup_dbtworkspace(orguser.org.id, payload.dict())
