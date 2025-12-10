@@ -55,6 +55,31 @@ class GitManager:
             )
         return result
 
+    @staticmethod
+    def generate_oauth_url_static(repo_url: str, pat: str) -> str:
+        """
+        Generate a Git URL with OAuth token embedded for authentication.
+
+        Converts:
+          https://github.com/user/repo.git
+        To:
+          https://oauth2:<token>@github.com/user/repo.git
+        """
+        if not pat:
+            raise ValueError("PAT (Personal Access Token) is not set")
+
+        # Handle both https:// and git@ formats
+        if repo_url.startswith("https://"):
+            # Insert oauth2:token after https://
+            return repo_url.replace("https://", f"https://oauth2:{pat}@")
+        elif repo_url.startswith("git@"):
+            # Convert git@github.com:user/repo.git to https://oauth2:<token>@github.com/user/repo.git
+            # git@github.com:user/repo.git -> github.com/user/repo.git
+            url_part = repo_url.replace("git@", "").replace(":", "/")
+            return f"https://oauth2:{pat}@{url_part}"
+        else:
+            raise ValueError(f"Unsupported URL format: {repo_url}")
+
     def init_repo(self, default_branch: str = "main") -> str:
         """Initialize a git repository with a specified default branch"""
         self._run_command(["git", "init"])
@@ -117,31 +142,6 @@ class GitManager:
                 error=f"Unexpected output format: {result.stdout.strip()}",
             )
 
-    @staticmethod
-    def _generate_oauth_url(repo_url: str, pat: str) -> str:
-        """
-        Generate a Git URL with OAuth token embedded for authentication.
-
-        Converts:
-          https://github.com/user/repo.git
-        To:
-          https://<token>@github.com/user/repo.git
-        """
-        if not pat:
-            raise ValueError("PAT (Personal Access Token) is not set")
-
-        # Handle both https:// and git@ formats
-        if repo_url.startswith("https://"):
-            # Insert token after https://
-            return repo_url.replace("https://", f"https://{pat}@")
-        elif repo_url.startswith("git@"):
-            # Convert git@github.com:user/repo.git to https://<token>@github.com/user/repo.git
-            # git@github.com:user/repo.git -> github.com/user/repo.git
-            url_part = repo_url.replace("git@", "").replace(":", "/")
-            return f"https://{pat}@{url_part}"
-        else:
-            raise ValueError(f"Unsupported URL format: {repo_url}")
-
     @classmethod
     def clone(
         cls, cwd: str, remote_repo_url: str, relative_path: str, pat: str = None
@@ -156,7 +156,7 @@ class GitManager:
         :return: GitManager instance for the cloned repository
         """
         # Build authenticated URL if PAT provided
-        clone_url = cls._generate_oauth_url(remote_repo_url, pat) if pat else remote_repo_url
+        clone_url = cls.generate_oauth_url_static(remote_repo_url, pat) if pat else remote_repo_url
 
         try:
             result = subprocess.run(
@@ -183,9 +183,9 @@ class GitManager:
     def generate_oauth_url(self, repo_url: str) -> str:
         """
         Generate a Git URL with OAuth token embedded for authentication.
-        Instance method wrapper around _generate_oauth_url.
+        Instance method wrapper around generate_oauth_url_static.
         """
-        return self._generate_oauth_url(repo_url, self.pat)
+        return self.generate_oauth_url_static(repo_url, self.pat)
 
     def set_remote(self, remote_url: str, remote_name: str = "origin") -> str:
         """Set or update the remote repository URL"""
