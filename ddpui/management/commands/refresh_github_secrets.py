@@ -61,13 +61,23 @@ class Command(BaseCommand):
                 skip_count += 1
                 continue
 
-            self.stdout.write(f"  - Current secret key: {old_secret_key}")
+            self.stdout.write(f"  - Current value: {old_secret_key[:20]}...")
 
             try:
-                # Step 1: Fetch the existing secret content
+                # Check if the value is a secret key reference or the actual token
+                is_secret_key = old_secret_key.startswith("gitrepoAccessToken")
+
                 if dry_run:
-                    self.stdout.write(f"  - [DRY RUN] Would fetch secret: {old_secret_key}")
-                    self.stdout.write(f"  - [DRY RUN] Would delete old secret")
+                    if is_secret_key:
+                        self.stdout.write(f"  - [DRY RUN] Value is a secret key reference")
+                        self.stdout.write(f"  - [DRY RUN] Would fetch secret: {old_secret_key}")
+                        self.stdout.write(f"  - [DRY RUN] Would delete old secret")
+                    else:
+                        self.stdout.write(
+                            self.style.WARNING(
+                                f"  - [DRY RUN] Value is the actual token (not a secret key)"
+                            )
+                        )
                     self.stdout.write(f"  - [DRY RUN] Would create new secret")
                     self.stdout.write(
                         f"  - [DRY RUN] Would update org.dbt.gitrepo_access_token_secret"
@@ -75,26 +85,36 @@ class Command(BaseCommand):
                     success_count += 1
                     continue
 
-                # Fetch the secret content
-                secret_value = secretsmanager.retrieve_github_pat(old_secret_key)
-                if not secret_value:
+                if is_secret_key:
+                    # Value is a secret key reference - fetch from secrets manager
+                    self.stdout.write(f"  - Value is a secret key reference")
+                    secret_value = secretsmanager.retrieve_github_pat(old_secret_key)
+                    if not secret_value:
+                        self.stdout.write(
+                            self.style.ERROR(f"  - Could not retrieve secret content, skipping")
+                        )
+                        error_count += 1
+                        continue
+
+                    self.stdout.write(f"  - Retrieved secret content successfully")
+
+                    # Delete the old secret from secrets manager
+                    secretsmanager.delete_github_pat(old_secret_key)
+                    self.stdout.write(f"  - Deleted old secret: {old_secret_key}")
+                else:
+                    # Value is the actual token stored in DB - use it directly
                     self.stdout.write(
-                        self.style.ERROR(f"  - Could not retrieve secret content, skipping")
+                        self.style.WARNING(
+                            f"  - Value is the actual token (not a secret key), will migrate to secrets manager"
+                        )
                     )
-                    error_count += 1
-                    continue
+                    secret_value = old_secret_key
 
-                self.stdout.write(f"  - Retrieved secret content successfully")
-
-                # Step 2: Delete the old secret
-                secretsmanager.delete_github_pat(old_secret_key)
-                self.stdout.write(f"  - Deleted old secret: {old_secret_key}")
-
-                # Step 3: Create a new secret with the same content
+                # Create a new secret with the token value
                 new_secret_key = secretsmanager.save_github_pat(secret_value)
                 self.stdout.write(f"  - Created new secret: {new_secret_key}")
 
-                # Step 4: Update the org.dbt reference
+                # Update the org.dbt reference with the new secret key
                 org.dbt.gitrepo_access_token_secret = new_secret_key
                 org.dbt.save()
                 self.stdout.write(
