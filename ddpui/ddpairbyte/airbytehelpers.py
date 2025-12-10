@@ -871,7 +871,9 @@ def create_warehouse(org: Org, payload: OrgWarehouseSchema):
         warehouse.bq_location = destination["connectionConfiguration"]["dataset_location"]
     warehouse.save()
 
-    create_or_update_org_cli_block(org, warehouse, dbt_credentials)
+    # this has been moved from here
+    # we want to map cli profile block to orgdbt
+    # create_or_update_org_cli_block(org, warehouse, dbt_credentials)
 
     return None, None
 

@@ -116,13 +116,22 @@ def test_delete_warehouse_v1(org_with_workspace):
     ) as mock_delete_connection, patch(
         "ddpui.ddpairbyte.airbyte_service.get_connections"
     ) as mock_get_connections, patch(
+        "ddpui.ddpairbyte.airbyte_service.get_sources"
+    ) as mock_get_sources, patch(
         "ddpui.ddpairbyte.airbyte_service.get_destinations"
     ) as mock_get_destinations, patch(
+        "ddpui.ddpairbyte.airbyte_service.delete_source"
+    ) as mock_delete_source, patch(
         "ddpui.ddpairbyte.airbyte_service.delete_destination"
     ) as mock_delete_destination, patch(
+        "ddpui.ddpairbyte.airbyte_service.delete_workspace"
+    ) as mock_delete_workspace, patch(
         "ddpui.utils.secretsmanager.delete_warehouse_credentials"
-    ) as mock_delete_warehouse_credentials:
+    ) as mock_delete_warehouse_credentials, patch(
+        "ddpui.ddpprefect.prefect_service.prefect_delete_a_block"
+    ) as mock_prefect_delete_a_block:
         # == delete_warehouse_v1 ==
+        mock_get_sources.return_value = {"sources": []}  # No sources to delete
         mock_get_destinations.return_value = {
             "destinations": [
                 {"destinationId": "fake-destination-id"},
@@ -164,13 +173,18 @@ def test_delete_airbyte_workspace_v1(org_with_workspace):
     org_with_workspace.save()
 
     with patch("ddpui.ddpairbyte.airbyte_service.get_sources") as mock_get_sources, patch(
+        "ddpui.ddpairbyte.airbyte_service.get_destinations"
+    ) as mock_get_destinations, patch(
         "ddpui.ddpairbyte.airbyte_service.delete_source"
     ) as mock_delete_source, patch(
+        "ddpui.ddpairbyte.airbyte_service.delete_destination"
+    ) as mock_delete_destination, patch(
         "ddpui.ddpairbyte.airbyte_service.delete_workspace"
     ) as mock_delete_workspace, patch(
         "ddpui.ddpprefect.prefect_service.prefect_delete_a_block"
     ) as mock_prefect_delete_a_block:
         mock_get_sources.return_value = {"sources": [{"sourceId": "fake-source-id"}]}
+        mock_get_destinations.return_value = {"destinations": []}
 
         OrgPrefectBlockv1.objects.create(
             org=org_with_workspace,
