@@ -260,8 +260,14 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
     logger.info("set org.dbt for org %s", org.name)
 
     if payload["gitrepoAccessToken"] is not None:
-        secretsmanager.delete_github_token(org)
-        secretsmanager.save_github_token(org, payload["gitrepoAccessToken"])
+        if dbt.gitrepo_access_token_secret:
+            secretsmanager.update_github_pat(
+                dbt.gitrepo_access_token_secret, payload["gitrepoAccessToken"]
+            )
+        else:
+            pat_secret_key = secretsmanager.save_github_pat(payload["gitrepoAccessToken"])
+            dbt.gitrepo_access_token_secret = pat_secret_key
+            dbt.save()
 
     taskprogress.add(
         {

@@ -94,6 +94,11 @@ def generate_github_token_name(org: Org):
     return f"gitrepoAccessToken-{org.slug}-{uuid4()}"
 
 
+def generate_github_pat_name():
+    """store a github personal access token"""
+    return f"gitrepoAccessToken-{uuid4()}"
+
+
 def generate_warehouse_credentials_name(org: Org):
     """store the connection credentials to their data warehouse"""
     return f"warehouseCreds-{org.slug}-{uuid4()}"
@@ -109,33 +114,41 @@ def generate_dalgo_user_superset_credentials_name():
     return f"dalgoUserSupersetCreds-{uuid4()}"
 
 
-def save_github_token(org: Org, access_token: str):
-    """saves a github auth token for an org under a predefined secret name"""
+def save_github_pat(access_token: str) -> str:
+    """saves a github auth token under a predefined secret name"""
     aws_sm = get_client()
-    secret_name = generate_github_token_name(org)
+    secret_name = generate_github_pat_name()
     response = aws_sm.create_secret(
         Name=secret_name,
         SecretString=access_token,
     )
     logger.info("saved github access token in secrets manager under name=" + response["Name"])
-    org.dbt.gitrepo_access_token_secret = secret_name
-    org.dbt.save()
+    return secret_name
 
 
-def retrieve_github_token(org_dbt: OrgDbt) -> str | None:
-    """retreive the github token if present otherwise return None"""
-    secret_name = org_dbt.gitrepo_access_token_secret
+def retrieve_github_pat(secret_name: str) -> str | None:
+    """retreive the github personal access token if present otherwise return None"""
     if secret_name is not None:
         aws_sm = get_client()
         try:
             response = aws_sm.get_secret_value(SecretId=secret_name)
-            logger.info("Git token fetched from secrets manager")
+            logger.info("GitHub PAT fetched from secrets manager")
             return response["SecretString"] if "SecretString" in response else None
         except Exception:  # skipcq PYL-W0703
             # no secret available by the secret_name
             logger.info("Could not find the secret")
 
     return None
+
+
+def update_github_pat(secret_name: str, access_token: str):
+    """updates a github personal access token for an org"""
+    aws_sm = get_client()
+    response = aws_sm.update_secret(
+        SecretId=secret_name,
+        SecretString=access_token,
+    )
+    logger.info("updated github access token in secrets manager under name=" + response["Name"])
 
 
 def delete_github_pat(pat_secret_name: str):
@@ -147,15 +160,6 @@ def delete_github_pat(pat_secret_name: str):
         except Exception:  # skipcq PYL-W0703
             # no secret to delete, carry on
             pass
-
-
-def delete_github_token(org: Org):
-    """deletes a secret corresponding to a github auth token for an org, if it exists"""
-    if org.dbt and org.dbt.gitrepo_access_token_secret:
-        secret_name = org.dbt.gitrepo_access_token_secret
-        delete_github_pat(secret_name)
-        org.dbt.gitrepo_access_token_secret = None
-        org.dbt.save()
 
 
 def save_warehouse_credentials(warehouse: OrgWarehouse, credentials: dict):
