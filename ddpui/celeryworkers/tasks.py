@@ -28,6 +28,7 @@ from ddpui.ddpdbt import elementary_service
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.awsses import send_text_message
 from ddpui.models.org_plans import OrgPlans, OrgPlanType
+from ddpui.ddpdbt.dbthelpers import create_or_update_org_cli_block
 from ddpui.models.org import (
     Org,
     OrgDbt,
@@ -268,6 +269,23 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
             "status": "completed",
         }
     )
+
+    taskprogress.add(
+        {
+            "message": "creating dbt profile from the warehouse",
+            "status": "completed",
+        }
+    )
+    saved_creds = secretsmanager.retrieve_warehouse_credentials(warehouse)
+    create_or_update_org_cli_block(org, warehouse, saved_creds)
+
+    taskprogress.add(
+        {
+            "message": "set dbt workspace completed",
+            "status": "completed",
+        }
+    )
+
     logger.info("set dbt workspace completed for org %s", org.name)
 
 
