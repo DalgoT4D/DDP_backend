@@ -32,8 +32,7 @@ def from_orguser(orguser: OrgUser) -> OrgUserResponse:
         is_demo=orguser.org.base_plan() == OrgType.DEMO if orguser.org else False,
     )
     if orguser.org:
-        response.org.tnc_accepted = True
-        # OrgTnC.objects.filter(org=orguser.org).exists()
+        response.org.tnc_accepted = OrgTnC.objects.filter(org=orguser.org).exists()
     return response
 
 
