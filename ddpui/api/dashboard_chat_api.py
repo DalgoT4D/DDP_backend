@@ -494,7 +494,9 @@ class DashboardContextAnalyzer:
                 extra_config={
                     "pagination": {
                         "enabled": True,
-                        "page_size": min(self.max_rows, 50),  # Limit for AI context
+                        "page_size": min(
+                            self.max_rows, 1000
+                        ),  # Use requested limit, capped for safety
                     }
                 },
             )
@@ -617,8 +619,10 @@ class DashboardContextAnalyzer:
                 )
 
                 # Try multiple query approaches
-                limit = min(self.max_rows, 20)  # Start with smaller limit
-                select_columns = column_names[:5]  # Start with just 5 columns
+                # Use the requested max_rows for AI context, capped for safety
+                limit = min(self.max_rows, 1000)
+                # Include all available columns so AI has full row context
+                select_columns = column_names
 
                 # Approach 1: Simple SELECT with quoted identifiers
                 try:
