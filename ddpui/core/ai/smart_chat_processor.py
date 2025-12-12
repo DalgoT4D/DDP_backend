@@ -431,7 +431,7 @@ class SmartChatProcessor:
 
                 # Normalise columns to a list of column names; sample_data.columns may
                 # be a list of dicts like {"name": "<col>", "type": "..."}.
-                column_names: list[str] = []
+                column_names: List[str] = []
                 for col in raw_columns:
                     if isinstance(col, dict) and col.get("name"):
                         column_names.append(str(col.get("name")))
@@ -441,8 +441,8 @@ class SmartChatProcessor:
                 if not column_names:
                     continue
 
+                # First, try to find a row whose string cell matches one of the entities
                 for row in rows:
-                    # Find a string cell that matches one of the entity candidates
                     matched_entity = None
                     for col_name in column_names:
                         cell_value = row.get(col_name)
@@ -510,6 +510,68 @@ class SmartChatProcessor:
                         },
                         query_executed=False,
                         confidence_score=0.9,
+                    )
+
+                # If no row-level entity match, but the chart title itself contains the entity
+                # and there is a single numeric column, treat this as an aggregate metric
+                # card (e.g. "Karnataka Population" showing one number).
+                chart_title = str(chart.get("title", ""))
+                matched_entity_from_title = None
+                for ent in entity_candidates:
+                    if ent.lower() in chart_title.lower():
+                        matched_entity_from_title = ent
+                        break
+
+                if matched_entity_from_title and rows:
+                    first_row = rows[0]
+                    numeric_cols = [
+                        col_name
+                        for col_name in column_names
+                        if isinstance(first_row.get(col_name), (int, float))
+                    ]
+                    if not numeric_cols:
+                        continue
+
+                    preferred_numeric_col = None
+                    for col_name in numeric_cols:
+                        lower_name = str(col_name).lower()
+                        if any(kw in lower_name for kw in numeric_preference_keywords):
+                            preferred_numeric_col = col_name
+                            break
+
+                    if not preferred_numeric_col:
+                        if len(numeric_cols) == 1:
+                            preferred_numeric_col = numeric_cols[0]
+                        else:
+                            continue
+
+                    value = first_row.get(preferred_numeric_col)
+                    if not isinstance(value, (int, float)):
+                        continue
+
+                    schema = chart.get("schema") or {}
+                    schema_name = schema.get("schema_name")
+                    table_name = schema.get("table_name")
+                    source_line = ""
+                    if schema_name and table_name:
+                        source_line = f"\n\nSource: {schema_name}.{table_name}"
+
+                    answer_text = (
+                        f"Based on your dashboard data, the {preferred_numeric_col} for {matched_entity_from_title} is **{value:,}**."
+                        f"{source_line}"
+                    )
+
+                    return EnhancedChatResponse(
+                        content=answer_text,
+                        intent_detected=MessageIntent.DATA_QUERY,
+                        data_results={
+                            "query_results": [first_row],
+                            "columns": column_names,
+                            "row_count": 1,
+                            "source": "direct_context_lookup_title",
+                        },
+                        query_executed=False,
+                        confidence_score=0.85,
                     )
 
             return None
