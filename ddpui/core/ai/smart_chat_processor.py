@@ -183,6 +183,13 @@ class SmartChatProcessor:
             EnhancedChatResponse with content and optional data results
         """
         try:
+            # First, attempt a direct answer from the already-available dashboard context data.
+            # This can handle simple fact-style questions (e.g. "What is the population of Karnataka")
+            # without relying on NLQ/SQL generation.
+            direct_answer = self._attempt_direct_lookup_from_context(message, dashboard_context)
+            if direct_answer:
+                return direct_answer
+
             # Analyze the message intent
             analysis = self.analyze_message(message, dashboard_context)
 
@@ -441,28 +448,27 @@ class SmartChatProcessor:
                 if not column_names:
                     continue
 
-                # First, try to find a row whose string cell matches one of the entities
-                for row in rows:
-                    matched_entity = None
-                    for col_name in column_names:
-                        cell_value = row.get(col_name)
-                        if isinstance(cell_value, str):
-                            for ent in entity_candidates:
-                                if ent.lower() in cell_value.lower():
-                                    matched_entity = ent
-                                    break
-                        if matched_entity:
-                            break
+                # For each candidate entity (e.g. "Karnataka"), try to aggregate over all
+                # matching rows in this chart.
+                for ent in entity_candidates:
+                    matching_rows = []
 
-                    if not matched_entity:
+                    for row in rows:
+                        for col_name in column_names:
+                            cell_value = row.get(col_name)
+                            if isinstance(cell_value, str) and ent.lower() in cell_value.lower():
+                                matching_rows.append(row)
+                                break
+
+                    if not matching_rows:
                         continue
 
-                    # Find numeric columns in this row
-                    numeric_cols = [
-                        col_name
-                        for col_name in column_names
-                        if isinstance(row.get(col_name), (int, float))
-                    ]
+                    # Identify numeric columns that appear in the matching rows
+                    numeric_cols: List[str] = []
+                    for col_name in column_names:
+                        if any(isinstance(r.get(col_name), (int, float)) for r in matching_rows):
+                            numeric_cols.append(col_name)
+
                     if not numeric_cols:
                         continue
 
@@ -481,8 +487,18 @@ class SmartChatProcessor:
                         else:
                             continue  # ambiguous, skip
 
-                    value = row.get(preferred_numeric_col)
-                    if not isinstance(value, (int, float)):
+                    # Aggregate across all matching rows
+                    total_value = 0.0
+                    for r in matching_rows:
+                        v = r.get(preferred_numeric_col)
+                        if isinstance(v, (int, float)):
+                            total_value += float(v)
+
+                    # If we couldn't accumulate anything numeric, skip
+                    if total_value == 0 and not any(
+                        isinstance(r.get(preferred_numeric_col), (int, float))
+                        for r in matching_rows
+                    ):
                         continue
 
                     # Try to infer a source table if available
@@ -495,7 +511,7 @@ class SmartChatProcessor:
 
                     # Build a concise, user-friendly answer
                     answer_text = (
-                        f"Based on your dashboard data, the {preferred_numeric_col} for {matched_entity} is **{value:,}**."
+                        f"Based on your dashboard data, the total {preferred_numeric_col} for {ent} is **{int(total_value):,}**."
                         f"{source_line}"
                     )
 
@@ -503,10 +519,10 @@ class SmartChatProcessor:
                         content=answer_text,
                         intent_detected=MessageIntent.DATA_QUERY,
                         data_results={
-                            "query_results": [row],
+                            "query_results": matching_rows,
                             "columns": column_names,
-                            "row_count": 1,
-                            "source": "direct_context_lookup",
+                            "row_count": len(matching_rows),
+                            "source": "direct_context_lookup_aggregate",
                         },
                         query_executed=False,
                         confidence_score=0.9,
