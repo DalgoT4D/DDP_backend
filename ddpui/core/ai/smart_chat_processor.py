@@ -354,6 +354,13 @@ class SmartChatProcessor:
         dashboard_context: Optional[Dict[str, Any]],
     ) -> EnhancedChatResponse:
         """Handle cases where data query execution failed"""
+        # First, attempt a direct lookup from the already-available dashboard context data.
+        # This allows answering simple questions like "What is the population of Karnataka"
+        # directly from chart/sample_data rows without relying on NLQ generation.
+        direct_answer = self._attempt_direct_lookup_from_context(message, dashboard_context)
+        if direct_answer:
+            return direct_answer
+
         error_msg = execution_result.error_message if execution_result else "Unknown error"
 
         # Provide helpful fallback based on the error type
@@ -382,6 +389,120 @@ class SmartChatProcessor:
             fallback_used=True,
             recommendations=suggestions,
         )
+
+    def _attempt_direct_lookup_from_context(
+        self, message: str, dashboard_context: Optional[Dict[str, Any]]
+    ) -> Optional[EnhancedChatResponse]:
+        """
+        Try to answer simple fact-style questions directly from dashboard sample data,
+        without relying on NLQ/SQL generation.
+
+        This is especially useful when chart data has already been materialized and
+        the question refers to a specific entity present in that data (for example,
+        "What is the population of Karnataka").
+        """
+        try:
+            if not dashboard_context:
+                return None
+
+            charts = dashboard_context.get("charts", [])
+            if not charts:
+                return None
+
+            # Extract candidate entity tokens from the question (e.g. "Karnataka")
+            import re
+
+            entity_candidates = set(
+                re.findall(r"\b[A-Z][a-zA-Z]+\b", message)
+            )  # simple proper-noun heuristic
+            if not entity_candidates:
+                return None
+
+            # Preferred numeric column name hints
+            numeric_preference_keywords = ["population", "count", "total", "value", "metric"]
+
+            for chart in charts:
+                sample_data = chart.get("sample_data") or {}
+                rows = sample_data.get("rows") or []
+                columns = sample_data.get("columns") or []
+
+                if not rows or not columns:
+                    continue
+
+                for row in rows:
+                    # Find a string cell that matches one of the entity candidates
+                    matched_entity = None
+                    for col in columns:
+                        cell_value = row.get(col)
+                        if isinstance(cell_value, str):
+                            for ent in entity_candidates:
+                                if ent.lower() in cell_value.lower():
+                                    matched_entity = ent
+                                    break
+                        if matched_entity:
+                            break
+
+                    if not matched_entity:
+                        continue
+
+                    # Find numeric columns in this row
+                    numeric_cols = [
+                        col for col in columns if isinstance(row.get(col), (int, float))
+                    ]
+                    if not numeric_cols:
+                        continue
+
+                    # Prefer numeric columns whose name suggests a metric like population/total
+                    preferred_numeric_col = None
+                    for col in numeric_cols:
+                        lower_name = str(col).lower()
+                        if any(kw in lower_name for kw in numeric_preference_keywords):
+                            preferred_numeric_col = col
+                            break
+
+                    if not preferred_numeric_col:
+                        # Fall back to the first numeric column if there is exactly one
+                        if len(numeric_cols) == 1:
+                            preferred_numeric_col = numeric_cols[0]
+                        else:
+                            continue  # ambiguous, skip
+
+                    value = row.get(preferred_numeric_col)
+                    if not isinstance(value, (int, float)):
+                        continue
+
+                    # Try to infer a source table if available
+                    schema = chart.get("schema") or {}
+                    schema_name = schema.get("schema_name")
+                    table_name = schema.get("table_name")
+                    source_line = ""
+                    if schema_name and table_name:
+                        source_line = f"\n\nSource: {schema_name}.{table_name}"
+
+                    # Build a concise, user-friendly answer
+                    answer_text = (
+                        f"Based on your dashboard data, the {preferred_numeric_col} for {matched_entity} is **{value:,}**."
+                        f"{source_line}"
+                    )
+
+                    return EnhancedChatResponse(
+                        content=answer_text,
+                        intent_detected=MessageIntent.DATA_QUERY,
+                        data_results={
+                            "query_results": [row],
+                            "columns": columns,
+                            "row_count": 1,
+                            "source": "direct_context_lookup",
+                        },
+                        query_executed=False,
+                        confidence_score=0.9,
+                    )
+
+            return None
+
+        except Exception as e:
+            self.logger.error(f"Error in direct context lookup: {e}")
+            return None
 
     def _generate_data_response_content(
         self,
