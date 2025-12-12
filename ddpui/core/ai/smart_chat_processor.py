@@ -863,21 +863,94 @@ class SmartChatProcessor:
         self, dashboard_context: Optional[Dict[str, Any]], analysis: MessageAnalysis
     ) -> str:
         """Build system prompt for dashboard explanation messages"""
-        return """You are a dashboard expert helping users understand their own data visualizations.
+        base_instructions = [
+            "You are a dashboard expert helping users understand their own data visualizations.",
+            "",
+            "HARD CONSTRAINTS:",
+            "- Use ONLY the information that is explicitly available in the dashboard context, the query results, and this conversation.",
+            "- Do NOT use any external knowledge, the public internet, or general facts about the world (for example: typical populations of states or countries).",
+            '- Do NOT guess, infer, or "fill in" missing values from outside knowledge. If the data needed to answer a question is not present in the dashboard context, clearly say that the data is not available.',
+            '- When data is missing, respond with a message like: "Based on the data available in this dashboard, I cannot determine this. The necessary data is not present."',
+            "",
+            "YOUR GOAL:",
+            "- Explain what THIS specific dashboard contains and how it can be used.",
+            "- Focus on the actual charts, metrics, and filters that are present in the dashboard context below.",
+            "- Describe business insights that can be derived ONLY from the provided charts and fields.",
+            "- Suggest concrete follow-up questions the user can ask about their own data (not external benchmarks or public statistics).",
+        ]
 
-HARD CONSTRAINTS:
-- Use ONLY the information that is explicitly available in the dashboard context, the query results, and this conversation.
-- Do NOT use any external knowledge, the public internet, or general facts about the world (for example: typical populations of states or countries).
-- Do NOT guess, infer, or "fill in" missing values from outside knowledge. If the data needed to answer a question is not present in the dashboard context, clearly say that the data is not available.
-- When data is missing, respond with a message like: "Based on the data available in this dashboard, I cannot determine this. The necessary data is not present."
+        # If no structured context is available, fall back to base instructions only
+        if not dashboard_context:
+            return "\n".join(base_instructions)
 
-Focus on:
-- Explaining what each chart (in the provided dashboard context) shows and why it's useful
-- Describing the business insights that can be derived ONLY from the provided charts and fields
-- Guiding users on how to interact with the dashboard
-- Suggesting specific questions they can ask about their own data (not external benchmarks or public statistics)
+        dashboard = dashboard_context.get("dashboard", {}) or {}
+        charts = dashboard_context.get("charts", []) or []
+        filters = dashboard_context.get("filters", []) or []
+        summary = dashboard_context.get("summary", {}) or {}
 
-Be clear, helpful, and business-focused in your explanations while staying strictly grounded in the provided data."""
+        context_lines: List[str] = []
+
+        # Dashboard summary
+        context_lines.append("")
+        context_lines.append("DASHBOARD OVERVIEW:")
+        context_lines.append(f"- Title: {dashboard.get('title', 'Untitled Dashboard')}")
+        description = dashboard.get("description") or ""
+        if description:
+            context_lines.append(f"- Description: {description}")
+        context_lines.append(
+            f"- Type: {dashboard.get('dashboard_type', 'unknown')} | Target screen size: {dashboard.get('target_screen_size', 'unspecified')}"
+        )
+        context_lines.append(f"- Total charts: {summary.get('total_charts', len(charts))}")
+
+        # High-level chart list
+        if charts:
+            context_lines.append("")
+            context_lines.append("CHARTS IN THIS DASHBOARD:")
+            for idx, chart in enumerate(charts[:10], start=1):
+                title = chart.get("title", f"Chart {idx}")
+                chart_type = chart.get("type", "unknown")
+                schema = chart.get("schema") or {}
+                schema_name = schema.get("schema_name")
+                table_name = schema.get("table_name")
+                metrics = schema.get("metrics") or []
+                dimensions = schema.get("dimensions") or []
+
+                line = f"{idx}. {title} — type: {chart_type}"
+                if metrics:
+                    line += f" | metrics: {', '.join(metrics)}"
+                if dimensions:
+                    line += f" | dimensions: {', '.join(dimensions)}"
+                if schema_name and table_name:
+                    line += f" | source table: {schema_name}.{table_name}"
+                context_lines.append(line)
+
+        # Filters
+        if filters:
+            context_lines.append("")
+            context_lines.append("AVAILABLE FILTERS:")
+            for f in filters[:10]:
+                name = f.get("name", "Unnamed filter")
+                ftype = f.get("filter_type", "unknown")
+                context_lines.append(f"- {name} (type: {ftype})")
+
+        context_lines.append("")
+        context_lines.append(
+            'When the user asks you to "tell me more about the dashboard" or similar, you MUST:'
+        )
+        context_lines.append(
+            "- Start with a 1–2 sentence plain-language summary of what this dashboard helps them understand."
+        )
+        context_lines.append(
+            "- Then mention a few key charts by name and briefly explain what each one focuses on (e.g., which metric and which dimension)."
+        )
+        context_lines.append(
+            "- Optionally point out any important filters that change how the data is viewed."
+        )
+        context_lines.append(
+            "- Keep your explanation concrete and grounded in the specific charts and fields listed above."
+        )
+
+        return "\n".join(base_instructions + context_lines)
 
     def _build_general_chat_prompt(self, dashboard_context: Optional[Dict[str, Any]]) -> str:
         """Build system prompt for general chat messages"""
