@@ -424,16 +424,28 @@ class SmartChatProcessor:
             for chart in charts:
                 sample_data = chart.get("sample_data") or {}
                 rows = sample_data.get("rows") or []
-                columns = sample_data.get("columns") or []
+                raw_columns = sample_data.get("columns") or []
 
-                if not rows or not columns:
+                if not rows or not raw_columns:
+                    continue
+
+                # Normalise columns to a list of column names; sample_data.columns may
+                # be a list of dicts like {"name": "<col>", "type": "..."}.
+                column_names: list[str] = []
+                for col in raw_columns:
+                    if isinstance(col, dict) and col.get("name"):
+                        column_names.append(str(col.get("name")))
+                    else:
+                        column_names.append(str(col))
+
+                if not column_names:
                     continue
 
                 for row in rows:
                     # Find a string cell that matches one of the entity candidates
                     matched_entity = None
-                    for col in columns:
-                        cell_value = row.get(col)
+                    for col_name in column_names:
+                        cell_value = row.get(col_name)
                         if isinstance(cell_value, str):
                             for ent in entity_candidates:
                                 if ent.lower() in cell_value.lower():
@@ -447,17 +459,19 @@ class SmartChatProcessor:
 
                     # Find numeric columns in this row
                     numeric_cols = [
-                        col for col in columns if isinstance(row.get(col), (int, float))
+                        col_name
+                        for col_name in column_names
+                        if isinstance(row.get(col_name), (int, float))
                     ]
                     if not numeric_cols:
                         continue
 
                     # Prefer numeric columns whose name suggests a metric like population/total
                     preferred_numeric_col = None
-                    for col in numeric_cols:
-                        lower_name = str(col).lower()
+                    for col_name in numeric_cols:
+                        lower_name = str(col_name).lower()
                         if any(kw in lower_name for kw in numeric_preference_keywords):
-                            preferred_numeric_col = col
+                            preferred_numeric_col = col_name
                             break
 
                     if not preferred_numeric_col:
@@ -490,7 +504,7 @@ class SmartChatProcessor:
                         intent_detected=MessageIntent.DATA_QUERY,
                         data_results={
                             "query_results": [row],
-                            "columns": columns,
+                            "columns": column_names,
                             "row_count": 1,
                             "source": "direct_context_lookup",
                         },
