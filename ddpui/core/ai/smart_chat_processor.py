@@ -763,6 +763,15 @@ class SmartChatProcessor:
     ) -> Tuple[MessageIntent, float]:
         """Classify the intent of the message"""
 
+        # Explicitly treat high-level dashboard questions as dashboard explanation,
+        # even if they don't exactly match the regex patterns below.
+        if "dashboard" in message_lower:
+            if any(
+                kw in message_lower
+                for kw in ["tell me", "explain", "describe", "about", "overview", "summary"]
+            ):
+                return MessageIntent.DASHBOARD_EXPLANATION, 0.9
+
         # Strong data query indicators
         if data_query_confidence > 0.4:
             return MessageIntent.DATA_QUERY, min(data_query_confidence + 0.2, 0.9)
