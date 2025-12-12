@@ -285,7 +285,17 @@ class SmartChatProcessor:
     ) -> EnhancedChatResponse:
         """Handle messages asking for dashboard explanations"""
         try:
-            # Use standard AI chat with rich dashboard context
+            # If we have structured dashboard context, build a deterministic,
+            # data-grounded explanation instead of asking the model to infer one.
+            if dashboard_context:
+                summary_text = self._build_dashboard_summary_from_context(dashboard_context)
+                return EnhancedChatResponse(
+                    content=summary_text,
+                    intent_detected=MessageIntent.DASHBOARD_EXPLANATION,
+                    confidence_score=0.95,
+                )
+
+            # Fallback: use standard AI chat with high-level instructions
             if not self.ai_provider:
                 self.ai_provider = get_default_ai_provider()
 
@@ -297,7 +307,7 @@ class SmartChatProcessor:
             ]
 
             response = self.ai_provider.chat_completion(
-                messages=ai_messages, temperature=0.3, max_tokens=1000
+                messages=ai_messages, temperature=0.3, max_tokens=600
             )
 
             return EnhancedChatResponse(
@@ -951,6 +961,80 @@ class SmartChatProcessor:
         )
 
         return "\n".join(base_instructions + context_lines)
+
+    def _build_dashboard_summary_from_context(self, dashboard_context: Dict[str, Any]) -> str:
+        """
+        Build a succinct, deterministic explanation of the current dashboard
+        using only the structured context (no model reasoning).
+        """
+        dashboard = dashboard_context.get("dashboard", {}) or {}
+        charts = dashboard_context.get("charts", []) or []
+        filters = dashboard_context.get("filters", []) or []
+        summary = dashboard_context.get("summary", {}) or {}
+
+        lines: List[str] = []
+
+        title = dashboard.get("title", "this dashboard")
+        description = (dashboard.get("description") or "").strip()
+        total_charts = summary.get("total_charts", len(charts))
+
+        # Intro
+        if description:
+            lines.append(
+                f'This dashboard, "{title}", gives you an overview of your data: {description}'
+            )
+        else:
+            lines.append(
+                f'This dashboard, "{title}", gives you an overview of key metrics in your data.'
+            )
+
+        if total_charts:
+            lines.append(
+                f"It contains {total_charts} chart{'' if total_charts == 1 else 's'} that highlight different aspects of your data."
+            )
+
+        # Chart-by-chart summary
+        if charts:
+            lines.append("")
+            lines.append("Here is what each chart focuses on:")
+            for idx, chart in enumerate(charts, start=1):
+                chart_title = chart.get("title", f"Chart {idx}")
+                chart_type = chart.get("type", "chart")
+                schema = chart.get("schema") or {}
+                metrics = schema.get("metrics") or []
+                dimensions = schema.get("dimensions") or []
+                schema_name = schema.get("schema_name")
+                table_name = schema.get("table_name")
+
+                parts: List[str] = []
+                parts.append(f"- {chart_title}: a {chart_type} visualization")
+
+                if metrics and dimensions:
+                    parts.append(
+                        f"showing {', '.join(metrics)} broken down by {', '.join(dimensions)}"
+                    )
+                elif metrics:
+                    parts.append(
+                        f"highlighting the metric{'' if len(metrics) == 1 else 's'} {', '.join(metrics)}"
+                    )
+                elif dimensions:
+                    parts.append(f"comparing values across {', '.join(dimensions)}")
+
+                if schema_name and table_name:
+                    parts.append(f"using data from {schema_name}.{table_name}")
+
+                lines.append(" ".join(parts).strip())
+
+        # Filters
+        if filters:
+            lines.append("")
+            lines.append("You can refine the view using the available filters, for example:")
+            for f in filters[:3]:
+                name = f.get("name", "Unnamed filter")
+                ftype = f.get("filter_type", "filter")
+                lines.append(f"- {name} ({ftype})")
+
+        return "\n".join(lines).strip()
 
     def _build_general_chat_prompt(self, dashboard_context: Optional[Dict[str, Any]]) -> str:
         """Build system prompt for general chat messages"""
