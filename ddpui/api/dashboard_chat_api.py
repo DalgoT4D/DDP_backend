@@ -1023,10 +1023,12 @@ def dashboard_chat(request, dashboard_id: int, payload: DashboardChatRequest):
                 user_message = msg.content
                 break
 
-        # ENHANCED: Try smart query execution first if data sharing is enabled
+        # ENHANCED: Use SmartChatProcessor for intent-aware handling.
+        # Data-query execution is only enabled when org has AI data sharing enabled,
+        # but dashboard explanations can still be generated from metadata even without data sharing.
         enhanced_response = None
         org_settings = OrgSettings.objects.filter(org=orguser_obj.org).first()
-        if user_message and org_settings and org_settings.ai_data_sharing_enabled:
+        if user_message and org_settings:
             try:
                 from ddpui.core.ai.smart_chat_processor import SmartChatProcessor
 
@@ -1040,7 +1042,7 @@ def dashboard_chat(request, dashboard_id: int, payload: DashboardChatRequest):
                     dashboard_id=dashboard_id,
                     dashboard_context=context,
                     user_context={},
-                    enable_data_query=True,
+                    enable_data_query=bool(org_settings.ai_data_sharing_enabled),
                 )
 
                 # If query was executed successfully, return the enhanced response
