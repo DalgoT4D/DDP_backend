@@ -318,8 +318,17 @@ class SmartChatProcessor:
 
         except Exception as e:
             self.logger.error(f"Error handling dashboard explanation: {e}")
+
+            # Always return a useful, data-grounded summary even on error
+            fallback_text = "This dashboard shows multiple charts summarizing your key metrics."
+            try:
+                if dashboard_context and isinstance(dashboard_context, dict):
+                    fallback_text = self._build_dashboard_summary_from_context(dashboard_context)
+            except Exception as inner_e:
+                self.logger.error(f"Fallback dashboard summary failed: {inner_e}")
+
             return EnhancedChatResponse(
-                content="I can help explain this dashboard. Could you be more specific about what you'd like to know?",
+                content=fallback_text,
                 intent_detected=MessageIntent.DASHBOARD_EXPLANATION,
                 fallback_used=True,
             )
