@@ -1020,6 +1020,7 @@ def dashboard_chat(request, dashboard_id: int, payload: DashboardChatRequest):
                 break
 
         # ENHANCED: Try smart query execution first if data sharing is enabled
+        enhanced_response = None
         org_settings = OrgSettings.objects.filter(org=orguser_obj.org).first()
         if user_message and org_settings and org_settings.ai_data_sharing_enabled:
             try:
@@ -1101,11 +1102,40 @@ def dashboard_chat(request, dashboard_id: int, payload: DashboardChatRequest):
                     logger.info(
                         f"Dashboard {dashboard_id} - Smart processor did not execute query, falling back to regular chat"
                     )
-
             except Exception as e:
                 logger.error(
                     f"Dashboard {dashboard_id} - Smart processing failed: {e}, falling back to regular chat"
                 )
+
+        # If smart processing ran, detected a data query, but could NOT execute a data query,
+        # do not fall back to a general chat completion (which could use outside knowledge).
+        # Instead, return the smart processor's fallback content so the user sees a clear,
+        # data-scoped limitation message.
+        if (
+            enhanced_response
+            and getattr(enhanced_response, "intent_detected", None) == MessageIntent.DATA_QUERY
+            and not getattr(enhanced_response, "query_executed", False)
+        ):
+            fallback_content = enhanced_response.content or (
+                "Based on the data available in this dashboard, I cannot answer that question because a safe data query could not be executed."
+            )
+
+            return JsonResponse(
+                {
+                    "content": fallback_content,
+                    "context_included": True,
+                    "data_included": payload.include_data,
+                    "dashboard_id": dashboard_id,
+                    "metadata": {
+                        "smart_processing": True,
+                        "data_query_executed": False,
+                        "charts_analyzed": len(context.get("charts", [])),
+                        "filters_available": len(context.get("filters", [])),
+                        "selected_chart": payload.selected_chart_id,
+                        "session_id": session_id,
+                    },
+                }
+            )
 
         # Handle streaming vs non-streaming
         if payload.stream:
