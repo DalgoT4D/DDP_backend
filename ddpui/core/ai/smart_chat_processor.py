@@ -1039,7 +1039,7 @@ class SmartChatProcessor:
                         continue
 
                     chart_title = str(chart.get("title") or f"Chart {idx}")
-                    chart_type = str(chart.get("type") or "chart")
+                    raw_chart_type = str(chart.get("type") or "").lower()
                     schema = chart.get("schema") or {}
                     if not isinstance(schema, dict):
                         schema = {}
@@ -1055,16 +1055,53 @@ class SmartChatProcessor:
                     schema_name = schema.get("schema_name")
                     table_name = schema.get("table_name")
 
-                    parts: List[str] = []
-                    parts.append(f"- {chart_title}: a {chart_type} visualization")
+                    # Derive a friendly chart type label
+                    chart_type_map = {
+                        "pie": "pie chart",
+                        "donut": "donut chart",
+                        "doughnut": "donut chart",
+                        "bar": "bar chart",
+                        "column": "column chart",
+                        "line": "line chart",
+                        "area": "area chart",
+                        "table": "table",
+                        "big_number": "summary number",
+                        "kpi": "summary number",
+                    }
+                    friendly_type = chart_type_map.get(raw_chart_type, "visualization")
 
-                    if metrics and dimensions:
+                    # Convert metric definitions to friendly labels
+                    metric_labels: List[str] = []
+                    for m in metrics:
+                        if isinstance(m, dict):
+                            alias = m.get("alias")
+                            if alias:
+                                metric_labels.append(str(alias))
+                            else:
+                                agg = m.get("aggregation") or ""
+                                col = m.get("column") or ""
+                                if agg and col:
+                                    metric_labels.append(f"{agg}({col})")
+                                elif col:
+                                    metric_labels.append(str(col))
+                        else:
+                            metric_labels.append(str(m))
+                    if not metric_labels and metrics:
+                        metric_labels = [str(m) for m in metrics]
+
+                    # Convert dimensions to friendly labels
+                    dimension_labels = [str(d) for d in dimensions if d]
+
+                    parts: List[str] = []
+                    parts.append(f"- {chart_title}: a {friendly_type}")
+
+                    if metric_labels and dimension_labels:
                         parts.append(
-                            f"showing {', '.join(str(m) for m in metrics)} broken down by {', '.join(str(d) for d in dimensions)}"
+                            f"showing {', '.join(metric_labels)} broken down by {', '.join(dimension_labels)}"
                         )
-                    elif metrics:
+                    elif metric_labels:
                         parts.append(
-                            f"highlighting the metric{'' if len(metrics) == 1 else 's'} {', '.join(str(m) for m in metrics)}"
+                            f"highlighting the metric{'' if len(metric_labels) == 1 else 's'} {', '.join(metric_labels)}"
                         )
                     elif dimensions:
                         parts.append(
