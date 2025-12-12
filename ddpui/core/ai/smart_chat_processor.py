@@ -975,75 +975,129 @@ class SmartChatProcessor:
         """
         Build a succinct, deterministic explanation of the current dashboard
         using only the structured context (no model reasoning).
+        This function is defensive and should never raise; on any issue it
+        still returns a chart-based summary instead of a generic sentence.
         """
-        dashboard = dashboard_context.get("dashboard", {}) or {}
-        charts = dashboard_context.get("charts", []) or []
-        filters = dashboard_context.get("filters", []) or []
-        summary = dashboard_context.get("summary", {}) or {}
+        try:
+            if not isinstance(dashboard_context, dict):
+                return "This dashboard has several charts that highlight different metrics for your data."
 
-        lines: List[str] = []
+            dashboard = dashboard_context.get("dashboard") or {}
+            if not isinstance(dashboard, dict):
+                dashboard = {}
 
-        title = dashboard.get("title", "this dashboard")
-        description = (dashboard.get("description") or "").strip()
-        total_charts = summary.get("total_charts", len(charts))
+            charts = dashboard_context.get("charts") or []
+            if not isinstance(charts, list):
+                charts = []
 
-        # Intro
-        if description:
-            lines.append(
-                f'This dashboard, "{title}", gives you an overview of your data: {description}'
-            )
-        else:
-            lines.append(
-                f'This dashboard, "{title}", gives you an overview of key metrics in your data.'
-            )
+            filters = dashboard_context.get("filters") or []
+            if not isinstance(filters, list):
+                filters = []
 
-        if total_charts:
-            lines.append(
-                f"It contains {total_charts} chart{'' if total_charts == 1 else 's'} that highlight different aspects of your data."
-            )
+            summary = dashboard_context.get("summary") or {}
+            if not isinstance(summary, dict):
+                summary = {}
 
-        # Chart-by-chart summary
-        if charts:
-            lines.append("")
-            lines.append("Here is what each chart focuses on:")
-            for idx, chart in enumerate(charts, start=1):
-                chart_title = chart.get("title", f"Chart {idx}")
-                chart_type = chart.get("type", "chart")
-                schema = chart.get("schema") or {}
-                metrics = schema.get("metrics") or []
-                dimensions = schema.get("dimensions") or []
-                schema_name = schema.get("schema_name")
-                table_name = schema.get("table_name")
+            lines: List[str] = []
 
-                parts: List[str] = []
-                parts.append(f"- {chart_title}: a {chart_type} visualization")
+            title = str(dashboard.get("title") or "this dashboard")
+            description = str(dashboard.get("description") or "").strip()
+            total_charts = summary.get("total_charts")
+            if not isinstance(total_charts, int):
+                total_charts = len(charts)
 
-                if metrics and dimensions:
-                    parts.append(
-                        f"showing {', '.join(metrics)} broken down by {', '.join(dimensions)}"
+            # Intro
+            if description:
+                lines.append(
+                    f'This dashboard, "{title}", gives you an overview of your data: {description}'
+                )
+            else:
+                lines.append(
+                    f'This dashboard, "{title}", gives you an overview of key metrics in your data.'
+                )
+
+            if total_charts > 0:
+                lines.append(
+                    f'It contains {total_charts} chart{"" if total_charts == 1 else "s"} that highlight different aspects of your data.'
+                )
+
+            # Chart-by-chart summary
+            if charts:
+                lines.append("")
+                lines.append("Here is what each chart focuses on:")
+                for idx, chart in enumerate(charts, start=1):
+                    if not isinstance(chart, dict):
+                        continue
+
+                    chart_title = str(chart.get("title") or f"Chart {idx}")
+                    chart_type = str(chart.get("type") or "chart")
+                    schema = chart.get("schema") or {}
+                    if not isinstance(schema, dict):
+                        schema = {}
+
+                    metrics = schema.get("metrics") or []
+                    if not isinstance(metrics, list):
+                        metrics = [str(metrics)]
+
+                    dimensions = schema.get("dimensions") or []
+                    if not isinstance(dimensions, list):
+                        dimensions = [str(dimensions)]
+
+                    schema_name = schema.get("schema_name")
+                    table_name = schema.get("table_name")
+
+                    parts: List[str] = []
+                    parts.append(f"- {chart_title}: a {chart_type} visualization")
+
+                    if metrics and dimensions:
+                        parts.append(
+                            f"showing {', '.join(str(m) for m in metrics)} broken down by {', '.join(str(d) for d in dimensions)}"
+                        )
+                    elif metrics:
+                        parts.append(
+                            f"highlighting the metric{'' if len(metrics) == 1 else 's'} {', '.join(str(m) for m in metrics)}"
+                        )
+                    elif dimensions:
+                        parts.append(
+                            f"comparing values across {', '.join(str(d) for d in dimensions)}"
+                        )
+
+                    if schema_name and table_name:
+                        parts.append(f"using data from {schema_name}.{table_name}")
+
+                    lines.append(" ".join(parts).strip())
+
+            # Filters
+            if filters:
+                lines.append("")
+                lines.append("You can refine the view using the available filters, for example:")
+                for f in filters[:3]:
+                    if not isinstance(f, dict):
+                        continue
+                    name = str(f.get("name") or "Unnamed filter")
+                    ftype = str(f.get("filter_type") or "filter")
+                    lines.append(f"- {name} ({ftype})")
+
+            return "\n".join(lines).strip()
+
+        except Exception as e:
+            self.logger.error(f"Error building dashboard summary from context: {e}")
+            # Fallback: at least mention chart titles if available
+            try:
+                charts = dashboard_context.get("charts") or []
+                titles = [
+                    str(c.get("title")) for c in charts if isinstance(c, dict) and c.get("title")
+                ]
+                if titles:
+                    return "This dashboard contains the following charts:\n" + "\n".join(
+                        f"- {t}" for t in titles
                     )
-                elif metrics:
-                    parts.append(
-                        f"highlighting the metric{'' if len(metrics) == 1 else 's'} {', '.join(metrics)}"
-                    )
-                elif dimensions:
-                    parts.append(f"comparing values across {', '.join(dimensions)}")
+            except Exception:
+                pass
 
-                if schema_name and table_name:
-                    parts.append(f"using data from {schema_name}.{table_name}")
-
-                lines.append(" ".join(parts).strip())
-
-        # Filters
-        if filters:
-            lines.append("")
-            lines.append("You can refine the view using the available filters, for example:")
-            for f in filters[:3]:
-                name = f.get("name", "Unnamed filter")
-                ftype = f.get("filter_type", "filter")
-                lines.append(f"- {name} ({ftype})")
-
-        return "\n".join(lines).strip()
+            return (
+                "This dashboard has several charts that highlight different metrics for your data."
+            )
 
     def _build_general_chat_prompt(self, dashboard_context: Optional[Dict[str, Any]]) -> str:
         """Build system prompt for general chat messages"""
