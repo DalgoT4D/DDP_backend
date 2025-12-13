@@ -197,22 +197,25 @@ def test_put_dbt_github(orguser):
 
     mocked_task = Mock()
     mocked_task.id = "task-id"
+    mock_secret_name = "gitrepoAccessToken-test-secret"
     with patch(
         "ddpui.celeryworkers.tasks.clone_github_repo.delay", return_value=mocked_task
     ) as delay, patch("ddpui.api.dbt_api.dbt_service.check_repo_exists", return_value=True), patch(
         "ddpui.ddpprefect.prefect_service.upsert_secret_block"
+    ), patch(
+        "ddpui.api.dbt_api.secretsmanager.save_github_pat", return_value=mock_secret_name
     ):
         put_dbt_github(request, payload)
         delay.assert_called_once_with(
             "org-slug",
             "new-url",
-            "new-access-token",
+            mock_secret_name,
             os.getenv("CLIENTDBT_ROOT") + "/org-slug",
             None,
             False,
         )
         assert request.orguser.org.dbt.gitrepo_url == "new-url"
-        assert request.orguser.org.dbt.gitrepo_access_token_secret == "new-access-token"
+        assert request.orguser.org.dbt.gitrepo_access_token_secret == mock_secret_name
 
 
 def test_put_dbt_github_with_elementary_setup(orguser):
@@ -236,6 +239,7 @@ def test_put_dbt_github_with_elementary_setup(orguser):
 
     mocked_task = Mock()
     mocked_task.id = "task-id"
+    mock_secret_name = "gitrepoAccessToken-test-secret"
 
     with patch(
         "ddpui.celeryworkers.tasks.clone_github_repo.delay", return_value=mocked_task
@@ -244,18 +248,20 @@ def test_put_dbt_github_with_elementary_setup(orguser):
     ), patch(
         "ddpui.api.dbt_api.elementary_service.elementary_setup_status",
         return_value={"status": "set-up"},
+    ), patch(
+        "ddpui.api.dbt_api.secretsmanager.save_github_pat", return_value=mock_secret_name
     ):
         put_dbt_github(request, payload)
         delay.assert_called_once_with(
             "org-slug",
             "new-url",
-            "new-access-token",
+            mock_secret_name,
             os.getenv("CLIENTDBT_ROOT") + "/org-slug",
             None,
             True,
         )
         assert request.orguser.org.dbt.gitrepo_url == "new-url"
-        assert request.orguser.org.dbt.gitrepo_access_token_secret == "new-access-token"
+        assert request.orguser.org.dbt.gitrepo_access_token_secret == mock_secret_name
 
 
 def test_dbt_delete_no_org(orguser):
