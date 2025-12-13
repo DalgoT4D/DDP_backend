@@ -34,6 +34,7 @@ from ddpui.utils.dbtdocs import create_single_html
 from ddpui.utils.helpers import runcmd
 from ddpui.utils.orguserhelpers import from_orguser
 from ddpui.utils.redis_client import RedisClient
+from ddpui.utils import secretsmanager
 from ddpui.schemas.org_task_schema import TaskParameters
 
 dbt_router = Router()
@@ -67,7 +68,8 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
     """Setup the client git repo and install a virtual env inside it to run dbt"""
     orguser: OrgUser = request.orguser
     org = orguser.org
-    if org.dbt is None:
+    orgdbt = org.dbt
+    if orgdbt is None:
         raise HttpError(400, "Create a dbt workspace first")
 
     repo_exists = dbt_service.check_repo_exists(payload.gitrepoUrl, payload.gitrepoAccessToken)
@@ -75,9 +77,7 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
     if not repo_exists:
         raise HttpError(400, "Github repository does not exist")
 
-    org.dbt.gitrepo_url = payload.gitrepoUrl
-    org.dbt.gitrepo_access_token_secret = payload.gitrepoAccessToken
-    org.dbt.save()
+    orgdbt.gitrepo_url = payload.gitrepoUrl
 
     # ignore if token is *******
     if set(payload.gitrepoAccessToken.strip()) == set("*"):
@@ -92,6 +92,11 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
         if secret_block:
             prefect_service.delete_secret_block(secret_block.block_id)
             secret_block.delete()
+
+        # remove from secrets manager
+        if orgdbt.gitrepo_access_token_secret:
+            secretsmanager.delete_github_pat(orgdbt.gitrepo_access_token_secret)
+            orgdbt.gitrepo_access_token_secret = None
 
     # else create / update the secret block
     else:
@@ -115,6 +120,18 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
                 block_name=secret_block_edit_params.block_name,
                 block_id=response["block_id"],
             )
+
+        # update or create in secrets manager
+        if orgdbt.gitrepo_access_token_secret:
+            secretsmanager.update_github_pat(
+                orgdbt.gitrepo_access_token_secret, payload.gitrepoAccessToken
+            )
+        else:
+            pat_secret_key = secretsmanager.save_github_pat(payload.gitrepoAccessToken)
+            orgdbt.gitrepo_access_token_secret = pat_secret_key
+
+    # save all orgdbt updates at once
+    orgdbt.save()
 
     org_dir = DbtProjectManager.get_org_dir(org)
 

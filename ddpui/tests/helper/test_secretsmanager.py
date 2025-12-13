@@ -1,12 +1,13 @@
 from unittest.mock import patch, Mock
 from ddpui.utils.secretsmanager import (
     Org,
-    generate_github_token_name,
+    generate_github_pat_name,
     generate_warehouse_credentials_name,
     generate_superset_credentials_name,
-    save_github_token,
-    retrieve_github_token,
-    delete_github_token,
+    save_github_pat,
+    retrieve_github_pat,
+    update_github_pat,
+    delete_github_pat,
     save_warehouse_credentials,
     update_warehouse_credentials,
     retrieve_warehouse_credentials,
@@ -17,10 +18,9 @@ from ddpui.utils.secretsmanager import (
 
 
 @patch("ddpui.utils.secretsmanager.uuid4", Mock(return_value="unique-val"))
-def test_generate_github_token_name():
-    org = Org(name="temporg", slug="temporg")
-    response = generate_github_token_name(org)
-    assert response == "gitrepoAccessToken-temporg-unique-val"
+def test_generate_github_pat_name():
+    response = generate_github_pat_name()
+    assert response == "gitrepoAccessToken-unique-val"
 
 
 @patch("ddpui.utils.secretsmanager.uuid4", Mock(return_value="unique-val"))
@@ -38,38 +38,41 @@ def test_generate_superset_credentials_name():
 
 
 @patch(
-    "ddpui.utils.secretsmanager.generate_github_token_name",
+    "ddpui.utils.secretsmanager.generate_github_pat_name",
     Mock(return_value="secretname"),
 )
 @patch("ddpui.utils.secretsmanager.get_client")
-def test_save_github_token(mock_getclient: Mock):
+def test_save_github_pat(mock_getclient: Mock):
     createsecret_mock = Mock(return_value={"Name": "secretname"})
     mock_getclient.return_value = Mock(create_secret=createsecret_mock)
-    org = Mock(slug="orgslug", dbt=Mock(gitrepo_access_token_secret="oldval", save=Mock()))
-    save_github_token(org, "newtoken")
+    response = save_github_pat("newtoken")
     createsecret_mock.assert_called_once_with(Name="secretname", SecretString="newtoken")
-    assert org.dbt.gitrepo_access_token_secret == "secretname"
+    assert response == "secretname"
 
 
 @patch("ddpui.utils.secretsmanager.get_client")
-def test_retrieve_github_token(mock_getclient: Mock):
+def test_retrieve_github_pat(mock_getclient: Mock):
     get_secret_value_mock = Mock(return_value={"SecretString": "secret-string"})
     mock_getclient.return_value = Mock(get_secret_value=get_secret_value_mock)
-    orgdbt = Mock(gitrepo_access_token_secret="access-token")
-    response = retrieve_github_token(orgdbt)
+    response = retrieve_github_pat("access-token")
     get_secret_value_mock.assert_called_once_with(SecretId="access-token")
     assert response == "secret-string"
 
 
 @patch("ddpui.utils.secretsmanager.get_client")
-def test_delete_github_token(mock_getclient: Mock):
+def test_update_github_pat(mock_getclient: Mock):
+    update_secret_mock = Mock(return_value={"Name": "secretname"})
+    mock_getclient.return_value = Mock(update_secret=update_secret_mock)
+    update_github_pat("access-token", "newtoken")
+    update_secret_mock.assert_called_once_with(SecretId="access-token", SecretString="newtoken")
+
+
+@patch("ddpui.utils.secretsmanager.get_client")
+def test_delete_github_pat(mock_getclient: Mock):
     delete_secret_mock = Mock()
-    save_mock = Mock()
     mock_getclient.return_value = Mock(delete_secret=delete_secret_mock)
-    org = Mock(dbt=Mock(gitrepo_access_token_secret="access-token", save=save_mock))
-    delete_github_token(org)
+    delete_github_pat("access-token")
     delete_secret_mock.assert_called_once_with(SecretId="access-token")
-    save_mock.assert_called_once()
 
 
 @patch(
