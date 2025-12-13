@@ -164,7 +164,11 @@ def post_system_transformation_tasks(request):
 
     # create a secret block to save the github endpoint url along with token
     try:
-        gitrepo_access_token = secretsmanager.retrieve_github_token(orguser.org.dbt)
+        gitrepo_access_token = None
+        if orguser.org.dbt.gitrepo_access_token_secret:
+            gitrepo_access_token = secretsmanager.retrieve_github_pat(
+                orguser.org.dbt.gitrepo_access_token_secret
+            )
         gitrepo_url = orguser.org.dbt.gitrepo_url
 
         if gitrepo_access_token is not None and gitrepo_access_token != "":

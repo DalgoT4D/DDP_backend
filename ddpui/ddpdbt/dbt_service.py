@@ -85,7 +85,9 @@ def delete_dbt_workspace(org: Org):
             pass
         secret_block.delete()
 
-    secretsmanager.delete_github_token(org)
+    # delete github PAT if exists
+    if org.dbt and org.dbt.gitrepo_access_token_secret:
+        secretsmanager.delete_github_pat(org.dbt.gitrepo_access_token_secret)
 
     logger.info("deleting orgdbt, orgdbtmodel and reference to org")
     if org.dbt:
