@@ -10,7 +10,7 @@ django.setup()
 
 from ddpui.models.org import Org, OrgPrefectBlockv1, OrgDataFlowv1, OrgWarehouse
 from ddpui.models.org_user import OrgUser, User
-from ddpui.models.tasks import OrgTask, DataflowOrgTask, Task
+from ddpui.models.tasks import OrgTask, DataflowOrgTask, Task, TaskType
 from ddpui.utils.constants import TASK_AIRBYTESYNC
 from ddpui.ddpprefect import AIRBYTESERVER
 
@@ -82,7 +82,7 @@ def test_delete_orgdataflows(org_with_workspace):
 def test_delete_warehouse_v1(org_with_workspace):
     """tests delete_warehouse_v1"""
     if not Task.objects.filter(slug=TASK_AIRBYTESYNC).exists():
-        Task.objects.create(slug=TASK_AIRBYTESYNC, type="airbyte", label="fake-name")
+        Task.objects.create(slug=TASK_AIRBYTESYNC, type=TaskType.AIRBYTE, label="fake-name")
     if not OrgTask.objects.filter(org=org_with_workspace, task__slug=TASK_AIRBYTESYNC).exists():
         task = Task.objects.filter(slug=TASK_AIRBYTESYNC).first()
         OrgTask.objects.create(org=org_with_workspace, task=task)

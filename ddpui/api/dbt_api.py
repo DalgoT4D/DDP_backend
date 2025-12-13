@@ -23,15 +23,15 @@ from ddpui.utils.constants import (
     TASK_DBTDEPS,
 )
 from ddpui.ddpdbt import dbt_service, elementary_service
-from ddpui.ddpprefect import DBTCLIPROFILE, SECRET, prefect_service
+from ddpui.ddpprefect import SECRET, prefect_service
 from ddpui.ddpprefect.schema import OrgDbtGitHub, OrgDbtSchema, OrgDbtTarget, PrefectSecretBlockEdit
-from ddpui.models.org import OrgPrefectBlockv1, Org, OrgWarehouse
+from ddpui.models.org import OrgPrefectBlockv1, Org, OrgWarehouse, OrgDbt
 from ddpui.models.org_user import OrgUser, OrgUserResponse
 from ddpui.core.orgdbt_manager import DbtProjectManager
+from ddpui.core.git_manager import GitManager
 from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.dbtdocs import create_single_html
-from ddpui.utils.helpers import runcmd
 from ddpui.utils.orguserhelpers import from_orguser
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils import secretsmanager
@@ -198,9 +198,10 @@ def post_dbt_git_pull(request):
         raise HttpError(400, "create the dbt env first")
 
     try:
-        runcmd("git pull", project_dir)
+        git_manager = GitManager(repo_local_path=project_dir)
+        git_manager.pull_changes()
     except Exception as error:
-        raise HttpError(500, f"git pull failed in {str(project_dir)}") from error
+        raise HttpError(500, str(error)) from error
 
     return {"success": True}
 
@@ -255,7 +256,7 @@ def put_dbt_schema_v1(request, payload: OrgDbtTarget):
     org.dbt.save()
     logger.info("updated orgdbt")
 
-    cli_profile_block = OrgPrefectBlockv1.objects.filter(org=org, block_type=DBTCLIPROFILE).first()
+    cli_profile_block: OrgPrefectBlockv1 = org.dbt.cli_profile_block
 
     if cli_profile_block:
         logger.info(f"Updating the cli profile block's schema : {cli_profile_block.block_name}")
@@ -293,6 +294,11 @@ def post_run_dbt_commands(request, payload: TaskParameters = None):
     orguser: OrgUser = request.orguser
     org: Org = orguser.org
 
+    orgdbt: OrgDbt = org.dbt
+
+    if orgdbt is None:
+        raise HttpError(400, "transform not setup for the client")
+
     task_id = str(uuid4())
 
     taskprogress = TaskProgress(task_id, f"{TaskProgressHashPrefix.RUNDBTCMDS.value}-{org.slug}")
@@ -304,7 +310,7 @@ def post_run_dbt_commands(request, payload: TaskParameters = None):
 
         # acquire locks for clean, deps and run
         org_tasks = OrgTask.objects.filter(
-            org=org,
+            dbt=orgdbt,
             task__slug__in=[TASK_DBTCLEAN, TASK_DBTDEPS, TASK_DBTRUN],
             generated_by="system",
         ).all()
@@ -315,7 +321,7 @@ def post_run_dbt_commands(request, payload: TaskParameters = None):
             task_locks.append(task_lock)
 
         # executes clean, deps, run
-        run_dbt_commands.delay(org.id, task_id, payload.dict() if payload else None)
+        run_dbt_commands.delay(org.id, orgdbt.id, task_id, payload.dict() if payload else None)
 
     finally:
         # clear all locks
