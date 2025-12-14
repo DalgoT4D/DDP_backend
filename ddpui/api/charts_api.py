@@ -123,7 +123,6 @@ def generate_chart_render_config(chart: Chart, org_warehouse: OrgWarehouse) -> d
 
         payload = ChartDataPayload(
             chart_type=chart.chart_type,
-            computation_type=chart.computation_type,
             schema_name=chart.schema_name,
             table_name=chart.table_name,
             x_axis=extra_config.get("x_axis_column"),
@@ -150,9 +149,7 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
     """Generate chart data and ECharts config from payload"""
     chart_id_str = f"chart {chart_id}" if chart_id else "chart"
 
-    logger.info(
-        f"Building query for {chart_id_str} - Type: {payload.chart_type}, Computation: {payload.computation_type}"
-    )
+    logger.info(f"Building query for {chart_id_str} - Type: {payload.chart_type}")
 
     # Handle maps differently
     if payload.chart_type == "map":
@@ -167,7 +164,6 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
 
     execute_payload = ExecuteChartQuery(
         chart_type=payload.chart_type,
-        computation_type=payload.computation_type,
         x_axis=payload.x_axis,
         y_axis=payload.y_axis,
         dimension_col=payload.dimension_col,
@@ -183,7 +179,6 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
     # Transform data for chart
     transform_payload = TransformDataForChart(
         chart_type=payload.chart_type,
-        computation_type=payload.computation_type,
         x_axis=payload.x_axis,
         y_axis=payload.y_axis,
         dimension_col=payload.dimension_col,
@@ -299,7 +294,6 @@ def list_charts(
             title=chart.title,
             description=chart.description,
             chart_type=chart.chart_type,
-            computation_type=chart.computation_type,
             schema_name=chart.schema_name,
             table_name=chart.table_name,
             extra_config=chart.extra_config,
@@ -458,7 +452,6 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
 
         chart_payload = ChartDataPayload(
             chart_type="bar",  # We use bar chart query logic for aggregated data
-            computation_type="aggregated",
             schema_name=schema_name,
             table_name=table_name,
             dimension_col=geographic_column,
@@ -484,7 +477,6 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         # Execute query using standard chart service
         execute_payload = ExecuteChartQuery(
             chart_type="map",
-            computation_type="aggregated",
             dimension_col=geographic_column,
             metrics=metrics,
         )
@@ -526,7 +518,7 @@ def get_chart_data(request, payload: ChartDataPayload):
 
     # Log the incoming payload for debugging
     logger.info(
-        f"Chart data request - Type: {payload.computation_type}, Schema: {payload.schema_name}, Table: {payload.table_name}"
+        f"Chart data request - Type: {payload.chart_type}, Schema: {payload.schema_name}, Table: {payload.table_name}"
     )
     logger.info(
         f"Columns - x_axis: {payload.x_axis}, y_axis: {payload.y_axis}, dimension_col: {payload.dimension_col}, metrics: {payload.metrics}"
@@ -618,7 +610,6 @@ def get_chart_data_preview(
     # Create a modified payload with dashboard filters
     modified_payload = ChartDataPayload(
         chart_type=payload.chart_type,
-        computation_type=payload.computation_type,
         schema_name=payload.schema_name,
         table_name=payload.table_name,
         x_axis=payload.x_axis,
@@ -716,7 +707,6 @@ def get_chart_data_preview_total_rows(
     # Create a modified payload with dashboard filters
     modified_payload = ChartDataPayload(
         chart_type=payload.chart_type,
-        computation_type=payload.computation_type,
         schema_name=payload.schema_name,
         table_name=payload.table_name,
         x_axis=payload.x_axis,
@@ -1026,7 +1016,6 @@ def get_chart(request, chart_id: int):
         title=chart.title,
         description=chart.description,
         chart_type=chart.chart_type,
-        computation_type=chart.computation_type,
         schema_name=chart.schema_name,
         table_name=chart.table_name,
         extra_config=chart.extra_config,
@@ -1104,7 +1093,6 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
 
     payload = ChartDataPayload(
         chart_type=chart.chart_type,
-        computation_type=chart.computation_type,
         schema_name=chart.schema_name,
         table_name=chart.table_name,
         x_axis=extra_config.get("x_axis_column"),
@@ -1146,7 +1134,6 @@ def create_chart(request, payload: ChartCreate):
             title=payload.title,
             description=payload.description,
             chart_type=payload.chart_type,
-            computation_type=payload.computation_type,
             schema_name=payload.schema_name,
             table_name=payload.table_name,
             extra_config=payload.extra_config,
@@ -1160,7 +1147,6 @@ def create_chart(request, payload: ChartCreate):
         title=chart.title,
         description=chart.description,
         chart_type=chart.chart_type,
-        computation_type=chart.computation_type,
         schema_name=chart.schema_name,
         table_name=chart.table_name,
         extra_config=chart.extra_config,
@@ -1183,7 +1169,6 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
             title=payload.title,
             description=payload.description,
             chart_type=payload.chart_type,
-            computation_type=payload.computation_type,
             schema_name=payload.schema_name,
             table_name=payload.table_name,
             extra_config=payload.extra_config,
@@ -1198,7 +1183,6 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
         title=chart.title,
         description=chart.description,
         chart_type=chart.chart_type,
-        computation_type=chart.computation_type,
         schema_name=chart.schema_name,
         table_name=chart.table_name,
         extra_config=chart.extra_config,

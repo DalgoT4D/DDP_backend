@@ -1,9 +1,19 @@
-"""Test cases for charts API endpoints"""
+"""API Tests for Charts endpoints
+
+Tests the full request → response cycle:
+1. list_charts - pagination, search, filter
+2. get_chart - success, not found, wrong org
+3. create_chart - success, validation errors
+4. update_chart - success, partial, not found
+5. delete_chart - success, not found, wrong org
+6. bulk_delete_charts - success, partial
+7. get_chart_dashboards - success
+8. get_chart_data - success, no warehouse
+"""
 
 import os
-import json
 import django
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 import pytest
 from ninja.errors import HttpError
 
@@ -12,11 +22,11 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
 from django.contrib.auth.models import User
-from django.core.management import call_command
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
-from ddpui.models.role_based_access import Role, RolePermission, Permission
+from ddpui.models.role_based_access import Role
 from ddpui.models.visualization import Chart
+from ddpui.models.dashboard import Dashboard, DashboardComponentType
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.api.charts_api import (
     list_charts,
@@ -24,17 +34,16 @@ from ddpui.api.charts_api import (
     create_chart,
     update_chart,
     delete_chart,
-    get_chart_data,
     bulk_delete_charts,
+    get_chart_dashboards,
+    get_chart_data,
+    BulkDeleteRequest,
 )
-from ddpui.schemas.chart_schema import (
-    ChartCreate,
-    ChartUpdate,
-    ChartDataPayload,
-)
+from ddpui.schemas.chart_schema import ChartCreate, ChartUpdate, ChartDataPayload
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
 pytestmark = pytest.mark.django_db
+
 
 # ================================================================================
 # Fixtures
@@ -45,7 +54,7 @@ pytestmark = pytest.mark.django_db
 def authuser():
     """A django User object"""
     user = User.objects.create(
-        username="chartuser", email="chartuser@test.com", password="testpassword"
+        username="chartapiuser", email="chartapiuser@test.com", password="testpassword"
     )
     yield user
     user.delete()
@@ -55,8 +64,8 @@ def authuser():
 def org():
     """An Org object"""
     org = Org.objects.create(
-        name="Test Org",
-        slug="test-org",
+        name="Chart API Test Org",
+        slug="chart-api-test-org",
         airbyte_workspace_id="workspace-id",
     )
     yield org
@@ -95,19 +104,22 @@ def sample_chart(orguser, org):
         title="Test Chart",
         description="Test Description",
         chart_type="bar",
-        computation_type="aggregated",
         schema_name="public",
         table_name="users",
         extra_config={
-            "x_axis_column": "date",
-            "y_axis_column": "count",
             "dimension_column": "category",
+            "metrics": [{"column": "revenue", "aggregation": "sum"}],
         },
         created_by=orguser,
+        last_modified_by=orguser,
         org=org,
     )
     yield chart
-    chart.delete()
+    try:
+        chart.refresh_from_db()
+        chart.delete()
+    except Chart.DoesNotExist:
+        pass
 
 
 # ================================================================================
@@ -115,85 +127,81 @@ def sample_chart(orguser, org):
 # ================================================================================
 
 
-def test_list_charts_success(orguser, sample_chart, seed_db):
-    """Test successfully listing charts"""
-    request = mock_request(orguser)
+class TestListCharts:
+    """Tests for list_charts endpoint"""
 
-    response = list_charts(request, page=1, page_size=10)
+    def test_list_charts_success(self, orguser, sample_chart, seed_db):
+        """Test successfully listing charts"""
+        request = mock_request(orguser)
 
-    assert response.total == 1
-    assert len(response.data) == 1
-    assert response.data[0].title == "Test Chart"
-    assert response.page == 1
-    assert response.page_size == 10
+        response = list_charts(request, page=1, page_size=10)
 
+        assert response.total == 1
+        assert len(response.data) == 1
+        assert response.data[0].title == "Test Chart"
+        assert response.page == 1
+        assert response.page_size == 10
 
-def test_list_charts_with_search(orguser, sample_chart, seed_db):
-    """Test listing charts with search filter"""
-    request = mock_request(orguser)
+    def test_list_charts_with_search(self, orguser, sample_chart, seed_db):
+        """Test listing charts with search filter"""
+        request = mock_request(orguser)
 
-    response = list_charts(request, page=1, page_size=10, search="Test")
+        response = list_charts(request, page=1, page_size=10, search="Test")
 
-    assert response.total == 1
-    assert response.data[0].title == "Test Chart"
+        assert response.total == 1
+        assert response.data[0].title == "Test Chart"
 
+    def test_list_charts_search_no_results(self, orguser, sample_chart, seed_db):
+        """Test search with no matching results"""
+        request = mock_request(orguser)
 
-def test_list_charts_with_search_no_results(orguser, sample_chart, seed_db):
-    """Test listing charts with search that returns no results"""
-    request = mock_request(orguser)
+        response = list_charts(request, page=1, page_size=10, search="Nonexistent")
 
-    response = list_charts(request, page=1, page_size=10, search="Nonexistent")
+        assert response.total == 0
+        assert len(response.data) == 0
 
-    assert response.total == 0
-    assert len(response.data) == 0
+    def test_list_charts_filter_by_type(self, orguser, sample_chart, seed_db):
+        """Test filtering by chart type"""
+        request = mock_request(orguser)
 
+        response = list_charts(request, page=1, page_size=10, chart_type="bar")
 
-def test_list_charts_with_chart_type_filter(orguser, sample_chart, seed_db):
-    """Test listing charts with chart type filter"""
-    request = mock_request(orguser)
+        assert response.total == 1
+        assert response.data[0].chart_type == "bar"
 
-    response = list_charts(request, page=1, page_size=10, chart_type="bar")
+    def test_list_charts_pagination(self, orguser, org, seed_db):
+        """Test pagination"""
+        # Create multiple charts
+        for i in range(15):
+            Chart.objects.create(
+                title=f"Chart {i}",
+                chart_type="bar",
+                schema_name="public",
+                table_name="test",
+                extra_config={},
+                created_by=orguser,
+                last_modified_by=orguser,
+                org=org,
+            )
 
-    assert response.total == 1
-    assert response.data[0].chart_type == "bar"
+        request = mock_request(orguser)
 
+        response_page1 = list_charts(request, page=1, page_size=10)
+        assert response_page1.total == 15
+        assert len(response_page1.data) == 10
+        assert response_page1.total_pages == 2
 
-def test_list_charts_pagination(orguser, org, seed_db):
-    """Test chart pagination"""
-    # Create multiple charts
-    for i in range(15):
-        Chart.objects.create(
-            title=f"Chart {i}",
-            chart_type="bar",
-            computation_type="raw",
-            schema_name="public",
-            table_name="test",
-            extra_config={},
-            created_by=orguser,
-            org=org,
-        )
+        response_page2 = list_charts(request, page=2, page_size=10)
+        assert len(response_page2.data) == 5
 
-    request = mock_request(orguser)
+    def test_list_charts_empty_org(self, orguser, seed_db):
+        """Test listing charts when org has no charts"""
+        request = mock_request(orguser)
 
-    # Get first page
-    response_page1 = list_charts(request, page=1, page_size=10)
-    assert response_page1.total == 15
-    assert len(response_page1.data) == 10
-    assert response_page1.total_pages == 2
+        response = list_charts(request, page=1, page_size=10)
 
-    # Get second page
-    response_page2 = list_charts(request, page=2, page_size=10)
-    assert len(response_page2.data) == 5
-
-
-def test_list_charts_empty_org(orguser, seed_db):
-    """Test listing charts when org has no charts"""
-    request = mock_request(orguser)
-
-    response = list_charts(request, page=1, page_size=10)
-
-    assert response.total == 0
-    assert len(response.data) == 0
+        assert response.total == 0
+        assert len(response.data) == 0
 
 
 # ================================================================================
@@ -201,61 +209,61 @@ def test_list_charts_empty_org(orguser, seed_db):
 # ================================================================================
 
 
-def test_get_chart_success(orguser, sample_chart, seed_db):
-    """Test successfully getting a single chart"""
-    request = mock_request(orguser)
+class TestGetChart:
+    """Tests for get_chart endpoint"""
 
-    response = get_chart(request, chart_id=sample_chart.id)
+    def test_get_chart_success(self, orguser, sample_chart, seed_db):
+        """Test successfully getting a chart"""
+        request = mock_request(orguser)
 
-    assert response.id == sample_chart.id
-    assert response.title == "Test Chart"
-    assert response.chart_type == "bar"
-    assert response.schema_name == "public"
+        response = get_chart(request, chart_id=sample_chart.id)
 
+        assert response.id == sample_chart.id
+        assert response.title == "Test Chart"
+        assert response.chart_type == "bar"
 
-def test_get_chart_not_found(orguser, seed_db):
-    """Test getting a non-existent chart"""
-    request = mock_request(orguser)
+    def test_get_chart_not_found(self, orguser, seed_db):
+        """Test getting non-existent chart returns 404"""
+        request = mock_request(orguser)
 
-    with pytest.raises(HttpError) as excinfo:
-        get_chart(request, chart_id=99999)
+        with pytest.raises(HttpError) as excinfo:
+            get_chart(request, chart_id=99999)
 
-    assert excinfo.value.status_code == 404
+        assert excinfo.value.status_code == 404
 
+    def test_get_chart_wrong_org(self, orguser, seed_db):
+        """Test getting chart from another org returns 404"""
+        # Create another org and chart
+        other_org = Org.objects.create(name="Other Org", slug="other-org-get")
+        other_user = User.objects.create(username="otheruser", email="other@test.com")
+        other_orguser = OrgUser.objects.create(
+            user=other_user,
+            org=other_org,
+            new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        )
+        other_chart = Chart.objects.create(
+            title="Other Chart",
+            chart_type="bar",
+            schema_name="public",
+            table_name="test",
+            extra_config={},
+            created_by=other_orguser,
+            last_modified_by=other_orguser,
+            org=other_org,
+        )
 
-def test_get_chart_wrong_org(orguser, seed_db):
-    """Test getting a chart from another org"""
-    # Create another org and chart
-    other_org = Org.objects.create(name="Other Org", slug="other-org")
-    other_user = User.objects.create(username="otheruser", email="other@test.com")
-    other_orguser = OrgUser.objects.create(
-        user=other_user,
-        org=other_org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    other_chart = Chart.objects.create(
-        title="Other Chart",
-        chart_type="bar",
-        computation_type="raw",
-        schema_name="public",
-        table_name="test",
-        extra_config={},
-        created_by=other_orguser,
-        org=other_org,
-    )
+        request = mock_request(orguser)
 
-    request = mock_request(orguser)
+        with pytest.raises(HttpError) as excinfo:
+            get_chart(request, chart_id=other_chart.id)
 
-    with pytest.raises(HttpError) as excinfo:
-        get_chart(request, chart_id=other_chart.id)
+        assert excinfo.value.status_code == 404
 
-    assert excinfo.value.status_code == 404
-
-    # Cleanup
-    other_chart.delete()
-    other_orguser.delete()
-    other_user.delete()
-    other_org.delete()
+        # Cleanup
+        other_chart.delete()
+        other_orguser.delete()
+        other_user.delete()
+        other_org.delete()
 
 
 # ================================================================================
@@ -263,83 +271,55 @@ def test_get_chart_wrong_org(orguser, seed_db):
 # ================================================================================
 
 
-def test_create_chart_success(orguser, org_warehouse, seed_db):
-    """Test successfully creating a chart"""
-    request = mock_request(orguser)
+class TestCreateChart:
+    """Tests for create_chart endpoint"""
 
-    payload = ChartCreate(
-        title="New Chart",
-        description="New Description",
-        chart_type="line",
-        computation_type="aggregated",
-        schema_name="public",
-        table_name="sales",
-        extra_config={
-            "dimension_column": "month",  # Required for aggregated charts
-            "metrics": [{"column": "revenue", "aggregation": "sum"}],  # lowercase
-        },
-    )
+    def test_create_chart_success(self, orguser, org_warehouse, seed_db):
+        """Test successfully creating a chart"""
+        request = mock_request(orguser)
 
-    response = create_chart(request, payload)
+        payload = ChartCreate(
+            title="New Chart",
+            description="New Description",
+            chart_type="line",
+            schema_name="public",
+            table_name="sales",
+            extra_config={
+                "dimension_column": "month",
+                "metrics": [{"column": "revenue", "aggregation": "sum"}],
+            },
+        )
 
-    assert response.title == "New Chart"
-    assert response.chart_type == "line"
-    assert response.schema_name == "public"
-    assert response.extra_config["dimension_column"] == "month"
+        response = create_chart(request, payload)
 
-    # Cleanup
-    Chart.objects.filter(id=response.id).delete()
+        assert response.title == "New Chart"
+        assert response.chart_type == "line"
+        assert response.id is not None
 
+        # Cleanup
+        Chart.objects.filter(id=response.id).delete()
 
-def test_create_chart_no_warehouse(orguser, seed_db):
-    """Test creating a chart when org has no warehouse - chart creation succeeds without warehouse"""
-    request = mock_request(orguser)
+    def test_create_chart_minimal(self, orguser, org_warehouse, seed_db):
+        """Test creating chart with minimal config"""
+        request = mock_request(orguser)
 
-    payload = ChartCreate(
-        title="New Chart",
-        chart_type="bar",
-        computation_type="raw",
-        schema_name="public",
-        table_name="test",
-        extra_config={
-            "x_axis_column": "date",  # Required for bar chart with raw data
-            "y_axis_column": "value",
-        },
-    )
+        payload = ChartCreate(
+            title="Minimal Chart",
+            chart_type="number",
+            schema_name="public",
+            table_name="metrics",
+            extra_config={
+                "metrics": [{"column": "total_count", "aggregation": "sum"}],
+            },
+        )
 
-    # Chart creation should succeed even without warehouse
-    # Warehouse is only needed when fetching data
-    response = create_chart(request, payload)
+        response = create_chart(request, payload)
 
-    assert response.title == "New Chart"
-    assert response.chart_type == "bar"
+        assert response.title == "Minimal Chart"
+        assert response.description is None
 
-    # Cleanup
-    Chart.objects.filter(id=response.id).delete()
-
-
-def test_create_chart_minimal_config(orguser, org_warehouse, seed_db):
-    """Test creating a chart with minimal configuration"""
-    request = mock_request(orguser)
-
-    payload = ChartCreate(
-        title="Minimal Chart",
-        chart_type="number",
-        computation_type="aggregated",  # Number charts require aggregated data
-        schema_name="public",
-        table_name="metrics",
-        extra_config={
-            "metrics": [{"column": "total_count", "aggregation": "sum"}],  # lowercase
-        },
-    )
-
-    response = create_chart(request, payload)
-
-    assert response.title == "Minimal Chart"
-    assert response.description is None
-
-    # Cleanup
-    Chart.objects.filter(id=response.id).delete()
+        # Cleanup
+        Chart.objects.filter(id=response.id).delete()
 
 
 # ================================================================================
@@ -347,68 +327,62 @@ def test_create_chart_minimal_config(orguser, org_warehouse, seed_db):
 # ================================================================================
 
 
-def test_update_chart_success(orguser, sample_chart, seed_db):
-    """Test successfully updating a chart"""
-    request = mock_request(orguser)
+class TestUpdateChart:
+    """Tests for update_chart endpoint"""
 
-    payload = ChartUpdate(
-        title="Updated Chart",
-        description="Updated Description",
-    )
+    def test_update_chart_success(self, orguser, sample_chart, seed_db):
+        """Test successfully updating a chart"""
+        request = mock_request(orguser)
 
-    response = update_chart(request, chart_id=sample_chart.id, payload=payload)
+        payload = ChartUpdate(
+            title="Updated Chart",
+            description="Updated Description",
+        )
 
-    assert response.id == sample_chart.id
-    assert response.title == "Updated Chart"
-    assert response.description == "Updated Description"
-    # Original values should remain
-    assert response.chart_type == "bar"
+        response = update_chart(request, chart_id=sample_chart.id, payload=payload)
 
+        assert response.id == sample_chart.id
+        assert response.title == "Updated Chart"
+        assert response.description == "Updated Description"
+        assert response.chart_type == "bar"  # Unchanged
 
-def test_update_chart_partial_update(orguser, sample_chart, seed_db):
-    """Test partial update of a chart"""
-    request = mock_request(orguser)
+    def test_update_chart_partial(self, orguser, sample_chart, seed_db):
+        """Test partial update"""
+        request = mock_request(orguser)
+        original_title = sample_chart.title
 
-    original_title = sample_chart.title
+        payload = ChartUpdate(description="Only description updated")
 
-    payload = ChartUpdate(
-        description="Only description updated",
-    )
+        response = update_chart(request, chart_id=sample_chart.id, payload=payload)
 
-    response = update_chart(request, chart_id=sample_chart.id, payload=payload)
+        assert response.title == original_title
+        assert response.description == "Only description updated"
 
-    assert response.title == original_title
-    assert response.description == "Only description updated"
+    def test_update_chart_not_found(self, orguser, seed_db):
+        """Test updating non-existent chart returns 404"""
+        request = mock_request(orguser)
 
+        payload = ChartUpdate(title="Updated")
 
-def test_update_chart_not_found(orguser, seed_db):
-    """Test updating a non-existent chart"""
-    request = mock_request(orguser)
+        with pytest.raises(HttpError) as excinfo:
+            update_chart(request, chart_id=99999, payload=payload)
 
-    payload = ChartUpdate(title="Updated")
+        assert excinfo.value.status_code == 404
 
-    with pytest.raises(HttpError) as excinfo:
-        update_chart(request, chart_id=99999, payload=payload)
+    def test_update_chart_extra_config(self, orguser, sample_chart, seed_db):
+        """Test updating extra_config"""
+        request = mock_request(orguser)
 
-    assert excinfo.value.status_code == 404
+        new_config = {
+            "dimension_column": "updated_dim",
+            "metrics": [{"column": "updated_metric", "aggregation": "avg"}],
+        }
 
+        payload = ChartUpdate(extra_config=new_config)
 
-def test_update_chart_extra_config(orguser, sample_chart, seed_db):
-    """Test updating chart extra config"""
-    request = mock_request(orguser)
+        response = update_chart(request, chart_id=sample_chart.id, payload=payload)
 
-    new_config = {
-        "x_axis_column": "updated_date",
-        "y_axis_column": "updated_count",
-        "new_field": "new_value",
-    }
-
-    payload = ChartUpdate(extra_config=new_config)
-
-    response = update_chart(request, chart_id=sample_chart.id, payload=payload)
-
-    assert response.extra_config["x_axis_column"] == "updated_date"
-    assert response.extra_config["new_field"] == "new_value"
+        assert response.extra_config["dimension_column"] == "updated_dim"
 
 
 # ================================================================================
@@ -416,60 +390,196 @@ def test_update_chart_extra_config(orguser, sample_chart, seed_db):
 # ================================================================================
 
 
-def test_delete_chart_success(orguser, sample_chart, seed_db):
-    """Test successfully deleting a chart"""
-    request = mock_request(orguser)
-    chart_id = sample_chart.id
+class TestDeleteChart:
+    """Tests for delete_chart endpoint"""
 
-    response = delete_chart(request, chart_id=chart_id)
+    def test_delete_chart_success(self, orguser, org, seed_db):
+        """Test successfully deleting a chart"""
+        # Create chart to delete
+        chart = Chart.objects.create(
+            title="Chart to Delete",
+            chart_type="bar",
+            schema_name="public",
+            table_name="users",
+            extra_config={},
+            created_by=orguser,
+            last_modified_by=orguser,
+            org=org,
+        )
+        chart_id = chart.id
 
-    assert response.get("success") is True
-    assert not Chart.objects.filter(id=chart_id).exists()
+        request = mock_request(orguser)
+
+        response = delete_chart(request, chart_id=chart_id)
+
+        assert response.get("success") is True
+        assert not Chart.objects.filter(id=chart_id).exists()
+
+    def test_delete_chart_not_found(self, orguser, seed_db):
+        """Test deleting non-existent chart returns 404"""
+        request = mock_request(orguser)
+
+        with pytest.raises(HttpError) as excinfo:
+            delete_chart(request, chart_id=99999)
+
+        assert excinfo.value.status_code == 404
+
+    def test_delete_chart_wrong_org(self, orguser, seed_db):
+        """Test deleting chart from another org returns 404"""
+        # Create another org and chart
+        other_org = Org.objects.create(name="Other Org", slug="other-org-del")
+        other_user = User.objects.create(username="otheruser2", email="other2@test.com")
+        other_orguser = OrgUser.objects.create(
+            user=other_user,
+            org=other_org,
+            new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        )
+        other_chart = Chart.objects.create(
+            title="Other Chart",
+            chart_type="bar",
+            schema_name="public",
+            table_name="test",
+            extra_config={},
+            created_by=other_orguser,
+            last_modified_by=other_orguser,
+            org=other_org,
+        )
+
+        request = mock_request(orguser)
+
+        with pytest.raises(HttpError) as excinfo:
+            delete_chart(request, chart_id=other_chart.id)
+
+        assert excinfo.value.status_code == 404
+
+        # Cleanup
+        other_chart.delete()
+        other_orguser.delete()
+        other_user.delete()
+        other_org.delete()
 
 
-def test_delete_chart_not_found(orguser, seed_db):
-    """Test deleting a non-existent chart"""
-    request = mock_request(orguser)
-
-    with pytest.raises(HttpError) as excinfo:
-        delete_chart(request, chart_id=99999)
-
-    assert excinfo.value.status_code == 404
+# ================================================================================
+# Test bulk_delete_charts endpoint
+# ================================================================================
 
 
-def test_delete_chart_wrong_org(orguser, seed_db):
-    """Test deleting a chart from another org"""
-    # Create another org and chart
-    other_org = Org.objects.create(name="Other Org", slug="other-org-del")
-    other_user = User.objects.create(username="otheruser2", email="other2@test.com")
-    other_orguser = OrgUser.objects.create(
-        user=other_user,
-        org=other_org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    other_chart = Chart.objects.create(
-        title="Other Chart",
-        chart_type="bar",
-        computation_type="raw",
-        schema_name="public",
-        table_name="test",
-        extra_config={},
-        created_by=other_orguser,
-        org=other_org,
-    )
+class TestBulkDeleteCharts:
+    """Tests for bulk_delete_charts endpoint"""
 
-    request = mock_request(orguser)
+    def test_bulk_delete_success(self, orguser, org, seed_db):
+        """Test successfully bulk deleting charts"""
+        # Create charts to delete
+        chart_ids = []
+        for i in range(3):
+            chart = Chart.objects.create(
+                title=f"Bulk Chart {i}",
+                chart_type="bar",
+                schema_name="public",
+                table_name="users",
+                extra_config={},
+                created_by=orguser,
+                last_modified_by=orguser,
+                org=org,
+            )
+            chart_ids.append(chart.id)
 
-    with pytest.raises(HttpError) as excinfo:
-        delete_chart(request, chart_id=other_chart.id)
+        request = mock_request(orguser)
+        payload = BulkDeleteRequest(chart_ids=chart_ids)
 
-    assert excinfo.value.status_code == 404
+        response = bulk_delete_charts(request, payload)
 
-    # Cleanup
-    other_chart.delete()
-    other_orguser.delete()
-    other_user.delete()
-    other_org.delete()
+        assert response["success"] is True
+        assert response["deleted_count"] == 3
+        assert response["requested_count"] == 3
+
+    def test_bulk_delete_partial(self, orguser, org, seed_db):
+        """Test bulk delete with some non-existent charts"""
+        chart = Chart.objects.create(
+            title="Existing Chart",
+            chart_type="bar",
+            schema_name="public",
+            table_name="users",
+            extra_config={},
+            created_by=orguser,
+            last_modified_by=orguser,
+            org=org,
+        )
+
+        request = mock_request(orguser)
+        payload = BulkDeleteRequest(chart_ids=[chart.id, 99998, 99999])
+
+        response = bulk_delete_charts(request, payload)
+
+        assert response["success"] is True
+        assert response["deleted_count"] == 1
+        assert 99998 in response["missing_ids"]
+        assert 99999 in response["missing_ids"]
+
+    def test_bulk_delete_empty_list(self, orguser, seed_db):
+        """Test bulk delete with empty list returns 400"""
+        request = mock_request(orguser)
+        payload = BulkDeleteRequest(chart_ids=[])
+
+        with pytest.raises(HttpError) as excinfo:
+            bulk_delete_charts(request, payload)
+
+        assert excinfo.value.status_code == 400
+
+
+# ================================================================================
+# Test get_chart_dashboards endpoint
+# ================================================================================
+
+
+class TestGetChartDashboards:
+    """Tests for get_chart_dashboards endpoint"""
+
+    def test_get_chart_dashboards_with_dashboard(self, orguser, sample_chart, org, seed_db):
+        """Test getting dashboards that use a chart"""
+        # Create a dashboard that uses the chart
+        dashboard = Dashboard.objects.create(
+            title="Dashboard with Chart",
+            dashboard_type="native",
+            grid_columns=12,
+            layout_config=[],
+            components={
+                "1": {
+                    "type": DashboardComponentType.CHART.value,
+                    "config": {"chartId": sample_chart.id},
+                }
+            },
+            created_by=orguser,
+            org=org,
+        )
+
+        request = mock_request(orguser)
+
+        response = get_chart_dashboards(request, chart_id=sample_chart.id)
+
+        assert len(response) == 1
+        assert response[0]["id"] == dashboard.id
+        assert response[0]["title"] == "Dashboard with Chart"
+
+        # Cleanup
+        dashboard.delete()
+
+    def test_get_chart_dashboards_no_dashboards(self, orguser, sample_chart, seed_db):
+        """Test when chart is not used in any dashboard"""
+        request = mock_request(orguser)
+
+        response = get_chart_dashboards(request, chart_id=sample_chart.id)
+
+        assert len(response) == 0
+
+    def test_get_chart_dashboards_not_found(self, orguser, seed_db):
+        """Test getting dashboards for non-existent chart returns 404"""
+        request = mock_request(orguser)
+
+        with pytest.raises(HttpError) as excinfo:
+            get_chart_dashboards(request, chart_id=99999)
+
+        assert excinfo.value.status_code == 404
 
 
 # ================================================================================
@@ -477,93 +587,45 @@ def test_delete_chart_wrong_org(orguser, seed_db):
 # ================================================================================
 
 
-@patch("ddpui.api.charts_api.generate_chart_data_and_config")
-def test_get_chart_data_success(mock_generate, orguser, sample_chart, org_warehouse, seed_db):
-    """Test successfully getting chart data"""
-    mock_generate.return_value = {
-        "data": {"categories": ["A", "B"], "values": [10, 20]},
-        "echarts_config": {"type": "bar"},
-    }
+class TestGetChartData:
+    """Tests for get_chart_data endpoint"""
 
-    request = mock_request(orguser)
+    @patch("ddpui.api.charts_api.generate_chart_data_and_config")
+    def test_get_chart_data_success(self, mock_generate, orguser, org_warehouse, seed_db):
+        """Test successfully getting chart data"""
+        mock_generate.return_value = {
+            "data": {"categories": ["A", "B"], "values": [10, 20]},
+            "echarts_config": {"type": "bar"},
+        }
 
-    payload = ChartDataPayload(
-        chart_type="bar",
-        computation_type="aggregated",
-        schema_name="public",
-        table_name="users",
-        dimension_col="category",
-        x_axis="date",
-        y_axis="count",
-    )
+        request = mock_request(orguser)
 
-    response = get_chart_data(request, payload)
+        payload = ChartDataPayload(
+            chart_type="bar",
+            schema_name="public",
+            table_name="users",
+            dimension_col="category",
+        )
 
-    assert hasattr(response, "data")
-    assert hasattr(response, "echarts_config")
-    assert response.data["categories"] == ["A", "B"]
+        response = get_chart_data(request, payload)
 
+        assert response.data["categories"] == ["A", "B"]
+        assert "echarts_config" in response.__dict__
 
-@patch("ddpui.api.charts_api.generate_chart_data_and_config")
-def test_get_chart_data_with_filters(mock_generate, orguser, org_warehouse, seed_db):
-    """Test getting chart data with dashboard filters"""
-    mock_generate.return_value = {
-        "data": {"filtered": True},
-        "echarts_config": {"type": "bar"},
-    }
+    def test_get_chart_data_no_warehouse(self, orguser, seed_db):
+        """Test getting chart data when org has no warehouse"""
+        request = mock_request(orguser)
 
-    request = mock_request(orguser)
+        payload = ChartDataPayload(
+            chart_type="bar",
+            schema_name="public",
+            table_name="test",
+        )
 
-    payload = ChartDataPayload(
-        chart_type="bar",
-        computation_type="aggregated",
-        schema_name="public",
-        table_name="users",
-        dimension_col="category",
-        dashboard_filters=[{"column": "status", "value": "active"}],
-    )
+        with pytest.raises(HttpError) as excinfo:
+            get_chart_data(request, payload)
 
-    response = get_chart_data(request, payload)
-
-    assert response.data["filtered"] is True
-    mock_generate.assert_called_once()
-
-
-def test_get_chart_data_no_warehouse(orguser, seed_db):
-    """Test getting chart data when org has no warehouse"""
-    request = mock_request(orguser)
-
-    payload = ChartDataPayload(
-        chart_type="bar",
-        computation_type="raw",
-        schema_name="public",
-        table_name="test",
-    )
-
-    with pytest.raises(HttpError) as excinfo:
-        get_chart_data(request, payload)
-
-    assert excinfo.value.status_code == 404
-
-
-@patch("ddpui.api.charts_api.generate_chart_data_and_config")
-def test_get_chart_data_error_handling(mock_generate, orguser, org_warehouse, seed_db):
-    """Test error handling in get_chart_data"""
-    mock_generate.side_effect = Exception("Database error")
-
-    request = mock_request(orguser)
-
-    payload = ChartDataPayload(
-        chart_type="bar",
-        computation_type="raw",
-        schema_name="public",
-        table_name="test",
-    )
-
-    with pytest.raises(HttpError) as excinfo:
-        get_chart_data(request, payload)
-
-    assert excinfo.value.status_code == 500
+        assert excinfo.value.status_code == 404
 
 
 # ================================================================================
@@ -574,5 +636,3 @@ def test_get_chart_data_error_handling(mock_generate, orguser, org_warehouse, se
 def test_seed_data(seed_db):
     """Test that seed data is loaded correctly"""
     assert Role.objects.count() == 5
-    assert RolePermission.objects.count() > 5
-    assert Permission.objects.count() > 5

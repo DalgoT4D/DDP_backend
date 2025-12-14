@@ -164,7 +164,6 @@ def get_public_chart_metadata(request, token: str, chart_id: int):
             "id": chart.id,
             "title": chart.title,
             "chart_type": chart.chart_type,
-            "computation_type": chart.computation_type,
             "schema_name": chart.schema_name,
             "table_name": chart.table_name,
             "extra_config": chart.extra_config,
@@ -273,7 +272,6 @@ def get_public_chart_data(request, token: str, chart_id: int):
             schema_name=chart.schema_name,
             table_name=chart.table_name,
             chart_type=chart.chart_type,
-            computation_type=chart.computation_type,
             x_axis=extra_config.get("x_axis_column"),  # Match authenticated API field names
             y_axis=extra_config.get("y_axis_column"),
             dimension_col=extra_config.get("dimension_column"),
@@ -770,7 +768,6 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
 
         chart_payload = ChartDataPayload(
             chart_type="map",
-            computation_type="aggregated",
             schema_name=map_payload.schema_name,
             table_name=map_payload.table_name,
             dimension_col=map_payload.geographic_column,
@@ -795,7 +792,6 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
         # Execute query using standard chart service
         execute_payload = ExecuteChartQuery(
             chart_type="map",
-            computation_type="aggregated",
             dimension_col=map_payload.geographic_column,
             metrics=map_payload.metrics,
         )

@@ -25,7 +25,6 @@ class ChartData:
 
     title: str
     chart_type: str
-    computation_type: str
     schema_name: str
     table_name: str
     extra_config: dict
@@ -144,7 +143,6 @@ class ChartService:
         # Validate chart configuration
         is_valid, error_message = ChartValidator.validate_chart_config(
             chart_type=data.chart_type,
-            computation_type=data.computation_type,
             extra_config=data.extra_config,
             schema_name=data.schema_name,
             table_name=data.table_name,
@@ -157,7 +155,6 @@ class ChartService:
             title=data.title,
             description=data.description,
             chart_type=data.chart_type,
-            computation_type=data.computation_type,
             schema_name=data.schema_name,
             table_name=data.table_name,
             extra_config=data.extra_config,
@@ -177,7 +174,6 @@ class ChartService:
         title: Optional[str] = None,
         description: Optional[str] = None,
         chart_type: Optional[str] = None,
-        computation_type: Optional[str] = None,
         schema_name: Optional[str] = None,
         table_name: Optional[str] = None,
         extra_config: Optional[dict] = None,
@@ -191,7 +187,6 @@ class ChartService:
             title: Optional new title
             description: Optional new description
             chart_type: Optional new chart type
-            computation_type: Optional new computation type
             schema_name: Optional new schema name
             table_name: Optional new table name
             extra_config: Optional new extra config
@@ -207,9 +202,6 @@ class ChartService:
 
         # Prepare updated values for validation
         updated_chart_type = chart_type if chart_type is not None else chart.chart_type
-        updated_computation_type = (
-            computation_type if computation_type is not None else chart.computation_type
-        )
         updated_extra_config = extra_config if extra_config is not None else chart.extra_config
         updated_schema_name = schema_name if schema_name is not None else chart.schema_name
         updated_table_name = table_name if table_name is not None else chart.table_name
@@ -218,7 +210,6 @@ class ChartService:
         is_valid, error_message = ChartValidator.validate_for_update(
             existing_chart_type=chart.chart_type,
             new_chart_type=chart_type,
-            new_computation_type=computation_type,
             extra_config=updated_extra_config,
             schema_name=updated_schema_name,
             table_name=updated_table_name,
@@ -234,8 +225,6 @@ class ChartService:
             chart.description = description
         if chart_type is not None:
             chart.chart_type = chart_type
-        if computation_type is not None:
-            chart.computation_type = computation_type
         if schema_name is not None:
             chart.schema_name = schema_name
         if table_name is not None:

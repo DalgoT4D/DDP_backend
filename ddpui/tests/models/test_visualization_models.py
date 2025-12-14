@@ -76,7 +76,6 @@ def test_chart_create_success(orguser, org, seed_db):
         title="Test Chart",
         description="Test Description",
         chart_type="bar",
-        computation_type="raw",
         schema_name="public",
         table_name="users",
         extra_config={"x_axis_column": "date"},
@@ -87,7 +86,6 @@ def test_chart_create_success(orguser, org, seed_db):
     assert chart.id is not None
     assert chart.title == "Test Chart"
     assert chart.chart_type == "bar"
-    assert chart.computation_type == "raw"
     assert chart.extra_config == {"x_axis_column": "date"}
     assert chart.created_at is not None
     assert chart.updated_at is not None
@@ -101,7 +99,6 @@ def test_chart_create_all_chart_types(orguser, org, seed_db):
         chart = Chart.objects.create(
             title=f"{display_name} Test",
             chart_type=chart_type,
-            computation_type="raw",
             schema_name="public",
             table_name="test",
             extra_config={},
@@ -113,30 +110,11 @@ def test_chart_create_all_chart_types(orguser, org, seed_db):
         chart.delete()
 
 
-def test_chart_create_all_computation_types(orguser, org, seed_db):
-    """Test creating charts with all valid computation types"""
-    for comp_type, display_name in COMPUTATION_TYPE_CHOICES:
-        chart = Chart.objects.create(
-            title=f"{display_name} Test",
-            chart_type="bar",
-            computation_type=comp_type,
-            schema_name="public",
-            table_name="test",
-            extra_config={},
-            created_by=orguser,
-            org=org,
-        )
-
-        assert chart.computation_type == comp_type
-        chart.delete()
-
-
 def test_chart_create_without_description(orguser, org, seed_db):
     """Test creating a chart without description (optional field)"""
     chart = Chart.objects.create(
         title="No Description Chart",
         chart_type="pie",
-        computation_type="aggregated",
         schema_name="public",
         table_name="stats",
         extra_config={},
@@ -153,7 +131,6 @@ def test_chart_create_with_empty_extra_config(orguser, org, seed_db):
     chart = Chart.objects.create(
         title="Empty Config Chart",
         chart_type="number",
-        computation_type="aggregated",
         schema_name="public",
         table_name="metrics",
         extra_config={},
@@ -183,7 +160,6 @@ def test_chart_create_with_complex_extra_config(orguser, org, seed_db):
     chart = Chart.objects.create(
         title="Complex Config Chart",
         chart_type="line",
-        computation_type="aggregated",
         schema_name="analytics",
         table_name="sales_data",
         extra_config=complex_config,
@@ -206,7 +182,6 @@ def test_chart_str_representation(orguser, org, seed_db):
     chart = Chart.objects.create(
         title="My Chart",
         chart_type="bar",
-        computation_type="raw",
         schema_name="public",
         table_name="test",
         extra_config={},
@@ -228,7 +203,6 @@ def test_chart_org_relationship(orguser, org, seed_db):
     chart = Chart.objects.create(
         title="Org Related Chart",
         chart_type="bar",
-        computation_type="raw",
         schema_name="public",
         table_name="test",
         extra_config={},
@@ -251,7 +225,6 @@ def test_chart_created_by_relationship(orguser, org, seed_db):
     chart = Chart.objects.create(
         title="User Related Chart",
         chart_type="bar",
-        computation_type="raw",
         schema_name="public",
         table_name="test",
         extra_config={},
@@ -270,7 +243,6 @@ def test_chart_last_modified_by_relationship(orguser, org, seed_db):
     chart = Chart.objects.create(
         title="Modified Chart",
         chart_type="bar",
-        computation_type="raw",
         schema_name="public",
         table_name="test",
         extra_config={},
@@ -288,7 +260,6 @@ def test_chart_last_modified_by_null(orguser, org, seed_db):
     chart = Chart.objects.create(
         title="Not Modified Chart",
         chart_type="bar",
-        computation_type="raw",
         schema_name="public",
         table_name="test",
         extra_config={},
@@ -310,7 +281,6 @@ def test_chart_update_title(orguser, org, seed_db):
     chart = Chart.objects.create(
         title="Original Title",
         chart_type="bar",
-        computation_type="raw",
         schema_name="public",
         table_name="test",
         extra_config={},
@@ -335,7 +305,6 @@ def test_chart_update_extra_config(orguser, org, seed_db):
     chart = Chart.objects.create(
         title="Config Update Chart",
         chart_type="bar",
-        computation_type="raw",
         schema_name="public",
         table_name="test",
         extra_config={"original": "value"},
@@ -364,7 +333,6 @@ def test_chart_delete(orguser, org, seed_db):
     chart = Chart.objects.create(
         title="Delete Me",
         chart_type="bar",
-        computation_type="raw",
         schema_name="public",
         table_name="test",
         extra_config={},
@@ -391,7 +359,6 @@ def test_chart_cascade_delete_on_org_delete(authuser, seed_db):
     chart = Chart.objects.create(
         title="Cascade Delete Chart",
         chart_type="bar",
-        computation_type="raw",
         schema_name="public",
         table_name="test",
         extra_config={},
@@ -416,7 +383,6 @@ def test_chart_filter_by_chart_type(orguser, org, seed_db):
     bar_chart = Chart.objects.create(
         title="Bar Chart",
         chart_type="bar",
-        computation_type="raw",
         schema_name="public",
         table_name="test",
         extra_config={},
@@ -427,7 +393,6 @@ def test_chart_filter_by_chart_type(orguser, org, seed_db):
     pie_chart = Chart.objects.create(
         title="Pie Chart",
         chart_type="pie",
-        computation_type="aggregated",
         schema_name="public",
         table_name="test",
         extra_config={},
@@ -452,7 +417,6 @@ def test_chart_filter_by_schema_and_table(orguser, org, seed_db):
     chart1 = Chart.objects.create(
         title="Public Users Chart",
         chart_type="bar",
-        computation_type="raw",
         schema_name="public",
         table_name="users",
         extra_config={},
@@ -463,7 +427,6 @@ def test_chart_filter_by_schema_and_table(orguser, org, seed_db):
     chart2 = Chart.objects.create(
         title="Analytics Orders Chart",
         chart_type="line",
-        computation_type="aggregated",
         schema_name="analytics",
         table_name="orders",
         extra_config={},
@@ -482,7 +445,7 @@ def test_chart_filter_by_schema_and_table(orguser, org, seed_db):
 
 
 # ================================================================================
-# Test Chart Type and Computation Type Choices
+# Test Chart Type and Aggregate Function Choices
 # ================================================================================
 
 
@@ -490,14 +453,6 @@ def test_chart_type_choices():
     """Test that chart type choices are correctly defined"""
     expected_types = ["bar", "pie", "line", "number", "map"]
     actual_types = [choice[0] for choice in CHART_TYPE_CHOICES]
-
-    assert set(expected_types) == set(actual_types)
-
-
-def test_computation_type_choices():
-    """Test that computation type choices are correctly defined"""
-    expected_types = ["raw", "aggregated"]
-    actual_types = [choice[0] for choice in COMPUTATION_TYPE_CHOICES]
 
     assert set(expected_types) == set(actual_types)
 

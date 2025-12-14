@@ -1,12 +1,21 @@
-"""Test cases for native dashboard API endpoints"""
+"""API Tests for Native Dashboard endpoints
+
+Tests the full request → response cycle:
+1. list_dashboards - search, filter by type, filter by published
+2. get_dashboard - success, not found, wrong org
+3. create_dashboard - success, minimal
+4. update_dashboard - success, partial, not found, layout/components
+5. delete_dashboard - success, not found, wrong org
+6. create_filter - success, dashboard not found
+7. update_filter - success, not found
+8. delete_filter - success, not found
+"""
 
 import os
-import json
 import django
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 import pytest
 from ninja.errors import HttpError
-from datetime import datetime
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
@@ -16,7 +25,7 @@ from django.contrib.auth.models import User
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
-from ddpui.models.dashboard import Dashboard, DashboardFilter, DashboardLock
+from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.models.visualization import Chart
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.api.dashboard_native_api import (
@@ -28,6 +37,8 @@ from ddpui.api.dashboard_native_api import (
     create_filter,
     update_filter,
     delete_filter,
+)
+from ddpui.schemas.dashboard_schema import (
     DashboardCreate,
     DashboardUpdate,
     FilterCreate,
@@ -36,6 +47,7 @@ from ddpui.api.dashboard_native_api import (
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
 pytestmark = pytest.mark.django_db
+
 
 # ================================================================================
 # Fixtures
@@ -46,7 +58,7 @@ pytestmark = pytest.mark.django_db
 def authuser():
     """A django User object"""
     user = User.objects.create(
-        username="dashuser", email="dashuser@test.com", password="testpassword"
+        username="dashapiuser", email="dashapiuser@test.com", password="testpassword"
     )
     yield user
     user.delete()
@@ -56,8 +68,8 @@ def authuser():
 def org():
     """An Org object"""
     org = Org.objects.create(
-        name="Test Org",
-        slug="test-org",
+        name="Dashboard API Test Org",
+        slug="dashboard-api-test-org",
         airbyte_workspace_id="workspace-id",
     )
     yield org
@@ -90,24 +102,32 @@ def sample_dashboard(orguser, org):
         org=org,
     )
     yield dashboard
-    dashboard.delete()
+    try:
+        dashboard.refresh_from_db()
+        dashboard.delete()
+    except Dashboard.DoesNotExist:
+        pass
 
 
 @pytest.fixture
-def sample_chart(orguser, org):
-    """A sample chart for dashboard testing"""
-    chart = Chart.objects.create(
-        title="Test Chart",
-        chart_type="bar",
-        computation_type="raw",
+def sample_filter(sample_dashboard):
+    """A sample filter for testing"""
+    filter_obj = DashboardFilter.objects.create(
+        dashboard=sample_dashboard,
+        name="Status Filter",
+        filter_type="value",
         schema_name="public",
-        table_name="users",
-        extra_config={},
-        created_by=orguser,
-        org=org,
+        table_name="orders",
+        column_name="status",
+        settings={},
+        order=0,
     )
-    yield chart
-    chart.delete()
+    yield filter_obj
+    try:
+        filter_obj.refresh_from_db()
+        filter_obj.delete()
+    except DashboardFilter.DoesNotExist:
+        pass
 
 
 # ================================================================================
@@ -115,86 +135,80 @@ def sample_chart(orguser, org):
 # ================================================================================
 
 
-def test_list_dashboards_success(orguser, sample_dashboard, seed_db):
-    """Test successfully listing dashboards"""
-    request = mock_request(orguser)
+class TestListDashboards:
+    """Tests for list_dashboards endpoint"""
 
-    response = list_dashboards(request)
+    def test_list_dashboards_success(self, orguser, sample_dashboard, seed_db):
+        """Test successfully listing dashboards"""
+        request = mock_request(orguser)
 
-    assert len(response) == 1
-    assert response[0].title == "Test Dashboard"
-    assert response[0].dashboard_type == "native"
+        response = list_dashboards(request)
 
+        assert len(response) == 1
+        assert response[0].title == "Test Dashboard"
+        assert response[0].dashboard_type == "native"
 
-def test_list_dashboards_with_search(orguser, sample_dashboard, seed_db):
-    """Test listing dashboards with search filter"""
-    request = mock_request(orguser)
+    def test_list_dashboards_with_search(self, orguser, sample_dashboard, seed_db):
+        """Test listing with search filter"""
+        request = mock_request(orguser)
 
-    response = list_dashboards(request, search="Test")
+        response = list_dashboards(request, search="Test")
 
-    assert len(response) == 1
-    assert response[0].title == "Test Dashboard"
+        assert len(response) == 1
+        assert response[0].title == "Test Dashboard"
 
+    def test_list_dashboards_search_no_results(self, orguser, sample_dashboard, seed_db):
+        """Test search with no matching results"""
+        request = mock_request(orguser)
 
-def test_list_dashboards_with_search_no_results(orguser, sample_dashboard, seed_db):
-    """Test listing dashboards with search that returns no results"""
-    request = mock_request(orguser)
+        response = list_dashboards(request, search="Nonexistent")
 
-    response = list_dashboards(request, search="Nonexistent")
+        assert len(response) == 0
 
-    assert len(response) == 0
+    def test_list_dashboards_filter_by_type(self, orguser, sample_dashboard, seed_db):
+        """Test filtering by dashboard type"""
+        request = mock_request(orguser)
 
+        response = list_dashboards(request, dashboard_type="native")
 
-def test_list_dashboards_filter_by_dashboard_type(orguser, sample_dashboard, seed_db):
-    """Test listing dashboards filtered by type"""
-    request = mock_request(orguser)
+        assert len(response) == 1
+        assert response[0].dashboard_type == "native"
 
-    response = list_dashboards(request, dashboard_type="native")
+    def test_list_dashboards_filter_by_published(self, orguser, org, seed_db):
+        """Test filtering by published status"""
+        # Create published and unpublished dashboards
+        Dashboard.objects.create(
+            title="Published Dashboard",
+            dashboard_type="native",
+            is_published=True,
+            created_by=orguser,
+            org=org,
+        )
+        Dashboard.objects.create(
+            title="Unpublished Dashboard",
+            dashboard_type="native",
+            is_published=False,
+            created_by=orguser,
+            org=org,
+        )
 
-    assert len(response) == 1
-    assert response[0].dashboard_type == "native"
+        request = mock_request(orguser)
 
+        published = list_dashboards(request, is_published=True)
+        assert len(published) == 1
+        assert published[0].is_published is True
 
-def test_list_dashboards_filter_by_published_status(orguser, org, seed_db):
-    """Test listing dashboards filtered by published status"""
-    # Create published dashboard
-    Dashboard.objects.create(
-        title="Published Dashboard",
-        dashboard_type="native",
-        is_published=True,
-        created_by=orguser,
-        org=org,
-    )
+        unpublished = list_dashboards(request, is_published=False)
+        assert len(unpublished) == 1
+        assert unpublished[0].is_published is False
 
-    # Create unpublished dashboard
-    Dashboard.objects.create(
-        title="Unpublished Dashboard",
-        dashboard_type="native",
-        is_published=False,
-        created_by=orguser,
-        org=org,
-    )
+    def test_list_dashboards_empty_org(self, orguser, seed_db):
+        """Test listing when org has no dashboards"""
+        request = mock_request(orguser)
 
-    request = mock_request(orguser)
+        response = list_dashboards(request)
 
-    # Test published only
-    published = list_dashboards(request, is_published=True)
-    assert len(published) == 1
-    assert published[0].is_published is True
-
-    # Test unpublished only
-    unpublished = list_dashboards(request, is_published=False)
-    assert len(unpublished) == 1
-    assert unpublished[0].is_published is False
-
-
-def test_list_dashboards_empty_org(orguser, seed_db):
-    """Test listing dashboards when org has no dashboards"""
-    request = mock_request(orguser)
-
-    response = list_dashboards(request)
-
-    assert len(response) == 0
+        assert len(response) == 0
 
 
 # ================================================================================
@@ -202,56 +216,57 @@ def test_list_dashboards_empty_org(orguser, seed_db):
 # ================================================================================
 
 
-def test_get_dashboard_success(orguser, sample_dashboard, seed_db):
-    """Test successfully getting a single dashboard"""
-    request = mock_request(orguser)
+class TestGetDashboard:
+    """Tests for get_dashboard endpoint"""
 
-    response = get_dashboard(request, dashboard_id=sample_dashboard.id)
+    def test_get_dashboard_success(self, orguser, sample_dashboard, seed_db):
+        """Test successfully getting a dashboard"""
+        request = mock_request(orguser)
 
-    assert response.id == sample_dashboard.id
-    assert response.title == "Test Dashboard"
-    assert response.dashboard_type == "native"
+        response = get_dashboard(request, dashboard_id=sample_dashboard.id)
 
+        assert response.id == sample_dashboard.id
+        assert response.title == "Test Dashboard"
+        assert response.dashboard_type == "native"
 
-def test_get_dashboard_not_found(orguser, seed_db):
-    """Test getting a non-existent dashboard"""
-    request = mock_request(orguser)
+    def test_get_dashboard_not_found(self, orguser, seed_db):
+        """Test getting non-existent dashboard returns 404"""
+        request = mock_request(orguser)
 
-    with pytest.raises(HttpError) as excinfo:
-        get_dashboard(request, dashboard_id=99999)
+        with pytest.raises(HttpError) as excinfo:
+            get_dashboard(request, dashboard_id=99999)
 
-    assert excinfo.value.status_code == 404
+        assert excinfo.value.status_code == 404
 
+    def test_get_dashboard_wrong_org(self, orguser, seed_db):
+        """Test getting dashboard from another org returns 404"""
+        # Create another org and dashboard
+        other_org = Org.objects.create(name="Other Org", slug="other-org-dash")
+        other_user = User.objects.create(username="otheruser", email="other@test.com")
+        other_orguser = OrgUser.objects.create(
+            user=other_user,
+            org=other_org,
+            new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        )
+        other_dashboard = Dashboard.objects.create(
+            title="Other Dashboard",
+            dashboard_type="native",
+            created_by=other_orguser,
+            org=other_org,
+        )
 
-def test_get_dashboard_wrong_org(orguser, seed_db):
-    """Test getting a dashboard from another org"""
-    # Create another org and dashboard
-    other_org = Org.objects.create(name="Other Org", slug="other-org")
-    other_user = User.objects.create(username="otheruser", email="other@test.com")
-    other_orguser = OrgUser.objects.create(
-        user=other_user,
-        org=other_org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    other_dashboard = Dashboard.objects.create(
-        title="Other Dashboard",
-        dashboard_type="native",
-        created_by=other_orguser,
-        org=other_org,
-    )
+        request = mock_request(orguser)
 
-    request = mock_request(orguser)
+        with pytest.raises(HttpError) as excinfo:
+            get_dashboard(request, dashboard_id=other_dashboard.id)
 
-    with pytest.raises(HttpError) as excinfo:
-        get_dashboard(request, dashboard_id=other_dashboard.id)
+        assert excinfo.value.status_code == 404
 
-    assert excinfo.value.status_code == 404
-
-    # Cleanup
-    other_dashboard.delete()
-    other_orguser.delete()
-    other_user.delete()
-    other_org.delete()
+        # Cleanup
+        other_dashboard.delete()
+        other_orguser.delete()
+        other_user.delete()
+        other_org.delete()
 
 
 # ================================================================================
@@ -259,43 +274,43 @@ def test_get_dashboard_wrong_org(orguser, seed_db):
 # ================================================================================
 
 
-def test_create_dashboard_success(orguser, seed_db):
-    """Test successfully creating a dashboard"""
-    request = mock_request(orguser)
+class TestCreateDashboard:
+    """Tests for create_dashboard endpoint"""
 
-    payload = DashboardCreate(
-        title="New Dashboard",
-        description="New Description",
-        grid_columns=12,
-    )
+    def test_create_dashboard_success(self, orguser, seed_db):
+        """Test successfully creating a dashboard"""
+        request = mock_request(orguser)
 
-    response = create_dashboard(request, payload)
+        payload = DashboardCreate(
+            title="New Dashboard",
+            description="New Description",
+            grid_columns=24,
+        )
 
-    assert response.title == "New Dashboard"
-    assert response.description == "New Description"
-    assert response.grid_columns == 12
-    assert response.dashboard_type == "native"
+        response = create_dashboard(request, payload)
 
-    # Cleanup
-    Dashboard.objects.filter(id=response.id).delete()
+        assert response.title == "New Dashboard"
+        assert response.description == "New Description"
+        assert response.grid_columns == 24
+        assert response.dashboard_type == "native"
 
+        # Cleanup
+        Dashboard.objects.filter(id=response.id).delete()
 
-def test_create_dashboard_minimal(orguser, seed_db):
-    """Test creating a dashboard with minimal info"""
-    request = mock_request(orguser)
+    def test_create_dashboard_minimal(self, orguser, seed_db):
+        """Test creating dashboard with minimal config"""
+        request = mock_request(orguser)
 
-    payload = DashboardCreate(
-        title="Minimal Dashboard",
-    )
+        payload = DashboardCreate(title="Minimal Dashboard")
 
-    response = create_dashboard(request, payload)
+        response = create_dashboard(request, payload)
 
-    assert response.title == "Minimal Dashboard"
-    assert response.description is None
-    assert response.grid_columns == 12  # default value
+        assert response.title == "Minimal Dashboard"
+        assert response.description is None
+        assert response.grid_columns == 12  # Default
 
-    # Cleanup
-    Dashboard.objects.filter(id=response.id).delete()
+        # Cleanup
+        Dashboard.objects.filter(id=response.id).delete()
 
 
 # ================================================================================
@@ -303,85 +318,80 @@ def test_create_dashboard_minimal(orguser, seed_db):
 # ================================================================================
 
 
-def test_update_dashboard_success(orguser, sample_dashboard, seed_db):
-    """Test successfully updating a dashboard"""
-    request = mock_request(orguser)
+class TestUpdateDashboard:
+    """Tests for update_dashboard endpoint"""
 
-    payload = DashboardUpdate(
-        title="Updated Dashboard",
-        description="Updated Description",
-    )
+    def test_update_dashboard_success(self, orguser, sample_dashboard, seed_db):
+        """Test successfully updating a dashboard"""
+        request = mock_request(orguser)
 
-    response = update_dashboard(request, dashboard_id=sample_dashboard.id, payload=payload)
+        payload = DashboardUpdate(
+            title="Updated Dashboard",
+            description="Updated Description",
+        )
 
-    assert response.id == sample_dashboard.id
-    assert response.title == "Updated Dashboard"
-    assert response.description == "Updated Description"
+        response = update_dashboard(request, dashboard_id=sample_dashboard.id, payload=payload)
 
+        assert response.id == sample_dashboard.id
+        assert response.title == "Updated Dashboard"
+        assert response.description == "Updated Description"
 
-def test_update_dashboard_partial(orguser, sample_dashboard, seed_db):
-    """Test partial update of a dashboard"""
-    request = mock_request(orguser)
+    def test_update_dashboard_partial(self, orguser, sample_dashboard, seed_db):
+        """Test partial update"""
+        request = mock_request(orguser)
+        original_title = sample_dashboard.title
 
-    original_title = sample_dashboard.title
+        payload = DashboardUpdate(description="Only description updated")
 
-    payload = DashboardUpdate(
-        description="Only description updated",
-    )
+        response = update_dashboard(request, dashboard_id=sample_dashboard.id, payload=payload)
 
-    response = update_dashboard(request, dashboard_id=sample_dashboard.id, payload=payload)
+        assert response.title == original_title
+        assert response.description == "Only description updated"
 
-    assert response.title == original_title
-    assert response.description == "Only description updated"
+    def test_update_dashboard_not_found(self, orguser, seed_db):
+        """Test updating non-existent dashboard returns 404"""
+        request = mock_request(orguser)
 
+        payload = DashboardUpdate(title="Updated")
 
-def test_update_dashboard_not_found(orguser, seed_db):
-    """Test updating a non-existent dashboard"""
-    request = mock_request(orguser)
+        with pytest.raises(HttpError) as excinfo:
+            update_dashboard(request, dashboard_id=99999, payload=payload)
 
-    payload = DashboardUpdate(title="Updated")
+        assert excinfo.value.status_code == 404
 
-    with pytest.raises(HttpError) as excinfo:
-        update_dashboard(request, dashboard_id=99999, payload=payload)
+    def test_update_dashboard_layout_and_components(self, orguser, sample_dashboard, seed_db):
+        """Test updating layout and components"""
+        request = mock_request(orguser)
 
-    assert excinfo.value.status_code == 404
+        new_layout = [
+            {"i": "chart-1", "x": 0, "y": 0, "w": 6, "h": 4},
+            {"i": "chart-2", "x": 6, "y": 0, "w": 6, "h": 4},
+        ]
+        new_components = {
+            "chart-1": {"type": "chart", "config": {"chartId": 1}},
+            "chart-2": {"type": "chart", "config": {"chartId": 2}},
+        }
 
+        payload = DashboardUpdate(
+            layout_config=new_layout,
+            components=new_components,
+        )
 
-def test_update_dashboard_layout_and_components(orguser, sample_dashboard, seed_db):
-    """Test updating dashboard layout and components"""
-    request = mock_request(orguser)
+        response = update_dashboard(request, dashboard_id=sample_dashboard.id, payload=payload)
 
-    new_layout = [
-        {"i": "chart-1", "x": 0, "y": 0, "w": 6, "h": 4},
-        {"i": "chart-2", "x": 6, "y": 0, "w": 6, "h": 4},
-    ]
+        assert len(response.layout_config) == 2
+        assert len(response.components) == 2
 
-    new_components = {
-        "chart-1": {"type": "chart", "chart_id": 1},
-        "chart-2": {"type": "chart", "chart_id": 2},
-    }
+    def test_update_dashboard_publish(self, orguser, sample_dashboard, seed_db):
+        """Test publishing a dashboard"""
+        request = mock_request(orguser)
 
-    payload = DashboardUpdate(
-        layout_config=new_layout,
-        components=new_components,
-    )
+        payload = DashboardUpdate(is_published=True)
 
-    response = update_dashboard(request, dashboard_id=sample_dashboard.id, payload=payload)
+        response = update_dashboard(request, dashboard_id=sample_dashboard.id, payload=payload)
 
-    assert len(response.layout_config) == 2
-    assert len(response.components) == 2
-
-
-def test_update_dashboard_publish(orguser, sample_dashboard, seed_db):
-    """Test publishing a dashboard"""
-    request = mock_request(orguser)
-
-    payload = DashboardUpdate(is_published=True)
-
-    response = update_dashboard(request, dashboard_id=sample_dashboard.id, payload=payload)
-
-    assert response.is_published is True
-    assert response.published_at is not None
+        assert response.is_published is True
+        assert response.published_at is not None
 
 
 # ================================================================================
@@ -389,185 +399,198 @@ def test_update_dashboard_publish(orguser, sample_dashboard, seed_db):
 # ================================================================================
 
 
-def test_delete_dashboard_success(orguser, sample_dashboard, seed_db):
-    """Test successfully deleting a dashboard"""
-    request = mock_request(orguser)
-    dashboard_id = sample_dashboard.id
+class TestDeleteDashboard:
+    """Tests for delete_dashboard endpoint"""
 
-    response = delete_dashboard(request, dashboard_id=dashboard_id)
+    def test_delete_dashboard_success(self, orguser, org, seed_db):
+        """Test successfully deleting a dashboard"""
+        # Create dashboard to delete
+        dashboard = Dashboard.objects.create(
+            title="Dashboard to Delete",
+            dashboard_type="native",
+            grid_columns=12,
+            layout_config=[],
+            components={},
+            created_by=orguser,
+            org=org,
+        )
+        dashboard_id = dashboard.id
 
-    assert response.get("success") is True
-    assert not Dashboard.objects.filter(id=dashboard_id).exists()
+        request = mock_request(orguser)
 
+        response = delete_dashboard(request, dashboard_id=dashboard_id)
 
-def test_delete_dashboard_not_found(orguser, seed_db):
-    """Test deleting a non-existent dashboard"""
-    request = mock_request(orguser)
+        assert response.get("success") is True
+        assert not Dashboard.objects.filter(id=dashboard_id).exists()
 
-    with pytest.raises(HttpError) as excinfo:
-        delete_dashboard(request, dashboard_id=99999)
+    def test_delete_dashboard_not_found(self, orguser, seed_db):
+        """Test deleting non-existent dashboard returns 404"""
+        request = mock_request(orguser)
 
-    assert excinfo.value.status_code == 404
+        with pytest.raises(HttpError) as excinfo:
+            delete_dashboard(request, dashboard_id=99999)
 
+        assert excinfo.value.status_code == 404
 
-def test_delete_dashboard_wrong_org(orguser, seed_db):
-    """Test deleting a dashboard from another org"""
-    # Create another org and dashboard
-    other_org = Org.objects.create(name="Other Org", slug="other-org-del")
-    other_user = User.objects.create(username="otheruser2", email="other2@test.com")
-    other_orguser = OrgUser.objects.create(
-        user=other_user,
-        org=other_org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    other_dashboard = Dashboard.objects.create(
-        title="Other Dashboard",
-        dashboard_type="native",
-        created_by=other_orguser,
-        org=other_org,
-    )
+    def test_delete_dashboard_wrong_org(self, orguser, seed_db):
+        """Test deleting dashboard from another org returns 404"""
+        # Create another org and dashboard
+        other_org = Org.objects.create(name="Other Org", slug="other-org-del-dash")
+        other_user = User.objects.create(username="otheruser2", email="other2@test.com")
+        other_orguser = OrgUser.objects.create(
+            user=other_user,
+            org=other_org,
+            new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        )
+        other_dashboard = Dashboard.objects.create(
+            title="Other Dashboard",
+            dashboard_type="native",
+            created_by=other_orguser,
+            org=other_org,
+        )
 
-    request = mock_request(orguser)
+        request = mock_request(orguser)
 
-    with pytest.raises(HttpError) as excinfo:
-        delete_dashboard(request, dashboard_id=other_dashboard.id)
+        with pytest.raises(HttpError) as excinfo:
+            delete_dashboard(request, dashboard_id=other_dashboard.id)
 
-    assert excinfo.value.status_code == 404
+        assert excinfo.value.status_code == 404
 
-    # Cleanup
-    other_dashboard.delete()
-    other_orguser.delete()
-    other_user.delete()
-    other_org.delete()
+        # Cleanup
+        other_dashboard.delete()
+        other_orguser.delete()
+        other_user.delete()
+        other_org.delete()
 
 
 # ================================================================================
-# Test dashboard filter endpoints
+# Test create_filter endpoint
 # ================================================================================
 
 
-def test_create_filter_success(orguser, sample_dashboard, seed_db):
-    """Test successfully creating a dashboard filter"""
-    request = mock_request(orguser)
+class TestCreateFilter:
+    """Tests for create_filter endpoint"""
 
-    payload = FilterCreate(
-        name="Status Filter",
-        filter_type="value",
-        schema_name="public",
-        table_name="orders",
-        column_name="status",
-        settings={"options": ["active", "completed"]},
-        order=0,
-    )
+    def test_create_filter_success(self, orguser, sample_dashboard, seed_db):
+        """Test successfully creating a filter"""
+        request = mock_request(orguser)
 
-    response = create_filter(request, dashboard_id=sample_dashboard.id, payload=payload)
+        payload = FilterCreate(
+            name="Category Filter",
+            filter_type="value",
+            schema_name="public",
+            table_name="products",
+            column_name="category",
+            settings={"multiSelect": True},
+            order=1,
+        )
 
-    assert response.name == "Status Filter"
-    assert response.filter_type == "value"
-    assert response.column_name == "status"
+        response = create_filter(request, dashboard_id=sample_dashboard.id, payload=payload)
 
-    # Cleanup
-    DashboardFilter.objects.filter(id=response.id).delete()
+        assert response.name == "Category Filter"
+        assert response.filter_type == "value"
+        assert response.column_name == "category"
 
+        # Cleanup
+        DashboardFilter.objects.filter(id=response.id).delete()
 
-def test_create_filter_dashboard_not_found(orguser, seed_db):
-    """Test creating a filter for non-existent dashboard"""
-    request = mock_request(orguser)
+    def test_create_filter_dashboard_not_found(self, orguser, seed_db):
+        """Test creating filter for non-existent dashboard returns 404"""
+        request = mock_request(orguser)
 
-    payload = FilterCreate(
-        filter_type="value",
-        schema_name="public",
-        table_name="orders",
-        column_name="status",
-    )
+        payload = FilterCreate(
+            filter_type="value",
+            schema_name="public",
+            table_name="orders",
+            column_name="status",
+        )
 
-    with pytest.raises(HttpError) as excinfo:
-        create_filter(request, dashboard_id=99999, payload=payload)
+        with pytest.raises(HttpError) as excinfo:
+            create_filter(request, dashboard_id=99999, payload=payload)
 
-    assert excinfo.value.status_code == 404
-
-
-def test_update_filter_success(orguser, sample_dashboard, seed_db):
-    """Test successfully updating a dashboard filter"""
-    # Create a filter first
-    filter_obj = DashboardFilter.objects.create(
-        dashboard=sample_dashboard,
-        filter_type="value",
-        schema_name="public",
-        table_name="orders",
-        column_name="status",
-        settings={},
-        order=0,
-    )
-
-    request = mock_request(orguser)
-
-    payload = FilterUpdate(
-        name="Updated Filter Name",
-        settings={"options": ["new", "pending"]},
-    )
-
-    response = update_filter(
-        request,
-        dashboard_id=sample_dashboard.id,
-        filter_id=filter_obj.id,
-        payload=payload,
-    )
-
-    assert response.name == "Updated Filter Name"
-    assert response.settings["options"] == ["new", "pending"]
-
-    # Cleanup
-    filter_obj.delete()
+        assert excinfo.value.status_code == 404
 
 
-def test_update_filter_not_found(orguser, sample_dashboard, seed_db):
-    """Test updating a non-existent filter"""
-    request = mock_request(orguser)
+# ================================================================================
+# Test update_filter endpoint
+# ================================================================================
 
-    payload = FilterUpdate(name="Updated")
 
-    with pytest.raises(HttpError) as excinfo:
-        update_filter(
+class TestUpdateFilter:
+    """Tests for update_filter endpoint"""
+
+    def test_update_filter_success(self, orguser, sample_dashboard, sample_filter, seed_db):
+        """Test successfully updating a filter"""
+        request = mock_request(orguser)
+
+        payload = FilterUpdate(
+            name="Updated Filter Name",
+            settings={"newSetting": True},
+        )
+
+        response = update_filter(
             request,
             dashboard_id=sample_dashboard.id,
-            filter_id=99999,
+            filter_id=sample_filter.id,
             payload=payload,
         )
 
-    assert excinfo.value.status_code == 404
+        assert response.name == "Updated Filter Name"
+        assert response.settings["newSetting"] is True
+
+    def test_update_filter_not_found(self, orguser, sample_dashboard, seed_db):
+        """Test updating non-existent filter returns 404"""
+        request = mock_request(orguser)
+
+        payload = FilterUpdate(name="Updated")
+
+        with pytest.raises(HttpError) as excinfo:
+            update_filter(
+                request,
+                dashboard_id=sample_dashboard.id,
+                filter_id=99999,
+                payload=payload,
+            )
+
+        assert excinfo.value.status_code == 404
 
 
-def test_delete_filter_success(orguser, sample_dashboard, seed_db):
-    """Test successfully deleting a dashboard filter"""
-    # Create a filter first
-    filter_obj = DashboardFilter.objects.create(
-        dashboard=sample_dashboard,
-        filter_type="value",
-        schema_name="public",
-        table_name="orders",
-        column_name="status",
-        settings={},
-        order=0,
-    )
-
-    request = mock_request(orguser)
-    filter_id = filter_obj.id
-
-    response = delete_filter(request, dashboard_id=sample_dashboard.id, filter_id=filter_id)
-
-    assert response.get("success") is True
-    assert not DashboardFilter.objects.filter(id=filter_id).exists()
+# ================================================================================
+# Test delete_filter endpoint
+# ================================================================================
 
 
-def test_delete_filter_not_found(orguser, sample_dashboard, seed_db):
-    """Test deleting a non-existent filter"""
-    request = mock_request(orguser)
+class TestDeleteFilter:
+    """Tests for delete_filter endpoint"""
 
-    with pytest.raises(HttpError) as excinfo:
-        delete_filter(request, dashboard_id=sample_dashboard.id, filter_id=99999)
+    def test_delete_filter_success(self, orguser, sample_dashboard, seed_db):
+        """Test successfully deleting a filter"""
+        # Create filter to delete
+        filter_obj = DashboardFilter.objects.create(
+            dashboard=sample_dashboard,
+            name="Filter to Delete",
+            filter_type="value",
+            schema_name="public",
+            table_name="orders",
+            column_name="status",
+        )
+        filter_id = filter_obj.id
 
-    assert excinfo.value.status_code == 404
+        request = mock_request(orguser)
+
+        response = delete_filter(request, dashboard_id=sample_dashboard.id, filter_id=filter_id)
+
+        assert response.get("success") is True
+        assert not DashboardFilter.objects.filter(id=filter_id).exists()
+
+    def test_delete_filter_not_found(self, orguser, sample_dashboard, seed_db):
+        """Test deleting non-existent filter returns 404"""
+        request = mock_request(orguser)
+
+        with pytest.raises(HttpError) as excinfo:
+            delete_filter(request, dashboard_id=sample_dashboard.id, filter_id=99999)
+
+        assert excinfo.value.status_code == 404
 
 
 # ================================================================================

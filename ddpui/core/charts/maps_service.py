@@ -88,32 +88,15 @@ def build_map_query(
 ):
     """Build query for map data with optional drill-down filters"""
     # Maps always use aggregated data grouped by geographic column
-
-    # Create a new payload that mimics aggregated bar chart structure
-    if payload.metrics:
-        # Use new multiple metrics system
-        map_payload = ChartDataPayload(
-            chart_type="bar",  # Reuse bar chart query logic internally
-            computation_type="aggregated",
-            schema_name=payload.schema_name,
-            table_name=payload.table_name,
-            dimension_col=payload.geographic_column,
-            metrics=payload.metrics,  # Use metrics array
-            dashboard_filters=payload.dashboard_filters,  # Pass through dashboard filters
-            extra_config=payload.extra_config,  # Pass through filters, pagination, sorting, and other config
-        )
-    else:
-        # Fallback to legacy single metric system for backward compatibility
-        map_payload = ChartDataPayload(
-            chart_type="bar",  # Reuse bar chart query logic internally
-            computation_type="aggregated",
-            schema_name=payload.schema_name,
-            table_name=payload.table_name,
-            dimension_col=payload.geographic_column,
-            metrics=payload.metrics,
-            dashboard_filters=payload.dashboard_filters,  # Pass through dashboard filters
-            extra_config=payload.extra_config,  # Pass through filters, pagination, sorting, and other config
-        )
+    map_payload = ChartDataPayload(
+        chart_type="bar",  # Reuse bar chart query logic internally
+        schema_name=payload.schema_name,
+        table_name=payload.table_name,
+        dimension_col=payload.geographic_column,
+        metrics=payload.metrics,  # Use metrics array
+        dashboard_filters=payload.dashboard_filters,  # Pass through dashboard filters
+        extra_config=payload.extra_config,  # Pass through filters, pagination, sorting, and other config
+    )
 
     # Build base query using the same service as regular charts (includes filtering, pagination, sorting)
     query = charts_service.build_chart_query(map_payload, org_warehouse)
@@ -159,7 +142,6 @@ def build_drill_down_query_for_layer(
     # Create modified payload for this layer
     layer_payload = ChartDataPayload(
         chart_type=payload.chart_type,
-        computation_type=payload.computation_type,
         schema_name=payload.schema_name,
         table_name=payload.table_name,
         geographic_column=geographic_column,
