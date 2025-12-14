@@ -20,6 +20,13 @@ from ddpui.core.charts import charts_service
 from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
 from ddpui.core.charts.chart_validator import ChartValidator
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.services.chart_service import (
+    ChartService,
+    ChartData,
+    ChartNotFoundError,
+    ChartValidationError,
+    ChartPermissionError,
+)
 from ddpui.schemas.chart_schema import (
     ChartCreate,
     ChartMetric,
@@ -275,57 +282,32 @@ def list_charts(
     if page_size < 1 or page_size > 100:
         page_size = 10
 
-    # Start with all charts for the organization
-    queryset = Chart.objects.filter(org=orguser.org)
+    charts, total = ChartService.list_charts(
+        org=orguser.org,
+        page=page,
+        page_size=page_size,
+        search=search,
+        chart_type=chart_type,
+    )
 
-    # Apply search filter
-    if search:
-        from django.db.models import Q
-
-        queryset = queryset.filter(
-            Q(title__icontains=search)
-            | Q(description__icontains=search)
-            | Q(schema_name__icontains=search)
-            | Q(table_name__icontains=search)
-        )
-
-    # Apply chart type filter
-    if chart_type and chart_type != "all":
-        queryset = queryset.filter(chart_type=chart_type)
-
-    # Order by updated_at descending
-    queryset = queryset.order_by("-updated_at")
-
-    # Get total count before pagination
-    total = queryset.count()
     total_pages = (total + page_size - 1) // page_size  # Ceiling division
 
-    # Apply pagination
-    offset = (page - 1) * page_size
-    charts = queryset[offset : offset + page_size]
-
-    # Get org warehouse once for all charts
-    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
-    if not org_warehouse:
-        logger.warning(f"No warehouse configured for org {orguser.org.slug}")
-
     # Build response for each chart
-    chart_responses = []
-    for chart in charts:
-        chart_dict = {
-            "id": chart.id,
-            "title": chart.title,
-            "description": chart.description,
-            "chart_type": chart.chart_type,
-            "computation_type": chart.computation_type,
-            "schema_name": chart.schema_name,
-            "table_name": chart.table_name,
-            "extra_config": chart.extra_config,
-            # render_config removed - charts fetch fresh config via /data endpoint
-            "created_at": chart.created_at,
-            "updated_at": chart.updated_at,
-        }
-        chart_responses.append(ChartResponse(**chart_dict))
+    chart_responses = [
+        ChartResponse(
+            id=chart.id,
+            title=chart.title,
+            description=chart.description,
+            chart_type=chart.chart_type,
+            computation_type=chart.computation_type,
+            schema_name=chart.schema_name,
+            table_name=chart.table_name,
+            extra_config=chart.extra_config,
+            created_at=chart.created_at,
+            updated_at=chart.updated_at,
+        )
+        for chart in charts
+    ]
 
     return ChartListResponse(
         data=chart_responses, total=total, page=page, page_size=page_size, total_pages=total_pages
@@ -1033,32 +1015,24 @@ def download_chart_data_csv(request, payload: ChartDataPayload):
 def get_chart(request, chart_id: int):
     """Get a specific chart"""
     orguser: OrgUser = request.orguser
+
     try:
-        chart = Chart.objects.get(id=chart_id, org=orguser.org)
-    except Chart.DoesNotExist:
+        chart = ChartService.get_chart(chart_id, orguser.org)
+    except ChartNotFoundError:
         raise HttpError(404, "Chart not found")
 
-    # Get org warehouse
-    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
-    if not org_warehouse:
-        logger.warning(f"No warehouse configured for org {orguser.org.slug}")
-
-    # Build response
-    chart_dict = {
-        "id": chart.id,
-        "title": chart.title,
-        "description": chart.description,
-        "chart_type": chart.chart_type,
-        "computation_type": chart.computation_type,
-        "schema_name": chart.schema_name,
-        "table_name": chart.table_name,
-        "extra_config": chart.extra_config,
-        # render_config removed - charts fetch fresh config via /data endpoint
-        "created_at": chart.created_at,
-        "updated_at": chart.updated_at,
-    }
-
-    return ChartResponse(**chart_dict)
+    return ChartResponse(
+        id=chart.id,
+        title=chart.title,
+        description=chart.description,
+        chart_type=chart.chart_type,
+        computation_type=chart.computation_type,
+        schema_name=chart.schema_name,
+        table_name=chart.table_name,
+        extra_config=chart.extra_config,
+        created_at=chart.created_at,
+        updated_at=chart.updated_at,
+    )
 
 
 @charts_router.get("/{chart_id}/data/", response=ChartDataResponse)
@@ -1165,147 +1139,87 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
 @has_permission(["can_create_charts"])
 def create_chart(request, payload: ChartCreate):
     """Create a new chart"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
 
-    # Validate chart configuration using ChartValidator
-    is_valid, error_message = ChartValidator.validate_chart_config(
-        chart_type=payload.chart_type,
-        computation_type=payload.computation_type,
-        extra_config=payload.extra_config,
-        schema_name=payload.schema_name,
-        table_name=payload.table_name,
+    try:
+        chart_data = ChartData(
+            title=payload.title,
+            description=payload.description,
+            chart_type=payload.chart_type,
+            computation_type=payload.computation_type,
+            schema_name=payload.schema_name,
+            table_name=payload.table_name,
+            extra_config=payload.extra_config,
+        )
+        chart = ChartService.create_chart(chart_data, orguser)
+    except ChartValidationError as e:
+        raise HttpError(400, e.message)
+
+    return ChartResponse(
+        id=chart.id,
+        title=chart.title,
+        description=chart.description,
+        chart_type=chart.chart_type,
+        computation_type=chart.computation_type,
+        schema_name=chart.schema_name,
+        table_name=chart.table_name,
+        extra_config=chart.extra_config,
+        created_at=chart.created_at,
+        updated_at=chart.updated_at,
     )
-
-    if not is_valid:
-        raise HttpError(400, error_message)
-
-    chart = Chart.objects.create(
-        title=payload.title,
-        description=payload.description,
-        chart_type=payload.chart_type,
-        computation_type=payload.computation_type,
-        schema_name=payload.schema_name,
-        table_name=payload.table_name,
-        extra_config=payload.extra_config,
-        created_by=orguser,
-        last_modified_by=orguser,
-        org=orguser.org,
-    )
-
-    # Get org warehouse
-    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
-
-    # Build response
-    chart_dict = {
-        "id": chart.id,
-        "title": chart.title,
-        "description": chart.description,
-        "chart_type": chart.chart_type,
-        "computation_type": chart.computation_type,
-        "schema_name": chart.schema_name,
-        "table_name": chart.table_name,
-        "extra_config": chart.extra_config,
-        # render_config removed - charts fetch fresh config via /data endpoint
-        "render_config": (
-            generate_chart_render_config(chart, org_warehouse) if org_warehouse else {}
-        ),
-        "created_at": chart.created_at,
-        "updated_at": chart.updated_at,
-    }
-
-    return ChartResponse(**chart_dict)
 
 
 @charts_router.put("/{chart_id}/", response=ChartResponse)
 @has_permission(["can_edit_charts"])
 def update_chart(request, chart_id: int, payload: ChartUpdate):
     """Update a chart"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
+
     try:
-        chart = Chart.objects.get(id=chart_id, org=orguser.org)
-    except Chart.DoesNotExist:
+        chart = ChartService.update_chart(
+            chart_id=chart_id,
+            org=orguser.org,
+            orguser=orguser,
+            title=payload.title,
+            description=payload.description,
+            chart_type=payload.chart_type,
+            computation_type=payload.computation_type,
+            schema_name=payload.schema_name,
+            table_name=payload.table_name,
+            extra_config=payload.extra_config,
+        )
+    except ChartNotFoundError:
         raise HttpError(404, "Chart not found")
+    except ChartValidationError as e:
+        raise HttpError(400, e.message)
 
-    # Prepare the updated values
-    updated_chart_type = payload.chart_type if payload.chart_type is not None else chart.chart_type
-    updated_computation_type = (
-        payload.computation_type if payload.computation_type is not None else chart.computation_type
+    return ChartResponse(
+        id=chart.id,
+        title=chart.title,
+        description=chart.description,
+        chart_type=chart.chart_type,
+        computation_type=chart.computation_type,
+        schema_name=chart.schema_name,
+        table_name=chart.table_name,
+        extra_config=chart.extra_config,
+        created_at=chart.created_at,
+        updated_at=chart.updated_at,
     )
-    updated_extra_config = (
-        payload.extra_config if payload.extra_config is not None else chart.extra_config
-    )
-    updated_schema_name = (
-        payload.schema_name if payload.schema_name is not None else chart.schema_name
-    )
-    updated_table_name = payload.table_name if payload.table_name is not None else chart.table_name
-
-    # Validate the updated configuration
-    is_valid, error_message = ChartValidator.validate_for_update(
-        existing_chart_type=chart.chart_type,
-        new_chart_type=payload.chart_type,
-        new_computation_type=payload.computation_type,
-        extra_config=updated_extra_config,
-        schema_name=updated_schema_name,
-        table_name=updated_table_name,
-    )
-
-    if not is_valid:
-        raise HttpError(400, error_message)
-
-    # Apply updates
-    if payload.title is not None:
-        chart.title = payload.title
-    if payload.description is not None:
-        chart.description = payload.description
-    if payload.chart_type is not None:
-        chart.chart_type = payload.chart_type
-    if payload.computation_type is not None:
-        chart.computation_type = payload.computation_type
-    if payload.schema_name is not None:
-        chart.schema_name = payload.schema_name
-    if payload.table_name is not None:
-        chart.table_name = payload.table_name
-    if payload.extra_config is not None:
-        chart.extra_config = payload.extra_config
-
-    # Update last_modified_by
-    chart.last_modified_by = orguser
-
-    chart.save()
-
-    # Build response
-    chart_dict = {
-        "id": chart.id,
-        "title": chart.title,
-        "description": chart.description,
-        "chart_type": chart.chart_type,
-        "computation_type": chart.computation_type,
-        "schema_name": chart.schema_name,
-        "table_name": chart.table_name,
-        "extra_config": chart.extra_config,
-        # render_config removed - charts fetch fresh config via /data endpoint
-        "created_at": chart.created_at,
-        "updated_at": chart.updated_at,
-    }
-
-    return ChartResponse(**chart_dict)
 
 
 @charts_router.delete("/{chart_id}/")
 @has_permission(["can_delete_charts"])
 def delete_chart(request, chart_id: int):
     """Delete a chart"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
+
     try:
-        chart = Chart.objects.get(id=chart_id, org=orguser.org)
-    except Chart.DoesNotExist:
+        ChartService.delete_chart(chart_id, orguser.org, orguser)
+    except ChartNotFoundError:
         raise HttpError(404, "Chart not found")
+    except ChartPermissionError as e:
+        raise HttpError(403, e.message)
 
-    # Only allow deletion if the current user is the creator
-    if chart.created_by != orguser:
-        raise HttpError(403, "You can only delete charts you created.")
-
-    chart.delete()
     return {"success": True}
 
 
@@ -1313,29 +1227,16 @@ def delete_chart(request, chart_id: int):
 @has_permission(["can_delete_charts"])
 def bulk_delete_charts(request, payload: BulkDeleteRequest):
     """Delete multiple charts"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
 
     if not payload.chart_ids:
         raise HttpError(400, "No chart IDs provided")
 
     try:
-        # Get charts that belong to this org
-        charts = Chart.objects.filter(id__in=payload.chart_ids, org=orguser.org)
-        found_ids = list(charts.values_list("id", flat=True))
-
-        # Check if all requested charts were found
-        missing_ids = set(payload.chart_ids) - set(found_ids)
-        if missing_ids:
-            logger.warning(f"Charts not found or not accessible: {missing_ids}")
-
-        # Delete the charts
-        deleted_count = charts.delete()[0]
-
+        result = ChartService.bulk_delete_charts(payload.chart_ids, orguser.org, orguser)
         return {
             "success": True,
-            "deleted_count": deleted_count,
-            "requested_count": len(payload.chart_ids),
-            "missing_ids": list(missing_ids),
+            **result,
         }
     except Exception as e:
         logger.error(f"Error in bulk delete: {str(e)}")
@@ -1346,35 +1247,11 @@ def bulk_delete_charts(request, payload: BulkDeleteRequest):
 @has_permission(["can_view_charts"])
 def get_chart_dashboards(request, chart_id: int):
     """Get list of dashboards that use this chart"""
-    orguser = request.orguser
+    orguser: OrgUser = request.orguser
 
-    # Verify chart exists and belongs to org
     try:
-        chart = Chart.objects.get(id=chart_id, org=orguser.org)
-    except Chart.DoesNotExist:
+        dashboards = ChartService.get_chart_dashboards(chart_id, orguser.org)
+    except ChartNotFoundError:
         raise HttpError(404, "Chart not found")
 
-    # Import here to avoid circular imports
-    from ddpui.models.dashboard import Dashboard
-
-    # Find dashboards that have this chart in their components
-    dashboards_with_chart = []
-    dashboards = Dashboard.objects.filter(org=orguser.org)
-
-    for dashboard in dashboards:
-        if dashboard.components:
-            for component_id, component in dashboard.components.items():
-                if (
-                    component.get("type") == "chart"
-                    and component.get("config", {}).get("chartId") == chart_id
-                ):
-                    dashboards_with_chart.append(
-                        {
-                            "id": dashboard.id,
-                            "title": dashboard.title,
-                            "dashboard_type": dashboard.dashboard_type,
-                        }
-                    )
-                    break  # Found chart in this dashboard, no need to check other components
-
-    return dashboards_with_chart
+    return dashboards

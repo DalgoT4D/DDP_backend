@@ -1,22 +1,31 @@
-"""Dashboard service for business logic"""
+"""Dashboard service for business logic
 
-from typing import Dict, List, Optional, Any, Union
-from datetime import datetime
+This module encapsulates all dashboard-related business logic,
+separating it from the API layer for better testability and maintainability.
+"""
+
+from typing import Dict, List, Optional, Any, Union, Tuple
+from datetime import datetime, timedelta
+from dataclasses import dataclass
 import json
+import uuid
 
 from django.core.cache import cache
+from django.db.models import Q
+from django.utils import timezone
 from sqlalchemy import text, distinct, column
 from sqlalchemy.dialects import postgresql
 
 from ddpui.models.dashboard import (
     Dashboard,
     DashboardFilter,
+    DashboardLock,
     DashboardComponentType,
     DashboardFilterType,
 )
+from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.visualization import Chart
-from ddpui.models.org import OrgWarehouse
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.core.charts.charts_service import (
     get_warehouse_client,
@@ -30,8 +39,470 @@ from ddpui.datainsights.query_builder import AggQueryBuilder
 logger = CustomLogger("ddpui.dashboard_service")
 
 
+# =============================================================================
+# Custom Exceptions
+# =============================================================================
+
+
+class DashboardServiceError(Exception):
+    """Base exception for dashboard service errors"""
+
+    def __init__(self, message: str, error_code: str = "DASHBOARD_ERROR"):
+        self.message = message
+        self.error_code = error_code
+        super().__init__(self.message)
+
+
+class DashboardNotFoundError(DashboardServiceError):
+    """Raised when dashboard is not found"""
+
+    def __init__(self, dashboard_id: int):
+        super().__init__(f"Dashboard with id {dashboard_id} not found", "DASHBOARD_NOT_FOUND")
+        self.dashboard_id = dashboard_id
+
+
+class DashboardLockedError(DashboardServiceError):
+    """Raised when dashboard is locked by another user"""
+
+    def __init__(self, locked_by_email: str):
+        super().__init__(f"Dashboard is locked by {locked_by_email}", "DASHBOARD_LOCKED")
+        self.locked_by_email = locked_by_email
+
+
+class DashboardPermissionError(DashboardServiceError):
+    """Raised when user doesn't have permission"""
+
+    def __init__(self, message: str = "Permission denied"):
+        super().__init__(message, "PERMISSION_DENIED")
+
+
+class FilterNotFoundError(DashboardServiceError):
+    """Raised when filter is not found"""
+
+    def __init__(self, filter_id: int):
+        super().__init__(f"Filter with id {filter_id} not found", "FILTER_NOT_FOUND")
+        self.filter_id = filter_id
+
+
+class FilterValidationError(DashboardServiceError):
+    """Raised when filter validation fails"""
+
+    def __init__(self, message: str):
+        super().__init__(message, "FILTER_VALIDATION_ERROR")
+
+
+# =============================================================================
+# Data Classes
+# =============================================================================
+
+
+@dataclass
+class DashboardData:
+    """Data class for dashboard creation"""
+
+    title: str
+    description: Optional[str] = None
+    grid_columns: int = 12
+
+
+@dataclass
+class FilterData:
+    """Data class for filter creation"""
+
+    filter_type: str
+    schema_name: str
+    table_name: str
+    column_name: str
+    name: Optional[str] = None
+    settings: Optional[dict] = None
+    order: int = 0
+
+
+@dataclass
+class LockInfo:
+    """Data class for lock information"""
+
+    lock_token: str
+    expires_at: datetime
+    locked_by_email: str
+
+
 class DashboardService:
     """Service class for dashboard-related operations"""
+
+    # =========================================================================
+    # CRUD Operations
+    # =========================================================================
+
+    @staticmethod
+    def get_dashboard(dashboard_id: int, org: Org) -> Dashboard:
+        """Get a dashboard by ID for an organization.
+
+        Args:
+            dashboard_id: The dashboard ID
+            org: The organization
+
+        Returns:
+            Dashboard instance
+
+        Raises:
+            DashboardNotFoundError: If dashboard doesn't exist or doesn't belong to org
+        """
+        try:
+            return Dashboard.objects.prefetch_related("filters").get(id=dashboard_id, org=org)
+        except Dashboard.DoesNotExist:
+            raise DashboardNotFoundError(dashboard_id)
+
+    @staticmethod
+    def list_dashboards(
+        org: Org,
+        dashboard_type: Optional[str] = None,
+        search: Optional[str] = None,
+        is_published: Optional[bool] = None,
+    ) -> List[Dashboard]:
+        """List dashboards for an organization with filtering.
+
+        Args:
+            org: The organization
+            dashboard_type: Optional filter by dashboard type
+            search: Optional search term for title/description
+            is_published: Optional filter by published status
+
+        Returns:
+            List of Dashboard instances
+        """
+        query = Q(org=org)
+
+        if dashboard_type:
+            query &= Q(dashboard_type=dashboard_type)
+
+        if search:
+            query &= Q(title__icontains=search) | Q(description__icontains=search)
+
+        if is_published is not None:
+            query &= Q(is_published=is_published)
+
+        return list(Dashboard.objects.filter(query).order_by("-updated_at"))
+
+    @staticmethod
+    def create_dashboard(data: DashboardData, orguser: OrgUser) -> Dashboard:
+        """Create a new dashboard.
+
+        Args:
+            data: Dashboard creation data
+            orguser: The user creating the dashboard
+
+        Returns:
+            Created Dashboard instance
+        """
+        dashboard = Dashboard.objects.create(
+            title=data.title,
+            description=data.description,
+            grid_columns=data.grid_columns,
+            created_by=orguser,
+            org=orguser.org,
+            last_modified_by=orguser,
+        )
+
+        logger.info(f"Created dashboard {dashboard.id} for org {orguser.org.id}")
+        return dashboard
+
+    @staticmethod
+    def update_dashboard(
+        dashboard_id: int,
+        org: Org,
+        orguser: OrgUser,
+        title: Optional[str] = None,
+        description: Optional[str] = None,
+        grid_columns: Optional[int] = None,
+        target_screen_size: Optional[str] = None,
+        layout_config: Optional[list] = None,
+        components: Optional[dict] = None,
+        filter_layout: Optional[str] = None,
+        is_published: Optional[bool] = None,
+    ) -> Dashboard:
+        """Update an existing dashboard.
+
+        Args:
+            dashboard_id: The dashboard ID
+            org: The organization
+            orguser: The user making the update
+            title: Optional new title
+            description: Optional new description
+            grid_columns: Optional new grid columns
+            target_screen_size: Optional new target screen size
+            layout_config: Optional new layout config
+            components: Optional new components
+            filter_layout: Optional new filter layout
+            is_published: Optional new published status
+
+        Returns:
+            Updated Dashboard instance
+
+        Raises:
+            DashboardNotFoundError: If dashboard doesn't exist
+            DashboardLockedError: If dashboard is locked by another user
+        """
+        dashboard = DashboardService.get_dashboard(dashboard_id, org)
+
+        # Check if dashboard is locked by another user
+        if hasattr(dashboard, "lock") and dashboard.lock:
+            if not dashboard.lock.is_expired() and dashboard.lock.locked_by != orguser:
+                raise DashboardLockedError(dashboard.lock.locked_by.user.email)
+
+        # Apply updates
+        if title is not None:
+            dashboard.title = title
+        if description is not None:
+            dashboard.description = description
+        if grid_columns is not None:
+            dashboard.grid_columns = grid_columns
+        if target_screen_size is not None:
+            dashboard.target_screen_size = target_screen_size
+        if layout_config is not None:
+            dashboard.layout_config = layout_config
+        if components is not None:
+            dashboard.components = components
+        if filter_layout is not None:
+            dashboard.filter_layout = filter_layout
+        if is_published is not None:
+            dashboard.is_published = is_published
+            if is_published:
+                dashboard.published_at = timezone.now()
+
+        dashboard.last_modified_by = orguser
+        dashboard.save()
+
+        # Auto-refresh lock if dashboard is locked by current user
+        if hasattr(dashboard, "lock") and dashboard.lock:
+            if not dashboard.lock.is_expired() and dashboard.lock.locked_by == orguser:
+                dashboard.lock.expires_at = timezone.now() + timedelta(minutes=2)
+                dashboard.lock.save()
+                logger.info(f"Auto-refreshed lock for dashboard {dashboard_id} during save")
+
+        logger.info(f"Updated dashboard {dashboard.id}")
+        return dashboard
+
+    @staticmethod
+    def delete_dashboard(
+        dashboard_id: int, org: Org, orguser: OrgUser, force: bool = False
+    ) -> bool:
+        """Delete a dashboard with safety checks.
+
+        Args:
+            dashboard_id: The dashboard ID
+            org: The organization
+            orguser: The user deleting the dashboard
+            force: If True, bypass some safety checks
+
+        Returns:
+            True if deletion was successful
+
+        Raises:
+            DashboardNotFoundError: If dashboard doesn't exist
+            DashboardPermissionError: If user doesn't have permission
+            DashboardLockedError: If dashboard is locked
+        """
+        dashboard = DashboardService.get_dashboard(dashboard_id, org)
+
+        # Check if this is org default
+        if dashboard.is_org_default and not force:
+            raise DashboardPermissionError("Cannot delete the organization's default dashboard.")
+
+        # Only allow deletion if the current user is the creator
+        if dashboard.created_by != orguser:
+            raise DashboardPermissionError("You can only delete dashboards you created.")
+
+        # Check if dashboard is landing page for any user
+        if OrgUser.objects.filter(landing_dashboard=dashboard).exists():
+            raise DashboardPermissionError(
+                "Cannot delete a dashboard that is set as landing page for one or more users."
+            )
+
+        # Check if dashboard is locked
+        if hasattr(dashboard, "lock") and dashboard.lock and not dashboard.lock.is_expired():
+            raise DashboardLockedError(dashboard.lock.locked_by.user.email)
+
+        # Use safe deletion
+        success, error_message = delete_dashboard_safely(dashboard_id, orguser)
+        if not success:
+            raise DashboardServiceError(error_message)
+
+        return True
+
+    # =========================================================================
+    # Lock Operations
+    # =========================================================================
+
+    @staticmethod
+    def lock_dashboard(dashboard_id: int, org: Org, orguser: OrgUser) -> LockInfo:
+        """Lock a dashboard for editing.
+
+        Args:
+            dashboard_id: The dashboard ID
+            org: The organization
+            orguser: The user locking the dashboard
+
+        Returns:
+            LockInfo with lock details
+
+        Raises:
+            DashboardNotFoundError: If dashboard doesn't exist
+            DashboardLockedError: If dashboard is locked by another user
+        """
+        dashboard = DashboardService.get_dashboard(dashboard_id, org)
+
+        # Check if already locked
+        try:
+            lock = dashboard.lock
+            if not lock.is_expired():
+                if lock.locked_by == orguser:
+                    # Refresh lock
+                    lock.expires_at = timezone.now() + timedelta(minutes=2)
+                    lock.save()
+                    return LockInfo(
+                        lock_token=lock.lock_token,
+                        expires_at=lock.expires_at,
+                        locked_by_email=lock.locked_by.user.email,
+                    )
+                else:
+                    raise DashboardLockedError(lock.locked_by.user.email)
+            else:
+                # Delete expired lock
+                lock.delete()
+        except DashboardLock.DoesNotExist:
+            pass
+
+        # Create new lock
+        lock = DashboardLock.objects.create(
+            dashboard=dashboard,
+            locked_by=orguser,
+            lock_token=str(uuid.uuid4()),
+            expires_at=timezone.now() + timedelta(minutes=2),
+        )
+
+        return LockInfo(
+            lock_token=lock.lock_token,
+            expires_at=lock.expires_at,
+            locked_by_email=lock.locked_by.user.email,
+        )
+
+    @staticmethod
+    def unlock_dashboard(dashboard_id: int, org: Org, orguser: OrgUser) -> bool:
+        """Unlock a dashboard.
+
+        Args:
+            dashboard_id: The dashboard ID
+            org: The organization
+            orguser: The user unlocking the dashboard
+
+        Returns:
+            True if unlock was successful
+
+        Raises:
+            DashboardNotFoundError: If dashboard doesn't exist
+            DashboardPermissionError: If user doesn't own the lock
+        """
+        dashboard = DashboardService.get_dashboard(dashboard_id, org)
+
+        try:
+            lock = dashboard.lock
+            if lock.locked_by != orguser:
+                raise DashboardPermissionError("You can only unlock your own locks")
+            lock.delete()
+            logger.info(f"Unlocked dashboard {dashboard_id}")
+        except DashboardLock.DoesNotExist:
+            pass
+
+        return True
+
+    # =========================================================================
+    # Filter Operations
+    # =========================================================================
+
+    @staticmethod
+    def create_filter(dashboard_id: int, org: Org, data: FilterData) -> DashboardFilter:
+        """Create a filter for a dashboard.
+
+        Args:
+            dashboard_id: The dashboard ID
+            org: The organization
+            data: Filter creation data
+
+        Returns:
+            Created DashboardFilter instance
+
+        Raises:
+            DashboardNotFoundError: If dashboard doesn't exist
+            FilterValidationError: If filter type is invalid
+        """
+        dashboard = DashboardService.get_dashboard(dashboard_id, org)
+
+        # Validate filter type
+        if data.filter_type not in [ft.value for ft in DashboardFilterType]:
+            raise FilterValidationError(f"Invalid filter type: {data.filter_type}")
+
+        filter_obj = DashboardFilter.objects.create(
+            dashboard=dashboard,
+            name=data.name or data.column_name,
+            filter_type=data.filter_type,
+            schema_name=data.schema_name,
+            table_name=data.table_name,
+            column_name=data.column_name,
+            settings=data.settings or {},
+            order=data.order,
+        )
+
+        logger.info(f"Created filter {filter_obj.id} for dashboard {dashboard_id}")
+        return filter_obj
+
+    @staticmethod
+    def get_filter(dashboard_id: int, filter_id: int, org: Org) -> DashboardFilter:
+        """Get a specific filter from a dashboard.
+
+        Args:
+            dashboard_id: The dashboard ID
+            filter_id: The filter ID
+            org: The organization
+
+        Returns:
+            DashboardFilter instance
+
+        Raises:
+            DashboardNotFoundError: If dashboard doesn't exist
+            FilterNotFoundError: If filter doesn't exist
+        """
+        dashboard = DashboardService.get_dashboard(dashboard_id, org)
+
+        try:
+            return dashboard.filters.get(id=filter_id)
+        except DashboardFilter.DoesNotExist:
+            raise FilterNotFoundError(filter_id)
+
+    @staticmethod
+    def delete_filter(dashboard_id: int, filter_id: int, org: Org) -> bool:
+        """Delete a filter from a dashboard.
+
+        Args:
+            dashboard_id: The dashboard ID
+            filter_id: The filter ID
+            org: The organization
+
+        Returns:
+            True if deletion was successful
+
+        Raises:
+            DashboardNotFoundError: If dashboard doesn't exist
+            FilterNotFoundError: If filter doesn't exist
+        """
+        filter_obj = DashboardService.get_filter(dashboard_id, filter_id, org)
+        filter_obj.delete()
+        logger.info(f"Deleted filter {filter_id} from dashboard {dashboard_id}")
+        return True
+
+    # =========================================================================
+    # Business Logic Operations (existing methods)
+    # =========================================================================
 
     @staticmethod
     def apply_filters(dashboard_id: int, filters: Dict[str, Any], orguser) -> Dict[str, Any]:
