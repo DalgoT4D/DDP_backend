@@ -2,14 +2,13 @@
 
 import copy
 from typing import Optional, List
-from datetime import datetime, timedelta
-import uuid
+from datetime import timedelta
 
-from ninja import Router, Schema
+from ninja import Router
 from ninja.errors import HttpError
 from django.utils import timezone
 from django.db import transaction
-from django.db.models import Q, Prefetch
+from django.db.models import Prefetch
 
 from ddpui.models.dashboard import (
     Dashboard,
@@ -20,122 +19,37 @@ from ddpui.models.dashboard import (
 from ddpui.models.org_user import OrgUser
 from ddpui.auth import has_permission
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.services.dashboard_service import delete_dashboard_safely
-from ddpui.auth import SUPER_ADMIN_ROLE
+from ddpui.services.dashboard_service import (
+    DashboardService,
+    DashboardData,
+    FilterData,
+    DashboardNotFoundError,
+    DashboardLockedError,
+    DashboardPermissionError,
+    FilterNotFoundError,
+    FilterValidationError,
+    delete_dashboard_safely,
+)
+from ddpui.schemas.dashboard_schema import (
+    DashboardCreate,
+    DashboardUpdate,
+    DashboardResponse,
+    DashboardFilterResponse,
+    FilterCreate,
+    FilterUpdate,
+    FilterOptionResponse,
+    FilterOptionsResponse,
+    LockResponse,
+    DashboardShareToggle,
+    DashboardShareResponse,
+    DashboardShareStatus,
+    LandingPageResponse,
+    LandingPageResolveResponse,
+)
 
 logger = CustomLogger("ddpui")
 
 dashboard_native_router = Router()
-
-
-# Schemas
-class DashboardCreate(Schema):
-    """Schema for creating a dashboard"""
-
-    title: str
-    description: Optional[str] = None
-    grid_columns: int = 12
-
-
-class DashboardUpdate(Schema):
-    """Schema for updating a dashboard"""
-
-    title: Optional[str] = None
-    description: Optional[str] = None
-    grid_columns: Optional[int] = None
-    target_screen_size: Optional[str] = None
-    layout_config: Optional[list[dict]] = None
-    components: Optional[dict] = None
-    # filters removed - managed via separate filter endpoints
-    filter_layout: Optional[str] = None
-    is_published: Optional[bool] = None
-
-
-class FilterCreate(Schema):
-    """Schema for creating a filter"""
-
-    name: Optional[str] = None
-    filter_type: str
-    schema_name: str
-    table_name: str
-    column_name: str
-    settings: dict = {}
-    order: int = 0
-
-
-class FilterUpdate(Schema):
-    """Schema for updating a filter"""
-
-    name: Optional[str] = None
-    filter_type: Optional[str] = None
-    schema_name: Optional[str] = None
-    table_name: Optional[str] = None
-    column_name: Optional[str] = None
-    settings: Optional[dict] = None
-    order: Optional[int] = None
-
-
-class DashboardFilterResponse(Schema):
-    """Response schema for dashboard filter"""
-
-    id: int
-    dashboard_id: int
-    name: str
-    filter_type: str
-    schema_name: str
-    table_name: str
-    column_name: str
-    settings: dict
-    order: int
-    created_at: datetime
-    updated_at: datetime
-
-
-class DashboardResponse(Schema):
-    """Response schema for dashboard"""
-
-    id: int
-    title: str
-    description: Optional[str]
-    dashboard_type: str
-    grid_columns: int
-    target_screen_size: str
-    filter_layout: str
-    layout_config: list[dict]
-    components: dict
-    is_published: bool
-    published_at: Optional[datetime]
-    is_locked: bool = False
-    locked_by: Optional[str] = None
-    created_by: str
-    org_id: int
-    last_modified_by: Optional[str]
-    created_at: datetime
-    updated_at: datetime
-    filters: List[DashboardFilterResponse] = []
-
-
-class LockResponse(Schema):
-    """Response schema for dashboard lock"""
-
-    lock_token: str
-    expires_at: datetime
-    locked_by: str
-
-
-class FilterOptionResponse(Schema):
-    """Schema for individual filter option"""
-
-    label: str
-    value: str
-    count: Optional[int] = None
-
-
-class FilterOptionsResponse(Schema):
-    """Response schema for filter options"""
-
-    options: List[FilterOptionResponse]
-    total_count: int
 
 
 # Helper functions
@@ -223,25 +137,12 @@ def list_dashboards(
     """List all dashboards with optional filters"""
     orguser: OrgUser = request.orguser
 
-    # Build query
-    query = Q(org=orguser.org)
-
-    if dashboard_type:
-        query &= Q(dashboard_type=dashboard_type)
-
-    if search:
-        query &= Q(title__icontains=search) | Q(description__icontains=search)
-
-    if is_published is not None:
-        query &= Q(is_published=is_published)
-
-    # Fetch dashboards with related data
-    # dashboards = (
-    #     Dashboard.objects.filter(query)
-    #     .prefetch_related("filters", Prefetch("lock", queryset=DashboardLock.objects.all()))
-    #     .order_by("-updated_at")
-    # )
-    dashboards = Dashboard.objects.filter(query).order_by("-updated_at")
+    dashboards = DashboardService.list_dashboards(
+        org=orguser.org,
+        dashboard_type=dashboard_type,
+        search=search,
+        is_published=is_published,
+    )
 
     return [get_dashboard_response(d) for d in dashboards]
 
@@ -253,10 +154,8 @@ def get_dashboard(request, dashboard_id: int):
     orguser: OrgUser = request.orguser
 
     try:
-        dashboard = Dashboard.objects.prefetch_related(
-            "filters", Prefetch("lock", queryset=DashboardLock.objects.all())
-        ).get(id=dashboard_id, org=orguser.org)
-    except Dashboard.DoesNotExist:
+        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
+    except DashboardNotFoundError:
         raise HttpError(404, "Dashboard not found")
 
     return get_dashboard_response(dashboard)
@@ -268,14 +167,12 @@ def create_dashboard(request, payload: DashboardCreate):
     """Create a new dashboard"""
     orguser: OrgUser = request.orguser
 
-    dashboard = Dashboard.objects.create(
+    dashboard_data = DashboardData(
         title=payload.title,
         description=payload.description,
         grid_columns=payload.grid_columns,
-        created_by=orguser,
-        org=orguser.org,
-        last_modified_by=orguser,
     )
+    dashboard = DashboardService.create_dashboard(dashboard_data, orguser)
 
     # --- Custom logic for org default and landing dashboard (permission-driven) ---
     has_org_default = Dashboard.objects.filter(org=orguser.org, is_org_default=True).exists()
@@ -291,8 +188,6 @@ def create_dashboard(request, payload: DashboardCreate):
                 orguser.landing_dashboard = dashboard
                 orguser.save(update_fields=["landing_dashboard"])
 
-    logger.info(f"Created dashboard {dashboard.id} for org {orguser.org.id}")
-
     return get_dashboard_response(dashboard)
 
 
@@ -303,55 +198,23 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
     orguser: OrgUser = request.orguser
 
     try:
-        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
-    except Dashboard.DoesNotExist:
+        dashboard = DashboardService.update_dashboard(
+            dashboard_id=dashboard_id,
+            org=orguser.org,
+            orguser=orguser,
+            title=payload.title,
+            description=payload.description,
+            grid_columns=payload.grid_columns,
+            target_screen_size=payload.target_screen_size,
+            layout_config=payload.layout_config,
+            components=payload.components,
+            filter_layout=payload.filter_layout,
+            is_published=payload.is_published,
+        )
+    except DashboardNotFoundError:
         raise HttpError(404, "Dashboard not found")
-
-    # Check if dashboard is locked by another user
-    if hasattr(dashboard, "lock") and dashboard.lock:
-        if not dashboard.lock.is_expired() and dashboard.lock.locked_by != orguser:
-            raise HttpError(423, f"Dashboard is locked by {dashboard.lock.locked_by.user.email}")
-
-    # Update fields
-    if payload.title is not None:
-        dashboard.title = payload.title
-
-    if payload.description is not None:
-        dashboard.description = payload.description
-
-    if payload.grid_columns is not None:
-        dashboard.grid_columns = payload.grid_columns
-
-    if payload.target_screen_size is not None:
-        dashboard.target_screen_size = payload.target_screen_size
-
-    if payload.layout_config is not None:
-        dashboard.layout_config = payload.layout_config
-
-    if payload.components is not None:
-        dashboard.components = payload.components
-
-    if payload.filter_layout is not None:
-        dashboard.filter_layout = payload.filter_layout
-
-    # Note: Filters are now managed independently of components
-    # Filter CRUD operations are handled through separate endpoints
-    # No need to sync filters with components as they are no longer part of the canvas
-
-    if payload.is_published is not None:
-        dashboard.is_published = payload.is_published
-        if payload.is_published:
-            dashboard.published_at = timezone.now()
-
-    dashboard.last_modified_by = orguser
-    dashboard.save()
-
-    # Auto-refresh lock if dashboard is locked by current user
-    if hasattr(dashboard, "lock") and dashboard.lock:
-        if not dashboard.lock.is_expired() and dashboard.lock.locked_by == orguser:
-            dashboard.lock.expires_at = timezone.now() + timedelta(minutes=2)
-            dashboard.lock.save()
-            logger.info(f"Auto-refreshed lock for dashboard {dashboard_id} during save")
+    except DashboardLockedError as e:
+        raise HttpError(423, e.message)
 
     return get_dashboard_response(dashboard)
 
@@ -363,32 +226,13 @@ def delete_dashboard(request, dashboard_id: int):
     orguser: OrgUser = request.orguser
 
     try:
-        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
-    except Dashboard.DoesNotExist:
+        DashboardService.delete_dashboard(dashboard_id, orguser.org, orguser)
+    except DashboardNotFoundError:
         raise HttpError(404, "Dashboard not found")
-
-    # Prevent deletion if dashboard is org default
-    if dashboard.is_org_default:
-        raise HttpError(403, "Cannot delete the organization's default dashboard.")
-
-    # Only allow deletion if the current user is the creator
-    if dashboard.created_by != orguser:
-        raise HttpError(403, "You can only delete dashboards you created.")
-
-    # Prevent deletion if dashboard is landing page for any user
-    if OrgUser.objects.filter(landing_dashboard=dashboard).exists():
-        raise HttpError(
-            403, "Cannot delete a dashboard that is set as landing page for one or more users."
-        )
-
-    # Check if dashboard is locked
-    if hasattr(dashboard, "lock") and dashboard.lock and not dashboard.lock.is_expired():
+    except DashboardPermissionError as e:
+        raise HttpError(403, e.message)
+    except DashboardLockedError:
         raise HttpError(423, "Cannot delete a locked dashboard")
-
-    # Use safe deletion function
-    success, error_message = delete_dashboard_safely(dashboard_id, orguser)
-    if not success:
-        raise HttpError(400, error_message)
 
     return {"success": True}
 
@@ -497,41 +341,16 @@ def lock_dashboard(request, dashboard_id: int):
     orguser: OrgUser = request.orguser
 
     try:
-        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
-    except Dashboard.DoesNotExist:
+        lock_info = DashboardService.lock_dashboard(dashboard_id, orguser.org, orguser)
+    except DashboardNotFoundError:
         raise HttpError(404, "Dashboard not found")
-
-    # Check if already locked
-    try:
-        lock = dashboard.lock
-        if not lock.is_expired():
-            if lock.locked_by == orguser:
-                # Refresh lock with 2-minute duration
-                lock.expires_at = timezone.now() + timedelta(minutes=2)
-                lock.save()
-                return LockResponse(
-                    lock_token=lock.lock_token,
-                    expires_at=lock.expires_at,
-                    locked_by=lock.locked_by.user.email,
-                )
-            else:
-                raise HttpError(423, f"Dashboard is already locked by {lock.locked_by.user.email}")
-        else:
-            # Delete expired lock
-            lock.delete()
-    except DashboardLock.DoesNotExist:
-        pass
-
-    # Create new lock with 2-minute duration
-    lock = DashboardLock.objects.create(
-        dashboard=dashboard,
-        locked_by=orguser,
-        lock_token=str(uuid.uuid4()),
-        expires_at=timezone.now() + timedelta(minutes=2),
-    )
+    except DashboardLockedError as e:
+        raise HttpError(423, e.message)
 
     return LockResponse(
-        lock_token=lock.lock_token, expires_at=lock.expires_at, locked_by=lock.locked_by.user.email
+        lock_token=lock_info.lock_token,
+        expires_at=lock_info.expires_at,
+        locked_by=lock_info.locked_by_email,
     )
 
 
@@ -540,32 +359,26 @@ def lock_dashboard(request, dashboard_id: int):
 def refresh_dashboard_lock(request, dashboard_id: int):
     """Refresh dashboard lock to extend expiry"""
     orguser: OrgUser = request.orguser
+    from ddpui.services.dashboard_service import DashboardServiceError
 
     try:
-        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
-    except Dashboard.DoesNotExist:
+        lock_info = DashboardService.refresh_lock(dashboard_id, orguser.org, orguser)
+    except DashboardNotFoundError:
         raise HttpError(404, "Dashboard not found")
-
-    try:
-        lock = dashboard.lock
-        if lock.is_expired():
+    except DashboardPermissionError as e:
+        raise HttpError(403, e.message)
+    except DashboardServiceError as e:
+        if e.error_code == "LOCK_EXPIRED":
             raise HttpError(410, "Lock has expired")
-        if lock.locked_by != orguser:
-            raise HttpError(403, "You can only refresh your own locks")
+        elif e.error_code == "NO_LOCK":
+            raise HttpError(404, "No active lock found")
+        raise HttpError(400, e.message)
 
-        # Refresh lock with 2-minute duration
-        lock.expires_at = timezone.now() + timedelta(minutes=2)
-        lock.save()
-
-        logger.info(f"Refreshed lock for dashboard {dashboard_id}")
-
-        return LockResponse(
-            lock_token=lock.lock_token,
-            expires_at=lock.expires_at,
-            locked_by=lock.locked_by.user.email,
-        )
-    except DashboardLock.DoesNotExist:
-        raise HttpError(404, "No active lock found")
+    return LockResponse(
+        lock_token=lock_info.lock_token,
+        expires_at=lock_info.expires_at,
+        locked_by=lock_info.locked_by_email,
+    )
 
 
 @dashboard_native_router.delete("/{dashboard_id}/lock/")
@@ -575,18 +388,11 @@ def unlock_dashboard(request, dashboard_id: int):
     orguser: OrgUser = request.orguser
 
     try:
-        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
-    except Dashboard.DoesNotExist:
+        DashboardService.unlock_dashboard(dashboard_id, orguser.org, orguser)
+    except DashboardNotFoundError:
         raise HttpError(404, "Dashboard not found")
-
-    try:
-        lock = dashboard.lock
-        if lock.locked_by != orguser:
-            raise HttpError(403, "You can only unlock your own locks")
-        lock.delete()
-        logger.info(f"Unlocked dashboard {dashboard_id}")
-    except DashboardLock.DoesNotExist:
-        pass
+    except DashboardPermissionError as e:
+        raise HttpError(403, e.message)
 
     return {"success": True}
 
@@ -599,26 +405,22 @@ def create_filter(request, dashboard_id: int, payload: FilterCreate):
     orguser: OrgUser = request.orguser
 
     try:
-        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
-    except Dashboard.DoesNotExist:
+        filter_data = FilterData(
+            name=payload.name,
+            filter_type=payload.filter_type,
+            schema_name=payload.schema_name,
+            table_name=payload.table_name,
+            column_name=payload.column_name,
+            settings=payload.settings,
+            order=payload.order,
+        )
+        filter_obj = DashboardService.create_filter(dashboard_id, orguser.org, filter_data)
+    except DashboardNotFoundError:
         raise HttpError(404, "Dashboard not found")
+    except FilterValidationError as e:
+        raise HttpError(400, e.message)
 
-    # Validate filter type
-    if payload.filter_type not in [ft.value for ft in DashboardFilterType]:
-        raise HttpError(400, f"Invalid filter type: {payload.filter_type}")
-
-    filter = DashboardFilter.objects.create(
-        dashboard=dashboard,
-        name=payload.name or payload.column_name,
-        filter_type=payload.filter_type,
-        schema_name=payload.schema_name,
-        table_name=payload.table_name,
-        column_name=payload.column_name,
-        settings=payload.settings,
-        order=payload.order,
-    )
-
-    return filter.to_json()
+    return filter_obj.to_json()
 
 
 @dashboard_native_router.get(
@@ -630,14 +432,13 @@ def get_filter(request, dashboard_id: int, filter_id: int):
     orguser: OrgUser = request.orguser
 
     try:
-        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
-        filter: DashboardFilter = dashboard.filters.get(id=filter_id)
-    except Dashboard.DoesNotExist:
+        filter_obj = DashboardService.get_filter(dashboard_id, filter_id, orguser.org)
+    except DashboardNotFoundError:
         raise HttpError(404, "Dashboard not found")
-    except DashboardFilter.DoesNotExist:
+    except FilterNotFoundError:
         raise HttpError(404, "Filter not found")
 
-    return filter.to_json()
+    return filter_obj.to_json()
 
 
 @dashboard_native_router.put(
@@ -649,40 +450,26 @@ def update_filter(request, dashboard_id: int, filter_id: int, payload: FilterUpd
     orguser: OrgUser = request.orguser
 
     try:
-        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
-        filter: DashboardFilter = dashboard.filters.get(id=filter_id)
-    except Dashboard.DoesNotExist:
+        filter_obj = DashboardService.update_filter(
+            dashboard_id=dashboard_id,
+            filter_id=filter_id,
+            org=orguser.org,
+            name=payload.name,
+            filter_type=payload.filter_type,
+            schema_name=payload.schema_name,
+            table_name=payload.table_name,
+            column_name=payload.column_name,
+            settings=payload.settings,
+            order=payload.order,
+        )
+    except DashboardNotFoundError:
         raise HttpError(404, "Dashboard not found")
-    except DashboardFilter.DoesNotExist:
+    except FilterNotFoundError:
         raise HttpError(404, "Filter not found")
+    except FilterValidationError as e:
+        raise HttpError(400, e.message)
 
-    # Update fields
-    if payload.name is not None:
-        filter.name = payload.name
-
-    if payload.filter_type is not None:
-        if payload.filter_type not in [ft.value for ft in DashboardFilterType]:
-            raise HttpError(400, f"Invalid filter type: {payload.filter_type}")
-        filter.filter_type = payload.filter_type
-
-    if payload.schema_name is not None:
-        filter.schema_name = payload.schema_name
-
-    if payload.table_name is not None:
-        filter.table_name = payload.table_name
-
-    if payload.column_name is not None:
-        filter.column_name = payload.column_name
-
-    if payload.settings is not None:
-        filter.settings = payload.settings
-
-    if payload.order is not None:
-        filter.order = payload.order
-
-    filter.save()
-
-    return filter.to_json()
+    return filter_obj.to_json()
 
 
 @dashboard_native_router.delete("/{dashboard_id}/filters/{filter_id}/")
@@ -692,14 +479,11 @@ def delete_filter(request, dashboard_id: int, filter_id: int):
     orguser: OrgUser = request.orguser
 
     try:
-        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
-        filter = dashboard.filters.get(id=filter_id)
-    except Dashboard.DoesNotExist:
+        DashboardService.delete_filter(dashboard_id, filter_id, orguser.org)
+    except DashboardNotFoundError:
         raise HttpError(404, "Dashboard not found")
-    except DashboardFilter.DoesNotExist:
+    except FilterNotFoundError:
         raise HttpError(404, "Filter not found")
-
-    filter.delete()
 
     return {"success": True}
 
@@ -735,31 +519,6 @@ def get_filter_options(
 
 
 # ===== Dashboard Sharing Endpoints =====
-
-
-class DashboardShareToggle(Schema):
-    """Schema for toggling dashboard sharing"""
-
-    is_public: bool
-
-
-class DashboardShareResponse(Schema):
-    """Schema for share response"""
-
-    is_public: bool
-    public_url: Optional[str] = None
-    public_share_token: Optional[str] = None
-    message: str
-
-
-class DashboardShareStatus(Schema):
-    """Schema for share status response"""
-
-    is_public: bool
-    public_url: Optional[str] = None
-    public_access_count: int
-    last_public_accessed: Optional[datetime] = None
-    public_shared_at: Optional[datetime] = None
 
 
 @dashboard_native_router.put("/{dashboard_id}/share/")
@@ -861,13 +620,6 @@ def get_dashboard_sharing_status(request, dashboard_id: int):
 # =============================================================================
 # Landing Page Management APIs
 # =============================================================================
-
-
-class LandingPageResponse(Schema):
-    """Response schema for landing page operations"""
-
-    success: bool
-    message: str = ""
 
 
 @dashboard_native_router.post(

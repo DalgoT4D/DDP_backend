@@ -416,6 +416,46 @@ class DashboardService:
 
         return True
 
+    @staticmethod
+    def refresh_lock(dashboard_id: int, org: Org, orguser: OrgUser) -> LockInfo:
+        """Refresh a dashboard lock to extend its expiry.
+
+        Args:
+            dashboard_id: The dashboard ID
+            org: The organization
+            orguser: The user refreshing the lock
+
+        Returns:
+            LockInfo with updated lock details
+
+        Raises:
+            DashboardNotFoundError: If dashboard doesn't exist
+            DashboardPermissionError: If user doesn't own the lock
+            DashboardServiceError: If lock has expired or doesn't exist
+        """
+        dashboard = DashboardService.get_dashboard(dashboard_id, org)
+
+        try:
+            lock = dashboard.lock
+            if lock.is_expired():
+                raise DashboardServiceError("Lock has expired", "LOCK_EXPIRED")
+            if lock.locked_by != orguser:
+                raise DashboardPermissionError("You can only refresh your own locks")
+
+            # Refresh lock
+            lock.expires_at = timezone.now() + timedelta(minutes=2)
+            lock.save()
+
+            logger.info(f"Refreshed lock for dashboard {dashboard_id}")
+
+            return LockInfo(
+                lock_token=lock.lock_token,
+                expires_at=lock.expires_at,
+                locked_by_email=lock.locked_by.user.email,
+            )
+        except DashboardLock.DoesNotExist:
+            raise DashboardServiceError("No active lock found", "NO_LOCK")
+
     # =========================================================================
     # Filter Operations
     # =========================================================================
@@ -478,6 +518,70 @@ class DashboardService:
             return dashboard.filters.get(id=filter_id)
         except DashboardFilter.DoesNotExist:
             raise FilterNotFoundError(filter_id)
+
+    @staticmethod
+    def update_filter(
+        dashboard_id: int,
+        filter_id: int,
+        org: Org,
+        name: Optional[str] = None,
+        filter_type: Optional[str] = None,
+        schema_name: Optional[str] = None,
+        table_name: Optional[str] = None,
+        column_name: Optional[str] = None,
+        settings: Optional[dict] = None,
+        order: Optional[int] = None,
+    ) -> DashboardFilter:
+        """Update a filter in a dashboard.
+
+        Args:
+            dashboard_id: The dashboard ID
+            filter_id: The filter ID
+            org: The organization
+            name: Optional new name
+            filter_type: Optional new filter type
+            schema_name: Optional new schema name
+            table_name: Optional new table name
+            column_name: Optional new column name
+            settings: Optional new settings
+            order: Optional new order
+
+        Returns:
+            Updated DashboardFilter instance
+
+        Raises:
+            DashboardNotFoundError: If dashboard doesn't exist
+            FilterNotFoundError: If filter doesn't exist
+            FilterValidationError: If filter type is invalid
+        """
+        filter_obj = DashboardService.get_filter(dashboard_id, filter_id, org)
+
+        if name is not None:
+            filter_obj.name = name
+
+        if filter_type is not None:
+            if filter_type not in [ft.value for ft in DashboardFilterType]:
+                raise FilterValidationError(f"Invalid filter type: {filter_type}")
+            filter_obj.filter_type = filter_type
+
+        if schema_name is not None:
+            filter_obj.schema_name = schema_name
+
+        if table_name is not None:
+            filter_obj.table_name = table_name
+
+        if column_name is not None:
+            filter_obj.column_name = column_name
+
+        if settings is not None:
+            filter_obj.settings = settings
+
+        if order is not None:
+            filter_obj.order = order
+
+        filter_obj.save()
+        logger.info(f"Updated filter {filter_id} in dashboard {dashboard_id}")
+        return filter_obj
 
     @staticmethod
     def delete_filter(dashboard_id: int, filter_id: int, org: Org) -> bool:
