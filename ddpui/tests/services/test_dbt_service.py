@@ -75,9 +75,9 @@ def test_setup_local_dbt_workspace_warehouse_not_created():
     """a failure test; creating local dbt workspace without org warehouse"""
     org = Org.objects.create(name="temp", slug="temp")
 
-    result, error = setup_local_dbt_workspace(org, project_name="dbtrepo", default_schema="default")
-    assert result is None
-    assert error == "Please set up your warehouse first"
+    with pytest.raises(Exception) as excinfo:
+        setup_local_dbt_workspace(org, project_name="dbtrepo", default_schema="default")
+    assert str(excinfo.value) == "Please set up your warehouse first"
 
 
 def test_setup_local_dbt_workspace_project_already_exists(tmp_path):
@@ -93,11 +93,9 @@ def test_setup_local_dbt_workspace_project_already_exists(tmp_path):
     os.makedirs(dbtrepo_dir)
 
     with patch("os.getenv", return_value=tmp_path):
-        result, error = setup_local_dbt_workspace(
-            org, project_name=project_name, default_schema=default_schema
-        )
-        assert result is None
-        assert error == f"Project {project_name} already exists"
+        with pytest.raises(Exception) as excinfo:
+            setup_local_dbt_workspace(org, project_name=project_name, default_schema=default_schema)
+        assert str(excinfo.value) == f"Project {project_name} already exists"
 
 
 def test_setup_local_dbt_workspace_dbt_init_failed(tmp_path):
@@ -112,13 +110,15 @@ def test_setup_local_dbt_workspace_dbt_init_failed(tmp_path):
     with patch("os.getenv", return_value=tmp_path), patch(
         "subprocess.check_call",
         side_effect=subprocess.CalledProcessError(returncode=1, cmd="cmd"),
-    ) as mock_subprocess_call:
-        result, error = setup_local_dbt_workspace(
-            org, project_name=project_name, default_schema=default_schema
-        )
-        assert result is None
-        assert error == "Something went wrong while setting up workspace"
+    ) as mock_subprocess_call, patch(
+        "ddpui.ddpdbt.dbt_service.secretsmanager.retrieve_warehouse_credentials", return_value={}
+    ) as mock_retrieve_creds:
+        with pytest.raises(Exception) as excinfo:
+            setup_local_dbt_workspace(org, project_name=project_name, default_schema=default_schema)
+        assert "dbt init failed" in str(excinfo.value)
         mock_subprocess_call.assert_called_once()
+        # retrieve_warehouse_credentials is not called when dbt init fails early
+        mock_retrieve_creds.assert_not_called()
 
 
 def test_setup_local_dbt_workspace_success(tmp_path):
@@ -138,13 +138,15 @@ def test_setup_local_dbt_workspace_success(tmp_path):
 
     with patch("os.getenv", return_value=tmp_path), patch(
         "subprocess.check_call", side_effect=run_dbt_init
-    ) as mock_subprocess_call:
-        result, error = setup_local_dbt_workspace(
-            org, project_name=project_name, default_schema=default_schema
-        )
-        assert result is None
-        assert error is None
+    ) as mock_subprocess_call, patch(
+        "ddpui.ddpdbt.dbt_service.secretsmanager.retrieve_warehouse_credentials", return_value={}
+    ) as mock_retrieve_creds, patch(
+        "ddpui.ddpdbt.dbt_service.create_or_update_org_cli_block", return_value=((None, None), None)
+    ) as mock_create_cli_block:
+        setup_local_dbt_workspace(org, project_name=project_name, default_schema=default_schema)
         mock_subprocess_call.assert_called_once()
+        mock_retrieve_creds.assert_called_once()
+        mock_create_cli_block.assert_called_once()
 
     assert (Path(dbtrepo_dir) / "packages.yml").exists()
     assert (Path(dbtrepo_dir) / "macros").exists()

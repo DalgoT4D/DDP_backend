@@ -72,11 +72,7 @@ def create_dbt_project(request, payload: DbtProjectSchema):
     org_dir.mkdir(parents=True, exist_ok=True)
 
     # Call the post_dbt_workspace function
-    _, error = setup_local_dbt_workspace(
-        org, project_name="dbtrepo", default_schema=payload.default_schema
-    )
-    if error:
-        raise HttpError(422, error)
+    setup_local_dbt_workspace(org, project_name="dbtrepo", default_schema=payload.default_schema)
 
     return {"message": f"Project {org.slug} created successfully"}
 

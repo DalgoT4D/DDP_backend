@@ -17,6 +17,7 @@ from ddpui.models.org_user import Org
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskType
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtModelType
 from ddpui.models.canvas_models import CanvasNode, CanvasNodeType, CanvasEdge
+from ddpui.ddpdbt.dbthelpers import create_or_update_org_cli_block
 from ddpui.utils import secretsmanager
 from ddpui.utils.constants import (
     TASK_DOCSGENERATE,
@@ -122,12 +123,12 @@ def task_config_params(task: Task):
     return TASK_CONIF_PARAM[task.slug] if task.slug in TASK_CONIF_PARAM else None
 
 
-def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) -> str:
+def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str):
     """sets up an org's dbt workspace, recreating it if it already exists"""
     warehouse = OrgWarehouse.objects.filter(org=org).first()
 
     if not warehouse:
-        return None, "Please set up your warehouse first"
+        raise Exception("Please set up your warehouse first")
 
     if org.slug is None:
         org.slug = slugify(org.name)
@@ -160,7 +161,7 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
     dbtrepo_dir: Path = project_dir / project_name
 
     if dbtrepo_dir.exists():
-        return None, f"Project {project_name} already exists"
+        raise Exception(f"Project {project_name} already exists")
 
     if not project_dir.exists():
         project_dir.mkdir()
@@ -185,34 +186,51 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
         if example_models_dir.exists():
             shutil.rmtree(example_models_dir)
 
-    except Exception as err:
-        logger.error(f"dbt init failed: {str(err)}")
-        if dbtrepo_dir.exists():
-            shutil.rmtree(dbtrepo_dir)
-        return None, f"Something went wrong while setting up workspace: {str(err)}"
+    except subprocess.CalledProcessError as e:
+        logger.error(f"dbt init failed with {e.returncode}")
+        raise Exception(f"dbt init failed: {e}") from e
 
-    # copy packages.yml
-    logger.info("copying packages.yml from assets")
-    target_packages_yml = Path(dbtrepo_dir) / "packages.yml"
-    source_packages_yml = os.path.abspath(
-        os.path.join(os.path.abspath(assets.__file__), "..", "packages.yml")
+    try:
+        # copy packages.yml
+        logger.info("copying packages.yml from assets")
+        target_packages_yml = Path(dbtrepo_dir) / "packages.yml"
+        source_packages_yml = os.path.abspath(
+            os.path.join(os.path.abspath(assets.__file__), "..", "packages.yml")
+        )
+        shutil.copy(source_packages_yml, target_packages_yml)
+
+        # copy all macros with .sql extension from assets
+        assets_dir = assets.__path__[0]
+
+        for sql_file_path in glob.glob(os.path.join(assets_dir, "*.sql")):
+            # Get the target path in the project_dir/macros directory
+            target_path = Path(dbtrepo_dir) / "macros" / Path(sql_file_path).name
+
+            # Copy the .sql file to the target path
+            shutil.copy(sql_file_path, target_path)
+
+            # Log the creation of the file
+            logger.info("created %s", target_path)
+    except Exception as e:
+        logger.error(f"failed to copy asset files: {e}")
+        raise Exception(f"Something went wrong while copying asset files : {e}")
+
+    saved_creds = secretsmanager.retrieve_warehouse_credentials(warehouse)
+    if saved_creds is None:
+        logger.error(
+            "failed to retrieve warehouse credentials for org %s to create dbt profile", org.name
+        )
+        raise Exception(
+            "failed to retrieve warehouse credentials for org %s to create dbt profile" % org.name
+        )
+
+    (cli_profile_block, dbt_project_params), error = create_or_update_org_cli_block(
+        org, warehouse, saved_creds
     )
-    shutil.copy(source_packages_yml, target_packages_yml)
 
-    # copy all macros with .sql extension from assets
-    assets_dir = assets.__path__[0]
-
-    for sql_file_path in glob.glob(os.path.join(assets_dir, "*.sql")):
-        # Get the target path in the project_dir/macros directory
-        target_path = Path(dbtrepo_dir) / "macros" / Path(sql_file_path).name
-
-        # Copy the .sql file to the target path
-        shutil.copy(sql_file_path, target_path)
-
-        # Log the creation of the file
-        logger.info("created %s", target_path)
-
-    logger.info("set dbt workspace completed for org %s", org.name)
+    if error:
+        logger.error("failed to create dbt cli profile for org %s: %s", org.name, error)
+        raise Exception(f"failed to create dbt cli profile for org {org.name}: {error}") from e
 
     # initializing it as git repo
     logger.info("initializing dbt workspace as git repo")
@@ -221,9 +239,9 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
         git_manager.init_repo()
     except Exception as err:
         logger.error(f"Failed to initialize git repo: {str(err)}")
-        return None, f"Failed to initialize git repo: {str(err)}"
+        raise Exception(f"Failed to initialize git repo: {str(err)}") from e
 
-    return None, None
+    logger.info("set dbt workspace completed for org %s", org.name)
 
 
 def convert_github_url(url: str) -> str:
