@@ -521,7 +521,7 @@ def test_post_run_dbt_commands_no_payload(orguser: OrgUser, f_org_tasks):
         )
 
         # Verify celery task was called with correct parameters
-        mock_run_dbt.assert_called_once_with(orguser.org.id, mock_task_id, None)
+        mock_run_dbt.assert_called_once_with(orguser.org.id, orguser.org.dbt.id, mock_task_id, None)
 
 
 def test_post_run_dbt_commands_with_payload(orguser: OrgUser, f_org_tasks):
@@ -550,7 +550,9 @@ def test_post_run_dbt_commands_with_payload(orguser: OrgUser, f_org_tasks):
         )
 
         # Verify celery task was called with payload
-        mock_run_dbt.assert_called_once_with(orguser.org.id, mock_task_id, payload.dict())
+        mock_run_dbt.assert_called_once_with(
+            orguser.org.id, orguser.org.dbt.id, mock_task_id, payload.dict()
+        )
 
 
 def test_post_run_dbt_commands_task_locks(orguser: OrgUser, f_org_tasks):

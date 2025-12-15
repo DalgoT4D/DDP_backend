@@ -28,6 +28,9 @@ def test_create_or_update_org_cli_block_create_case(
     """test create_or_update_org_cli_block when its created for the first time"""
     org = Org.objects.create(name="org", slug="org")
     warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", name="name")
+    orgdbt = OrgDbt.objects.create(gitrepo_url="A", target_type="B", default_schema="C")
+    org.dbt = orgdbt
+    org.save()
 
     mock_create_dbt_cli_profile_block.return_value = {
         "block_id": "some_id",

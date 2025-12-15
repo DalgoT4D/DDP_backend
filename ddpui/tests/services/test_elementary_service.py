@@ -518,6 +518,7 @@ def test_create_elementary_tracking_tables(
     mock_task_progress.assert_called_once_with("test-uuid", "run-dbt-commands-" + org.slug)
     mock_run_dbt_commands.delay.assert_called_once_with(
         org.id,
+        org.dbt.id,
         "test-uuid",
         {
             # run parameters
