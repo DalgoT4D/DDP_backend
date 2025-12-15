@@ -332,7 +332,6 @@ def test_post_dbt_git_pull_no_env(orguser: OrgUser):
 
 
 @patch.multiple("os.path", exists=Mock(return_value=True))
-@patch.multiple("ddpui.api.dbt_api", runcmd=Mock(side_effect=Exception("runcmd failed")))
 def test_post_dbt_git_pull_gitpull_failed(orguser: OrgUser):
     """fail - dbt not configured"""
     orguser = orguser
@@ -341,20 +340,26 @@ def test_post_dbt_git_pull_gitpull_failed(orguser: OrgUser):
 
     with patch(
         "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir", return_value="project_dir"
-    ), pytest.raises(HttpError) as excinfo:
+    ), patch("ddpui.api.dbt_api.GitManager") as mock_git_manager, pytest.raises(
+        HttpError
+    ) as excinfo:
+        mock_git_manager.return_value.pull_changes.side_effect = Exception("git pull failed")
         post_dbt_git_pull(request)
-        assert str(excinfo.value) == "git pull failed in " + os.path.join("project_dir", "dbtrepo")
+    assert str(excinfo.value) == "git pull failed"
 
 
 @patch.multiple("os.path", exists=Mock(return_value=True))
-@patch.multiple("ddpui.api.dbt_api", runcmd=Mock(return_value=True))
 def test_post_dbt_git_pull_succes(orguser: OrgUser):
     """fail - dbt not configured"""
     orguser = orguser
     orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
     request = mock_request(orguser)
 
-    response = post_dbt_git_pull(request)
+    with patch(
+        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir", return_value="project_dir"
+    ), patch("ddpui.api.dbt_api.GitManager") as mock_git_manager:
+        mock_git_manager.return_value.pull_changes.return_value = None
+        response = post_dbt_git_pull(request)
     assert response == {"success": True}
 
 
