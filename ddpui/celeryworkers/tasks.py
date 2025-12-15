@@ -245,19 +245,41 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
 
     logger.info("git clone succeeded for org %s", org.name)
 
-    dbt = OrgDbt(
-        gitrepo_url=payload["gitrepoUrl"],
-        project_dir=DbtProjectManager.get_dbt_repo_relative_path(dbtcloned_repo_path),
-        dbt_venv=DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH,
-        target_type=warehouse.wtype,
-        default_schema=payload["profile"]["target_configs_schema"],
-        transform_type=TransformType.GIT,
-    )
-    dbt.save()
-    logger.info("created orgdbt for org %s", org.name)
-    org.dbt = dbt
-    org.save()
-    logger.info("set org.dbt for org %s", org.name)
+    # create or update orgdbt model
+    try:
+        if org.dbt:
+            dbt = org.dbt
+            dbt.gitrepo_url = payload["gitrepoUrl"]
+            dbt.project_dir = DbtProjectManager.get_dbt_repo_relative_path(dbtcloned_repo_path)
+            dbt.dbt_venv = DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH
+            dbt.target_type = warehouse.wtype
+            dbt.default_schema = payload["profile"]["target_configs_schema"]
+            dbt.transform_type = TransformType.GIT
+            dbt.save()
+            logger.info("updated orgdbt for org %s", org.name)
+        else:
+            dbt = OrgDbt(
+                gitrepo_url=payload["gitrepoUrl"],
+                project_dir=DbtProjectManager.get_dbt_repo_relative_path(dbtcloned_repo_path),
+                dbt_venv=DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH,
+                target_type=warehouse.wtype,
+                default_schema=payload["profile"]["target_configs_schema"],
+                transform_type=TransformType.GIT,
+            )
+            dbt.save()
+            logger.info("created orgdbt for org %s", org.name)
+            org.dbt = dbt
+            org.save()
+            logger.info("set org.dbt for org %s", org.name)
+    except Exception as e:
+        taskprogress.add(
+            {
+                "message": "failed to write OrgDbt entry",
+                "status": "failed",
+            }
+        )
+        logger.error("failed to create orgdbt for org %s: %s", org.name, e)
+        raise Exception(f"Something went wrong while creating OrgDbt model : {e}")
 
     if payload["gitrepoAccessToken"] is not None:
         if dbt.gitrepo_access_token_secret:
