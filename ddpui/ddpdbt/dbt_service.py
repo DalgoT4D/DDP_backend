@@ -1,3 +1,4 @@
+import yaml
 import re
 import uuid
 import json
@@ -27,7 +28,7 @@ from ddpui.utils.constants import (
     TASK_DBTDEPS,
     TASK_DBTCLOUD_JOB,
 )
-from ddpui.core.orgdbt_manager import DbtProjectManager
+from ddpui.core.orgdbt_manager import DbtProjectManager, DbtProjectParams
 from ddpui.core.git_manager import GitManager
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.utils.custom_logger import CustomLogger
@@ -272,22 +273,51 @@ def check_repo_exists(gitrepo_url: str, gitrepo_access_token: str | None) -> boo
     return response.status_code == 200
 
 
-def generate_manifest_json_for_dbt_project(orgdbt: OrgDbt) -> dict:
+def generate_manifest_json_for_dbt_project(org: Org, orgdbt: OrgDbt) -> dict:
     """Generates the manifest.json for a given OrgDbt project."""
-    try:
-        project_dir: Path = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+    # we need to make sure the profiles.yml exists in the profiles dir
+    dbt_project_params: DbtProjectParams = DbtProjectManager.gather_dbt_project_params(org, orgdbt)
+    dbt_cli_profile_block: OrgPrefectBlockv1 = orgdbt.cli_profile_block
+    if not dbt_cli_profile_block:
+        raise Exception("DBT CLI profile block not found for the OrgDbt project")
 
-        subprocess.run(
-            ["dbt", "compile", "--profiles-dir", "profiles/"],
-            cwd=project_dir,
-            check=True,  # Same as check_call behavior
-            capture_output=True,  # Capture stdout/stderr if needed
-            text=True,  # Return strings instead of bytes
+    try:
+        profile = prefect_service.get_dbt_cli_profile_block(dbt_cli_profile_block.block_name)[
+            "profile"
+        ]
+        profile_dirname = Path(dbt_project_params.project_dir) / "profiles"
+        os.makedirs(profile_dirname, exist_ok=True)
+        profile_filename = profile_dirname / "profiles.yml"
+        logger.info("writing dbt profile to " + str(profile_filename))
+        with open(profile_filename, "w", encoding="utf-8") as f:
+            yaml.safe_dump(profile, f)
+    except Exception as err:
+        logger.error(f"failed to write profiles.yml: {str(err)}")
+        raise Exception(f"Something went wrong while writing profiles.yml: {str(err)}") from err
+
+    try:
+        # install dependencies
+        logger.info("running dbt deps for manifest generation")
+        result = DbtProjectManager.run_dbt_command(
+            org, orgdbt, command=["deps", "--profiles-dir", "profiles/"]
         )
+
+        logger.info(f"dbt deps output: {result.stdout}")
+
+        # compile to generate manifest.json
+        logger.info("running dbt compile for manifest generation")
+        result = DbtProjectManager.run_dbt_command(
+            org=org, orgdbt=orgdbt, command=["compile", "--profiles-dir", "profiles/"]
+        )
+
+        logger.info(f"dbt compile output: {result.stdout}")
 
     except Exception as err:
         logger.error(f"dbt compile failed with {str(err)}")
         raise Exception(f"Something went wrong while generating manifest.json: {str(err)}")
+
+    # make sure the manifest.json file exists
+    project_dir: Path = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
 
     if not os.path.exists(project_dir / "target" / "manifest.json"):
         logger.error("dbt compile did not generate manifest.json")
@@ -300,12 +330,13 @@ def generate_manifest_json_for_dbt_project(orgdbt: OrgDbt) -> dict:
 
 
 def parse_dbt_manifest_to_canvas(
-    orgdbt: OrgDbt, org_warehouse: OrgWarehouse, manifest_json: dict = None
+    org: Org, orgdbt: OrgDbt, org_warehouse: OrgWarehouse, manifest_json: dict = None
 ) -> dict:
     """
     Parse dbt manifest.json and create/update CanvasNodes and CanvasEdges.
 
     Args:
+        org: The organization
         orgdbt: The OrgDbt instance
         org_warehouse: OrgWarehouse instance to fetch column info from warehouse
         manifest_json: Optional pre-fetched manifest.json. If not provided, will generate it.
@@ -318,7 +349,7 @@ def parse_dbt_manifest_to_canvas(
     # Generate manifest if not provided
     if manifest_json is None:
         logger.info("Generating manifest.json...")
-        manifest_json = generate_manifest_json_for_dbt_project(orgdbt)
+        manifest_json = generate_manifest_json_for_dbt_project(org, orgdbt)
 
     # Track created/updated objects
     stats = {
@@ -423,8 +454,31 @@ def parse_dbt_manifest_to_canvas(
 
             # Process models from manifest
             nodes = manifest_json.get("nodes", {})
-            model_nodes = {k: v for k, v in nodes.items() if v.get("resource_type") == "model"}
-            logger.info(f"Processing {len(model_nodes)} models from manifest")
+
+            # Get the project name from manifest metadata
+            project_name = manifest_json.get("metadata", {}).get("project_name", "")
+
+            if not project_name:
+                logger.warning("Could not determine project_name from manifest metadata")
+
+            # Log all unique package names for debugging
+            all_package_names = set(
+                v.get("package_name", "")
+                for v in nodes.values()
+                if v.get("resource_type") == "model"
+            )
+            logger.info(f"All package names found in manifest: {all_package_names}")
+            logger.info(f"Project name from metadata: '{project_name}'")
+
+            # Filter to only include models from the user's project (exclude packages like elementary)
+            model_nodes = {
+                k: v
+                for k, v in nodes.items()
+                if v.get("resource_type") == "model" and v.get("package_name") == project_name
+            }
+            logger.info(
+                f"Processing {len(model_nodes)} models from manifest (filtered to project: {project_name})"
+            )
 
             for node_id, node_data in model_nodes.items():
                 # Extract model information

@@ -867,7 +867,7 @@ def get_dbt_project_DAG_v2(request):
         raise HttpError(422, "please setup your warehouse first")
 
     # Validate org has dbt workspace
-    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    orgdbt = OrgDbt.objects.filter(org=org, transform_type=TransformType.UI).first()
     if not orgdbt:
         raise HttpError(422, "dbt workspace not setup")
 
@@ -1433,7 +1433,7 @@ def sync_manifest_to_canvas(request):
 
     try:
         # Parse manifest to canvas
-        stats = parse_dbt_manifest_to_canvas(org.dbt, warehouse_obj)
+        stats = parse_dbt_manifest_to_canvas(org, org.dbt, warehouse_obj)
 
         logger.info(f"Manifest sync completed for org {org.name}. Stats: {stats}")
 
