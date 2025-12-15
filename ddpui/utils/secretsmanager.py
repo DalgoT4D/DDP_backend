@@ -57,6 +57,8 @@ class DevSecretsManager:
     def get_secret_value(self, **kwargs):
         """retrieves the value of the secret"""
         secretid = kwargs["SecretId"]
+        if not secretid:  # Handle empty or None secret ID
+            return None
         if not os.path.exists(self.secretfile(secretid)):
             return None
         with open(self.secretfile(secretid), "r", encoding="utf-8") as infile:

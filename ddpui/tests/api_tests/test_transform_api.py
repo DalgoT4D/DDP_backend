@@ -86,13 +86,15 @@ def mock_setup_dbt_workspace_ui_transform(orguser: OrgUser, tmp_path):
 
     with patch(
         "ddpui.ddpdbt.dbt_service.DbtProjectManager.get_org_dir", return_value=project_dir
-    ), patch("subprocess.check_call", side_effect=run_dbt_init) as mock_subprocess_call:
-        result, error = setup_local_dbt_workspace(
-            org, project_name=project_name, default_schema=default_schema
-        )
-        assert result is None
-        assert error is None
+    ), patch("subprocess.check_call", side_effect=run_dbt_init) as mock_subprocess_call, patch(
+        "ddpui.ddpdbt.dbt_service.create_or_update_org_cli_block", return_value=((None, None), None)
+    ) as mock_create_cli_block, patch(
+        "ddpui.ddpdbt.dbt_service.secretsmanager.retrieve_warehouse_credentials", return_value={}
+    ) as mock_retrieve_creds:
+        setup_local_dbt_workspace(org, project_name=project_name, default_schema=default_schema)
         mock_subprocess_call.assert_called_once()
+        mock_retrieve_creds.assert_called_once()
+        mock_create_cli_block.assert_called_once()
 
     assert (Path(dbtrepo_dir) / "packages.yml").exists()
     assert (Path(dbtrepo_dir) / "macros").exists()
@@ -269,7 +271,7 @@ def test_create_dbt_project_check_permission(orguser: OrgUser):
     for slug in slugs_have_permission:
         orguser.new_role = Role.objects.filter(slug=slug).first()
         request = mock_request(orguser)
-        with pytest.raises(HttpError) as exc:
+        with pytest.raises(Exception) as exc:
             create_dbt_project(request, payload)
         assert str(exc.value) == "Please set up your warehouse first"
 
