@@ -135,6 +135,9 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str):
         org.slug = slugify(org.name)
         org.save()
 
+    project_dir: Path = Path(DbtProjectManager.get_org_dir(org))
+    dbtrepo_dir: Path = project_dir / project_name
+
     orgdbt = org.dbt
     if not orgdbt:
         dbt = OrgDbt(
@@ -158,9 +161,6 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str):
         orgdbt.save()
 
     # this client's dbt setup happens here
-    project_dir: Path = Path(DbtProjectManager.get_org_dir(org))
-    dbtrepo_dir: Path = project_dir / project_name
-
     if dbtrepo_dir.exists():
         raise Exception(f"Project {project_name} already exists")
 
