@@ -1009,7 +1009,7 @@ def get_chart(request, chart_id: int):
     try:
         chart = ChartService.get_chart(chart_id, orguser.org)
     except ChartNotFoundError:
-        raise HttpError(404, "Chart not found")
+        raise HttpError(404, "Chart not found") from None
 
     return ChartResponse(
         id=chart.id,
@@ -1034,7 +1034,7 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
     try:
         chart = Chart.objects.get(id=chart_id, org=orguser.org)
     except Chart.DoesNotExist:
-        raise HttpError(404, "Chart not found")
+        raise HttpError(404, "Chart not found") from None
 
     # Get org warehouse
     org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
@@ -1140,7 +1140,7 @@ def create_chart(request, payload: ChartCreate):
         )
         chart = ChartService.create_chart(chart_data, orguser)
     except ChartValidationError as e:
-        raise HttpError(400, e.message)
+        raise HttpError(400, e.message) from None
 
     return ChartResponse(
         id=chart.id,
@@ -1174,9 +1174,9 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
             extra_config=payload.extra_config,
         )
     except ChartNotFoundError:
-        raise HttpError(404, "Chart not found")
+        raise HttpError(404, "Chart not found") from None
     except ChartValidationError as e:
-        raise HttpError(400, e.message)
+        raise HttpError(400, e.message) from None
 
     return ChartResponse(
         id=chart.id,
@@ -1200,9 +1200,9 @@ def delete_chart(request, chart_id: int):
     try:
         ChartService.delete_chart(chart_id, orguser.org, orguser)
     except ChartNotFoundError:
-        raise HttpError(404, "Chart not found")
+        raise HttpError(404, "Chart not found") from None
     except ChartPermissionError as e:
-        raise HttpError(403, e.message)
+        raise HttpError(403, e.message) from None
 
     return {"success": True}
 
@@ -1236,6 +1236,6 @@ def get_chart_dashboards(request, chart_id: int):
     try:
         dashboards = ChartService.get_chart_dashboards(chart_id, orguser.org)
     except ChartNotFoundError:
-        raise HttpError(404, "Chart not found")
+        raise HttpError(404, "Chart not found") from None
 
     return dashboards

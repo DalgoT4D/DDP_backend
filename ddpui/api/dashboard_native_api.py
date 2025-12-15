@@ -156,7 +156,7 @@ def get_dashboard(request, dashboard_id: int):
     try:
         dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
     except DashboardNotFoundError:
-        raise HttpError(404, "Dashboard not found")
+        raise HttpError(404, "Dashboard not found") from None
 
     return get_dashboard_response(dashboard)
 
@@ -212,9 +212,9 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
             is_published=payload.is_published,
         )
     except DashboardNotFoundError:
-        raise HttpError(404, "Dashboard not found")
+        raise HttpError(404, "Dashboard not found") from None
     except DashboardLockedError as e:
-        raise HttpError(423, e.message)
+        raise HttpError(423, e.message) from None
 
     return get_dashboard_response(dashboard)
 
@@ -228,11 +228,11 @@ def delete_dashboard(request, dashboard_id: int):
     try:
         DashboardService.delete_dashboard(dashboard_id, orguser.org, orguser)
     except DashboardNotFoundError:
-        raise HttpError(404, "Dashboard not found")
+        raise HttpError(404, "Dashboard not found") from None
     except DashboardPermissionError as e:
-        raise HttpError(403, e.message)
+        raise HttpError(403, e.message) from None
     except DashboardLockedError:
-        raise HttpError(423, "Cannot delete a locked dashboard")
+        raise HttpError(423, "Cannot delete a locked dashboard") from None
 
     return {"success": True}
 
@@ -249,7 +249,7 @@ def duplicate_dashboard(request, dashboard_id: int):
             id=dashboard_id, org=orguser.org
         )
     except Dashboard.DoesNotExist:
-        raise HttpError(404, "Dashboard not found")
+        raise HttpError(404, "Dashboard not found") from None
 
     # Create a copy of the dashboard
     with transaction.atomic():
@@ -343,9 +343,9 @@ def lock_dashboard(request, dashboard_id: int):
     try:
         lock_info = DashboardService.lock_dashboard(dashboard_id, orguser.org, orguser)
     except DashboardNotFoundError:
-        raise HttpError(404, "Dashboard not found")
+        raise HttpError(404, "Dashboard not found") from None
     except DashboardLockedError as e:
-        raise HttpError(423, e.message)
+        raise HttpError(423, e.message) from None
 
     return LockResponse(
         lock_token=lock_info.lock_token,
@@ -364,9 +364,9 @@ def refresh_dashboard_lock(request, dashboard_id: int):
     try:
         lock_info = DashboardService.refresh_lock(dashboard_id, orguser.org, orguser)
     except DashboardNotFoundError:
-        raise HttpError(404, "Dashboard not found")
+        raise HttpError(404, "Dashboard not found") from None
     except DashboardPermissionError as e:
-        raise HttpError(403, e.message)
+        raise HttpError(403, e.message) from None
     except DashboardServiceError as e:
         if e.error_code == "LOCK_EXPIRED":
             raise HttpError(410, "Lock has expired")
@@ -390,9 +390,9 @@ def unlock_dashboard(request, dashboard_id: int):
     try:
         DashboardService.unlock_dashboard(dashboard_id, orguser.org, orguser)
     except DashboardNotFoundError:
-        raise HttpError(404, "Dashboard not found")
+        raise HttpError(404, "Dashboard not found") from None
     except DashboardPermissionError as e:
-        raise HttpError(403, e.message)
+        raise HttpError(403, e.message) from None
 
     return {"success": True}
 
@@ -416,9 +416,9 @@ def create_filter(request, dashboard_id: int, payload: FilterCreate):
         )
         filter_obj = DashboardService.create_filter(dashboard_id, orguser.org, filter_data)
     except DashboardNotFoundError:
-        raise HttpError(404, "Dashboard not found")
+        raise HttpError(404, "Dashboard not found") from None
     except FilterValidationError as e:
-        raise HttpError(400, e.message)
+        raise HttpError(400, e.message) from None
 
     return filter_obj.to_json()
 
@@ -434,9 +434,9 @@ def get_filter(request, dashboard_id: int, filter_id: int):
     try:
         filter_obj = DashboardService.get_filter(dashboard_id, filter_id, orguser.org)
     except DashboardNotFoundError:
-        raise HttpError(404, "Dashboard not found")
+        raise HttpError(404, "Dashboard not found") from None
     except FilterNotFoundError:
-        raise HttpError(404, "Filter not found")
+        raise HttpError(404, "Filter not found") from None
 
     return filter_obj.to_json()
 
@@ -463,11 +463,11 @@ def update_filter(request, dashboard_id: int, filter_id: int, payload: FilterUpd
             order=payload.order,
         )
     except DashboardNotFoundError:
-        raise HttpError(404, "Dashboard not found")
+        raise HttpError(404, "Dashboard not found") from None
     except FilterNotFoundError:
-        raise HttpError(404, "Filter not found")
+        raise HttpError(404, "Filter not found") from None
     except FilterValidationError as e:
-        raise HttpError(400, e.message)
+        raise HttpError(400, e.message) from None
 
     return filter_obj.to_json()
 
@@ -481,9 +481,9 @@ def delete_filter(request, dashboard_id: int, filter_id: int):
     try:
         DashboardService.delete_filter(dashboard_id, filter_id, orguser.org)
     except DashboardNotFoundError:
-        raise HttpError(404, "Dashboard not found")
+        raise HttpError(404, "Dashboard not found") from None
     except FilterNotFoundError:
-        raise HttpError(404, "Filter not found")
+        raise HttpError(404, "Filter not found") from None
 
     return {"success": True}
 
@@ -530,7 +530,7 @@ def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShare
     try:
         dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
     except Dashboard.DoesNotExist:
-        raise HttpError(404, "Dashboard not found")
+        raise HttpError(404, "Dashboard not found") from None
 
     # Check permissions - only dashboard creator or org admin can modify sharing
     if dashboard.created_by != orguser:
@@ -590,7 +590,7 @@ def get_dashboard_sharing_status(request, dashboard_id: int):
     try:
         dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
     except Dashboard.DoesNotExist:
-        raise HttpError(404, "Dashboard not found")
+        raise HttpError(404, "Dashboard not found") from None
 
     # Check permissions - only dashboard creator or org admin can view sharing status
     if dashboard.created_by != orguser:
@@ -634,7 +634,7 @@ def set_personal_landing_dashboard(request, dashboard_id: int):
     try:
         dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
     except Dashboard.DoesNotExist:
-        raise HttpError(404, "Dashboard not found")
+        raise HttpError(404, "Dashboard not found") from None
 
     # Set as personal landing page
     orguser.landing_dashboard = dashboard
@@ -677,7 +677,7 @@ def set_org_default_dashboard(request, dashboard_id: int):
     try:
         dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
     except Dashboard.DoesNotExist:
-        raise HttpError(404, "Dashboard not found")
+        raise HttpError(404, "Dashboard not found") from None
 
     with transaction.atomic():
         # Remove previous org default
