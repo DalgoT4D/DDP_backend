@@ -17,6 +17,7 @@ from ddpui.models.org import OrgDbt, OrgPrefectBlockv1, OrgWarehouse, TransformT
 from ddpui.models.org_user import Org
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask
 from ddpui.models.dbt_workflow import OrgDbtModel
+from ddpui.ddpdbt.dbthelpers import create_or_update_org_cli_block
 from ddpui.utils import secretsmanager
 from ddpui.utils.constants import (
     TASK_DOCSGENERATE,
@@ -107,12 +108,12 @@ def task_config_params(task: Task):
     return TASK_CONIF_PARAM[task.slug] if task.slug in TASK_CONIF_PARAM else None
 
 
-def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) -> str:
+def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str):
     """sets up an org's dbt workspace, recreating it if it already exists"""
     warehouse = OrgWarehouse.objects.filter(org=org).first()
 
     if not warehouse:
-        return None, "Please set up your warehouse first"
+        return Exception("Please set up your warehouse first")
 
     if org.slug is None:
         org.slug = slugify(org.name)
@@ -123,7 +124,7 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
     dbtrepo_dir: Path = project_dir / project_name
 
     if dbtrepo_dir.exists():
-        return None, f"Project {project_name} already exists"
+        raise Exception(f"Project {project_name} already exists")
 
     if not project_dir.exists():
         project_dir.mkdir()
@@ -151,45 +152,79 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str) 
 
     except subprocess.CalledProcessError as e:
         logger.error(f"dbt init failed with {e.returncode}")
-        return None, "Something went wrong while setting up workspace"
+        raise Exception(f"dbt init failed: {e}") from e
 
-    # copy packages.yml
-    logger.info("copying packages.yml from assets")
-    target_packages_yml = Path(dbtrepo_dir) / "packages.yml"
-    source_packages_yml = os.path.abspath(
-        os.path.join(os.path.abspath(assets.__file__), "..", "packages.yml")
+    try:
+        # copy packages.yml
+        logger.info("copying packages.yml from assets")
+        target_packages_yml = Path(dbtrepo_dir) / "packages.yml"
+        source_packages_yml = os.path.abspath(
+            os.path.join(os.path.abspath(assets.__file__), "..", "packages.yml")
+        )
+        shutil.copy(source_packages_yml, target_packages_yml)
+
+        # copy all macros with .sql extension from assets
+        assets_dir = assets.__path__[0]
+
+        for sql_file_path in glob.glob(os.path.join(assets_dir, "*.sql")):
+            # Get the target path in the project_dir/macros directory
+            target_path = Path(dbtrepo_dir) / "macros" / Path(sql_file_path).name
+
+            # Copy the .sql file to the target path
+            shutil.copy(sql_file_path, target_path)
+
+            # Log the creation of the file
+            logger.info("created %s", target_path)
+    except Exception as e:
+        logger.error(f"failed to copy asset files: {e}")
+        raise Exception(f"Something went wrong while copying asset files : {e}")
+
+    try:
+        # create or update org dbt model
+        orgdbt = org.dbt
+        if orgdbt:
+            orgdbt.project_dir = DbtProjectManager.get_dbt_repo_relative_path(dbtrepo_dir)
+            orgdbt.default_schema = default_schema
+            orgdbt.target_type = warehouse.wtype
+            orgdbt.transform_type = TransformType.UI
+            orgdbt.dbt_venv = DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH
+            orgdbt.save()
+            logger.info("updated orgdbt for org %s", org.name)
+        else:
+            orgdbt = OrgDbt(
+                project_dir=DbtProjectManager.get_dbt_repo_relative_path(dbtrepo_dir),
+                dbt_venv=DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH,
+                target_type=warehouse.wtype,
+                default_schema=default_schema,
+                transform_type=TransformType.UI,
+            )
+            orgdbt.save()
+            logger.info("created orgdbt for org %s", org.name)
+            org.dbt = orgdbt
+            logger.info("set org.dbt for org %s", org.name)
+            org.save()
+    except Exception as e:
+        logger.error(f"failed to create OrgDbt model: {e}")
+        raise Exception(f"Something went wrong while saving dbt project info : {e}")
+
+    saved_creds = secretsmanager.retrieve_warehouse_credentials(warehouse)
+    if saved_creds is None:
+        logger.error(
+            "failed to retrieve warehouse credentials for org %s to create dbt profile", org.name
+        )
+        raise Exception(
+            "failed to retrieve warehouse credentials for org %s to create dbt profile" % org.name
+        )
+
+    (cli_profile_block, dbt_project_params), error = create_or_update_org_cli_block(
+        org, warehouse, saved_creds
     )
-    shutil.copy(source_packages_yml, target_packages_yml)
 
-    # copy all macros with .sql extension from assets
-    assets_dir = assets.__path__[0]
-
-    for sql_file_path in glob.glob(os.path.join(assets_dir, "*.sql")):
-        # Get the target path in the project_dir/macros directory
-        target_path = Path(dbtrepo_dir) / "macros" / Path(sql_file_path).name
-
-        # Copy the .sql file to the target path
-        shutil.copy(sql_file_path, target_path)
-
-        # Log the creation of the file
-        logger.info("created %s", target_path)
-
-    dbt = OrgDbt(
-        project_dir=DbtProjectManager.get_dbt_repo_relative_path(dbtrepo_dir),
-        dbt_venv=DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH,
-        target_type=warehouse.wtype,
-        default_schema=default_schema,
-        transform_type=TransformType.UI,
-    )
-    dbt.save()
-    logger.info("created orgdbt for org %s", org.name)
-    org.dbt = dbt
-    org.save()
-    logger.info("set org.dbt for org %s", org.name)
+    if error:
+        logger.error("failed to create dbt cli profile for org %s: %s", org.name, error)
+        raise Exception(f"failed to create dbt cli profile for org {org.name}: {error}")
 
     logger.info("set dbt workspace completed for org %s", org.name)
-
-    return None, None
 
 
 def convert_github_url(url: str) -> str:
