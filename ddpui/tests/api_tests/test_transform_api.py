@@ -86,13 +86,15 @@ def mock_setup_dbt_workspace_ui_transform(orguser: OrgUser, tmp_path):
 
     with patch(
         "ddpui.ddpdbt.dbt_service.DbtProjectManager.get_org_dir", return_value=project_dir
-    ), patch("subprocess.check_call", side_effect=run_dbt_init) as mock_subprocess_call, patch(
+    ), patch(
+        "ddpui.ddpdbt.dbt_service.DbtProjectManager.run_dbt_command", side_effect=run_dbt_init
+    ) as mock_dbt_command, patch(
         "ddpui.ddpdbt.dbt_service.create_or_update_org_cli_block", return_value=((None, None), None)
     ) as mock_create_cli_block, patch(
         "ddpui.ddpdbt.dbt_service.secretsmanager.retrieve_warehouse_credentials", return_value={}
     ) as mock_retrieve_creds:
         setup_local_dbt_workspace(org, project_name=project_name, default_schema=default_schema)
-        mock_subprocess_call.assert_called_once()
+        mock_dbt_command.assert_called_once()
         mock_retrieve_creds.assert_called_once()
         mock_create_cli_block.assert_called_once()
 

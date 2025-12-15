@@ -493,6 +493,7 @@ def test_get_transform_type_non_none(orguser: OrgUser):
 
 def test_post_run_dbt_commands_no_payload(orguser: OrgUser, f_org_tasks):
     """tests post_run_dbt_commands with no payload"""
+    orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
     request = mock_request(orguser)
 
     mock_task_id = "test-task-id-123"
@@ -525,6 +526,7 @@ def test_post_run_dbt_commands_no_payload(orguser: OrgUser, f_org_tasks):
 
 def test_post_run_dbt_commands_with_payload(orguser: OrgUser, f_org_tasks):
     """tests post_run_dbt_commands with TaskParameters payload"""
+    orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
     request = mock_request(orguser)
     payload = TaskParameters(flags=["full-refresh"], options={"target": "dev"})
 
@@ -553,6 +555,7 @@ def test_post_run_dbt_commands_with_payload(orguser: OrgUser, f_org_tasks):
 
 def test_post_run_dbt_commands_task_locks(orguser: OrgUser, f_org_tasks):
     """tests that post_run_dbt_commands creates and cleans up task locks properly"""
+    orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
     request = mock_request(orguser)
 
     mock_task_id = "test-task-id-789"
@@ -595,6 +598,7 @@ def test_post_run_dbt_commands_task_locks(orguser: OrgUser, f_org_tasks):
 
 def test_post_run_dbt_commands_exception_handling(orguser: OrgUser, f_org_tasks):
     """tests that task locks are cleaned up even when an exception occurs"""
+    orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
     request = mock_request(orguser)
 
     mock_task_id = "test-task-id-error"
@@ -625,6 +629,7 @@ def test_post_run_dbt_commands_exception_handling(orguser: OrgUser, f_org_tasks)
 
 def test_post_run_dbt_commands_task_filtering(orguser: OrgUser, f_org_tasks):
     """tests that only the correct system tasks are used for locking"""
+    orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
     request = mock_request(orguser)
 
     # Create an additional non-system task that should be ignored
