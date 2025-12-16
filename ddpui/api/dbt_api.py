@@ -181,12 +181,17 @@ def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
     if orgdbt is None:
         raise HttpError(400, "Create a dbt workspace first")
 
-    # Get the dbt project directory
-    project_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
-    if not project_dir.exists():
-        raise HttpError(400, "DBT project directory does not exist")
+    # Check if the GitHub URL is already used by another organization
+    existing_orgdbt = (
+        OrgDbt.objects.filter(gitrepo_url=payload.gitrepoUrl).exclude(id=orgdbt.id).first()
+    )
+    if existing_orgdbt:
+        raise HttpError(
+            400, "This GitHub repository URL is already connected to another organization"
+        )
 
-    dbt_repo_dir = project_dir / "dbtrepo"
+    # Get the dbt repo directory (get_dbt_project_dir already returns the full path including dbtrepo)
+    dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
     if not dbt_repo_dir.exists():
         raise HttpError(400, "DBT repo directory does not exist")
 
