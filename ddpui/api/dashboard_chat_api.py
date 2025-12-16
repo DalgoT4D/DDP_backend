@@ -19,7 +19,7 @@ from ninja.security import HttpBearer
 
 from ddpui.auth import has_permission
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.core.ai.factory import get_default_ai_provider
+from ddpui.core.ai.factory import get_default_ai_provider, get_ai_provider
 from ddpui.core.ai.interfaces import AIMessage
 from ddpui.core.ai.data_intelligence import DataIntelligenceService
 from ddpui.core.ai.query_executor import DynamicQueryExecutor, QueryExecutionResult
@@ -955,8 +955,34 @@ def dashboard_chat(request, dashboard_id: int, payload: DashboardChatRequest):
         if not orguser_obj:
             return JsonResponse({"error": "Unauthorized"}, status=401)
 
-        # Get AI provider
-        provider = get_default_ai_provider()
+        # Check organization settings for AI features and data sharing.
+        # We treat AI enablement as equivalent to data sharing being enabled,
+        # consistent with /api/org-settings/ai-status.
+        org_settings = OrgSettings.objects.filter(org=orguser_obj.org).first()
+        if not org_settings or not org_settings.ai_data_sharing_enabled:
+            return JsonResponse(
+                {
+                    "error": "AI features must be enabled in organization settings",
+                    "requires_consent": True,
+                },
+                status=400,
+            )
+
+        # Respect org-level data sharing preferences: if disabled, force schema-only mode.
+        # At this point ai_data_sharing_enabled is True, so include_data can safely be honored.
+        effective_include_data = payload.include_data and bool(org_settings.ai_data_sharing_enabled)
+        if payload.include_data and not org_settings.ai_data_sharing_enabled:
+            logger.info(
+                f"Dashboard {dashboard_id} - Data sharing disabled for org {orguser_obj.org.slug}, "
+                "forcing schema-only context for AI chat"
+            )
+        payload.include_data = effective_include_data
+
+        # Select AI provider based on requested provider_type, falling back to default
+        if payload.provider_type:
+            provider = get_ai_provider(payload.provider_type)
+        else:
+            provider = get_default_ai_provider()
 
         # Get dashboard context
         analyzer = DashboardContextAnalyzer(
@@ -1213,10 +1239,17 @@ def dashboard_chat(request, dashboard_id: int, payload: DashboardChatRequest):
             if hasattr(response, "model"):
                 model_name = response.model
 
+            # Normalize model name for metering as "provider:model"
+            provider_id = getattr(response, "provider", None) or getattr(
+                provider.get_provider_type(), "value", "unknown"
+            )
+            model_id = getattr(response, "model", None) or "unknown"
+            combined_model_name = f"{provider_id}:{model_id}"
+
             log_ai_chat_metering(
                 org=orguser_obj.org,
                 user=orguser_obj.user,
-                model_used=model_name,
+                model_used=combined_model_name,
                 prompt_tokens=usage.get("prompt_tokens", 0),
                 completion_tokens=usage.get("completion_tokens", 0),
                 response_time_ms=response_time_ms,
@@ -1306,9 +1339,12 @@ async def _stream_dashboard_chat(
 
                 # Always log metering data
                 usage = final_usage or {}
-                model_name = getattr(chunk, "provider", "unknown")
-                if hasattr(chunk, "model"):
-                    model_name = chunk.model
+                # Normalize model name for metering as "provider:model"
+                provider_id = getattr(chunk, "provider", None) or getattr(
+                    provider.get_provider_type(), "value", "unknown"
+                )
+                model_id = getattr(chunk, "model", None) or "unknown"
+                model_name = f"{provider_id}:{model_id}"
 
                 log_ai_chat_metering(
                     org=orguser_obj.org,
@@ -1994,9 +2030,11 @@ def enhanced_dashboard_chat(request, dashboard_id: int, payload: EnhancedDashboa
         if not orguser_obj:
             return JsonResponse({"error": "Unauthorized"}, status=401)
 
-        # Check organization settings for AI features
+        # Check organization settings for AI features.
+        # We treat AI enablement as equivalent to data sharing being enabled,
+        # consistent with /api/org-settings/ai-status.
         org_settings = OrgSettings.objects.filter(org=orguser_obj.org).first()
-        if not org_settings or not org_settings.ai_consent:
+        if not org_settings or not org_settings.ai_data_sharing_enabled:
             return JsonResponse(
                 {
                     "error": "AI features must be enabled in organization settings",

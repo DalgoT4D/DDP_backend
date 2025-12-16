@@ -217,9 +217,9 @@ class SmartChatProcessor:
                 return self._handle_general_chat_message(message, analysis, dashboard_context)
 
         except Exception as e:
-            self.logger.error(f"Error processing enhanced chat message: {e}")
+            self.logger.exception("Error processing enhanced chat message", exc_info=e)
             return EnhancedChatResponse(
-                content=f"I encountered an error processing your message. Please try rephrasing your question.",
+                content="I encountered an error processing your message. Please try rephrasing your question.",
                 intent_detected=MessageIntent.GENERAL_CONVERSATION,
                 fallback_used=True,
             )
@@ -277,7 +277,7 @@ class SmartChatProcessor:
                 )
 
         except Exception as e:
-            self.logger.error(f"Error handling data query message: {e}")
+            self.logger.exception("Error handling data query message", exc_info=e)
             return self._handle_failed_data_query(message, None, analysis, dashboard_context)
 
     def _handle_dashboard_explanation_message(
@@ -317,7 +317,7 @@ class SmartChatProcessor:
             )
 
         except Exception as e:
-            self.logger.error(f"Error handling dashboard explanation: {e}")
+            self.logger.exception("Error handling dashboard explanation", exc_info=e)
 
             # Always return a useful, data-grounded summary even on error
             fallback_text = "This dashboard shows multiple charts summarizing your key metrics."
@@ -612,7 +612,7 @@ class SmartChatProcessor:
             return None
 
         except Exception as e:
-            self.logger.error(f"Error in direct context lookup: {e}")
+            self.logger.exception("Error in direct context lookup")
             return None
 
     def _generate_data_response_content(
@@ -681,8 +681,11 @@ class SmartChatProcessor:
             return content
 
         except Exception as e:
-            self.logger.error(f"Error generating data response content: {e}")
-            return f"I successfully queried your data and found {execution_result.row_count} results, but had trouble formatting the response. The raw data is available in the detailed results."
+            self.logger.exception("Error generating data response content", exc_info=e)
+            return (
+                "I successfully queried your data but had trouble formatting the response. "
+                "The raw data is available in the detailed results."
+            )
 
     def _format_small_result_set(self, data: List[Dict], columns: List[str]) -> str:
         """Format small result sets (≤10 rows) as readable text"""

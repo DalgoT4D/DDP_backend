@@ -165,6 +165,7 @@ class OpenAIProvider(AIProviderInterface):
                 "messages": openai_messages,
                 "temperature": temperature,
                 "stream": True,
+                "stream_options": {"include_usage": True},
                 **kwargs,
             }
 
@@ -174,13 +175,33 @@ class OpenAIProvider(AIProviderInterface):
             stream = await self.async_client.chat.completions.create(**completion_kwargs)
 
             async for chunk in stream:
-                if chunk.choices and chunk.choices[0].delta.content:
+                if not chunk.choices:
+                    continue
+
+                choice = chunk.choices[0]
+                delta = getattr(getattr(choice, "delta", None), "content", None) or ""
+                finish_reason = getattr(choice, "finish_reason", None)
+
+                # Extract usage if present on this chunk (final chunk when include_usage=True)
+                usage_dict = None
+                usage = getattr(chunk, "usage", None)
+                if usage is not None:
+                    usage_dict = {
+                        "prompt_tokens": getattr(usage, "prompt_tokens", None),
+                        "completion_tokens": getattr(usage, "completion_tokens", None),
+                        "total_tokens": getattr(usage, "total_tokens", None),
+                    }
+                    usage_dict = {k: v for k, v in usage_dict.items() if v is not None} or None
+
+                # Emit chunk if it has content, or is the final chunk (finish_reason/usage only)
+                if delta or finish_reason is not None or usage_dict is not None:
                     yield StreamingAIResponse(
-                        content=chunk.choices[0].delta.content,
-                        is_complete=chunk.choices[0].finish_reason is not None,
+                        content=delta,
+                        is_complete=finish_reason is not None,
+                        usage=usage_dict,
                         metadata={
                             "chunk_id": chunk.id,
-                            "finish_reason": chunk.choices[0].finish_reason,
+                            "finish_reason": finish_reason,
                         },
                     )
 

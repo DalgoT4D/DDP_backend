@@ -148,6 +148,9 @@ class QuerySecurityValidator:
             # Step 5: Syntax validation (if possible)
             syntax_result = self._validate_sql_syntax(query, org_warehouse)
 
+            if not syntax_result.is_valid:
+                return syntax_result
+
             # Combine all validation results
             final_result = QueryValidationResult(
                 is_valid=True,

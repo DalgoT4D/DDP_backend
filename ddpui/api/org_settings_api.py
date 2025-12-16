@@ -159,16 +159,12 @@ def get_org_settings(request):
                     org_settings, created = OrgSettings.objects.get_or_create(
                         org=orguser.org,
                         defaults={
-                            "organization_name": orguser.org.name,
-                            "website": getattr(orguser.org, "website", None),
                             "ai_data_sharing_enabled": False,
                             "ai_logging_acknowledged": False,
                         },
                     )
 
                     retry_org_data = OrgSettingsSchema(
-                        organization_name=org_settings.org.name,  # Reference from org model
-                        website=org_settings.org.website,  # Reference from org model
                         organization_logo_filename=org_settings.organization_logo_filename,
                         ai_data_sharing_enabled=org_settings.ai_data_sharing_enabled,
                         ai_logging_acknowledged=org_settings.ai_logging_acknowledged,
@@ -254,8 +250,6 @@ def update_org_settings(request, payload: UpdateOrgSettingsSchema):
         logger.info(f"Updated org settings for org {orguser.org.slug} by user {orguser.user.email}")
 
         update_org_data = OrgSettingsSchema(
-            organization_name=org_settings.org.name,  # Reference from org model
-            website=org_settings.org.website,  # Reference from org model
             organization_logo_filename=org_settings.organization_logo_filename,
             ai_data_sharing_enabled=org_settings.ai_data_sharing_enabled,
             ai_logging_acknowledged=org_settings.ai_logging_acknowledged,
@@ -279,8 +273,6 @@ def update_org_settings(request, payload: UpdateOrgSettingsSchema):
                     org_settings, created = OrgSettings.objects.get_or_create(
                         org=orguser.org,
                         defaults={
-                            "organization_name": orguser.org.name,
-                            "website": getattr(orguser.org, "website", None),
                             "ai_data_sharing_enabled": False,
                             "ai_logging_acknowledged": False,
                         },
@@ -327,8 +319,6 @@ def update_org_settings(request, payload: UpdateOrgSettingsSchema):
                         )
 
                     retry_update_org_data = OrgSettingsSchema(
-                        organization_name=org_settings.org.name,  # Reference from org model
-                        website=org_settings.org.website,  # Reference from org model
                         organization_logo_filename=org_settings.organization_logo_filename,
                         ai_data_sharing_enabled=org_settings.ai_data_sharing_enabled,
                         ai_logging_acknowledged=org_settings.ai_logging_acknowledged,
@@ -387,8 +377,6 @@ def create_org_settings(request, payload: CreateOrgSettingsSchema):
         logger.info(f"Created org settings for org {orguser.org.slug} by user {orguser.user.email}")
 
         create_org_data = OrgSettingsSchema(
-            organization_name=org_settings.org.name,  # Reference from org model
-            website=org_settings.org.website,  # Reference from org model
             organization_logo_filename=org_settings.organization_logo_filename,
             ai_data_sharing_enabled=org_settings.ai_data_sharing_enabled,
             ai_logging_acknowledged=org_settings.ai_logging_acknowledged,
@@ -440,8 +428,6 @@ def update_ai_data_sharing(request):
         )
 
         patch_org_data = OrgSettingsSchema(
-            organization_name=org_settings.organization_name,
-            website=org_settings.website,
             organization_logo_filename=org_settings.organization_logo_filename,
             ai_data_sharing_enabled=org_settings.ai_data_sharing_enabled,
             ai_logging_acknowledged=org_settings.ai_logging_acknowledged,
@@ -495,8 +481,6 @@ def upload_organization_logo(request, logo_file: UploadedFile = File(...)):
             org_settings, created = OrgSettings.objects.get_or_create(
                 org=orguser.org,
                 defaults={
-                    "organization_name": orguser.org.name,
-                    "website": getattr(orguser.org, "website", None),
                     "ai_data_sharing_enabled": False,
                     "ai_logging_acknowledged": False,
                 },
@@ -511,8 +495,6 @@ def upload_organization_logo(request, logo_file: UploadedFile = File(...)):
                     org_settings, created = OrgSettings.objects.get_or_create(
                         org=orguser.org,
                         defaults={
-                            "organization_name": orguser.org.name,
-                            "website": getattr(orguser.org, "website", None),
                             "ai_data_sharing_enabled": False,
                             "ai_logging_acknowledged": False,
                         },
