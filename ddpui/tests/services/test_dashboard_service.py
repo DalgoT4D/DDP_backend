@@ -36,6 +36,7 @@ from ddpui.services.dashboard_service import (
     FilterNotFoundError,
     FilterValidationError,
 )
+from ddpui.schemas.dashboard_schema import DashboardUpdate
 from ddpui.tests.api_tests.test_user_org_api import seed_db
 
 pytestmark = pytest.mark.django_db
@@ -71,7 +72,7 @@ def org():
     """An Org object"""
     org = Org.objects.create(
         name="Dashboard Service Test Org",
-        slug="dashboard-service-test-org",
+        slug="dash-svc-test-org",  # max_length=20
         airbyte_workspace_id="workspace-id",
     )
     yield org
@@ -145,7 +146,10 @@ class TestUpdateDashboardLockChecking:
 
         with pytest.raises(DashboardLockedError) as excinfo:
             DashboardService.update_dashboard(
-                sample_dashboard.id, orguser.org, orguser, title="New Title"
+                sample_dashboard.id,
+                orguser.org,
+                orguser,
+                DashboardUpdate(title="New Title"),
             )
 
         assert orguser2.user.email in excinfo.value.locked_by_email
@@ -165,7 +169,10 @@ class TestUpdateDashboardLockChecking:
         )
 
         dashboard = DashboardService.update_dashboard(
-            sample_dashboard.id, orguser.org, orguser, title="Updated by Lock Owner"
+            sample_dashboard.id,
+            orguser.org,
+            orguser,
+            DashboardUpdate(title="Updated by Lock Owner"),
         )
 
         assert dashboard.title == "Updated by Lock Owner"
@@ -185,7 +192,10 @@ class TestUpdateDashboardLockChecking:
         )
 
         dashboard = DashboardService.update_dashboard(
-            sample_dashboard.id, orguser.org, orguser, title="Updated After Expiry"
+            sample_dashboard.id,
+            orguser.org,
+            orguser,
+            DashboardUpdate(title="Updated After Expiry"),
         )
 
         assert dashboard.title == "Updated After Expiry"

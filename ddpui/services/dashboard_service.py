@@ -35,6 +35,7 @@ from ddpui.core.charts.charts_service import (
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.redis_client import RedisClient
 from ddpui.datainsights.query_builder import AggQueryBuilder
+from ddpui.schemas.dashboard_schema import DashboardUpdate, FilterUpdate
 
 logger = CustomLogger("ddpui.dashboard_service")
 
@@ -154,6 +155,90 @@ class DashboardService:
             raise DashboardNotFoundError(dashboard_id)
 
     @staticmethod
+    def get_dashboard_response(dashboard: Dashboard) -> Dict[str, Any]:
+        """Convert dashboard model to response dict with migration support.
+
+        This method handles:
+        - Migration of old filter format to new format
+        - Adding lock information
+        - Formatting filters data
+
+        Args:
+            dashboard: The dashboard instance
+
+        Returns:
+            Dictionary containing dashboard response data
+        """
+        lock = getattr(dashboard, "lock", None)
+
+        # Check if components need migration from old filter format to new format
+        components = dashboard.components or {}
+        needs_update = False
+
+        for comp_id, component in components.items():
+            if component.get("type") == "filter":
+                # Check if this is old format (full config) vs new format (just filterId reference)
+                config = component.get("config", {})
+                if "filterId" not in config and "column_name" in config:
+                    # This is old format, needs migration
+                    # Find or create matching filter in DashboardFilter table
+                    matching_filter = dashboard.filters.filter(
+                        column_name=config.get("column_name"),
+                        table_name=config.get("table_name", ""),
+                        schema_name=config.get("schema_name", ""),
+                    ).first()
+
+                    if not matching_filter:
+                        # Create filter if it doesn't exist
+                        matching_filter = DashboardFilter.objects.create(
+                            dashboard=dashboard,
+                            name=config.get("name", config.get("column_name", "")),
+                            filter_type=config.get("filter_type", "value"),
+                            schema_name=config.get("schema_name", ""),
+                            table_name=config.get("table_name", ""),
+                            column_name=config.get("column_name", ""),
+                            settings=config.get("settings", {}),
+                            order=0,
+                        )
+
+                    # Update component to new format with just filterId reference
+                    components[comp_id] = {
+                        "id": comp_id,
+                        "type": "filter",
+                        "config": {
+                            "filterId": matching_filter.id,
+                            "name": config.get("name", matching_filter.column_name),
+                        },
+                    }
+                    needs_update = True
+
+        if needs_update:
+            # Save migrated components back to database
+            dashboard.components = components
+            dashboard.save(update_fields=["components"])
+            logger.info(f"Migrated filter components for dashboard {dashboard.id}")
+
+        response_data = dashboard.to_json()
+        response_data["is_locked"] = bool(lock and not lock.is_expired())
+        response_data["locked_by"] = (
+            lock.locked_by.user.email if lock and not lock.is_expired() else None
+        )
+
+        # Add filters without position data in settings
+        filters_data = []
+        for f in dashboard.filters.all():
+            filter_json = f.to_json()
+            # Remove position and name from settings if they exist (for backward compatibility)
+            if "settings" in filter_json:
+                filter_json["settings"].pop("position", None)
+                filter_json["settings"].pop("name", None)
+            filters_data.append(filter_json)
+
+        response_data["filters"] = filters_data
+
+        return response_data
+
+    @staticmethod
     def list_dashboards(
         org: Org,
         dashboard_type: Optional[str] = None,
@@ -212,14 +297,7 @@ class DashboardService:
         dashboard_id: int,
         org: Org,
         orguser: OrgUser,
-        title: Optional[str] = None,
-        description: Optional[str] = None,
-        grid_columns: Optional[int] = None,
-        target_screen_size: Optional[str] = None,
-        layout_config: Optional[list] = None,
-        components: Optional[dict] = None,
-        filter_layout: Optional[str] = None,
-        is_published: Optional[bool] = None,
+        data: DashboardUpdate,
     ) -> Dashboard:
         """Update an existing dashboard.
 
@@ -227,14 +305,7 @@ class DashboardService:
             dashboard_id: The dashboard ID
             org: The organization
             orguser: The user making the update
-            title: Optional new title
-            description: Optional new description
-            grid_columns: Optional new grid columns
-            target_screen_size: Optional new target screen size
-            layout_config: Optional new layout config
-            components: Optional new components
-            filter_layout: Optional new filter layout
-            is_published: Optional new published status
+            data: Dashboard update data
 
         Returns:
             Updated Dashboard instance
@@ -251,23 +322,23 @@ class DashboardService:
                 raise DashboardLockedError(dashboard.lock.locked_by.user.email)
 
         # Apply updates
-        if title is not None:
-            dashboard.title = title
-        if description is not None:
-            dashboard.description = description
-        if grid_columns is not None:
-            dashboard.grid_columns = grid_columns
-        if target_screen_size is not None:
-            dashboard.target_screen_size = target_screen_size
-        if layout_config is not None:
-            dashboard.layout_config = layout_config
-        if components is not None:
-            dashboard.components = components
-        if filter_layout is not None:
-            dashboard.filter_layout = filter_layout
-        if is_published is not None:
-            dashboard.is_published = is_published
-            if is_published:
+        if data.title is not None:
+            dashboard.title = data.title
+        if data.description is not None:
+            dashboard.description = data.description
+        if data.grid_columns is not None:
+            dashboard.grid_columns = data.grid_columns
+        if data.target_screen_size is not None:
+            dashboard.target_screen_size = data.target_screen_size
+        if data.layout_config is not None:
+            dashboard.layout_config = data.layout_config
+        if data.components is not None:
+            dashboard.components = data.components
+        if data.filter_layout is not None:
+            dashboard.filter_layout = data.filter_layout
+        if data.is_published is not None:
+            dashboard.is_published = data.is_published
+            if data.is_published:
                 dashboard.published_at = timezone.now()
 
         dashboard.last_modified_by = orguser
@@ -524,13 +595,7 @@ class DashboardService:
         dashboard_id: int,
         filter_id: int,
         org: Org,
-        name: Optional[str] = None,
-        filter_type: Optional[str] = None,
-        schema_name: Optional[str] = None,
-        table_name: Optional[str] = None,
-        column_name: Optional[str] = None,
-        settings: Optional[dict] = None,
-        order: Optional[int] = None,
+        data: FilterUpdate,
     ) -> DashboardFilter:
         """Update a filter in a dashboard.
 
@@ -538,13 +603,7 @@ class DashboardService:
             dashboard_id: The dashboard ID
             filter_id: The filter ID
             org: The organization
-            name: Optional new name
-            filter_type: Optional new filter type
-            schema_name: Optional new schema name
-            table_name: Optional new table name
-            column_name: Optional new column name
-            settings: Optional new settings
-            order: Optional new order
+            data: Filter update data
 
         Returns:
             Updated DashboardFilter instance
@@ -556,28 +615,28 @@ class DashboardService:
         """
         filter_obj = DashboardService.get_filter(dashboard_id, filter_id, org)
 
-        if name is not None:
-            filter_obj.name = name
+        if data.name is not None:
+            filter_obj.name = data.name
 
-        if filter_type is not None:
-            if filter_type not in [ft.value for ft in DashboardFilterType]:
-                raise FilterValidationError(f"Invalid filter type: {filter_type}")
-            filter_obj.filter_type = filter_type
+        if data.filter_type is not None:
+            if data.filter_type not in [ft.value for ft in DashboardFilterType]:
+                raise FilterValidationError(f"Invalid filter type: {data.filter_type}")
+            filter_obj.filter_type = data.filter_type
 
-        if schema_name is not None:
-            filter_obj.schema_name = schema_name
+        if data.schema_name is not None:
+            filter_obj.schema_name = data.schema_name
 
-        if table_name is not None:
-            filter_obj.table_name = table_name
+        if data.table_name is not None:
+            filter_obj.table_name = data.table_name
 
-        if column_name is not None:
-            filter_obj.column_name = column_name
+        if data.column_name is not None:
+            filter_obj.column_name = data.column_name
 
-        if settings is not None:
-            filter_obj.settings = settings
+        if data.settings is not None:
+            filter_obj.settings = data.settings
 
-        if order is not None:
-            filter_obj.order = order
+        if data.order is not None:
+            filter_obj.order = data.order
 
         filter_obj.save()
         logger.info(f"Updated filter {filter_id} in dashboard {dashboard_id}")

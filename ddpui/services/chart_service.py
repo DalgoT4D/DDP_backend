@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from django.db.models import Q
 
 from ddpui.models.visualization import Chart
-from ddpui.models.org import Org, OrgWarehouse
+from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.dashboard import Dashboard, DashboardComponentType
 from ddpui.core.charts.chart_validator import ChartValidator
@@ -201,7 +201,6 @@ class ChartService:
         chart = ChartService.get_chart(chart_id, org)
 
         # Prepare updated values for validation
-        updated_chart_type = chart_type if chart_type is not None else chart.chart_type
         updated_extra_config = extra_config if extra_config is not None else chart.extra_config
         updated_schema_name = schema_name if schema_name is not None else chart.schema_name
         updated_table_name = table_name if table_name is not None else chart.table_name
@@ -340,15 +339,3 @@ class ChartService:
                         break  # Found chart in this dashboard
 
         return dashboards_with_chart
-
-    @staticmethod
-    def get_org_warehouse(org: Org) -> Optional[OrgWarehouse]:
-        """Get the warehouse for an organization.
-
-        Args:
-            org: The organization
-
-        Returns:
-            OrgWarehouse instance or None if not configured
-        """
-        return OrgWarehouse.objects.filter(org=org).first()

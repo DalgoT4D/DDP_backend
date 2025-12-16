@@ -99,9 +99,7 @@ class ChartValidator:
             )
 
     @staticmethod
-    def _validate_metrics(
-        metrics: Optional[List], chart_type: str, allow_multiple: bool = True
-    ) -> None:
+    def _validate_metrics(metrics: List, chart_type: str, allow_multiple: bool = True) -> None:
         """Validate metrics configuration"""
         if not metrics or len(metrics) == 0:
             raise ChartValidationError(
@@ -134,7 +132,7 @@ class ChartValidator:
     @staticmethod
     def _validate_bar_chart(
         dimension_col: Optional[str],
-        metrics: Optional[List] = None,
+        metrics: List,
     ) -> None:
         """Validate bar chart configuration"""
         if not dimension_col:
@@ -145,7 +143,7 @@ class ChartValidator:
     @staticmethod
     def _validate_pie_chart(
         dimension_col: Optional[str],
-        metrics: Optional[List] = None,
+        metrics: List,
     ) -> None:
         """Validate pie chart configuration"""
         if not dimension_col:
@@ -156,7 +154,7 @@ class ChartValidator:
     @staticmethod
     def _validate_line_chart(
         dimension_col: Optional[str],
-        metrics: Optional[List] = None,
+        metrics: List,
     ) -> None:
         """Validate line chart configuration"""
         if not dimension_col:
@@ -166,7 +164,7 @@ class ChartValidator:
 
     @staticmethod
     def _validate_number_chart(
-        metrics: Optional[List] = None,
+        metrics: List,
         customizations: Dict = None,
     ) -> None:
         """Validate number chart configuration"""
@@ -238,7 +236,7 @@ class ChartValidator:
     def _validate_map_chart(
         geographic_column: Optional[str],
         selected_geojson_id: Optional[int],
-        metrics: Optional[List] = None,
+        metrics: List,
         customizations: Dict = None,
     ) -> None:
         """Validate map chart configuration"""

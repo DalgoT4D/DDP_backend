@@ -23,8 +23,8 @@ from ddpui.core.charts import charts_service
 from ddpui.api.dashboard_native_api import (
     DashboardResponse,
     FilterOptionsResponse,
-    get_dashboard_response,
 )
+from ddpui.services.dashboard_service import DashboardService
 from ddpui.api.filter_api import (
     FilterPreviewResponse,
     FilterOptionResponse as AuthFilterOptionResponse,
@@ -98,7 +98,7 @@ def get_public_dashboard(request, token: str):
         )
 
         # Reuse the authenticated dashboard response generation logic
-        dashboard_data = get_dashboard_response(dashboard)
+        dashboard_data = DashboardService.get_dashboard_response(dashboard)
 
         # Enhance with public-specific fields and remove sensitive information
         public_response_data = {

@@ -4,9 +4,8 @@ Tests business logic NOT covered by API tests:
 1. delete_chart permission check (creator-only) 
 2. bulk_delete_charts - all edge cases
 3. get_chart_dashboards - multiple dashboards
-4. get_org_warehouse - lookup
-5. Exception classes
-6. ChartData dataclass
+4. Exception classes
+5. ChartData dataclass
 """
 
 import os
@@ -32,6 +31,7 @@ from ddpui.services.chart_service import (
     ChartValidationError,
     ChartPermissionError,
 )
+from ddpui.services.warehouse_service import WarehouseService
 from ddpui.tests.api_tests.test_user_org_api import seed_db
 
 pytestmark = pytest.mark.django_db
@@ -67,7 +67,7 @@ def org():
     """An Org object"""
     org = Org.objects.create(
         name="Chart Service Test Org",
-        slug="chart-service-test-org",
+        slug="chart-svc-test-org",  # max_length=20
         airbyte_workspace_id="workspace-id",
     )
     yield org
@@ -278,7 +278,7 @@ class TestGetChartDashboards:
 
 
 class TestGetOrgWarehouse:
-    """Tests for ChartService.get_org_warehouse()"""
+    """Tests for WarehouseService.get_org_warehouse()"""
 
     def test_get_org_warehouse_success(self, org, seed_db):
         """Test getting warehouse for org"""
@@ -288,7 +288,7 @@ class TestGetOrgWarehouse:
             credentials={},
         )
 
-        result = ChartService.get_org_warehouse(org)
+        result = WarehouseService.get_org_warehouse(org)
 
         assert result is not None
         assert result.id == warehouse.id
@@ -299,7 +299,7 @@ class TestGetOrgWarehouse:
 
     def test_get_org_warehouse_not_found(self, org, seed_db):
         """Test getting warehouse when none exists"""
-        result = ChartService.get_org_warehouse(org)
+        result = WarehouseService.get_org_warehouse(org)
 
         assert result is None
 

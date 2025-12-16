@@ -69,7 +69,7 @@ def org():
     """An Org object"""
     org = Org.objects.create(
         name="Dashboard API Test Org",
-        slug="dashboard-api-test-org",
+        slug="dash-api-test-org",  # max_length=20
         airbyte_workspace_id="workspace-id",
     )
     yield org
@@ -402,20 +402,20 @@ class TestUpdateDashboard:
 class TestDeleteDashboard:
     """Tests for delete_dashboard endpoint"""
 
-    def test_delete_dashboard_success(self, orguser, org, seed_db):
+    def test_delete_dashboard_success(self, orguser, sample_dashboard, seed_db):
         """Test successfully deleting a dashboard"""
-        # Create dashboard to delete
-        dashboard = Dashboard.objects.create(
-            title="Dashboard to Delete",
+        # Create another dashboard so we're not deleting the last one
+        Dashboard.objects.create(
+            title="Another Dashboard",
             dashboard_type="native",
             grid_columns=12,
             layout_config=[],
             components={},
             created_by=orguser,
-            org=org,
+            org=orguser.org,
         )
-        dashboard_id = dashboard.id
 
+        dashboard_id = sample_dashboard.id
         request = mock_request(orguser)
 
         response = delete_dashboard(request, dashboard_id=dashboard_id)
