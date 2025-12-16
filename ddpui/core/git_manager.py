@@ -311,3 +311,45 @@ class GitManager:
 
         result = self._run_command(cmd)
         return result.stdout.strip()
+
+    def verify_remote_url(self, remote_url: str) -> bool:
+        """
+        Verify that the remote URL is accessible with the PAT configured in this instance.
+        Uses `git ls-remote` to check connectivity without cloning.
+
+        :param remote_url: The remote repository URL to verify
+        :return: True if the remote is accessible, raises GitManagerError otherwise
+        """
+        if not self.pat:
+            raise GitManagerError(
+                message="PAT not configured",
+                error="A Personal Access Token is required to verify remote URL",
+            )
+
+        auth_url = self.generate_oauth_url(remote_url)
+
+        result = self._run_command(
+            ["git", "ls-remote", auth_url],
+            check=False,
+        )
+
+        if result.returncode != 0:
+            # Parse common error messages for better user feedback
+            stderr = result.stderr.strip().lower()
+            if "authentication" in stderr or "403" in stderr or "401" in stderr:
+                raise GitManagerError(
+                    message="Authentication failed",
+                    error="The PAT token is invalid or does not have access to this repository",
+                )
+            elif "not found" in stderr or "404" in stderr:
+                raise GitManagerError(
+                    message="Repository not found",
+                    error="The repository URL is invalid or does not exist",
+                )
+            else:
+                raise GitManagerError(
+                    message="Failed to connect to remote repository",
+                    error=result.stderr.strip(),
+                )
+
+        return True
