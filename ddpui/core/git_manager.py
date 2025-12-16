@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 
 
@@ -83,6 +84,24 @@ class GitManager:
             return f"https://oauth2:{pat}@{url_part}"
         else:
             raise ValueError(f"Unsupported URL format: {repo_url}")
+
+    @staticmethod
+    def sanitize_credentials(text: str) -> str:
+        """
+        Sanitize credentials from URLs in error messages or logs.
+
+        Removes oauth2:token@, user:pass@, or any credentials from URLs like:
+          https://oauth2:ghp_xxx@github.com/user/repo.git
+          https://user:password@gitlab.com/user/repo.git
+        To:
+          https://***@github.com/user/repo.git
+        """
+        # Pattern matches http(s)://credentials@host where credentials can be:
+        # - oauth2:token
+        # - user:password
+        # - just a token
+        pattern = r"(https?://)([^@]+)@"
+        return re.sub(pattern, r"\1***@", text)
 
     def init_repo(self, default_branch: str = "main") -> str:
         """Initialize a git repository with a specified default branch"""
@@ -328,8 +347,9 @@ class GitManager:
 
         auth_url = self.generate_oauth_url(remote_url)
 
+        # Use --quiet to suppress URL echo in output
         result = self._run_command(
-            ["git", "ls-remote", auth_url],
+            ["git", "ls-remote", "--quiet", auth_url],
             check=False,
         )
 
@@ -347,9 +367,11 @@ class GitManager:
                     error="The repository URL is invalid or does not exist",
                 )
             else:
+                # Sanitize stderr to avoid exposing credentials in error messages
+                sanitized_stderr = self.sanitize_credentials(result.stderr.strip())
                 raise GitManagerError(
                     message="Failed to connect to remote repository",
-                    error=result.stderr.strip(),
+                    error=sanitized_stderr,
                 )
 
         return True

@@ -229,8 +229,8 @@ def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
     # Handle PAT token storage (only if not masked)
     if not is_token_masked:
         # Create oauth URL for prefect secret block
-        gitrepo_url_with_token = payload.gitrepoUrl.replace(
-            "github.com", "oauth2:" + payload.gitrepoAccessToken + "@github.com"
+        gitrepo_url_with_token = GitManager.generate_oauth_url_static(
+            payload.gitrepoUrl, payload.gitrepoAccessToken
         )
 
         # Create or update the prefect secret block
