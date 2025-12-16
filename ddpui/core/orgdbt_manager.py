@@ -112,7 +112,7 @@ class DbtProjectManager:
 
             cmd = [params.dbt_binary] + command
 
-            result = subprocess.run(cmd, cwd=params.project_dir, capture_output=True, text=True)
+            result = subprocess.run(cmd, cwd=params.org_project_dir, capture_output=True, text=True)
         except Exception as e:
             raise DbtCommandError(
                 message="Failed to execute command",
