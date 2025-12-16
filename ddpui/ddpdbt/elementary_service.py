@@ -21,7 +21,6 @@ from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.constants import TASK_GENERATE_EDR
-from ddpui.celeryworkers.tasks import run_dbt_commands
 from ddpui.core.pipelinefunctions import setup_edr_send_report_task_config
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.core.orgdbt_manager import DbtProjectManager
@@ -170,6 +169,9 @@ def create_elementary_tracking_tables(org: Org):
     taskprogress = TaskProgress(task_id, hashkey)
 
     taskprogress.add({"message": "Added dbt commands in queue", "status": "queued"})
+
+    # Lazy import to avoid circular dependency
+    from ddpui.celeryworkers.tasks import run_dbt_commands
 
     # executes clean, deps, run
     run_dbt_commands.delay(
