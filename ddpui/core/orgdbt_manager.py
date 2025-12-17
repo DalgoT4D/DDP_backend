@@ -94,6 +94,7 @@ class DbtProjectManager:
         orgdbt: OrgDbt,
         command: list[str],
         check: bool = True,
+        cwd: str = None,
     ) -> subprocess.CompletedProcess:
         """
         Run a dbt command.
@@ -102,6 +103,7 @@ class DbtProjectManager:
             org: The organization
             orgdbt: The OrgDbt configuration
             command: The dbt command as a list (e.g., ["run"], ["test", "--select", "model_name"])
+            cwd: Working directory to run the command in. Defaults to project_dir (where dbt_project.yml exists)
 
         Returns:
             subprocess.CompletedProcess with the result
@@ -112,7 +114,10 @@ class DbtProjectManager:
 
             cmd = [params.dbt_binary] + command
 
-            result = subprocess.run(cmd, cwd=params.org_project_dir, capture_output=True, text=True)
+            # Default to project_dir where dbt_project.yml exists
+            working_dir = cwd if cwd else params.project_dir
+
+            result = subprocess.run(cmd, cwd=working_dir, capture_output=True, text=True)
         except Exception as e:
             raise DbtCommandError(
                 message="Failed to execute command",
