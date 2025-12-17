@@ -18,7 +18,6 @@ class ChartCreate(Schema):
     title: str
     description: Optional[str] = None
     chart_type: str
-    computation_type: str
     schema_name: str
     table_name: str
 
@@ -32,7 +31,6 @@ class ChartUpdate(Schema):
     title: Optional[str] = None
     description: Optional[str] = None
     chart_type: Optional[str] = None
-    computation_type: Optional[str] = None
     schema_name: Optional[str] = None
     table_name: Optional[str] = None
     extra_config: Optional[dict] = None
@@ -45,7 +43,6 @@ class ChartResponse(Schema):
     title: str
     description: Optional[str]
     chart_type: str
-    computation_type: str
     schema_name: str
     table_name: str
     extra_config: dict  # Contains all column configuration and customizations
@@ -58,7 +55,6 @@ class ChartDataPayload(Schema):
     """Schema for chart data request"""
 
     chart_type: str
-    computation_type: str
     schema_name: str
     table_name: str
 
@@ -109,7 +105,6 @@ class DataPreviewResponse(Schema):
 
 class ExecuteChartQuery(Schema):
     chart_type: str
-    computation_type: str
     x_axis: Optional[str] = None
     y_axis: Optional[str] = None
     dimension_col: Optional[str] = None
@@ -123,7 +118,6 @@ class TransformDataForChart(Schema):
     """Schema for transforming data for chart visualization"""
 
     chart_type: str
-    computation_type: str
     x_axis: Optional[str] = None
     y_axis: Optional[str] = None
     dimension_col: Optional[str] = None

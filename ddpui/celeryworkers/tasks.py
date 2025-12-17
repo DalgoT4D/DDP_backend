@@ -28,6 +28,7 @@ from ddpui.ddpdbt import elementary_service
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.awsses import send_text_message
 from ddpui.models.org_plans import OrgPlans, OrgPlanType
+from ddpui.ddpdbt.dbthelpers import create_or_update_org_cli_block
 from ddpui.models.org import (
     Org,
     OrgDbt,
@@ -244,23 +245,51 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
 
     logger.info("git clone succeeded for org %s", org.name)
 
-    dbt = OrgDbt(
-        gitrepo_url=payload["gitrepoUrl"],
-        project_dir=DbtProjectManager.get_dbt_repo_relative_path(dbtcloned_repo_path),
-        dbt_venv=DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH,
-        target_type=warehouse.wtype,
-        default_schema=payload["profile"]["target_configs_schema"],
-        transform_type=TransformType.GIT,
-    )
-    dbt.save()
-    logger.info("created orgdbt for org %s", org.name)
-    org.dbt = dbt
-    org.save()
-    logger.info("set org.dbt for org %s", org.name)
+    # create or update orgdbt model
+    try:
+        if org.dbt:
+            dbt = org.dbt
+            dbt.gitrepo_url = payload["gitrepoUrl"]
+            dbt.project_dir = DbtProjectManager.get_dbt_repo_relative_path(dbtcloned_repo_path)
+            dbt.dbt_venv = DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH
+            dbt.target_type = warehouse.wtype
+            dbt.default_schema = payload["profile"]["target_configs_schema"]
+            dbt.transform_type = TransformType.GIT
+            dbt.save()
+            logger.info("updated orgdbt for org %s", org.name)
+        else:
+            dbt = OrgDbt(
+                gitrepo_url=payload["gitrepoUrl"],
+                project_dir=DbtProjectManager.get_dbt_repo_relative_path(dbtcloned_repo_path),
+                dbt_venv=DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH,
+                target_type=warehouse.wtype,
+                default_schema=payload["profile"]["target_configs_schema"],
+                transform_type=TransformType.GIT,
+            )
+            dbt.save()
+            logger.info("created orgdbt for org %s", org.name)
+            org.dbt = dbt
+            org.save()
+            logger.info("set org.dbt for org %s", org.name)
+    except Exception as e:
+        taskprogress.add(
+            {
+                "message": "failed to write OrgDbt entry",
+                "status": "failed",
+            }
+        )
+        logger.error("failed to create orgdbt for org %s: %s", org.name, e)
+        raise Exception(f"Something went wrong while creating OrgDbt model : {e}")
 
     if payload["gitrepoAccessToken"] is not None:
-        secretsmanager.delete_github_token(org)
-        secretsmanager.save_github_token(org, payload["gitrepoAccessToken"])
+        if dbt.gitrepo_access_token_secret:
+            secretsmanager.update_github_pat(
+                dbt.gitrepo_access_token_secret, payload["gitrepoAccessToken"]
+            )
+        else:
+            pat_secret_key = secretsmanager.save_github_pat(payload["gitrepoAccessToken"])
+            dbt.gitrepo_access_token_secret = pat_secret_key
+            dbt.save()
 
     taskprogress.add(
         {
@@ -268,6 +297,45 @@ def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
             "status": "completed",
         }
     )
+
+    taskprogress.add(
+        {
+            "message": "creating dbt profile from the warehouse",
+            "status": "completed",
+        }
+    )
+    saved_creds = secretsmanager.retrieve_warehouse_credentials(warehouse)
+    if saved_creds is None:
+        taskprogress.add(
+            {
+                "message": "failed to retrieve warehouse credentials",
+                "status": "failed",
+            }
+        )
+        logger.error("failed to retrieve warehouse credentials for org %s", org.name)
+        raise Exception("failed to retrieve warehouse credentials for org %s" % org.name)
+
+    (cli_profile_block, dbt_project_params), error = create_or_update_org_cli_block(
+        org, warehouse, saved_creds
+    )
+
+    if error:
+        taskprogress.add(
+            {
+                "message": f"failed to create dbt cli profile: {error}",
+                "status": "failed",
+            }
+        )
+        logger.error("failed to create dbt cli profile for org %s: %s", org.name, error)
+        raise Exception(f"failed to create dbt cli profile for org {org.name}: {error}")
+
+    taskprogress.add(
+        {
+            "message": "set dbt workspace completed",
+            "status": "completed",
+        }
+    )
+
     logger.info("set dbt workspace completed for org %s", org.name)
 
 

@@ -245,7 +245,7 @@ def test_post_system_transformation_tasks_warehouse_not_setup(orguser_dbt_worksp
             "database": "the-database",
         }
     ),
-    retrieve_github_token=Mock(return_value="test-git-acccess-token"),
+    retrieve_github_pat=Mock(return_value="test-git-acccess-token"),
 )
 @patch.multiple(
     "ddpui.ddpprefect.prefect_service",
@@ -281,7 +281,7 @@ def test_post_system_transformation_tasks_success_postgres_warehouse(
             "database": "the-database",
         }
     ),
-    retrieve_github_token=Mock(return_value="test-git-acccess-token"),
+    retrieve_github_pat=Mock(return_value="test-git-acccess-token"),
 )
 @patch.multiple(
     "ddpui.ddpprefect.prefect_service",
