@@ -1,6 +1,8 @@
 import os
-import re
 import subprocess
+from urllib.parse import urlparse
+
+import requests
 
 
 class GitManagerError(Exception):
@@ -84,24 +86,6 @@ class GitManager:
             return f"https://oauth2:{pat}@{url_part}"
         else:
             raise ValueError(f"Unsupported URL format: {repo_url}")
-
-    @staticmethod
-    def sanitize_credentials(text: str) -> str:
-        """
-        Sanitize credentials from URLs in error messages or logs.
-
-        Removes oauth2:token@, user:pass@, or any credentials from URLs like:
-          https://oauth2:ghp_xxx@github.com/user/repo.git
-          https://user:password@gitlab.com/user/repo.git
-        To:
-          https://***@github.com/user/repo.git
-        """
-        # Pattern matches http(s)://credentials@host where credentials can be:
-        # - oauth2:token
-        # - user:password
-        # - just a token
-        pattern = r"(https?://)([^@]+)@"
-        return re.sub(pattern, r"\1***@", text)
 
     def init_repo(self, default_branch: str = "main") -> str:
         """Initialize a git repository with a specified default branch"""
@@ -331,13 +315,42 @@ class GitManager:
         result = self._run_command(cmd)
         return result.stdout.strip()
 
+    @staticmethod
+    def parse_github_url(remote_url: str) -> tuple[str, str]:
+        """
+        Parse a GitHub URL to extract owner and repo name.
+
+        :param remote_url: GitHub URL (e.g., https://github.com/owner/repo.git)
+        :return: Tuple of (owner, repo)
+        :raises GitManagerError: If URL is not a valid GitHub URL
+        """
+        parsed = urlparse(remote_url)
+
+        if parsed.hostname not in ("github.com", "www.github.com"):
+            raise GitManagerError(
+                message="Invalid GitHub URL",
+                error="Only GitHub URLs are supported (github.com)",
+            )
+
+        path_parts = parsed.path.strip("/").split("/")
+        if len(path_parts) < 2:
+            raise GitManagerError(
+                message="Invalid GitHub URL",
+                error="URL must be in format: https://github.com/owner/repo",
+            )
+
+        owner = path_parts[0]
+        repo = path_parts[1].removesuffix(".git")
+
+        return owner, repo
+
     def verify_remote_url(self, remote_url: str) -> bool:
         """
-        Verify that the remote URL is accessible with the PAT configured in this instance.
-        Uses `git ls-remote` to check connectivity without cloning.
+        Verify that the PAT has push (write) access to the remote repository.
+        Uses GitHub API to check permissions directly.
 
         :param remote_url: The remote repository URL to verify
-        :return: True if the remote is accessible, raises GitManagerError otherwise
+        :return: True if the PAT has push access, raises GitManagerError otherwise
         """
         if not self.pat:
             raise GitManagerError(
@@ -345,33 +358,42 @@ class GitManager:
                 error="A Personal Access Token is required to verify remote URL",
             )
 
-        auth_url = self.generate_oauth_url(remote_url)
+        owner, repo = self.parse_github_url(remote_url)
 
-        # Use --quiet to suppress URL echo in output
-        result = self._run_command(
-            ["git", "ls-remote", "--quiet", auth_url],
-            check=False,
+        response = requests.get(
+            f"https://api.github.com/repos/{owner}/{repo}",
+            headers={
+                "Authorization": f"Bearer {self.pat}",
+                "Accept": "application/vnd.github+json",
+            },
+            timeout=30,
         )
 
-        if result.returncode != 0:
-            # Parse common error messages for better user feedback
-            stderr = result.stderr.strip().lower()
-            if "authentication" in stderr or "403" in stderr or "401" in stderr:
-                raise GitManagerError(
-                    message="Authentication failed",
-                    error="The PAT token is invalid or does not have access to this repository",
-                )
-            elif "not found" in stderr or "404" in stderr:
-                raise GitManagerError(
-                    message="Repository not found",
-                    error="The repository URL is invalid or does not exist",
-                )
-            else:
-                # Sanitize stderr to avoid exposing credentials in error messages
-                sanitized_stderr = self.sanitize_credentials(result.stderr.strip())
-                raise GitManagerError(
-                    message="Failed to connect to remote repository",
-                    error=sanitized_stderr,
-                )
+        if response.status_code == 401:
+            raise GitManagerError(
+                message="Authentication failed",
+                error="The PAT token is invalid",
+            )
+
+        if response.status_code == 404:
+            raise GitManagerError(
+                message="Repository not found",
+                error="The repository does not exist or the PAT does not have access to it",
+            )
+
+        if response.status_code != 200:
+            raise GitManagerError(
+                message="Failed to verify repository access",
+                error=f"GitHub API returned status {response.status_code}",
+            )
+
+        data = response.json()
+        permissions = data.get("permissions", {})
+
+        if not permissions.get("push", False):
+            raise GitManagerError(
+                message="Insufficient permissions",
+                error="The PAT does not have write (push) access to this repository",
+            )
 
         return True

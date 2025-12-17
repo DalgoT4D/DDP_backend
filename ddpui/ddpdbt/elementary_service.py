@@ -33,6 +33,7 @@ from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE, DBTCLIPROFILE
 from ddpui.utils.timezone import as_ist
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.celeryworkers.tasks import run_dbt_commands
 
 logger = CustomLogger("ddpui")
 
@@ -169,9 +170,6 @@ def create_elementary_tracking_tables(org: Org):
     taskprogress = TaskProgress(task_id, hashkey)
 
     taskprogress.add({"message": "Added dbt commands in queue", "status": "queued"})
-
-    # Lazy import to avoid circular dependency
-    from ddpui.celeryworkers.tasks import run_dbt_commands
 
     # executes clean, deps, run
     run_dbt_commands.delay(
