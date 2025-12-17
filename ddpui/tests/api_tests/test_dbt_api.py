@@ -809,7 +809,7 @@ def test_put_connect_git_remote_workspace_errors(seed_db, orguser: OrgUser):
         put_connect_git_remote(request, payload)
     assert str(excinfo.value) == "Create a dbt workspace first"
 
-    # Test 2: Project directory doesn't exist
+    # Test 2: DBT repo directory doesn't exist
     orgdbt = OrgDbt.objects.create()
     request.orguser.org.dbt = orgdbt
     request.orguser.org.save()
@@ -819,22 +819,6 @@ def test_put_connect_git_remote_workspace_errors(seed_db, orguser: OrgUser):
         return_value="/nonexistent/path",
     ), patch("ddpui.api.dbt_api.Path") as mock_path:
         mock_path.return_value.exists.return_value = False
-        with pytest.raises(HttpError) as excinfo:
-            put_connect_git_remote(request, payload)
-        assert str(excinfo.value) == "DBT project directory does not exist"
-
-    # Test 3: Repo directory doesn't exist
-    with patch(
-        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
-        return_value="/existing/path",
-    ), patch("ddpui.api.dbt_api.Path") as mock_path:
-        mock_project_dir = Mock()
-        mock_project_dir.exists.return_value = True
-        mock_dbt_repo_dir = Mock()
-        mock_dbt_repo_dir.exists.return_value = False
-        mock_project_dir.__truediv__ = Mock(return_value=mock_dbt_repo_dir)
-        mock_path.return_value = mock_project_dir
-
         with pytest.raises(HttpError) as excinfo:
             put_connect_git_remote(request, payload)
         assert str(excinfo.value) == "DBT repo directory does not exist"
