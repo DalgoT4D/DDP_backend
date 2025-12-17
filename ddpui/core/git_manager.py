@@ -1,8 +1,11 @@
+import logging
 import os
 import subprocess
 from urllib.parse import urlparse
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 
 class GitManagerError(Exception):
@@ -360,14 +363,26 @@ class GitManager:
 
         owner, repo = self.parse_github_url(remote_url)
 
-        response = requests.get(
-            f"https://api.github.com/repos/{owner}/{repo}",
-            headers={
-                "Authorization": f"Bearer {self.pat}",
-                "Accept": "application/vnd.github+json",
-            },
-            timeout=30,
-        )
+        try:
+            response = requests.get(
+                f"https://api.github.com/repos/{owner}/{repo}",
+                headers={
+                    "Authorization": f"Bearer {self.pat}",
+                    "Accept": "application/vnd.github+json",
+                },
+                timeout=30,
+            )
+        except requests.exceptions.RequestException as e:
+            logger.exception(
+                "Network error while verifying GitHub repo access for %s/%s: %s",
+                owner,
+                repo,
+                str(e),
+            )
+            raise GitManagerError(
+                message="Network error",
+                error=f"Failed to connect to GitHub API: {str(e)}",
+            ) from e
 
         if response.status_code == 401:
             raise GitManagerError(
