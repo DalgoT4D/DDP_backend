@@ -24,11 +24,17 @@ from ddpui.utils.constants import (
 )
 from ddpui.ddpdbt import dbt_service, elementary_service
 from ddpui.ddpprefect import SECRET, prefect_service
-from ddpui.ddpprefect.schema import OrgDbtGitHub, OrgDbtSchema, OrgDbtTarget, PrefectSecretBlockEdit
+from ddpui.ddpprefect.schema import (
+    OrgDbtGitHub,
+    OrgDbtSchema,
+    OrgDbtTarget,
+    OrgDbtConnectGitRemote,
+    PrefectSecretBlockEdit,
+)
 from ddpui.models.org import OrgPrefectBlockv1, Org, OrgWarehouse, OrgDbt
 from ddpui.models.org_user import OrgUser, OrgUserResponse
 from ddpui.core.orgdbt_manager import DbtProjectManager
-from ddpui.core.git_manager import GitManager
+from ddpui.core.git_manager import GitManager, GitManagerError
 from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.dbtdocs import create_single_html
@@ -149,6 +155,116 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
     )
 
     return {"task_id": task.id}
+
+
+@dbt_router.put("/connect_git_remote/")
+@has_permission(["can_edit_dbt_workspace"])
+def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
+    """
+    Connect an existing local git repository to a remote GitHub URL.
+
+    This endpoint is for users who have already set up their local DBT workspace
+    and initialized git locally. It allows them to connect to a remote GitHub
+    repository without cloning.
+
+    Actions:
+    1. Validates the OrgDbt workspace exists and git is initialized locally
+    2. Verifies the remote URL is accessible with the provided PAT
+    3. Sets/updates the remote origin in the local git repository
+    4. Stores/updates the PAT token in secrets manager
+    5. Updates OrgDbt.gitrepo_url in database
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    orgdbt = org.dbt
+
+    if orgdbt is None:
+        raise HttpError(400, "Create a dbt workspace first")
+    # Get the dbt repo directory (get_dbt_project_dir already returns the full path including dbtrepo)
+    dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+    if not dbt_repo_dir.exists():
+        raise HttpError(400, "DBT repo directory does not exist")
+
+    # Check if token is masked (user only wants to update URL, not PAT)
+    is_token_masked = set(payload.gitrepoAccessToken.strip()) == set("*")
+
+    # Determine which PAT to use for verification
+    if is_token_masked:
+        # Token is masked, retrieve the actual PAT from secrets manager
+        if not orgdbt.gitrepo_access_token_secret:
+            raise HttpError(
+                400, "Cannot use masked token - no existing PAT found. Please provide a valid PAT."
+            )
+        actual_pat = secretsmanager.retrieve_github_pat(orgdbt.gitrepo_access_token_secret)
+        if not actual_pat:
+            raise HttpError(400, "Failed to retrieve existing PAT from secrets manager")
+    else:
+        actual_pat = payload.gitrepoAccessToken
+
+    # Validate git is initialized locally
+    try:
+        git_manager = GitManager(
+            repo_local_path=str(dbt_repo_dir), pat=actual_pat, validate_git=True
+        )
+    except GitManagerError as e:
+        raise HttpError(400, f"Git is not initialized in the DBT repo: {e.message}") from e
+
+    # Verify remote URL is accessible with the PAT
+    try:
+        git_manager.verify_remote_url(payload.gitrepoUrl)
+    except GitManagerError as e:
+        raise HttpError(400, f"{e.message}: {e.error}") from e
+
+    # Set or update the remote origin
+    try:
+        git_manager.set_remote(payload.gitrepoUrl)
+    except GitManagerError as e:
+        raise HttpError(500, f"Failed to set remote: {e.message}") from e
+
+    # Handle PAT token storage (only if not masked)
+    if not is_token_masked:
+        # Create oauth URL for prefect secret block
+        gitrepo_url_with_token = GitManager.generate_oauth_url_static(
+            payload.gitrepoUrl, payload.gitrepoAccessToken
+        )
+
+        # Create or update the prefect secret block
+        secret_block_edit_params = PrefectSecretBlockEdit(
+            block_name=f"{org.slug}-git-pull-url",
+            secret=gitrepo_url_with_token,
+        )
+
+        response = prefect_service.upsert_secret_block(secret_block_edit_params)
+        if not OrgPrefectBlockv1.objects.filter(
+            org=org, block_type=SECRET, block_name=secret_block_edit_params.block_name
+        ).exists():
+            OrgPrefectBlockv1.objects.create(
+                org=org,
+                block_type=SECRET,
+                block_name=secret_block_edit_params.block_name,
+                block_id=response["block_id"],
+            )
+
+        # Update or create PAT in secrets manager
+        if orgdbt.gitrepo_access_token_secret:
+            secretsmanager.update_github_pat(
+                orgdbt.gitrepo_access_token_secret, payload.gitrepoAccessToken
+            )
+        else:
+            pat_secret_key = secretsmanager.save_github_pat(payload.gitrepoAccessToken)
+            orgdbt.gitrepo_access_token_secret = pat_secret_key
+
+    # Update OrgDbt with the new gitrepo_url
+    orgdbt.gitrepo_url = payload.gitrepoUrl
+    orgdbt.save()
+
+    logger.info(f"Connected git remote for org {org.slug}: {payload.gitrepoUrl}")
+
+    return {
+        "success": True,
+        "gitrepo_url": payload.gitrepoUrl,
+        "message": "Successfully connected to remote git repository",
+    }
 
 
 @dbt_router.delete("/workspace/", response=OrgUserResponse)

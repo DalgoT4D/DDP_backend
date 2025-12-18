@@ -1,5 +1,11 @@
+import logging
 import os
 import subprocess
+from urllib.parse import urlparse
+
+import requests
+
+logger = logging.getLogger(__name__)
 
 
 class GitManagerError(Exception):
@@ -311,3 +317,91 @@ class GitManager:
 
         result = self._run_command(cmd)
         return result.stdout.strip()
+
+    @staticmethod
+    def parse_github_url_for_owner_and_repo(remote_url: str) -> tuple[str, str]:
+        """
+        Parse a GitHub URL to extract owner and repo name.
+
+        :param remote_url: GitHub URL (e.g., https://github.com/owner/repo.git)
+        :return: Tuple of (owner, repo)
+        :raises GitManagerError: If URL is not a valid GitHub URL
+        """
+        parsed = urlparse(remote_url)
+
+        if parsed.hostname not in ("github.com", "www.github.com"):
+            raise GitManagerError(
+                message="Invalid GitHub URL",
+                error="Only GitHub URLs are supported (github.com)",
+            )
+
+        path_parts = parsed.path.strip("/").split("/")
+        if len(path_parts) < 2:
+            raise GitManagerError(
+                message="Invalid GitHub URL",
+                error="URL must be in format: https://github.com/owner/repo",
+            )
+
+        owner = path_parts[0]
+        repo = path_parts[1].removesuffix(".git")
+
+        return owner, repo
+
+    def verify_remote_url(self, remote_url: str) -> bool:
+        """
+        Verify that the PAT has push (write) access to the remote repository.
+        Uses GitHub API to check permissions directly.
+
+        :param remote_url: The remote repository URL to verify
+        :return: True if the PAT has push access, raises GitManagerError otherwise
+        """
+        if not self.pat:
+            raise GitManagerError(
+                message="PAT not configured",
+                error="A Personal Access Token is required to verify remote URL",
+            )
+
+        owner, repo = self.parse_github_url_for_owner_and_repo(remote_url)
+
+        try:
+            response = requests.get(
+                f"https://api.github.com/repos/{owner}/{repo}",
+                headers={
+                    "Authorization": f"Bearer {self.pat}",
+                    "Accept": "application/vnd.github+json",
+                },
+                timeout=30,
+            )
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            status_code = e.response.status_code
+            if status_code == 401:
+                raise GitManagerError(
+                    message="Authentication failed",
+                    error=f"[{status_code}] The PAT token is invalid",
+                ) from e
+            if status_code == 404:
+                raise GitManagerError(
+                    message="Repository not found",
+                    error=f"[{status_code}] The repository does not exist or the PAT does not have access to it",
+                ) from e
+            raise GitManagerError(
+                message="Failed to verify repository access",
+                error=f"[{status_code}] GitHub API error: {str(e)}",
+            ) from e
+        except requests.RequestException as e:
+            raise GitManagerError(
+                message="Network error",
+                error=f"Failed to connect to GitHub API: {str(e)}",
+            ) from e
+
+        data = response.json()
+        permissions = data.get("permissions", {})
+
+        if not permissions.get("push", False):
+            raise GitManagerError(
+                message="Insufficient permissions",
+                error="The PAT does not have write (push) access to this repository",
+            )
+
+        return True

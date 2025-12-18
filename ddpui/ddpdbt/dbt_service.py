@@ -152,6 +152,7 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str):
         org.dbt = dbt
         org.save()
         logger.info("set org.dbt for org %s", org.name)
+        orgdbt = dbt
     else:
         orgdbt.project_dir = DbtProjectManager.get_dbt_repo_relative_path(dbtrepo_dir)
         orgdbt.target_type = warehouse.wtype
@@ -172,6 +173,7 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str):
 
     # dbt init
     try:
+        # dbt init must run from parent directory (project_dir) because it creates the dbtrepo folder
         DbtProjectManager.run_dbt_command(
             org,
             orgdbt,
@@ -180,6 +182,7 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str):
                 project_name,
                 "--skip-profile-setup",
             ],
+            cwd=str(project_dir),
         )
 
         # Delete example models

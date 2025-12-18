@@ -21,7 +21,6 @@ from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.constants import TASK_GENERATE_EDR
-from ddpui.celeryworkers.tasks import run_dbt_commands
 from ddpui.core.pipelinefunctions import setup_edr_send_report_task_config
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.core.orgdbt_manager import DbtProjectManager
@@ -34,6 +33,7 @@ from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE, DBTCLIPROFILE
 from ddpui.utils.timezone import as_ist
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.celeryworkers.tasks import run_dbt_commands
 
 logger = CustomLogger("ddpui")
 
