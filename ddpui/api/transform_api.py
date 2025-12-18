@@ -1207,10 +1207,11 @@ def put_operation_node(request, node_uuid: str, payload: EditOperationNodePayloa
                             name=f"{dbtmodel_input.src_model.schema}.{dbtmodel_input.src_model.name}",
                         )
 
-                    CanvasEdge.objects.create(
+                    # do an update or create for the edge
+                    CanvasEdge.objects.update_or_create(
                         from_node=src_model_node,
                         to_node=curr_operation_node,
-                        seq=dbtmodel_input.seq,
+                        defaults={"seq": dbtmodel_input.seq},
                     )
 
             logger.info(f"operation created successfully: {curr_operation_node.uuid}")
