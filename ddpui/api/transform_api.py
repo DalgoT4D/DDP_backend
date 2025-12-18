@@ -1177,17 +1177,10 @@ def put_operation_node(request, node_uuid: str, payload: EditOperationNodePayloa
         if "other_inputs" in final_op_config["config"]:
             del final_op_config["config"]["other_inputs"]  # clean up before saving
 
-        with transaction.atomic():
-            # Create the operation canvas node
-            curr_operation_node.operation_config = final_op_config
-            curr_operation_node.name = payload.op_type
-            curr_operation_node.output_cols = output_cols
-            curr_operation_node.save()
-
-            # remove the edges from other input nodes first
-            if is_multi_input_op:
-                CanvasEdge.objects.filter(to_node=curr_operation_node).exclude(seq=1).delete()
-
+        # remove the edges from other input nodes first
+        if is_multi_input_op:
+            from_input_nodes_ids = []
+            with transaction.atomic():
                 for dbtmodel_input in other_input_models:
                     # check if corresponding canvas node is already created
                     # create if its not there
@@ -1207,14 +1200,35 @@ def put_operation_node(request, node_uuid: str, payload: EditOperationNodePayloa
                             name=f"{dbtmodel_input.src_model.schema}.{dbtmodel_input.src_model.name}",
                         )
 
-                    CanvasEdge.objects.create(
-                        from_node=src_model_node,
-                        to_node=curr_operation_node,
-                        seq=dbtmodel_input.seq,
-                    )
+                    from_input_nodes_ids.append(src_model_node.id)
 
-            logger.info(f"operation created successfully: {curr_operation_node.uuid}")
-            return convert_canvas_node_to_frontend_format(curr_operation_node)
+                    curr_edge = CanvasEdge.objects.filter(
+                        from_node=src_model_node, to_node=curr_operation_node
+                    ).first()
+                    if not curr_edge:
+                        curr_edge = CanvasEdge.objects.create(
+                            from_node=src_model_node,
+                            to_node=curr_operation_node,
+                            seq=dbtmodel_input.seq,
+                        )
+                    else:
+                        curr_edge.seq = dbtmodel_input.seq
+                        curr_edge.save()
+
+                # delete edges that are no longer needed except the main input edge (seq=1)
+                # use the from_input_nodes_ids to determine which edges to keep
+                CanvasEdge.objects.filter(to_node=curr_operation_node).exclude(seq=1).exclude(
+                    from_node_id__in=from_input_nodes_ids
+                ).delete()
+
+        # Update the operation canvas node
+        curr_operation_node.operation_config = final_op_config
+        curr_operation_node.name = payload.op_type
+        curr_operation_node.output_cols = output_cols
+        curr_operation_node.save()
+
+        logger.info(f"operation created successfully: {curr_operation_node.uuid}")
+        return convert_canvas_node_to_frontend_format(curr_operation_node)
 
     except CanvasNode.DoesNotExist:
         logger.error(f"Operation node {node_uuid} not found")
