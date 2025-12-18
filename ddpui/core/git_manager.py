@@ -319,7 +319,7 @@ class GitManager:
         return result.stdout.strip()
 
     @staticmethod
-    def parse_github_url(remote_url: str) -> tuple[str, str]:
+    def parse_github_url_for_owner_and_repo(remote_url: str) -> tuple[str, str]:
         """
         Parse a GitHub URL to extract owner and repo name.
 
@@ -361,7 +361,7 @@ class GitManager:
                 error="A Personal Access Token is required to verify remote URL",
             )
 
-        owner, repo = self.parse_github_url(remote_url)
+        owner, repo = self.parse_github_url_for_owner_and_repo(remote_url)
 
         try:
             response = requests.get(
@@ -372,35 +372,28 @@ class GitManager:
                 },
                 timeout=30,
             )
-        except requests.exceptions.RequestException as e:
-            logger.exception(
-                "Network error while verifying GitHub repo access for %s/%s: %s",
-                owner,
-                repo,
-                str(e),
-            )
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            status_code = e.response.status_code
+            if status_code == 401:
+                raise GitManagerError(
+                    message="Authentication failed",
+                    error=f"[{status_code}] The PAT token is invalid",
+                ) from e
+            if status_code == 404:
+                raise GitManagerError(
+                    message="Repository not found",
+                    error=f"[{status_code}] The repository does not exist or the PAT does not have access to it",
+                ) from e
+            raise GitManagerError(
+                message="Failed to verify repository access",
+                error=f"[{status_code}] GitHub API error: {str(e)}",
+            ) from e
+        except requests.RequestException as e:
             raise GitManagerError(
                 message="Network error",
                 error=f"Failed to connect to GitHub API: {str(e)}",
             ) from e
-
-        if response.status_code == 401:
-            raise GitManagerError(
-                message="Authentication failed",
-                error="The PAT token is invalid",
-            )
-
-        if response.status_code == 404:
-            raise GitManagerError(
-                message="Repository not found",
-                error="The repository does not exist or the PAT does not have access to it",
-            )
-
-        if response.status_code != 200:
-            raise GitManagerError(
-                message="Failed to verify repository access",
-                error=f"GitHub API returned status {response.status_code}",
-            )
 
         data = response.json()
         permissions = data.get("permissions", {})
