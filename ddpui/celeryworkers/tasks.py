@@ -348,20 +348,21 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
 
     # Lock all dbt tasks that will be run
     task_locks: list[TaskLock] = []
-    orgtasks = OrgTask.objects.filter(
-        dbt__id=orgdbt_id, task__slug__in=[TASK_DBTCLEAN, TASK_DBTDEPS, TASK_DBTRUN]
-    )
-    for orgtask in orgtasks:
-        task_lock, task_lock_created = TaskLock.objects.get_or_create(
-            orgtask=orgtask, locked_by=system_user, celery_task_id=task_id
-        )
-        if not task_lock_created:
-            task_lock.locked_at = datetime.now()
-            task_lock.save()
-
-        task_locks.append(task_lock)
 
     try:
+        orgtasks = OrgTask.objects.filter(
+            dbt__id=orgdbt_id, task__slug__in=[TASK_DBTCLEAN, TASK_DBTDEPS, TASK_DBTRUN]
+        )
+        for orgtask in orgtasks:
+            task_lock, task_lock_created = TaskLock.objects.get_or_create(
+                orgtask=orgtask, locked_by=system_user, celery_task_id=task_id
+            )
+            if not task_lock_created:
+                task_lock.locked_at = datetime.now()
+                task_lock.save()
+
+            task_locks.append(task_lock)
+
         logger.info("found org %s", org.name)
 
         taskprogress = TaskProgress(
@@ -419,7 +420,7 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
                 }
             )
             process: subprocess.CompletedProcess = DbtProjectManager.run_dbt_command(
-                org, orgdbt, ["clean", "--profiles-dir=profiles"]
+                org, orgdbt, ["clean"], keyword_args={"profiles-dir": "profiles"}
             )
             command_output = process.stdout.split("\n")
             for cmd_out in command_output:
@@ -449,7 +450,7 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
         try:
             taskprogress.add({"message": "starting dbt deps", "status": "running"})
             process: subprocess.CompletedProcess = DbtProjectManager.run_dbt_command(
-                org, orgdbt, ["deps", "--profiles-dir=profiles"]
+                org, orgdbt, ["deps"], keyword_args={"profiles-dir": "profiles"}
             )
             command_output = process.stdout.split("\n")
             taskprogress.add(
@@ -484,16 +485,15 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
         # dbt run
         try:
             flags = []
-            keyval_args = []
+            keyword_args = {"profiles-dir": "profiles"}
             if dbt_run_params is not None:
-                for flag in dbt_run_params.get("flags") or []:
-                    flags.append(f"--{flag}")
+                flags = dbt_run_params.get("flags") or []
                 for optname, optval in (dbt_run_params.get("options") or {}).items():
-                    keyval_args.append(f"--{optname} {optval}")
+                    keyword_args[optname] = optval
 
             taskprogress.add({"message": "starting dbt run", "status": "running"})
             process: subprocess.CompletedProcess = DbtProjectManager.run_dbt_command(
-                org, orgdbt, ["run", "--profiles-dir=profiles"] + flags + keyval_args
+                org, orgdbt, ["run"], keyword_args=keyword_args, flags=flags
             )
 
             command_output = process.stdout.split("\n")

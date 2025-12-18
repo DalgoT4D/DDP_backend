@@ -95,6 +95,8 @@ class DbtProjectManager:
         command: list[str],
         check: bool = True,
         cwd: str = None,
+        keyword_args: dict = None,
+        flags: list = None,
     ) -> subprocess.CompletedProcess:
         """
         Run a dbt command.
@@ -102,8 +104,10 @@ class DbtProjectManager:
         Args:
             org: The organization
             orgdbt: The OrgDbt configuration
-            command: The dbt command as a list (e.g., ["run"], ["test", "--select", "model_name"])
+            command: The dbt command as a list (e.g., ["run"], ["test"])
             cwd: Working directory to run the command in. Defaults to project_dir (where dbt_project.yml exists)
+            keyword_args: Dict of keyword arguments (e.g., {"select": "+model_name", "profiles-dir": "profiles"})
+            flags: List of boolean flags (e.g., ["full-refresh", "no-partial-parse"])
 
         Returns:
             subprocess.CompletedProcess with the result
@@ -113,6 +117,17 @@ class DbtProjectManager:
             params = cls.gather_dbt_project_params(org, orgdbt)
 
             cmd = [params.dbt_binary] + command
+
+            # Add keyword arguments (e.g., select -> --select model_name)
+            if keyword_args:
+                for key, value in keyword_args.items():
+                    flag = f"--{key}" if not key.startswith("-") else key
+                    cmd.extend([flag, str(value)])
+
+            # Add boolean flags (e.g., full-refresh -> --full-refresh)
+            if flags:
+                for flag in flags:
+                    cmd.append(f"--{flag}" if not flag.startswith("-") else flag)
 
             # Default to project_dir where dbt_project.yml exists
             working_dir = cwd if cwd else params.project_dir
