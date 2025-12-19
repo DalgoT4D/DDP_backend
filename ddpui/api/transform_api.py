@@ -148,7 +148,7 @@ def sync_sources(request):
 ########################## Models & Sources #############################################
 
 
-@transform_router.post("/dbt_project/model/")
+@transform_router.post("/dbt_project/model/", deprecated=True)
 @has_permission(["can_create_dbt_model"])
 def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     """
@@ -230,7 +230,7 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     return from_orgdbtoperation(dbt_op, chain_length=dbt_op.seq)
 
 
-@transform_router.put("/dbt_project/model/operations/{operation_uuid}/")
+@transform_router.put("/dbt_project/model/operations/{operation_uuid}/", deprecated=True)
 @has_permission(["can_edit_dbt_operation"])
 def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload):
     """
@@ -318,7 +318,7 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
     return from_orgdbtoperation(dbt_operation, chain_length=len(all_ops))
 
 
-@transform_router.get("/dbt_project/model/operations/{operation_uuid}/")
+@transform_router.get("/dbt_project/model/operations/{operation_uuid}/", deprecated=True)
 @has_permission(["can_view_dbt_operation"])
 def get_operation(request, operation_uuid: str):
     """
@@ -368,7 +368,7 @@ def get_operation(request, operation_uuid: str):
     return from_orgdbtoperation(dbt_operation, prev_source_columns=prev_source_columns)
 
 
-@transform_router.post("/dbt_project/model/{model_uuid}/save/")
+@transform_router.post("/dbt_project/model/{model_uuid}/save/", deprecated=True)
 @has_permission(["can_edit_dbt_model"])
 def post_save_model(request, model_uuid: str, payload: CompleteDbtModelPayload):
     """Complete the model; create the dbt model on disk"""
@@ -454,7 +454,7 @@ def get_input_sources_and_models(request, schema_name: str = None):
     return res
 
 
-@transform_router.get("/dbt_project/graph/")
+@transform_router.get("/dbt_project/graph/", deprecated=True)
 @has_permission(["can_view_dbt_workspace"])
 def get_dbt_project_DAG(request):
     """
@@ -563,7 +563,7 @@ def get_dbt_project_DAG(request):
     return res
 
 
-@transform_router.delete("/dbt_project/model/{model_uuid}/")
+@transform_router.delete("/dbt_project/model/{model_uuid}/", deprecated=True)
 @has_permission(["can_delete_dbt_model"])
 def delete_model(request, model_uuid, canvas_lock_id: str = None, cascade: bool = False):
     """
@@ -600,7 +600,7 @@ def delete_model(request, model_uuid, canvas_lock_id: str = None, cascade: bool 
     return {"success": 1}
 
 
-@transform_router.delete("/dbt_project/source/{model_uuid}/")
+@transform_router.delete("/dbt_project/source/{model_uuid}/", deprecated=True)
 @has_permission(["can_delete_dbt_model"])
 def delete_source(request, model_uuid, canvas_lock_id: str = None, cascade: bool = False):
     """
@@ -636,7 +636,7 @@ def delete_source(request, model_uuid, canvas_lock_id: str = None, cascade: bool
     return {"success": 1}
 
 
-@transform_router.delete("/dbt_project/model/operations/{operation_uuid}/")
+@transform_router.delete("/dbt_project/model/operations/{operation_uuid}/", deprecated=True)
 @has_permission(["can_delete_dbt_operation"])
 def delete_operation(request, operation_uuid, canvas_lock_id: str = None):
     """
