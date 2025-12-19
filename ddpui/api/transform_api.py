@@ -1,7 +1,7 @@
 import uuid
 import shutil
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 from ninja import Router
@@ -10,6 +10,7 @@ from ninja.errors import HttpError
 from django.db.models import Q
 from django.utils.text import slugify
 from django.db import transaction
+from django.utils import timezone
 
 from ddpui.datainsights import warehouse
 from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace, parse_dbt_manifest_to_canvas
@@ -25,7 +26,6 @@ from ddpui.schemas.dbt_workflow_schema import (
     CompleteDbtModelPayload,
     CreateOperationNodePayload,
     EditDbtOperationPayload,
-    LockCanvasRequestSchema,
     LockCanvasResponseSchema,
     EditOperationNodePayload,
     ModelSrcInputsForMultiInputOp,
@@ -34,7 +34,7 @@ from ddpui.schemas.dbt_workflow_schema import (
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.utils.taskprogress import TaskProgress
-from ddpui.core.transformfunctions import validate_operation_config, check_canvas_locked
+from ddpui.core.transformfunctions import validate_operation_config
 from ddpui.api.warehouse_api import get_warehouse_data
 from ddpui.models.tasks import TaskProgressHashPrefix
 
@@ -167,7 +167,7 @@ def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
-    check_canvas_locked(orguser, payload.canvas_lock_id)
+    validate_canvas_lock(orguser, orgdbt)
 
     if payload.op_type not in dbtautomation_service.OPERATIONS_DICT.keys():
         raise HttpError(422, "Operation not supported")
@@ -250,7 +250,7 @@ def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
-    check_canvas_locked(orguser, payload.canvas_lock_id)
+    validate_canvas_lock(orguser, orgdbt)
 
     try:
         uuid.UUID(str(operation_uuid))
@@ -404,7 +404,7 @@ def post_save_model(request, model_uuid: str, payload: CompleteDbtModelPayload):
     ):
         raise HttpError(422, "model with this name already exists in the schema")
 
-    check_canvas_locked(orguser, payload.canvas_lock_id)
+    validate_canvas_lock(orguser, orgdbt)
 
     payload.name = slugify(payload.name)
 
@@ -586,7 +586,7 @@ def delete_model(request, model_uuid, canvas_lock_id: str = None, cascade: bool 
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
-    check_canvas_locked(orguser, canvas_lock_id)
+    validate_canvas_lock(orguser, orgdbt)
 
     orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid, type=OrgDbtModelType.MODEL).first()
     if not orgdbt_model:
@@ -622,7 +622,7 @@ def delete_source(request, model_uuid, canvas_lock_id: str = None, cascade: bool
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
-    check_canvas_locked(orguser, canvas_lock_id)
+    validate_canvas_lock(orguser, orgdbt)
 
     orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid, type=OrgDbtModelType.SOURCE).first()
     if not orgdbt_model:
@@ -655,7 +655,7 @@ def delete_operation(request, operation_uuid, canvas_lock_id: str = None):
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
-    check_canvas_locked(orguser, canvas_lock_id)
+    validate_canvas_lock(orguser, orgdbt)
 
     dbt_operation = OrgDbtOperation.objects.filter(uuid=operation_uuid).first()
     if not dbt_operation:
@@ -688,78 +688,136 @@ def get_warehouse_datatypes(request):
     return data_types
 
 
-@transform_router.post(
-    "/dbt_project/canvas/lock/",
-    response=LockCanvasResponseSchema,
-)
+# Canvas Lock endpoints (matching dashboard pattern)
+@transform_router.post("/dbt_project/canvas/lock/", response=LockCanvasResponseSchema)
 @has_permission(["can_edit_dbt_model"])
-def post_lock_canvas(request, payload: LockCanvasRequestSchema):
-    """
-    Lock the canvas for the org
-    """
+def lock_canvas(request):
+    """Lock canvas for editing"""
     orguser: OrgUser = request.orguser
     org = orguser.org
 
-    canvas_lock = CanvasLock.objects.filter(locked_by__org=org).first()
+    # Get the dbt project via org.dbt relationship
+    orgdbt = getattr(org, "dbt", None)
+    if orgdbt is None:
+        raise HttpError(404, "dbt workspace not setup")
 
-    if canvas_lock:
-        # locked, but not by the requestor
-        if canvas_lock.locked_by != orguser:
-            # no lock_id => didn't acquire the lock
-            return LockCanvasResponseSchema(
-                locked_by=canvas_lock.locked_by.user.email,
-                locked_at=canvas_lock.locked_at.isoformat(),
-            )
-
-        # locked by the requestor
-        else:
-            # only if this is the right session do we refresh the lock
-            if payload.lock_id == canvas_lock.lock_id:
-                canvas_lock.locked_at = datetime.now()
-                canvas_lock.save()
-            else:
-                # no lock_id => didn't acquire the lock
+    # Check if already locked
+    try:
+        lock = orgdbt.canvas_lock
+        if not lock.is_expired():
+            if lock.locked_by == orguser:
+                # Refresh lock with 2-minute duration
+                lock.expires_at = timezone.now() + timedelta(minutes=2)
+                lock.save()
                 return LockCanvasResponseSchema(
-                    locked_by=canvas_lock.locked_by.user.email,
-                    locked_at=canvas_lock.locked_at.isoformat(),
+                    lock_token=lock.lock_token,
+                    expires_at=lock.expires_at.isoformat(),
+                    locked_by=lock.locked_by.user.email,
                 )
+            else:
+                raise HttpError(423, f"Canvas is already locked by {lock.locked_by.user.email}")
+        else:
+            # Delete expired lock
+            lock.delete()
+    except CanvasLock.DoesNotExist:
+        pass
 
-    # no lock, acquire
-    else:
-        canvas_lock = CanvasLock.objects.create(
-            locked_by=orguser, locked_at=datetime.now(), lock_id=uuid.uuid4()
-        )
+    # Create new lock with 2-minute duration
+    lock = CanvasLock.objects.create(
+        dbt=orgdbt,
+        locked_by=orguser,
+        lock_token=str(uuid.uuid4()),
+        expires_at=timezone.now() + timedelta(minutes=2),
+    )
 
     return LockCanvasResponseSchema(
-        locked_by=canvas_lock.locked_by.user.email,
-        locked_at=canvas_lock.locked_at.isoformat(),
-        lock_id=str(canvas_lock.lock_id),
+        lock_token=lock.lock_token,
+        expires_at=lock.expires_at.isoformat(),
+        locked_by=lock.locked_by.user.email,
     )
 
 
-@transform_router.post("/dbt_project/canvas/unlock/")
+@transform_router.put("/dbt_project/canvas/lock/refresh/")
 @has_permission(["can_edit_dbt_model"])
-def post_unlock_canvas(request, payload: LockCanvasRequestSchema):
-    """
-    Unlock the canvas for the org
-    """
+def refresh_canvas_lock(request):
+    """Refresh canvas lock to extend expiry"""
     orguser: OrgUser = request.orguser
     org = orguser.org
 
-    canvas_lock = CanvasLock.objects.filter(locked_by__org=org).first()
+    # Get the dbt project via org.dbt relationship
+    orgdbt = getattr(org, "dbt", None)
+    if orgdbt is None:
+        raise HttpError(404, "dbt workspace not setup")
 
-    if canvas_lock is None:
-        raise HttpError(404, "no lock found")
+    try:
+        lock = orgdbt.canvas_lock
+        if lock.is_expired():
+            raise HttpError(410, "Lock has expired")
+        if lock.locked_by != orguser:
+            raise HttpError(403, "You can only refresh your own locks")
 
-    if canvas_lock.locked_by != orguser:
-        raise HttpError(403, "not allowed")
+        # Refresh lock with 2-minute duration
+        lock.expires_at = timezone.now() + timedelta(minutes=2)
+        lock.save()
 
-    if str(canvas_lock.lock_id) != payload.lock_id:
-        raise HttpError(422, "wrong lock id")
+        return LockCanvasResponseSchema(
+            lock_token=lock.lock_token,
+            expires_at=lock.expires_at.isoformat(),
+            locked_by=lock.locked_by.user.email,
+        )
+    except CanvasLock.DoesNotExist:
+        raise HttpError(404, "No active lock found")
 
-    canvas_lock.delete()
 
-    return {"success": 1}
+@transform_router.delete("/dbt_project/canvas/lock/")
+@has_permission(["can_edit_dbt_model"])
+def unlock_canvas(request):
+    """Unlock canvas"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    # Get the dbt project via org.dbt relationship
+    orgdbt = getattr(org, "dbt", None)
+    if orgdbt is None:
+        raise HttpError(404, "dbt workspace not setup")
+
+    try:
+        lock = orgdbt.canvas_lock
+        if lock.locked_by != orguser:
+            raise HttpError(403, "You can only unlock your own locks")
+        lock.delete()
+    except CanvasLock.DoesNotExist:
+        pass  # Already unlocked
+
+    return {"success": True}
+
+
+# Canvas Lock Helper Function
+def validate_canvas_lock(orguser: OrgUser, orgdbt):
+    """
+    Validate that the canvas is properly locked by the requesting user.
+    Similar to dashboard lock validation but for canvas operations.
+
+    Args:
+        orguser: The user making the request
+        orgdbt: The OrgDbt object to check lock for
+
+    Raises:
+        HttpError: 423 if canvas is locked by another user
+        HttpError: 410 if canvas lock has expired
+    """
+    # Check canvas lock status
+    try:
+        lock = orgdbt.canvas_lock
+        if lock.is_expired():
+            # Clean up expired lock
+            lock.delete()
+            raise HttpError(410, "Canvas lock has expired. Please acquire a new lock.")
+        elif lock.locked_by != orguser:
+            raise HttpError(423, f"Canvas is locked by {lock.locked_by.user.email}")
+        # Lock is valid and owned by the user - operation can proceed
+    except CanvasLock.DoesNotExist:
+        raise HttpError(423, "Canvas is not locked. Please acquire a lock before making changes.")
 
 
 # ==============================================================================
@@ -831,7 +889,7 @@ def delete_orgdbtmodel(request, model_uuid, canvas_lock_id: str = None, cascade:
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
-    check_canvas_locked(orguser, canvas_lock_id)
+    validate_canvas_lock(orguser, orgdbt)
 
     orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid).first()
     if not orgdbt_model:
