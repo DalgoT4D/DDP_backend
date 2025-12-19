@@ -7,9 +7,19 @@ from enum import Enum
 import uuid
 from django.db import models
 from django.utils import timezone
-from ddpui.models.org import Org
+from ddpui.models.org import Org, OrgDbt
 from ddpui.models.org import OrgDataFlowv1
 from ddpui.models.org_user import OrgUser
+
+
+class TaskType(str, Enum):
+    """all possible task types"""
+
+    DBT = "dbt"
+    GIT = "git"
+    EDR = "edr"
+    DBTCLOUD = "dbtcloud"
+    AIRBYTE = "airbyte"
 
 
 class TaskProgressStatus(str, Enum):
@@ -85,6 +95,7 @@ class OrgTask(models.Model):
     generated_by = models.CharField(
         choices=OrgTaskGeneratedBy.choices(), max_length=50, default="system"
     )
+    dbt = models.ForeignKey(OrgDbt, on_delete=models.CASCADE, null=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -62,18 +62,12 @@ class SyncSourcesSchema(Schema):
     source_name: str = None
 
 
-class LockCanvasRequestSchema(Schema):
-    """schema to acquire a lock on the ui4t canvas"""
-
-    lock_id: str = None
-
-
 class LockCanvasResponseSchema(Schema):
     """schema representing lock on the ui4t canvas"""
 
-    lock_id: str = None
+    lock_token: str
+    expires_at: str
     locked_by: str
-    locked_at: str
 
 
 # ==============================================================================
