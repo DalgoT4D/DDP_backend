@@ -701,12 +701,15 @@ def lock_canvas(request):
     if orgdbt is None:
         raise HttpError(404, "dbt workspace not setup")
 
-    # Check if already locked
-    try:
-        lock = orgdbt.canvas_lock
-        if not lock.is_expired():
+    # Use atomic transaction to prevent race conditions
+    from django.db import transaction
+
+    with transaction.atomic():
+        # Check if already locked
+        try:
+            lock = orgdbt.canvas_lock
             if lock.locked_by == orguser:
-                # Refresh lock with 2-minute duration
+                # Same user requesting lock - refresh it regardless of expiry
                 lock.expires_at = timezone.now() + timedelta(minutes=2)
                 lock.save()
                 return LockCanvasResponseSchema(
@@ -715,20 +718,24 @@ def lock_canvas(request):
                     locked_by=lock.locked_by.user.email,
                 )
             else:
-                raise HttpError(423, f"Canvas is already locked by {lock.locked_by.user.email}")
-        else:
-            # Delete expired lock
-            lock.delete()
-    except CanvasLock.DoesNotExist:
-        pass
+                # Different user owns the lock
+                if not lock.is_expired():
+                    # Lock is active and owned by someone else - deny
+                    raise HttpError(423, f"Canvas is already locked by {lock.locked_by.user.email}")
+                else:
+                    # Lock is expired and owned by someone else - allow immediate takeover
+                    lock.delete()
+        except CanvasLock.DoesNotExist:
+            # No existing lock, safe to create
+            pass
 
-    # Create new lock with 2-minute duration
-    lock = CanvasLock.objects.create(
-        dbt=orgdbt,
-        locked_by=orguser,
-        lock_token=str(uuid.uuid4()),
-        expires_at=timezone.now() + timedelta(minutes=2),
-    )
+        # Create new lock only if no lock exists at all
+        lock = CanvasLock.objects.create(
+            dbt=orgdbt,
+            locked_by=orguser,
+            lock_token=str(uuid.uuid4()),
+            expires_at=timezone.now() + timedelta(minutes=2),
+        )
 
     return LockCanvasResponseSchema(
         lock_token=lock.lock_token,
