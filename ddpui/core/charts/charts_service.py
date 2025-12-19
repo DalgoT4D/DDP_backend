@@ -717,10 +717,33 @@ def execute_query(
 
     logger.info(f"Query executed successfully, fetched {len(results)} rows")
     if results and len(results) > 0:
-        logger.info(f"Query result columns (first row keys): {list(results[0].keys())}")
+        first_row_keys = list(results[0].keys())
+        logger.info(f"Query result columns (first row keys): {first_row_keys}")
         logger.info(f"Query result sample (first row): {results[0]}")
 
+        # Log column mapping if provided for debugging
+        if column_mapping:
+            expected_keys = [col_name for col_name, _ in column_mapping]
+            logger.info(f"Expected column keys from mapping: {expected_keys}")
+            missing_keys = [key for key in expected_keys if key not in first_row_keys]
+            if missing_keys:
+                logger.warning(
+                    f"Some expected column keys not found in results: {missing_keys}. "
+                    f"Available keys: {first_row_keys}"
+                )
+                # Try case-insensitive matching
+                for missing_key in missing_keys:
+                    for actual_key in first_row_keys:
+                        if actual_key.lower() == missing_key.lower():
+                            logger.info(
+                                f"Found case-insensitive match: '{missing_key}' -> '{actual_key}'"
+                            )
+                            break
+
     # Return raw results if no mapping provided
+    # Note: column_mapping is currently not used for transformation, as warehouse.execute()
+    # should return dictionaries with keys matching the SQL column labels
+    # However, if keys don't match, we rely on case-insensitive matching in transform functions
     return list(results)
 
 
@@ -1087,7 +1110,23 @@ def transform_data_for_chart(
             f"Table chart - dimensions: {dimensions}, dimensions_count: {len(dimensions)}, metrics: {payload.metrics}, results count: {len(results)}"
         )
         if results:
-            logger.info(f"Sample row keys: {list(results[0].keys())}")
+            first_row_keys = list(results[0].keys())
+            logger.info(f"Sample row keys: {first_row_keys}")
+            logger.info(f"Sample row data: {results[0]}")
+
+            # Check if all dimensions are present in the row keys
+            missing_dimensions = [dim for dim in dimensions if dim not in first_row_keys]
+            if missing_dimensions:
+                logger.error(
+                    f"CRITICAL: Some dimensions not found in query results! "
+                    f"Missing: {missing_dimensions}, Available keys: {first_row_keys}, Expected dimensions: {dimensions}"
+                )
+                # Try case-insensitive match
+                for dim in missing_dimensions:
+                    for key in first_row_keys:
+                        if key.lower() == dim.lower():
+                            logger.info(f"Found dimension '{dim}' with different casing as '{key}'")
+                            break
 
         table_data = []
         for row in results:
@@ -1100,11 +1139,31 @@ def transform_data_for_chart(
                 if value is None:
                     # Try with different key variations (in case of time grain or aliases)
                     # The row keys should match dim_col due to .label() in query builder
-                    logger.warning(
-                        f"Dimension column '{dim_col}' not found in row. Available keys: {list(row.keys())}"
-                    )
+                    # For multiple dimensions, check if the key exists with different casing or format
+                    available_keys = list(row.keys())
+                    matching_key = None
+
+                    # Try case-insensitive match
+                    for key in available_keys:
+                        if key.lower() == dim_col.lower():
+                            matching_key = key
+                            break
+
+                    if matching_key:
+                        value = row.get(matching_key)
+                        logger.info(
+                            f"Dimension column '{dim_col}' found with different casing as '{matching_key}'"
+                        )
+                    else:
+                        logger.warning(
+                            f"Dimension column '{dim_col}' not found in row. Available keys: {available_keys}, dimensions: {dimensions}"
+                        )
+                        # Still set the value to null_label to ensure column appears in output
+                        value = None
+
                 row_data[dim_col] = handle_null_value(
-                    safe_get_value(row, dim_col, null_label), null_label
+                    value if value is not None else safe_get_value(row, dim_col, null_label),
+                    null_label,
                 )
 
             # Add all metric columns if present
@@ -1263,7 +1322,18 @@ def get_chart_data_table_preview(
 
         # Copy dimension columns as-is (they use column names directly)
         for dim_col in dimensions:
-            transformed_row[dim_col] = row.get(dim_col)
+            value = row.get(dim_col)
+            # If not found, try case-insensitive match (some databases return lowercase keys)
+            if value is None:
+                available_keys = list(row.keys())
+                for key in available_keys:
+                    if key.lower() == dim_col.lower():
+                        value = row.get(key)
+                        logger.info(
+                            f"Preview: Dimension '{dim_col}' found with different casing as '{key}'"
+                        )
+                        break
+            transformed_row[dim_col] = value
 
         # Transform metric columns from alias to display_name
         if payload.metrics:
@@ -1282,6 +1352,17 @@ def get_chart_data_table_preview(
 
     logger.info(f"Table preview - transformed {len(transformed_data)} rows, columns: {columns}")
     if transformed_data:
+        logger.info(f"Table preview - First row keys: {list(transformed_data[0].keys())}")
+        logger.info(f"Table preview - First row sample: {transformed_data[0]}")
+        # Verify all dimensions are in the transformed data
+        missing_dims = [dim for dim in dimensions if dim not in transformed_data[0]]
+        if missing_dims:
+            logger.error(
+                f"CRITICAL: Dimensions missing in transformed data! Missing: {missing_dims}, "
+                f"Available keys: {list(transformed_data[0].keys())}, Expected dimensions: {dimensions}"
+            )
+        else:
+            logger.info(f"✅ All {len(dimensions)} dimensions present in transformed data")
         logger.info(f"Table preview - first row keys: {list(transformed_data[0].keys())}")
 
     # For chart preview, we don't need column types for specific columns
