@@ -180,9 +180,9 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str):
             [
                 "init",
                 project_name,
-                "--skip-profile-setup",
             ],
             cwd=str(project_dir),
+            flags=["--skip-profile-setup"],
         )
 
         # Delete example models
@@ -302,7 +302,7 @@ def generate_manifest_json_for_dbt_project(org: Org, orgdbt: OrgDbt) -> dict:
         # install dependencies
         logger.info("running dbt deps for manifest generation")
         result = DbtProjectManager.run_dbt_command(
-            org, orgdbt, command=["deps", "--profiles-dir", "profiles/"]
+            org, orgdbt, command=["deps"], keyword_args={"profiles-dir": "profiles/"}
         )
 
         logger.info(f"dbt deps output: {result.stdout}")
@@ -310,7 +310,10 @@ def generate_manifest_json_for_dbt_project(org: Org, orgdbt: OrgDbt) -> dict:
         # compile to generate manifest.json
         logger.info("running dbt compile for manifest generation")
         result = DbtProjectManager.run_dbt_command(
-            org=org, orgdbt=orgdbt, command=["compile", "--profiles-dir", "profiles/"]
+            org=org,
+            orgdbt=orgdbt,
+            command=["compile"],
+            keyword_args={"profiles-dir": "profiles/"},
         )
 
         logger.info(f"dbt compile output: {result.stdout}")
