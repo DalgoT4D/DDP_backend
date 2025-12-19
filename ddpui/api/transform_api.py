@@ -799,6 +799,7 @@ def validate_canvas_lock(orguser: OrgUser, orgdbt):
     """
     Validate that the canvas is properly locked by the requesting user.
     Similar to dashboard lock validation but for canvas operations.
+    Also refreshes the lock expiry on successful validation.
 
     Args:
         orguser: The user making the request
@@ -817,7 +818,9 @@ def validate_canvas_lock(orguser: OrgUser, orgdbt):
             raise HttpError(410, "Canvas lock has expired. Please acquire a new lock.")
         elif lock.locked_by != orguser:
             raise HttpError(423, f"Canvas is locked by {lock.locked_by.user.email}")
-        # Lock is valid and owned by the user - operation can proceed
+        # Lock is valid and owned by the user - refresh expiry and proceed
+        lock.expires_at = timezone.now() + timedelta(minutes=2)
+        lock.save()
     except CanvasLock.DoesNotExist:
         raise HttpError(423, "Canvas is not locked. Please acquire a lock before making changes.")
 
