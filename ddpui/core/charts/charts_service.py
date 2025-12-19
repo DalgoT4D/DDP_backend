@@ -89,17 +89,12 @@ def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
 
     Returns list of dimension column names.
     """
-    logger.info(
-        f"normalize_dimensions - chart_type: {payload.chart_type}, dimensions: {payload.dimensions}, dimension_col: {payload.dimension_col}, extra_dimension: {payload.extra_dimension}"
-    )
-
     if payload.chart_type == "table":
         # For table charts, use dimensions list if available
         if payload.dimensions:
             # Filter out empty strings
             filtered_dims = [d for d in payload.dimensions if d and d.strip()]
             if filtered_dims:
-                logger.info(f"normalize_dimensions - Using dimensions array: {filtered_dims}")
                 return filtered_dims
             else:
                 logger.warning(
@@ -112,7 +107,7 @@ def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
         if payload.extra_dimension:
             dims.append(payload.extra_dimension)
         if dims:
-            logger.info(f"normalize_dimensions - Using backward-compatible dimensions: {dims}")
+            pass
         else:
             logger.warning(f"normalize_dimensions - No dimensions found in payload for table chart")
         return dims
@@ -193,10 +188,6 @@ def build_multi_metric_query(
     """Build query for multiple metrics on bar/line/pie/table/map charts"""
     dimensions = normalize_dimensions(payload)
 
-    logger.info(
-        f"build_multi_metric_query - chart_type: {payload.chart_type}, dimensions: {dimensions}, metrics: {payload.metrics}"
-    )
-
     # For non-table charts, require at least one dimension
     if payload.chart_type != "table" and not dimensions:
         raise ValueError("dimension_col is required for multiple metrics charts")
@@ -227,7 +218,6 @@ def build_multi_metric_query(
             dimension_column = dimension_column.label(dim_col)
 
         query_builder.add_column(dimension_column)
-        logger.info(f"Added dimension column to query: {dim_col}")
 
         # Group by dimension column (use the same time grain logic)
         if time_grain and org_warehouse:
@@ -313,9 +303,6 @@ def build_chart_query(
 
             if not payload.metrics or len(payload.metrics) == 0:
                 # Non-aggregated query: just select dimension columns
-                logger.info(
-                    f"Table chart - no metrics, selecting {len(dimensions)} dimensions directly"
-                )
                 for dim_col in dimensions:
                     if not dim_col or not dim_col.strip():
                         continue
@@ -323,13 +310,9 @@ def build_chart_query(
                     # Always label to ensure consistent key access
                     dim_expr = dim_expr.label(dim_col)
                     query_builder.add_column(dim_expr)
-                    logger.info(f"Added dimension column (no metrics): {dim_col}")
                 # No GROUP BY needed for non-aggregated queries
             else:
                 # Aggregated query: use multi-metric query builder
-                logger.info(
-                    f"Table chart - has metrics, using build_multi_metric_query with {len(dimensions)} dimensions"
-                )
                 query_builder = build_multi_metric_query(payload, query_builder, org_warehouse)
 
             # Apply filters and sorting before returning
@@ -710,21 +693,15 @@ def execute_query(
         bind=warehouse_client.engine, compile_kwargs={"literal_binds": True}
     )
 
-    logger.info(f"Generated SQL: {compiled_stmt}")
-
     # Execute query
     results: list[dict] = warehouse_client.execute(compiled_stmt)
 
-    logger.info(f"Query executed successfully, fetched {len(results)} rows")
     if results and len(results) > 0:
         first_row_keys = list(results[0].keys())
-        logger.info(f"Query result columns (first row keys): {first_row_keys}")
-        logger.info(f"Query result sample (first row): {results[0]}")
 
         # Log column mapping if provided for debugging
         if column_mapping:
             expected_keys = [col_name for col_name, _ in column_mapping]
-            logger.info(f"Expected column keys from mapping: {expected_keys}")
             missing_keys = [key for key in expected_keys if key not in first_row_keys]
             if missing_keys:
                 logger.warning(
@@ -735,9 +712,7 @@ def execute_query(
                 for missing_key in missing_keys:
                     for actual_key in first_row_keys:
                         if actual_key.lower() == missing_key.lower():
-                            logger.info(
-                                f"Found case-insensitive match: '{missing_key}' -> '{actual_key}'"
-                            )
+                            pass
                             break
 
     # Return raw results if no mapping provided
@@ -762,9 +737,6 @@ def execute_chart_query(
             if dim_col and dim_col.strip():
                 column_mapping.append((dim_col, col_index))
                 col_index += 1
-                logger.info(
-                    f"execute_chart_query - Added dimension to mapping: {dim_col} at index {col_index - 1}"
-                )
     else:
         # For other charts or backward compatibility, use dimension_col
         if payload.chart_type != "number" and payload.dimension_col:
@@ -785,9 +757,6 @@ def execute_chart_query(
     if payload.extra_dimension and not (payload.chart_type == "table" and payload.dimensions):
         column_mapping.append((payload.extra_dimension, col_index))
 
-    logger.info(
-        f"execute_chart_query - column_mapping: {column_mapping}, chart_type: {payload.chart_type}"
-    )
     return execute_query(warehouse_client, query_builder, column_mapping)
 
 
@@ -1095,7 +1064,6 @@ def transform_data_for_chart(
         # Get dimensions from payload.dimensions if available, otherwise normalize from dimension_col/extra_dimension
         if payload.dimensions and len(payload.dimensions) > 0:
             dimensions = [d for d in payload.dimensions if d and d.strip()]
-            logger.info(f"Table chart - Using payload.dimensions: {dimensions}")
         else:
             # Fallback to normalize_dimensions logic for backward compatibility
             dims = []
@@ -1104,28 +1072,20 @@ def transform_data_for_chart(
             if payload.extra_dimension:
                 dims.append(payload.extra_dimension)
             dimensions = dims
-            logger.info(f"Table chart - Using fallback dimensions: {dimensions}")
 
-        logger.info(
-            f"Table chart - dimensions: {dimensions}, dimensions_count: {len(dimensions)}, metrics: {payload.metrics}, results count: {len(results)}"
-        )
         if results:
             first_row_keys = list(results[0].keys())
-            logger.info(f"Sample row keys: {first_row_keys}")
-            logger.info(f"Sample row data: {results[0]}")
 
             # Check if all dimensions are present in the row keys
             missing_dimensions = [dim for dim in dimensions if dim not in first_row_keys]
             if missing_dimensions:
                 logger.error(
-                    f"CRITICAL: Some dimensions not found in query results! "
                     f"Missing: {missing_dimensions}, Available keys: {first_row_keys}, Expected dimensions: {dimensions}"
                 )
                 # Try case-insensitive match
                 for dim in missing_dimensions:
                     for key in first_row_keys:
                         if key.lower() == dim.lower():
-                            logger.info(f"Found dimension '{dim}' with different casing as '{key}'")
                             break
 
         table_data = []
@@ -1151,9 +1111,6 @@ def transform_data_for_chart(
 
                     if matching_key:
                         value = row.get(matching_key)
-                        logger.info(
-                            f"Dimension column '{dim_col}' found with different casing as '{matching_key}'"
-                        )
                     else:
                         logger.warning(
                             f"Dimension column '{dim_col}' not found in row. Available keys: {available_keys}, dimensions: {dimensions}"
@@ -1196,11 +1153,6 @@ def transform_data_for_chart(
                     alias = metric.alias or f"{metric.aggregation}_{metric.column}"
                     display_name = metric.alias or f"{metric.aggregation}({metric.column})"
                 columns_list.append(display_name)
-
-        logger.info(f"Table chart - returning {len(table_data)} rows with columns: {columns_list}")
-        logger.info(
-            f"Table chart - data row keys (for comparison): {list(table_data[0].keys()) if table_data else []}"
-        )
 
         return {
             "tableData": table_data,
@@ -1267,13 +1219,6 @@ def get_chart_data_table_preview(
 
     dimensions = normalize_dimensions(payload)
 
-    logger.info(
-        f"Table preview - dimensions: {dimensions}, dimensions_count: {len(dimensions)}, metrics: {payload.metrics}"
-    )
-    logger.info(
-        f"Table preview - payload.dimensions: {payload.dimensions}, payload.dimension_col: {payload.dimension_col}, payload.extra_dimension: {payload.extra_dimension}"
-    )
-
     # Add all dimension columns
     if not dimensions or len(dimensions) == 0:
         logger.error(
@@ -1282,24 +1227,16 @@ def get_chart_data_table_preview(
 
     for dim_col in dimensions:
         if not dim_col or not dim_col.strip():
-            logger.warning(f"Table preview - Skipping empty dimension: '{dim_col}'")
             continue
         column_mapping.append((dim_col, col_index))
         columns.append(dim_col)
         col_index += 1
-        logger.info(
-            f"Table preview - Added dimension column to mapping: {dim_col} at index {col_index - 1}"
-        )
 
     # Handle multiple metrics (if present)
     if payload.metrics:
         for metric in payload.metrics:
-            if metric.aggregation.lower() == "count" and metric.column is None:
-                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-                display_name = metric.alias or "Total Count"
-            else:
-                alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-                display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+            alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+            display_name = metric.alias or f"{metric.aggregation}({metric.column})"
             # Use display_name for columns array to match transform_data_for_chart
             # But use alias for column_mapping to match query results
             column_mapping.append((alias, col_index))
@@ -1329,9 +1266,6 @@ def get_chart_data_table_preview(
                 for key in available_keys:
                     if key.lower() == dim_col.lower():
                         value = row.get(key)
-                        logger.info(
-                            f"Preview: Dimension '{dim_col}' found with different casing as '{key}'"
-                        )
                         break
             transformed_row[dim_col] = value
 
@@ -1350,10 +1284,7 @@ def get_chart_data_table_preview(
 
         transformed_data.append(transformed_row)
 
-    logger.info(f"Table preview - transformed {len(transformed_data)} rows, columns: {columns}")
     if transformed_data:
-        logger.info(f"Table preview - First row keys: {list(transformed_data[0].keys())}")
-        logger.info(f"Table preview - First row sample: {transformed_data[0]}")
         # Verify all dimensions are in the transformed data
         missing_dims = [dim for dim in dimensions if dim not in transformed_data[0]]
         if missing_dims:
@@ -1361,9 +1292,6 @@ def get_chart_data_table_preview(
                 f"CRITICAL: Dimensions missing in transformed data! Missing: {missing_dims}, "
                 f"Available keys: {list(transformed_data[0].keys())}, Expected dimensions: {dimensions}"
             )
-        else:
-            logger.info(f"✅ All {len(dimensions)} dimensions present in transformed data")
-        logger.info(f"Table preview - first row keys: {list(transformed_data[0].keys())}")
 
     # For chart preview, we don't need column types for specific columns
     column_types = {col: "unknown" for col in columns}
@@ -1373,7 +1301,6 @@ def get_chart_data_table_preview(
         "column_types": column_types,
         "data": transformed_data,  # Data rows now use display_names as keys
         "page": page,
-        "limit": limit,
     }
 
 
