@@ -347,6 +347,39 @@ class GitManager:
 
         return owner, repo
 
+    def get_file_status(self) -> list[dict]:
+        """
+        Get file status in the repository (staged + unstaged + untracked).
+        Returns a list of dicts with 'status' and 'file' keys.
+
+        Status codes:
+        - 'M' = Modified
+        - 'A' = Added
+        - 'D' = Deleted
+        - 'R' = Renamed
+        - 'C' = Copied
+        - '?' = Untracked
+        - '!' = Ignored
+        """
+        result = self._run_command(["git", "status", "--porcelain"])
+        changes = []
+
+        for line in result.stdout.strip().split("\n"):
+            if not line:
+                continue
+            # Format: XY filename or XY old -> new (for renames)
+            status_code = line[:2].strip()
+            file_path = line[3:].strip()
+
+            # Handle rename format: "old -> new"
+            if " -> " in file_path:
+                old_file, new_file = file_path.split(" -> ")
+                changes.append({"status": status_code, "file": new_file, "old_file": old_file})
+            else:
+                changes.append({"status": status_code, "file": file_path})
+
+        return changes
+
     def verify_remote_url(self, remote_url: str) -> bool:
         """
         Verify that the PAT has push (write) access to the remote repository.

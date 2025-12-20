@@ -23,12 +23,14 @@ from ddpui.utils.constants import (
     TASK_DBTDEPS,
 )
 from ddpui.ddpdbt import dbt_service, elementary_service
+from ddpui.ddpdbt.dbthelpers import check_sensitive_files_in_staged_changes
 from ddpui.ddpprefect import SECRET, prefect_service
 from ddpui.ddpprefect.schema import (
     OrgDbtGitHub,
     OrgDbtSchema,
     OrgDbtTarget,
     OrgDbtConnectGitRemote,
+    OrgDbtChangesPublish,
     PrefectSecretBlockEdit,
 )
 from ddpui.models.org import OrgPrefectBlockv1, Org, OrgWarehouse, OrgDbt
@@ -264,6 +266,156 @@ def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
         "success": True,
         "gitrepo_url": payload.gitrepoUrl,
         "message": "Successfully connected to remote git repository",
+    }
+
+
+@dbt_router.get("/fetch_file_changes/")
+@has_permission(["can_view_dbt_workspace"])
+def get_fetch_file_changes(request):
+    """
+    Fetch the list of file changes in the dbt workspace.
+    When user clicks on publish button, they will see a popup with this list.
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    orgdbt = org.dbt
+
+    if orgdbt is None:
+        raise HttpError(400, "dbt workspace is not configured for this organization")
+
+    dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+    if not dbt_repo_dir.exists():
+        raise HttpError(400, "DBT repo directory does not exist")
+
+    try:
+        git_manager = GitManager(repo_local_path=str(dbt_repo_dir), validate_git=True)
+    except GitManagerError as e:
+        raise HttpError(400, f"Git is not initialized in the DBT repo: {e.message}") from e
+
+    file_changes = git_manager.get_file_status()
+
+    # Check if remote is configured
+    has_remote = orgdbt.gitrepo_url is not None and orgdbt.gitrepo_access_token_secret is not None
+
+    return {
+        "changes": file_changes,
+        "has_remote": has_remote,
+        "gitrepo_url": orgdbt.gitrepo_url,
+    }
+
+
+@dbt_router.post("/publish_changes/")
+@has_permission(["can_edit_dbt_workspace"])
+def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
+    """
+    Commit and optionally push local changes to remote git repo.
+
+    - Commits with the user's email for tracking
+    - If git remote and access token are configured, pushes to remote
+    - Otherwise, only commits locally
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    orgdbt = org.dbt
+
+    if orgdbt is None:
+        raise HttpError(400, "dbt workspace is not configured for this organization")
+
+    dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+    if not dbt_repo_dir.exists():
+        raise HttpError(400, "DBT repo directory does not exist")
+
+    # Retrieve PAT from secrets manager - required for publish
+    if not orgdbt.gitrepo_access_token_secret:
+        raise HttpError(
+            400, "Git access token is not configured. Please connect to a remote repository first."
+        )
+
+    actual_pat = secretsmanager.retrieve_github_pat(orgdbt.gitrepo_access_token_secret)
+    if not actual_pat:
+        raise HttpError(400, "Failed to retrieve git access token from secrets manager.")
+
+    try:
+        git_manager = GitManager(
+            repo_local_path=str(dbt_repo_dir), pat=actual_pat, validate_git=True
+        )
+    except GitManagerError as e:
+        raise HttpError(400, f"Git is not initialized in the DBT repo: {e.message}") from e
+
+    # Check what needs to be done
+    file_changes = git_manager.get_file_status()
+    has_uncommitted_changes = len(file_changes) > 0
+    has_remote = orgdbt.gitrepo_url is not None
+    ahead, _ = git_manager.get_ahead_behind() if has_remote else (0, 0)
+    has_unpushed_commits = (
+        ahead > 0
+    )  # if commit succeeded but push push failed in previous attempt.
+
+    # Nothing to do
+    if not has_uncommitted_changes and not has_unpushed_commits:
+        return {
+            "success": True,
+            "message": "No changes to publish",
+            "committed": False,
+            "pushed": False,
+        }
+
+    committed = False
+    commit_result = None
+    pushed = False
+    push_message = None
+
+    # Step 1: Commit if there are uncommitted changes
+    if has_uncommitted_changes:
+        sensitive_files = check_sensitive_files_in_staged_changes(file_changes)
+        if sensitive_files:
+            raise HttpError(
+                400,
+                f"Cannot publish: sensitive files detected: {', '.join(sensitive_files)}. "
+                "Please add these files to .gitignore and try again.",
+            )
+
+        try:
+            commit_result = git_manager.commit_changes(
+                message=payload.commit_message,
+                user_email=orguser.user.email,
+            )
+            committed = True
+        except GitManagerError as e:
+            raise HttpError(500, f"Failed to commit changes: {e.message}") from e
+
+    # Step 2: Push if remote is configured
+    if has_remote:
+        try:
+            push_result = git_manager.push_changes()
+            pushed = True
+            push_message = push_result or "Changes pushed successfully"
+            logger.info(f"Pushed changes for org {org.slug}: {push_message}")
+        except GitManagerError as e:
+            logger.error(f"Failed to push changes for org {org.slug}: {e.message}")
+            return {
+                "success": False,
+                "message": f"Push failed: {e.message}",
+                "committed": committed,
+                "pushed": False,
+                "commit_result": commit_result,
+            }
+
+    # Build response message
+    if pushed:
+        message = "Changes published successfully"
+    elif committed:
+        message = "Changes committed locally"
+    else:
+        message = "No changes to publish"
+
+    return {
+        "success": True,
+        "message": message,
+        "committed": committed,
+        "pushed": pushed,
+        "commit_result": commit_result,
+        "push_message": push_message,
     }
 
 
