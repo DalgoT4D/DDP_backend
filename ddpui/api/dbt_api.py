@@ -318,6 +318,9 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
     org = orguser.org
     orgdbt = org.dbt
 
+    if payload.commit_message.strip() == "":
+        raise HttpError(400, "Commit message cannot be empty")
+
     if orgdbt is None:
         raise HttpError(400, "dbt workspace is not configured for this organization")
 
