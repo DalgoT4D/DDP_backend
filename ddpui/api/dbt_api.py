@@ -325,15 +325,15 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
     if not dbt_repo_dir.exists():
         raise HttpError(400, "DBT repo directory does not exist")
 
-    # Retrieve PAT from secrets manager - required for publish
-    if not orgdbt.gitrepo_access_token_secret:
-        raise HttpError(
-            400, "Git access token is not configured. Please connect to a remote repository first."
-        )
+    # Check if remote is configured
+    has_remote = orgdbt.gitrepo_url is not None and orgdbt.gitrepo_access_token_secret is not None
 
-    actual_pat = secretsmanager.retrieve_github_pat(orgdbt.gitrepo_access_token_secret)
-    if not actual_pat:
-        raise HttpError(400, "Failed to retrieve git access token from secrets manager.")
+    # Retrieve PAT only if remote is configured (needed for push)
+    actual_pat = None
+    if has_remote:
+        actual_pat = secretsmanager.retrieve_github_pat(orgdbt.gitrepo_access_token_secret)
+        if not actual_pat:
+            raise HttpError(400, "Failed to retrieve git access token from secrets manager.")
 
     try:
         git_manager = GitManager(
@@ -345,11 +345,8 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
     # Check what needs to be done
     file_changes = git_manager.get_file_status()
     has_uncommitted_changes = len(file_changes) > 0
-    has_remote = orgdbt.gitrepo_url is not None
     ahead, _ = git_manager.get_ahead_behind() if has_remote else (0, 0)
-    has_unpushed_commits = (
-        ahead > 0
-    )  # if commit succeeded but push push failed in previous attempt.
+    has_unpushed_commits = ahead > 0  # if commit succeeded but push failed in previous attempt.
 
     # Nothing to do
     if not has_uncommitted_changes and not has_unpushed_commits:
