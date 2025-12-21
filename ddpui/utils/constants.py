@@ -93,3 +93,15 @@ AIRBYTE_JOB_STATUS_FAILED = "failed"
 AIRBYTE_JOB_STATUS_CANCELLED = "cancelled"
 
 AIRBYTE_CONNECTION_DEPRECATED = "deprecated"
+
+# Git status code to display name mapping
+GIT_STATUS_MAP = {
+    "M": "Modified",
+    "A": "Added",
+    "D": "Deleted",
+    "R": "Renamed",
+    "C": "Copied",
+    "U": "Unmerged",
+    "?": "Untracked",
+    "!": "Ignored",
+}

@@ -363,7 +363,6 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
     committed = False
     commit_result = None
     pushed = False
-    push_message = None
 
     # Step 1: Commit if there are uncommitted changes
     if has_uncommitted_changes:
@@ -389,8 +388,7 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
         try:
             push_result = git_manager.push_changes()
             pushed = True
-            push_message = push_result or "Changes pushed successfully"
-            logger.info(f"Pushed changes for org {org.slug}: {push_message}")
+            logger.info(f"Pushed changes for org {org.slug}")
         except GitManagerError as e:
             logger.error(f"Failed to push changes for org {org.slug}: {e.message}")
             return {
@@ -415,7 +413,6 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
         "committed": committed,
         "pushed": pushed,
         "commit_result": commit_result,
-        "push_message": push_message,
     }
 
 

@@ -5,6 +5,8 @@ from urllib.parse import urlparse
 
 import requests
 
+from ddpui.utils.constants import GIT_STATUS_MAP
+
 logger = logging.getLogger(__name__)
 
 
@@ -137,7 +139,18 @@ class GitManager:
         )
 
         if result.returncode != 0:
-            # Remote branch might not exist yet
+            # Remote branch might not exist yet (never pushed)
+            # Count all local commits as "ahead"
+            commit_count_result = self._run_command(
+                ["git", "rev-list", "--count", branch],
+                check=False,
+            )
+            if commit_count_result.returncode == 0:
+                try:
+                    local_commits = int(commit_count_result.stdout.strip())
+                    return (local_commits, 0)
+                except ValueError:
+                    pass
             return (0, 0)
 
         # Output format: "ahead\tbehind"
@@ -349,19 +362,13 @@ class GitManager:
 
     def get_file_status(self) -> list[dict]:
         """
-        Get file status in the repository (staged + unstaged + untracked).
+        Get file status in the repository.
         Returns a list of dicts with 'status' and 'file' keys.
-
-        Status codes:
-        - 'M' = Modified
-        - 'A' = Added
-        - 'D' = Deleted
-        - 'R' = Renamed
-        - 'C' = Copied
-        - '?' = Untracked
-        - '!' = Ignored
         """
-        result = self._run_command(["git", "status", "--porcelain"])
+        # Stage all changes to enable rename detection and consistent status
+        self._run_command(["git", "add", "."])
+
+        result = self._run_command(["git", "status", "-u", "--porcelain"])
         changes = []
 
         for line in result.stdout.strip().split("\n"):
@@ -369,14 +376,15 @@ class GitManager:
                 continue
             # Format: XY filename or XY old -> new (for renames)
             status_code = line[:2].strip()
-            file_path = line[3:].strip()
+            file_path = line[2:].lstrip()
+            status = GIT_STATUS_MAP.get(status_code, status_code)
 
             # Handle rename format: "old -> new"
             if " -> " in file_path:
                 old_file, new_file = file_path.split(" -> ")
-                changes.append({"status": status_code, "file": new_file, "old_file": old_file})
+                changes.append({"status": status, "file": new_file, "old_file": old_file})
             else:
-                changes.append({"status": status_code, "file": file_path})
+                changes.append({"status": status, "file": file_path})
 
         return changes
 
