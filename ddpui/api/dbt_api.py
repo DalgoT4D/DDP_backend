@@ -393,10 +393,11 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
             pushed = True
             logger.info(f"Pushed changes for org {org.slug}")
         except GitManagerError as e:
-            logger.error(f"Failed to push changes for org {org.slug}: {e.message}")
+            error_detail = e.error if e.error else e.message
+            logger.error(f"Failed to push changes for org {org.slug}: {error_detail}")
             return {
                 "success": False,
-                "message": f"Push failed: {e.message}",
+                "message": f"Push failed: {error_detail}",
                 "committed": committed,
                 "pushed": False,
                 "commit_result": commit_result,
