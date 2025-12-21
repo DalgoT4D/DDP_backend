@@ -312,6 +312,14 @@ class GitManager:
             cmd.extend([remote, branch])
 
         result = self._run_command(cmd)
+
+        # Update the remote tracking ref after push (required when pushing to URL directly)
+        # This ensures origin/<branch> reflects what we just pushed
+        self._run_command(
+            ["git", "update-ref", f"refs/remotes/{remote}/{branch}", "HEAD"],
+            check=False,
+        )
+
         return result.stdout.strip()
 
     def pull_changes(self, remote: str = "origin", branch: str = None) -> str:

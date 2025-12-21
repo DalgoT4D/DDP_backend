@@ -349,7 +349,7 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
     file_changes = git_manager.get_file_status()
     has_uncommitted_changes = len(file_changes) > 0
     ahead, _ = git_manager.get_ahead_behind() if has_remote else (0, 0)
-    has_unpushed_commits = ahead > 0  # if commit succeeded but push failed in previous attempt.
+    has_unpushed_commits = ahead > 0
 
     # Nothing to do
     if not has_uncommitted_changes and not has_unpushed_commits:
@@ -375,18 +375,21 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
             )
 
         try:
+            user = orguser.user
+            user_name = f"{user.first_name} {user.last_name}".strip() or user.email
             commit_result = git_manager.commit_changes(
                 message=payload.commit_message,
-                user_email=orguser.user.email,
+                user_name=user_name,
+                user_email=user.email,
             )
             committed = True
         except GitManagerError as e:
             raise HttpError(500, f"Failed to commit changes: {e.message}") from e
 
-    # Step 2: Push if remote is configured
-    if has_remote:
+    # Step 2: Push if remote is configured and there's something to push
+    if has_remote and (committed or has_unpushed_commits):
         try:
-            push_result = git_manager.push_changes()
+            git_manager.push_changes()
             pushed = True
             logger.info(f"Pushed changes for org {org.slug}")
         except GitManagerError as e:
