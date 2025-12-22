@@ -1091,16 +1091,33 @@ def dashboard_chat(request, dashboard_id: int, payload: DashboardChatRequest):
                     )
 
                     # Log metering
+                    data_results = enhanced_response.data_results or {}
+                    analytics = (
+                        (data_results.get("analytics") or {})
+                        if isinstance(data_results, dict)
+                        else {}
+                    )
+                    usage = (analytics.get("usage") or {}) if isinstance(analytics, dict) else {}
+
+                    # Prefer real token usage from the NLQ generator when available
+                    prompt_tokens_real = usage.get("prompt_tokens")
+                    completion_tokens_real = usage.get("completion_tokens")
+
                     log_ai_chat_metering(
                         org=orguser_obj.org,
                         user=orguser_obj.user,
                         model_used="smart_query_processor",
-                        prompt_tokens=len(user_message.split()) * 1.3,  # Rough estimate
-                        completion_tokens=len(enhanced_response.content.split())
-                        * 1.3,  # Rough estimate
-                        response_time_ms=enhanced_response.data_results.get("analytics", {})
-                        .get("performance_metrics", {})
-                        .get("total_time_ms", 0),
+                        prompt_tokens=prompt_tokens_real
+                        if isinstance(prompt_tokens_real, int)
+                        else int(len(user_message.split()) * 1.3),
+                        completion_tokens=completion_tokens_real
+                        if isinstance(completion_tokens_real, int)
+                        else int(len(enhanced_response.content.split()) * 1.3),
+                        response_time_ms=analytics.get("performance_metrics", {}).get(
+                            "total_time_ms", 0
+                        )
+                        if isinstance(analytics, dict)
+                        else 0,
                         include_data=payload.include_data,
                         max_rows=payload.max_rows if payload.include_data else None,
                         dashboard_id=dashboard_id,

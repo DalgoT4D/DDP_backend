@@ -263,6 +263,8 @@ class SmartChatProcessor:
                         if execution_result.query_plan
                         else "",
                         "analytics": analytics,
+                        # Surface usage information (LLM tokens) for metering when present
+                        "usage": analytics.get("usage", {}),
                     },
                     query_executed=True,
                     confidence_score=execution_result.query_plan.confidence_score

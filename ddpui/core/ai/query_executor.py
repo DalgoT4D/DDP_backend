@@ -208,6 +208,33 @@ class DynamicQueryExecutor:
             if query_plan.validation_result and query_plan.validation_result.tables_accessed:
                 source_tables = list(query_plan.validation_result.tables_accessed)
 
+            # Build base resource usage
+            resource_usage: Dict[str, Any] = {
+                "execution_time_ms": execution_time_ms,
+                "result_rows": len(formatted_data),
+                "result_columns": len(columns),
+            }
+
+            # Attach LLM token usage from the query plan when available
+            try:
+                if query_plan and hasattr(query_plan, "llm_usage") and query_plan.llm_usage:
+                    llm_usage = query_plan.llm_usage or {}
+                    resource_usage.update(
+                        {
+                            "ai_prompt_tokens": llm_usage.get("prompt_tokens", 0),
+                            "ai_completion_tokens": llm_usage.get("completion_tokens", 0),
+                            "ai_total_tokens": llm_usage.get("total_tokens", 0),
+                        }
+                    )
+
+                if query_plan and hasattr(query_plan, "llm_provider") and query_plan.llm_provider:
+                    resource_usage["ai_provider"] = query_plan.llm_provider
+
+                if query_plan and hasattr(query_plan, "llm_model") and query_plan.llm_model:
+                    resource_usage["ai_model"] = query_plan.llm_model
+            except Exception as usage_error:
+                logger.error(f"Error attaching LLM usage to QueryExecutionResult: {usage_error}")
+
             return QueryExecutionResult(
                 success=True,
                 data=formatted_data,
@@ -219,11 +246,7 @@ class DynamicQueryExecutor:
                 was_query_modified=len(modifications) > 0,
                 original_query=query_plan.generated_sql,
                 executed_query=safe_query,
-                resource_usage={
-                    "execution_time_ms": execution_time_ms,
-                    "result_rows": len(formatted_data),
-                    "result_columns": len(columns),
-                },
+                resource_usage=resource_usage,
                 source_tables=source_tables,
             )
 

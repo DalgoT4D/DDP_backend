@@ -54,6 +54,11 @@ class QueryPlan:
     ai_reasoning: str = ""
     created_at: datetime = field(default_factory=timezone.now)
 
+    # Optional LLM usage details for accurate metering
+    llm_usage: Optional[Dict[str, int]] = None
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
+
 
 class QuerySecurityValidator:
     """
@@ -489,6 +494,23 @@ class NaturalLanguageQueryService:
 
             # Parse AI response
             query_plan = self._parse_ai_query_response(question, response.content)
+
+            # Attach LLM usage and model metadata for downstream metering
+            try:
+                if hasattr(query_plan, "llm_usage"):
+                    query_plan.llm_usage = response.usage or None
+                if hasattr(query_plan, "llm_provider"):
+                    # Prefer explicit provider on response, fallback to provider type enum
+                    provider_name = getattr(response, "provider", None)
+                    if not provider_name and hasattr(self.ai_provider, "get_provider_type"):
+                        provider_enum = self.ai_provider.get_provider_type()
+                        provider_name = getattr(provider_enum, "value", None)
+                    query_plan.llm_provider = provider_name
+                if hasattr(query_plan, "llm_model"):
+                    query_plan.llm_model = getattr(response, "model", None)
+            except Exception as usage_error:
+                # Do not fail query generation if usage attachment fails
+                self.logger.error(f"Error attaching LLM usage to QueryPlan: {usage_error}")
 
             # Validate the generated query
             if query_plan.requires_execution and query_plan.generated_sql:

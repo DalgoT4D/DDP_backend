@@ -150,6 +150,29 @@ class EnhancedDynamicExecutor(DynamicQueryExecutor):
                     self._cache_result(cache_key, result, org.id, question)
                     analytics["performance_metrics"]["cached"] = True
 
+            # Attach usage information (LLM tokens) when available for metering
+            try:
+                usage_from_result: Dict[str, Any] = {}
+                if result and isinstance(getattr(result, "resource_usage", None), dict):
+                    ru = result.resource_usage
+                    if any(
+                        k in ru
+                        for k in ["ai_prompt_tokens", "ai_completion_tokens", "ai_total_tokens"]
+                    ):
+                        usage_from_result = {
+                            "prompt_tokens": int(ru.get("ai_prompt_tokens") or 0),
+                            "completion_tokens": int(ru.get("ai_completion_tokens") or 0),
+                            "total_tokens": int(ru.get("ai_total_tokens") or 0),
+                        }
+                        if ru.get("ai_provider"):
+                            usage_from_result["provider"] = ru.get("ai_provider")
+                        if ru.get("ai_model"):
+                            usage_from_result["model"] = ru.get("ai_model")
+
+                analytics["usage"] = usage_from_result
+            except Exception as usage_error:
+                self.logger.error(f"Error attaching usage analytics: {usage_error}")
+
             # Record performance metrics
             self._record_performance_metrics(question, result, org.id, analytics)
 
