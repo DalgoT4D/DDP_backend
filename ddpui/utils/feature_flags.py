@@ -8,7 +8,7 @@ FEATURE_FLAGS = {
     "LOG_SUMMARIZATION": "Summarize logs using AI",
     "AI_DATA_ANALYSIS": "Enable data analysis using AI",
     "DATA_STATISTICS": "Enable detailed data statistics in explore",
-    "AI_CHATBOT": "AI Chatbot for dashboard analysis",
+    "AI_DASHBOARD_CHAT": "AI Chatbot for dashboard analysis",
 }
 
 
