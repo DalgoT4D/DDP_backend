@@ -27,6 +27,10 @@ from ddpui.core.ai.smart_chat_processor import SmartChatProcessor, MessageIntent
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.org_settings import OrgSettings
 from ddpui.models.ai_chat_logging import AIChatLog, AIChatMetering
+from ddpui.models.visualization import Chart
+from ddpui.models.org import OrgWarehouse
+from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
+
 
 # Remove unused import - orguser is accessed via request.orguser
 
@@ -98,6 +102,7 @@ def log_ai_chat_conversation(
         # Check if logging is enabled for this organization
         org_settings = OrgSettings.objects.filter(org=org).first()
         if not org_settings or not org_settings.ai_logging_acknowledged:
+            logger.error(f"AI logging not acknowledged for org {org.slug}")
             return  # Skip logging if not acknowledged
 
         # Create the log entry
@@ -353,10 +358,6 @@ class DashboardContextAnalyzer:
     def _get_chart_schema_context(self, chart_id: int) -> Dict[str, Any]:
         """Get chart schema information without actual data."""
         try:
-            from ddpui.models.visualization import Chart
-            from ddpui.models.org import OrgWarehouse
-            from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
-
             chart = Chart.objects.filter(id=chart_id, org=self.orguser.org).first()
 
             if not chart:
@@ -2351,7 +2352,7 @@ def test_layer2_full_execution(request, dashboard_id: int, payload: NaturalLangu
         executor = DynamicQueryExecutor()
 
         # Execute the natural language query
-        execution_result = executor.execute_natural_language_query(
+        execution_result = executor.logg(
             question=payload.question,
             org=orguser_obj.org,
             dashboard_id=dashboard_id,

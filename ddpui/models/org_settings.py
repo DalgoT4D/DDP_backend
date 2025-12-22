@@ -66,7 +66,6 @@ class OrgSettingsSchema(Schema):
 
     organization_name: Optional[str] = None  # Read-only, from org.name
     website: Optional[str] = None  # Read-only, from org.website
-    organization_logo_filename: Optional[str] = None
     ai_data_sharing_enabled: bool
     ai_logging_acknowledged: bool
     ai_settings_accepted_by_email: Optional[str] = None
