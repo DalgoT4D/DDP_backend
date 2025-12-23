@@ -81,11 +81,6 @@ def delete_warehouse_v1(org: Org, dry_run: bool = False):  # skipcq: PYL-R0201
         if not dry_run:
             org_task.delete()
 
-    logger.info(
-        "================ Remove remaining airbyte connections & destinations (warehouse) ==========="
-    )
-    delete_airbyte_workspace_v1(org, dry_run=dry_run)
-
     logger.info("================ Remove dbt workspace and transform tasks ===========")
     delete_dbt_workspace(org, dry_run=dry_run)
 

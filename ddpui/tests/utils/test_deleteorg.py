@@ -214,3 +214,66 @@ def test_delete_orgusers(org_with_workspace):
     assert OrgUser.objects.filter(user__email=email, org=org_with_workspace).count() == 1
     delete_orgusers(org_with_workspace)
     assert OrgUser.objects.filter(user__email=email, org=org_with_workspace).count() == 0
+
+
+def test_delete_warehouse_v1_does_not_delete_airbyte_workspace(org_with_workspace):
+    """Ensure delete_warehouse_v1 does NOT delete airbyte workspace"""
+    from ddpui.models.tasks import Task, OrgTask
+    from ddpui.utils.constants import TASK_AIRBYTESYNC
+    from ddpui.models.org import OrgWarehouse, OrgDataFlowv1
+    import uuid
+
+    if not Task.objects.filter(slug=TASK_AIRBYTESYNC).exists():
+        Task.objects.create(slug=TASK_AIRBYTESYNC, type="airbyte", label="fake-name")
+    if not OrgTask.objects.filter(org=org_with_workspace, task__slug=TASK_AIRBYTESYNC).exists():
+        task = Task.objects.filter(slug=TASK_AIRBYTESYNC).first()
+        OrgTask.objects.create(org=org_with_workspace, task=task)
+
+    orgtask = OrgTask.objects.filter(org=org_with_workspace, task__slug=TASK_AIRBYTESYNC).first()
+    orgtask.connection_id = "fake-connection-id"
+    orgtask.save()
+
+    org_with_workspace.airbyte_workspace_id = str(uuid.uuid4())
+    org_with_workspace.save()
+
+    dataflow = OrgDataFlowv1.objects.create(
+        org=org_with_workspace,
+        name="fake-name",
+        deployment_id="fake-deployment_id",
+        deployment_name="fake-deployment-name",
+    )
+    from ddpui.models.tasks import DataflowOrgTask
+
+    DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=orgtask)
+    if not OrgWarehouse.objects.filter(org=org_with_workspace).exists():
+        OrgWarehouse.objects.create(
+            org=org_with_workspace,
+            wtype="fake-wtype",
+            airbyte_destination_id="fake-destination-id",
+            airbyte_docker_repository="fake-docker-repository",
+            airbyte_docker_image_tag="fake-docker-image-tag",
+            bq_location="fake-bq-location",
+        )
+
+    with patch("ddpui.ddpairbyte.airbyte_service.delete_workspace") as mock_delete_workspace, patch(
+        "ddpui.ddpprefect.prefect_service.delete_deployment_by_id"
+    ), patch("ddpui.ddpairbyte.airbyte_service.delete_connection"), patch(
+        "ddpui.ddpairbyte.airbyte_service.get_connections"
+    ), patch(
+        "ddpui.ddpairbyte.airbyte_service.get_sources"
+    ) as mock_get_sources, patch(
+        "ddpui.ddpairbyte.airbyte_service.get_destinations"
+    ) as mock_get_destinations, patch(
+        "ddpui.ddpairbyte.airbyte_service.delete_source"
+    ), patch(
+        "ddpui.ddpairbyte.airbyte_service.delete_destination"
+    ), patch(
+        "ddpui.utils.secretsmanager.delete_warehouse_credentials"
+    ), patch(
+        "ddpui.ddpprefect.prefect_service.prefect_delete_a_block"
+    ):
+        mock_get_sources.return_value = {"sources": []}
+        mock_get_destinations.return_value = {"destinations": []}
+
+        delete_warehouse_v1(org_with_workspace)
+        mock_delete_workspace.assert_not_called()
