@@ -23,7 +23,6 @@ from ddpui.utils.constants import (
     TASK_DBTDEPS,
 )
 from ddpui.ddpdbt import dbt_service, elementary_service
-from ddpui.ddpdbt.dbthelpers import check_sensitive_files_in_staged_changes
 from ddpui.ddpprefect import SECRET, prefect_service
 from ddpui.ddpprefect.schema import (
     OrgDbtGitHub,
@@ -266,41 +265,6 @@ def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
         "success": True,
         "gitrepo_url": payload.gitrepoUrl,
         "message": "Successfully connected to remote git repository",
-    }
-
-
-@dbt_router.get("/fetch_file_changes/")
-@has_permission(["can_view_dbt_workspace"])
-def get_fetch_file_changes(request):
-    """
-    Fetch the list of file changes in the dbt workspace.
-    When user clicks on publish button, they will see a popup with this list.
-    """
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-    orgdbt = org.dbt
-
-    if orgdbt is None:
-        raise HttpError(400, "dbt workspace is not configured for this organization")
-
-    dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
-    if not dbt_repo_dir.exists():
-        raise HttpError(400, "DBT repo directory does not exist")
-
-    try:
-        git_manager = GitManager(repo_local_path=str(dbt_repo_dir), validate_git=True)
-    except GitManagerError as e:
-        raise HttpError(400, f"Git is not initialized in the DBT repo: {e.message}") from e
-
-    file_changes = git_manager.get_file_status()
-
-    # Check if remote is configured
-    has_remote = orgdbt.gitrepo_url is not None and orgdbt.gitrepo_access_token_secret is not None
-
-    return {
-        "changes": file_changes,
-        "has_remote": has_remote,
-        "gitrepo_url": orgdbt.gitrepo_url,
     }
 
 

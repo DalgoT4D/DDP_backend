@@ -12,46 +12,6 @@ from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddphelpers")
 
-# Sensitive file patterns that should not be committed to git
-SENSITIVE_FILE_PATTERNS = [
-    ".env",
-    ".env.local",
-    ".env.production",
-    ".env.development",
-    "credentials.json",
-    "secrets.json",
-    "*.pem",
-    "*.key",
-    "id_rsa",
-    "id_dsa",
-]
-
-
-def check_sensitive_files_in_staged_changes(changes: list[dict]) -> list[str]:
-    """
-    Check if any sensitive files are present in the staged git changes.
-
-    Args:
-        changes: List of file changes from git status, each with 'file' and 'status' keys
-
-    Returns:
-        List of sensitive file paths that should not be committed
-    """
-    sensitive_files = []
-    for change in changes:
-        file_path = change.get("file", "")
-        file_name = os.path.basename(file_path)
-        for pattern in SENSITIVE_FILE_PATTERNS:
-            if pattern.startswith("*"):
-                # Wildcard pattern like *.pem
-                if file_name.endswith(pattern[1:]):
-                    sensitive_files.append(file_path)
-                    break
-            elif file_name == pattern or file_path.endswith(f"/{pattern}"):
-                sensitive_files.append(file_path)
-                break
-    return sensitive_files
-
 
 def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_creds: dict):
     """Create/update the block in db and also in prefect"""
