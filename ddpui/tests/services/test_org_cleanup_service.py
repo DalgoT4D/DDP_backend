@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.tasks import OrgTask, Task, OrgDataFlowv1, DataflowOrgTask
-from ddpui.services.org_cleanup_service import OrgCleanupService
+from ddpui.services.org_cleanup_service import OrgCleanupService, OrgCleanupServiceError
 
 
 pytestmark = pytest.mark.django_db
@@ -102,3 +102,136 @@ def test_delete_warehouse_full_flow():
     org.delete()
     task_sync.delete()
     task_dbt.delete()
+
+
+@pytest.fixture
+def org_with_transform_tasks():
+    org = Org.objects.create(
+        name="TestOrg2", airbyte_workspace_id="workspace456", slug="test-slug2"
+    )
+    # Create dbt and git tasks
+    task_dbt = Task.objects.create(
+        type="dbt", slug="dbt", label="DBT", command="dbt run", is_system=True
+    )
+    task_git = Task.objects.create(
+        type="git", slug="git", label="Git", command="git pull", is_system=True
+    )
+    orgtask_dbt = OrgTask.objects.create(org=org, task=task_dbt, generated_by="system")
+    orgtask_git = OrgTask.objects.create(org=org, task=task_git, generated_by="system")
+    return org, orgtask_dbt, orgtask_git
+
+
+@patch("ddpui.services.org_cleanup_service.prefect_service")
+@patch("ddpui.services.org_cleanup_service.secretsmanager")
+@patch("ddpui.services.org_cleanup_service.DbtProjectManager")
+@patch("ddpui.services.org_cleanup_service.os")
+@patch("ddpui.services.org_cleanup_service.shutil")
+def test_delete_transformation_layer_dry_run(
+    mock_shutil,
+    mock_os,
+    mock_DbtProjectManager,
+    mock_secretsmanager,
+    mock_prefect_service,
+    org_with_transform_tasks,
+):
+    org, orgtask_dbt, orgtask_git = org_with_transform_tasks
+    service = OrgCleanupService(org, dry_run=True)
+    service.delete_transformation_layer()
+    # Objects should still exist
+    assert OrgTask.objects.filter(id=orgtask_dbt.id).exists()
+    assert OrgTask.objects.filter(id=orgtask_git.id).exists()
+
+
+@patch("ddpui.services.org_cleanup_service.prefect_service")
+@patch("ddpui.services.org_cleanup_service.secretsmanager")
+@patch("ddpui.services.org_cleanup_service.DbtProjectManager")
+@patch("ddpui.services.org_cleanup_service.os")
+@patch("ddpui.services.org_cleanup_service.shutil")
+def test_delete_transformation_layer_delete(
+    mock_shutil,
+    mock_os,
+    mock_DbtProjectManager,
+    mock_secretsmanager,
+    mock_prefect_service,
+    org_with_transform_tasks,
+):
+    org, orgtask_dbt, orgtask_git = org_with_transform_tasks
+    # Simulate dbt workspace exists
+    mock_os.path.exists.return_value = True
+    service = OrgCleanupService(org, dry_run=False)
+    service.delete_transformation_layer()
+    # Objects should be deleted
+    assert not OrgTask.objects.filter(id=orgtask_dbt.id).exists()
+    assert not OrgTask.objects.filter(id=orgtask_git.id).exists()
+
+
+@patch("ddpui.services.org_cleanup_service.prefect_service")
+@patch("ddpui.services.org_cleanup_service.secretsmanager")
+@patch("ddpui.services.org_cleanup_service.DbtProjectManager")
+@patch("ddpui.services.org_cleanup_service.os")
+@patch("ddpui.services.org_cleanup_service.shutil")
+def test_delete_transformation_layer_task_in_orchestrate(
+    mock_shutil,
+    mock_os,
+    mock_DbtProjectManager,
+    mock_secretsmanager,
+    mock_prefect_service,
+    org_with_transform_tasks,
+):
+    org, orgtask_dbt, orgtask_git = org_with_transform_tasks
+    # Create orchestrate pipeline using orgtask_dbt
+    dataflow_orchestrate = OrgDataFlowv1.objects.create(
+        org=org, dataflow_type="orchestrate", deployment_id="deployX", deployment_name="dfX"
+    )
+    DataflowOrgTask.objects.create(dataflow=dataflow_orchestrate, orgtask=orgtask_dbt)
+    service = OrgCleanupService(org, dry_run=False)
+    with pytest.raises(OrgCleanupServiceError):
+        service.delete_transformation_layer()
+
+
+@pytest.fixture
+def org_with_orchestrate_pipelines():
+    org = Org.objects.create(
+        name="TestOrgOrch", airbyte_workspace_id="workspace789", slug="test-slug-orch"
+    )
+    dataflow1 = OrgDataFlowv1.objects.create(
+        org=org, dataflow_type="orchestrate", deployment_id="dep1", deployment_name="orch1"
+    )
+    dataflow2 = OrgDataFlowv1.objects.create(
+        org=org, dataflow_type="orchestrate", deployment_id="dep2", deployment_name="orch2"
+    )
+    return org, [dataflow1, dataflow2]
+
+
+@patch("ddpui.services.org_cleanup_service.prefect_service")
+def test_delete_orchestrate_pipelines_dry_run(mock_prefect_service, org_with_orchestrate_pipelines):
+    org, dataflows = org_with_orchestrate_pipelines
+    service = OrgCleanupService(org, dry_run=True)
+    service.delete_orchestrate_pipelines()
+    # Should not delete any dataflows
+    for df in dataflows:
+        assert OrgDataFlowv1.objects.filter(id=df.id).exists()
+    mock_prefect_service.delete_deployment_by_id.assert_not_called()
+
+
+@patch("ddpui.services.org_cleanup_service.prefect_service")
+def test_delete_orchestrate_pipelines_delete(mock_prefect_service, org_with_orchestrate_pipelines):
+    org, dataflows = org_with_orchestrate_pipelines
+    service = OrgCleanupService(org, dry_run=False)
+    service.delete_orchestrate_pipelines()
+    # Should delete all orchestrate dataflows
+    for df in dataflows:
+        assert not OrgDataFlowv1.objects.filter(id=df.id).exists()
+        mock_prefect_service.delete_deployment_by_id.assert_any_call(df.deployment_id)
+
+
+@patch("ddpui.services.org_cleanup_service.prefect_service")
+def test_delete_orchestrate_pipelines_none(mock_prefect_service):
+    org = Org.objects.create(
+        name="TestOrgOrchNone", airbyte_workspace_id="workspace000", slug="test-slug-orch-none"
+    )
+    service = OrgCleanupService(org, dry_run=False)
+    service.delete_orchestrate_pipelines()
+    # No orchestrate pipelines, nothing should be deleted
+    assert OrgDataFlowv1.objects.filter(org=org, dataflow_type="orchestrate").count() == 0
+    mock_prefect_service.delete_deployment_by_id.assert_not_called()
