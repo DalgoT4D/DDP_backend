@@ -137,6 +137,7 @@ class GitManager:
         )
 
         if result.returncode != 0:
+            # Remote branch might not exist yet
             return (0, 0)
 
         # Output format: "ahead\tbehind"
