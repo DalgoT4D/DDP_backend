@@ -272,11 +272,7 @@ def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
 @has_permission(["can_edit_dbt_workspace"])
 def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
     """
-    Commit and optionally push local changes to remote git repo.
-
-    - Commits with the user's email for tracking
-    - If git remote and access token are configured, pushes to remote
-    - Otherwise, only commits locally
+    Commit and push local changes to remote git repo.
     """
     orguser: OrgUser = request.orguser
     org = orguser.org
@@ -292,15 +288,10 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
     if not dbt_repo_dir.exists():
         raise HttpError(400, "DBT repo directory does not exist")
 
-    # Check if remote is configured
-    has_remote = orgdbt.gitrepo_url is not None and orgdbt.gitrepo_access_token_secret is not None
-
-    # Retrieve PAT only if remote is configured (needed for push)
+    # Retrieve PAT if available
     actual_pat = None
-    if has_remote:
+    if orgdbt.gitrepo_access_token_secret:
         actual_pat = secretsmanager.retrieve_github_pat(orgdbt.gitrepo_access_token_secret)
-        if not actual_pat:
-            raise HttpError(400, "Failed to retrieve git access token from secrets manager.")
 
     try:
         git_manager = GitManager(
@@ -309,75 +300,47 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
     except GitManagerError as e:
         raise HttpError(400, f"Git is not initialized in the DBT repo: {e.message}") from e
 
-    # Check what needs to be done
-    file_changes = git_manager.get_file_status()
-    has_uncommitted_changes = len(file_changes) > 0
-    ahead, _ = git_manager.get_ahead_behind() if has_remote else (0, 0)
-    has_unpushed_commits = ahead > 0
-
-    # Nothing to do
-    if not has_uncommitted_changes and not has_unpushed_commits:
-        return {
-            "success": True,
-            "message": "No changes to publish",
-            "committed": False,
-            "pushed": False,
-        }
-
     committed = False
     commit_result = None
     pushed = False
 
-    # Step 1: Commit if there are uncommitted changes
-    if has_uncommitted_changes:
-        sensitive_files = check_sensitive_files_in_staged_changes(file_changes)
-        if sensitive_files:
-            raise HttpError(
-                400,
-                f"Cannot publish: sensitive files detected: {', '.join(sensitive_files)}. "
-                "Please add these files to .gitignore and try again.",
-            )
+    # Step 1: Commit changes
+    try:
+        user = orguser.user
+        user_name = f"{user.first_name} {user.last_name}".strip() or user.email
+        commit_result = git_manager.commit_changes(
+            message=payload.commit_message,
+            user_name=user_name,
+            user_email=user.email,
+        )
+        committed = True
+    except GitManagerError as e:
+        return {
+            "success": False,
+            "message": f"Commit failed: {e.message}",
+            "committed": False,
+            "pushed": False,
+        }
 
-        try:
-            user = orguser.user
-            user_name = f"{user.first_name} {user.last_name}".strip() or user.email
-            commit_result = git_manager.commit_changes(
-                message=payload.commit_message,
-                user_name=user_name,
-                user_email=user.email,
-            )
-            committed = True
-        except GitManagerError as e:
-            raise HttpError(500, f"Failed to commit changes: {e.message}") from e
-
-    # Step 2: Push if remote is configured and there's something to push
-    if has_remote and (committed or has_unpushed_commits):
-        try:
-            git_manager.push_changes()
-            pushed = True
-            logger.info(f"Pushed changes for org {org.slug}")
-        except GitManagerError as e:
-            error_detail = e.error if e.error else e.message
-            logger.error(f"Failed to push changes for org {org.slug}: {error_detail}")
-            return {
-                "success": False,
-                "message": f"Push failed: {error_detail}",
-                "committed": committed,
-                "pushed": False,
-                "commit_result": commit_result,
-            }
-
-    # Build response message
-    if pushed:
-        message = "Changes published successfully"
-    elif committed:
-        message = "Changes committed locally"
-    else:
-        message = "No changes to publish"
+    # Step 2: Push changes
+    try:
+        git_manager.push_changes()
+        pushed = True
+        logger.info(f"Pushed changes for org {org.slug}")
+    except GitManagerError as e:
+        error_detail = e.error if e.error else e.message
+        logger.error(f"Failed to push changes for org {org.slug}: {error_detail}")
+        return {
+            "success": False,
+            "message": f"Push failed: {error_detail}",
+            "committed": committed,
+            "pushed": False,
+            "commit_result": commit_result,
+        }
 
     return {
         "success": True,
-        "message": message,
+        "message": "Changes published successfully",
         "committed": committed,
         "pushed": pushed,
         "commit_result": commit_result,
