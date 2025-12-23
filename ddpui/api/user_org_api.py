@@ -594,7 +594,11 @@ def delete_organization_warehouses_v1(request):
     if org.base_plan() == OrgType.DEMO:
         raise HttpError(403, "insufficient permissions")
 
-    OrgCleanupService(org, dry_run=False).delete_warehouse()
+    cleanup_src = OrgCleanupService(org, dry_run=False)
+
+    cleanup_src.delete_orchestrate_pipelines()
+    cleanup_src.delete_warehouse()
+    cleanup_src.delete_transformation_layer()
 
     return {"success": 1}
 

@@ -162,6 +162,8 @@ class OrgCleanupService:
         2. delete the destinations in airbyte for all OrgWarehouse objects
         3. delete all warehouse credentials in secrets manager
         4. delete all OrgWarehouse object related to the org
+
+        Note that this will also remove the connection syncs from the pipelines
         """
         for dataflow in OrgDataFlowv1.objects.filter(org=self.org, dataflow_type="manual"):
             all_tasks_are_airbyte_type = all(
