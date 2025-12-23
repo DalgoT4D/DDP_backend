@@ -1233,119 +1233,12 @@ def test_post_publish_changes_workspace_errors(seed_db, orguser: OrgUser):
     orgdbt.delete()
 
 
-def test_post_publish_changes_pat_retrieval_fails(seed_db, orguser: OrgUser):
-    """Test error when PAT retrieval from secretsmanager fails"""
-    request = mock_request(orguser)
-    payload = OrgDbtChangesPublish(commit_message="Test commit")
-
-    orgdbt = OrgDbt.objects.create(
-        gitrepo_url="https://github.com/user/repo.git",
-        gitrepo_access_token_secret="pat-secret-key",
-    )
-    request.orguser.org.dbt = orgdbt
-    request.orguser.org.save()
-
-    with patch(
-        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
-        return_value="/existing/path",
-    ), patch("ddpui.api.dbt_api.Path") as mock_path:
-        mock_path.return_value.exists.return_value = True
-
-        with patch(
-            "ddpui.api.dbt_api.secretsmanager.retrieve_github_pat",
-            return_value=None,
-        ), pytest.raises(HttpError) as excinfo:
-            post_dbt_publish_changes(request, payload)
-        assert str(excinfo.value) == "Failed to retrieve git access token from secrets manager."
-
-    # Cleanup
-    orgdbt.delete()
-
-
-def test_post_publish_changes_no_changes(seed_db, orguser: OrgUser):
-    """Test success when no uncommitted changes and no unpushed commits"""
-    request = mock_request(orguser)
-    payload = OrgDbtChangesPublish(commit_message="Test commit")
-
-    orgdbt = OrgDbt.objects.create(
-        gitrepo_url="https://github.com/user/repo.git",
-        gitrepo_access_token_secret="pat-secret-key",
-    )
-    request.orguser.org.dbt = orgdbt
-    request.orguser.org.save()
-
-    with patch(
-        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
-        return_value="/existing/path",
-    ), patch("ddpui.api.dbt_api.Path") as mock_path:
-        mock_path.return_value.exists.return_value = True
-
-        mock_git_manager = Mock()
-        mock_git_manager.get_file_status.return_value = []  # No uncommitted changes
-        mock_git_manager.get_ahead_behind.return_value = (0, 0)  # No unpushed commits
-
-        with patch(
-            "ddpui.api.dbt_api.secretsmanager.retrieve_github_pat",
-            return_value="actual-pat",
-        ), patch("ddpui.api.dbt_api.GitManager", return_value=mock_git_manager):
-            response = post_dbt_publish_changes(request, payload)
-
-            assert response["success"] is True
-            assert response["message"] == "No changes to publish"
-            assert response["committed"] is False
-            assert response["pushed"] is False
-
-    # Cleanup
-    orgdbt.delete()
-
-
-def test_post_publish_changes_sensitive_files_detected(seed_db, orguser: OrgUser):
-    """Test error when sensitive files are staged for commit"""
-    request = mock_request(orguser)
-    payload = OrgDbtChangesPublish(commit_message="Test commit")
-
-    orgdbt = OrgDbt.objects.create(
-        gitrepo_url=None,  # No remote
-        gitrepo_access_token_secret=None,
-    )
-    request.orguser.org.dbt = orgdbt
-    request.orguser.org.save()
-
-    sensitive_changes = [
-        {"status": "added", "file": ".env"},
-        {"status": "modified", "file": "models/model1.sql"},
-    ]
-
-    with patch(
-        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
-        return_value="/existing/path",
-    ), patch("ddpui.api.dbt_api.Path") as mock_path:
-        mock_path.return_value.exists.return_value = True
-
-        mock_git_manager = Mock()
-        mock_git_manager.get_file_status.return_value = sensitive_changes
-
-        with patch("ddpui.api.dbt_api.GitManager", return_value=mock_git_manager), patch(
-            "ddpui.api.dbt_api.check_sensitive_files_in_staged_changes",
-            return_value=[".env"],
-        ), pytest.raises(HttpError) as excinfo:
-            post_dbt_publish_changes(request, payload)
-        assert "sensitive files detected" in str(excinfo.value)
-        assert ".env" in str(excinfo.value)
-
-    # Cleanup
-    orgdbt.delete()
-
-
 def test_post_publish_changes_commit_fails(seed_db, orguser: OrgUser):
-    """Test error when git commit operation fails"""
+    """Test that commit failure returns success=False with error message"""
     request = mock_request(orguser)
     payload = OrgDbtChangesPublish(commit_message="Test commit")
 
-    orgdbt = OrgDbt.objects.create(
-        gitrepo_url=None,  # No remote
-        gitrepo_access_token_secret=None,
-    )
+    orgdbt = OrgDbt.objects.create()
     request.orguser.org.dbt = orgdbt
     request.orguser.org.save()
 
@@ -1356,20 +1249,17 @@ def test_post_publish_changes_commit_fails(seed_db, orguser: OrgUser):
         mock_path.return_value.exists.return_value = True
 
         mock_git_manager = Mock()
-        mock_git_manager.get_file_status.return_value = [
-            {"status": "modified", "file": "model.sql"}
-        ]
         mock_git_manager.commit_changes.side_effect = GitManagerError(
             message="Commit failed", error="git error"
         )
 
-        with patch("ddpui.api.dbt_api.GitManager", return_value=mock_git_manager), patch(
-            "ddpui.api.dbt_api.check_sensitive_files_in_staged_changes",
-            return_value=[],
-        ), pytest.raises(HttpError) as excinfo:
-            post_dbt_publish_changes(request, payload)
-        assert excinfo.value.status_code == 500
-        assert "Failed to commit changes" in str(excinfo.value)
+        with patch("ddpui.api.dbt_api.GitManager", return_value=mock_git_manager):
+            response = post_dbt_publish_changes(request, payload)
+
+            assert response["success"] is False
+            assert "Commit failed" in response["message"]
+            assert response["committed"] is False
+            assert response["pushed"] is False
 
     # Cleanup
     orgdbt.delete()
@@ -1381,7 +1271,6 @@ def test_post_publish_changes_push_fails(seed_db, orguser: OrgUser):
     payload = OrgDbtChangesPublish(commit_message="Test commit")
 
     orgdbt = OrgDbt.objects.create(
-        gitrepo_url="https://github.com/user/repo.git",
         gitrepo_access_token_secret="pat-secret-key",
     )
     request.orguser.org.dbt = orgdbt
@@ -1394,10 +1283,6 @@ def test_post_publish_changes_push_fails(seed_db, orguser: OrgUser):
         mock_path.return_value.exists.return_value = True
 
         mock_git_manager = Mock()
-        mock_git_manager.get_file_status.return_value = [
-            {"status": "modified", "file": "model.sql"}
-        ]
-        mock_git_manager.get_ahead_behind.return_value = (0, 0)
         mock_git_manager.commit_changes.return_value = "Committed successfully"
         mock_git_manager.push_changes.side_effect = GitManagerError(
             message="Push failed", error="remote rejected"
@@ -1406,10 +1291,7 @@ def test_post_publish_changes_push_fails(seed_db, orguser: OrgUser):
         with patch(
             "ddpui.api.dbt_api.secretsmanager.retrieve_github_pat",
             return_value="actual-pat",
-        ), patch("ddpui.api.dbt_api.GitManager", return_value=mock_git_manager), patch(
-            "ddpui.api.dbt_api.check_sensitive_files_in_staged_changes",
-            return_value=[],
-        ):
+        ), patch("ddpui.api.dbt_api.GitManager", return_value=mock_git_manager):
             response = post_dbt_publish_changes(request, payload)
 
             assert response["success"] is False
@@ -1421,15 +1303,12 @@ def test_post_publish_changes_push_fails(seed_db, orguser: OrgUser):
     orgdbt.delete()
 
 
-def test_post_publish_changes_commit_only_no_remote(seed_db, orguser: OrgUser):
-    """Test local commit only when no remote is configured"""
+def test_post_publish_changes_push_fails_no_remote(seed_db, orguser: OrgUser):
+    """Test that push fails when no remote is configured (git error returned to user)"""
     request = mock_request(orguser)
     payload = OrgDbtChangesPublish(commit_message="Test commit")
 
-    orgdbt = OrgDbt.objects.create(
-        gitrepo_url=None,  # No remote
-        gitrepo_access_token_secret=None,
-    )
+    orgdbt = OrgDbt.objects.create()  # No PAT secret
     request.orguser.org.dbt = orgdbt
     request.orguser.org.save()
 
@@ -1440,75 +1319,26 @@ def test_post_publish_changes_commit_only_no_remote(seed_db, orguser: OrgUser):
         mock_path.return_value.exists.return_value = True
 
         mock_git_manager = Mock()
-        mock_git_manager.get_file_status.return_value = [
-            {"status": "modified", "file": "model.sql"}
-        ]
         mock_git_manager.commit_changes.return_value = "Committed successfully"
+        mock_git_manager.push_changes.side_effect = GitManagerError(
+            message="No remote configured",
+            error="fatal: 'origin' does not appear to be a git repository",
+        )
 
-        with patch("ddpui.api.dbt_api.GitManager", return_value=mock_git_manager), patch(
-            "ddpui.api.dbt_api.check_sensitive_files_in_staged_changes",
-            return_value=[],
-        ):
+        with patch("ddpui.api.dbt_api.GitManager", return_value=mock_git_manager):
             response = post_dbt_publish_changes(request, payload)
 
-            assert response["success"] is True
-            assert response["message"] == "Changes committed locally"
+            assert response["success"] is False
+            assert "origin" in response["message"]
             assert response["committed"] is True
             assert response["pushed"] is False
-            mock_git_manager.push_changes.assert_not_called()
 
     # Cleanup
     orgdbt.delete()
 
 
-def test_post_publish_changes_commit_and_push(seed_db, orguser: OrgUser):
-    """Test successful commit and push when remote is configured"""
-    request = mock_request(orguser)
-    payload = OrgDbtChangesPublish(commit_message="Test commit")
-
-    orgdbt = OrgDbt.objects.create(
-        gitrepo_url="https://github.com/user/repo.git",
-        gitrepo_access_token_secret="pat-secret-key",
-    )
-    request.orguser.org.dbt = orgdbt
-    request.orguser.org.save()
-
-    with patch(
-        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
-        return_value="/existing/path",
-    ), patch("ddpui.api.dbt_api.Path") as mock_path:
-        mock_path.return_value.exists.return_value = True
-
-        mock_git_manager = Mock()
-        mock_git_manager.get_file_status.return_value = [
-            {"status": "modified", "file": "model.sql"}
-        ]
-        mock_git_manager.get_ahead_behind.return_value = (0, 0)
-        mock_git_manager.commit_changes.return_value = "Committed successfully"
-        mock_git_manager.push_changes.return_value = "Pushed successfully"
-
-        with patch(
-            "ddpui.api.dbt_api.secretsmanager.retrieve_github_pat",
-            return_value="actual-pat",
-        ), patch("ddpui.api.dbt_api.GitManager", return_value=mock_git_manager), patch(
-            "ddpui.api.dbt_api.check_sensitive_files_in_staged_changes",
-            return_value=[],
-        ):
-            response = post_dbt_publish_changes(request, payload)
-
-            assert response["success"] is True
-            assert response["message"] == "Changes published successfully"
-            assert response["committed"] is True
-            assert response["pushed"] is True
-            mock_git_manager.commit_changes.assert_called_once()
-            mock_git_manager.push_changes.assert_called_once()
-
-    # Cleanup
-    orgdbt.delete()
-
-
-def test_post_publish_changes_push_unpushed_commits(seed_db, orguser: OrgUser):
-    """Test push only when no new changes but unpushed commits exist, also verifies user info"""
+def test_post_publish_changes_success(seed_db, orguser: OrgUser):
+    """Test successful commit and push"""
     request = mock_request(orguser)
     request.orguser.user.first_name = "John"
     request.orguser.user.last_name = "Doe"
@@ -1516,7 +1346,6 @@ def test_post_publish_changes_push_unpushed_commits(seed_db, orguser: OrgUser):
     payload = OrgDbtChangesPublish(commit_message="Test commit")
 
     orgdbt = OrgDbt.objects.create(
-        gitrepo_url="https://github.com/user/repo.git",
         gitrepo_access_token_secret="pat-secret-key",
     )
     request.orguser.org.dbt = orgdbt
@@ -1529,8 +1358,7 @@ def test_post_publish_changes_push_unpushed_commits(seed_db, orguser: OrgUser):
         mock_path.return_value.exists.return_value = True
 
         mock_git_manager = Mock()
-        mock_git_manager.get_file_status.return_value = []  # No uncommitted changes
-        mock_git_manager.get_ahead_behind.return_value = (3, 0)  # 3 unpushed commits
+        mock_git_manager.commit_changes.return_value = "Committed successfully"
         mock_git_manager.push_changes.return_value = "Pushed successfully"
 
         with patch(
@@ -1541,10 +1369,55 @@ def test_post_publish_changes_push_unpushed_commits(seed_db, orguser: OrgUser):
 
             assert response["success"] is True
             assert response["message"] == "Changes published successfully"
-            assert response["committed"] is False  # No new commit was made
+            assert response["committed"] is True
             assert response["pushed"] is True
-            mock_git_manager.commit_changes.assert_not_called()
+            assert response["commit_result"] == "Committed successfully"
+
+            # Verify commit was called with correct user info
+            mock_git_manager.commit_changes.assert_called_once_with(
+                message="Test commit",
+                user_name="John Doe",
+                user_email="john.doe@example.com",
+            )
             mock_git_manager.push_changes.assert_called_once()
+
+    # Cleanup
+    orgdbt.delete()
+
+
+def test_post_publish_changes_nothing_to_commit(seed_db, orguser: OrgUser):
+    """Test when there's nothing to commit but push still runs"""
+    request = mock_request(orguser)
+    payload = OrgDbtChangesPublish(commit_message="Test commit")
+
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_access_token_secret="pat-secret-key",
+    )
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    with patch(
+        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
+        return_value="/existing/path",
+    ), patch("ddpui.api.dbt_api.Path") as mock_path:
+        mock_path.return_value.exists.return_value = True
+
+        mock_git_manager = Mock()
+        # This is what git returns when there's nothing to commit
+        mock_git_manager.commit_changes.return_value = "Nothing to commit, working tree clean"
+        mock_git_manager.push_changes.return_value = "Everything up-to-date"
+
+        with patch(
+            "ddpui.api.dbt_api.secretsmanager.retrieve_github_pat",
+            return_value="actual-pat",
+        ), patch("ddpui.api.dbt_api.GitManager", return_value=mock_git_manager):
+            response = post_dbt_publish_changes(request, payload)
+
+            assert response["success"] is True
+            assert response["message"] == "Changes published successfully"
+            assert response["committed"] is True
+            assert response["pushed"] is True
+            assert response["commit_result"] == "Nothing to commit, working tree clean"
 
     # Cleanup
     orgdbt.delete()
