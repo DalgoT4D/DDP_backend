@@ -128,7 +128,7 @@ class OrgCleanupService:
                 except Exception:  # pylint:disable=broad-exception-caught
                     pass
 
-                if orgdbt.gitrepo_access_token_secret:
+                if orgdbt and orgdbt.gitrepo_access_token_secret:
                     secretsmanager.delete_github_pat(orgdbt.gitrepo_access_token_secret)
                     logger.info("deleted github PAT from secrets manager")
 
