@@ -105,6 +105,9 @@ def mock_setup_dbt_workspace_ui_transform(orguser: OrgUser, tmp_path):
     for sql_file_path in glob.glob(os.path.join(assets_dir, "*.sql")):
         assert (Path(dbtrepo_dir) / "macros" / Path(sql_file_path).name).exists()
 
+    # Verify .gitignore was created
+    assert (Path(dbtrepo_dir) / ".gitignore").exists()
+
     orgdbt = OrgDbt.objects.filter(org=org).first()
     assert orgdbt is not None
     assert org.dbt == orgdbt
