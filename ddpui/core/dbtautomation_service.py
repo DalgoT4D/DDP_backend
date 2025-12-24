@@ -612,7 +612,10 @@ def convert_canvas_node_to_frontend_format(canvas_node: CanvasNode):
     """
     is_last_in_chain = True  # you can always build chains on a model/source node
     if canvas_node.node_type == CanvasNodeType.OPERATION:
-        outgoing_edges = CanvasEdge.objects.filter(from_node=canvas_node).count()
+        # check if there is another operation in chain after this
+        outgoing_edges = CanvasEdge.objects.filter(
+            from_node=canvas_node, to_node__node_type=CanvasNodeType.OPERATION
+        ).count()
         is_last_in_chain = outgoing_edges == 0
 
     return {
