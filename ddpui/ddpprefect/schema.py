@@ -293,6 +293,12 @@ class OrgDbtConnectGitRemote(Schema):
     gitrepoAccessToken: str  # Required - PAT is mandatory for this endpoint
 
 
+class OrgDbtChangesPublish(Schema):
+    """Schema for publishing local changes to remote git repo"""
+
+    commit_message: str
+
+
 class OrgDbtTarget(Schema):
     """Docstring"""
 

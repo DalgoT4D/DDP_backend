@@ -191,6 +191,15 @@ def test_setup_local_dbt_workspace_success(tmp_path):
     for sql_file_path in glob.glob(os.path.join(assets_dir, "*.sql")):
         assert (Path(dbtrepo_dir) / "macros" / Path(sql_file_path).name).exists()
 
+    # Verify .gitignore was created with expected content
+    gitignore_path = Path(dbtrepo_dir) / ".gitignore"
+    assert gitignore_path.exists()
+    gitignore_content = gitignore_path.read_text()
+    assert "target/" in gitignore_content
+    assert "dbt_packages/" in gitignore_content
+    assert "profiles.yml" in gitignore_content
+    assert ".env*" in gitignore_content
+
     orgdbt = OrgDbt.objects.filter(org=org).first()
     assert orgdbt is not None
     assert org.dbt == orgdbt
