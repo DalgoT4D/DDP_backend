@@ -35,6 +35,7 @@ from ddpui.utils.helpers import runcmd
 from ddpui.utils.orguserhelpers import from_orguser
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils import secretsmanager
+from ddpui.services.org_cleanup_service import OrgCleanupService
 from ddpui.schemas.org_task_schema import TaskParameters
 
 dbt_router = Router()
@@ -156,10 +157,11 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
 def dbt_delete(request):
     """Delete the dbt workspace and project repo created"""
     orguser: OrgUser = request.orguser
-    if orguser.org is None:
+    org = orguser.org
+    if org is None:
         raise HttpError(400, "create an organization first")
 
-    dbt_service.delete_dbt_workspace(orguser.org)
+    OrgCleanupService(org, dry_run=False).delete_transformation_layer()
 
     return from_orguser(orguser)
 

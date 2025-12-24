@@ -21,7 +21,6 @@ from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.constants import TASK_GENERATE_EDR
-from ddpui.celeryworkers.tasks import run_dbt_commands
 from ddpui.core.pipelinefunctions import setup_edr_send_report_task_config
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.core.orgdbt_manager import DbtProjectManager
@@ -161,6 +160,9 @@ def check_dbt_files(org: Org):
 
 def create_elementary_tracking_tables(org: Org):
     """creates elementary tracking tables"""
+
+    from ddpui.celeryworkers.tasks import run_dbt_commands
+
     if org.dbt is None:
         return {"error": "dbt is not configured for this client"}
 

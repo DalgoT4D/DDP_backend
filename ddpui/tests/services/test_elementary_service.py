@@ -500,7 +500,7 @@ def test_check_dbt_files_missing_elementary_package_have_target_schema(
 
 @patch("ddpui.ddpdbt.elementary_service.TaskProgress")
 @patch("ddpui.ddpdbt.elementary_service.uuid4")
-@patch("ddpui.ddpdbt.elementary_service.run_dbt_commands")
+@patch("ddpui.celeryworkers.tasks.run_dbt_commands")
 def test_create_elementary_tracking_tables(
     mock_run_dbt_commands, mock_uuid4, mock_task_progress, org
 ):
