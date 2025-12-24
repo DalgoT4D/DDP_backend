@@ -1313,7 +1313,8 @@ def post_terminate_operation_node(
                 model_node.save()
 
             # create the edge from the terminal operation node to the model node
-            CanvasEdge.objects.create(from_node=terminal_node, to_node=model_node, seq=1)
+            if not CanvasEdge.objects.filter(from_node=terminal_node, to_node=model_node).exists():
+                CanvasEdge.objects.create(from_node=terminal_node, to_node=model_node, seq=1)
 
         logger.info(f"V2 operation node terminated successfully: {node_uuid}")
         return convert_canvas_node_to_frontend_format(model_node)
