@@ -121,6 +121,20 @@ def generate_chart_render_config(chart: Chart, org_warehouse: OrgWarehouse) -> d
         extra_config = chart.extra_config
         logger.debug(f"Chart {chart.id} extra_config: {extra_config}")
 
+        # For table charts, prefer dimensions list, fallback to dimension_column + extra_dimension_column
+        dimensions = None
+        if chart.chart_type == "table":
+            if extra_config.get("dimension_columns"):
+                dimensions = extra_config.get("dimension_columns")
+            else:
+                # Backward compatibility: convert dimension_column + extra_dimension_column to list
+                dims = []
+                if extra_config.get("dimension_column"):
+                    dims.append(extra_config.get("dimension_column"))
+                if extra_config.get("extra_dimension_column"):
+                    dims.append(extra_config.get("extra_dimension_column"))
+                dimensions = dims if dims else None
+
         payload = ChartDataPayload(
             chart_type=chart.chart_type,
             schema_name=chart.schema_name,
@@ -129,11 +143,14 @@ def generate_chart_render_config(chart: Chart, org_warehouse: OrgWarehouse) -> d
             y_axis=extra_config.get("y_axis_column"),
             dimension_col=extra_config.get("dimension_column"),
             extra_dimension=extra_config.get("extra_dimension_column"),
+            dimensions=dimensions,
+            metrics=extra_config.get("metrics"),
             # Map-specific fields
             geographic_column=extra_config.get("geographic_column"),
             value_column=extra_config.get("value_column"),
             selected_geojson_id=extra_config.get("selected_geojson_id"),
             customizations=extra_config.get("customizations", {}),
+            extra_config=extra_config,
         )
 
         # Use the common function to generate config and data
@@ -168,6 +185,7 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
         y_axis=payload.y_axis,
         dimension_col=payload.dimension_col,
         extra_dimension=payload.extra_dimension,
+        dimensions=payload.dimensions,  # Support multiple dimensions for table charts
         metrics=payload.metrics,
     )
 
@@ -183,6 +201,7 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
         y_axis=payload.y_axis,
         dimension_col=payload.dimension_col,
         extra_dimension=payload.extra_dimension,
+        dimensions=payload.dimensions,  # Pass dimensions for table charts
         customizations=payload.customizations,
         metrics=payload.metrics,
     )
@@ -533,15 +552,26 @@ def get_chart_data(request, payload: ChartDataPayload):
     if not org_warehouse:
         raise HttpError(404, "Warehouse not configured")
 
+    # Log payload details for debugging
+    logger.info(
+        f"Chart data endpoint - payload dimensions: {payload.dimensions}, dimension_col: {payload.dimension_col}, extra_dimension: {payload.extra_dimension}"
+    )
+    logger.info(f"Chart data endpoint - payload metrics: {payload.metrics}")
+    logger.info(f"Chart data endpoint - payload extra_config: {payload.extra_config}")
+
     # Use the common function to generate data and config
     try:
         result = generate_chart_data_and_config(payload, org_warehouse)
         return ChartDataResponse(data=result["data"], echarts_config=result["echarts_config"])
     except ValueError as e:
+        logger.error(f"ValueError generating chart data: {str(e)}", exc_info=True)
         raise HttpError(400, str(e))
     except Exception as e:
-        logger.error(f"Error generating chart data: {str(e)}")
-        raise HttpError(500, "Error generating chart data")
+        logger.error(f"Error generating chart data: {str(e)}", exc_info=True)
+        logger.error(
+            f"Error details - payload: {payload.dict() if hasattr(payload, 'dict') else payload}"
+        )
+        raise HttpError(500, f"Error generating chart data: {str(e)}")
 
 
 @charts_router.post("/chart-data-preview/", response=DataPreviewResponse)
@@ -608,6 +638,11 @@ def get_chart_data_preview(
             resolved_dashboard_filters = None
 
     # Create a modified payload with dashboard filters
+    # Log the incoming payload to debug dimension issues
+    logger.info(
+        f"Chart data preview - received payload dimensions: {payload.dimensions}, dimension_col: {payload.dimension_col}, extra_dimension: {payload.extra_dimension}"
+    )
+
     modified_payload = ChartDataPayload(
         chart_type=payload.chart_type,
         schema_name=payload.schema_name,
@@ -616,6 +651,7 @@ def get_chart_data_preview(
         y_axis=payload.y_axis,
         dimension_col=payload.dimension_col,
         extra_dimension=payload.extra_dimension,
+        dimensions=payload.dimensions,  # Support multiple dimensions for table charts
         metrics=payload.metrics,
         geographic_column=payload.geographic_column,
         value_column=payload.value_column,
@@ -626,6 +662,8 @@ def get_chart_data_preview(
         extra_config=payload.extra_config,
         dashboard_filters=resolved_dashboard_filters,  # Add resolved dashboard filters
     )
+
+    logger.info(f"Chart data preview - modified payload dimensions: {modified_payload.dimensions}")
 
     # Get table preview using the same query builder as chart data
     # This ensures preview shows exactly what will be used for the chart
@@ -713,6 +751,7 @@ def get_chart_data_preview_total_rows(
         y_axis=payload.y_axis,
         dimension_col=payload.dimension_col,
         extra_dimension=payload.extra_dimension,
+        dimensions=payload.dimensions,  # Support multiple dimensions for table charts
         metrics=payload.metrics,
         geographic_column=payload.geographic_column,
         value_column=payload.value_column,
