@@ -352,6 +352,45 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
     }
 
 
+@dbt_router.get("/git_status/")
+@has_permission(["can_view_dbt_workspace"])
+def get_dbt_git_status(request):
+    """
+    Get current git status summary for the canvas publish section.
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    orgdbt = org.dbt
+
+    if orgdbt is None:
+        raise HttpError(400, "dbt workspace is not configured for this organization")
+
+    if not orgdbt.gitrepo_url:
+        raise HttpError(400, "Git repository is not connected")
+
+    dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+    if not dbt_repo_dir.exists():
+        raise HttpError(400, "DBT repo directory does not exist")
+
+    # Retrieve PAT if available
+    actual_pat = None
+    if orgdbt.gitrepo_access_token_secret:
+        actual_pat = secretsmanager.retrieve_github_pat(orgdbt.gitrepo_access_token_secret)
+
+    try:
+        git_manager = GitManager(
+            repo_local_path=str(dbt_repo_dir), pat=actual_pat, validate_git=True
+        )
+    except GitManagerError as e:
+        raise HttpError(400, f"Git is not initialized in the DBT repo: {e.message}") from e
+
+    try:
+        summary = git_manager.get_changes_summary()
+        return {"summary": summary}
+    except GitManagerError as e:
+        raise HttpError(500, f"Failed to get git status: {e.message}") from e
+
+
 @dbt_router.delete("/workspace/", response=OrgUserResponse)
 @has_permission(["can_delete_dbt_workspace"])
 def dbt_delete(request):
