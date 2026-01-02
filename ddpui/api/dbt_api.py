@@ -283,15 +283,15 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
     org = orguser.org
     orgdbt = org.dbt
 
-    if payload.commit_message.strip() == "":
-        raise HttpError(400, "Commit message cannot be empty")
-
     if orgdbt is None:
         raise HttpError(400, "dbt workspace is not configured for this organization")
 
     dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
     if not dbt_repo_dir.exists():
         raise HttpError(400, "DBT repo directory does not exist")
+
+    if payload.commit_message.strip() == "":
+        raise HttpError(400, "Commit message cannot be empty")
 
     # Retrieve PAT if available
     actual_pat = None
