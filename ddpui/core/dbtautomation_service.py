@@ -48,6 +48,7 @@ from ddpui.dbt_automation.utils.warehouseclient import get_client
 from ddpui.dbt_automation.utils.dbtproject import dbtProject
 from ddpui.dbt_automation.utils.dbtsources import read_sources, read_sources_from_yaml
 from ddpui.dbt_automation.operations.replace import replace, replace_dbt_sql
+from ddpui.core.git_manager import GitChangedFile
 from ddpui.dbt_automation.operations.casewhen import casewhen, casewhen_dbt_sql
 from ddpui.dbt_automation.operations.aggregate import aggregate, aggregate_dbt_sql
 from ddpui.dbt_automation.operations.pivot import pivot, pivot_dbt_sql
@@ -606,7 +607,9 @@ def create_or_update_dbt_model_in_project_v2(
     return model_sql_path, output_cols
 
 
-def convert_canvas_node_to_frontend_format(canvas_node: CanvasNode):
+def convert_canvas_node_to_frontend_format(
+    canvas_node: CanvasNode, changed_files: list[GitChangedFile] = None
+):
     """
     Convert CanvasNode to dict
     """
@@ -617,6 +620,35 @@ def convert_canvas_node_to_frontend_format(canvas_node: CanvasNode):
             from_node=canvas_node, to_node__node_type=CanvasNodeType.OPERATION
         ).count()
         is_last_in_chain = outgoing_edges == 0
+
+    # Determine if the node is published (only for model nodes)
+    is_published = None
+    if (
+        canvas_node.node_type == CanvasNodeType.MODEL
+        and canvas_node.dbtmodel
+        and changed_files is not None
+    ):
+        # Check if the model's SQL file or any of its parent directories appears in the changed files list
+        sql_path = canvas_node.dbtmodel.sql_path
+        is_published = True  # Assume published unless we find it in changed files
+
+        for changed_file in changed_files:
+            changed_filename = changed_file.filename
+            # Check if exact file matches
+            if changed_filename == sql_path:
+                is_published = False
+                break
+            # Check if any parent directory is untracked (ends with /)
+            if changed_filename.endswith("/") and sql_path.startswith(changed_filename):
+                is_published = False
+                break
+            # Check if the file is under a changed directory
+            if sql_path.startswith(changed_filename + "/"):
+                is_published = False
+                break
+    elif canvas_node.node_type != CanvasNodeType.MODEL:
+        # For non-model nodes, set isPublished to null as per requirement
+        is_published = None
 
     return {
         "uuid": str(canvas_node.uuid),
@@ -639,6 +671,7 @@ def convert_canvas_node_to_frontend_format(canvas_node: CanvasNode):
             else None
         ),
         "is_last_in_chain": is_last_in_chain,
+        "isPublished": is_published,
     }
 
 
