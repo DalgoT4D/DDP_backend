@@ -102,6 +102,9 @@ class DataPreviewResponse(Schema):
     columns: List
     column_types: dict
     data: List[dict]
+    page: Optional[int] = 0
+    page_size: Optional[int] = 100
+    total_rows: Optional[int] = 0
 
 
 class ExecuteChartQuery(Schema):

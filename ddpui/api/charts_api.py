@@ -665,19 +665,52 @@ def get_chart_data_preview(
 
     logger.info(f"Chart data preview - modified payload dimensions: {modified_payload.dimensions}")
 
-    # Get table preview using the same query builder as chart data
-    # This ensures preview shows exactly what will be used for the chart
-    preview_data = charts_service.get_chart_data_table_preview(
-        org_warehouse, modified_payload, page, limit
-    )
+    try:
+        # Get table preview using the same query builder as chart data
+        # This ensures preview shows exactly what will be used for the chart
+        preview_data = charts_service.get_chart_data_table_preview(
+            org_warehouse, modified_payload, page, limit
+        )
 
-    return DataPreviewResponse(
-        columns=preview_data["columns"],
-        column_types=preview_data["column_types"],
-        data=preview_data["data"],
-        page=preview_data["page"],
-        limit=preview_data["limit"],
-    )
+        logger.info(f"Preview data keys: {list(preview_data.keys())}")
+        logger.info(
+            f"Preview data sample: columns={len(preview_data.get('columns', []))}, data_rows={len(preview_data.get('data', []))}"
+        )
+
+        # Calculate total rows if not provided
+        total_rows = preview_data.get("total_rows")
+        if total_rows is None:
+            try:
+                # Get total rows count
+                total_rows = charts_service.get_chart_data_total_rows(
+                    org_warehouse, modified_payload
+                )
+            except Exception as total_rows_error:
+                logger.warning(f"Failed to get total rows count: {str(total_rows_error)}")
+                # Fallback to length of current data if total rows calculation fails
+                total_rows = len(preview_data.get("data", []))
+
+        # Ensure all required fields are present with proper defaults
+        response_data = {
+            "columns": preview_data.get("columns", []),
+            "column_types": preview_data.get("column_types", {}),
+            "data": preview_data.get("data", []),
+            "page": preview_data.get("page", page),
+            "page_size": preview_data.get("limit", limit),
+            "total_rows": total_rows if total_rows is not None else 0,
+        }
+
+        logger.info(
+            f"Response data keys: {list(response_data.keys())}, page_size={response_data['page_size']}"
+        )
+
+        return DataPreviewResponse(**response_data)
+    except Exception as e:
+        logger.error(f"Error in chart data preview: {str(e)}", exc_info=True)
+        import traceback
+
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HttpError(500, f"Error generating chart data preview: {str(e)}")
 
 
 @charts_router.post("/chart-data-preview/total-rows/", response=int)

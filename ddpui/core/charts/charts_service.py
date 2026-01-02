@@ -700,20 +700,27 @@ def execute_query(
         first_row_keys = list(results[0].keys())
 
         # Log column mapping if provided for debugging
+        # Note: column_mapping uses SQL aliases which should match query results
+        # Warnings here are informational - transformation handles key mapping
         if column_mapping:
             expected_keys = [col_name for col_name, _ in column_mapping]
             missing_keys = [key for key in expected_keys if key not in first_row_keys]
             if missing_keys:
-                logger.warning(
-                    f"Some expected column keys not found in results: {missing_keys}. "
-                    f"Available keys: {first_row_keys}"
-                )
-                # Try case-insensitive matching
+                # Try case-insensitive matching first
+                case_insensitive_matches = {}
                 for missing_key in missing_keys:
                     for actual_key in first_row_keys:
                         if actual_key.lower() == missing_key.lower():
-                            pass
+                            case_insensitive_matches[missing_key] = actual_key
                             break
+
+                # Only warn about keys that truly don't exist
+                truly_missing = [k for k in missing_keys if k not in case_insensitive_matches]
+                if truly_missing:
+                    logger.warning(
+                        f"Some expected column keys not found in results: {truly_missing}. "
+                        f"Available keys: {first_row_keys}, Expected: {expected_keys}"
+                    )
 
     # Return raw results if no mapping provided
     # Note: column_mapping is currently not used for transformation, as warehouse.execute()
@@ -1221,9 +1228,13 @@ def get_chart_data_table_preview(
 
     # Add all dimension columns
     if not dimensions or len(dimensions) == 0:
-        logger.error(
-            f"Table preview - ERROR: No dimensions found after normalization! Payload had: dimensions={payload.dimensions}, dimension_col={payload.dimension_col}, extra_dimension={payload.extra_dimension}"
+        error_msg = (
+            f"Table preview - ERROR: No dimensions found after normalization! "
+            f"Payload had: dimensions={payload.dimensions}, dimension_col={payload.dimension_col}, "
+            f"extra_dimension={payload.extra_dimension}"
         )
+        logger.error(error_msg)
+        raise ValueError("At least one dimension is required for table charts")
 
     for dim_col in dimensions:
         if not dim_col or not dim_col.strip():
@@ -1235,10 +1246,15 @@ def get_chart_data_table_preview(
     # Handle multiple metrics (if present)
     if payload.metrics:
         for metric in payload.metrics:
-            alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-            display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+            # Handle COUNT(*) case - SQL alias includes count_all_ prefix
+            if metric.aggregation.lower() == "count" and metric.column is None:
+                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+                display_name = metric.alias or "Total Count"
+            else:
+                alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+                display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+            # Use SQL alias for column_mapping to match query results
             # Use display_name for columns array to match transform_data_for_chart
-            # But use alias for column_mapping to match query results
             column_mapping.append((alias, col_index))
             columns.append(display_name)  # Use display_name to match transform_data_for_chart
             col_index += 1
@@ -1284,13 +1300,30 @@ def get_chart_data_table_preview(
 
         transformed_data.append(transformed_row)
 
-    if transformed_data:
+    if transformed_data and len(transformed_data) > 0:
         # Verify all dimensions are in the transformed data
         missing_dims = [dim for dim in dimensions if dim not in transformed_data[0]]
         if missing_dims:
             logger.error(
                 f"CRITICAL: Dimensions missing in transformed data! Missing: {missing_dims}, "
                 f"Available keys: {list(transformed_data[0].keys())}, Expected dimensions: {dimensions}"
+            )
+
+        # Verify all expected columns (dimensions + metrics) are present
+        expected_columns = dimensions.copy()
+        if payload.metrics:
+            for metric in payload.metrics:
+                if metric.aggregation.lower() == "count" and metric.column is None:
+                    display_name = metric.alias or "Total Count"
+                else:
+                    display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+                expected_columns.append(display_name)
+
+        missing_cols = [col for col in expected_columns if col not in transformed_data[0]]
+        if missing_cols:
+            logger.warning(
+                f"Some expected columns not found in transformed data: {missing_cols}. "
+                f"Available keys: {list(transformed_data[0].keys())}, Expected: {expected_columns}"
             )
 
     # For chart preview, we don't need column types for specific columns
@@ -1301,6 +1334,7 @@ def get_chart_data_table_preview(
         "column_types": column_types,
         "data": transformed_data,  # Data rows now use display_names as keys
         "page": page,
+        "limit": limit,  # Include limit in response
     }
 
 
