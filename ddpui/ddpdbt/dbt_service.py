@@ -245,6 +245,36 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str):
         logger.error(f"Failed to initialize git repo: {str(err)}")
         raise Exception(f"Failed to initialize git repo: {str(err)}") from err
 
+    # create .gitignore file
+    try:
+        gitignore_content = """# dbt artifacts
+target/
+dbt_packages/
+logs/
+
+# Virtual environments
+.venv/
+venv/
+
+# dbt profiles (contain credentials)
+profiles/
+profiles.yml
+profiles.yaml
+
+# dbt user config
+.user.yml
+package-lock.yml
+
+# Environment files
+.env*
+"""
+        gitignore_path = dbtrepo_dir / ".gitignore"
+        gitignore_path.write_text(gitignore_content)
+        logger.info("created .gitignore file at %s", gitignore_path)
+    except Exception as err:
+        logger.error(f"Failed to create .gitignore file: {str(err)}")
+        raise Exception(f"Failed to create .gitignore file: {str(err)}") from err
+
     logger.info("set dbt workspace completed for org %s", org.name)
 
 

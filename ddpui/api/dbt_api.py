@@ -29,6 +29,7 @@ from ddpui.ddpprefect.schema import (
     OrgDbtSchema,
     OrgDbtTarget,
     OrgDbtConnectGitRemote,
+    OrgDbtChangesPublish,
     PrefectSecretBlockEdit,
 )
 from ddpui.models.org import OrgPrefectBlockv1, Org, OrgWarehouse, OrgDbt
@@ -269,6 +270,85 @@ def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
         "success": True,
         "gitrepo_url": payload.gitrepoUrl,
         "message": "Successfully connected to remote git repository",
+    }
+
+
+@dbt_router.post("/publish_changes/")
+@has_permission(["can_edit_dbt_workspace"])
+def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
+    """
+    Commit and push local changes to remote git repo.
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    orgdbt = org.dbt
+
+    if orgdbt is None:
+        raise HttpError(400, "dbt workspace is not configured for this organization")
+
+    dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+    if not dbt_repo_dir.exists():
+        raise HttpError(400, "DBT repo directory does not exist")
+
+    if payload.commit_message.strip() == "":
+        raise HttpError(400, "Commit message cannot be empty")
+
+    # Retrieve PAT if available
+    actual_pat = None
+    if orgdbt.gitrepo_access_token_secret:
+        actual_pat = secretsmanager.retrieve_github_pat(orgdbt.gitrepo_access_token_secret)
+
+    try:
+        git_manager = GitManager(
+            repo_local_path=str(dbt_repo_dir), pat=actual_pat, validate_git=True
+        )
+    except GitManagerError as e:
+        raise HttpError(400, f"Git is not initialized in the DBT repo: {e.message}") from e
+
+    committed = False
+    commit_result = None
+    pushed = False
+
+    # Step 1: Commit changes
+    try:
+        user = orguser.user
+        user_name = f"{user.first_name} {user.last_name}".strip() or user.email
+        commit_result = git_manager.commit_changes(
+            message=payload.commit_message,
+            user_name=user_name,
+            user_email=user.email,
+        )
+        committed = True
+    except GitManagerError as e:
+        return {
+            "success": False,
+            "message": f"Commit failed: {e.message}",
+            "committed": False,
+            "pushed": False,
+        }
+
+    # Step 2: Push changes
+    try:
+        git_manager.push_changes()
+        pushed = True
+        logger.info(f"Pushed changes for org {org.slug}")
+    except GitManagerError as e:
+        error_detail = e.error if e.error else e.message
+        logger.error(f"Failed to push changes for org {org.slug}: {error_detail}")
+        return {
+            "success": False,
+            "message": f"Push failed: {error_detail}",
+            "committed": committed,
+            "pushed": False,
+            "commit_result": commit_result,
+        }
+
+    return {
+        "success": True,
+        "message": "Changes published successfully",
+        "committed": committed,
+        "pushed": pushed,
+        "commit_result": commit_result,
     }
 
 
