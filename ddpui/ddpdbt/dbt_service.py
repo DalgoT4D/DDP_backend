@@ -234,7 +234,7 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str):
 
     if error:
         logger.error("failed to create dbt cli profile for org %s: %s", org.name, error)
-        raise Exception(f"failed to create dbt cli profile for org {org.name}: {error}") from e
+        raise Exception(f"failed to create dbt cli profile for org {org.name}: {error}")
 
     # initializing it as git repo
     logger.info("initializing dbt workspace as git repo")
@@ -243,7 +243,7 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str):
         git_manager.init_repo()
     except Exception as err:
         logger.error(f"Failed to initialize git repo: {str(err)}")
-        raise Exception(f"Failed to initialize git repo: {str(err)}") from e
+        raise Exception(f"Failed to initialize git repo: {str(err)}") from err
 
     logger.info("set dbt workspace completed for org %s", org.name)
 
