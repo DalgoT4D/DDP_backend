@@ -1201,6 +1201,28 @@ def create_chart(request, payload: ChartCreate):
     """Create a new chart"""
     orguser: OrgUser = request.orguser
 
+    # Log the incoming payload for debugging
+    logger.info(f"🔵 CREATE CHART - Chart creation request received:")
+    logger.info(f"  - Title: {payload.title}")
+    logger.info(f"  - Chart Type: {payload.chart_type}")
+    logger.info(f"  - Schema: {payload.schema_name}, Table: {payload.table_name}")
+
+    if payload.chart_type == "table":
+        logger.info(f"  - Table chart save request received:")
+        logger.info(f"    - dimensions: {payload.extra_config.get('dimensions')}")
+        logger.info(f"    - dimension_columns: {payload.extra_config.get('dimension_columns')}")
+        logger.info(
+            f"    - dimensions (full with drill-down): {payload.extra_config.get('dimensions')}"
+        )
+        dimensions = payload.extra_config.get("dimensions", [])
+        if dimensions:
+            drill_down_count = sum(
+                1 for d in dimensions if isinstance(d, dict) and d.get("enable_drill_down") is True
+            )
+            logger.info(
+                f"    - Dimensions with drill-down enabled: {drill_down_count}/{len(dimensions)}"
+            )
+
     try:
         chart_data = ChartData(
             title=payload.title,
@@ -1211,8 +1233,25 @@ def create_chart(request, payload: ChartCreate):
             extra_config=payload.extra_config,
         )
         chart = ChartService.create_chart(chart_data, orguser)
+
+        # Log successful save
+        if payload.chart_type == "table":
+            logger.info(f"🟢 CREATE CHART - Table chart {chart.id} SAVED:")
+            logger.info(f"    - saved dimensions: {chart.extra_config.get('dimensions')}")
+            logger.info(
+                f"    - saved dimension_columns: {chart.extra_config.get('dimension_columns')}"
+            )
+
     except ChartValidationError as e:
+        logger.error(f"🔴 CREATE CHART - Validation error: {e.message}")
+        logger.error(
+            f"    - extra_config keys: {list(payload.extra_config.keys()) if payload.extra_config else 'None'}"
+        )
         raise HttpError(400, e.message) from None
+    except Exception as e:
+        logger.error(f"🔴 CREATE CHART - Unexpected error: {str(e)}", exc_info=True)
+        logger.error(f"    - extra_config: {payload.extra_config}")
+        raise HttpError(500, f"Error creating chart: {str(e)}") from None
 
     return ChartResponse(
         id=chart.id,
