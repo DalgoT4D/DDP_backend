@@ -8,6 +8,7 @@ dbt-venv/
 # Distribution / packaging
 .Python
 build/
+dev-secrets/
 develop-eggs/
 dist/
 downloads/

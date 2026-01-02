@@ -16,6 +16,8 @@ CHART_TYPE_CHOICES = [
     ("map", "Map Chart"),
 ]
 
+# Deprecated: computation_type is no longer used in chart logic
+# Kept for backwards compatibility with existing database records
 COMPUTATION_TYPE_CHOICES = [
     ("raw", "Raw Data"),
     ("aggregated", "Aggregated Data"),
@@ -38,8 +40,12 @@ class Chart(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     chart_type = models.CharField(max_length=20, choices=CHART_TYPE_CHOICES)
+
+    # Deprecated: computation_type is no longer used in chart logic
+    # All charts now use aggregated (metrics-based) behavior
+    # Kept for backwards compatibility with existing database records
     computation_type = models.CharField(
-        max_length=20, choices=COMPUTATION_TYPE_CHOICES, default="raw"
+        max_length=20, choices=COMPUTATION_TYPE_CHOICES, default="aggregated"
     )
 
     # Data source configuration

@@ -1193,11 +1193,16 @@ def put_operation_node(request, node_uuid: str, payload: EditOperationNodePayloa
 
     # TODO: apply canvas locking logic
 
+    # Fetch the operation node first, outside the main try block
     try:
         curr_operation_node: CanvasNode = CanvasNode.objects.select_related("dbtmodel").get(
             uuid=node_uuid, orgdbt=orgdbt, node_type=CanvasNodeType.OPERATION
         )
+    except CanvasNode.DoesNotExist:
+        logger.error(f"Operation node {node_uuid} not found")
+        raise HttpError(404, "operation node not found")
 
+    try:
         is_multi_input_op = payload.op_type in ["join", "unionall"]
         # validate operation config
         validate_operation_config_v2(payload.op_type, payload.config)
@@ -1269,18 +1274,16 @@ def put_operation_node(request, node_uuid: str, payload: EditOperationNodePayloa
                             name=f"{dbtmodel_input.src_model.schema}.{dbtmodel_input.src_model.name}",
                         )
 
-                    CanvasEdge.objects.create(
+                    # do an update or create for the edge
+                    CanvasEdge.objects.update_or_create(
                         from_node=src_model_node,
                         to_node=curr_operation_node,
-                        seq=dbtmodel_input.seq,
+                        defaults={"seq": dbtmodel_input.seq},
                     )
 
-            logger.info(f"operation created successfully: {curr_operation_node.uuid}")
+            logger.info(f"operation updated successfully: {curr_operation_node.uuid}")
             return convert_canvas_node_to_frontend_format(curr_operation_node)
 
-    except CanvasNode.DoesNotExist:
-        logger.error(f"Operation node {node_uuid} not found")
-        raise HttpError(404, "input node not found")
     except HttpError:
         # let domain errors propagate (422/404 from validation helpers)
         raise
@@ -1372,7 +1375,12 @@ def post_terminate_operation_node(
                 model_node.save()
 
             # create the edge from the terminal operation node to the model node
-            CanvasEdge.objects.create(from_node=terminal_node, to_node=model_node, seq=1)
+            # do an update or create for the edge
+            CanvasEdge.objects.update_or_create(
+                from_node=terminal_node,
+                to_node=model_node,
+                defaults={"seq": 1},
+            )
 
         logger.info(f"V2 operation node terminated successfully: {node_uuid}")
         return convert_canvas_node_to_frontend_format(model_node)

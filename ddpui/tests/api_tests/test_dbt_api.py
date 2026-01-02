@@ -290,9 +290,11 @@ def test_dbt_delete(orguser):
     """ensures that delete_dbt_workspace is called"""
     request = mock_request(orguser)
 
-    with patch("ddpui.ddpdbt.dbt_service.delete_dbt_workspace") as mocked:
+    with patch("ddpui.api.dbt_api.OrgCleanupService") as mocked:
+        instance = mocked.return_value
         dbt_delete(request)
-        mocked.assert_called_once_with(request.orguser.org)
+        mocked.assert_called_once_with(request.orguser.org, dry_run=False)
+        instance.delete_transformation_layer.assert_called_once()
 
 
 def test_get_dbt_workspace_error(orguser):
