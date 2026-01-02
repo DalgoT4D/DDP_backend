@@ -161,6 +161,9 @@ def check_dbt_files(org: Org):
 
 def create_elementary_tracking_tables(org: Org):
     """creates elementary tracking tables"""
+
+    from ddpui.celeryworkers.tasks import run_dbt_commands
+
     if org.dbt is None:
         return {"error": "dbt is not configured for this client"}
 

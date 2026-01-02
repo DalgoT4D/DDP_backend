@@ -47,12 +47,12 @@ from ddpui.models.org_plans import OrgPlanType
 from ddpui.models.org_wren import OrgWren
 from ddpui.models.role_based_access import Role, RolePermission
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.deleteorg import delete_warehouse_v1
 from ddpui.models.org import OrgWarehouse, Org, OrgType
 from ddpui.ddpairbyte import airbytehelpers
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.celeryworkers.moretasks import create_free_trial_org_account
 from ddpui.utils.feature_flags import get_all_feature_flags_for_org
+from ddpui.services.org_cleanup_service import OrgCleanupService
 from django.db import transaction
 
 user_org_router = Router()
@@ -587,13 +587,18 @@ def post_organization_free_trial(request, payload: CreateFreeTrialOrgSchema):
 def delete_organization_warehouses_v1(request):
     """deletes all (references to) data warehouses for the org"""
     orguser: OrgUser = request.orguser
-    if orguser.org is None:
+    org: Org = orguser.org
+    if org is None:
         raise HttpError(400, "create an organization first")
 
-    if orguser.org.base_plan() == OrgType.DEMO:
+    if org.base_plan() == OrgType.DEMO:
         raise HttpError(403, "insufficient permissions")
 
-    delete_warehouse_v1(orguser.org)
+    cleanup_src = OrgCleanupService(org, dry_run=False)
+
+    cleanup_src.delete_orchestrate_pipelines()
+    cleanup_src.delete_warehouse()
+    cleanup_src.delete_transformation_layer()
 
     return {"success": 1}
 

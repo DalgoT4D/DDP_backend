@@ -42,6 +42,7 @@ from ddpui.utils.dbtdocs import create_single_html
 from ddpui.utils.orguserhelpers import from_orguser
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils import secretsmanager
+from ddpui.services.org_cleanup_service import OrgCleanupService
 from ddpui.schemas.org_task_schema import TaskParameters
 
 dbt_router = Router()
@@ -208,12 +209,16 @@ def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
             repo_local_path=str(dbt_repo_dir), pat=actual_pat, validate_git=True
         )
     except GitManagerError as e:
-        raise HttpError(400, f"Git is not initialized in the DBT repo: {e.message}") from e
+        logger.error(f"GitManagerError during git init validation: {e.message}")
+        raise HttpError(
+            400, f"Git is not initialized in the DBT project folder: {e.message}"
+        ) from e
 
     # Verify remote URL is accessible with the PAT
     try:
         git_manager.verify_remote_url(payload.gitrepoUrl)
     except GitManagerError as e:
+        logger.error(f"GitManagerError during remote URL verification: {e.message}")
         raise HttpError(400, f"{e.message}: {e.error}") from e
 
     # Set or update the remote origin
@@ -352,10 +357,11 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
 def dbt_delete(request):
     """Delete the dbt workspace and project repo created"""
     orguser: OrgUser = request.orguser
-    if orguser.org is None:
+    org = orguser.org
+    if org is None:
         raise HttpError(400, "create an organization first")
 
-    dbt_service.delete_dbt_workspace(orguser.org)
+    OrgCleanupService(org, dry_run=False).delete_transformation_layer()
 
     return from_orguser(orguser)
 

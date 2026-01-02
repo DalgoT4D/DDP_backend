@@ -1,11 +1,20 @@
 import logging
 import os
 import subprocess
+from typing import List, Literal
 from urllib.parse import urlparse
 
 import requests
+from ninja import Schema
 
 logger = logging.getLogger(__name__)
+
+
+class GitChangedFile(Schema):
+    """Schema for a git changed file with its status"""
+
+    filename: str
+    status: Literal["added", "modified", "deleted"]
 
 
 class GitManagerError(Exception):
@@ -405,3 +414,114 @@ class GitManager:
             )
 
         return True
+
+    def is_file_modified(self, file_path: str) -> bool:
+        """
+        Check if a file has been modified, is untracked, or staged since the last commit.
+
+        :param file_path: Path to the file relative to the git repo root
+        :return: True if file has any changes, False if clean, None if cannot determine
+        """
+        if not self.is_git_initialized():
+            return None
+
+        try:
+            result = self._run_command(["git", "status", "--porcelain", file_path], check=False)
+            return len(result.stdout.strip()) > 0
+
+        except Exception as e:
+            logger.error(f"Error checking file modification status for {file_path}: {e}")
+            return None
+
+    def get_raw_status(self) -> str:
+        """
+        Get raw git status output directly from command.
+        Returns exactly what 'git status --porcelain' outputs.
+
+        :return: Raw git status output
+        """
+        if not self.is_git_initialized():
+            return ""
+
+        try:
+            result = self._run_command(["git", "status", "--porcelain"], check=False)
+            return result.stdout if result.returncode == 0 else ""
+        except Exception as e:
+            logger.error(f"Error getting raw git status: {e}")
+            return ""
+
+    def get_changes_summary(self) -> str:
+        """
+        Parse git status and construct a nice summary message.
+        Shows which files will be added, modified, or deleted.
+
+        :return: User-friendly summary of changes
+        """
+        raw_status = self.get_raw_status()
+        if not raw_status.strip():
+            return "No changes to publish"
+
+        added = []
+        modified = []
+        deleted = []
+
+        for line in raw_status.strip().split("\n"):
+            if len(line) < 3:
+                continue
+
+            status_code = line[:2]
+            filepath = line[3:]
+
+            # Parse git status codes
+            if status_code in ["A ", "??"]:  # Added or untracked
+                added.append(filepath)
+            elif "M" in status_code:  # Modified (staged or unstaged)
+                modified.append(filepath)
+            elif "D" in status_code:  # Deleted
+                deleted.append(filepath)
+
+        # Construct summary message
+        parts = []
+        if added:
+            parts.append(f"Added: {', '.join(added)}")
+        if modified:
+            parts.append(f"Modified: {', '.join(modified)}")
+        if deleted:
+            parts.append(f"Deleted: {', '.join(deleted)}")
+
+        return "\n".join(parts) if parts else "No changes to publish"
+
+    def get_changed_files_list(self) -> List[GitChangedFile]:
+        """
+        Get list of all changed files with their status.
+        Perfect for comparing with nodes to mark them published/unpublished.
+
+        :return: List of GitChangedFile objects with filename and status
+                 status values: 'added', 'modified', 'deleted'
+        """
+        raw_status = self.get_raw_status()
+        if not raw_status.strip():
+            return []
+
+        changed_files = []
+
+        for line in raw_status.strip().split("\n"):
+            if len(line) < 3:
+                continue
+
+            status_code = line[:2]
+            filepath = line[3:]
+
+            # Map git status codes to our status values
+            if status_code in ["A ", "??"]:  # Added or untracked
+                status = "added"
+            elif "M" in status_code:  # Modified (staged or unstaged)
+                status = "modified"
+            elif "D" in status_code:  # Deleted
+                status = "deleted"
+            else:
+                continue  # Skip other statuses
+
+            changed_files.append(GitChangedFile(filename=filepath, status=status))
+
+        return changed_files
