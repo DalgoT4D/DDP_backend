@@ -11,19 +11,6 @@ from datetime import datetime, date
 import pytz
 
 
-def runcmd(cmd: str, cwd: str):
-    """runs a shell command in a specified working directory"""
-    return subprocess.run(shlex.split(cmd), cwd=str(cwd), check=True)
-
-
-def runcmd_with_output(cmd, cwd):
-    """
-    runs a shell command in a specified working directory
-    attempted to use Popen and then poll(), but poll() was blocking
-    """
-    return subprocess.run(shlex.split(cmd), cwd=str(cwd), capture_output=True, check=False)
-
-
 def remove_nested_attribute(obj: dict, attr: str) -> dict:
     """
     this function searches for `attr` in the JSON object

@@ -33,6 +33,7 @@ from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE, DBTCLIPROFILE
 from ddpui.utils.timezone import as_ist
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.celeryworkers.tasks import run_dbt_commands
 
 logger = CustomLogger("ddpui")
 
@@ -176,6 +177,7 @@ def create_elementary_tracking_tables(org: Org):
     # executes clean, deps, run
     run_dbt_commands.delay(
         org.id,
+        org.dbt.id,
         task_id,
         {
             # run parameters
@@ -221,9 +223,7 @@ def create_elementary_profile(org: Org):
     if not os.path.exists(dbt_profile_file):
         # fetch from the cli profile block in prefect
         logger.info("fetching dbt profile from prefect block")
-        dbt_cli_profile = OrgPrefectBlockv1.objects.filter(
-            org=org, block_type=DBTCLIPROFILE
-        ).first()
+        dbt_cli_profile: OrgPrefectBlockv1 = org.dbt.cli_profile_block if org.dbt else None
         if dbt_cli_profile is None:
             raise HttpError(400, f"{dbt_profile_file} is missing")
 
