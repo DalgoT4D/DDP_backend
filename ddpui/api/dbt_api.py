@@ -207,12 +207,16 @@ def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
             repo_local_path=str(dbt_repo_dir), pat=actual_pat, validate_git=True
         )
     except GitManagerError as e:
-        raise HttpError(400, f"Git is not initialized in the DBT repo: {e.message}") from e
+        logger.error(f"GitManagerError during git init validation: {e.message}")
+        raise HttpError(
+            400, f"Git is not initialized in the DBT project folder: {e.message}"
+        ) from e
 
     # Verify remote URL is accessible with the PAT
     try:
         git_manager.verify_remote_url(payload.gitrepoUrl)
     except GitManagerError as e:
+        logger.error(f"GitManagerError during remote URL verification: {e.message}")
         raise HttpError(400, f"{e.message}: {e.error}") from e
 
     # Set or update the remote origin
