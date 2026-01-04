@@ -931,7 +931,7 @@ def get_dbt_project_DAG_v2(request):
         raise HttpError(422, "please setup your warehouse first")
 
     # Validate org has dbt workspace
-    orgdbt = OrgDbt.objects.filter(org=org, transform_type=TransformType.UI).first()
+    orgdbt = OrgDbt.objects.filter(org=org).first()
     if not orgdbt:
         raise HttpError(422, "dbt workspace not setup")
 
