@@ -32,7 +32,7 @@ from ddpui.ddpprefect.schema import (
     OrgDbtChangesPublish,
     PrefectSecretBlockEdit,
 )
-from ddpui.models.org import OrgPrefectBlockv1, Org, OrgWarehouse, OrgDbt
+from ddpui.models.org import OrgPrefectBlockv1, Org, OrgWarehouse, OrgDbt, TransformType
 from ddpui.models.org_user import OrgUser, OrgUserResponse
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.core.git_manager import GitManager, GitManagerError
@@ -261,7 +261,9 @@ def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
             orgdbt.gitrepo_access_token_secret = pat_secret_key
 
     # Update OrgDbt with the new gitrepo_url
+    # mark the state of transform type to GIT
     orgdbt.gitrepo_url = payload.gitrepoUrl
+    orgdbt.transform_type = TransformType.GIT
     orgdbt.save()
 
     logger.info(f"Connected git remote for org {org.slug}: {payload.gitrepoUrl}")
@@ -328,20 +330,22 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
         }
 
     # Step 2: Push changes
-    try:
-        git_manager.push_changes()
-        pushed = True
-        logger.info(f"Pushed changes for org {org.slug}")
-    except GitManagerError as e:
-        error_detail = e.error if e.error else e.message
-        logger.error(f"Failed to push changes for org {org.slug}: {error_detail}")
-        return {
-            "success": False,
-            "message": f"Push failed: {error_detail}",
-            "committed": committed,
-            "pushed": False,
-            "commit_result": commit_result,
-        }
+    # only if we are connected to git
+    if orgdbt.transform_type == TransformType.GIT:
+        try:
+            git_manager.push_changes()
+            pushed = True
+            logger.info(f"Pushed changes for org {org.slug}")
+        except GitManagerError as e:
+            error_detail = e.error if e.error else e.message
+            logger.error(f"Failed to push changes for org {org.slug}: {error_detail}")
+            return {
+                "success": False,
+                "message": f"Push failed: {error_detail}",
+                "committed": committed,
+                "pushed": False,
+                "commit_result": commit_result,
+            }
 
     return {
         "success": True,
