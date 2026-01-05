@@ -121,6 +121,20 @@ def generate_chart_render_config(chart: Chart, org_warehouse: OrgWarehouse) -> d
         extra_config = chart.extra_config
         logger.debug(f"Chart {chart.id} extra_config: {extra_config}")
 
+        # For table charts, prefer dimensions list, fallback to dimension_column + extra_dimension_column
+        dimensions = None
+        if chart.chart_type == "table":
+            if extra_config.get("dimension_columns"):
+                dimensions = extra_config.get("dimension_columns")
+            else:
+                # Backward compatibility: convert dimension_column + extra_dimension_column to list
+                dims = []
+                if extra_config.get("dimension_column"):
+                    dims.append(extra_config.get("dimension_column"))
+                if extra_config.get("extra_dimension_column"):
+                    dims.append(extra_config.get("extra_dimension_column"))
+                dimensions = dims if dims else None
+
         payload = ChartDataPayload(
             chart_type=chart.chart_type,
             schema_name=chart.schema_name,
@@ -129,11 +143,14 @@ def generate_chart_render_config(chart: Chart, org_warehouse: OrgWarehouse) -> d
             y_axis=extra_config.get("y_axis_column"),
             dimension_col=extra_config.get("dimension_column"),
             extra_dimension=extra_config.get("extra_dimension_column"),
+            dimensions=dimensions,
+            metrics=extra_config.get("metrics"),
             # Map-specific fields
             geographic_column=extra_config.get("geographic_column"),
             value_column=extra_config.get("value_column"),
             selected_geojson_id=extra_config.get("selected_geojson_id"),
             customizations=extra_config.get("customizations", {}),
+            extra_config=extra_config,
         )
 
         # Use the common function to generate config and data
@@ -168,6 +185,7 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
         y_axis=payload.y_axis,
         dimension_col=payload.dimension_col,
         extra_dimension=payload.extra_dimension,
+        dimensions=payload.dimensions,  # Support multiple dimensions for table charts
         metrics=payload.metrics,
     )
 
@@ -183,12 +201,18 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
         y_axis=payload.y_axis,
         dimension_col=payload.dimension_col,
         extra_dimension=payload.extra_dimension,
+        dimensions=payload.dimensions,  # Pass dimensions for table charts
         customizations=payload.customizations,
         metrics=payload.metrics,
     )
     chart_data = charts_service.transform_data_for_chart(dict_results, transform_payload)
 
-    # Generate ECharts config
+    # Table charts don't need ECharts config - they just return the data
+    if payload.chart_type == "table":
+        logger.info(f"Successfully generated table data for {chart_id_str}")
+        return {"data": chart_data, "echarts_config": {}}
+
+    # Generate ECharts config for other chart types
     config_generators = {
         "bar": EChartsConfigGenerator.generate_bar_config,
         "pie": EChartsConfigGenerator.generate_pie_config,
@@ -533,15 +557,32 @@ def get_chart_data(request, payload: ChartDataPayload):
     if not org_warehouse:
         raise HttpError(404, "Warehouse not configured")
 
+    # Log payload details for debugging
+    logger.info(
+        f"Chart data endpoint - payload dimensions: {payload.dimensions}, dimension_col: {payload.dimension_col}, extra_dimension: {payload.extra_dimension}"
+    )
+    logger.info(f"Chart data endpoint - payload metrics: {payload.metrics}")
+    logger.info(f"Chart data endpoint - payload extra_config: {payload.extra_config}")
+
+    # Validate table charts have at least one dimension
+    if payload.chart_type == "table":
+        normalized_dims = charts_service.normalize_dimensions(payload)
+        if not normalized_dims or len(normalized_dims) == 0:
+            raise HttpError(400, "Table charts require at least one dimension")
+
     # Use the common function to generate data and config
     try:
         result = generate_chart_data_and_config(payload, org_warehouse)
         return ChartDataResponse(data=result["data"], echarts_config=result["echarts_config"])
     except ValueError as e:
+        logger.error(f"ValueError generating chart data: {str(e)}", exc_info=True)
         raise HttpError(400, str(e))
     except Exception as e:
-        logger.error(f"Error generating chart data: {str(e)}")
-        raise HttpError(500, "Error generating chart data")
+        logger.error(f"Error generating chart data: {str(e)}", exc_info=True)
+        logger.error(
+            f"Error details - payload: {payload.dict() if hasattr(payload, 'dict') else payload}"
+        )
+        raise HttpError(500, f"Error generating chart data: {str(e)}")
 
 
 @charts_router.post("/chart-data-preview/", response=DataPreviewResponse)
@@ -608,6 +649,11 @@ def get_chart_data_preview(
             resolved_dashboard_filters = None
 
     # Create a modified payload with dashboard filters
+    # Log the incoming payload to debug dimension issues
+    logger.info(
+        f"Chart data preview - received payload dimensions: {payload.dimensions}, dimension_col: {payload.dimension_col}, extra_dimension: {payload.extra_dimension}"
+    )
+
     modified_payload = ChartDataPayload(
         chart_type=payload.chart_type,
         schema_name=payload.schema_name,
@@ -616,6 +662,7 @@ def get_chart_data_preview(
         y_axis=payload.y_axis,
         dimension_col=payload.dimension_col,
         extra_dimension=payload.extra_dimension,
+        dimensions=payload.dimensions,  # Support multiple dimensions for table charts
         metrics=payload.metrics,
         geographic_column=payload.geographic_column,
         value_column=payload.value_column,
@@ -627,19 +674,54 @@ def get_chart_data_preview(
         dashboard_filters=resolved_dashboard_filters,  # Add resolved dashboard filters
     )
 
-    # Get table preview using the same query builder as chart data
-    # This ensures preview shows exactly what will be used for the chart
-    preview_data = charts_service.get_chart_data_table_preview(
-        org_warehouse, modified_payload, page, limit
-    )
+    logger.info(f"Chart data preview - modified payload dimensions: {modified_payload.dimensions}")
 
-    return DataPreviewResponse(
-        columns=preview_data["columns"],
-        column_types=preview_data["column_types"],
-        data=preview_data["data"],
-        page=preview_data["page"],
-        limit=preview_data["limit"],
-    )
+    try:
+        # Get table preview using the same query builder as chart data
+        # This ensures preview shows exactly what will be used for the chart
+        preview_data = charts_service.get_chart_data_table_preview(
+            org_warehouse, modified_payload, page, limit
+        )
+
+        logger.info(f"Preview data keys: {list(preview_data.keys())}")
+        logger.info(
+            f"Preview data sample: columns={len(preview_data.get('columns', []))}, data_rows={len(preview_data.get('data', []))}"
+        )
+
+        # Calculate total rows if not provided
+        total_rows = preview_data.get("total_rows")
+        if total_rows is None:
+            try:
+                # Get total rows count
+                total_rows = charts_service.get_chart_data_total_rows(
+                    org_warehouse, modified_payload
+                )
+            except Exception as total_rows_error:
+                logger.warning(f"Failed to get total rows count: {str(total_rows_error)}")
+                # Fallback to length of current data if total rows calculation fails
+                total_rows = len(preview_data.get("data", []))
+
+        # Ensure all required fields are present with proper defaults
+        response_data = {
+            "columns": preview_data.get("columns", []),
+            "column_types": preview_data.get("column_types", {}),
+            "data": preview_data.get("data", []),
+            "page": preview_data.get("page", page),
+            "page_size": preview_data.get("limit", limit),
+            "total_rows": total_rows if total_rows is not None else 0,
+        }
+
+        logger.info(
+            f"Response data keys: {list(response_data.keys())}, page_size={response_data['page_size']}"
+        )
+
+        return DataPreviewResponse(**response_data)
+    except Exception as e:
+        logger.error(f"Error in chart data preview: {str(e)}", exc_info=True)
+        import traceback
+
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HttpError(500, f"Error generating chart data preview: {str(e)}")
 
 
 @charts_router.post("/chart-data-preview/total-rows/", response=int)
@@ -713,6 +795,7 @@ def get_chart_data_preview_total_rows(
         y_axis=payload.y_axis,
         dimension_col=payload.dimension_col,
         extra_dimension=payload.extra_dimension,
+        dimensions=payload.dimensions,  # Support multiple dimensions for table charts
         metrics=payload.metrics,
         geographic_column=payload.geographic_column,
         value_column=payload.value_column,
@@ -1129,6 +1212,17 @@ def create_chart(request, payload: ChartCreate):
     """Create a new chart"""
     orguser: OrgUser = request.orguser
 
+    # Log the incoming payload for debugging
+    if payload.chart_type == "table":
+        dimensions = payload.extra_config.get("dimensions", [])
+        if dimensions:
+            drill_down_count = sum(
+                1 for d in dimensions if isinstance(d, dict) and d.get("enable_drill_down") is True
+            )
+            logger.info(
+                f"Table chart created with {len(dimensions)} dimensions, {drill_down_count} with drill-down enabled"
+            )
+
     try:
         chart_data = ChartData(
             title=payload.title,
@@ -1139,8 +1233,16 @@ def create_chart(request, payload: ChartCreate):
             extra_config=payload.extra_config,
         )
         chart = ChartService.create_chart(chart_data, orguser)
+
+        if payload.chart_type == "table":
+            logger.info(f"Table chart {chart.id} saved successfully")
+
     except ChartValidationError as e:
+        logger.error(f"Chart validation error: {e.message}")
         raise HttpError(400, e.message) from None
+    except Exception as e:
+        logger.error(f"Error creating chart: {str(e)}", exc_info=True)
+        raise HttpError(500, f"Error creating chart: {str(e)}") from None
 
     return ChartResponse(
         id=chart.id,
