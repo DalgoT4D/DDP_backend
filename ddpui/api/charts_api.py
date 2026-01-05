@@ -207,7 +207,12 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
     )
     chart_data = charts_service.transform_data_for_chart(dict_results, transform_payload)
 
-    # Generate ECharts config
+    # Table charts don't need ECharts config - they just return the data
+    if payload.chart_type == "table":
+        logger.info(f"Successfully generated table data for {chart_id_str}")
+        return {"data": chart_data, "echarts_config": {}}
+
+    # Generate ECharts config for other chart types
     config_generators = {
         "bar": EChartsConfigGenerator.generate_bar_config,
         "pie": EChartsConfigGenerator.generate_pie_config,
@@ -558,6 +563,12 @@ def get_chart_data(request, payload: ChartDataPayload):
     )
     logger.info(f"Chart data endpoint - payload metrics: {payload.metrics}")
     logger.info(f"Chart data endpoint - payload extra_config: {payload.extra_config}")
+
+    # Validate table charts have at least one dimension
+    if payload.chart_type == "table":
+        normalized_dims = charts_service.normalize_dimensions(payload)
+        if not normalized_dims or len(normalized_dims) == 0:
+            raise HttpError(400, "Table charts require at least one dimension")
 
     # Use the common function to generate data and config
     try:

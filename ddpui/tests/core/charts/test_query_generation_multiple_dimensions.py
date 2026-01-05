@@ -15,7 +15,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from sqlalchemy import text
 from ddpui.core.charts import charts_service
-from ddpui.core.charts.query_builder import AggQueryBuilder
+from ddpui.datainsights.query_builder import AggQueryBuilder
 from ddpui.schemas.chart_schema import ChartDataPayload, ChartMetric
 from ddpui.models.org import OrgWarehouse
 
@@ -41,7 +41,7 @@ class TestQueryGenerationMultipleDimensions:
         query_builder = charts_service.build_chart_query(payload, mock_warehouse)
 
         # Get the compiled SQL query
-        compiled_query = str(query_builder.compile())
+        compiled_query = str(query_builder.build().compile(compile_kwargs={"literal_binds": True}))
         print(f"\n=== TEST: test_query_two_dimensions_one_metric ===")
         print(f"Compiled Query:\n{compiled_query}\n")
 
@@ -83,7 +83,7 @@ class TestQueryGenerationMultipleDimensions:
 
         query_builder = charts_service.build_chart_query(payload, mock_warehouse)
 
-        compiled_query = str(query_builder.compile())
+        compiled_query = str(query_builder.build().compile(compile_kwargs={"literal_binds": True}))
         print(f"\n=== TEST: test_query_three_dimensions_two_metrics ===")
         print(f"Compiled Query:\n{compiled_query}\n")
 
@@ -126,7 +126,7 @@ class TestQueryGenerationMultipleDimensions:
 
         query_builder = charts_service.build_chart_query(payload, mock_warehouse)
 
-        compiled_query = str(query_builder.compile())
+        compiled_query = str(query_builder.build().compile(compile_kwargs={"literal_binds": True}))
         print(f"\n=== TEST: test_query_four_dimensions_three_metrics ===")
         print(f"Compiled Query:\n{compiled_query}\n")
 
@@ -173,7 +173,7 @@ class TestQueryGenerationMultipleDimensions:
 
         query_builder = charts_service.build_chart_query(payload, mock_warehouse)
 
-        compiled_query = str(query_builder.compile())
+        compiled_query = str(query_builder.build().compile(compile_kwargs={"literal_binds": True}))
         print(f"\n=== TEST: test_query_dimensions_only_no_metrics ===")
         print(f"Compiled Query:\n{compiled_query}\n")
 
@@ -215,7 +215,7 @@ class TestQueryBuilderMultipleDimensions:
         assert result is not None
 
         # Get compiled query to verify structure
-        compiled_query = str(result.compile())
+        compiled_query = str(result.build().compile(compile_kwargs={"literal_binds": True}))
         print(f"\n=== TEST: test_build_multi_metric_query_adds_all_dimensions ===")
         print(f"Compiled Query:\n{compiled_query}\n")
 
@@ -245,7 +245,7 @@ class TestQueryBuilderMultipleDimensions:
         query_builder = charts_service.build_chart_query(payload, mock_warehouse)
 
         # Verify query builder has columns with labels
-        compiled_query = str(query_builder.compile())
+        compiled_query = str(query_builder.build().compile(compile_kwargs={"literal_binds": True}))
         print(f"\n=== TEST: test_query_builder_labels_dimensions_correctly ===")
         print(f"Compiled Query:\n{compiled_query}\n")
 
@@ -273,7 +273,7 @@ class TestQueryGenerationEdgeCases:
 
         query_builder = charts_service.build_chart_query(payload, mock_warehouse)
 
-        compiled_query = str(query_builder.compile())
+        compiled_query = str(query_builder.build().compile(compile_kwargs={"literal_binds": True}))
         print(f"\n=== TEST: test_query_filters_empty_dimensions ===")
         print(f"Compiled Query:\n{compiled_query}\n")
 
@@ -300,7 +300,7 @@ class TestQueryGenerationEdgeCases:
 
         query_builder = charts_service.build_chart_query(payload, mock_warehouse)
 
-        compiled_query = str(query_builder.compile())
+        compiled_query = str(query_builder.build().compile(compile_kwargs={"literal_binds": True}))
         print(f"\n=== TEST: test_query_with_time_grain_and_multiple_dimensions ===")
         print(f"Compiled Query:\n{compiled_query}\n")
 
@@ -341,7 +341,7 @@ class TestQueryColumnOrdering:
 
         query_builder = charts_service.build_chart_query(payload, mock_warehouse)
 
-        compiled_query = str(query_builder.compile())
+        compiled_query = str(query_builder.build().compile(compile_kwargs={"literal_binds": True}))
         print(f"\n=== TEST: test_dimensions_before_metrics_in_select ===")
         print(f"Compiled Query:\n{compiled_query}\n")
 

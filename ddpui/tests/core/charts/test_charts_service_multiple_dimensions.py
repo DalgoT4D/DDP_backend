@@ -157,8 +157,9 @@ class TestTransformDataForChart:
 
         result = charts_service.transform_data_for_chart(results, payload)
 
-        assert "data" in result
-        columns = result["data"]["columns"]
+        # Table charts return data directly with columns and tableData keys
+        assert "columns" in result
+        columns = result["columns"]
         # Should have all 3 dimensions
         assert "KEY" in columns
         assert "region" in columns
@@ -181,8 +182,9 @@ class TestTransformDataForChart:
 
         result = charts_service.transform_data_for_chart(results, payload)
 
-        assert "data" in result
-        columns = result["data"]["columns"]
+        # Table charts return data directly with columns and tableData keys
+        assert "columns" in result
+        columns = result["columns"]
         # Should have exactly 3 dimensions
         assert len(columns) == 3
         assert "KEY" in columns
@@ -212,8 +214,9 @@ class TestTransformDataForChart:
 
         result = charts_service.transform_data_for_chart(results, payload)
 
-        assert "data" in result
-        columns = result["data"]["columns"]
+        # Table charts return data directly with columns and tableData keys
+        assert "columns" in result
+        columns = result["columns"]
         # Should have all 3 dimensions
         assert "KEY" in columns
         assert "region" in columns
@@ -247,8 +250,9 @@ class TestTransformDataForChart:
 
         result = charts_service.transform_data_for_chart(results, payload)
 
-        assert "data" in result
-        columns = result["data"]["columns"]
+        # Table charts return data directly with columns and tableData keys
+        assert "columns" in result
+        columns = result["columns"]
         # Should have all 2 dimensions
         assert "KEY" in columns
         assert "region" in columns
@@ -285,8 +289,9 @@ class TestTransformDataForChart:
 
         result = charts_service.transform_data_for_chart(results, payload)
 
-        assert "data" in result
-        columns = result["data"]["columns"]
+        # Table charts return data directly with columns and tableData keys
+        assert "columns" in result
+        columns = result["columns"]
         # Should have all 4 dimensions
         assert len(columns) == 7  # 4 dimensions + 3 metrics
         assert "KEY" in columns
