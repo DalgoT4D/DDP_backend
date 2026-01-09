@@ -366,7 +366,11 @@ def generate_manifest_json_for_dbt_project(org: Org, orgdbt: OrgDbt) -> dict:
 
 
 def parse_dbt_manifest_to_canvas(
-    org: Org, orgdbt: OrgDbt, org_warehouse: OrgWarehouse, manifest_json: dict = None
+    org: Org,
+    orgdbt: OrgDbt,
+    org_warehouse: OrgWarehouse,
+    manifest_json: dict = None,
+    refresh: bool = True,
 ) -> dict:
     """
     Parse dbt manifest.json and create/update CanvasNodes and CanvasEdges.
@@ -382,8 +386,8 @@ def parse_dbt_manifest_to_canvas(
     """
     logger.info(f"Starting manifest parsing for orgdbt {orgdbt.project_dir}")
 
-    # Generate manifest if not provided
-    if manifest_json is None:
+    # Generate manifest if not provided or if we are refreshing the manifest
+    if manifest_json is None or refresh:
         logger.info("Generating manifest.json...")
         manifest_json = generate_manifest_json_for_dbt_project(org, orgdbt)
 
@@ -401,6 +405,9 @@ def parse_dbt_manifest_to_canvas(
 
     # Maps to track nodes for edge creation
     node_map = {}  # unique_id -> CanvasNode
+
+    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+    wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
 
     try:
         with transaction.atomic():
@@ -421,8 +428,6 @@ def parse_dbt_manifest_to_canvas(
                 # Try to fetch columns from warehouse first
                 output_cols = []
                 try:
-                    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
-                    wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
                     warehouse_cols = wclient.get_table_columns(schema, table_name)
                     output_cols = [col["name"] for col in warehouse_cols]
                     logger.info(
@@ -527,8 +532,6 @@ def parse_dbt_manifest_to_canvas(
                 # Try to fetch columns from warehouse first
                 output_cols = []
                 try:
-                    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
-                    wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
                     warehouse_cols = wclient.get_table_columns(schema, model_name)
                     output_cols = [col["name"] for col in warehouse_cols]
                     logger.info(
