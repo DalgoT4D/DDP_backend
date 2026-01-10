@@ -49,7 +49,7 @@ dbt_router = Router()
 logger = CustomLogger("ddpui")
 
 
-@dbt_router.post("/workspace/")
+@dbt_router.post("/workspace/", deprecated=True)
 @has_permission(["can_create_dbt_workspace"])
 def post_dbt_workspace(request, payload: OrgDbtSchema):
     """Setup the client git repo and install a virtual env inside it to run dbt"""
@@ -70,7 +70,7 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
     return {"task_id": task.id}
 
 
-@dbt_router.put("/github/")
+@dbt_router.put("/github/", deprecated=True)
 @has_permission(["can_edit_dbt_workspace"])
 def put_dbt_github(request, payload: OrgDbtGitHub):
     """Setup the client git repo and install a virtual env inside it to run dbt"""
@@ -414,7 +414,8 @@ def dbt_delete(request):
 def get_dbt_workspace(request):
     """return details of the dbt workspace for this org"""
     orguser: OrgUser = request.orguser
-    if orguser.org.dbt is None:
+    orgdbt = orguser.org.dbt
+    if orgdbt is None:
         return {"error": "no dbt workspace has been configured"}
 
     secret_block_exists = OrgPrefectBlockv1.objects.filter(
@@ -422,10 +423,10 @@ def get_dbt_workspace(request):
     ).exists()
 
     return {
-        "gitrepo_url": orguser.org.dbt.gitrepo_url,
+        "gitrepo_url": orgdbt.gitrepo_url,
         "gitrepo_access_token": "*********" if secret_block_exists else None,
-        "target_type": orguser.org.dbt.target_type,
-        "default_schema": orguser.org.dbt.default_schema,
+        "target_type": orgdbt.target_type,
+        "default_schema": orgdbt.default_schema,
     }
 
 
