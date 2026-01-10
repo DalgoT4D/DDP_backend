@@ -4,8 +4,7 @@ from ninja import Router
 from ninja.errors import HttpError
 from django.forms.models import model_to_dict
 
-from ddpui import auth
-from ddpui.models.tasks import Task
+from ddpui.models.tasks import Task, TaskType
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.utils.custom_logger import CustomLogger
@@ -25,7 +24,9 @@ def get_tasks(request):
     """Fetch master list of tasks related to transformation"""
     tasks = [
         model_to_dict(task, exclude=["id"])
-        for task in Task.objects.filter(type__in=["dbt", "git", "dbtcloud"]).all()
+        for task in Task.objects.filter(
+            type__in=[TaskType.DBT, TaskType.GIT, TaskType.DBTCLOUD]
+        ).all()
     ]
     return tasks
 

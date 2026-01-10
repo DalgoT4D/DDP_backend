@@ -21,6 +21,7 @@ from ddpui.models.tasks import (
     TaskLock,
     Task,
     OrgTaskGeneratedBy,
+    TaskType,
 )
 from ddpui.ddpprefect.schema import (
     PrefectSecretBlockCreate,
@@ -85,20 +86,19 @@ def post_orgtask(request, payload: CreateOrgTaskPayload):
         parameters=parameters,
         generated_by="client",
         uuid=uuid.uuid4(),
+        dbt=orgdbt,
     )
 
     dataflow = None
     if task.slug in LONG_RUNNING_TASKS:
         # For dbt-cli
-        if task.type == "dbt":
+        if task.type == TaskType.DBT:
             dbt_project_params: DbtProjectParams = DbtProjectManager.gather_dbt_project_params(
                 orguser.org, orgdbt
             )
 
             # fetch the cli profile block
-            cli_profile_block = OrgPrefectBlockv1.objects.filter(
-                org=orguser.org, block_type=DBTCLIPROFILE
-            ).first()
+            cli_profile_block: OrgPrefectBlockv1 = orgdbt.cli_profile_block
 
             if cli_profile_block is None:
                 raise HttpError(400, "dbt cli profile block not found")
@@ -108,11 +108,9 @@ def post_orgtask(request, payload: CreateOrgTaskPayload):
             )
 
         # For dbt-cloud
-        if task.type == "dbtcloud":
+        if task.type == TaskType.DBTCLOUD:
             # fetch dbt cloud creds block
-            dbt_cloud_creds_block = OrgPrefectBlockv1.objects.filter(
-                org=orguser.org, block_type=DBTCLOUDCREDS
-            ).first()
+            dbt_cloud_creds_block: OrgPrefectBlockv1 = orgdbt.dbtcloud_creds_block
 
             if dbt_cloud_creds_block is None:
                 raise HttpError(400, "dbt cloud credentials block not found")
@@ -231,7 +229,7 @@ def get_prefect_transformation_tasks(request):
     org_tasks = (
         OrgTask.objects.filter(
             org=orguser.org,
-            task__type__in=["git", "dbt", "dbtcloud"],
+            task__type__in=[TaskType.GIT, TaskType.DBT, TaskType.DBTCLOUD],
         )
         .order_by("-generated_by")
         .select_related("task")
@@ -250,7 +248,7 @@ def get_prefect_transformation_tasks(request):
         # git pull               : "git" + " " + "pull"
         # dbt run --full-refresh : "dbt" + " " + "run --full-refresh"
         command = None
-        if org_task.task.type != "dbtcloud":
+        if org_task.task.type != TaskType.DBTCLOUD:
             command = org_task.task.type + " " + org_task.get_task_parameters()
 
         lock = None
@@ -299,16 +297,17 @@ def delete_system_transformation_tasks(request):
         prefect_service.delete_secret_block(secret_block.block_id)
         secret_block.delete()
 
-    cli_profile_block = OrgPrefectBlockv1.objects.filter(
-        org=orguser.org,
-        block_type=DBTCLIPROFILE,
-    ).first()
+    orgdbt = orguser.org.dbt
+    if orgdbt is None:
+        raise HttpError(400, "dbt is not configured for this client")
+
+    cli_profile_block = orgdbt.cli_profile_block
     if cli_profile_block:
         logger.info("deleting cli profile block %s", cli_profile_block.block_name)
         prefect_service.delete_dbt_cli_profile_block(cli_profile_block.block_id)
         cli_profile_block.delete()
 
-    for org_task in OrgTask.objects.filter(org=orguser.org, task__is_system=True).all():
+    for org_task in OrgTask.objects.filter(dbt=orgdbt, task__is_system=True).all():
         _, error = delete_orgtask(org_task)
 
         if error:
@@ -344,7 +343,7 @@ def post_run_prefect_org_task(
     if org_task is None:
         raise HttpError(400, "task not found")
 
-    if org_task.task.type not in ["dbt", "git", "edr"]:
+    if org_task.task.type not in [TaskType.DBT, TaskType.GIT, TaskType.EDR]:
         raise HttpError(400, "task not supported")
 
     orgdbt = orguser.org.dbt
@@ -407,9 +406,7 @@ def post_run_prefect_org_task(
 
     else:
         # fetch the cli profile block
-        cli_profile_block = OrgPrefectBlockv1.objects.filter(
-            org=orguser.org, block_type=DBTCLIPROFILE
-        ).first()
+        cli_profile_block: OrgPrefectBlockv1 = orgdbt.cli_profile_block
 
         if cli_profile_block is None:
             raise HttpError(400, "dbt cli profile block not found")
@@ -457,7 +454,7 @@ def post_delete_orgtask(request, orgtask_uuid):  # pylint: disable=unused-argume
     if org_task is None:
         raise HttpError(400, "task not found")
 
-    if org_task.task.type not in ["dbt", "git", "edr", "dbtcloud"]:
+    if org_task.task.type not in [TaskType.DBT, TaskType.GIT, TaskType.EDR, TaskType.DBTCLOUD]:
         raise HttpError(400, "task not supported")
 
     if orguser.org.dbt is None:
