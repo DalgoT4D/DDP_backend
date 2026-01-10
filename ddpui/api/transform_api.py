@@ -845,7 +845,7 @@ def get_input_sources_and_models_v2(request, schema_name: str = None):
         raise HttpError(404, "please setup your warehouse first")
 
     # make sure the orgdbt here is the one we create locally
-    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    orgdbt = org.dbt
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 

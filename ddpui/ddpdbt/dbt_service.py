@@ -36,6 +36,24 @@ from ddpui.utils.custom_logger import CustomLogger
 logger = CustomLogger("ddpui")
 
 
+DBT_GITIGNORE_CONTENT = [
+    "target/",
+    "dbt_packages/",
+    "logs/",
+    ".venv/",
+    "venv/",
+    "profiles/",
+    "*/profiles.yml",
+    "profiles.yaml",
+    ".user.yml",
+    "package-lock.yml",
+    ".env*",
+    ".env.local",
+    "elementary_profiles/",
+    "*.html",  # ignore elementary reports
+]
+
+
 def delete_dbt_workspace(org: Org):
     """deletes the dbt workspace on disk as well as in prefect"""
 
@@ -122,6 +140,30 @@ def task_config_params(task: Task):
     }
 
     return TASK_CONIF_PARAM[task.slug] if task.slug in TASK_CONIF_PARAM else None
+
+
+def sync_gitignore_contents(
+    dbt_project_path: str, ignore_entries: list[str] = DBT_GITIGNORE_CONTENT
+):
+    """
+    If the .gitignore file exists in the dbt project path, read and append the entries that are not already present.
+    If it does not exist, create one with the provided entries.
+    """
+
+    gitignore_path = Path(dbt_project_path) / ".gitignore"
+    existing_entries = set()
+
+    if gitignore_path.exists():
+        with open(gitignore_path, "r", encoding="utf-8") as f:
+            for line in f:
+                existing_entries.add(line.strip())
+
+    with open(gitignore_path, "a", encoding="utf-8") as f:
+        for entry in ignore_entries:
+            if entry not in existing_entries:
+                f.write(entry + "\n")
+
+    logger.info(f"Synced .gitignore at {gitignore_path} with new entries.")
 
 
 def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str):
@@ -247,30 +289,7 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str):
 
     # create .gitignore file
     try:
-        gitignore_content = """# dbt artifacts
-target/
-dbt_packages/
-logs/
-
-# Virtual environments
-.venv/
-venv/
-
-# dbt profiles (contain credentials)
-profiles/
-profiles.yml
-profiles.yaml
-
-# dbt user config
-.user.yml
-package-lock.yml
-
-# Environment files
-.env*
-"""
-        gitignore_path = dbtrepo_dir / ".gitignore"
-        gitignore_path.write_text(gitignore_content)
-        logger.info("created .gitignore file at %s", gitignore_path)
+        sync_gitignore_contents(dbtrepo_dir)
     except Exception as err:
         logger.error(f"Failed to create .gitignore file: {str(err)}")
         raise Exception(f"Failed to create .gitignore file: {str(err)}") from err

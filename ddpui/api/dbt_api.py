@@ -268,6 +268,13 @@ def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
 
     logger.info(f"Connected git remote for org {org.slug}: {payload.gitrepoUrl}")
 
+    # sync gitignore contents
+    try:
+        dbt_service.sync_gitignore_contents(dbt_repo_dir)
+    except Exception as err:
+        logger.error(f"Failed to sync .gitignore contents: {err}")
+        raise HttpError(500, f"Failed to sync .gitignore contents: {err}") from err
+
     return {
         "success": True,
         "gitrepo_url": payload.gitrepoUrl,
