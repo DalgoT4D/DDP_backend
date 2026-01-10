@@ -48,6 +48,7 @@ from ddpui.core.dbtautomation_service import (
 )
 from ddpui.auth import has_permission
 from ddpui.core.git_manager import GitManager
+from ddpui.ddpdbt import dbt_service
 
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.transform_workflow_helpers import (
@@ -1500,17 +1501,25 @@ def get_canvas_node(request, node_uuid: str):
         raise HttpError(500, f"Failed to fetch canvas node: {str(e)}")
 
 
-@transform_router.post("/v2/dbt_project/sync_manifest_to_canvas/")
+@transform_router.post("/v2/dbt_project/sync_remote_dbtproject_to_canvas/")
 @has_permission(["can_create_dbt_model"])
-def sync_manifest_to_canvas(request):
+def sync_remote_dbtproject_to_canvas(request):
     """
-    Parse dbt manifest.json and sync it to canvas (create/update CanvasNodes and CanvasEdges)
+    Sync a remote dbt project to canvas (create/update CanvasNodes and CanvasEdges)
     """
     orguser: OrgUser = request.orguser
     org = orguser.org
+    orgdbt = org.dbt
 
-    if not org.dbt:
+    if not orgdbt:
         raise HttpError(400, "Organization does not have a dbt workspace configured")
+
+    if orgdbt.transform_type != TransformType.GIT:
+        logger.info(f"Org {org.slug} dbt workspace is not of GIT type, skipping sync to canvas")
+        return {
+            "success": True,
+            "message": "dbt workspace is not of GIT type, skipping sync to canvas",
+        }
 
     # Get warehouse
     try:
@@ -1518,14 +1527,4 @@ def sync_manifest_to_canvas(request):
     except OrgWarehouse.DoesNotExist:
         raise HttpError(400, "Organization does not have a warehouse configured")
 
-    try:
-        # Parse manifest to canvas
-        stats = parse_dbt_manifest_to_canvas(org, org.dbt, warehouse_obj)
-
-        logger.info(f"Manifest sync completed for org {org.name}. Stats: {stats}")
-
-        return {"success": True, "message": "Manifest sync completed successfully", "stats": stats}
-
-    except Exception as e:
-        logger.error(f"Failed to sync manifest for org {org.name}: {str(e)}")
-        raise HttpError(500, f"Failed to sync manifest: {str(e)}")
+    return dbt_service.sync_remote_dbtproject_to_canvas(org, orgdbt, warehouse_obj)

@@ -29,7 +29,7 @@ from ddpui.utils.constants import (
     TASK_DBTCLOUD_JOB,
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager, DbtProjectParams
-from ddpui.core.git_manager import GitManager
+from ddpui.core.git_manager import GitManager, GitManagerError
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -405,7 +405,14 @@ def parse_dbt_manifest_to_canvas(
     """
     logger.info(f"Starting manifest parsing for orgdbt {orgdbt.project_dir}")
 
-    # Generate manifest if not provided or if we are refreshing the manifest
+    # Load the manifest.json from the target folder if it exists
+    dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+    manifest_json_path = dbt_repo_dir / "target" / "manifest.json"
+    if manifest_json_path.exists():
+        with open(manifest_json_path, "r") as manifest_file:
+            manifest_json = json.load(manifest_file)
+
+    # Overwrite/generate manifest if not provided or if we are refreshing the manifest
     if manifest_json is None or refresh:
         logger.info("Generating manifest.json...")
         manifest_json = generate_manifest_json_for_dbt_project(org, orgdbt)
@@ -652,3 +659,37 @@ def parse_dbt_manifest_to_canvas(
 
     logger.info(f"Manifest parsing complete. Stats: {stats}")
     return stats
+
+
+def sync_remote_dbtproject_to_canvas(org: Org, orgdbt: OrgDbt, warehouse_obj: OrgWarehouse) -> dict:
+    """
+    1. Fetch the latest changes from remote git repo
+    2. Compile and generate manifest.json
+    3. Parse manifest.json to canvas
+    """
+    logger.info(f"Syncing remote dbt project to canvas for org: {org.slug}")
+
+    dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+    if not dbt_repo_dir.exists():
+        raise Exception("DBT repo directory does not exist")
+
+    pat = secretsmanager.retrieve_github_pat(orgdbt.gitrepo_access_token_secret)
+
+    # Fetch changes from remote git repo
+    try:
+        git_manager = GitManager(repo_local_path=str(dbt_repo_dir), pat=pat, validate_git=True)
+    except GitManagerError as e:
+        logger.error(f"GitManagerError during git init validation: {e.message}")
+        raise Exception(f"Git is not initialized in the DBT project folder: {e.message}") from e
+
+    try:
+        git_manager.pull_changes()
+    except GitManagerError as e:
+        logger.error(f"GitManagerError during git pull: {e.message}")
+        raise Exception(f"Failed to pull changes from remote git repo: {e.message}") from e
+
+    # Parse the dbt manifest
+    manifest_stats = parse_dbt_manifest_to_canvas(org, orgdbt, warehouse_obj)
+
+    logger.info(f"Sync complete. Stats: {manifest_stats}")
+    return manifest_stats
