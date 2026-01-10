@@ -35,7 +35,7 @@ from ddpui.ddpprefect.schema import (
 from ddpui.models.org import OrgPrefectBlockv1, Org, OrgWarehouse, OrgDbt, TransformType
 from ddpui.models.org_user import OrgUser, OrgUserResponse
 from ddpui.core.orgdbt_manager import DbtProjectManager
-from ddpui.core.git_manager import GitManager, GitManagerError
+from ddpui.core.git_manager import GitManager, GitManagerError, GitStatusSummary
 from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.dbtdocs import create_single_html
@@ -363,7 +363,7 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
     }
 
 
-@dbt_router.get("/git_status/")
+@dbt_router.get("/git_status/", response=GitStatusSummary)
 @has_permission(["can_view_dbt_workspace"])
 def get_dbt_git_status(request):
     """
@@ -396,8 +396,7 @@ def get_dbt_git_status(request):
         raise HttpError(400, f"Git is not initialized in the DBT repo: {e.message}") from e
 
     try:
-        summary = git_manager.get_changes_summary()
-        return {"summary": summary}
+        return git_manager.get_changes_summary()
     except GitManagerError as e:
         raise HttpError(500, f"Failed to get git status: {e.message}") from e
 

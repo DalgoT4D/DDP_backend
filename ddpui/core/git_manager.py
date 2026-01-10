@@ -17,6 +17,14 @@ class GitChangedFile(Schema):
     status: Literal["added", "modified", "deleted"]
 
 
+class GitStatusSummary(Schema):
+    """Schema for git status summary"""
+
+    added: List[str]
+    modified: List[str]
+    deleted: List[str]
+
+
 class GitManagerError(Exception):
     """Exception raised when a git command fails"""
 
@@ -450,7 +458,7 @@ class GitManager:
             logger.error(f"Error getting raw git status: {e}")
             return ""
 
-    def get_changes_summary(self) -> str:
+    def get_changes_summary(self) -> GitStatusSummary:
         """
         Parse git status and construct a nice summary message.
         Shows which files will be added, modified, or deleted.
@@ -459,7 +467,7 @@ class GitManager:
         """
         raw_status = self.get_raw_status()
         if not raw_status.strip():
-            return "No changes to publish"
+            return GitStatusSummary(added=[], modified=[], deleted=[])
 
         added = []
         modified = []
@@ -480,16 +488,7 @@ class GitManager:
             elif "D" in status_code:  # Deleted
                 deleted.append(filepath)
 
-        # Construct summary message
-        parts = []
-        if added:
-            parts.append(f"Added: {', '.join(added)}")
-        if modified:
-            parts.append(f"Modified: {', '.join(modified)}")
-        if deleted:
-            parts.append(f"Deleted: {', '.join(deleted)}")
-
-        return "\n".join(parts) if parts else "No changes to publish"
+        return GitStatusSummary(added=added, modified=modified, deleted=deleted)
 
     def get_changed_files_list(self) -> List[GitChangedFile]:
         """
