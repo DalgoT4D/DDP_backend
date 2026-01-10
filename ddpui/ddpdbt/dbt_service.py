@@ -384,6 +384,55 @@ def generate_manifest_json_for_dbt_project(org: Org, orgdbt: OrgDbt) -> dict:
     return manifest_json
 
 
+def _has_operation_chain_between_nodes(from_node, to_node) -> bool:
+    """
+    Check if there's already an operation chain between two nodes.
+
+    This prevents creating direct edges when nodes are already connected
+    through a chain of operations (e.g., source -> op1 -> op2 -> model).
+
+    Uses breadth-first search to find if there's a path from from_node to to_node
+    that goes through at least one operation node.
+
+    Args:
+        from_node: Starting CanvasNode
+        to_node: Target CanvasNode
+
+    Returns:
+        bool: True if operation chain exists, False otherwise
+    """
+    from collections import deque
+
+    # BFS to find path from from_node to to_node through operations
+    queue = deque([(from_node, False)])  # (current_node, has_passed_through_operation)
+    visited = set([from_node.id])
+
+    while queue:
+        current_node, passed_through_operation = queue.popleft()
+
+        # Check all outgoing edges from current node
+        outgoing_edges = CanvasEdge.objects.filter(from_node=current_node).select_related("to_node")
+
+        for edge in outgoing_edges:
+            next_node = edge.to_node
+
+            # If we reached the target node and passed through at least one operation
+            if next_node.id == to_node.id and passed_through_operation:
+                return True
+
+            # Continue BFS if not visited
+            if next_node.id not in visited:
+                visited.add(next_node.id)
+
+                # Mark if we've passed through an operation
+                is_operation = next_node.node_type == CanvasNodeType.OPERATION
+                has_operation_in_path = passed_through_operation or is_operation
+
+                queue.append((next_node, has_operation_in_path))
+
+    return False
+
+
 def parse_dbt_manifest_to_canvas(
     org: Org,
     orgdbt: OrgDbt,
@@ -425,6 +474,7 @@ def parse_dbt_manifest_to_canvas(
         "nodes_updated": 0,
         "edges_created": 0,
         "edges_skipped": 0,
+        "edges_deleted": 0,
         "orgdbtmodels_created": 0,
         "orgdbtmodels_updated": 0,
     }
@@ -641,17 +691,42 @@ def parse_dbt_manifest_to_canvas(
                     if dependency_id in node_map:
                         from_node = node_map[dependency_id]
 
-                        # Check if edge already exists
-                        edge_exists = CanvasEdge.objects.filter(
+                        # Check if there's already an operation chain between the nodes
+                        operation_chain_exists = _has_operation_chain_between_nodes(
+                            from_node, to_node
+                        )
+
+                        # Check if direct edge already exists
+                        direct_edge_exists = CanvasEdge.objects.filter(
                             from_node=from_node, to_node=to_node
                         ).exists()
 
-                        if not edge_exists:
+                        if operation_chain_exists:
+                            # If operation chain exists, delete any direct edge between the nodes
+                            if direct_edge_exists:
+                                CanvasEdge.objects.filter(
+                                    from_node=from_node, to_node=to_node
+                                ).delete()
+                                logger.info(
+                                    f"Deleted direct edge {from_node.name} -> {to_node.name}: operation chain exists"
+                                )
+                                stats["edges_deleted"] += 1
+                            else:
+                                logger.info(
+                                    f"Skipped edge {from_node.name} -> {to_node.name}: operation chain exists"
+                                )
+                                stats["edges_skipped"] += 1
+                        elif not direct_edge_exists:
+                            # No operation chain and no direct edge - create direct edge
                             CanvasEdge.objects.create(from_node=from_node, to_node=to_node, seq=1)
                             stats["edges_created"] += 1
                             logger.info(f"Created edge: {from_node.name} -> {to_node.name}")
                         else:
+                            # Direct edge already exists and no operation chain - keep it
                             stats["edges_skipped"] += 1
+                            logger.info(
+                                f"Skipped edge {from_node.name} -> {to_node.name}: direct edge exists"
+                            )
 
     except Exception as e:
         logger.error(f"Error parsing manifest: {str(e)}")

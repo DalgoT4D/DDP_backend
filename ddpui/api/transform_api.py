@@ -123,7 +123,7 @@ def sync_sources(request):
     if not org_warehouse:
         raise HttpError(404, "Please set up your warehouse first")
 
-    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    orgdbt = OrgDbt.objects.filter(org=org).first()
     if not orgdbt:
         raise HttpError(404, "DBT workspace not set up")
 

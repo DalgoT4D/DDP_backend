@@ -558,28 +558,7 @@ def post_run_dbt_commands(request, payload: TaskParameters = None):
 
     taskprogress.add({"message": "Added dbt commands in queue", "status": "queued"})
 
-    try:
-        task_locks: list[TaskLock] = []
-
-        # acquire locks for clean, deps and run
-        org_tasks = OrgTask.objects.filter(
-            dbt=orgdbt,
-            task__slug__in=[TASK_DBTCLEAN, TASK_DBTDEPS, TASK_DBTRUN],
-            generated_by="system",
-        ).all()
-        for org_task in org_tasks:
-            task_lock = TaskLock.objects.create(
-                orgtask=org_task, locked_by=orguser, celery_task_id=task_id
-            )
-            task_locks.append(task_lock)
-
-        # executes clean, deps, run
-        run_dbt_commands.delay(org.id, orgdbt.id, task_id, payload.dict() if payload else None)
-
-    finally:
-        # clear all locks
-        for lock in task_locks:
-            lock.delete()
+    run_dbt_commands.delay(org.id, orgdbt.id, task_id, payload.dict() if payload else None)
 
     return {"task_id": task_id}
 

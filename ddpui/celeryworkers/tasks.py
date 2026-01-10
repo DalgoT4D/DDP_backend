@@ -431,15 +431,17 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
                     }
                 )
         except DbtCommandError as error:
+            command_output = error.message.split("\n")
+            for cmd_out in command_output:
+                taskprogress.add(
+                    {
+                        "message": cmd_out,
+                        "status": "running",
+                    }
+                )
             taskprogress.add(
                 {
                     "message": "dbt clean failed",
-                    "status": "failed",
-                }
-            )
-            taskprogress.add(
-                {
-                    "message": str(error),
                     "status": "failed",
                 }
             )
@@ -467,15 +469,17 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
                     }
                 )
         except DbtCommandError as error:
+            command_output = error.message.split("\n")
+            for cmd_out in command_output:
+                taskprogress.add(
+                    {
+                        "message": cmd_out,
+                        "status": "failed",
+                    }
+                )
             taskprogress.add(
                 {
                     "message": "dbt deps failed",
-                    "status": "failed",
-                }
-            )
-            taskprogress.add(
-                {
-                    "message": str(error),
                     "status": "failed",
                 }
             )
@@ -510,26 +514,33 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
                         "status": "running",
                     }
                 )
-        except subprocess.CalledProcessError as error:
+        except DbtCommandError as error:
+            command_output = error.message.split("\n")
+            for cmd_out in command_output:
+                taskprogress.add(
+                    {
+                        "message": cmd_out,
+                        "status": "running",
+                    }
+                )
             taskprogress.add(
                 {
                     "message": "dbt run failed",
                     "status": "failed",
                 }
             )
-            taskprogress.add(
-                {
-                    "message": str(error),
-                    "status": "failed",
-                }
-            )
-            logger.exception(error)
-            raise Exception("Dbt run failed")
+            logger.exception(error.message)
+            raise Exception("Dbt run failed") from error
 
         # done
         taskprogress.add({"message": "dbt run completed", "status": "completed"})
     except Exception as e:
-        logger.error(e)
+        taskprogress.add(
+            {
+                "message": "Job finished with a failure",
+                "status": "failed",
+            }
+        )
 
     finally:
         for task_lock in task_locks:
