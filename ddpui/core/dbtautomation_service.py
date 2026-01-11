@@ -65,6 +65,7 @@ from ddpui.schemas.dbt_workflow_schema import (
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation, DbtEdge, OrgDbtModelType
 from ddpui.models.canvas_models import CanvasNode, CanvasNodeType, CanvasEdge
+from ddpui.models.tasks import TaskProgressStatus
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils.helpers import map_airbyte_keys_to_postgres_keys
@@ -398,7 +399,7 @@ def propagate_changes_to_downstream_operations(
 
 
 @app.task(bind=True)
-def sync_sources_for_warehouse(
+def sync_sources_for_warehouse_v2(
     self, org_dbt_id: str, org_warehouse_id: str, task_id: str, hashkey: str
 ):
     """
@@ -417,7 +418,7 @@ def sync_sources_for_warehouse(
     taskprogress.add(
         {
             "message": "Started syncing sources",
-            "status": "runnning",
+            "status": "running",
         }
     )
 
@@ -539,6 +540,130 @@ def sync_sources_for_warehouse(
         }
     )
 
+    logger.info("saved sources to db")
+
+    return True
+
+
+@app.task(bind=True)
+def sync_sources_for_warehouse_v2(
+    self, org_dbt_id: str, org_warehouse_id: str, task_id: str, hashkey: str
+):
+    """
+    1. Go through all tables in all the schemas in the warehouse.
+    2. If a table is not present as a OrgDbtModel.type=MODEL in our db, create a source for it.
+    3. Source name will be the same as the schema name.
+
+    We do not update the sources.yml definitions of the dbt project.
+    """
+    taskprogress = TaskProgress(
+        task_id=task_id,
+        hashkey=hashkey,
+        expire_in_seconds=10 * 60,  # max 10 minutes
+    )
+
+    org_dbt: OrgDbt = OrgDbt.objects.filter(id=org_dbt_id).first()
+    org_warehouse: OrgWarehouse = OrgWarehouse.objects.filter(id=org_warehouse_id).first()
+
+    taskprogress.add(
+        {
+            "message": "Started syncing sources",
+            "status": TaskProgressStatus.RUNNING,
+        }
+    )
+
+    try:
+        wclient = _get_wclient(org_warehouse)
+
+        create_source_model_for_tables: list[tuple] = []
+        for schema in wclient.get_schemas():
+            taskprogress.add(
+                {
+                    "message": f"Reading sources for schema {schema} from warehouse",
+                    "status": TaskProgressStatus.RUNNING,
+                }
+            )
+            logger.info(f"reading sources for schema {schema} for warehouse")
+            for table in wclient.get_tables(schema):
+                dbtmodel = OrgDbtModel.objects.filter(
+                    orgdbt=org_dbt, schema=schema, name=table
+                ).first()
+                if not dbtmodel:
+                    logger.info(
+                        f"table {table} in schema {schema} not present as model; will create source"
+                    )
+                    create_source_model_for_tables.append((schema, table))
+                else:
+                    # update the cols though
+                    try:
+                        dbtmodel.output_cols = [
+                            col["name"] for col in wclient.get_table_columns(schema, table)
+                        ]
+                        dbtmodel.save()
+                    except Exception as e:
+                        logger.error(
+                            f"Error updating output cols for existing model {dbtmodel.name} in schema {schema}: {e}"
+                        )
+
+            taskprogress.add(
+                {
+                    "message": f"Finished reading sources for schema {schema}",
+                    "status": TaskProgressStatus.RUNNING,
+                }
+            )
+
+    except Exception as e:
+        logger.error(f"Error syncing sources: {e}")
+        taskprogress.add(
+            {
+                "message": f"Error syncing sources: {e}",
+                "status": TaskProgressStatus.FAILED,
+            }
+        )
+        raise Exception(f"Error syncing sources: {e}")
+
+    logger.info("synced sources in dbt, creating now")
+    taskprogress.add(
+        {
+            "message": "Creating sources",
+            "status": TaskProgressStatus.RUNNING,
+        }
+    )
+
+    for source_schema, source_table in create_source_model_for_tables:
+        orgdbt_source = OrgDbtModel(
+            uuid=uuid.uuid4(),
+            orgdbt=org_dbt,
+            source_name=source_schema,
+            name=source_table,
+            display_name=source_table,
+            schema=source_schema,
+            type=OrgDbtModelType.SOURCE,
+        )
+        try:
+            orgdbt_source.output_cols = [
+                col["name"] for col in wclient.get_table_columns(source_schema, source_table)
+            ]
+        except Exception as e:
+            logger.error(
+                f"Error fetching output cols for source {source_table} in schema {source_schema}: {e}"
+            )
+
+        orgdbt_source.save()
+
+        taskprogress.add(
+            {
+                "message": "Added " + source_schema + "." + source_table,
+                "status": TaskProgressStatus.RUNNING,
+            }
+        )
+
+    taskprogress.add(
+        {
+            "message": "Sync finished",
+            "status": TaskProgressStatus.COMPLETED,
+        }
+    )
     logger.info("saved sources to db")
 
     return True

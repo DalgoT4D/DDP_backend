@@ -28,7 +28,7 @@ from ddpui.celeryworkers.tasks import (
     get_connection_catalog_task,
 )
 from ddpui.models.tasks import TaskProgressStatus
-from ddpui.core.dbtautomation_service import sync_sources_for_warehouse
+from ddpui.core.dbtautomation_service import sync_sources_for_warehouse_v2
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.models.tasks import Task, OrgTask
 from ddpui.utils.constants import TASK_AIRBYTESYNC
@@ -159,7 +159,7 @@ def test_sync_sources_failed_to_connect_to_warehouse(orguser: OrgUser, tmp_path)
         Mock(side_effect=Exception("_get_wclient failed")),
     ) as get_wclient_mock:
         with pytest.raises(Exception) as exc:
-            sync_sources_for_warehouse(orgdbt.id, warehouse.id, "task-id", "hashkey")
+            sync_sources_for_warehouse_v2(orgdbt.id, warehouse.id, "task-id", "hashkey")
 
         assert exc.value.args[0] == f"Error syncing sources: _get_wclient failed"
         add_progress_mock.assert_has_calls(
@@ -215,7 +215,7 @@ def test_sync_sources_failed_to_fetch_schemas(orguser: OrgUser, tmp_path):
         get_wclient_mock.return_value = mock_instance
 
         with pytest.raises(Exception) as exc:
-            sync_sources_for_warehouse(orgdbt.id, warehouse.id, "task-id", "hashkey")
+            sync_sources_for_warehouse_v2(orgdbt.id, warehouse.id, "task-id", "hashkey")
 
         assert exc.value.args[0] == f"Error syncing sources: get_schemas failed"
         add_progress_mock.assert_has_calls(
@@ -287,7 +287,7 @@ def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
         get_wclient_mock.return_value = mock_instance
 
         assert OrgDbtModel.objects.filter(type="source", orgdbt=orgdbt).count() == 0
-        sync_sources_for_warehouse(orgdbt.id, warehouse.id, "task-id", "hashkey")
+        sync_sources_for_warehouse_v2(orgdbt.id, warehouse.id, "task-id", "hashkey")
         for schema in SCHEMAS_TABLES:
             assert set(
                 OrgDbtModel.objects.filter(type="source", orgdbt=orgdbt, schema=schema).values_list(
@@ -332,7 +332,7 @@ def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
         )
 
         # syncing sources again should not create any new entries
-        sync_sources_for_warehouse(orgdbt.id, warehouse.id, "task-id", "hashkey")
+        sync_sources_for_warehouse_v2(orgdbt.id, warehouse.id, "task-id", "hashkey")
         for schema in SCHEMAS_TABLES:
             assert set(
                 OrgDbtModel.objects.filter(type="source", orgdbt=orgdbt, schema=schema).values_list(
@@ -342,7 +342,7 @@ def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
 
         # add a new table in the warehouse
         SCHEMAS_TABLES["schema1"].append("table5")
-        sync_sources_for_warehouse(orgdbt.id, warehouse.id, "task-id", "hashkey")
+        sync_sources_for_warehouse_v2(orgdbt.id, warehouse.id, "task-id", "hashkey")
         for schema in SCHEMAS_TABLES:
             assert set(
                 OrgDbtModel.objects.filter(type="source", orgdbt=orgdbt, schema=schema).values_list(

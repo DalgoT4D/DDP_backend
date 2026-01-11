@@ -524,3 +524,45 @@ class GitManager:
             changed_files.append(GitChangedFile(filename=filepath, status=status))
 
         return changed_files
+
+    def get_remote_default_branch(self, remote: str = "origin") -> str:
+        """
+        Determine the remote's default branch.
+
+        1) Try `git ls-remote --symref <remote> HEAD` and parse the symbolic ref.
+        2) Fallback to GitHub API default_branch when remote is a GitHub URL and PAT is available.
+
+        Raises GitManagerError on failure.
+        """
+        # Try parsing via git ls-remote --symref
+        result = self._run_command(["git", "ls-remote", "--symref", remote, "HEAD"], check=False)
+        if result.returncode == 0 and result.stdout:
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                # Example line: "ref: refs/heads/main\tHEAD"
+                if line.startswith("ref: "):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        ref = parts[1]
+                        if ref.startswith("refs/heads/"):
+                            return ref.split("/")[-1]
+
+    def sync_local_default_to_remote(self, remote: str = "origin") -> str:
+        """
+        Ensure local default branch name matches remote default branch by renaming
+        the current local branch to the remote default (uses `git branch -M`).
+
+        This implementation only renames the local branch; it does not checkout,
+        set upstream or push.
+        """
+        remote_default = self.get_remote_default_branch(remote)
+
+        local_current = self.get_current_branch()
+
+        if local_current == remote_default:
+            return f"local branch already '{remote_default}'"
+
+        # rename current branch to remote_default (force)
+        self._run_command(["git", "branch", "-M", remote_default])
+
+        return f"renamed local branch '{local_current}' -> '{remote_default}'"

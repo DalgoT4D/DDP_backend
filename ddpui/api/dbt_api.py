@@ -227,6 +227,12 @@ def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
     except GitManagerError as e:
         raise HttpError(500, f"Failed to set remote: {e.message}") from e
 
+    # sync local default to remote
+    try:
+        git_manager.sync_local_default_to_remote()
+    except GitManagerError as e:
+        raise HttpError(500, f"Failed to sync local branch with remote: {e.error}") from e
+
     # Handle PAT token storage (only if not masked)
     if not is_token_masked:
         # Create oauth URL for prefect secret block

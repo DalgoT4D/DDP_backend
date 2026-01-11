@@ -763,7 +763,7 @@ def sync_remote_dbtproject_to_canvas(org: Org, orgdbt: OrgDbt, warehouse_obj: Or
         git_manager.pull_changes()
     except GitManagerError as e:
         logger.error(f"GitManagerError during git pull: {e.message}")
-        raise Exception(f"Failed to pull changes from remote git repo: {e.message}") from e
+        raise Exception(f"Failed to pull changes from remote git repo: {e.error}") from e
 
     # Parse the dbt manifest
     manifest_stats = parse_dbt_manifest_to_canvas(org, orgdbt, warehouse_obj)

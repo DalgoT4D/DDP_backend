@@ -36,12 +36,12 @@ from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.core.transformfunctions import validate_operation_config
 from ddpui.api.warehouse_api import get_warehouse_data
-from ddpui.models.tasks import TaskProgressHashPrefix
+from ddpui.models.tasks import TaskProgressHashPrefix, TaskProgressStatus
 
 from ddpui.core import dbtautomation_service
 from ddpui.core.dbtautomation_service import (
     create_or_update_dbt_model_in_project_v2,
-    sync_sources_for_warehouse,
+    sync_sources_for_warehouse_v2,
     convert_canvas_node_to_frontend_format,
     tranverse_graph_and_return_operations_list,
     validate_and_return_inputs_for_multi_input_op,
@@ -138,11 +138,11 @@ def sync_sources(request):
     taskprogress.add(
         {
             "message": "Started syncing sources",
-            "status": "runnning",
+            "status": TaskProgressStatus.RUNNING,
         }
     )
 
-    sync_sources_for_warehouse.delay(orgdbt.id, org_warehouse.id, task_id, hashkey)
+    sync_sources_for_warehouse_v2.delay(orgdbt.id, org_warehouse.id, task_id, hashkey)
 
     return {"task_id": task_id, "hashkey": hashkey}
 

@@ -57,7 +57,7 @@ from ddpui.schemas.dbt_workflow_schema import (
 )
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
-from ddpui.core.dbtautomation_service import sync_sources_for_warehouse
+from ddpui.core.dbtautomation_service import sync_sources_for_warehouse_v2
 from ddpui.dbt_automation.utils.warehouseclient import PostgresClient
 
 pytestmark = pytest.mark.django_db
@@ -136,7 +136,7 @@ def mock_setup_sync_sources(orgdbt: OrgDbt, warehouse: OrgWarehouse):
         get_wclient_mock.return_value = mock_instance
 
         assert OrgDbtModel.objects.filter(type="source", orgdbt=orgdbt).count() == 0
-        sync_sources_for_warehouse(orgdbt.id, warehouse.id, "task-id", "hashkey")
+        sync_sources_for_warehouse_v2(orgdbt.id, warehouse.id, "task-id", "hashkey")
         for schema in SCHEMAS_TABLES:
             assert (
                 list(
