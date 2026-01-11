@@ -1,6 +1,7 @@
 import uuid
 from pathlib import Path
 from collections import deque
+from ninja import Schema
 
 from django.db.models import Q
 from ninja.errors import HttpError
@@ -117,6 +118,13 @@ OPERATIONS_DICT_SQL = {
     "generic": generic_function_dbt_sql,
     "rawsql": raw_generic_dbt_sql,
 }
+
+
+class SourceYmlDefinition(Schema):
+    source_name: str
+    source_schema: str
+    table: str
+    sql_path: str
 
 
 logger = CustomLogger("ddpui")
@@ -275,12 +283,19 @@ def delete_dbt_model_in_project(orgdbt_model: OrgDbtModel):
 
 
 def delete_dbt_source_in_project(orgdbt_model: OrgDbtModel):
-    """Deletes a dbt model's sql file on disk"""
+    """Deletes a dbt source yml def on disk"""
+
+    # check if the sources yml file exists in the project
+    dbt_project_dir = DbtProjectManager.get_dbt_project_dir(orgdbt_model.orgdbt)
+    sources_yml_rel_path = orgdbt_model.sql_path
+    if not (Path(dbt_project_dir) / sources_yml_rel_path).exists():
+        logger.warning(
+            f"Source yml file at {sources_yml_rel_path} does not exist in dbt project. Nothing to delete."
+        )
+        return False
 
     # read all sources in the same yml file
-    src_tables: list[dict] = read_sources_from_yaml(
-        DbtProjectManager.get_dbt_project_dir(orgdbt_model.orgdbt), orgdbt_model.sql_path
-    )
+    src_tables: list[dict] = read_sources_from_yaml(dbt_project_dir, sources_yml_rel_path)
 
     filtered_src_tables: list[dict] = [
         src_table for src_table in src_tables if src_table["input_name"] != orgdbt_model.name
@@ -293,9 +308,21 @@ def delete_dbt_source_in_project(orgdbt_model: OrgDbtModel):
             orgdbt_model.source_name,
             [src["input_name"] for src in filtered_src_tables],
             dbtProject(Path(DbtProjectManager.get_dbt_project_dir(orgdbt_model.orgdbt))),
+            sources_rel_dir_to_models=str(Path(sources_yml_rel_path).parent.relative_to("models")),
         )
 
-        logger.info(f"Deleted & Updated the source tables in yml {src_yml_path}")
+        logger.info(
+            f"Updated the source definition yml at {src_yml_path} by removing the src table"
+        )
+
+    if len(filtered_src_tables) == 0:
+        logger.info(
+            f"No sources left in the source yml file at {sources_yml_rel_path}. Deleting it."
+        )
+        # delete the sources yml file
+        dbt_project = dbtProject(Path(DbtProjectManager.get_dbt_project_dir(orgdbt_model.orgdbt)))
+        dbt_project.delete_model(sources_yml_rel_path)
+        logger.info(f"Deleted the source yml file at {sources_yml_rel_path}")
 
     return True
 
@@ -679,6 +706,54 @@ def json_columnspec(warehouse: OrgWarehouse, source_schema, input_name, json_col
     """Get json keys of a table in warehouse"""
     wclient = _get_wclient(warehouse)
     return wclient.get_json_columnspec(source_schema, input_name, json_column)
+
+
+def ensure_source_yml_definition_in_project(
+    orgdbt: OrgDbt,
+    schema: str,
+    table: str,
+) -> SourceYmlDefinition:
+    """
+    1. Read through all yaml files in project & parse to check if the source is present or not
+    2. If not present, create the source definition in a new yaml file under models/sources/sources.yml.
+    3. If models/sources/sources.yml file exists, append to it.
+    """
+
+    sources = read_dbt_sources_in_project(orgdbt)
+
+    for source in sources:
+        if (
+            source["schema"] == schema
+            and source["input_name"] == table
+            and source["input_type"] == "source"
+        ):
+            logger.info(
+                f"yml source definition for {schema}.{table} already exists in dbt project."
+            )
+            return SourceYmlDefinition(
+                source_name=source["source_name"],
+                source_schema=source["schema"],
+                table=source["input_name"],
+                sql_path=str(source["sql_path"]),
+            )
+
+    # create the source definition as it does not exist
+    source_yml_path = generate_source_definitions_yaml(
+        schema,
+        schema,
+        [table],
+        dbtProject(Path(DbtProjectManager.get_dbt_project_dir(orgdbt))),
+        sources_rel_dir_to_models="sources",  # by default we create new sources in models/sources/sources.yml
+    )
+
+    logger.info(f"Generated yaml for source {schema}.{table}; yaml at {source_yml_path}")
+
+    return SourceYmlDefinition(
+        source_name=schema,
+        source_schema=schema,
+        table=table,
+        sql_path=str(source_yml_path),
+    )
 
 
 # ==============================================================================

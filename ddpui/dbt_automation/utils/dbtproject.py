@@ -12,11 +12,11 @@ class dbtProject:  # pylint:disable=invalid-name
         """constructor"""
         self.project_dir = project_dir
 
-    def sources_filename(self, schema: str) -> str:
+    def sources_filename(self, schema: str) -> Path:
         """returns the pathname of the sources.yml in the folder for the given schema"""
         return Path(self.project_dir) / "models" / schema / "sources.yml"
 
-    def models_dir(self, schema: str, subdir="") -> str:
+    def models_dir(self, schema: str, subdir="") -> Path:
         """returns the path of the models folder for the given schema"""
         return Path(self.project_dir) / "models" / schema / subdir
 

@@ -1017,6 +1017,21 @@ def post_create_src_model_node(request, dbtmodel_uuid: str):
         if not org_dbt_model:
             raise HttpError(404, "model not found")
 
+        # handle source definitions better
+        # if its a source that we are adding to the canvas; make sure it exists in the yml deifnition
+        # then update the sql_path to point to the source definition file
+        if org_dbt_model.type == OrgDbtModelType.SOURCE:
+            source_yml_def: dbtautomation_service.SourceYmlDefinition = (
+                dbtautomation_service.ensure_source_yml_definition_in_project(
+                    orgdbt, org_dbt_model.schema, org_dbt_model.name
+                )
+            )
+            org_dbt_model.sql_path = source_yml_def.sql_path
+            org_dbt_model.source_name = source_yml_def.source_name
+            org_dbt_model.name = source_yml_def.table
+            org_dbt_model.schema = source_yml_def.source_schema
+            org_dbt_model.save()
+
         # create only if the canvas node for the model doesn't already exist
         existing_node = CanvasNode.objects.filter(dbtmodel=org_dbt_model, orgdbt=orgdbt).first()
         if existing_node:
@@ -1431,9 +1446,13 @@ def delete_canvas_node(request, node_uuid: str):
 
     try:
         canvas_node = CanvasNode.objects.get(uuid=node_uuid, orgdbt=orgdbt)
+        dbtmodel = canvas_node.dbtmodel
 
-        if canvas_node.dbtmodel:
-            dbtautomation_service.delete_dbt_model_in_project(canvas_node.dbtmodel)
+        if dbtmodel:
+            if dbtmodel.type == OrgDbtModelType.MODEL:
+                dbtautomation_service.delete_dbt_model_in_project(dbtmodel)
+            elif dbtmodel.type == OrgDbtModelType.SOURCE:
+                dbtautomation_service.delete_dbt_source_in_project(dbtmodel)
 
         canvas_node.delete()
 
