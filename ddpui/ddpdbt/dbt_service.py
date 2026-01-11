@@ -497,6 +497,8 @@ def parse_dbt_manifest_to_canvas(
                 table_name = source_data.get("name", "")
                 database = source_data.get("database", "")
                 schema = source_data.get("schema", "")
+                path = source_data.get("path", "")
+                original_file_path = source_data.get("original_file_path", "")
 
                 # Create display name for source
                 display_name = f"{source_name}.{table_name}"
@@ -521,16 +523,16 @@ def parse_dbt_manifest_to_canvas(
                     )
 
                 # Check if OrgDbtModel already exists
-                orgdbt_model, model_created = OrgDbtModel.objects.get_or_create(
+                orgdbt_model, model_created = OrgDbtModel.objects.update_or_create(
                     orgdbt=orgdbt,
                     name=table_name,
-                    source_name=source_name,
-                    type=OrgDbtModelType.SOURCE,
+                    schema=schema,
                     defaults={
                         "uuid": uuid.uuid4(),
-                        "display_name": display_name,
-                        "schema": schema,
+                        "type": OrgDbtModelType.SOURCE,
+                        "display_name": table_name,
                         "output_cols": output_cols,
+                        "sql_path": original_file_path or path,
                         "under_construction": False,
                     },
                 )
@@ -625,14 +627,14 @@ def parse_dbt_manifest_to_canvas(
                     )
 
                 # Check if OrgDbtModel already exists
-                orgdbt_model, model_created = OrgDbtModel.objects.get_or_create(
+                orgdbt_model, model_created = OrgDbtModel.objects.update_or_create(
                     orgdbt=orgdbt,
                     name=model_name,
-                    type=OrgDbtModelType.MODEL,
+                    schema=schema,
                     defaults={
                         "uuid": uuid.uuid4(),
+                        "type": OrgDbtModelType.MODEL,
                         "display_name": model_name,
-                        "schema": schema,
                         "sql_path": original_file_path or path,
                         "output_cols": output_cols,
                         "under_construction": False,
