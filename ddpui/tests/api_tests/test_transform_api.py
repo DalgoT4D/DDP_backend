@@ -487,7 +487,7 @@ def test_sync_sources_success(orguser: OrgUser, tmp_path):
     mocked_task = Mock()
     mocked_task.id = "task-id"
     with patch(
-        "ddpui.core.dbtautomation_service.sync_sources_for_warehouse.delay",
+        "ddpui.core.dbtautomation_service.sync_sources_for_warehouse_v2.delay",
         return_value=mocked_task,
     ) as delay:
         result = sync_sources(request)
