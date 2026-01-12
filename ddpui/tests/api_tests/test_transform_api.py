@@ -45,10 +45,7 @@ from ddpui.api.transform_api import (
     delete_model,
     delete_operation,
     get_warehouse_datatypes,
-    post_lock_canvas,
-    LockCanvasRequestSchema,
     CanvasLock,
-    post_unlock_canvas,
     delete_source,
 )
 from ddpui.schemas.dbt_workflow_schema import (
