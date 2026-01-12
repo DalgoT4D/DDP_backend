@@ -439,6 +439,7 @@ def get_dbt_workspace(request):
         "gitrepo_access_token": "*********" if secret_block_exists else None,
         "target_type": orgdbt.target_type,
         "default_schema": orgdbt.default_schema,
+        "transform_type": orgdbt.transform_type,
     }
 
 
