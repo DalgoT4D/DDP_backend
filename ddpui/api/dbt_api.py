@@ -382,9 +382,6 @@ def get_dbt_git_status(request):
     if orgdbt is None:
         raise HttpError(400, "dbt workspace is not configured for this organization")
 
-    if not orgdbt.gitrepo_url:
-        raise HttpError(400, "Git repository is not connected")
-
     dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
     if not dbt_repo_dir.exists():
         raise HttpError(400, "DBT repo directory does not exist")

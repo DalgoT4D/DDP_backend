@@ -1,3 +1,4 @@
+import yaml
 import os, glob
 import subprocess
 from pathlib import Path
@@ -15,6 +16,9 @@ from ddpui.ddpdbt.dbt_service import (
     parse_dbt_manifest_to_canvas,
     generate_manifest_json_for_dbt_project,
 )
+from ddpui.core.orgdbt_manager import DbtProjectManager
+from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtModelType
+from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpprefect import DBTCLIPROFILE, SECRET
 from ddpui.core.orgdbt_manager import DbtCommandError
 from ddpui.dbt_automation import assets
@@ -208,6 +212,132 @@ def test_setup_local_dbt_workspace_success(tmp_path):
 # ============= Tests for generate_manifest_json_for_dbt_project =============
 
 
+@pytest.fixture()
+def org_with_dbt_workspace(tmpdir_factory):
+    """a pytest fixture which creates an Org having an dbt workspace"""
+    print("creating org_with_dbt_workspace")
+    org_slug = "test-org-slug"
+    client_dir = tmpdir_factory.mktemp("clients")
+    org_dir = client_dir.mkdir(org_slug)
+    org_dir.mkdir("dbtrepo")
+
+    os.environ["CLIENTDBT_ROOT"] = str(client_dir)
+
+    # create dbt_project.yml file
+    yml_obj = {"profile": "dummy"}
+    with open(str(org_dir / "dbtrepo" / "dbt_project.yml"), "w", encoding="utf-8") as output:
+        yaml.safe_dump(yml_obj, output)
+
+    dbt = OrgDbt.objects.create(
+        gitrepo_url="dummy-git-url.github.com",
+        project_dir="tmp/",
+        dbt_venv=tmpdir_factory.mktemp("venv"),
+        target_type="postgres",
+        default_schema="prod",
+    )
+    org = Org.objects.create(
+        airbyte_workspace_id="FAKE-WORKSPACE-ID-1",
+        slug=org_slug,
+        dbt=dbt,
+        name=org_slug,
+    )
+    cli_profile_block = OrgPrefectBlockv1.objects.create(
+        org=org,
+        block_type=DBTCLIPROFILE,
+        block_name="test-cli-block",
+        block_id="test-block-id",
+    )
+    dbt.cli_profile_block = cli_profile_block
+    dbt.save()
+    yield org
+    print("deleting org_with_dbt_workspace")
+    org.delete()
+
+
+def test_generate_manifest_no_cli_profile_block(org_with_dbt_workspace: Org):
+    """Test that exception is raised when CLI profile block is missing"""
+
+    org_with_dbt_workspace.dbt.cli_profile_block = None
+
+    with pytest.raises(Exception) as exc_info:
+        generate_manifest_json_for_dbt_project(org_with_dbt_workspace, org_with_dbt_workspace.dbt)
+
+    assert "DBT CLI profile block not found" in str(exc_info.value)
+
+
+def test_generate_manifest_success(org_with_dbt_workspace: Org):
+    """Test successful manifest generation"""
+    # Create CLI profile block
+
+    # Mock the subprocess call to simulate successful dbt docs generation
+    mock_manifest = {"metadata": {"project_name": "test_project"}}
+
+    # Create the manifest file in tmp_path
+    dbtrepo_dir = DbtProjectManager.get_dbt_project_dir(org_with_dbt_workspace.dbt)
+    manifest_path = Path(dbtrepo_dir) / "target" / "manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(mock_manifest))
+
+    with patch(
+        "ddpui.ddpdbt.dbt_service.prefect_service.get_dbt_cli_profile_block"
+    ) as mock_get_profile, patch(
+        "ddpui.ddpdbt.dbt_service.DbtProjectManager.run_dbt_command"
+    ) as mock_run_dbt:
+        # Mock the profile block content
+        mock_get_profile.return_value = {
+            "profile": {
+                "test_profile": {
+                    "outputs": {"public": {"type": "postgres", "host": "localhost", "port": 5432}}
+                }
+            }
+        }
+
+        result = generate_manifest_json_for_dbt_project(
+            org_with_dbt_workspace, org_with_dbt_workspace.dbt
+        )
+
+        # Verify dbt commands were called (deps and compile)
+        assert mock_run_dbt.call_count == 2
+        # First call should be deps
+        deps_call = mock_run_dbt.call_args_list[0]
+        assert "deps" in deps_call[1]["command"]
+        # Second call should be compile
+        compile_call = mock_run_dbt.call_args_list[1]
+        assert "compile" in compile_call[1]["command"]
+
+        # Verify manifest was read and returned
+        assert result == mock_manifest
+
+
+def test_generate_manifest_error(org_with_dbt_workspace: Org):
+    """Test error handling when dbt docs generate fails"""
+
+    with patch(
+        "ddpui.ddpdbt.dbt_service.prefect_service.get_dbt_cli_profile_block"
+    ) as mock_get_profile, patch(
+        "ddpui.ddpdbt.dbt_service.DbtProjectManager.run_dbt_command"
+    ) as mock_run_dbt:
+        # Mock the profile block content
+        mock_get_profile.return_value = {
+            "profile": {
+                "test_profile": {
+                    "outputs": {"public": {"type": "postgres", "host": "localhost", "port": 5432}}
+                }
+            }
+        }
+
+        # Mock dbt command to fail
+        mock_run_dbt.side_effect = DbtCommandError("dbt deps failed", "command failed")
+
+        with pytest.raises(Exception) as exc_info:
+            generate_manifest_json_for_dbt_project(
+                org_with_dbt_workspace, org_with_dbt_workspace.dbt
+            )
+
+        assert "Something went wrong while generating manifest.json" in str(exc_info.value)
+
+
+# ============= Tests for parse_dbt_manifest_to_canvas =============
 @pytest.fixture
 def sample_manifest():
     """Sample manifest.json structure for testing"""
@@ -286,396 +416,170 @@ def sample_manifest():
     }
 
 
-def test_generate_manifest_no_cli_profile_block(tmp_path):
-    """Test that exception is raised when CLI profile block is missing"""
-    org = Org.objects.create(name="test-org", slug="test-org")
-    orgdbt = OrgDbt.objects.create(
-        project_dir=str(tmp_path / "dbtrepo"),
-        dbt_venv=str(tmp_path / "venv"),
-        target_type="postgres",
-        default_schema="public",
-        cli_profile_block=None,  # No CLI profile block
-    )
-
-    try:
-        # Mock gather_dbt_project_params to pass the initial check but then hit the CLI profile block check
-        with patch(
-            "ddpui.ddpdbt.dbt_service.DbtProjectManager.gather_dbt_project_params"
-        ) as mock_gather:
-            from ddpui.ddpdbt.schema import DbtProjectParams
-
-            mock_gather.return_value = DbtProjectParams(
-                dbt_binary=str(tmp_path / "venv/bin/dbt"),
-                dbt_env_dir=str(tmp_path / "venv"),
-                venv_binary=str(tmp_path / "venv/bin"),
-                target="public",
-                project_dir=str(tmp_path / "dbtrepo"),
-                org_project_dir=str(tmp_path),
-            )
-
-            with pytest.raises(Exception) as exc_info:
-                generate_manifest_json_for_dbt_project(org, orgdbt)
-
-            assert "DBT CLI profile block not found" in str(exc_info.value)
-    finally:
-        orgdbt.delete()
-        org.delete()
-
-
-def test_generate_manifest_success(tmp_path):
-    """Test successful manifest generation"""
-    org = Org.objects.create(name="test-org", slug="test-org")
-
-    # Create CLI profile block
-    cli_block = OrgPrefectBlockv1.objects.create(
-        org=org,
-        block_type=DBTCLIPROFILE,
-        block_name="test-cli-block",
-        block_id="test-block-id",
-    )
-
-    orgdbt = OrgDbt.objects.create(
-        project_dir=str(tmp_path / "dbtrepo"),
-        dbt_venv=str(tmp_path / "venv"),
-        target_type="postgres",
-        default_schema="public",
-        cli_profile_block=cli_block,
-    )
-
-    try:
-        # Mock the subprocess call to simulate successful dbt docs generation
-        mock_manifest = {"metadata": {"project_name": "test_project"}}
-
-        # Create the manifest file in tmp_path
-        manifest_path = tmp_path / "dbtrepo" / "target" / "manifest.json"
-        manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        manifest_path.write_text(json.dumps(mock_manifest))
-
-        with patch(
-            "ddpui.ddpdbt.dbt_service.DbtProjectManager.gather_dbt_project_params"
-        ) as mock_gather, patch(
-            "ddpui.ddpdbt.dbt_service.prefect_service.get_dbt_cli_profile_block"
-        ) as mock_get_profile, patch(
-            "ddpui.ddpdbt.dbt_service.DbtProjectManager.run_dbt_command"
-        ) as mock_run_dbt:
-            # Mock gather_dbt_project_params
-            from ddpui.ddpdbt.schema import DbtProjectParams
-
-            mock_gather.return_value = DbtProjectParams(
-                dbt_binary=str(tmp_path / "venv/bin/dbt"),
-                dbt_env_dir=str(tmp_path / "venv"),
-                venv_binary=str(tmp_path / "venv/bin"),
-                target="public",
-                project_dir=str(tmp_path / "dbtrepo"),
-                org_project_dir=str(tmp_path),
-            )
-
-            # Mock the profile block content
-            mock_get_profile.return_value = {
-                "profile": {
-                    "test_profile": {
-                        "outputs": {
-                            "public": {"type": "postgres", "host": "localhost", "port": 5432}
-                        }
-                    }
-                }
-            }
-
-            result = generate_manifest_json_for_dbt_project(org, orgdbt)
-
-            # Verify dbt commands were called (deps and compile)
-            assert mock_run_dbt.call_count == 2
-            # First call should be deps
-            deps_call = mock_run_dbt.call_args_list[0]
-            assert "deps" in deps_call[1]["command"]
-            # Second call should be compile
-            compile_call = mock_run_dbt.call_args_list[1]
-            assert "compile" in compile_call[1]["command"]
-
-            # Verify manifest was read and returned
-            assert result == mock_manifest
-
-    finally:
-        orgdbt.delete()
-        cli_block.delete()
-        org.delete()
-
-
-def test_generate_manifest_error(tmp_path):
-    """Test error handling when dbt docs generate fails"""
-    org = Org.objects.create(name="test-org", slug="test-org")
-
-    cli_block = OrgPrefectBlockv1.objects.create(
-        org=org,
-        block_type=DBTCLIPROFILE,
-        block_name="test-cli-block",
-        block_id="test-block-id",
-    )
-
-    orgdbt = OrgDbt.objects.create(
-        project_dir=str(tmp_path / "dbtrepo"),
-        dbt_venv=str(tmp_path / "venv"),
-        target_type="postgres",
-        default_schema="public",
-        cli_profile_block=cli_block,
-    )
-
-    try:
-        with patch(
-            "ddpui.ddpdbt.dbt_service.DbtProjectManager.gather_dbt_project_params"
-        ) as mock_gather, patch(
-            "ddpui.ddpdbt.dbt_service.prefect_service.get_dbt_cli_profile_block"
-        ) as mock_get_profile, patch(
-            "ddpui.ddpdbt.dbt_service.DbtProjectManager.run_dbt_command"
-        ) as mock_run_dbt:
-            # Mock gather_dbt_project_params
-            from ddpui.ddpdbt.schema import DbtProjectParams
-
-            mock_gather.return_value = DbtProjectParams(
-                dbt_binary=str(tmp_path / "venv/bin/dbt"),
-                dbt_env_dir=str(tmp_path / "venv"),
-                venv_binary=str(tmp_path / "venv/bin"),
-                target="public",
-                project_dir=str(tmp_path / "dbtrepo"),
-                org_project_dir=str(tmp_path),
-            )
-
-            # Mock the profile block content
-            mock_get_profile.return_value = {
-                "profile": {
-                    "test_profile": {
-                        "outputs": {
-                            "public": {"type": "postgres", "host": "localhost", "port": 5432}
-                        }
-                    }
-                }
-            }
-
-            # Mock dbt command to fail
-            mock_run_dbt.side_effect = DbtCommandError("dbt deps failed", "command failed")
-
-            with pytest.raises(Exception) as exc_info:
-                generate_manifest_json_for_dbt_project(org, orgdbt)
-
-            assert "Something went wrong while generating manifest.json" in str(exc_info.value)
-
-    finally:
-        orgdbt.delete()
-        cli_block.delete()
-        org.delete()
-
-
-# ============= Tests for parse_dbt_manifest_to_canvas =============
-
-
-def test_parse_dbt_manifest_to_canvas_success(sample_manifest):
+def test_parse_dbt_manifest_to_canvas_success(sample_manifest, org_with_dbt_workspace: Org):
     """Test successful parsing of manifest to canvas nodes"""
-    org = Org.objects.create(name="test-org", slug="test-org")
 
-    # Create OrgWarehouse for the function
-    from ddpui.models.org import OrgWarehouse
+    warehouse = OrgWarehouse.objects.create(org=org_with_dbt_workspace, wtype="postgres")
+    orgdbt = org_with_dbt_workspace.dbt
 
-    warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres")
+    # Mock warehouse connection to return column info
+    mock_warehouse = Mock()
+    mock_warehouse.get_table_columns.return_value = [
+        {"name": "id", "data_type": "integer"},
+        {"name": "name", "data_type": "text"},
+        {"name": "extra_col", "data_type": "text"},
+    ]
 
-    # Create OrgDbt that will be used by CanvasNode
-    orgdbt = OrgDbt.objects.create(target_type="postgres", default_schema="public")
-    org.dbt = orgdbt
-    org.save()
+    with patch(
+        "ddpui.ddpdbt.dbt_service.prefect_service.get_dbt_cli_profile_block"
+    ) as mock_get_profile, patch(
+        "ddpui.ddpdbt.dbt_service.WarehouseFactory.connect", return_value=mock_warehouse
+    ) as mock_connect, patch(
+        "ddpui.ddpdbt.dbt_service.secretsmanager.retrieve_warehouse_credentials",
+        return_value={"host": "localhost"},
+    ) as mock_creds, patch(
+        "ddpui.ddpdbt.dbt_service.DbtProjectManager.run_dbt_command"
+    ) as mock_run_dbt:
+        # Mock the profile block content
+        mock_get_profile.return_value = {
+            "profile": {
+                "test_profile": {
+                    "outputs": {"public": {"type": "postgres", "host": "localhost", "port": 5432}}
+                }
+            }
+        }
 
-    try:
-        # Mock warehouse connection to return column info
-        mock_warehouse = Mock()
-        mock_warehouse.get_table_columns.return_value = [
-            {"name": "id", "data_type": "integer"},
-            {"name": "name", "data_type": "text"},
-            {"name": "extra_col", "data_type": "text"},
-        ]
+        result = parse_dbt_manifest_to_canvas(
+            org_with_dbt_workspace, orgdbt, warehouse, sample_manifest, refresh=False
+        )
 
-        with patch(
-            "ddpui.ddpdbt.dbt_service.WarehouseFactory.connect", return_value=mock_warehouse
-        ) as mock_connect, patch(
-            "ddpui.ddpdbt.dbt_service.secretsmanager.retrieve_warehouse_credentials",
-            return_value={"host": "localhost"},
-        ) as mock_creds:
-            result = parse_dbt_manifest_to_canvas(org, orgdbt, warehouse, sample_manifest)
+        # Check the returned statistics
+        assert "sources_processed" in result
+        assert "models_processed" in result
+        assert "edges_created" in result
 
-            # Check the returned statistics
-            assert "sources_processed" in result
-            assert "models_processed" in result
-            assert "edges_created" in result
+        # Verify sources were created
+        assert result["sources_processed"] == 2
+        source_nodes = CanvasNode.objects.filter(orgdbt=orgdbt, node_type=CanvasNodeType.SOURCE)
+        assert source_nodes.count() == 2
 
-            # Verify sources were created
-            assert result["sources_processed"] == 2
-            source_nodes = CanvasNode.objects.filter(orgdbt=orgdbt, node_type=CanvasNodeType.SOURCE)
-            assert source_nodes.count() == 2
+        # Verify models were created (excluding package models)
+        assert result["models_processed"] == 2
+        model_nodes = CanvasNode.objects.filter(orgdbt=orgdbt, node_type=CanvasNodeType.MODEL)
+        assert model_nodes.count() == 2
 
-            # Verify models were created (excluding package models)
-            assert result["models_processed"] == 2
-            model_nodes = CanvasNode.objects.filter(orgdbt=orgdbt, node_type=CanvasNodeType.MODEL)
-            assert model_nodes.count() == 2
-
-            # Verify edges were created
-            assert (
-                result["edges_created"] == 3
-            )  # model1 -> table1, model2 -> model1, model2 -> table2
-            edges = CanvasEdge.objects.filter(from_node__orgdbt=orgdbt)
-            assert edges.count() == 3
-
-    finally:
-        # Cleanup
-        CanvasNode.objects.filter(orgdbt=orgdbt).delete()
-        CanvasEdge.objects.filter(from_node__orgdbt=orgdbt).delete()
-        orgdbt.delete()
-        warehouse.delete()
-        org.delete()
+        # Verify edges were created
+        assert result["edges_created"] == 3  # model1 -> table1, model2 -> model1, model2 -> table2
+        edges = CanvasEdge.objects.filter(from_node__orgdbt=orgdbt)
+        assert edges.count() == 3
 
 
-def test_parse_dbt_manifest_to_canvas_warehouse_columns(sample_manifest):
+def test_parse_dbt_manifest_to_canvas_warehouse_columns(
+    sample_manifest, org_with_dbt_workspace: Org
+):
     """Test parsing with warehouse column fetching and fallback to manifest"""
-    org = Org.objects.create(name="test-org", slug="test-org")
 
-    # Create OrgWarehouse for the function
-    from ddpui.models.org import OrgWarehouse
+    warehouse = OrgWarehouse.objects.create(org=org_with_dbt_workspace, wtype="postgres")
+    orgdbt = org_with_dbt_workspace.dbt
 
-    warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres")
+    # Mock warehouse connection that fails for some tables
+    mock_warehouse = Mock()
 
-    # Create OrgDbt that will be used by CanvasNode
-    orgdbt = OrgDbt.objects.create(target_type="postgres", default_schema="public")
-    org.dbt = orgdbt
-    org.save()
+    def mock_get_columns(schema_name, table_name):
+        if table_name == "table1":
+            return [
+                {"name": "id", "data_type": "integer"},
+                {"name": "name", "data_type": "text"},
+                {"name": "warehouse_col", "data_type": "text"},
+            ]
+        else:
+            # Return None to simulate failure, should fallback to manifest
+            return None
 
-    try:
-        # Mock warehouse connection that fails for some tables
-        mock_warehouse = Mock()
+    mock_warehouse.get_table_columns.side_effect = mock_get_columns
 
-        def mock_get_columns(schema_name, table_name):
-            if table_name == "table1":
-                return [
-                    {"name": "id", "data_type": "integer"},
-                    {"name": "name", "data_type": "text"},
-                    {"name": "warehouse_col", "data_type": "text"},
-                ]
-            else:
-                # Return None to simulate failure, should fallback to manifest
-                return None
+    with patch(
+        "ddpui.ddpdbt.dbt_service.WarehouseFactory.connect", return_value=mock_warehouse
+    ) as mock_connect, patch(
+        "ddpui.ddpdbt.dbt_service.secretsmanager.retrieve_warehouse_credentials",
+        return_value={"host": "localhost"},
+    ) as mock_creds:
+        result = parse_dbt_manifest_to_canvas(
+            org_with_dbt_workspace, orgdbt, warehouse, sample_manifest, refresh=False
+        )
 
-        mock_warehouse.get_table_columns.side_effect = mock_get_columns
+        # Check the returned statistics
+        assert "sources_processed" in result
 
-        with patch(
-            "ddpui.ddpdbt.dbt_service.WarehouseFactory.connect", return_value=mock_warehouse
-        ) as mock_connect, patch(
-            "ddpui.ddpdbt.dbt_service.secretsmanager.retrieve_warehouse_credentials",
-            return_value={"host": "localhost"},
-        ) as mock_creds:
-            result = parse_dbt_manifest_to_canvas(org, orgdbt, warehouse, sample_manifest)
+        # Check that warehouse was called for both tables
+        assert mock_warehouse.get_table_columns.call_count == 4  # 2 sources + 2 models
 
-            # Check the returned statistics
-            assert "sources_processed" in result
+        # Verify source nodes were created with correct columns
+        table1_node = CanvasNode.objects.get(orgdbt=orgdbt, name="source1.table1")
+        table1_columns = table1_node.output_cols
 
-            # Check that warehouse was called for both tables
-            assert mock_warehouse.get_table_columns.call_count == 4  # 2 sources + 2 models
+        # table1 should have warehouse columns (3 columns)
+        assert len(table1_columns) == 3
+        assert "warehouse_col" in table1_columns
 
-            # Verify source nodes were created with correct columns
-            table1_node = CanvasNode.objects.get(orgdbt=orgdbt, name="source1.table1")
-            table1_columns = table1_node.output_cols
-
-            # table1 should have warehouse columns (3 columns)
-            assert len(table1_columns) == 3
-            assert "warehouse_col" in table1_columns
-
-            # table2 should fallback to manifest columns (2 columns)
-            table2_node = CanvasNode.objects.get(orgdbt=orgdbt, name="source1.table2")
-            table2_columns = table2_node.output_cols
-            assert len(table2_columns) == 2
-            assert all(col in ["user_id", "email"] for col in table2_columns)
-
-    finally:
-        # Cleanup
-        CanvasNode.objects.filter(orgdbt=orgdbt).delete()
-        CanvasEdge.objects.filter(from_node__orgdbt=orgdbt).delete()
-        orgdbt.delete()
-        warehouse.delete()
-        org.delete()
+        # table2 should fallback to manifest columns (2 columns)
+        table2_node = CanvasNode.objects.get(orgdbt=orgdbt, name="source1.table2")
+        table2_columns = table2_node.output_cols
+        assert len(table2_columns) == 2
+        assert all(col in ["user_id", "email"] for col in table2_columns)
 
 
-def test_parse_dbt_manifest_to_canvas_update_existing(sample_manifest):
+def test_parse_dbt_manifest_to_canvas_update_existing(org_with_dbt_workspace: Org, sample_manifest):
     """Test updating existing canvas nodes when they already exist"""
-    org = Org.objects.create(name="test-org", slug="test-org")
 
-    # Create OrgWarehouse for the function
-    from ddpui.models.org import OrgWarehouse
+    warehouse = OrgWarehouse.objects.create(org=org_with_dbt_workspace, wtype="postgres")
+    orgdbt = org_with_dbt_workspace.dbt
 
-    warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres")
+    existing_orgdbt_model = OrgDbtModel.objects.create(
+        orgdbt=orgdbt,
+        name="table1",
+        source_name="source1",
+        type=OrgDbtModelType.SOURCE,
+        display_name="source1.table1",
+        schema="raw",
+        output_cols=["old_col1", "old_col2"],
+        under_construction=False,
+    )
 
-    # Create OrgDbt that will be used by CanvasNode
-    orgdbt = OrgDbt.objects.create(target_type="postgres", default_schema="public")
-    org.dbt = orgdbt
-    org.save()
+    # Create existing node that should be updated
+    existing_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        name="source1.table1",
+        node_type=CanvasNodeType.SOURCE,
+        output_cols=["old_col1", "old_col2"],
+        dbtmodel=existing_orgdbt_model,
+    )
 
-    try:
-        # Create existing OrgDbtModel that the function will find
-        from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtModelType
+    mock_warehouse = Mock()
+    mock_warehouse.get_table_columns.return_value = [
+        {"name": "id", "data_type": "integer"},
+        {"name": "name", "data_type": "text"},
+    ]
 
-        existing_orgdbt_model = OrgDbtModel.objects.create(
-            orgdbt=orgdbt,
-            name="table1",
-            source_name="source1",
-            type=OrgDbtModelType.SOURCE,
-            display_name="source1.table1",
-            schema="raw",
-            output_cols=["old_col1", "old_col2"],
-            under_construction=False,
+    with patch(
+        "ddpui.ddpdbt.dbt_service.WarehouseFactory.connect", return_value=mock_warehouse
+    ) as mock_connect, patch(
+        "ddpui.ddpdbt.dbt_service.secretsmanager.retrieve_warehouse_credentials",
+        return_value={"host": "localhost"},
+    ) as mock_creds:
+        result = parse_dbt_manifest_to_canvas(
+            org_with_dbt_workspace, orgdbt, warehouse, sample_manifest, refresh=False
         )
 
-        # Create existing node that should be updated
-        existing_node = CanvasNode.objects.create(
-            orgdbt=orgdbt,
-            name="source1.table1",
-            node_type=CanvasNodeType.SOURCE,
-            output_cols=["old_col1", "old_col2"],
-            dbtmodel=existing_orgdbt_model,
-        )
+        # Check the returned statistics
+        assert "sources_processed" in result
 
-        mock_warehouse = Mock()
-        mock_warehouse.get_table_columns.return_value = [
-            {"name": "id", "data_type": "integer"},
-            {"name": "name", "data_type": "text"},
-        ]
+        # Verify existing node was updated, not duplicated
+        source_nodes = CanvasNode.objects.filter(orgdbt=orgdbt, node_type=CanvasNodeType.SOURCE)
+        assert source_nodes.count() == 2  # Still only 2 source nodes
 
-        with patch(
-            "ddpui.ddpdbt.dbt_service.WarehouseFactory.connect", return_value=mock_warehouse
-        ) as mock_connect, patch(
-            "ddpui.ddpdbt.dbt_service.secretsmanager.retrieve_warehouse_credentials",
-            return_value={"host": "localhost"},
-        ) as mock_creds:
-            result = parse_dbt_manifest_to_canvas(org, orgdbt, warehouse, sample_manifest)
-
-            # Check the returned statistics
-            assert "sources_processed" in result
-
-            # Verify existing node was updated, not duplicated
-            source_nodes = CanvasNode.objects.filter(orgdbt=orgdbt, node_type=CanvasNodeType.SOURCE)
-            assert source_nodes.count() == 2  # Still only 2 source nodes
-
-            # Verify the existing node was updated
-            updated_node = CanvasNode.objects.get(orgdbt=orgdbt, name="source1.table1")
-            assert updated_node.id == existing_node.id  # Same node
-            assert "id" in updated_node.output_cols  # New columns added
-            assert "name" in updated_node.output_cols
-
-    finally:
-        # Cleanup
-        CanvasNode.objects.filter(orgdbt=orgdbt).delete()
-        CanvasEdge.objects.filter(from_node__orgdbt=orgdbt).delete()
-        orgdbt.delete()
-        warehouse.delete()
-        org.delete()
-
-
-def mock_open_manifest(manifest_data):
-    """Helper function to mock file opening for manifest.json"""
-    mock_file = MagicMock()
-    mock_file.read.return_value = json.dumps(manifest_data)
-    mock_file.__enter__ = Mock(return_value=mock_file)
-    mock_file.__exit__ = Mock(return_value=None)
-    return Mock(return_value=mock_file)
+        # Verify the existing node was updated
+        updated_node = CanvasNode.objects.get(orgdbt=orgdbt, name="source1.table1")
+        assert updated_node.id == existing_node.id  # Same node
+        assert "id" in updated_node.output_cols  # New columns added
+        assert "name" in updated_node.output_cols

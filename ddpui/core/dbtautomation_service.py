@@ -426,7 +426,7 @@ def propagate_changes_to_downstream_operations(
 
 
 @app.task(bind=True)
-def sync_sources_for_warehouse_v2(
+def sync_sources_for_warehouse(
     self, org_dbt_id: str, org_warehouse_id: str, task_id: str, hashkey: str
 ):
     """
