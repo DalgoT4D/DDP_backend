@@ -230,8 +230,16 @@ def merge_operations_v2(
     dbt_sql += select_statement
 
     dbt_project = dbtProject(project_dir)
-    dbt_project.ensure_models_dir(config["dest_schema"])
+    if config.get("rel_dir_to_models"):
+        dbt_project.ensure_models_dir(config["rel_dir_to_models"])
+    else:
+        dbt_project.ensure_models_dir(config["dest_schema"])
 
-    model_sql_path = dbt_project.write_model(config["dest_schema"], config["output_name"], dbt_sql)
+    model_sql_path = dbt_project.write_model(
+        config["dest_schema"],
+        config["output_name"],
+        dbt_sql,
+        rel_dir_to_models=config.get("rel_dir_to_models"),
+    )
 
     return model_sql_path, output_cols

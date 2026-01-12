@@ -32,14 +32,25 @@ class dbtProject:  # pylint:disable=invalid-name
 
     def write_model(self, schema: str, modelname: str, model_sql: str, **kwargs) -> None:
         """writes a .sql model"""
-        self.ensure_models_dir(schema, kwargs.get("subdir", ""))
+        if kwargs.get("rel_dir_to_models"):
+            self.ensure_models_dir(kwargs.get("rel_dir_to_models"))
+        else:
+            self.ensure_models_dir(schema, kwargs.get("subdir", ""))
+
         model_sql = (
             "--DBT AUTOMATION has generated this model, please DO NOT EDIT \n--Please make sure you dont change the model name \n\n"
             + model_sql
         )
-        model_filename = Path(self.models_dir(schema, kwargs.get("subdir", ""))) / (
-            modelname + ".sql"
-        )
+
+        if kwargs.get("rel_dir_to_models"):
+            model_filename = Path(self.models_dir(kwargs.get("rel_dir_to_models"))) / (
+                modelname + ".sql"
+            )
+        else:
+            model_filename = Path(self.models_dir(schema, kwargs.get("subdir", ""))) / (
+                modelname + ".sql"
+            )
+
         with open(model_filename, "w", encoding="utf-8") as outfile:
             if kwargs.get("logger"):
                 kwargs["logger"].info("[write_model] %s", model_filename)

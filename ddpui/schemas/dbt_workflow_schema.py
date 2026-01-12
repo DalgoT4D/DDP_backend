@@ -391,3 +391,4 @@ class TerminateChainAndCreateModelPayload(Schema):
     name: str
     display_name: str
     dest_schema: str
+    rel_dir_to_models: str = None

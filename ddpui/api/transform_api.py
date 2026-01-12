@@ -1361,6 +1361,7 @@ def post_terminate_operation_node(
             "operations": operations_list,
             "dest_schema": payload.dest_schema,
             "output_name": payload.name,
+            "rel_dir_to_models": payload.rel_dir_to_models,
         }
 
         # create the dbt model on disk by merging all the operations
@@ -1547,3 +1548,43 @@ def sync_remote_dbtproject_to_canvas(request):
         raise HttpError(400, "Organization does not have a warehouse configured")
 
     return dbt_service.sync_remote_dbtproject_to_canvas(org, orgdbt, warehouse_obj)
+
+
+@transform_router.get("/v2/dbt_project/models_directories/")
+@has_permission(["can_view_dbt_workspace"])
+def get_models_directories(request):
+    """
+    Get all directories (and subdirectories) under the models folder
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    orgdbt = org.dbt
+    if not orgdbt:
+        raise HttpError(400, "Organization does not have a dbt workspace configured")
+
+    try:
+        project_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+        if not project_dir.exists():
+            raise HttpError(500, "dbt project directory does not exist")
+
+        models_dir = project_dir / "models"
+        if not models_dir.exists():
+            return {"directories": []}
+
+        # Get all directories under models
+        directories = []
+        for item in models_dir.rglob("*"):
+            if item.is_dir():
+                # Get relative path from models directory
+                relative_path = item.relative_to(models_dir)
+                directories.append(str(relative_path))
+
+        # Add root models directory and sort
+        directories.insert(0, "")  # Empty string represents models root
+        directories.sort(key=lambda x: (x.count("/"), x))  # Sort by depth then alphabetically
+
+        return {"directories": directories}
+
+    except Exception as e:
+        logger.exception(f"Error getting models directories for org {org.slug}: {str(e)}")
+        raise HttpError(500, f"Failed to get models directories: {str(e)}")

@@ -308,7 +308,7 @@ def delete_dbt_source_in_project(orgdbt_model: OrgDbtModel):
             orgdbt_model.source_name,
             [src["input_name"] for src in filtered_src_tables],
             dbtProject(Path(DbtProjectManager.get_dbt_project_dir(orgdbt_model.orgdbt))),
-            sources_rel_dir_to_models=str(Path(sources_yml_rel_path).parent.relative_to("models")),
+            rel_dir_to_models=str(Path(sources_yml_rel_path).parent.relative_to("models")),
         )
 
         logger.info(
@@ -743,7 +743,7 @@ def ensure_source_yml_definition_in_project(
         schema,
         [table],
         dbtProject(Path(DbtProjectManager.get_dbt_project_dir(orgdbt))),
-        sources_rel_dir_to_models="sources",  # by default we create new sources in models/sources/sources.yml
+        rel_dir_to_models="sources",  # by default we create new sources in models/sources/sources.yml
     )
 
     logger.info(f"Generated yaml for source {schema}.{table}; yaml at {source_yml_path}")

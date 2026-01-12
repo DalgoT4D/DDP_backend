@@ -29,14 +29,14 @@ def generate_source_definitions_yaml(
     input_schema: str,
     tablenames: list,
     dbtproject: dbtProject,
-    sources_rel_dir_to_models: str = None,
+    rel_dir_to_models: str = None,
 ):
     """
     Generate the sources.yml file. Or merge if one already exists
     """
-    if sources_rel_dir_to_models:
-        source_dir: Path = dbtproject.models_dir(sources_rel_dir_to_models)
-        sources_file: Path = dbtproject.sources_filename(sources_rel_dir_to_models)
+    if rel_dir_to_models:
+        source_dir: Path = dbtproject.models_dir(rel_dir_to_models)
+        sources_file: Path = dbtproject.sources_filename(rel_dir_to_models)
     else:
         source_dir: Path = dbtproject.models_dir(input_schema)
         sources_file: Path = dbtproject.sources_filename(input_schema)
