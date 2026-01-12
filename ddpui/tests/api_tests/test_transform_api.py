@@ -7,13 +7,15 @@ import django
 import pydantic
 import pytest
 from unittest.mock import Mock, patch, call
-from datetime import datetime
+from datetime import datetime, timedelta
+from django.utils import timezone
 from ninja.errors import HttpError, ValidationError
 from ddpui.dbt_automation import assets
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgWarehouse, OrgDbt, TransformType
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation, DbtEdge, OrgDbtModelType
+from ddpui.models.canvaslock import CanvasLock
 from ddpui.auth import (
     GUEST_ROLE,
     SUPER_ADMIN_ROLE,
@@ -45,12 +47,14 @@ from ddpui.api.transform_api import (
     delete_model,
     delete_operation,
     get_warehouse_datatypes,
-    CanvasLock,
+    lock_canvas,
+    unlock_canvas,
     delete_source,
 )
 from ddpui.schemas.dbt_workflow_schema import (
     CreateDbtModelPayload,
     CompleteDbtModelPayload,
+    LockCanvasResponseSchema,
 )
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
@@ -177,80 +181,161 @@ def test_seed_data(seed_db):
     assert Permission.objects.count() > 5
 
 
-def test_post_lock_canvas_acquire(orguser):
+def test_lock_canvas_acquire(seed_db, orguser):
     """a test to lock the canvas"""
+    # First create a dbt workspace for the org
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
     request = mock_request(orguser)
-    payload = LockCanvasRequestSchema()
-    response = post_lock_canvas(request, payload)
+    response = lock_canvas(request)
     assert response is not None
     assert response.locked_by == orguser.user.email
-    assert response.lock_id is not None
+    assert response.lock_token is not None
 
 
-def test_post_lock_canvas_locked_by_another(orguser, nonadminorguser):
-    """a test to lock the canvas"""
-    CanvasLock.objects.create(locked_by=nonadminorguser, locked_at=datetime.now())
+def test_lock_canvas_locked_by_another(seed_db, orguser, nonadminorguser):
+    """a test to lock the canvas when it's already locked by another user"""
+    # Create dbt workspace for both users
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create a lock for another user
+    lock = CanvasLock.objects.create(
+        dbt=orgdbt,
+        locked_by=nonadminorguser,
+        lock_token="existing-lock-token",
+        expires_at=timezone.now() + timedelta(minutes=5),
+    )
+
     request = mock_request(orguser)
-    payload = LockCanvasRequestSchema()
-    response = post_lock_canvas(request, payload)
-    assert response is not None
-    assert response.locked_by == nonadminorguser.user.email
-    assert response.lock_id is None
-
-
-def test_post_lock_canvas_locked_by_self(orguser):
-    """a test to lock the canvas"""
-    request = mock_request(orguser)
-    payload = LockCanvasRequestSchema()
-    post_lock_canvas(request, payload)
-    # the second call won't acquire a lock
-    response = post_lock_canvas(request, payload)
-    assert response is not None
-    assert response.locked_by == orguser.user.email
-    assert response.lock_id is None
-
-
-def test_post_unlock_canvas_unlocked(orguser):
-    """a test to unlock the canvas"""
-    request = mock_request(orguser)
-    payload = LockCanvasRequestSchema()
     with pytest.raises(HttpError) as excinfo:
-        post_unlock_canvas(request, payload)
-    assert str(excinfo.value) == "no lock found"
+        lock_canvas(request)
+    assert "already locked by" in str(excinfo.value)
 
 
-def test_post_unlock_canvas_locked(orguser):
-    """a test to unlock the canvas"""
+def test_lock_canvas_locked_by_self(seed_db, orguser):
+    """a test to lock the canvas when it's already locked by the same user"""
+    # Create dbt workspace
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
     request = mock_request(orguser)
-    payload = LockCanvasRequestSchema()
-    post_lock_canvas(request, payload)
+    # First lock should succeed
+    first_response = lock_canvas(request)
+    assert first_response is not None
+    assert first_response.locked_by == orguser.user.email
+    assert first_response.lock_token is not None
 
+    # Second call should refresh the lock
+    second_response = lock_canvas(request)
+    assert second_response is not None
+    assert second_response.locked_by == orguser.user.email
+    assert second_response.lock_token == first_response.lock_token
+
+
+def test_unlock_canvas_unlocked(seed_db, orguser):
+    """a test to unlock the canvas when no lock exists"""
+    # Create dbt workspace
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    request = mock_request(orguser)
+    # Should succeed even if no lock exists (already unlocked)
+    response = unlock_canvas(request)
+    assert response == {"success": True}
+
+
+def test_unlock_canvas_locked_by_different_user(seed_db, orguser, nonadminorguser):
+    """a test to unlock the canvas when locked by different user"""
+    # Create dbt workspace
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create a lock for another user
+    CanvasLock.objects.create(
+        dbt=orgdbt,
+        locked_by=nonadminorguser,
+        lock_token="existing-lock-token",
+        expires_at=timezone.now() + timedelta(minutes=5),
+    )
+
+    request = mock_request(orguser)
     with pytest.raises(HttpError) as excinfo:
-        post_unlock_canvas(request, payload)
-    assert str(excinfo.value) == "wrong lock id"
+        unlock_canvas(request)
+    assert "You can only unlock your own locks" in str(excinfo.value)
 
 
-def test_post_unlock_canvas_locked_unlocked(orguser):
-    """a test to unlock the canvas"""
+def test_unlock_canvas_success(seed_db, orguser):
+    """a test to unlock the canvas successfully"""
+    # Create dbt workspace
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
     request = mock_request(orguser)
-    payload = LockCanvasRequestSchema()
-    lock = post_lock_canvas(request, payload)
+    # First lock the canvas
+    lock_response = lock_canvas(request)
+    assert lock_response.locked_by == orguser.user.email
 
-    payload.lock_id = lock.lock_id
-    response = post_unlock_canvas(request, payload)
-    assert response == {"success": 1}
+    # Then unlock it
+    unlock_response = unlock_canvas(request)
+    assert unlock_response == {"success": True}
 
 
-def test_post_unlock_canvas_locked_wrong_lock_id(orguser):
-    """a test to unlock the canvas"""
+def test_unlock_canvas_dbt_workspace_not_setup(seed_db, orguser):
+    """a test to unlock the canvas when dbt workspace is not setup"""
     request = mock_request(orguser)
-    payload = LockCanvasRequestSchema()
-    post_lock_canvas(request, payload)
-
-    payload.lock_id = "wrong-lock-id"
     with pytest.raises(HttpError) as excinfo:
-        post_unlock_canvas(request, payload)
-    assert str(excinfo.value) == "wrong lock id"
+        unlock_canvas(request)
+    assert "dbt workspace not setup" in str(excinfo.value)
 
 
 # =================================== ui4t =======================================
