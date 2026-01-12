@@ -208,7 +208,7 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str):
         raise Exception(f"Project {project_name} already exists")
 
     if not project_dir.exists():
-        project_dir.mkdir()
+        project_dir.mkdir(parents=True, exist_ok=True)
         logger.info("created project_dir %s", project_dir)
 
     logger.info(f"starting to setup local dbt workspace at {project_dir}")

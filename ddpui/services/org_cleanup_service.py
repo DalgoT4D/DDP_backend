@@ -117,7 +117,13 @@ class OrgCleanupService:
                 logger.info(f"deleted dbt cli profile block {dbt_cli_block.block_name} from DB")
 
         # clear up github PAT from everywhere if exists
-        orgdbt = self.org.dbt
+        try:
+            orgdbt = self.org.dbt
+        except Exception:
+            orgdbt = None
+            logger.info("No existing dbt workspace found")
+            return
+
         for secret_block in OrgPrefectBlockv1.objects.filter(org=self.org, block_type=SECRET).all():
             logger.info(f"will delete secret block {secret_block.block_name} from prefect & DB")
             logger.info("will also delete github PAT if exists in secrets manager")
