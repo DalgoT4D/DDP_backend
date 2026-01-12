@@ -136,8 +136,7 @@ dmypy.json
 # mac stuff
 .DS_Store
 
-celeryworker.pid
-celerybeat.pid
+*.pid
 
 secrets/
 data/
