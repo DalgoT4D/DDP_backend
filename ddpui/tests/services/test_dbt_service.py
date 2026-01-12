@@ -583,3 +583,372 @@ def test_parse_dbt_manifest_to_canvas_update_existing(org_with_dbt_workspace: Or
         assert updated_node.id == existing_node.id  # Same node
         assert "id" in updated_node.output_cols  # New columns added
         assert "name" in updated_node.output_cols
+
+
+# ============= Fixtures for Operation Chain Tests =============
+
+
+@pytest.fixture
+def operation_chain_graph(org_with_dbt_workspace: Org):
+    """
+    Creates a canvas graph with operation chain: model1 -> op1 -> op2 -> model2
+    Returns dict with all nodes for easy access in tests.
+    """
+    warehouse = OrgWarehouse.objects.create(org=org_with_dbt_workspace, wtype="postgres")
+    orgdbt = org_with_dbt_workspace.dbt
+
+    # Create OrgDbtModel instances for model nodes (required for MODEL/SOURCE types)
+    model1_dbtmodel = OrgDbtModel.objects.create(
+        orgdbt=orgdbt,
+        name="model1",
+        type=OrgDbtModelType.MODEL,
+        display_name="model1",
+        schema="analytics",
+        output_cols=["id", "name"],
+        under_construction=False,
+    )
+
+    model2_dbtmodel = OrgDbtModel.objects.create(
+        orgdbt=orgdbt,
+        name="model2",
+        type=OrgDbtModelType.MODEL,
+        display_name="model2",
+        schema="analytics",
+        output_cols=["id", "final_name", "created_at"],
+        under_construction=False,
+    )
+
+    # Create canvas nodes with proper OrgDbtModel references
+    model1_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        name="model1",
+        node_type=CanvasNodeType.MODEL,
+        output_cols=["id", "name"],
+        dbtmodel=model1_dbtmodel,
+    )
+
+    op1_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        name="op1",
+        node_type=CanvasNodeType.OPERATION,
+        output_cols=["id", "processed_name"],
+        # Operations don't need dbtmodel
+    )
+
+    op2_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        name="op2",
+        node_type=CanvasNodeType.OPERATION,
+        output_cols=["id", "final_name"],
+        # Operations don't need dbtmodel
+    )
+
+    model2_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        name="model2",
+        node_type=CanvasNodeType.MODEL,
+        output_cols=["id", "final_name", "created_at"],
+        dbtmodel=model2_dbtmodel,
+    )
+
+    # Create the operation chain edges: model1 -> op1 -> op2 -> model2
+    edge1 = CanvasEdge.objects.create(from_node=model1_node, to_node=op1_node)
+    edge2 = CanvasEdge.objects.create(from_node=op1_node, to_node=op2_node)
+    edge3 = CanvasEdge.objects.create(from_node=op2_node, to_node=model2_node)
+
+    return {
+        "warehouse": warehouse,
+        "orgdbt": orgdbt,
+        "model1_node": model1_node,
+        "op1_node": op1_node,
+        "op2_node": op2_node,
+        "model2_node": model2_node,
+        "model1_dbtmodel": model1_dbtmodel,
+        "model2_dbtmodel": model2_dbtmodel,
+        "edges": [edge1, edge2, edge3],
+    }
+
+
+@pytest.fixture
+def direct_edge_with_operation_chain_graph(org_with_dbt_workspace: Org):
+    """
+    Creates a canvas graph with BOTH direct edge AND operation chain:
+    - Direct: model1 -> model2
+    - Chain: model1 -> op1 -> op2 -> model2
+    Used to test that direct edge gets deleted when operation chain exists.
+    """
+    warehouse = OrgWarehouse.objects.create(org=org_with_dbt_workspace, wtype="postgres")
+    orgdbt = org_with_dbt_workspace.dbt
+
+    # Create OrgDbtModel instances
+    model1_dbtmodel = OrgDbtModel.objects.create(
+        orgdbt=orgdbt,
+        name="model1",
+        type=OrgDbtModelType.MODEL,
+        display_name="model1",
+        schema="analytics",
+        output_cols=["id", "name"],
+        under_construction=False,
+    )
+
+    model2_dbtmodel = OrgDbtModel.objects.create(
+        orgdbt=orgdbt,
+        name="model2",
+        type=OrgDbtModelType.MODEL,
+        display_name="model2",
+        schema="analytics",
+        output_cols=["id", "processed_name"],
+        under_construction=False,
+    )
+
+    # Create canvas nodes
+    model1_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        name="model1",
+        node_type=CanvasNodeType.MODEL,
+        output_cols=["id", "name"],
+        dbtmodel=model1_dbtmodel,
+    )
+
+    model2_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        name="model2",
+        node_type=CanvasNodeType.MODEL,
+        output_cols=["id", "processed_name"],
+        dbtmodel=model2_dbtmodel,
+    )
+
+    # Create DIRECT edge first (this should be deleted later)
+    direct_edge = CanvasEdge.objects.create(from_node=model1_node, to_node=model2_node)
+
+    # Create operation nodes
+    op1_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        name="op1",
+        node_type=CanvasNodeType.OPERATION,
+        output_cols=["id", "temp_name"],
+    )
+
+    op2_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        name="op2",
+        node_type=CanvasNodeType.OPERATION,
+        output_cols=["id", "processed_name"],
+    )
+
+    # Create the operation chain edges
+    chain_edge1 = CanvasEdge.objects.create(from_node=model1_node, to_node=op1_node)
+    chain_edge2 = CanvasEdge.objects.create(from_node=op1_node, to_node=op2_node)
+    chain_edge3 = CanvasEdge.objects.create(from_node=op2_node, to_node=model2_node)
+
+    return {
+        "warehouse": warehouse,
+        "orgdbt": orgdbt,
+        "model1_node": model1_node,
+        "model2_node": model2_node,
+        "op1_node": op1_node,
+        "op2_node": op2_node,
+        "model1_dbtmodel": model1_dbtmodel,
+        "model2_dbtmodel": model2_dbtmodel,
+        "direct_edge": direct_edge,
+        "chain_edges": [chain_edge1, chain_edge2, chain_edge3],
+    }
+
+
+# ============= Operation Chain Tests =============
+
+
+def test_parse_dbt_manifest_preserves_operation_chains(operation_chain_graph):
+    """
+    Test that existing operation chains are preserved and direct edges are not created.
+
+    Scenario: model1 -> op1 -> op2 -> model2
+    The function should NOT create a direct edge from model1 -> model2
+    when an operation chain already exists.
+    """
+    # Extract nodes and objects from fixture
+    warehouse = operation_chain_graph["warehouse"]
+    orgdbt = operation_chain_graph["orgdbt"]
+    model1_node = operation_chain_graph["model1_node"]
+    model2_node = operation_chain_graph["model2_node"]
+    op1_node = operation_chain_graph["op1_node"]
+    op2_node = operation_chain_graph["op2_node"]
+
+    # Verify initial state - should have 3 edges for the operation chain
+    initial_edge_count = CanvasEdge.objects.filter(from_node__orgdbt=orgdbt).count()
+    assert initial_edge_count == 3
+
+    # Create manifest with model2 depending on model1 (this would normally create a direct edge)
+    manifest_with_operation_chain = {
+        "metadata": {"project_name": "test_project"},
+        "sources": {},
+        "nodes": {
+            "model.test_project.model1": {
+                "unique_id": "model.test_project.model1",
+                "resource_type": "model",
+                "package_name": "test_project",
+                "name": "model1",
+                "database": "test_db",
+                "schema": "analytics",
+                "path": "models/model1.sql",
+                "depends_on": {"nodes": []},  # No dependencies
+                "columns": {
+                    "id": {"name": "id", "data_type": "integer"},
+                    "name": {"name": "name", "data_type": "text"},
+                },
+            },
+            "model.test_project.model2": {
+                "unique_id": "model.test_project.model2",
+                "resource_type": "model",
+                "package_name": "test_project",
+                "name": "model2",
+                "database": "test_db",
+                "schema": "analytics",
+                "path": "models/model2.sql",
+                "depends_on": {"nodes": ["model.test_project.model1"]},  # Depends on model1
+                "columns": {
+                    "id": {"name": "id", "data_type": "integer"},
+                    "final_name": {"name": "final_name", "data_type": "text"},
+                    "created_at": {"name": "created_at", "data_type": "timestamp"},
+                },
+            },
+        },
+    }
+
+    # Mock warehouse connection
+    mock_warehouse = Mock()
+    mock_warehouse.get_table_columns.return_value = None  # Use manifest columns
+
+    with patch(
+        "ddpui.ddpdbt.dbt_service.WarehouseFactory.connect", return_value=mock_warehouse
+    ), patch(
+        "ddpui.ddpdbt.dbt_service.secretsmanager.retrieve_warehouse_credentials",
+        return_value={"host": "localhost"},
+    ):
+        # Parse the manifest - this should detect the operation chain and NOT create direct edge
+        result = parse_dbt_manifest_to_canvas(
+            org_with_dbt_workspace, orgdbt, warehouse, manifest_with_operation_chain, refresh=False
+        )
+
+        # Verify that no additional edges were created
+        final_edge_count = CanvasEdge.objects.filter(from_node__orgdbt=orgdbt).count()
+        assert (
+            final_edge_count == 3
+        ), "Operation chain should be preserved, no direct edge should be added"
+
+        # Verify the operation chain still exists intact
+        assert CanvasEdge.objects.filter(from_node=model1_node, to_node=op1_node).exists()
+        assert CanvasEdge.objects.filter(from_node=op1_node, to_node=op2_node).exists()
+        assert CanvasEdge.objects.filter(from_node=op2_node, to_node=model2_node).exists()
+
+        # Verify NO direct edge was created from model1 to model2
+        direct_edge_exists = CanvasEdge.objects.filter(
+            from_node=model1_node, to_node=model2_node
+        ).exists()
+        assert (
+            not direct_edge_exists
+        ), "Direct edge should NOT exist when operation chain is present"
+
+        # Verify nodes were updated with manifest data (but chain preserved)
+        updated_model1 = CanvasNode.objects.get(orgdbt=orgdbt, name="model1")
+        updated_model2 = CanvasNode.objects.get(orgdbt=orgdbt, name="model2")
+
+        # Model columns should be updated from manifest
+        assert "id" in updated_model1.output_cols
+        assert "name" in updated_model1.output_cols
+        assert "id" in updated_model2.output_cols
+        assert "final_name" in updated_model2.output_cols
+        assert "created_at" in updated_model2.output_cols
+
+
+def test_parse_dbt_manifest_deletes_existing_direct_edge_when_operation_chain_exists(
+    direct_edge_with_operation_chain_graph,
+):
+    """
+    Test that existing direct edges are DELETED when operation chains are detected.
+
+    Scenario:
+    1. Initial state: model1 -> model2 (direct edge)
+    2. Add operation chain: model1 -> op1 -> op2 -> model2
+    3. Parse manifest: should delete direct edge and preserve operation chain
+    """
+    # Extract from fixture
+    warehouse = direct_edge_with_operation_chain_graph["warehouse"]
+    orgdbt = direct_edge_with_operation_chain_graph["orgdbt"]
+    model1_node = direct_edge_with_operation_chain_graph["model1_node"]
+    model2_node = direct_edge_with_operation_chain_graph["model2_node"]
+    op1_node = direct_edge_with_operation_chain_graph["op1_node"]
+    op2_node = direct_edge_with_operation_chain_graph["op2_node"]
+
+    # Verify initial state - should have 4 edges (1 direct + 3 operation chain)
+    initial_edge_count = CanvasEdge.objects.filter(from_node__orgdbt=orgdbt).count()
+    assert initial_edge_count == 4
+
+    # Verify direct edge exists initially
+    assert CanvasEdge.objects.filter(from_node=model1_node, to_node=model2_node).exists()
+
+    # Create manifest that would create the direct dependency
+    manifest = {
+        "metadata": {"project_name": "test_project"},
+        "sources": {},
+        "nodes": {
+            "model.test_project.model1": {
+                "unique_id": "model.test_project.model1",
+                "resource_type": "model",
+                "package_name": "test_project",
+                "name": "model1",
+                "database": "test_db",
+                "schema": "analytics",
+                "path": "models/model1.sql",
+                "depends_on": {"nodes": []},
+                "columns": {
+                    "id": {"name": "id", "data_type": "integer"},
+                    "name": {"name": "name", "data_type": "text"},
+                },
+            },
+            "model.test_project.model2": {
+                "unique_id": "model.test_project.model2",
+                "resource_type": "model",
+                "package_name": "test_project",
+                "name": "model2",
+                "database": "test_db",
+                "schema": "analytics",
+                "path": "models/model2.sql",
+                "depends_on": {"nodes": ["model.test_project.model1"]},  # This dependency exists
+                "columns": {
+                    "id": {"name": "id", "data_type": "integer"},
+                    "processed_name": {"name": "processed_name", "data_type": "text"},
+                },
+            },
+        },
+    }
+
+    # Mock warehouse connection
+    mock_warehouse = Mock()
+    mock_warehouse.get_table_columns.return_value = None
+
+    with patch(
+        "ddpui.ddpdbt.dbt_service.WarehouseFactory.connect", return_value=mock_warehouse
+    ), patch(
+        "ddpui.ddpdbt.dbt_service.secretsmanager.retrieve_warehouse_credentials",
+        return_value={"host": "localhost"},
+    ):
+        # Parse manifest - should detect operation chain and DELETE direct edge
+        result = parse_dbt_manifest_to_canvas(
+            org_with_dbt_workspace, orgdbt, warehouse, manifest, refresh=False
+        )
+
+        # Verify direct edge was DELETED (operation chain detection removes it)
+        direct_edge_exists = CanvasEdge.objects.filter(
+            from_node=model1_node, to_node=model2_node
+        ).exists()
+        assert not direct_edge_exists, "Direct edge should be DELETED when operation chain exists"
+
+        # Verify operation chain is intact
+        assert CanvasEdge.objects.filter(from_node=model1_node, to_node=op1_node).exists()
+        assert CanvasEdge.objects.filter(from_node=op1_node, to_node=op2_node).exists()
+        assert CanvasEdge.objects.filter(from_node=op2_node, to_node=model2_node).exists()
+
+        # Final edge count should be 3 (operation chain only, direct edge deleted)
+        final_edge_count = CanvasEdge.objects.filter(from_node__orgdbt=orgdbt).count()
+        assert final_edge_count == 3, "Should only have operation chain edges, direct edge deleted"
