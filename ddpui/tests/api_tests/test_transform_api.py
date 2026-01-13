@@ -45,6 +45,7 @@ from ddpui.api.transform_api import (
     unlock_canvas,
     delete_orgdbtmodel,
     get_dbt_project_DAG_v2,
+    post_create_src_model_node,
 )
 from ddpui.schemas.dbt_workflow_schema import (
     LockCanvasResponseSchema,
@@ -1078,3 +1079,469 @@ def test_get_dbt_project_DAG_v2_project_directory_not_exist(seed_db, orguser: Or
             get_dbt_project_DAG_v2(request)
 
         assert str(excinfo.value) == "dbt project directory does not exist"
+
+
+# ==================== Tests for post_create_src_model_node ====================
+
+
+def test_post_create_src_model_node_warehouse_not_setup(seed_db, orguser):
+    """Test post_create_src_model_node when warehouse is not setup"""
+    request = mock_request(orguser)
+
+    # Ensure no warehouse exists
+    OrgWarehouse.objects.filter(org=orguser.org).delete()
+
+    with pytest.raises(HttpError) as excinfo:
+        post_create_src_model_node(request, str(uuid.uuid4()))
+
+    assert str(excinfo.value) == "please setup your warehouse first"
+
+
+def test_post_create_src_model_node_dbt_workspace_not_setup(seed_db, orguser):
+    """Test post_create_src_model_node when dbt workspace is not setup"""
+    request = mock_request(orguser)
+
+    # Create warehouse but ensure no dbt workspace exists
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orguser.org.dbt = None
+    orguser.org.save()
+
+    with pytest.raises(HttpError) as excinfo:
+        post_create_src_model_node(request, str(uuid.uuid4()))
+
+    assert str(excinfo.value) == "dbt workspace not setup"
+
+
+def test_post_create_src_model_node_model_not_found(seed_db, orguser):
+    """Test post_create_src_model_node when model is not found"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    with pytest.raises(HttpError) as excinfo:
+        post_create_src_model_node(request, str(uuid.uuid4()))
+
+    assert str(excinfo.value) == "model not found"
+
+
+@patch("ddpui.api.transform_api.dbtautomation_service.ensure_source_yml_definition_in_project")
+@patch("ddpui.api.transform_api.dbtautomation_service.update_output_cols_of_dbt_model")
+@patch("ddpui.api.transform_api.convert_canvas_node_to_frontend_format")
+def test_post_create_src_model_node_source_type_success(
+    mock_convert_canvas, mock_update_cols, mock_ensure_source, seed_db, orguser
+):
+    """Test post_create_src_model_node for SOURCE type - successful creation"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    org_warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create SOURCE type dbt model
+    org_dbt_model = OrgDbtModel.objects.create(
+        uuid=uuid.uuid4(),
+        orgdbt=orgdbt,
+        name="test_source",
+        schema="public",
+        type=OrgDbtModelType.SOURCE,
+        display_name="Test Source",
+        sql_path="models/source.sql",
+    )
+
+    # Mock the source definition response
+    mock_source_def = Mock()
+    mock_source_def.sql_path = "models/schema.yml"
+    mock_source_def.source_name = "test_source_name"
+    mock_source_def.table = "test_table"
+    mock_source_def.source_schema = "public"
+    mock_ensure_source.return_value = mock_source_def
+
+    # Mock update_output_cols to return sample columns
+    mock_update_cols.return_value = ["id", "name", "email"]
+
+    # Mock convert_canvas_node_to_frontend_format
+    mock_convert_canvas.return_value = {"uuid": str(org_dbt_model.uuid), "name": "test_source"}
+
+    # Call the function
+    result = post_create_src_model_node(request, str(org_dbt_model.uuid))
+
+    # Verify mocks were called correctly
+    mock_ensure_source.assert_called_once_with(orgdbt, "public", "test_source")
+    mock_update_cols.assert_called_once_with(org_warehouse, org_dbt_model)
+    mock_convert_canvas.assert_called_once()
+
+    # Verify the model was updated with source definition values
+    org_dbt_model.refresh_from_db()
+    assert org_dbt_model.sql_path == "models/schema.yml"
+    assert org_dbt_model.source_name == "test_source_name"
+    assert org_dbt_model.name == "test_table"
+    assert org_dbt_model.schema == "public"
+    assert org_dbt_model.output_cols == ["id", "name", "email"]
+
+    # Verify canvas node was created
+    canvas_node = CanvasNode.objects.get(dbtmodel=org_dbt_model)
+    assert canvas_node.node_type == CanvasNodeType.SOURCE
+    assert canvas_node.name == "public.test_table"
+    assert canvas_node.output_cols == ["id", "name", "email"]
+
+    # Verify result
+    assert result == {"uuid": str(org_dbt_model.uuid), "name": "test_source"}
+
+
+@patch("ddpui.api.transform_api.dbtautomation_service.update_output_cols_of_dbt_model")
+@patch("ddpui.api.transform_api.convert_canvas_node_to_frontend_format")
+def test_post_create_src_model_node_model_type_success(
+    mock_convert_canvas, mock_update_cols, seed_db, orguser
+):
+    """Test post_create_src_model_node for MODEL type - successful creation"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    org_warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create MODEL type dbt model
+    org_dbt_model = OrgDbtModel.objects.create(
+        uuid=uuid.uuid4(),
+        orgdbt=orgdbt,
+        name="test_model",
+        schema="analytics",
+        type=OrgDbtModelType.MODEL,
+        display_name="Test Model",
+        sql_path="models/test_model.sql",
+    )
+
+    # Mock update_output_cols to return sample columns
+    mock_update_cols.return_value = ["id", "name", "processed_at"]
+
+    # Mock convert_canvas_node_to_frontend_format
+    mock_convert_canvas.return_value = {"uuid": str(org_dbt_model.uuid), "name": "test_model"}
+
+    # Call the function
+    result = post_create_src_model_node(request, str(org_dbt_model.uuid))
+
+    # Verify mock was called correctly
+    mock_update_cols.assert_called_once_with(org_warehouse, org_dbt_model)
+    mock_convert_canvas.assert_called_once()
+
+    # Verify the model was updated with output columns
+    org_dbt_model.refresh_from_db()
+    assert org_dbt_model.output_cols == ["id", "name", "processed_at"]
+
+    # Verify canvas node was created
+    canvas_node = CanvasNode.objects.get(dbtmodel=org_dbt_model)
+    assert canvas_node.node_type == CanvasNodeType.MODEL
+    assert canvas_node.name == "analytics.test_model"
+    assert canvas_node.output_cols == ["id", "name", "processed_at"]
+
+    # Verify result
+    assert result == {"uuid": str(org_dbt_model.uuid), "name": "test_model"}
+
+
+@patch("ddpui.api.transform_api.convert_canvas_node_to_frontend_format")
+def test_post_create_src_model_node_existing_node_returns_existing(
+    mock_convert_canvas, seed_db, orguser
+):
+    """Test post_create_src_model_node returns existing canvas node if already exists"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create dbt model
+    org_dbt_model = OrgDbtModel.objects.create(
+        uuid=uuid.uuid4(),
+        orgdbt=orgdbt,
+        name="existing_model",
+        schema="public",
+        type=OrgDbtModelType.MODEL,
+        display_name="Existing Model",
+    )
+
+    # Create existing canvas node
+    existing_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.MODEL,
+        name="public.existing_model",
+        dbtmodel=org_dbt_model,
+        output_cols=["id", "name"],
+    )
+
+    # Mock convert_canvas_node_to_frontend_format
+    mock_convert_canvas.return_value = {"uuid": str(existing_node.uuid), "name": "existing_model"}
+
+    # Call the function
+    result = post_create_src_model_node(request, str(org_dbt_model.uuid))
+
+    # Verify convert function was called with existing node
+    mock_convert_canvas.assert_called_once_with(existing_node)
+
+    # Verify no new canvas node was created
+    assert CanvasNode.objects.filter(dbtmodel=org_dbt_model).count() == 1
+
+    # Verify result
+    assert result == {"uuid": str(existing_node.uuid), "name": "existing_model"}
+
+
+@patch("ddpui.api.transform_api.dbtautomation_service.ensure_source_yml_definition_in_project")
+def test_post_create_src_model_node_source_definition_error(mock_ensure_source, seed_db, orguser):
+    """Test post_create_src_model_node handles error in source definition creation"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create SOURCE type dbt model
+    org_dbt_model = OrgDbtModel.objects.create(
+        uuid=uuid.uuid4(),
+        orgdbt=orgdbt,
+        name="test_source",
+        schema="public",
+        type=OrgDbtModelType.SOURCE,
+        display_name="Test Source",
+    )
+
+    # Mock ensure_source_yml_definition_in_project to raise exception
+    mock_ensure_source.side_effect = Exception("Failed to create source definition")
+
+    # Call the function and expect HttpError
+    with pytest.raises(HttpError) as excinfo:
+        post_create_src_model_node(request, str(org_dbt_model.uuid))
+
+    assert str(excinfo.value) == "Failed to create node: Failed to create source definition"
+
+    # Verify ensure_source was called
+    mock_ensure_source.assert_called_once_with(orgdbt, "public", "test_source")
+
+    # Verify no canvas node was created
+    assert not CanvasNode.objects.filter(dbtmodel=org_dbt_model).exists()
+
+
+@patch("ddpui.api.transform_api.dbtautomation_service.update_output_cols_of_dbt_model")
+def test_post_create_src_model_node_update_cols_error(mock_update_cols, seed_db, orguser):
+    """Test post_create_src_model_node handles error in update_output_cols"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    org_warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create MODEL type dbt model
+    org_dbt_model = OrgDbtModel.objects.create(
+        uuid=uuid.uuid4(),
+        orgdbt=orgdbt,
+        name="test_model",
+        schema="public",
+        type=OrgDbtModelType.MODEL,
+        display_name="Test Model",
+    )
+
+    # Mock update_output_cols to raise exception
+    mock_update_cols.side_effect = Exception("Failed to update columns")
+
+    # Call the function and expect HttpError
+    with pytest.raises(HttpError) as excinfo:
+        post_create_src_model_node(request, str(org_dbt_model.uuid))
+
+    assert str(excinfo.value) == "Failed to create node: Failed to update columns"
+
+    # Verify update_cols was called
+    mock_update_cols.assert_called_once_with(org_warehouse, org_dbt_model)
+
+    # Verify no canvas node was created
+    assert not CanvasNode.objects.filter(dbtmodel=org_dbt_model).exists()
+
+
+@patch("ddpui.api.transform_api.dbtautomation_service.ensure_source_yml_definition_in_project")
+@patch("ddpui.api.transform_api.dbtautomation_service.update_output_cols_of_dbt_model")
+@patch("ddpui.api.transform_api.convert_canvas_node_to_frontend_format")
+def test_post_create_src_model_node_source_no_existing_node_calls_all_functions(
+    mock_convert_canvas, mock_update_cols, mock_ensure_source, seed_db, orguser
+):
+    """Test that all required functions are called for SOURCE type when no existing node"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    org_warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create SOURCE type dbt model
+    org_dbt_model = OrgDbtModel.objects.create(
+        uuid=uuid.uuid4(),
+        orgdbt=orgdbt,
+        name="new_source",
+        schema="public",
+        type=OrgDbtModelType.SOURCE,
+        display_name="New Source",
+    )
+
+    # Mock responses
+    mock_source_def = Mock()
+    mock_source_def.sql_path = "schema.yml"
+    mock_source_def.source_name = "source_name"
+    mock_source_def.table = "table_name"
+    mock_source_def.source_schema = "public"
+    mock_ensure_source.return_value = mock_source_def
+
+    mock_update_cols.return_value = ["col1", "col2"]
+    mock_convert_canvas.return_value = {"result": "success"}
+
+    # Call the function
+    result = post_create_src_model_node(request, str(org_dbt_model.uuid))
+
+    # Verify all functions were called in correct order
+    mock_ensure_source.assert_called_once_with(orgdbt, "public", "new_source")
+    mock_update_cols.assert_called_once_with(org_warehouse, org_dbt_model)
+    mock_convert_canvas.assert_called_once()
+
+    # Verify result
+    assert result == {"result": "success"}
+
+
+@patch("ddpui.api.transform_api.dbtautomation_service.update_output_cols_of_dbt_model")
+@patch("ddpui.api.transform_api.convert_canvas_node_to_frontend_format")
+def test_post_create_src_model_node_model_no_existing_node_calls_required_functions(
+    mock_convert_canvas, mock_update_cols, seed_db, orguser
+):
+    """Test that required functions are called for MODEL type when no existing node"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    org_warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create MODEL type dbt model
+    org_dbt_model = OrgDbtModel.objects.create(
+        uuid=uuid.uuid4(),
+        orgdbt=orgdbt,
+        name="new_model",
+        schema="analytics",
+        type=OrgDbtModelType.MODEL,
+        display_name="New Model",
+    )
+
+    # Mock responses
+    mock_update_cols.return_value = ["id", "value"]
+    mock_convert_canvas.return_value = {"result": "model_success"}
+
+    # Call the function
+    result = post_create_src_model_node(request, str(org_dbt_model.uuid))
+
+    # Verify required functions were called
+    mock_update_cols.assert_called_once_with(org_warehouse, org_dbt_model)
+    mock_convert_canvas.assert_called_once()
+
+    # Verify result
+    assert result == {"result": "model_success"}
