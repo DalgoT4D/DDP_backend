@@ -48,11 +48,13 @@ from ddpui.api.transform_api import (
     post_create_src_model_node,
     post_add_operation_node,
     put_operation_node,
+    post_terminate_operation_node,
 )
 from ddpui.schemas.dbt_workflow_schema import (
     LockCanvasResponseSchema,
     CreateOperationNodePayload,
     EditOperationNodePayload,
+    TerminateChainAndCreateModelPayload,
 )
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
@@ -2752,3 +2754,525 @@ def test_put_operation_node_edge_cleanup_for_multi_input_operation(
     assert CanvasEdge.objects.filter(
         from_node=second_node, to_node=existing_operation, seq=2
     ).exists()
+
+
+# =============================================================================
+# Tests for post_terminate_operation_node
+# =============================================================================
+
+
+def test_post_terminate_operation_node_warehouse_not_setup(seed_db, orguser):
+    """Test post_terminate_operation_node when warehouse is not setup"""
+    request = mock_request(orguser)
+
+    payload = TerminateChainAndCreateModelPayload(
+        name="test_model", display_name="Test Model", dest_schema="public"
+    )
+
+    with pytest.raises(HttpError) as exc_info:
+        post_terminate_operation_node(request, str(uuid.uuid4()), payload)
+
+    assert exc_info.value.status_code == 404
+    assert "please setup your warehouse first" in str(exc_info.value)
+
+
+def test_post_terminate_operation_node_dbt_workspace_not_setup(seed_db, orguser):
+    """Test post_terminate_operation_node when dbt workspace is not setup"""
+    request = mock_request(orguser)
+
+    # Create warehouse but no dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+
+    payload = TerminateChainAndCreateModelPayload(
+        name="test_model", display_name="Test Model", dest_schema="public"
+    )
+
+    with pytest.raises(HttpError) as exc_info:
+        post_terminate_operation_node(request, str(uuid.uuid4()), payload)
+
+    assert exc_info.value.status_code == 404
+    assert "dbt workspace not setup" in str(exc_info.value)
+
+
+def test_post_terminate_operation_node_operation_node_not_found(seed_db, orguser):
+    """Test post_terminate_operation_node when operation node is not found"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    payload = TerminateChainAndCreateModelPayload(
+        name="test_model", display_name="Test Model", dest_schema="public"
+    )
+
+    with pytest.raises(HttpError) as exc_info:
+        post_terminate_operation_node(request, str(uuid.uuid4()), payload)
+
+    assert exc_info.value.status_code == 404
+    assert "operation node not found" in str(exc_info.value)
+
+
+def test_post_terminate_operation_node_non_operation_node(seed_db, orguser):
+    """Test post_terminate_operation_node when node is not an operation"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create a source node instead of operation
+    source_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.SOURCE,
+        name="public.test_table",
+        output_cols=["id", "name"],
+    )
+
+    payload = TerminateChainAndCreateModelPayload(
+        name="test_model", display_name="Test Model", dest_schema="public"
+    )
+
+    with pytest.raises(HttpError) as exc_info:
+        post_terminate_operation_node(request, str(source_node.uuid), payload)
+
+    assert exc_info.value.status_code == 404
+    assert "operation node not found" in str(exc_info.value)
+
+
+@patch("ddpui.api.transform_api.tranverse_graph_and_return_operations_list")
+@patch("ddpui.api.transform_api.create_or_update_dbt_model_in_project_v2")
+@patch("ddpui.api.transform_api.convert_canvas_node_to_frontend_format")
+def test_post_terminate_operation_node_create_new_model_success(
+    mock_convert_canvas,
+    mock_create_dbt_model,
+    mock_tranverse_graph,
+    seed_db,
+    orguser,
+):
+    """Test post_terminate_operation_node creating a new model successfully"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    org_warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create operation node
+    operation_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="aggregate",
+        operation_config={"type": "aggregate"},
+        output_cols=["id", "total"],
+    )
+
+    # Mock function responses
+    mock_operations_list = [{"type": "aggregate", "config": {}}]
+    mock_tranverse_graph.return_value = mock_operations_list
+    mock_create_dbt_model.return_value = (Path("models/test_model.sql"), ["id", "total"])
+    mock_convert_canvas.return_value = {"uuid": str(uuid.uuid4())}
+
+    payload = TerminateChainAndCreateModelPayload(
+        name="test_model", display_name="Test Model", dest_schema="analytics"
+    )
+
+    # Call the function
+    result = post_terminate_operation_node(request, str(operation_node.uuid), payload)
+
+    # Verify function calls
+    mock_tranverse_graph.assert_called_once_with(operation_node)
+    expected_config = {
+        "operations": mock_operations_list,
+        "dest_schema": "analytics",
+        "output_name": "test_model",
+        "rel_dir_to_models": None,
+    }
+    mock_create_dbt_model.assert_called_once_with(org_warehouse, expected_config, orgdbt)
+
+    # Verify OrgDbtModel was created
+    dbt_model = OrgDbtModel.objects.get(orgdbt=orgdbt, name="test_model")
+    assert dbt_model.display_name == "Test Model"
+    assert dbt_model.schema == "analytics"
+    assert dbt_model.sql_path == "models/test_model.sql"
+    assert dbt_model.type == OrgDbtModelType.MODEL
+
+    # Verify CanvasNode was created for the model
+    model_node = CanvasNode.objects.get(dbtmodel=dbt_model)
+    assert model_node.node_type == CanvasNodeType.MODEL
+    assert model_node.name == "analytics.test_model"
+    assert model_node.output_cols == ["id", "total"]
+
+    # Verify edge was created
+    assert CanvasEdge.objects.filter(from_node=operation_node, to_node=model_node, seq=1).exists()
+
+
+@patch("ddpui.api.transform_api.tranverse_graph_and_return_operations_list")
+@patch("ddpui.api.transform_api.create_or_update_dbt_model_in_project_v2")
+@patch("ddpui.api.transform_api.convert_canvas_node_to_frontend_format")
+def test_post_terminate_operation_node_update_existing_model_success(
+    mock_convert_canvas,
+    mock_create_dbt_model,
+    mock_tranverse_graph,
+    seed_db,
+    orguser,
+):
+    """Test post_terminate_operation_node updating an existing model successfully"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    org_warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create existing dbt model
+    existing_dbt_model = OrgDbtModel.objects.create(
+        uuid=uuid.uuid4(),
+        orgdbt=orgdbt,
+        name="test_model",
+        display_name="Old Display Name",
+        schema="old_schema",
+        sql_path="old/path.sql",
+        type=OrgDbtModelType.MODEL,
+    )
+
+    # Create existing model node
+    existing_model_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.MODEL,
+        name="old_schema.test_model",
+        dbtmodel=existing_dbt_model,
+        output_cols=["old_col"],
+    )
+
+    # Create operation node
+    operation_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="aggregate",
+        operation_config={"type": "aggregate"},
+        output_cols=["id", "total"],
+    )
+
+    # Mock function responses
+    mock_operations_list = [{"type": "aggregate", "config": {}}]
+    mock_tranverse_graph.return_value = mock_operations_list
+    mock_create_dbt_model.return_value = (
+        Path("models/new_test_model.sql"),
+        ["id", "total", "updated"],
+    )
+    mock_convert_canvas.return_value = {"uuid": str(existing_model_node.uuid)}
+
+    payload = TerminateChainAndCreateModelPayload(
+        name="test_model",  # Same name to trigger update
+        display_name="Updated Display Name",
+        dest_schema="updated_schema",
+    )
+
+    # Call the function
+    result = post_terminate_operation_node(request, str(operation_node.uuid), payload)
+
+    # Verify existing dbt model was updated
+    existing_dbt_model.refresh_from_db()
+    assert existing_dbt_model.display_name == "Updated Display Name"
+    assert existing_dbt_model.schema == "updated_schema"
+    assert existing_dbt_model.sql_path == "models/new_test_model.sql"
+
+    # Verify existing model node was updated
+    existing_model_node.refresh_from_db()
+    assert existing_model_node.output_cols == ["id", "total", "updated"]
+
+    # Verify edge was updated/created
+    assert CanvasEdge.objects.filter(
+        from_node=operation_node, to_node=existing_model_node, seq=1
+    ).exists()
+
+
+@patch("ddpui.api.transform_api.tranverse_graph_and_return_operations_list")
+@patch("ddpui.api.transform_api.create_or_update_dbt_model_in_project_v2")
+def test_post_terminate_operation_node_create_dbt_model_error(
+    mock_create_dbt_model,
+    mock_tranverse_graph,
+    seed_db,
+    orguser,
+):
+    """Test post_terminate_operation_node when create_or_update_dbt_model_in_project_v2 raises error"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create operation node
+    operation_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="aggregate",
+        operation_config={"type": "aggregate"},
+        output_cols=["id", "total"],
+    )
+
+    # Mock function responses
+    mock_operations_list = [{"type": "aggregate", "config": {}}]
+    mock_tranverse_graph.return_value = mock_operations_list
+    mock_create_dbt_model.side_effect = Exception("DBT creation failed")
+
+    payload = TerminateChainAndCreateModelPayload(
+        name="test_model", display_name="Test Model", dest_schema="analytics"
+    )
+
+    with pytest.raises(HttpError) as exc_info:
+        post_terminate_operation_node(request, str(operation_node.uuid), payload)
+
+    assert exc_info.value.status_code == 500
+    assert "Failed to terminate operation node" in str(exc_info.value)
+
+    # Verify no database changes were persisted due to transaction rollback
+    assert not OrgDbtModel.objects.filter(orgdbt=orgdbt, name="test_model").exists()
+
+
+@patch("ddpui.api.transform_api.tranverse_graph_and_return_operations_list")
+@patch("ddpui.api.transform_api.create_or_update_dbt_model_in_project_v2")
+@patch("ddpui.api.transform_api.convert_canvas_node_to_frontend_format")
+def test_post_terminate_operation_node_with_rel_dir_to_models(
+    mock_convert_canvas,
+    mock_create_dbt_model,
+    mock_tranverse_graph,
+    seed_db,
+    orguser,
+):
+    """Test post_terminate_operation_node with rel_dir_to_models parameter"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    org_warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create operation node
+    operation_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="aggregate",
+        operation_config={"type": "aggregate"},
+        output_cols=["id", "total"],
+    )
+
+    # Mock function responses
+    mock_operations_list = [{"type": "aggregate", "config": {}}]
+    mock_tranverse_graph.return_value = mock_operations_list
+    mock_create_dbt_model.return_value = (Path("custom/models/test_model.sql"), ["id", "total"])
+    mock_convert_canvas.return_value = {"uuid": str(uuid.uuid4())}
+
+    payload = TerminateChainAndCreateModelPayload(
+        name="test_model",
+        display_name="Test Model",
+        dest_schema="analytics",
+        rel_dir_to_models="custom",
+    )
+
+    # Call the function
+    result = post_terminate_operation_node(request, str(operation_node.uuid), payload)
+
+    # Verify function was called with rel_dir_to_models
+    expected_config = {
+        "operations": mock_operations_list,
+        "dest_schema": "analytics",
+        "output_name": "test_model",
+        "rel_dir_to_models": "custom",
+    }
+    mock_create_dbt_model.assert_called_once_with(org_warehouse, expected_config, orgdbt)
+
+    # Verify model was created
+    dbt_model = OrgDbtModel.objects.get(orgdbt=orgdbt, name="test_model")
+    assert dbt_model.sql_path == "custom/models/test_model.sql"
+
+
+@patch("ddpui.api.transform_api.tranverse_graph_and_return_operations_list")
+def test_post_terminate_operation_node_traverse_graph_error(
+    mock_tranverse_graph,
+    seed_db,
+    orguser,
+):
+    """Test post_terminate_operation_node when tranverse_graph_and_return_operations_list raises error"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create operation node
+    operation_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="aggregate",
+        operation_config={"type": "aggregate"},
+        output_cols=["id", "total"],
+    )
+
+    # Mock function to raise error
+    mock_tranverse_graph.side_effect = Exception("Graph traversal failed")
+
+    payload = TerminateChainAndCreateModelPayload(
+        name="test_model", display_name="Test Model", dest_schema="analytics"
+    )
+
+    with pytest.raises(HttpError) as exc_info:
+        post_terminate_operation_node(request, str(operation_node.uuid), payload)
+
+    assert exc_info.value.status_code == 500
+    assert "Failed to terminate operation node" in str(exc_info.value)
+
+    # Verify function was called
+    mock_tranverse_graph.assert_called_once_with(operation_node)
+
+
+@patch("ddpui.api.transform_api.tranverse_graph_and_return_operations_list")
+@patch("ddpui.api.transform_api.create_or_update_dbt_model_in_project_v2")
+@patch("ddpui.api.transform_api.convert_canvas_node_to_frontend_format")
+def test_post_terminate_operation_node_verify_transaction_atomicity(
+    mock_convert_canvas,
+    mock_create_dbt_model,
+    mock_tranverse_graph,
+    seed_db,
+    orguser,
+):
+    """Test post_terminate_operation_node transaction atomicity on partial failure"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    org_warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create operation node
+    operation_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="aggregate",
+        operation_config={"type": "aggregate"},
+        output_cols=["id", "total"],
+    )
+
+    # Mock function responses - fail during database operations inside transaction
+    mock_operations_list = [{"type": "aggregate", "config": {}}]
+    mock_tranverse_graph.return_value = mock_operations_list
+    mock_create_dbt_model.side_effect = Exception("DBT model creation failed")
+    mock_convert_canvas.return_value = {"uuid": str(uuid.uuid4())}
+
+    payload = TerminateChainAndCreateModelPayload(
+        name="test_model", display_name="Test Model", dest_schema="analytics"
+    )
+
+    with pytest.raises(HttpError) as exc_info:
+        post_terminate_operation_node(request, str(operation_node.uuid), payload)
+
+    assert exc_info.value.status_code == 500
+    assert "Failed to terminate operation node" in str(exc_info.value)
+
+    # Verify no database changes were persisted due to transaction rollback on early failure
+    assert not OrgDbtModel.objects.filter(orgdbt=orgdbt, name="test_model").exists()
