@@ -568,85 +568,54 @@ def test_post_run_dbt_commands_with_payload(orguser: OrgUser, f_org_tasks):
 
 
 def test_post_run_dbt_commands_task_locks(orguser: OrgUser, f_org_tasks):
-    """tests that post_run_dbt_commands creates and cleans up task locks properly"""
+    """tests that post_run_dbt_commands successfully starts celery task"""
     orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
     request = mock_request(orguser)
 
-    mock_task_id = "test-task-id-789"
     mock_celery_task = Mock()
     mock_celery_task.id = "celery-task-id"
 
-    # Track TaskLock creation and deletion
-    created_locks = []
-
-    def mock_task_lock_create(**kwargs):
-        lock = Mock()
-        lock.delete = Mock()
-        created_locks.append(lock)
-        return lock
-
-    with patch("ddpui.api.dbt_api.uuid4", return_value=mock_task_id), patch(
+    with patch("ddpui.api.dbt_api.uuid4") as mock_uuid, patch(
         "ddpui.api.dbt_api.TaskProgress"
     ), patch(
         "ddpui.celeryworkers.tasks.run_dbt_commands.delay", return_value=mock_celery_task
-    ), patch(
-        "ddpui.api.dbt_api.TaskLock.objects.create", side_effect=mock_task_lock_create
-    ) as mock_lock_create:
+    ) as mock_celery_delay:
+        mock_uuid.return_value = "test-task-id-789"
+
         response = post_run_dbt_commands(request)
 
-        # Verify 3 task locks were created (for clean, deps, run)
-        assert mock_lock_create.call_count == 3
+        # Verify response contains task_id
+        assert response["task_id"] == "test-task-id-789"
 
-        # Verify all locks were created with correct parameters
-        for call in mock_lock_create.call_args_list:
-            kwargs = call[1]
-            assert kwargs["locked_by"] == orguser
-            assert kwargs["celery_task_id"] == mock_task_id
-            assert kwargs["orgtask"] in f_org_tasks
-
-        # Verify all locks were deleted in finally block
-        assert len(created_locks) == 3
-        for lock in created_locks:
-            lock.delete.assert_called_once()
+        # Verify celery task was called with correct parameters
+        mock_celery_delay.assert_called_once_with(
+            orguser.org.id, orguser.org.dbt.id, "test-task-id-789", None
+        )
 
 
 def test_post_run_dbt_commands_exception_handling(orguser: OrgUser, f_org_tasks):
-    """tests that task locks are cleaned up even when an exception occurs"""
+    """tests that exceptions are properly propagated"""
     orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
     request = mock_request(orguser)
 
-    mock_task_id = "test-task-id-error"
-    created_locks = []
-
-    def mock_task_lock_create(**kwargs):
-        lock = Mock()
-        lock.delete = Mock()
-        created_locks.append(lock)
-        return lock
-
-    with patch("ddpui.api.dbt_api.uuid4", return_value=Mock(hex=mock_task_id)), patch(
+    with patch("ddpui.api.dbt_api.uuid4") as mock_uuid, patch(
         "ddpui.api.dbt_api.TaskProgress"
     ), patch(
         "ddpui.celeryworkers.tasks.run_dbt_commands.delay", side_effect=Exception("Celery error")
-    ), patch(
-        "ddpui.api.dbt_api.TaskLock.objects.create", side_effect=mock_task_lock_create
     ):
-        # The function should raise the exception but still clean up locks
+        mock_uuid.return_value = "test-task-id-error"
+
+        # The function should raise the exception
         with pytest.raises(Exception, match="Celery error"):
             post_run_dbt_commands(request)
 
-        # Verify all locks were still deleted despite the exception
-        assert len(created_locks) == 3
-        for lock in created_locks:
-            lock.delete.assert_called_once()
-
 
 def test_post_run_dbt_commands_task_filtering(orguser: OrgUser, f_org_tasks):
-    """tests that only the correct system tasks are used for locking"""
+    """tests that the API successfully starts celery task regardless of additional tasks"""
     orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
     request = mock_request(orguser)
 
-    # Create an additional non-system task that should be ignored
+    # Create an additional non-system task that should be ignored by celery task
     extra_task = Task.objects.create(
         type=TaskType.DBT,
         slug=TASK_DBTRUN,
@@ -656,27 +625,21 @@ def test_post_run_dbt_commands_task_filtering(orguser: OrgUser, f_org_tasks):
     )
     extra_org_task = OrgTask.objects.create(org=orguser.org, task=extra_task, generated_by="client")
 
-    mock_task_id = "test-task-id-filtering"
     mock_celery_task = Mock()
 
     try:
-        with patch("ddpui.api.dbt_api.uuid4", return_value=Mock(hex=mock_task_id)), patch(
+        with patch("ddpui.api.dbt_api.uuid4") as mock_uuid, patch(
             "ddpui.api.dbt_api.TaskProgress"
         ), patch(
             "ddpui.celeryworkers.tasks.run_dbt_commands.delay", return_value=mock_celery_task
-        ), patch(
-            "ddpui.api.dbt_api.TaskLock.objects.create"
-        ) as mock_lock_create:
-            post_run_dbt_commands(request)
+        ) as mock_celery_delay:
+            mock_uuid.return_value = "test-task-id-filtering"
 
-            # Should only create 3 locks for system tasks, not the client task
-            assert mock_lock_create.call_count == 3
+            response = post_run_dbt_commands(request)
 
-            # Verify only system-generated org tasks were used
-            for call in mock_lock_create.call_args_list:
-                kwargs = call[1]
-                assert kwargs["orgtask"].generated_by == "system"
-                assert kwargs["orgtask"] != extra_org_task
+            # Verify the API works correctly
+            assert response["task_id"] == "test-task-id-filtering"
+            mock_celery_delay.assert_called_once()
 
     finally:
         # Cleanup
@@ -976,7 +939,9 @@ def test_put_connect_git_remote_create(seed_db, orguser: OrgUser):
     with patch(
         "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
         return_value="/existing/path",
-    ), patch("ddpui.api.dbt_api.Path") as mock_path:
+    ), patch("ddpui.api.dbt_api.Path") as mock_path, patch(
+        "ddpui.api.dbt_api.dbt_service.sync_gitignore_contents"
+    ) as mock_sync_gitignore:
         mock_project_dir = Mock()
         mock_project_dir.exists.return_value = True
         mock_dbt_repo_dir = Mock()
@@ -1047,7 +1012,9 @@ def test_put_connect_git_remote_update_url_only(seed_db, orguser: OrgUser):
     with patch(
         "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
         return_value="/existing/path",
-    ), patch("ddpui.api.dbt_api.Path") as mock_path:
+    ), patch("ddpui.api.dbt_api.Path") as mock_path, patch(
+        "ddpui.api.dbt_api.dbt_service.sync_gitignore_contents"
+    ) as mock_sync_gitignore:
         mock_project_dir = Mock()
         mock_project_dir.exists.return_value = True
         mock_dbt_repo_dir = Mock()
@@ -1118,7 +1085,9 @@ def test_put_connect_git_remote_update_pat(seed_db, orguser: OrgUser):
     with patch(
         "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
         return_value="/existing/path",
-    ), patch("ddpui.api.dbt_api.Path") as mock_path:
+    ), patch("ddpui.api.dbt_api.Path") as mock_path, patch(
+        "ddpui.api.dbt_api.dbt_service.sync_gitignore_contents"
+    ) as mock_sync_gitignore:
         mock_project_dir = Mock()
         mock_project_dir.exists.return_value = True
         mock_dbt_repo_dir = Mock()
@@ -1274,6 +1243,7 @@ def test_post_publish_changes_push_fails(seed_db, orguser: OrgUser):
 
     orgdbt = OrgDbt.objects.create(
         gitrepo_access_token_secret="pat-secret-key",
+        transform_type="GIT",  # Required for push to be attempted
     )
     request.orguser.org.dbt = orgdbt
     request.orguser.org.save()
@@ -1310,7 +1280,7 @@ def test_post_publish_changes_push_fails_no_remote(seed_db, orguser: OrgUser):
     request = mock_request(orguser)
     payload = OrgDbtChangesPublish(commit_message="Test commit")
 
-    orgdbt = OrgDbt.objects.create()  # No PAT secret
+    orgdbt = OrgDbt.objects.create(transform_type="GIT")  # No PAT secret but GIT type
     request.orguser.org.dbt = orgdbt
     request.orguser.org.save()
 
@@ -1349,6 +1319,7 @@ def test_post_publish_changes_success(seed_db, orguser: OrgUser):
 
     orgdbt = OrgDbt.objects.create(
         gitrepo_access_token_secret="pat-secret-key",
+        transform_type="GIT",  # Required for push to be attempted
     )
     request.orguser.org.dbt = orgdbt
     request.orguser.org.save()
@@ -1394,6 +1365,7 @@ def test_post_publish_changes_nothing_to_commit(seed_db, orguser: OrgUser):
 
     orgdbt = OrgDbt.objects.create(
         gitrepo_access_token_secret="pat-secret-key",
+        transform_type="GIT",  # Required for push to be attempted
     )
     request.orguser.org.dbt = orgdbt
     request.orguser.org.save()
