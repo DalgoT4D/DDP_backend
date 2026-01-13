@@ -47,10 +47,12 @@ from ddpui.api.transform_api import (
     get_dbt_project_DAG_v2,
     post_create_src_model_node,
     post_add_operation_node,
+    put_operation_node,
 )
 from ddpui.schemas.dbt_workflow_schema import (
     LockCanvasResponseSchema,
     CreateOperationNodePayload,
+    EditOperationNodePayload,
 )
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
@@ -2071,3 +2073,682 @@ def test_post_add_operation_node_verify_function_calls(
 
     # Verify result
     assert result == {"uuid": "filter-uuid", "name": "where_filter"}
+
+
+# ==================== Tests for put_operation_node ====================
+
+
+def test_put_operation_node_warehouse_not_setup(seed_db, orguser):
+    """Test put_operation_node when warehouse is not setup"""
+    request = mock_request(orguser)
+
+    # Ensure no warehouse exists
+    OrgWarehouse.objects.filter(org=orguser.org).delete()
+
+    payload = EditOperationNodePayload(config={}, op_type="aggregate", source_columns=["id"])
+
+    with pytest.raises(HttpError) as excinfo:
+        put_operation_node(request, str(uuid.uuid4()), payload)
+
+    assert str(excinfo.value) == "please setup your warehouse first"
+
+
+def test_put_operation_node_dbt_workspace_not_setup(seed_db, orguser):
+    """Test put_operation_node when dbt workspace is not setup"""
+    request = mock_request(orguser)
+
+    # Create warehouse but ensure no dbt workspace exists
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orguser.org.dbt = None
+    orguser.org.save()
+
+    payload = EditOperationNodePayload(config={}, op_type="aggregate", source_columns=["id"])
+
+    with pytest.raises(HttpError) as excinfo:
+        put_operation_node(request, str(uuid.uuid4()), payload)
+
+    assert str(excinfo.value) == "dbt workspace not setup"
+
+
+def test_put_operation_node_operation_node_not_found(seed_db, orguser):
+    """Test put_operation_node when operation node is not found"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    payload = EditOperationNodePayload(config={}, op_type="aggregate", source_columns=["id"])
+
+    with pytest.raises(HttpError) as excinfo:
+        put_operation_node(request, str(uuid.uuid4()), payload)  # Non-existent node
+
+    assert str(excinfo.value) == "operation node not found"
+
+
+def test_put_operation_node_non_operation_node(seed_db, orguser):
+    """Test put_operation_node when node exists but is not an operation node"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create a source node (not operation node)
+    source_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.SOURCE,
+        name="public.test_source",
+        output_cols=["id"],
+    )
+
+    payload = EditOperationNodePayload(config={}, op_type="aggregate", source_columns=["id"])
+
+    with pytest.raises(HttpError) as excinfo:
+        put_operation_node(request, str(source_node.uuid), payload)
+
+    assert str(excinfo.value) == "operation node not found"
+
+
+@patch("ddpui.api.transform_api.validate_operation_config_v2")
+@patch("ddpui.api.transform_api.dbtautomation_service.get_output_cols_for_operation")
+@patch("ddpui.api.transform_api.convert_canvas_node_to_frontend_format")
+def test_put_operation_node_single_input_operation_success(
+    mock_convert_canvas, mock_get_output_cols, mock_validate_config, seed_db, orguser
+):
+    """Test put_operation_node for single input operation - successful update"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    org_warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create an existing operation node
+    existing_operation = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="old_operation",
+        operation_config={
+            "type": "where",
+            "config": {"where_type": "and", "source_columns": ["id"]},
+        },
+        output_cols=["id"],
+    )
+
+    # Mock responses
+    mock_validate_config.return_value = None  # No exception means valid
+    mock_get_output_cols.return_value = ["id", "total_value"]
+    mock_convert_canvas.return_value = {"uuid": str(existing_operation.uuid), "name": "aggregate"}
+
+    payload = EditOperationNodePayload(
+        config={
+            "aggregate_on": [
+                {"column": "value", "operation": "sum", "output_column_name": "total_value"}
+            ]
+        },
+        op_type="aggregate",
+        source_columns=["id", "value"],
+    )
+
+    # Call the function
+    result = put_operation_node(request, str(existing_operation.uuid), payload)
+
+    # Verify mocks were called correctly
+    mock_validate_config.assert_called_once_with("aggregate", payload.config)
+    mock_get_output_cols.assert_called_once()
+    mock_convert_canvas.assert_called_once()
+
+    # Verify operation node was updated
+    existing_operation.refresh_from_db()
+    assert existing_operation.name == "aggregate"
+    assert existing_operation.output_cols == ["id", "total_value"]
+    assert existing_operation.operation_config["type"] == "aggregate"
+    assert existing_operation.operation_config["config"]["source_columns"] == ["id", "value"]
+
+    # Verify result
+    assert result == {"uuid": str(existing_operation.uuid), "name": "aggregate"}
+
+
+@patch("ddpui.api.transform_api.validate_operation_config_v2")
+@patch("ddpui.api.transform_api.validate_and_return_inputs_for_multi_input_op")
+@patch("ddpui.api.transform_api.dbtautomation_service.get_output_cols_for_operation")
+@patch("ddpui.api.transform_api.convert_canvas_node_to_frontend_format")
+def test_put_operation_node_multi_input_operation_success(
+    mock_convert_canvas,
+    mock_get_output_cols,
+    mock_validate_inputs,
+    mock_validate_config,
+    seed_db,
+    orguser,
+):
+    """Test put_operation_node for multi input operation (join) - successful update"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    org_warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create two source models for join
+    org_dbt_model1 = OrgDbtModel.objects.create(
+        uuid=uuid.uuid4(),
+        orgdbt=orgdbt,
+        name="users",
+        schema="public",
+        type=OrgDbtModelType.SOURCE,
+        display_name="Users",
+        output_cols=["id", "name"],
+    )
+
+    org_dbt_model2 = OrgDbtModel.objects.create(
+        uuid=uuid.uuid4(),
+        orgdbt=orgdbt,
+        name="orders",
+        schema="public",
+        type=OrgDbtModelType.SOURCE,
+        display_name="Orders",
+        output_cols=["id", "user_id", "amount"],
+    )
+
+    # Create existing operation node
+    existing_operation = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="old_join",
+        operation_config={
+            "type": "join",
+            "config": {"join_type": "left", "source_columns": ["id"]},
+        },
+        output_cols=["id", "name"],
+    )
+
+    # Create existing edges that should be cleaned up
+    input_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.SOURCE,
+        name="public.users",
+        dbtmodel=org_dbt_model1,
+        output_cols=["id", "name"],
+    )
+
+    CanvasEdge.objects.create(from_node=input_node, to_node=existing_operation, seq=1)
+
+    # Create an old edge that should be removed
+    old_second_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.SOURCE,
+        name="public.old_table",
+        output_cols=["id"],
+    )
+    CanvasEdge.objects.create(from_node=old_second_node, to_node=existing_operation, seq=2)
+
+    # Mock validation responses
+    from ddpui.schemas.dbt_workflow_schema import ModelSrcInputsForMultiInputOp
+
+    mock_input = ModelSrcInputsForMultiInputOp(seq=2, src_model=org_dbt_model2)
+    mock_validate_inputs.return_value = [mock_input]
+
+    mock_validate_config.return_value = None
+    mock_get_output_cols.return_value = ["id", "name", "user_id", "amount"]
+    mock_convert_canvas.return_value = {"uuid": str(existing_operation.uuid), "name": "join"}
+
+    payload = EditOperationNodePayload(
+        config={
+            "join_type": "inner",
+            "join_on": {"key1": "id", "key2": "user_id", "compare_with": "="},
+        },
+        op_type="join",
+        source_columns=["id", "name"],
+        other_inputs=[
+            {
+                "input_model_uuid": str(org_dbt_model2.uuid),
+                "columns": ["id", "user_id", "amount"],
+                "seq": 2,
+            }
+        ],
+    )
+
+    # Call the function
+    result = put_operation_node(request, str(existing_operation.uuid), payload)
+
+    # Verify mocks were called
+    mock_validate_config.assert_called_once_with("join", payload.config)
+    mock_validate_inputs.assert_called_once()
+    mock_get_output_cols.assert_called_once()
+    mock_convert_canvas.assert_called_once()
+
+    # Verify operation node was updated
+    existing_operation.refresh_from_db()
+    assert existing_operation.name == "join"
+    assert existing_operation.output_cols == ["id", "name", "user_id", "amount"]
+    assert existing_operation.operation_config["type"] == "join"
+
+    # Verify old edge (seq=2) was removed and new edge was created
+    assert not CanvasEdge.objects.filter(
+        from_node=old_second_node, to_node=existing_operation
+    ).exists()
+
+    # Verify new edge was created for the new second input
+    second_node = CanvasNode.objects.get(dbtmodel=org_dbt_model2)
+    new_edge = CanvasEdge.objects.get(from_node=second_node, to_node=existing_operation, seq=2)
+    assert new_edge.seq == 2
+
+    # Verify main edge (seq=1) still exists
+    main_edge = CanvasEdge.objects.get(from_node=input_node, to_node=existing_operation, seq=1)
+    assert main_edge.seq == 1
+
+    # Verify result
+    assert result == {"uuid": str(existing_operation.uuid), "name": "join"}
+
+
+@patch("ddpui.api.transform_api.validate_operation_config_v2")
+def test_put_operation_node_invalid_operation_config(mock_validate_config, seed_db, orguser):
+    """Test put_operation_node with invalid operation config"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create existing operation node
+    existing_operation = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="test_operation",
+        operation_config={"type": "aggregate"},
+        output_cols=["id"],
+    )
+
+    # Mock validation to raise ValueError
+    mock_validate_config.side_effect = ValueError("Invalid config for aggregate operation")
+
+    payload = EditOperationNodePayload(
+        config={"invalid": "config"}, op_type="aggregate", source_columns=["id"]
+    )
+
+    # Call the function and expect HttpError
+    with pytest.raises(HttpError) as excinfo:
+        put_operation_node(request, str(existing_operation.uuid), payload)
+
+    assert str(excinfo.value) == "Invalid config for aggregate operation"
+
+    # Verify validate_config was called
+    mock_validate_config.assert_called_once_with("aggregate", {"invalid": "config"})
+
+    # Verify operation node was not modified
+    existing_operation.refresh_from_db()
+    assert existing_operation.operation_config == {"type": "aggregate"}
+
+
+@patch("ddpui.api.transform_api.validate_operation_config_v2")
+@patch("ddpui.api.transform_api.dbtautomation_service.get_output_cols_for_operation")
+def test_put_operation_node_get_output_cols_error(
+    mock_get_output_cols, mock_validate_config, seed_db, orguser
+):
+    """Test put_operation_node handles error in get_output_cols_for_operation"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    org_warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create existing operation node
+    existing_operation = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="test_operation",
+        operation_config={"type": "aggregate"},
+        output_cols=["id"],
+    )
+
+    # Mock validation to succeed but get_output_cols to fail
+    mock_validate_config.return_value = None
+    mock_get_output_cols.side_effect = Exception("Failed to get output columns")
+
+    payload = EditOperationNodePayload(
+        config={"aggregate_on": [{"column": "id", "operation": "count"}]},
+        op_type="aggregate",
+        source_columns=["id"],
+    )
+
+    # Call the function and expect HttpError
+    with pytest.raises(HttpError) as excinfo:
+        put_operation_node(request, str(existing_operation.uuid), payload)
+
+    assert str(excinfo.value) == "Failed to create operation: Failed to get output columns"
+
+    # Verify get_output_cols was called
+    mock_get_output_cols.assert_called_once()
+
+    # Verify operation node was not modified
+    existing_operation.refresh_from_db()
+    assert existing_operation.operation_config == {"type": "aggregate"}
+
+
+@patch("ddpui.api.transform_api.validate_operation_config_v2")
+@patch("ddpui.api.transform_api.validate_and_return_inputs_for_multi_input_op")
+def test_put_operation_node_validate_inputs_error(
+    mock_validate_inputs, mock_validate_config, seed_db, orguser
+):
+    """Test put_operation_node handles error in validate_and_return_inputs_for_multi_input_op"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create existing operation node
+    existing_operation = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="test_join",
+        operation_config={"type": "join"},
+        output_cols=["id"],
+    )
+
+    # Mock validation to succeed but input validation to fail
+    mock_validate_config.return_value = None
+    mock_validate_inputs.side_effect = Exception("Invalid input models")
+
+    payload = EditOperationNodePayload(
+        config={"join_type": "inner"},
+        op_type="join",  # Multi-input operation
+        source_columns=["id"],
+        other_inputs=[{"input_model_uuid": str(uuid.uuid4()), "columns": [], "seq": 2}],
+    )
+
+    # Call the function and expect HttpError
+    with pytest.raises(HttpError) as excinfo:
+        put_operation_node(request, str(existing_operation.uuid), payload)
+
+    assert str(excinfo.value) == "Failed to create operation: Invalid input models"
+
+    # Verify validate_inputs was called
+    mock_validate_inputs.assert_called_once()
+
+    # Verify operation node was not modified
+    existing_operation.refresh_from_db()
+    assert existing_operation.operation_config == {"type": "join"}
+
+
+@patch("ddpui.api.transform_api.validate_operation_config_v2")
+@patch("ddpui.api.transform_api.dbtautomation_service.get_output_cols_for_operation")
+@patch("ddpui.api.transform_api.convert_canvas_node_to_frontend_format")
+def test_put_operation_node_verify_function_calls(
+    mock_convert_canvas, mock_get_output_cols, mock_validate_config, seed_db, orguser
+):
+    """Test that all required functions are called correctly for put_operation_node"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    org_warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create existing operation node
+    existing_operation = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="old_filter",
+        operation_config={"type": "where"},
+        output_cols=["id"],
+    )
+
+    # Mock responses
+    mock_validate_config.return_value = None
+    mock_get_output_cols.return_value = ["filtered_id"]
+    mock_convert_canvas.return_value = {"uuid": str(existing_operation.uuid), "name": "where"}
+
+    config = {
+        "where_type": "and",
+        "clauses": [
+            {"column": "value", "operator": ">", "operand": {"is_col": False, "value": 10}}
+        ],
+    }
+
+    payload = EditOperationNodePayload(
+        config=config, op_type="where", source_columns=["id", "value"]
+    )
+
+    # Call the function
+    result = put_operation_node(request, str(existing_operation.uuid), payload)
+
+    # Verify all required functions were called with correct parameters
+    mock_validate_config.assert_called_once_with("where", config)
+
+    # Verify get_output_cols was called with correct config
+    called_args = mock_get_output_cols.call_args
+    assert called_args[0][0] == org_warehouse  # First argument is warehouse
+    assert called_args[0][1] == "where"  # Second argument is op_type
+    assert called_args[0][2]["source_columns"] == [
+        "id",
+        "value",
+    ]  # Third argument contains source_columns
+
+    mock_convert_canvas.assert_called_once_with(existing_operation)
+
+    # Verify result
+    assert result == {"uuid": str(existing_operation.uuid), "name": "where"}
+
+
+@patch("ddpui.api.transform_api.validate_operation_config_v2")
+@patch("ddpui.api.transform_api.validate_and_return_inputs_for_multi_input_op")
+@patch("ddpui.api.transform_api.dbtautomation_service.get_output_cols_for_operation")
+@patch("ddpui.api.transform_api.convert_canvas_node_to_frontend_format")
+def test_put_operation_node_edge_cleanup_for_multi_input_operation(
+    mock_convert_canvas,
+    mock_get_output_cols,
+    mock_validate_inputs,
+    mock_validate_config,
+    seed_db,
+    orguser,
+):
+    """Test put_operation_node properly cleans up edges when updating a multi-input operation"""
+    request = mock_request(orguser)
+
+    # Create warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create models for the multi-input operation
+    org_dbt_model1 = OrgDbtModel.objects.create(
+        uuid=uuid.uuid4(),
+        orgdbt=orgdbt,
+        name="table1",
+        schema="public",
+        type=OrgDbtModelType.SOURCE,
+        display_name="Table1",
+        output_cols=["id", "name"],
+    )
+
+    org_dbt_model2 = OrgDbtModel.objects.create(
+        uuid=uuid.uuid4(),
+        orgdbt=orgdbt,
+        name="table2",
+        schema="public",
+        type=OrgDbtModelType.SOURCE,
+        display_name="Table2",
+        output_cols=["id", "value"],
+    )
+
+    # Create existing join operation node
+    existing_operation = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="join",
+        operation_config={"type": "join"},
+        output_cols=["id", "name"],
+    )
+
+    # Create multiple existing edges that should be cleaned up
+    main_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.SOURCE,
+        name="public.table1",
+        dbtmodel=org_dbt_model1,
+        output_cols=["id", "name"],
+    )
+    old_node2 = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.SOURCE,
+        name="public.old_table",
+        output_cols=["id"],
+    )
+
+    CanvasEdge.objects.create(from_node=main_node, to_node=existing_operation, seq=1)
+    old_edge = CanvasEdge.objects.create(from_node=old_node2, to_node=existing_operation, seq=2)
+
+    # Mock validation responses for new union operation
+    from ddpui.schemas.dbt_workflow_schema import ModelSrcInputsForMultiInputOp
+
+    mock_input = ModelSrcInputsForMultiInputOp(seq=2, src_model=org_dbt_model2)
+    mock_validate_inputs.return_value = [mock_input]
+
+    mock_validate_config.return_value = None
+    mock_get_output_cols.return_value = ["id", "name", "value"]
+    mock_convert_canvas.return_value = {"uuid": str(existing_operation.uuid)}
+
+    payload = EditOperationNodePayload(
+        config={},
+        op_type="unionall",  # Change to different multi-input operation
+        source_columns=["id", "name"],
+        other_inputs=[
+            {"input_model_uuid": str(org_dbt_model2.uuid), "columns": ["id", "value"], "seq": 2}
+        ],
+    )
+
+    # Call the function
+    put_operation_node(request, str(existing_operation.uuid), payload)
+
+    # Verify that old edge (seq=2) was removed
+    assert not CanvasEdge.objects.filter(id=old_edge.id).exists()
+
+    # Verify main edge (seq=1) still exists
+    assert CanvasEdge.objects.filter(
+        from_node=main_node, to_node=existing_operation, seq=1
+    ).exists()
+
+    # Verify new edge was created for table2
+    second_node = CanvasNode.objects.get(dbtmodel=org_dbt_model2)
+    assert CanvasEdge.objects.filter(
+        from_node=second_node, to_node=existing_operation, seq=2
+    ).exists()
