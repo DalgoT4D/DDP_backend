@@ -1243,7 +1243,7 @@ def test_post_publish_changes_push_fails(seed_db, orguser: OrgUser):
 
     orgdbt = OrgDbt.objects.create(
         gitrepo_access_token_secret="pat-secret-key",
-        transform_type="GIT",  # Required for push to be attempted
+        transform_type="github",  # Required for push to be attempted
     )
     request.orguser.org.dbt = orgdbt
     request.orguser.org.save()
@@ -1280,7 +1280,7 @@ def test_post_publish_changes_push_fails_no_remote(seed_db, orguser: OrgUser):
     request = mock_request(orguser)
     payload = OrgDbtChangesPublish(commit_message="Test commit")
 
-    orgdbt = OrgDbt.objects.create(transform_type="GIT")  # No PAT secret but GIT type
+    orgdbt = OrgDbt.objects.create(transform_type="github")  # No PAT secret but github type
     request.orguser.org.dbt = orgdbt
     request.orguser.org.save()
 
@@ -1319,7 +1319,7 @@ def test_post_publish_changes_success(seed_db, orguser: OrgUser):
 
     orgdbt = OrgDbt.objects.create(
         gitrepo_access_token_secret="pat-secret-key",
-        transform_type="GIT",  # Required for push to be attempted
+        transform_type="github",  # Required for push to be attempted
     )
     request.orguser.org.dbt = orgdbt
     request.orguser.org.save()
@@ -1365,7 +1365,7 @@ def test_post_publish_changes_nothing_to_commit(seed_db, orguser: OrgUser):
 
     orgdbt = OrgDbt.objects.create(
         gitrepo_access_token_secret="pat-secret-key",
-        transform_type="GIT",  # Required for push to be attempted
+        transform_type="github",  # Required for push to be attempted
     )
     request.orguser.org.dbt = orgdbt
     request.orguser.org.save()
