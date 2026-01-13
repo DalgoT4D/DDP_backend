@@ -22,6 +22,8 @@ from ddpui.core.dbtautomation_service import (
     delete_dbt_source_in_project,
     convert_canvas_node_to_frontend_format,
     DbtProjectManager,
+    ensure_source_yml_definition_in_project,
+    SourceYmlDefinition,
 )
 from ddpui.dbt_automation.utils.dbtproject import dbtProject
 from ddpui.dbt_automation.utils.dbtsources import read_sources_from_yaml
@@ -756,3 +758,359 @@ def test_convert_canvas_node_comprehensive_structure_validation(orgdbt):
     assert result["dbtmodel"] is None
     assert isinstance(result["is_last_in_chain"], bool)
     assert result["isPublished"] is None
+
+
+# Tests for ensure_source_yml_definition_in_project
+
+
+@patch("ddpui.core.dbtautomation_service.read_dbt_sources_in_project")
+def test_ensure_source_yml_definition_existing_source_found(
+    mock_read_dbt_sources: Mock, orgdbt: OrgDbt
+):
+    """Test that function returns existing source when found in project"""
+    schema = "test_schema"
+    table = "test_table"
+
+    # Mock existing source found in project
+    existing_sources = [
+        {
+            "source_name": "test_source",
+            "schema": schema,
+            "input_name": table,
+            "input_type": "source",
+            "sql_path": "models/staging/sources.yml",
+        }
+    ]
+    mock_read_dbt_sources.return_value = existing_sources
+
+    result = ensure_source_yml_definition_in_project(orgdbt, schema, table)
+
+    # Verify function returns the existing source definition
+    assert isinstance(result, SourceYmlDefinition)
+    assert result.source_name == "test_source"
+    assert result.source_schema == schema
+    assert result.table == table
+    assert result.sql_path == "models/staging/sources.yml"
+
+    mock_read_dbt_sources.assert_called_once_with(orgdbt)
+
+
+@patch("ddpui.core.dbtautomation_service.read_dbt_sources_in_project")
+@patch("ddpui.core.dbtautomation_service.generate_source_definitions_yaml")
+@patch("ddpui.core.dbtautomation_service.DbtProjectManager.get_dbt_project_dir")
+def test_ensure_source_yml_definition_create_new_source(
+    mock_get_dir: Mock, mock_generate: Mock, mock_read_dbt_sources: Mock, orgdbt: OrgDbt
+):
+    """Test that function creates new source definition when none found"""
+    schema = "test_schema"
+    table = "test_table"
+
+    # Mock no existing sources found
+    mock_read_dbt_sources.return_value = []
+    mock_get_dir.return_value = "/fake/dbt/project"
+    mock_generate.return_value = "models/sources/sources.yml"
+
+    result = ensure_source_yml_definition_in_project(orgdbt, schema, table)
+
+    # Verify function creates new source definition
+    assert isinstance(result, SourceYmlDefinition)
+    assert result.source_name == schema
+    assert result.source_schema == schema
+    assert result.table == table
+    assert result.sql_path == "models/sources/sources.yml"
+
+    # Verify mocks were called correctly
+    mock_read_dbt_sources.assert_called_once_with(orgdbt)
+    mock_get_dir.assert_called_once_with(orgdbt)
+    mock_generate.assert_called_once_with(
+        schema, schema, [table], ANY, rel_dir_to_models="sources"  # dbtProject instance
+    )
+
+
+@patch("ddpui.core.dbtautomation_service.read_dbt_sources_in_project")
+def test_ensure_source_yml_definition_no_match_different_criteria(
+    mock_read_dbt_sources: Mock, orgdbt: OrgDbt
+):
+    """Test that function doesn't match source with different schema, table, or input_type"""
+    schema = "test_schema"
+    table = "test_table"
+
+    # Mock existing sources with different criteria
+    existing_sources = [
+        {
+            "source_name": "source1",
+            "schema": "different_schema",  # Different schema
+            "input_name": table,
+            "input_type": "source",
+            "sql_path": "models/staging/sources.yml",
+        },
+        {
+            "source_name": "source2",
+            "schema": schema,
+            "input_name": "different_table",  # Different table
+            "input_type": "source",
+            "sql_path": "models/staging/sources.yml",
+        },
+        {
+            "source_name": "source3",
+            "schema": schema,
+            "input_name": table,
+            "input_type": "model",  # Different input_type
+            "sql_path": "models/staging/sources.yml",
+        },
+    ]
+    mock_read_dbt_sources.return_value = existing_sources
+
+    with patch(
+        "ddpui.core.dbtautomation_service.generate_source_definitions_yaml"
+    ) as mock_generate, patch(
+        "ddpui.core.dbtautomation_service.DbtProjectManager.get_dbt_project_dir"
+    ) as mock_get_dir:
+        mock_get_dir.return_value = "/fake/dbt/project"
+        mock_generate.return_value = "models/sources/sources.yml"
+
+        result = ensure_source_yml_definition_in_project(orgdbt, schema, table)
+
+        # Verify function creates new source definition since no exact match
+        assert isinstance(result, SourceYmlDefinition)
+        assert result.source_name == schema
+        assert result.source_schema == schema
+        assert result.table == table
+        assert result.sql_path == "models/sources/sources.yml"
+
+        mock_generate.assert_called_once()
+
+
+@patch("ddpui.core.dbtautomation_service.read_dbt_sources_in_project")
+def test_ensure_source_yml_definition_exact_match_among_multiple(
+    mock_read_dbt_sources: Mock, orgdbt: OrgDbt
+):
+    """Test that function finds exact match among multiple sources"""
+    schema = "test_schema"
+    table = "test_table"
+
+    # Mock multiple existing sources with one exact match
+    existing_sources = [
+        {
+            "source_name": "source1",
+            "schema": "different_schema",
+            "input_name": table,
+            "input_type": "source",
+            "sql_path": "models/staging/sources.yml",
+        },
+        {
+            "source_name": "exact_match_source",
+            "schema": schema,
+            "input_name": table,
+            "input_type": "source",
+            "sql_path": "models/exact/sources.yml",
+        },
+        {
+            "source_name": "source3",
+            "schema": schema,
+            "input_name": "different_table",
+            "input_type": "source",
+            "sql_path": "models/staging/sources.yml",
+        },
+    ]
+    mock_read_dbt_sources.return_value = existing_sources
+
+    result = ensure_source_yml_definition_in_project(orgdbt, schema, table)
+
+    # Verify function returns the exact match
+    assert isinstance(result, SourceYmlDefinition)
+    assert result.source_name == "exact_match_source"
+    assert result.source_schema == schema
+    assert result.table == table
+    assert result.sql_path == "models/exact/sources.yml"
+
+
+# Integration tests for ensure_source_yml_definition_in_project with actual YAML files
+
+
+def test_ensure_source_yml_definition_integration_create_new_yaml_file(orgdbt, tmp_path):
+    """Test creating a new YAML file when none exists"""
+    # Create temporary DBT project structure
+    dbt_project_dir = tmp_path / "test_dbt_project"
+    models_dir = dbt_project_dir / "models"
+    sources_dir = models_dir / "sources"
+    sources_dir.mkdir(parents=True)
+
+    schema = "test_schema"
+    table = "test_table"
+
+    # Mock DbtProjectManager to return our temp directory
+    with patch(
+        "ddpui.core.dbtautomation_service.DbtProjectManager.get_dbt_project_dir"
+    ) as mock_get_dir:
+        mock_get_dir.return_value = str(dbt_project_dir)
+
+        result = ensure_source_yml_definition_in_project(orgdbt, schema, table)
+
+        # Verify the function succeeded
+        assert isinstance(result, SourceYmlDefinition)
+        assert result.source_name == schema
+        assert result.source_schema == schema
+        assert result.table == table
+        assert "sources.yml" in result.sql_path
+
+        # Verify the YAML file was created
+        sources_yaml_path = sources_dir / "sources.yml"
+        assert sources_yaml_path.exists()
+
+        # Verify the YAML content
+        with open(sources_yaml_path, "r") as f:
+            yaml_content = yaml.safe_load(f)
+
+        assert yaml_content["version"] == 2
+        assert len(yaml_content["sources"]) == 1
+        assert yaml_content["sources"][0]["name"] == schema
+        assert yaml_content["sources"][0]["schema"] == schema
+        assert len(yaml_content["sources"][0]["tables"]) == 1
+        assert yaml_content["sources"][0]["tables"][0]["identifier"] == table
+
+
+def test_ensure_source_yml_definition_integration_append_to_existing_yaml(orgdbt, tmp_path):
+    """Test appending to existing YAML file without creating duplicates"""
+    # Create temporary DBT project structure
+    dbt_project_dir = tmp_path / "test_dbt_project"
+    models_dir = dbt_project_dir / "models"
+    sources_dir = models_dir / "sources"
+    sources_dir.mkdir(parents=True)
+
+    schema = "test_schema"
+    new_table = "new_table"
+
+    # Create existing sources YAML file
+    existing_sources_content = {
+        "version": 2,
+        "sources": [
+            {
+                "name": schema,
+                "schema": schema,
+                "tables": [{"identifier": "existing_table_1"}, {"identifier": "existing_table_2"}],
+            }
+        ],
+    }
+
+    sources_yaml_path = sources_dir / "sources.yml"
+    with open(sources_yaml_path, "w") as f:
+        yaml.safe_dump(existing_sources_content, f)
+
+    # Mock DbtProjectManager to return our temp directory
+    with patch(
+        "ddpui.core.dbtautomation_service.DbtProjectManager.get_dbt_project_dir"
+    ) as mock_get_dir:
+        mock_get_dir.return_value = str(dbt_project_dir)
+
+        result = ensure_source_yml_definition_in_project(orgdbt, schema, new_table)
+
+        # Verify the function succeeded
+        assert isinstance(result, SourceYmlDefinition)
+        assert result.source_name == schema
+        assert result.source_schema == schema
+        assert result.table == new_table
+
+        # Verify the YAML file was updated (not duplicated)
+        with open(sources_yaml_path, "r") as f:
+            updated_yaml_content = yaml.safe_load(f)
+
+        # Should still have only one source but with additional table
+        assert len(updated_yaml_content["sources"]) == 1
+        source = updated_yaml_content["sources"][0]
+        assert source["name"] == schema
+        assert len(source["tables"]) == 3  # 2 existing + 1 new
+
+        table_identifiers = [table["identifier"] for table in source["tables"]]
+        assert "existing_table_1" in table_identifiers
+        assert "existing_table_2" in table_identifiers
+        assert new_table in table_identifiers
+
+
+def test_ensure_source_yml_definition_integration_no_duplicate_creation(orgdbt, tmp_path):
+    """Test that calling the function twice doesn't create duplicates"""
+    # Create temporary DBT project structure
+    dbt_project_dir = tmp_path / "test_dbt_project"
+    models_dir = dbt_project_dir / "models"
+    sources_dir = models_dir / "sources"
+    sources_dir.mkdir(parents=True)
+
+    schema = "test_schema"
+    table = "test_table"
+
+    # Mock DbtProjectManager to return our temp directory
+    with patch(
+        "ddpui.core.dbtautomation_service.DbtProjectManager.get_dbt_project_dir"
+    ) as mock_get_dir:
+        mock_get_dir.return_value = str(dbt_project_dir)
+
+        # Call the function first time
+        result1 = ensure_source_yml_definition_in_project(orgdbt, schema, table)
+
+        # Call the function second time with same parameters
+        result2 = ensure_source_yml_definition_in_project(orgdbt, schema, table)
+
+        # Both calls should succeed and return the same result
+        assert result1.source_name == result2.source_name
+        assert result1.source_schema == result2.source_schema
+        assert result1.table == result2.table
+        assert result1.sql_path == result2.sql_path
+
+        # Verify no duplicates in YAML file
+        sources_yaml_path = sources_dir / "sources.yml"
+        with open(sources_yaml_path, "r") as f:
+            yaml_content = yaml.safe_load(f)
+
+        assert len(yaml_content["sources"]) == 1
+        assert len(yaml_content["sources"][0]["tables"]) == 1
+        assert yaml_content["sources"][0]["tables"][0]["identifier"] == table
+
+
+def test_ensure_source_yml_definition_integration_multiple_schemas(orgdbt, tmp_path):
+    """Test creating sources for multiple schemas"""
+    # Create temporary DBT project structure
+    dbt_project_dir = tmp_path / "test_dbt_project"
+    models_dir = dbt_project_dir / "models"
+    sources_dir = models_dir / "sources"
+    sources_dir.mkdir(parents=True)
+
+    # Mock DbtProjectManager to return our temp directory
+    with patch(
+        "ddpui.core.dbtautomation_service.DbtProjectManager.get_dbt_project_dir"
+    ) as mock_get_dir:
+        mock_get_dir.return_value = str(dbt_project_dir)
+
+        # Create sources for different schemas
+        result1 = ensure_source_yml_definition_in_project(orgdbt, "schema1", "table1")
+        result2 = ensure_source_yml_definition_in_project(orgdbt, "schema2", "table2")
+        result3 = ensure_source_yml_definition_in_project(
+            orgdbt, "schema1", "table3"
+        )  # Same schema, different table
+
+        # Verify all results are valid
+        assert result1.source_name == "schema1"
+        assert result1.table == "table1"
+        assert result2.source_name == "schema2"
+        assert result2.table == "table2"
+        assert result3.source_name == "schema1"
+        assert result3.table == "table3"
+
+        # Verify YAML content has multiple sources
+        sources_yaml_path = sources_dir / "sources.yml"
+        with open(sources_yaml_path, "r") as f:
+            yaml_content = yaml.safe_load(f)
+
+        # Should have 2 sources (schema1 and schema2)
+        assert len(yaml_content["sources"]) == 2
+
+        # Find schema1 source - should have 2 tables
+        schema1_source = next(s for s in yaml_content["sources"] if s["name"] == "schema1")
+        assert len(schema1_source["tables"]) == 2
+        table_identifiers = [table["identifier"] for table in schema1_source["tables"]]
+        assert "table1" in table_identifiers
+        assert "table3" in table_identifiers
+
+        # Find schema2 source - should have 1 table
+        schema2_source = next(s for s in yaml_content["sources"] if s["name"] == "schema2")
+        assert len(schema2_source["tables"]) == 1
+        assert schema2_source["tables"][0]["identifier"] == "table2"
