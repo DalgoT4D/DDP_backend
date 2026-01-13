@@ -304,8 +304,8 @@ def delete_dbt_source_in_project(orgdbt_model: OrgDbtModel):
     # if there are sources & there is diff; update the sources.yml
     if len(src_tables) > 0 and len(src_tables) != len(filtered_src_tables):
         src_yml_path = generate_source_definitions_yaml(
-            orgdbt_model.schema,
             orgdbt_model.source_name,
+            orgdbt_model.schema,
             [src["input_name"] for src in filtered_src_tables],
             dbtProject(Path(DbtProjectManager.get_dbt_project_dir(orgdbt_model.orgdbt))),
             rel_dir_to_models=str(Path(sources_yml_rel_path).parent.relative_to("models")),
