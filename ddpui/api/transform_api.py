@@ -312,7 +312,7 @@ def validate_canvas_lock(orguser: OrgUser, orgdbt):
     """
     # Check canvas lock status
     try:
-        lock = orgdbt.canvas_lock
+        lock: CanvasLock = orgdbt.canvas_lock
         if lock.is_expired():
             # Clean up expired lock
             lock.delete()
@@ -419,8 +419,6 @@ def get_dbt_project_DAG_v2(request):
     1. Get all canvas nodes for the org
     2. Get all canvas edges for the org
     3. Convert to frontend format
-
-    Returns same format as v1 API for backward compatibility.
     """
     orguser: OrgUser = request.orguser
     org = orguser.org

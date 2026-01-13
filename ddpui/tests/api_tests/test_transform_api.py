@@ -16,6 +16,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgWarehouse, OrgDbt, TransformType
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation, DbtEdge, OrgDbtModelType
 from ddpui.models.canvaslock import CanvasLock
+from ddpui.models.canvas_models import CanvasNode, CanvasEdge, CanvasNodeType
 from ddpui.auth import (
     GUEST_ROLE,
     SUPER_ADMIN_ROLE,
@@ -38,10 +39,12 @@ from ddpui.api.transform_api import (
     create_dbt_project,
     delete_dbt_project,
     sync_sources,
-    get_input_sources_and_models,
+    get_input_sources_and_models_v2,
     get_warehouse_datatypes,
     lock_canvas,
     unlock_canvas,
+    delete_orgdbtmodel,
+    get_dbt_project_DAG_v2,
 )
 from ddpui.schemas.dbt_workflow_schema import (
     LockCanvasResponseSchema,
@@ -58,6 +61,48 @@ WAREHOUSE_DATA = {
     "schema1": ["table1", "table2"],
     "schema2": ["table3", "table4"],
 }
+
+
+def create_canvas_graph(orgdbt):
+    """Helper function to create a sample canvas graph with nodes and edges"""
+    # Create canvas nodes
+    source_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.SOURCE,
+        name="source_table",
+        uuid=uuid.uuid4(),
+        output_cols=["id", "name"],
+    )
+
+    operation_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="filter",
+        uuid=uuid.uuid4(),
+        operation_config={"type": "where", "config": {"clauses": []}},
+        output_cols=["id", "name"],
+    )
+
+    model_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.MODEL,
+        name="target_model",
+        uuid=uuid.uuid4(),
+        output_cols=["id", "name"],
+    )
+
+    # Create edges: source -> operation -> model
+    edge1 = CanvasEdge.objects.create(from_node=source_node, to_node=operation_node, seq=1)
+
+    edge2 = CanvasEdge.objects.create(from_node=operation_node, to_node=model_node, seq=1)
+
+    return {
+        "nodes": [source_node, operation_node, model_node],
+        "edges": [edge1, edge2],
+        "source_node": source_node,
+        "operation_node": operation_node,
+        "model_node": model_node,
+    }
 
 
 def mock_setup_dbt_workspace_ui_transform(orguser: OrgUser, tmp_path):
@@ -468,3 +513,568 @@ def test_sync_sources_success(orguser: OrgUser, tmp_path):
         assert args[3] == f"{TaskProgressHashPrefix.SYNCSOURCES.value}-{orguser.org.slug}"
         assert "task_id" in result
         assert "hashkey" in result
+
+
+def test_get_input_sources_and_models_v2_warehouse_not_setup(seed_db, orguser: OrgUser):
+    """Test failure when warehouse is not setup"""
+    request = mock_request(orguser)
+
+    with pytest.raises(HttpError) as excinfo:
+        get_input_sources_and_models_v2(request)
+
+    assert str(excinfo.value) == "please setup your warehouse first"
+
+
+def test_get_input_sources_and_models_v2_dbt_workspace_not_setup(seed_db, orguser: OrgUser):
+    """Test failure when dbt workspace is not setup"""
+    # Create warehouse but no dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+
+    request = mock_request(orguser)
+
+    with pytest.raises(HttpError) as excinfo:
+        get_input_sources_and_models_v2(request)
+
+    assert str(excinfo.value) == "dbt workspace not setup"
+
+
+def test_get_input_sources_and_models_v2_empty_response(seed_db, orguser: OrgUser):
+    """Test success with no models/sources"""
+    # Setup warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    request = mock_request(orguser)
+
+    result = get_input_sources_and_models_v2(request)
+
+    assert result == []
+
+
+def test_get_input_sources_and_models_v2_with_models_and_sources(seed_db, orguser: OrgUser):
+    """Test success with models and sources, excluding under_construction models"""
+    # Setup warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create a completed model (should be included)
+    completed_model = OrgDbtModel.objects.create(
+        orgdbt=orgdbt,
+        name="completed_model",
+        display_name="Completed Model",
+        schema="public",
+        type=OrgDbtModelType.MODEL,
+        sql_path="models/completed_model.sql",
+        under_construction=False,
+        output_cols=["col1", "col2"],
+    )
+
+    # Create a source (should be included)
+    source_model = OrgDbtModel.objects.create(
+        orgdbt=orgdbt,
+        name="source_table",
+        display_name="Source Table",
+        schema="raw",
+        type=OrgDbtModelType.SOURCE,
+        source_name="my_source",
+        under_construction=False,
+        output_cols=["id", "name"],
+    )
+
+    # Create an under_construction model (should be excluded)
+    under_construction_model = OrgDbtModel.objects.create(
+        orgdbt=orgdbt,
+        name="under_construction_model",
+        display_name="Under Construction Model",
+        schema="public",
+        type=OrgDbtModelType.MODEL,
+        under_construction=True,
+        output_cols=["col3"],
+    )
+
+    request = mock_request(orguser)
+
+    result = get_input_sources_and_models_v2(request)
+
+    # Should return 2 items (completed_model and source_model), excluding under_construction
+    assert len(result) == 2
+
+    # Find the completed model in results
+    completed_model_result = next((r for r in result if r["name"] == "completed_model"), None)
+    assert completed_model_result is not None
+    assert completed_model_result["schema"] == "public"
+    assert completed_model_result["sql_path"] == "models/completed_model.sql"
+    assert completed_model_result["display_name"] == "Completed Model"
+    assert completed_model_result["type"] == OrgDbtModelType.MODEL
+    assert completed_model_result["source_name"] is None
+    assert completed_model_result["output_cols"] == ["col1", "col2"]
+    assert completed_model_result["uuid"] == str(completed_model.uuid)
+
+    # Find the source in results
+    source_result = next((r for r in result if r["name"] == "source_table"), None)
+    assert source_result is not None
+    assert source_result["schema"] == "raw"
+    assert source_result["display_name"] == "Source Table"
+    assert source_result["type"] == OrgDbtModelType.SOURCE
+    assert source_result["source_name"] == "my_source"
+    assert source_result["output_cols"] == ["id", "name"]
+    assert source_result["uuid"] == str(source_model.uuid)
+
+    # Ensure under_construction model is not included
+    under_construction_result = next(
+        (r for r in result if r["name"] == "under_construction_model"), None
+    )
+    assert under_construction_result is None
+
+
+def test_get_input_sources_and_models_v2_with_schema_filter(seed_db, orguser: OrgUser):
+    """Test success with schema name filter"""
+    # Setup warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create models in different schemas
+    model_public = OrgDbtModel.objects.create(
+        orgdbt=orgdbt,
+        name="model_public",
+        display_name="Model Public",
+        schema="public",
+        type=OrgDbtModelType.MODEL,
+        under_construction=False,
+        output_cols=["col1"],
+    )
+
+    model_raw = OrgDbtModel.objects.create(
+        orgdbt=orgdbt,
+        name="model_raw",
+        display_name="Model Raw",
+        schema="raw",
+        type=OrgDbtModelType.MODEL,
+        under_construction=False,
+        output_cols=["col2"],
+    )
+
+    request = mock_request(orguser)
+
+    # Test with schema filter "public"
+    result = get_input_sources_and_models_v2(request, schema_name="public")
+
+    assert len(result) == 1
+    assert result[0]["name"] == "model_public"
+    assert result[0]["schema"] == "public"
+
+    # Test with schema filter "raw"
+    result = get_input_sources_and_models_v2(request, schema_name="raw")
+
+    assert len(result) == 1
+    assert result[0]["name"] == "model_raw"
+    assert result[0]["schema"] == "raw"
+
+    # Test with schema filter that doesn't exist
+    result = get_input_sources_and_models_v2(request, schema_name="nonexistent")
+
+    assert len(result) == 0
+
+
+def test_delete_orgdbtmodel_cascade_not_implemented(seed_db, orguser: OrgUser):
+    """Test that cascade=True raises NotImplementedError"""
+    request = mock_request(orguser)
+
+    with pytest.raises(NotImplementedError):
+        delete_orgdbtmodel(request, "test-uuid", cascade=True)
+
+
+def test_delete_orgdbtmodel_warehouse_not_setup(seed_db, orguser: OrgUser):
+    """Test failure when warehouse is not setup"""
+    request = mock_request(orguser)
+
+    with pytest.raises(HttpError) as excinfo:
+        delete_orgdbtmodel(request, "test-uuid")
+
+    assert str(excinfo.value) == "please setup your warehouse first"
+
+
+def test_delete_orgdbtmodel_dbt_workspace_not_setup(seed_db, orguser: OrgUser):
+    """Test failure when dbt workspace is not setup"""
+    # Create warehouse but no dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+
+    request = mock_request(orguser)
+
+    with pytest.raises(HttpError) as excinfo:
+        delete_orgdbtmodel(request, "test-uuid")
+
+    assert str(excinfo.value) == "dbt workspace not setup"
+
+
+def test_delete_orgdbtmodel_canvas_lock_validation_fails(seed_db, orguser: OrgUser):
+    """Test failure when canvas lock validation fails"""
+    # Setup warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    request = mock_request(orguser)
+
+    # Mock validate_canvas_lock to raise an HttpError
+    with patch("ddpui.api.transform_api.validate_canvas_lock") as mock_validate_lock:
+        mock_validate_lock.side_effect = HttpError(423, "Canvas is not locked")
+
+        with pytest.raises(HttpError) as excinfo:
+            delete_orgdbtmodel(request, "test-uuid")
+
+        assert str(excinfo.value) == "Canvas is not locked"
+        mock_validate_lock.assert_called_once_with(orguser, orgdbt)
+
+
+def test_delete_orgdbtmodel_model_not_found(seed_db, orguser: OrgUser):
+    """Test failure when model is not found"""
+    # Setup warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    request = mock_request(orguser)
+
+    # Use a valid UUID format that doesn't exist in database
+    nonexistent_uuid = str(uuid.uuid4())
+
+    # Mock validate_canvas_lock to pass
+    with patch("ddpui.api.transform_api.validate_canvas_lock"):
+        with pytest.raises(HttpError) as excinfo:
+            delete_orgdbtmodel(request, nonexistent_uuid)
+
+        assert str(excinfo.value) == "model not found"
+
+
+def test_delete_orgdbtmodel_cannot_delete_source(seed_db, orguser: OrgUser):
+    """Test failure when trying to delete a source model"""
+    # Setup warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create a source model
+    source_model = OrgDbtModel.objects.create(
+        orgdbt=orgdbt,
+        name="source_table",
+        display_name="Source Table",
+        schema="raw",
+        type=OrgDbtModelType.SOURCE,
+        source_name="my_source",
+        under_construction=False,
+        uuid=uuid.uuid4(),
+    )
+
+    request = mock_request(orguser)
+
+    # Mock validate_canvas_lock to pass
+    with patch("ddpui.api.transform_api.validate_canvas_lock"):
+        with pytest.raises(HttpError) as excinfo:
+            delete_orgdbtmodel(request, str(source_model.uuid))
+
+        assert str(excinfo.value) == "Cannot delete source model"
+
+
+def test_delete_orgdbtmodel_success(seed_db, orguser: OrgUser):
+    """Test successful deletion of a model"""
+    # Setup warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create a model (not source)
+    model = OrgDbtModel.objects.create(
+        orgdbt=orgdbt,
+        name="test_model",
+        display_name="Test Model",
+        schema="public",
+        type=OrgDbtModelType.MODEL,
+        under_construction=False,
+        sql_path="models/test_model.sql",
+        uuid=uuid.uuid4(),
+    )
+
+    request = mock_request(orguser)
+
+    # Mock both validate_canvas_lock and delete_org_dbt_model_v2
+    with patch("ddpui.api.transform_api.validate_canvas_lock"), patch(
+        "ddpui.core.dbtautomation_service.delete_org_dbt_model_v2"
+    ) as mock_delete:
+        result = delete_orgdbtmodel(request, str(model.uuid))
+
+        # Verify the service function was called with correct parameters
+        mock_delete.assert_called_once_with(model, False)
+
+        # Verify the response
+        assert result == {"success": 1}
+
+
+def test_get_dbt_project_DAG_v2_warehouse_not_setup(seed_db, orguser: OrgUser):
+    """Test failure when warehouse is not setup"""
+    request = mock_request(orguser)
+
+    with pytest.raises(HttpError) as excinfo:
+        get_dbt_project_DAG_v2(request)
+
+    assert str(excinfo.value) == "please setup your warehouse first"
+
+
+def test_get_dbt_project_DAG_v2_dbt_workspace_not_setup(seed_db, orguser: OrgUser):
+    """Test failure when dbt workspace is not setup"""
+    # Create warehouse but no dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+
+    request = mock_request(orguser)
+
+    with pytest.raises(HttpError) as excinfo:
+        get_dbt_project_DAG_v2(request)
+
+    assert str(excinfo.value) == "dbt workspace not setup"
+
+
+def test_get_dbt_project_DAG_v2_empty_canvas(seed_db, orguser: OrgUser, tmp_path):
+    """Test success with empty canvas (no nodes or edges)"""
+    # Setup warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir=str(tmp_path),
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    request = mock_request(orguser)
+
+    # Mock DbtProjectManager.get_dbt_project_dir
+    with patch("ddpui.api.transform_api.DbtProjectManager.get_dbt_project_dir") as mock_get_dir:
+        mock_get_dir.return_value = str(tmp_path)
+
+        result = get_dbt_project_DAG_v2(request)
+
+        assert result == {"nodes": [], "edges": []}
+
+
+def test_get_dbt_project_DAG_v2_with_canvas_graph(seed_db, orguser: OrgUser, tmp_path):
+    """Test success with canvas nodes and edges using helper function"""
+    # Setup warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir=str(tmp_path),
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create canvas graph using helper function
+    canvas_data = create_canvas_graph(orgdbt)
+
+    request = mock_request(orguser)
+
+    # Mock required functions - patch where the function is imported in transform_api
+    with patch(
+        "ddpui.api.transform_api.DbtProjectManager.get_dbt_project_dir"
+    ) as mock_get_dir, patch(
+        "ddpui.api.transform_api.convert_canvas_node_to_frontend_format"
+    ) as mock_convert:
+        mock_get_dir.return_value = str(tmp_path)
+
+        # Mock convert function to return simple format
+        def mock_convert_side_effect(node, changed_files=None):
+            return {
+                "id": str(node.uuid),
+                "type": node.node_type,
+                "name": node.name,
+                "output_cols": node.output_cols,
+            }
+
+        mock_convert.side_effect = mock_convert_side_effect
+
+        result = get_dbt_project_DAG_v2(request)
+
+        # Verify structure
+        assert "nodes" in result
+        assert "edges" in result
+
+        # Verify 3 nodes (source, operation, model)
+        assert len(result["nodes"]) == 3
+
+        # Verify 2 edges (source->operation, operation->model)
+        assert len(result["edges"]) == 2
+
+        # Verify edge format
+        expected_edges = [
+            {
+                "id": f"{canvas_data['source_node'].uuid}_{canvas_data['operation_node'].uuid}",
+                "source": str(canvas_data["source_node"].uuid),
+                "target": str(canvas_data["operation_node"].uuid),
+            },
+            {
+                "id": f"{canvas_data['operation_node'].uuid}_{canvas_data['model_node'].uuid}",
+                "source": str(canvas_data["operation_node"].uuid),
+                "target": str(canvas_data["model_node"].uuid),
+            },
+        ]
+
+        # Check edges (order may vary)
+        for expected_edge in expected_edges:
+            assert expected_edge in result["edges"]
+
+        # Verify convert function was called for each node
+        assert mock_convert.call_count == 3
+
+
+def test_get_dbt_project_DAG_v2_project_directory_not_exist(seed_db, orguser: OrgUser):
+    """Test failure when dbt project directory does not exist"""
+    # Setup warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="nonexistent_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    request = mock_request(orguser)
+
+    # Mock DbtProjectManager.get_dbt_project_dir to return nonexistent path
+    with patch("ddpui.api.transform_api.DbtProjectManager.get_dbt_project_dir") as mock_get_dir:
+        mock_get_dir.return_value = "/nonexistent/path"
+
+        with pytest.raises(HttpError) as excinfo:
+            get_dbt_project_DAG_v2(request)
+
+        assert str(excinfo.value) == "dbt project directory does not exist"
