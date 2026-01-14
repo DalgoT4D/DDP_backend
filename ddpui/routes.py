@@ -23,7 +23,7 @@ from ddpui.api.charts_api import charts_router
 from ddpui.api.dashboard_native_api import dashboard_native_router
 from ddpui.api.filter_api import filter_router
 from ddpui.api.public_api import public_router
-from ddpui.api.ai_api import router as ai_router
+from ddpui.api.ai_providers_api import router as ai_router
 from ddpui.api.dashboard_chat_api import router as dashboard_chat_router
 from ddpui.api.org_settings_api import router as org_settings_router
 

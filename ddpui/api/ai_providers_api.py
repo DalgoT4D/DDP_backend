@@ -5,17 +5,24 @@ Provides generic AI capabilities that work with any configured provider.
 
 import json
 import asyncio
-from typing import Optional, List, Dict, Any
 from django.http import JsonResponse, StreamingHttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.utils.decorators import method_decorator
+from django.utils import timezone
 from django.views import View
-from ninja import Router, Schema
+from ninja import Router
 from ninja.errors import HttpError
 from ninja.security import HttpBearer
 
 from ddpui.auth import has_permission
+from ddpui.schemas.ai_schema import (
+    ChatMessageSchema,
+    ChatCompletionRequest,
+    CompletionRequest,
+    ProviderConfigRequest,
+    AIResponseSchema,
+)
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.core.ai.factory import get_ai_provider, get_default_ai_provider, AIProviderFactory
 from ddpui.core.ai.interfaces import (
@@ -32,54 +39,6 @@ logger = CustomLogger("ddpui.api.ai")
 
 # Ninja router for AI API
 router = Router()
-
-
-# Pydantic schemas for API
-class ChatMessageSchema(Schema):
-    role: str
-    content: str
-    metadata: Optional[Dict[str, Any]] = None
-
-
-class ChatCompletionRequest(Schema):
-    messages: List[ChatMessageSchema]
-    model: Optional[str] = None
-    temperature: float = 0.7
-    max_tokens: Optional[int] = None
-    provider_type: Optional[str] = None
-    stream: bool = False
-
-
-class CompletionRequest(Schema):
-    prompt: str
-    model: Optional[str] = None
-    temperature: float = 0.7
-    max_tokens: Optional[int] = None
-    provider_type: Optional[str] = None
-
-
-class ProviderConfigRequest(Schema):
-    provider_type: str
-    config: Dict[str, Any]
-
-
-class AIResponseSchema(Schema):
-    content: str
-    usage: Optional[Dict[str, int]] = None
-    model: Optional[str] = None
-    provider: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
-
-
-# Bearer token auth
-class AIApiAuth(HttpBearer):
-    def authenticate(self, request, token):
-        # You can integrate this with your existing auth system
-        # For now, we'll use the existing has_permission decorator
-        return token
-
-
-auth = AIApiAuth()
 
 
 def _ensure_org_ai_enabled(request) -> OrgSettings:
@@ -114,25 +73,14 @@ def _ensure_org_ai_enabled(request) -> OrgSettings:
 def handle_ai_error(error: Exception) -> JsonResponse:
     """Convert AI provider errors to appropriate HTTP responses."""
     if isinstance(error, AIProviderConfigurationError):
-        return JsonResponse(
-            {"error": "Configuration Error", "message": str(error), "provider": error.provider},
-            status=400,
-        )
+        raise HttpError(400, f"Configuration Error for provider {error.provider}: {str(error)}")
     elif isinstance(error, AIProviderConnectionError):
-        return JsonResponse(
-            {"error": "Connection Error", "message": str(error), "provider": error.provider},
-            status=502,
-        )
+        raise HttpError(502, f"Connection error for provider: {error.provider} : {str(error)}")
     elif isinstance(error, AIProviderRateLimitError):
-        return JsonResponse(
-            {"error": "Rate Limit Exceeded", "message": str(error), "provider": error.provider},
-            status=429,
-        )
+        raise HttpError(429, f"Rate Limit Exceeded for provider: {error.provider} : {str(error)}")
     else:
         logger.error(f"Unexpected AI error: {error}")
-        return JsonResponse(
-            {"error": "Internal Error", "message": "An unexpected error occurred"}, status=500
-        )
+        raise HttpError(500, f"Internal Error: {str(error)}")
 
 
 @router.post("/chat/completions")
@@ -181,7 +129,7 @@ def chat_completions(request, payload: ChatCompletionRequest):
                     if response.metadata
                     else "chatcmpl-unknown",
                     "object": "chat.completion",
-                    "created": int(asyncio.get_event_loop().time()),
+                    "created": int(timezone.now().timestamp() * 1000),
                     "model": response.model,
                     "provider": response.provider,
                     "choices": [
