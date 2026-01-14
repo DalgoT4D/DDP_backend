@@ -63,8 +63,8 @@ class ChartDataPayload(Schema):
     y_axis: Optional[str] = None
 
     # For aggregated data
-    dimension_col: Optional[str] = None  # Deprecated: use dimensions for table charts
-    extra_dimension: Optional[str] = None  # Deprecated: use dimensions for table charts
+    dimension_col: Optional[str] = None  #later we need to still merge dimension and extra dimension into dimensions list
+    extra_dimension: Optional[str] = None  
     dimensions: Optional[List[str]] = None  # Multiple dimensions for table charts
 
     # Multiple metrics for bar/line charts (optional for table charts)
