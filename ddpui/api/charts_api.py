@@ -553,21 +553,15 @@ def get_chart_data(request, payload: ChartDataPayload):
     logger.info(f"Chart data endpoint - payload metrics: {payload.metrics}")
     logger.info(f"Chart data endpoint - payload extra_config: {payload.extra_config}")
 
-    # Validate table charts have at least one dimension
-    if payload.chart_type == "table":
-        normalized_dims = charts_service.normalize_dimensions(payload)
-        if not normalized_dims or len(normalized_dims) == 0:
-            raise HttpError(400, "Table charts require at least one dimension")
-
     # Use the common function to generate data and config
     try:
         result = generate_chart_data_and_config(payload, org_warehouse)
         return ChartDataResponse(data=result["data"], echarts_config=result["echarts_config"])
     except ValueError as e:
-        logger.error(f"ValueError generating chart data: {str(e)}", exc_info=True)
+        logger.error(f"ValueError generating chart data: {str(e)}")
         raise HttpError(400, str(e))
     except Exception as e:
-        logger.error(f"Error generating chart data: {str(e)}", exc_info=True)
+        logger.error(f"Error generating chart data: {str(e)}")
         logger.error(
             f"Error details - payload: {payload.dict() if hasattr(payload, 'dict') else payload}"
         )
@@ -694,7 +688,7 @@ def get_chart_data_preview(
 
         return DataPreviewResponse(**response_data)
     except Exception as e:
-        logger.error(f"Error in chart data preview: {str(e)}", exc_info=True)
+        logger.error(f"Error in chart data preview: {str(e)}")
         import traceback
 
         logger.error(f"Traceback: {traceback.format_exc()}")
@@ -1217,7 +1211,7 @@ def create_chart(request, payload: ChartCreate):
         logger.error(f"Chart validation error: {e.message}")
         raise HttpError(400, e.message) from None
     except Exception as e:
-        logger.error(f"Error creating chart: {str(e)}", exc_info=True)
+        logger.error(f"Error creating chart: {str(e)}")
         raise HttpError(500, f"Error creating chart: {str(e)}") from None
 
     return ChartResponse(
