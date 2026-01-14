@@ -677,19 +677,6 @@ def get_chart_data_preview(
             f"Preview data sample: columns={len(preview_data.get('columns', []))}, data_rows={len(preview_data.get('data', []))}"
         )
 
-        # Calculate total rows if not provided
-        total_rows = preview_data.get("total_rows")
-        if total_rows is None:
-            try:
-                # Get total rows count
-                total_rows = charts_service.get_chart_data_total_rows(
-                    org_warehouse, modified_payload
-                )
-            except Exception as total_rows_error:
-                logger.warning(f"Failed to get total rows count: {str(total_rows_error)}")
-                # Fallback to length of current data if total rows calculation fails
-                total_rows = len(preview_data.get("data", []))
-
         # Ensure all required fields are present with proper defaults
         response_data = {
             "columns": preview_data.get("columns", []),
@@ -697,7 +684,8 @@ def get_chart_data_preview(
             "data": preview_data.get("data", []),
             "page": preview_data.get("page", page),
             "page_size": preview_data.get("limit", limit),
-            "total_rows": total_rows if total_rows is not None else 0,
+            # Total rows are fetched via /chart-data-preview/total-rows/
+            "total_rows": preview_data.get("total_rows", 0),
         }
 
         logger.info(
