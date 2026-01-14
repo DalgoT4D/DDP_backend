@@ -15,7 +15,7 @@ from pathlib import Path
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from ddpui.models.org import Org, OrgDbt, OrgWarehouse
+from ddpui.models.org import Org, OrgDbt, OrgWarehouse, TransformType
 from ddpui.models.canvas_models import CanvasNode, CanvasEdge
 from ddpui.ddpdbt import dbt_service
 from ddpui.ddpdbt.dbt_service import DbtProjectManager
@@ -159,7 +159,12 @@ class Command(BaseCommand):
                     refresh=False,  # Don't regenerate, we just did
                 )
 
-                # Step 3: Rollback if dry-run
+                # Step 3: Set transform_type to github
+                self.stdout.write("  Setting transform_type to 'github'...")
+                orgdbt.transform_type = TransformType.GIT.value
+                orgdbt.save()
+
+                # Step 4: Rollback if dry-run
                 if dry_run:
                     transaction.set_rollback(True)
 
