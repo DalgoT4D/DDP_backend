@@ -188,12 +188,10 @@ def build_multi_metric_query(
     """Build query for multiple metrics on bar/line/pie/table/map charts"""
     dimensions = normalize_dimensions(payload)
 
-    # For non-table charts, require at least one dimension
-    if payload.chart_type != "table" and not dimensions:
-        raise ValueError("dimension_col is required for multiple metrics charts")
-
-    # For table charts, metrics are optional
+    # For non-table charts, require at least one dimension and one metric
     if payload.chart_type != "table":
+        if not dimensions:
+            raise ValueError("At least one dimension is required for multiple metrics charts")
         if not payload.metrics or len(payload.metrics) == 0:
             raise ValueError("At least one metric is required for multiple metrics charts")
 
