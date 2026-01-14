@@ -390,8 +390,7 @@ def delete_orgdbtmodel(request, model_uuid, canvas_lock_id: str = None, cascade:
     if not org_warehouse:
         raise HttpError(404, "please setup your warehouse first")
 
-    # make sure the orgdbt here is the one we create locally
-    orgdbt = OrgDbt.objects.filter(org=org, transform_type=TransformType.UI).first()
+    orgdbt = org.dbt
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
