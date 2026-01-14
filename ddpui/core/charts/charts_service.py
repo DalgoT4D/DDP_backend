@@ -19,6 +19,54 @@ from ddpui.schemas.chart_schema import (
 )
 
 
+def validate_column_name(col_name: str) -> bool:
+    """
+    Validate column name to prevent SQL injection and ensure valid SQL identifiers.
+
+    Column names must:
+    - Start with a letter or underscore
+    - Contain only alphanumeric characters and underscores
+    - Be non-empty and not just whitespace
+
+    Args:
+        col_name: Column name to validate
+
+    Returns:
+        True if valid, False otherwise
+    """
+    import re
+
+    if not col_name or not col_name.strip():
+        return False
+
+    # SQL identifier pattern: starts with letter or underscore,
+    # followed by letters, digits, or underscores
+    pattern = r'^[a-zA-Z_][a-zA-Z0-9_]*$'
+    return bool(re.match(pattern, col_name.strip()))
+
+
+def validate_dimension_names(dimensions: List[str]) -> Tuple[bool, Optional[str]]:
+    """
+    Validate a list of dimension names.
+
+    Args:
+        dimensions: List of dimension column names to validate
+
+    Returns:
+        Tuple of (is_valid, error_message)
+        - (True, None) if all dimensions are valid
+        - (False, error_message) if any dimension is invalid
+    """
+    if not dimensions:
+        return True, None
+
+    for dim in dimensions:
+        if not validate_column_name(dim):
+            return False, f"Invalid column name: '{dim}'. Column names must start with a letter or underscore and contain only alphanumeric characters and underscores."
+
+    return True, None
+
+
 def apply_time_grain(column_expr, time_grain: str, warehouse_type: str = "postgres"):
     """
     Apply time grain to a datetime column using database-specific functions.
@@ -88,6 +136,7 @@ def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
     For other charts: use dimension_col if present
 
     Returns list of dimension column names.
+    Raises ValueError if any dimension name is invalid.
     """
     if payload.chart_type == "table":
         # For table charts, use dimensions list if available
@@ -95,6 +144,10 @@ def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
             # Filter out empty strings
             filtered_dims = [d for d in payload.dimensions if d and d.strip()]
             if filtered_dims:
+                # Validate dimension names
+                is_valid, error_msg = validate_dimension_names(filtered_dims)
+                if not is_valid:
+                    raise ValueError(error_msg)
                 return filtered_dims
             else:
                 logger.warning(
@@ -106,14 +159,23 @@ def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
             dims.append(payload.dimension_col)
         if payload.extra_dimension:
             dims.append(payload.extra_dimension)
-        if dims:
-            pass
-        else:
+
+        if not dims:
             logger.warning(f"normalize_dimensions - No dimensions found in payload for table chart")
+        else:
+            # Validate dimension names
+            is_valid, error_msg = validate_dimension_names(dims)
+            if not is_valid:
+                raise ValueError(error_msg)
+
         return dims
     else:
         # For other charts, return single dimension if present
         if payload.dimension_col:
+            # Validate single dimension
+            is_valid, error_msg = validate_dimension_names([payload.dimension_col])
+            if not is_valid:
+                raise ValueError(error_msg)
             return [payload.dimension_col]
         return []
 
@@ -239,7 +301,18 @@ def build_multi_metric_query(
             else:
                 if not metric.column:
                     raise ValueError(f"Column is required for {metric.aggregation} aggregation")
+
+                # Validate metric column name
+                if not validate_column_name(metric.column):
+                    raise ValueError(
+                        f"Invalid column name in metric: '{metric.column}'. Column names must start with a letter or underscore and contain only alphanumeric characters and underscores."
+                    )
+
                 alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+
+            # Note: We don't validate aliases because they can be human-readable display names
+            # with spaces and special characters (e.g., "Total Count", "Average Price")
+            # The aliases are only used as dictionary keys in the result set, not in SQL
 
             query_builder.add_aggregate_column(
                 metric.column,
@@ -534,6 +607,12 @@ def apply_chart_filters(
         if not column_name or operator is None:
             continue
 
+        # Validate column name to prevent SQL injection
+        if not validate_column_name(column_name):
+            raise ValueError(
+                f"Invalid column name in filter: '{column_name}'. Column names must start with a letter or underscore and contain only alphanumeric characters and underscores."
+            )
+
         # Operators that can be grouped (multiple values with OR)
         if operator in ["equals", "not_equals"]:
             grouped_filters[(column_name, operator)].append(value)
@@ -637,6 +716,12 @@ def apply_chart_sorting(
 
         if not column_name:
             continue
+
+        # Validate column name to prevent SQL injection
+        if not validate_column_name(column_name):
+            raise ValueError(
+                f"Invalid column name in sort: '{column_name}'. Column names must start with a letter or underscore and contain only alphanumeric characters and underscores."
+            )
 
         # Try to match against metric aliases first
         matching_metric = None
