@@ -1211,8 +1211,7 @@ def create_chart(request, payload: ChartCreate):
         )
         chart = ChartService.create_chart(chart_data, orguser)
 
-        if payload.chart_type == "table":
-            logger.info(f"Table chart {chart.id} saved successfully")
+        logger.info(f"Chart {chart.id} saved successfully (type={chart.chart_type})")
 
     except ChartValidationError as e:
         logger.error(f"Chart validation error: {e.message}")
