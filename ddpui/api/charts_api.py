@@ -121,20 +121,6 @@ def generate_chart_render_config(chart: Chart, org_warehouse: OrgWarehouse) -> d
         extra_config = chart.extra_config
         logger.debug(f"Chart {chart.id} extra_config: {extra_config}")
 
-        # For table charts, prefer dimensions list, fallback to dimension_column + extra_dimension_column
-        dimensions = None
-        if chart.chart_type == "table":
-            if extra_config.get("dimension_columns"):
-                dimensions = extra_config.get("dimension_columns")
-            else:
-                # Backward compatibility: convert dimension_column + extra_dimension_column to list
-                dims = []
-                if extra_config.get("dimension_column"):
-                    dims.append(extra_config.get("dimension_column"))
-                if extra_config.get("extra_dimension_column"):
-                    dims.append(extra_config.get("extra_dimension_column"))
-                dimensions = dims if dims else None
-
         payload = ChartDataPayload(
             chart_type=chart.chart_type,
             schema_name=chart.schema_name,
@@ -143,7 +129,7 @@ def generate_chart_render_config(chart: Chart, org_warehouse: OrgWarehouse) -> d
             y_axis=extra_config.get("y_axis_column"),
             dimension_col=extra_config.get("dimension_column"),
             extra_dimension=extra_config.get("extra_dimension_column"),
-            dimensions=dimensions,
+            dimensions=extra_config.get("dimension_columns"),
             metrics=extra_config.get("metrics"),
             # Map-specific fields
             geographic_column=extra_config.get("geographic_column"),
@@ -152,6 +138,9 @@ def generate_chart_render_config(chart: Chart, org_warehouse: OrgWarehouse) -> d
             customizations=extra_config.get("customizations", {}),
             extra_config=extra_config,
         )
+
+        # Normalize dimensions for backward compatibility and consistency
+        payload.dimensions = charts_service.normalize_dimensions(payload)
 
         # Use the common function to generate config and data
         result = generate_chart_data_and_config(payload, org_warehouse, chart_id=chart.id)
