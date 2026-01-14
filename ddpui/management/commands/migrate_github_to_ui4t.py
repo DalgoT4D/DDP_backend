@@ -1,0 +1,182 @@
+"""
+Django management command to migrate GitHub DBT users to UI4T canvas.
+Creates CanvasNode and CanvasEdge records from manifest.json.
+
+Usage:
+    # Dry run (no DB changes)
+    python manage.py migrate_github_to_ui4t --org {slug} --dry-run
+
+    # Actual migration
+    python manage.py migrate_github_to_ui4t --org {slug}
+"""
+
+from pathlib import Path
+
+from django.core.management.base import BaseCommand, CommandError
+from django.db import transaction
+
+from ddpui.models.org import Org, OrgDbt, OrgWarehouse
+from ddpui.models.canvas_models import CanvasNode, CanvasEdge
+from ddpui.ddpdbt import dbt_service
+from ddpui.ddpdbt.dbt_service import DbtProjectManager
+
+
+class Command(BaseCommand):
+    help = "Migrate GitHub DBT users to UI4T canvas"
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--org",
+            type=str,
+            required=True,
+            help="Organization slug to migrate",
+        )
+        parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Run migration without saving changes",
+        )
+
+    def handle(self, *args, **options):
+        org_slug = options["org"]
+        dry_run = options["dry_run"]
+
+        self.stdout.write(f"Starting GitHub to UI4T migration for: {org_slug}")
+        if dry_run:
+            self.stdout.write(self.style.WARNING("DRY-RUN MODE - No changes will be saved"))
+
+        # Step 1: Validate prerequisites
+        self.stdout.write("\n=== VALIDATION ===")
+        org, orgdbt, warehouse = self._validate_prerequisites(org_slug)
+        self.stdout.write(self.style.SUCCESS("All prerequisites validated"))
+
+        # Step 2: Check if already migrated
+        self.stdout.write("\n=== CHECKING EXISTING DATA ===")
+        if self._check_existing_migration(orgdbt):
+            self.stdout.write(self.style.WARNING("Migration skipped - already done"))
+            return
+
+        # Step 3: Run migration
+        self.stdout.write("\n=== RUNNING MIGRATION ===")
+        try:
+            stats = self._run_migration(org, orgdbt, warehouse, dry_run)
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f"Migration failed: {e}"))
+            raise CommandError(str(e))
+
+        # Step 4: Report stats
+        self.stdout.write("\n=== MIGRATION COMPLETE ===")
+        self._print_stats(stats)
+
+        if not dry_run:
+            self.stdout.write(self.style.SUCCESS("\nMigration successful!"))
+        else:
+            self.stdout.write(self.style.WARNING("\nDry-run complete - no changes were saved"))
+
+    def _validate_prerequisites(self, org_slug: str) -> tuple[Org, OrgDbt, OrgWarehouse]:
+        """
+        Validate all prerequisites before migration.
+        Returns (org, orgdbt, warehouse) or raises CommandError.
+        """
+        # 1. Check Org exists
+        org = Org.objects.filter(slug=org_slug).first()
+        if not org:
+            raise CommandError(f"Organization '{org_slug}' not found")
+        self.stdout.write(f"  Org: {org.name} ({org_slug})")
+
+        # 2. Check OrgDbt exists
+        orgdbt = org.dbt
+        if not orgdbt:
+            raise CommandError(f"No DBT workspace configured for '{org_slug}'")
+        self.stdout.write(f"  OrgDbt: {orgdbt.project_dir}")
+
+        # 3. Check gitrepo_url exists (confirms it's a GitHub DBT setup)
+        if not orgdbt.gitrepo_url:
+            raise CommandError(f"No Git repo URL found. Is this a GitHub DBT org?")
+        self.stdout.write(f"  Git repo: {orgdbt.gitrepo_url}")
+
+        # 4. Check OrgWarehouse exists
+        warehouse = OrgWarehouse.objects.filter(org=org).first()
+        if not warehouse:
+            raise CommandError(f"No warehouse configured for '{org_slug}'")
+        self.stdout.write(f"  Warehouse: {warehouse.wtype}")
+
+        # 5. Check project directory exists
+        dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+        if not dbt_repo_dir.exists():
+            raise CommandError(f"DBT repo directory does not exist: {dbt_repo_dir}")
+        self.stdout.write(f"  Project dir: {dbt_repo_dir}")
+
+        return org, orgdbt, warehouse
+
+    def _check_existing_migration(self, orgdbt: OrgDbt) -> bool:
+        """
+        Check if migration was already done.
+        Returns True if CanvasNode/CanvasEdge data exists.
+        """
+        existing_nodes = CanvasNode.objects.filter(orgdbt=orgdbt).count()
+        existing_edges = CanvasEdge.objects.filter(from_node__orgdbt=orgdbt).count()
+
+        if existing_nodes > 0 or existing_edges > 0:
+            self.stdout.write(
+                f"  Found existing data: {existing_nodes} CanvasNodes, "
+                f"{existing_edges} CanvasEdges"
+            )
+            return True
+
+        self.stdout.write("  No existing canvas data found - proceeding with migration")
+        return False
+
+    def _run_migration(
+        self,
+        org: Org,
+        orgdbt: OrgDbt,
+        warehouse: OrgWarehouse,
+        dry_run: bool = False,
+    ) -> dict:
+        """
+        Run the migration within a transaction.
+        Uses existing parse_dbt_manifest_to_canvas() function.
+        """
+        try:
+            with transaction.atomic():
+                # Step 1: Generate manifest.json
+                self.stdout.write("  Generating manifest.json (dbt deps + dbt compile)...")
+                manifest_json = dbt_service.generate_manifest_json_for_dbt_project(org, orgdbt)
+
+                if not manifest_json:
+                    raise Exception("Failed to generate manifest.json")
+
+                self.stdout.write(self.style.SUCCESS("  Manifest generated successfully"))
+
+                # Step 2: Parse manifest to canvas
+                self.stdout.write("  Parsing manifest and creating canvas nodes/edges...")
+                stats = dbt_service.parse_dbt_manifest_to_canvas(
+                    org=org,
+                    orgdbt=orgdbt,
+                    org_warehouse=warehouse,
+                    manifest_json=manifest_json,
+                    refresh=False,  # Don't regenerate, we just did
+                )
+
+                # Step 3: Rollback if dry-run
+                if dry_run:
+                    transaction.set_rollback(True)
+
+                return stats
+
+        except Exception as e:
+            # Transaction will auto-rollback
+            raise Exception(f"Migration failed: {e}")
+
+    def _print_stats(self, stats: dict):
+        """Print migration statistics."""
+        self.stdout.write(f"  Sources processed: {stats.get('sources_processed', 0)}")
+        self.stdout.write(f"  Models processed: {stats.get('models_processed', 0)}")
+        self.stdout.write(f"  CanvasNodes created: {stats.get('nodes_created', 0)}")
+        self.stdout.write(f"  CanvasNodes updated: {stats.get('nodes_updated', 0)}")
+        self.stdout.write(f"  CanvasEdges created: {stats.get('edges_created', 0)}")
+        self.stdout.write(f"  CanvasEdges skipped: {stats.get('edges_skipped', 0)}")
+        self.stdout.write(f"  CanvasEdges deleted: {stats.get('edges_deleted', 0)}")
+        self.stdout.write(f"  OrgDbtModels created: {stats.get('orgdbtmodels_created', 0)}")
+        self.stdout.write(f"  OrgDbtModels updated: {stats.get('orgdbtmodels_updated', 0)}")
