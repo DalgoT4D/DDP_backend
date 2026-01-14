@@ -478,7 +478,7 @@ class GitManager:
                 continue
 
             status_code = line[:2]
-            filepath = line[3:]
+            filepath = line[2:].lstrip()
 
             # Parse git status codes
             if status_code in ["A ", "??"]:  # Added or untracked
@@ -509,7 +509,7 @@ class GitManager:
                 continue
 
             status_code = line[:2]
-            filepath = line[3:]
+            filepath = line[2:].lstrip()
 
             # Map git status codes to our status values
             if status_code in ["A ", "??"]:  # Added or untracked
