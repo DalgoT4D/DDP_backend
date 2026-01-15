@@ -3168,6 +3168,77 @@ def test_post_terminate_operation_node_with_rel_dir_to_models(
 
 
 @patch("ddpui.api.transform_api.tranverse_graph_and_return_operations_list")
+@patch("ddpui.api.transform_api.create_or_update_dbt_model_in_project_v2")
+@patch("ddpui.api.transform_api.convert_canvas_node_to_frontend_format")
+def test_post_terminate_operation_node_with_root_directory_edge_case(
+    mock_convert_canvas,
+    mock_create_dbt_model,
+    mock_tranverse_graph,
+    seed_db,
+    orguser,
+):
+    """Test post_terminate_operation_node with rel_dir_to_models='/' (root directory edge case)"""
+    request = mock_request(orguser)
+    # Create warehouse and dbt workspace
+    org_warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+    # Create operation node
+    operation_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="aggregate",
+        operation_config={"type": "aggregate"},
+        output_cols=["id", "total"],
+    )
+    # Mock function responses
+    mock_operations_list = [{"type": "aggregate", "config": {}}]
+    mock_tranverse_graph.return_value = mock_operations_list
+    mock_create_dbt_model.return_value = (Path("models/root_test_model.sql"), ["id", "total"])
+    mock_convert_canvas.return_value = {"uuid": str(uuid.uuid4())}
+
+    payload = TerminateChainAndCreateModelPayload(
+        name="root_test_model",
+        display_name="Root Test Model",
+        dest_schema="analytics",
+        rel_dir_to_models="/",  # Edge case: root directory
+    )
+
+    # Call the function
+    result = post_terminate_operation_node(request, str(operation_node.uuid), payload)
+
+    # Verify function was called with rel_dir_to_models="/"
+    expected_config = {
+        "operations": mock_operations_list,
+        "dest_schema": "analytics",
+        "output_name": "root_test_model",
+        "rel_dir_to_models": "/",
+    }
+    mock_create_dbt_model.assert_called_once_with(org_warehouse, expected_config, orgdbt)
+
+    # Verify model was created
+    dbt_model = OrgDbtModel.objects.get(orgdbt=orgdbt, name="root_test_model")
+    assert dbt_model.sql_path == "models/root_test_model.sql"
+    assert dbt_model.display_name == "Root Test Model"
+    assert dbt_model.schema == "analytics"
+
+    # Verify the result structure (just that it returns the mocked value)
+    assert "uuid" in result
+
+
+@patch("ddpui.api.transform_api.tranverse_graph_and_return_operations_list")
 def test_post_terminate_operation_node_traverse_graph_error(
     mock_tranverse_graph,
     seed_db,
