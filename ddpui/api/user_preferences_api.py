@@ -28,6 +28,7 @@ def create_user_preferences(request, payload: CreateUserPreferencesSchema):
         orguser=orguser,
         enable_email_notifications=payload.enable_email_notifications,
         disclaimer_shown=payload.disclaimer_shown,
+        last_visited_transform_tab=payload.last_visited_transform_tab,
     )
 
     return {"success": True, "res": user_preferences.to_json()}
@@ -44,6 +45,8 @@ def update_user_preferences(request, payload: UpdateUserPreferencesSchema):
         user_preferences.enable_email_notifications = payload.enable_email_notifications
     if payload.disclaimer_shown is not None:
         user_preferences.disclaimer_shown = payload.disclaimer_shown
+    if payload.last_visited_transform_tab is not None:
+        user_preferences.last_visited_transform_tab = payload.last_visited_transform_tab
     user_preferences.save()
 
     return {"success": True, "res": user_preferences.to_json()}
@@ -59,6 +62,7 @@ def get_user_preferences(request):
     res = {
         "enable_email_notifications": user_preferences.enable_email_notifications,
         "disclaimer_shown": user_preferences.disclaimer_shown,
+        "last_visited_transform_tab": user_preferences.last_visited_transform_tab,
         "is_llm_active": org_preferences.llm_optin,
         "enable_llm_requested": org_preferences.enable_llm_request,
     }

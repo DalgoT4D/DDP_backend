@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Literal
 from ninja import Schema
 
 
@@ -7,6 +7,7 @@ class CreateUserPreferencesSchema(Schema):
 
     enable_email_notifications: bool
     disclaimer_shown: Optional[bool] = None
+    last_visited_transform_tab: Optional[Literal["ui", "github"]] = None
 
 
 class UpdateUserPreferencesSchema(Schema):
@@ -14,3 +15,4 @@ class UpdateUserPreferencesSchema(Schema):
 
     enable_email_notifications: Optional[bool] = None
     disclaimer_shown: Optional[bool] = None
+    last_visited_transform_tab: Optional[Literal["ui", "github"]] = None
