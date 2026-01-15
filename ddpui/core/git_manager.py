@@ -478,7 +478,7 @@ class GitManager:
                 continue
 
             status_code = line[:2]
-            filepath = line[3:]
+            filepath = line[2:].lstrip()
 
             # Parse git status codes
             if status_code in ["A ", "??"]:  # Added or untracked
@@ -509,7 +509,7 @@ class GitManager:
                 continue
 
             status_code = line[:2]
-            filepath = line[3:]
+            filepath = line[2:].lstrip()
 
             # Map git status codes to our status values
             if status_code in ["A ", "??"]:  # Added or untracked
@@ -525,14 +525,14 @@ class GitManager:
 
         return changed_files
 
-    def get_remote_default_branch(self, remote: str = "origin") -> str:
+    def get_remote_default_branch(self, remote: str = "origin") -> str | None:
         """
         Determine the remote's default branch.
 
         1) Try `git ls-remote --symref <remote> HEAD` and parse the symbolic ref.
-        2) Fallback to GitHub API default_branch when remote is a GitHub URL and PAT is available.
+        2) Returns None if the remote is empty (no commits yet).
 
-        Raises GitManagerError on failure.
+        :return: Branch name or None if remote is empty
         """
         # Try parsing via git ls-remote --symref
         result = self._run_command(["git", "ls-remote", "--symref", remote, "HEAD"], check=False)
@@ -547,6 +547,9 @@ class GitManager:
                         if ref.startswith("refs/heads/"):
                             return ref.split("/")[-1]
 
+        # Remote is empty (no commits) - return None
+        return None
+
     def sync_local_default_to_remote(self, remote: str = "origin") -> str:
         """
         Ensure local default branch name matches remote default branch by renaming
@@ -554,10 +557,15 @@ class GitManager:
 
         This implementation only renames the local branch; it does not checkout,
         set upstream or push.
+
+        If the remote is empty (no commits), keeps the local branch name as-is.
         """
         remote_default = self.get_remote_default_branch(remote)
-
         local_current = self.get_current_branch()
+
+        # Remote is empty (new repo with no commits) - keep local branch name
+        if remote_default is None:
+            return f"remote is empty, keeping local branch '{local_current}'"
 
         if local_current == remote_default:
             return f"local branch already '{remote_default}'"

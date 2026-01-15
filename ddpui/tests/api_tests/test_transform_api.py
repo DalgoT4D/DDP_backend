@@ -830,8 +830,8 @@ def test_delete_orgdbtmodel_model_not_found(seed_db, orguser: OrgUser):
         assert str(excinfo.value) == "model not found"
 
 
-def test_delete_orgdbtmodel_cannot_delete_source(seed_db, orguser: OrgUser):
-    """Test failure when trying to delete a source model"""
+def test_delete_orgdbtmodel_source_success(seed_db, orguser: OrgUser):
+    """Test successful deletion of a source model"""
     # Setup warehouse and dbt workspace
     OrgWarehouse.objects.create(
         org=orguser.org,
@@ -859,7 +859,80 @@ def test_delete_orgdbtmodel_cannot_delete_source(seed_db, orguser: OrgUser):
         type=OrgDbtModelType.SOURCE,
         source_name="my_source",
         under_construction=False,
+        sql_path="sources/raw/sources.yml",
         uuid=uuid.uuid4(),
+    )
+
+    request = mock_request(orguser)
+
+    # Mock validate_canvas_lock and delete_dbt_source_in_project
+    with patch("ddpui.api.transform_api.validate_canvas_lock"), patch(
+        "ddpui.core.dbtautomation_service.delete_dbt_source_in_project"
+    ) as mock_delete_source:
+        result = delete_orgdbtmodel(request, str(source_model.uuid))
+
+        # Verify the source deletion function was called with a model that has the same UUID
+        mock_delete_source.assert_called_once()
+        called_model = mock_delete_source.call_args[0][0]
+        assert called_model.uuid == source_model.uuid
+        assert called_model.type == OrgDbtModelType.SOURCE
+
+        # Verify the database record was deleted
+        assert not OrgDbtModel.objects.filter(uuid=source_model.uuid).exists()
+
+        # Verify the response
+        assert result == {"success": 1}
+
+
+def test_delete_orgdbtmodel_with_canvas_dependencies(seed_db, orguser: OrgUser):
+    """Test failure when trying to delete a model that is used in canvas workflow"""
+    from ddpui.models.canvas_models import CanvasNode, CanvasNodeType
+
+    # Setup warehouse and dbt workspace
+    OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    # Create a model
+    model = OrgDbtModel.objects.create(
+        orgdbt=orgdbt,
+        name="test_model",
+        display_name="Test Model",
+        schema="public",
+        type=OrgDbtModelType.MODEL,
+        under_construction=False,
+        sql_path="models/test_model.sql",
+        uuid=uuid.uuid4(),
+    )
+
+    # Create a canvas node that references this model (simulating it being used in workflow)
+    canvas_node1 = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        dbtmodel=model,
+        node_type=CanvasNodeType.MODEL,
+        name="workflow_node_1",
+        output_cols=[],
+    )
+
+    canvas_node2 = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        dbtmodel=model,
+        node_type=CanvasNodeType.MODEL,
+        name="workflow_node_2",
+        output_cols=[],
     )
 
     request = mock_request(orguser)
@@ -867,9 +940,11 @@ def test_delete_orgdbtmodel_cannot_delete_source(seed_db, orguser: OrgUser):
     # Mock validate_canvas_lock to pass
     with patch("ddpui.api.transform_api.validate_canvas_lock"):
         with pytest.raises(HttpError) as excinfo:
-            delete_orgdbtmodel(request, str(source_model.uuid))
+            delete_orgdbtmodel(request, str(model.uuid))
 
-        assert str(excinfo.value) == "Cannot delete source model"
+        # Should fail with dependency error and show node names
+        assert "Cannot delete: being used in the workflow" in str(excinfo.value)
+        assert "workflow_node_1" in str(excinfo.value)
 
 
 def test_delete_orgdbtmodel_success(seed_db, orguser: OrgUser):
@@ -906,14 +981,20 @@ def test_delete_orgdbtmodel_success(seed_db, orguser: OrgUser):
 
     request = mock_request(orguser)
 
-    # Mock both validate_canvas_lock and delete_org_dbt_model_v2
+    # Mock validate_canvas_lock and delete_dbt_model_in_project
     with patch("ddpui.api.transform_api.validate_canvas_lock"), patch(
-        "ddpui.core.dbtautomation_service.delete_org_dbt_model_v2"
-    ) as mock_delete:
+        "ddpui.core.dbtautomation_service.delete_dbt_model_in_project"
+    ) as mock_delete_file:
         result = delete_orgdbtmodel(request, str(model.uuid))
 
-        # Verify the service function was called with correct parameters
-        mock_delete.assert_called_once_with(model, False)
+        # Verify the file deletion function was called with a model that has the same UUID
+        mock_delete_file.assert_called_once()
+        called_model = mock_delete_file.call_args[0][0]
+        assert called_model.uuid == model.uuid
+        assert called_model.type == OrgDbtModelType.MODEL
+
+        # Verify the database record was deleted
+        assert not OrgDbtModel.objects.filter(uuid=model.uuid).exists()
 
         # Verify the response
         assert result == {"success": 1}
@@ -3165,6 +3246,77 @@ def test_post_terminate_operation_node_with_rel_dir_to_models(
     # Verify model was created
     dbt_model = OrgDbtModel.objects.get(orgdbt=orgdbt, name="test_model")
     assert dbt_model.sql_path == "custom/models/test_model.sql"
+
+
+@patch("ddpui.api.transform_api.tranverse_graph_and_return_operations_list")
+@patch("ddpui.api.transform_api.create_or_update_dbt_model_in_project_v2")
+@patch("ddpui.api.transform_api.convert_canvas_node_to_frontend_format")
+def test_post_terminate_operation_node_with_root_directory_edge_case(
+    mock_convert_canvas,
+    mock_create_dbt_model,
+    mock_tranverse_graph,
+    seed_db,
+    orguser,
+):
+    """Test post_terminate_operation_node with rel_dir_to_models='/' (root directory edge case)"""
+    request = mock_request(orguser)
+    # Create warehouse and dbt workspace
+    org_warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="test_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="test_project_dir",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+    # Create operation node
+    operation_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="aggregate",
+        operation_config={"type": "aggregate"},
+        output_cols=["id", "total"],
+    )
+    # Mock function responses
+    mock_operations_list = [{"type": "aggregate", "config": {}}]
+    mock_tranverse_graph.return_value = mock_operations_list
+    mock_create_dbt_model.return_value = (Path("models/root_test_model.sql"), ["id", "total"])
+    mock_convert_canvas.return_value = {"uuid": str(uuid.uuid4())}
+
+    payload = TerminateChainAndCreateModelPayload(
+        name="root_test_model",
+        display_name="Root Test Model",
+        dest_schema="analytics",
+        rel_dir_to_models="/",  # Edge case: root directory
+    )
+
+    # Call the function
+    result = post_terminate_operation_node(request, str(operation_node.uuid), payload)
+
+    # Verify function was called with rel_dir_to_models="/"
+    expected_config = {
+        "operations": mock_operations_list,
+        "dest_schema": "analytics",
+        "output_name": "root_test_model",
+        "rel_dir_to_models": "/",
+    }
+    mock_create_dbt_model.assert_called_once_with(org_warehouse, expected_config, orgdbt)
+
+    # Verify model was created
+    dbt_model = OrgDbtModel.objects.get(orgdbt=orgdbt, name="root_test_model")
+    assert dbt_model.sql_path == "models/root_test_model.sql"
+    assert dbt_model.display_name == "Root Test Model"
+    assert dbt_model.schema == "analytics"
+
+    # Verify the result structure (just that it returns the mocked value)
+    assert "uuid" in result
 
 
 @patch("ddpui.api.transform_api.tranverse_graph_and_return_operations_list")

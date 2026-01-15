@@ -32,8 +32,10 @@ class dbtProject:  # pylint:disable=invalid-name
 
     def write_model(self, schema: str, modelname: str, model_sql: str, **kwargs) -> None:
         """writes a .sql model"""
-        if kwargs.get("rel_dir_to_models"):
-            self.ensure_models_dir(kwargs.get("rel_dir_to_models"))
+        rel_dir_to_models = kwargs.get("rel_dir_to_models")
+
+        if rel_dir_to_models is not None:
+            self.ensure_models_dir(rel_dir_to_models)
         else:
             self.ensure_models_dir(schema, kwargs.get("subdir", ""))
 
@@ -42,10 +44,8 @@ class dbtProject:  # pylint:disable=invalid-name
             + model_sql
         )
 
-        if kwargs.get("rel_dir_to_models"):
-            model_filename = Path(self.models_dir(kwargs.get("rel_dir_to_models"))) / (
-                modelname + ".sql"
-            )
+        if rel_dir_to_models is not None:
+            model_filename = Path(self.models_dir(rel_dir_to_models)) / (modelname + ".sql")
         else:
             model_filename = Path(self.models_dir(schema, kwargs.get("subdir", ""))) / (
                 modelname + ".sql"

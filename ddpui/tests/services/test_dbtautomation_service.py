@@ -156,7 +156,7 @@ def test_delete_org_dbt_source_success(
     mock_delete_dbt_source_in_project.assert_called_once_with(orgdbt_source)
 
 
-@patch("ddpui.core.dbtautomation_service.generate_source_definitions_yaml")
+@patch("ddpui.core.dbtautomation_service.upsert_multiple_sources_to_a_yaml")
 @patch("ddpui.core.dbtautomation_service.read_sources_from_yaml")
 @patch("ddpui.core.dbtautomation_service.DbtProjectManager.get_dbt_project_dir")
 @patch("ddpui.core.dbtautomation_service.Path")
@@ -164,7 +164,7 @@ def test_delete_dbt_source_in_project_success(
     mock_path: Mock,
     mock_get_dbt_project_dir: Mock,
     mock_read_sources_from_yaml: Mock,
-    mock_generate_source_definitions_yaml: Mock,
+    mock_upsert_multiple_sources_to_a_yaml: Mock,
     orgdbt_source: OrgDbtModel,
 ):
     """Test that the function deletes the dbt source in the project"""
@@ -189,27 +189,36 @@ def test_delete_dbt_source_in_project_success(
     delete_dbt_source_in_project(orgdbt_source)
 
     mock_read_sources_from_yaml.assert_called_once()
-    mock_generate_source_definitions_yaml.assert_called_once_with(
-        orgdbt_source.source_name,
-        orgdbt_source.schema,
-        [src["input_name"] for src in schema_srcs if src["source_name"] != orgdbt_source.name],
-        ANY,  # dbtProject object
+
+    # Verify the new function was called with the expected sources_groups structure
+    expected_sources_groups = {}
+    for src in schema_srcs:
+        if src["source_name"] != orgdbt_source.name:  # Filtered sources
+            source_name = src["source_name"]
+            schema = src["schema"]
+            table_name = src["input_name"]
+
+            if source_name not in expected_sources_groups:
+                expected_sources_groups[source_name] = {}
+            if schema not in expected_sources_groups[source_name]:
+                expected_sources_groups[source_name][schema] = []
+            expected_sources_groups[source_name][schema].append(table_name)
+
+    mock_upsert_multiple_sources_to_a_yaml.assert_called_once_with(
+        sources_groups=expected_sources_groups,
+        dbt_project=ANY,  # dbtProject object
         rel_dir_to_models=ANY,  # Path(...).parent.relative_to("models")
     )
 
 
 # Integration tests for delete_dbt_source_in_project with actual YAML files
 def test_delete_dbt_source_integration_update_yaml(orgdbt_source, tmp_path):
-    """Test that deleting a source calls generate_source_definitions_yaml correctly
-
-    NOTE: This test reveals that generate_source_definitions_yaml doesn't properly
-    handle source deletion - it merges the existing YAML with new definitions rather
-    than replacing them. This is a known issue with the underlying function.
+    """Test that deleting a source updates the YAML file correctly
 
     The test validates that:
     1. The function executes without errors
-    2. The YAML file is not deleted (since multiple tables exist)
-    3. generate_source_definitions_yaml is called with correct parameters
+    2. The YAML file is properly updated with remaining sources
+    3. upsert_multiple_sources_to_a_yaml is called with correct parameters
     """
 
     # Create temporary DBT project structure
@@ -259,7 +268,7 @@ def test_delete_dbt_source_integration_update_yaml(orgdbt_source, tmp_path):
         assert sources_yaml_path.exists()
 
         # Verify the function executed the update path
-        # (The actual source deletion doesn't work due to generate_source_definitions_yaml merging behavior)
+        # (Source deletion now works correctly with the new upsert function)
 
 
 def test_delete_dbt_source_integration_delete_yaml_file(orgdbt_source, tmp_path):
@@ -295,12 +304,10 @@ def test_delete_dbt_source_integration_delete_yaml_file(orgdbt_source, tmp_path)
     # Verify file exists before deletion
     assert sources_yaml_path.exists()
 
-    # Mock DbtProjectManager and dbtProject.delete_model
+    # Mock DbtProjectManager
     with patch(
         "ddpui.core.dbtautomation_service.DbtProjectManager.get_dbt_project_dir"
-    ) as mock_get_dir, patch(
-        "ddpui.dbt_automation.utils.dbtproject.dbtProject.delete_model"
-    ) as mock_delete:
+    ) as mock_get_dir:
         mock_get_dir.return_value = str(dbt_project_dir)
 
         # Call the function
@@ -309,8 +316,8 @@ def test_delete_dbt_source_integration_delete_yaml_file(orgdbt_source, tmp_path)
         # Verify the function succeeded
         assert result is True
 
-        # Verify dbtProject.delete_model was called to remove the file
-        mock_delete.assert_called_once_with("models/staging/sources.yml")
+        # Verify the YAML file was actually deleted
+        assert not sources_yaml_path.exists()
 
 
 def test_delete_dbt_source_integration_file_not_exists(orgdbt_source, tmp_path):
@@ -385,6 +392,88 @@ def test_delete_dbt_source_integration_source_not_in_yaml(orgdbt_source, tmp_pat
 
         # Content should be identical to original
         assert unchanged_content == sources_yaml_content
+
+
+def test_delete_dbt_source_edge_case_same_table_different_schemas(orgdbt_source, tmp_path):
+    """Test that delete_dbt_source correctly handles sources with same table name but different schemas"""
+
+    # Create temporary DBT project structure
+    dbt_project_dir = tmp_path / "test_dbt_project"
+    models_dir = dbt_project_dir / "models" / "staging"
+    models_dir.mkdir(parents=True)
+
+    # Create a sources YAML file with same table name in different schemas
+    sources_yaml_content = {
+        "version": 2,
+        "sources": [
+            {
+                "name": "production_schema",
+                "schema": "production",
+                "tables": [{"identifier": "users"}, {"identifier": "orders"}],  # Same table name
+            },
+            {
+                "name": "staging_schema",
+                "schema": "staging",
+                "tables": [
+                    {"identifier": "users"},  # Same table name, different schema
+                    {"identifier": "products"},
+                ],
+            },
+        ],
+    }
+
+    sources_yaml_path = models_dir / "sources.yml"
+    with open(sources_yaml_path, "w") as f:
+        yaml.safe_dump(sources_yaml_content, f)
+
+    # Update orgdbt_source to target the staging.users table specifically
+    orgdbt_source.sql_path = "models/staging/sources.yml"
+    orgdbt_source.name = "users"  # Same table name exists in both schemas
+    orgdbt_source.schema = "staging"  # But we only want to delete from staging schema
+    orgdbt_source.save()
+
+    # Mock DbtProjectManager
+    with patch(
+        "ddpui.core.dbtautomation_service.DbtProjectManager.get_dbt_project_dir"
+    ) as mock_get_dir:
+        mock_get_dir.return_value = str(dbt_project_dir)
+
+        # Call the function
+        result = delete_dbt_source_in_project(orgdbt_source)
+
+        # Verify the function succeeded
+        assert result is True
+
+        # Verify the YAML content was updated correctly
+        with open(sources_yaml_path, "r") as f:
+            updated_content = yaml.safe_load(f)
+
+        # Should still have 2 sources
+        assert len(updated_content["sources"]) == 2
+
+        # Find the production schema source
+        production_source = None
+        staging_source = None
+        for source in updated_content["sources"]:
+            if source["schema"] == "production":
+                production_source = source
+            elif source["schema"] == "staging":
+                staging_source = source
+
+        # Production schema should be unchanged - still has users table
+        assert production_source is not None
+        assert production_source["name"] == "production_schema"
+        assert len(production_source["tables"]) == 2
+        table_names = [table["identifier"] for table in production_source["tables"]]
+        assert "users" in table_names  # users table should still exist in production
+        assert "orders" in table_names
+
+        # Staging schema should have users table removed, but products table preserved
+        assert staging_source is not None
+        assert staging_source["name"] == "staging_schema"
+        assert len(staging_source["tables"]) == 1
+        remaining_table = staging_source["tables"][0]
+        assert remaining_table["identifier"] == "products"  # Only products should remain
 
 
 # Tests for convert_canvas_node_to_frontend_format
@@ -796,7 +885,7 @@ def test_ensure_source_yml_definition_existing_source_found(
 
 
 @patch("ddpui.core.dbtautomation_service.read_dbt_sources_in_project")
-@patch("ddpui.core.dbtautomation_service.generate_source_definitions_yaml")
+@patch("ddpui.core.dbtautomation_service.upsert_multiple_sources_to_a_yaml")
 @patch("ddpui.core.dbtautomation_service.DbtProjectManager.get_dbt_project_dir")
 def test_ensure_source_yml_definition_create_new_source(
     mock_get_dir: Mock, mock_generate: Mock, mock_read_dbt_sources: Mock, orgdbt: OrgDbt
@@ -822,8 +911,11 @@ def test_ensure_source_yml_definition_create_new_source(
     # Verify mocks were called correctly
     mock_read_dbt_sources.assert_called_once_with(orgdbt)
     mock_get_dir.assert_called_once_with(orgdbt)
+    expected_sources_groups = {schema: {schema: [table]}}  # source_name -> {schema -> [tables]}
     mock_generate.assert_called_once_with(
-        schema, schema, [table], ANY, rel_dir_to_models="sources"  # dbtProject instance
+        sources_groups=expected_sources_groups,
+        dbt_project=ANY,  # dbtProject instance
+        rel_dir_to_models="sources",
     )
 
 
@@ -862,7 +954,7 @@ def test_ensure_source_yml_definition_no_match_different_criteria(
     mock_read_dbt_sources.return_value = existing_sources
 
     with patch(
-        "ddpui.core.dbtautomation_service.generate_source_definitions_yaml"
+        "ddpui.core.dbtautomation_service.upsert_multiple_sources_to_a_yaml"
     ) as mock_generate, patch(
         "ddpui.core.dbtautomation_service.DbtProjectManager.get_dbt_project_dir"
     ) as mock_get_dir:
