@@ -39,7 +39,6 @@ from ddpui.dbt_automation.operations.mergeoperations import (
 )
 from ddpui.dbt_automation.operations.syncsources import (
     sync_sources,
-    generate_source_definitions_yaml,
 )
 from ddpui.dbt_automation.operations.joins import join, joins_sql
 from ddpui.dbt_automation.operations.groupby import groupby, groupby_dbt_sql
@@ -73,6 +72,238 @@ from ddpui.utils.helpers import map_airbyte_keys_to_postgres_keys
 from ddpui.celery import app
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.core.orgdbt_manager import DbtProjectManager
+from pydantic import BaseModel, validator
+from typing import Dict, List
+import yaml
+
+
+# Pydantic models for source validation
+class SourceGrouping(BaseModel):
+    """
+    Validates the structure of source groupings for DBT YAML generation
+
+    Expected structure:
+    {
+        "source_name_1": {
+            "schema_1": ["table1", "table2"],
+            "schema_2": ["table3"]
+        },
+        "source_name_2": {
+            "schema_3": ["table4", "table5"],
+            "schema_4": []  # Empty list is allowed - will be filtered out
+        }
+    }
+    """
+
+    sources: Dict[str, Dict[str, List[str]]]
+
+    @validator("sources")
+    def validate_sources_structure(cls, v):
+        """Validate that sources structure is correct"""
+        if not isinstance(v, dict):
+            raise ValueError("Sources must be a dictionary")
+
+        for source_name, schemas in v.items():
+            if not isinstance(source_name, str) or not source_name.strip():
+                raise ValueError(f"Source name must be a non-empty string, got: {source_name}")
+
+            if not isinstance(schemas, dict):
+                raise ValueError(f"Schemas for source '{source_name}' must be a dictionary")
+
+            for schema_name, tables in schemas.items():
+                if not isinstance(schema_name, str) or not schema_name.strip():
+                    raise ValueError(f"Schema name must be a non-empty string, got: {schema_name}")
+
+                if not isinstance(tables, list):
+                    raise ValueError(f"Tables for schema '{schema_name}' must be a list")
+
+                # Empty table list is allowed - will be filtered out during YAML generation
+                for table in tables:
+                    if not isinstance(table, str) or not table.strip():
+                        raise ValueError(f"Table name must be a non-empty string, got: {table}")
+
+        return v
+
+    @validator("sources")
+    def validate_unique_schema_table_pairs(cls, v):
+        """Validate that each (schema, table) combination appears only once across all sources"""
+        seen_schema_table_pairs = set()
+
+        for source_name, schemas in v.items():
+            for schema_name, tables in schemas.items():
+                for table in tables:
+                    schema_table_pair = (schema_name, table)
+
+                    if schema_table_pair in seen_schema_table_pairs:
+                        raise ValueError(
+                            f"Duplicate (schema, table) combination found: {schema_table_pair}. "
+                            f"Each table must be unique within its schema across all sources."
+                        )
+
+                    seen_schema_table_pairs.add(schema_table_pair)
+
+        return v
+
+
+def merge_source_groupings(
+    existing_sources: SourceGrouping, new_sources: SourceGrouping
+) -> SourceGrouping:
+    """
+    Merge two SourceGrouping objects, combining tables for matching (source_name, schema) pairs
+
+    Args:
+        existing_sources: Existing SourceGrouping with current sources
+        new_sources: New SourceGrouping to merge in
+
+    Returns:
+        SourceGrouping: Merged result with combined sources and tables
+    """
+    # Start with a copy of existing sources
+    merged_sources = {}
+
+    # Add all existing sources first
+    for source_name, schemas in existing_sources.sources.items():
+        merged_sources[source_name] = {}
+        for schema_name, tables in schemas.items():
+            # Copy existing tables
+            merged_sources[source_name][schema_name] = list(tables)
+
+    # Merge in new sources
+    for source_name, schemas in new_sources.sources.items():
+        if source_name not in merged_sources:
+            merged_sources[source_name] = {}
+
+        for schema_name, tables in schemas.items():
+            if schema_name in merged_sources[source_name]:
+                # Merge tables - combine and deduplicate
+                existing_tables = set(merged_sources[source_name][schema_name])
+                new_tables = set(tables)
+                merged_tables = list(existing_tables | new_tables)  # Union removes duplicates
+                merged_sources[source_name][schema_name] = sorted(merged_tables)
+                logger.info(
+                    f"Merged tables for source '{source_name}' schema '{schema_name}': "
+                    f"{len(existing_tables)} existing + {len(new_tables)} new = {len(merged_tables)} total"
+                )
+            else:
+                # New schema for this source - add all tables
+                merged_sources[source_name][schema_name] = list(tables)
+                logger.info(
+                    f"Added new schema '{schema_name}' to source '{source_name}' "
+                    f"with {len(tables)} tables"
+                )
+
+    # Return validated merged result
+    return SourceGrouping(sources=merged_sources)
+
+
+def upsert_multiple_sources_to_a_yaml(
+    sources_groups: Dict[str, Dict[str, List[str]]],
+    dbt_project: "dbtProject",
+    rel_dir_to_models: str,
+) -> str:
+    """
+    Upsert multiple sources to a YAML file - creates new file or merges with existing
+
+    Args:
+        sources_groups: Dictionary of source_name -> {schema -> [tables]}
+        dbt_project: dbtProject instance
+        rel_dir_to_models: Relative directory path from models directory
+
+    Returns:
+        str: Path to the generated/updated sources file relative to project root
+    """
+    # Validate the new sources using Pydantic
+    new_sources = SourceGrouping(sources=sources_groups)
+
+    # Filter out sources with empty table lists
+    filtered_sources = {}
+    for source_name, schemas in new_sources.sources.items():
+        filtered_schemas = {
+            schema_name: tables
+            for schema_name, tables in schemas.items()
+            if tables  # Only include schemas with non-empty table lists
+        }
+
+        # Only include the source if it has at least one schema with tables
+        if filtered_schemas:
+            filtered_sources[source_name] = filtered_schemas
+
+    if not filtered_sources:
+        logger.warning("No sources with tables to upsert to YAML")
+        return None
+
+    # Create filtered SourceGrouping for processing
+    filtered_new_sources = SourceGrouping(sources=filtered_sources)
+
+    # Determine the target file path using provided rel_dir_to_models
+    source_dir = dbt_project.models_dir(rel_dir_to_models)
+    sources_file = dbt_project.sources_filename(rel_dir_to_models)
+
+    # Ensure the directory exists
+    if not source_dir.exists():
+        source_dir.mkdir(parents=True)
+        logger.info(f"Created source directory {source_dir}")
+
+    # Determine final sources to write
+    if sources_file.exists():
+        # File exists - read existing and merge
+        with open(sources_file, "r", encoding="utf-8") as infile:
+            existing_yaml = yaml.safe_load(infile) or {}
+
+        existing_sources_data = {}
+        for source in existing_yaml.get("sources", []):
+            source_name = source.get("name")
+            schema_name = source.get("schema")
+            # Extract table identifiers from existing YAML (could be either format)
+            tables = []
+            for table in source.get("tables", []):
+                if isinstance(table, dict):
+                    # New format with name/identifier/description
+                    table_id = table.get("identifier") or table.get("name")
+                    if table_id:
+                        tables.append(table_id)
+                elif isinstance(table, str):
+                    # Old format where table is just a string
+                    tables.append(table)
+
+            if source_name not in existing_sources_data:
+                existing_sources_data[source_name] = {}
+            existing_sources_data[source_name][schema_name] = tables
+
+        existing_sources = SourceGrouping(sources=existing_sources_data)
+        logger.info(f"Found existing sources YAML, merging with new sources")
+
+        # Merge existing and new sources
+        final_sources = merge_source_groupings(existing_sources, filtered_new_sources)
+
+        # Preserve existing YAML structure (version, etc.)
+        yaml_content = existing_yaml
+    else:
+        # File doesn't exist - create new
+        logger.info("Creating new sources YAML file")
+        final_sources = filtered_new_sources
+        yaml_content = {"version": 2}
+
+    # Build the sources list for YAML
+    yaml_content["sources"] = []
+    for source_name, schemas in final_sources.sources.items():
+        for schema_name, tables in schemas.items():
+            source_def = {
+                "name": source_name,
+                "schema": schema_name,
+                "tables": [
+                    {"name": table, "identifier": table, "description": ""} for table in tables
+                ],
+            }
+            yaml_content["sources"].append(source_def)
+
+    # Write the YAML file
+    with open(sources_file, "w", encoding="utf-8") as outfile:
+        yaml.safe_dump(yaml_content, outfile, sort_keys=False)
+        logger.info(f"Upserted source definitions to {sources_file}")
+
+    return dbt_project.strip_project_dir(sources_file)
+
 
 OPERATIONS_DICT = {
     "flatten": flatten_operation,
@@ -298,31 +529,65 @@ def delete_dbt_source_in_project(orgdbt_model: OrgDbtModel):
     src_tables: list[dict] = read_sources_from_yaml(dbt_project_dir, sources_yml_rel_path)
 
     filtered_src_tables: list[dict] = [
-        src_table for src_table in src_tables if src_table["input_name"] != orgdbt_model.name
+        src_table
+        for src_table in src_tables
+        if not (
+            src_table["input_name"] == orgdbt_model.name
+            and src_table["schema"] == orgdbt_model.schema
+        )
     ]
 
-    # if there are sources & there is diff; update the sources.yml
-    if len(src_tables) > 0 and len(src_tables) != len(filtered_src_tables):
-        src_yml_path = generate_source_definitions_yaml(
-            orgdbt_model.source_name,
-            orgdbt_model.schema,
-            [src["input_name"] for src in filtered_src_tables],
-            dbtProject(Path(DbtProjectManager.get_dbt_project_dir(orgdbt_model.orgdbt))),
-            rel_dir_to_models=str(Path(sources_yml_rel_path).parent.relative_to("models")),
+    # Check if we actually found and removed the target table
+    if len(src_tables) == len(filtered_src_tables):
+        logger.warning(
+            f"Table '{orgdbt_model.name}' not found in schema '{orgdbt_model.schema}' "
+            f"in {sources_yml_rel_path}"
         )
+        return True
 
-        logger.info(
-            f"Updated the source definition yml at {src_yml_path} by removing the src table"
-        )
-
+    # If no sources left after filtering, delete the entire file
     if len(filtered_src_tables) == 0:
         logger.info(
             f"No sources left in the source yml file at {sources_yml_rel_path}. Deleting it."
         )
-        # delete the sources yml file
-        dbt_project = dbtProject(Path(DbtProjectManager.get_dbt_project_dir(orgdbt_model.orgdbt)))
-        dbt_project.delete_model(sources_yml_rel_path)
+        sources_yml_full_path = Path(dbt_project_dir) / sources_yml_rel_path
+        sources_yml_full_path.unlink()
         logger.info(f"Deleted the source yml file at {sources_yml_rel_path}")
+        return True
+
+    # Group the remaining tables by source_name, preserving (schema, table) pairs under each source
+    # A single source_name can have tables from multiple schemas
+    sources_groups = {}
+    for src_table in filtered_src_tables:
+        source_name = src_table["source_name"]
+        schema = src_table["schema"]
+        table_name = src_table["input_name"]
+
+        if source_name not in sources_groups:
+            sources_groups[source_name] = {}
+
+        if schema not in sources_groups[source_name]:
+            sources_groups[source_name][schema] = []
+
+        sources_groups[source_name][schema].append(table_name)
+
+    # Regenerate the file with all remaining sources using the upsert function
+    dbt_project = dbtProject(Path(dbt_project_dir))
+    rel_dir_to_models = str(Path(sources_yml_rel_path).parent.relative_to("models"))
+
+    # Clear the file first since we want complete replacement, not merging
+    # The upsert function would merge with existing content, but we want to replace entirely
+    sources_yml_full_path = Path(dbt_project_dir) / sources_yml_rel_path
+    sources_yml_full_path.unlink()
+
+    # Use upsert function to create the YAML with only the remaining sources
+    upsert_multiple_sources_to_a_yaml(
+        sources_groups=sources_groups, dbt_project=dbt_project, rel_dir_to_models=rel_dir_to_models
+    )
+
+    logger.info(
+        f"Updated the source definition yml at {sources_yml_rel_path} by removing the src table"
+    )
 
     return True
 
@@ -591,11 +856,10 @@ def ensure_source_yml_definition_in_project(
             )
 
     # create the source definition as it does not exist
-    source_yml_path = generate_source_definitions_yaml(
-        schema,
-        schema,
-        [table],
-        dbtProject(Path(DbtProjectManager.get_dbt_project_dir(orgdbt))),
+    sources_groups = {schema: {schema: [table]}}  # source_name  # schema -> [tables]
+    source_yml_path = upsert_multiple_sources_to_a_yaml(
+        sources_groups=sources_groups,
+        dbt_project=dbtProject(Path(DbtProjectManager.get_dbt_project_dir(orgdbt))),
         rel_dir_to_models="sources",  # by default we create new sources in models/sources/sources.yml
     )
 
