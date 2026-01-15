@@ -175,7 +175,8 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
                 orgslug=orguser.org.slug,
                 deployment_params={"config": {"tasks": tasks, "org_slug": orguser.org.slug}},
                 cron=payload.cron,
-            )
+            ),
+            orguser.org.prefect_ddp_sync_queue,
         )
     except Exception as error:
         logger.exception(error)

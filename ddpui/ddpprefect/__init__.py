@@ -53,6 +53,7 @@ MAP_FLOW_RUN_STATE_NAME_TO_TYPE = {
 # Prefect worker related
 DDP_WORK_QUEUE = "ddp"
 MANUL_DBT_WORK_QUEUE = "manual-dbt"
+BOOTCAMP_DDP_QUEUE = "bootcamp-ddp"
 
 # Kind
 FLOW_RUN_KIND = "flow-run"

@@ -89,6 +89,11 @@ class Org(models.Model):
     ses_whitelisted_email = models.TextField(max_length=100, null=True)
     dalgouser_superset_creds_key = models.TextField(null=True)
     website = models.CharField(max_length=1000, null=True)
+    prefect_ddp_sync_queue = models.CharField(
+        max_length=100,
+        default="bootcamp-ddp",
+        help_text="Work queue for Airbyte/pipeline deployments. New orgs default to 'bootcamp-ddp'.",
+    )
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 

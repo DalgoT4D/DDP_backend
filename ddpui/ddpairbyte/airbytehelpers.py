@@ -205,7 +205,8 @@ def create_airbyte_deployment(org: Org, org_task: OrgTask, server_block: OrgPref
                     "tasks": [setup_airbyte_sync_task_config(org_task, server_block).to_json()],
                 }
             },
-        )
+        ),
+        org.prefect_ddp_sync_queue,
     )
 
     existing_dataflow = OrgDataFlowv1.objects.filter(
