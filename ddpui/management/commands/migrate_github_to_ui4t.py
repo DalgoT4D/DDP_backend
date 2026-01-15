@@ -17,6 +17,8 @@ from django.db import transaction
 
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse, TransformType
 from ddpui.models.canvas_models import CanvasNode, CanvasEdge
+from ddpui.models.org_user import OrgUser
+from ddpui.models.userpreferences import UserPreferences
 from ddpui.ddpdbt import dbt_service
 from ddpui.ddpdbt.dbt_service import DbtProjectManager
 
@@ -36,10 +38,18 @@ class Command(BaseCommand):
             action="store_true",
             help="Run migration without saving changes",
         )
+        parser.add_argument(
+            "--usertabpreference",
+            type=str,
+            required=True,
+            choices=["github", "ui"],
+            help="User tab preference to set for all org users (github or ui)",
+        )
 
     def handle(self, *args, **options):
         org_slug = options["org"]
         dry_run = options["dry_run"]
+        usertabpreference = options["usertabpreference"]
 
         self.stdout.write(f"Starting GitHub to UI4T migration for: {org_slug}")
         if dry_run:
@@ -59,7 +69,7 @@ class Command(BaseCommand):
         # Step 3: Run migration
         self.stdout.write("\n=== RUNNING MIGRATION ===")
         try:
-            stats = self._run_migration(org, orgdbt, warehouse, dry_run)
+            stats = self._run_migration(org, orgdbt, warehouse, dry_run, usertabpreference)
         except Exception as e:
             self.stdout.write(self.style.ERROR(f"Migration failed: {e}"))
             raise CommandError(str(e))
@@ -133,6 +143,7 @@ class Command(BaseCommand):
         orgdbt: OrgDbt,
         warehouse: OrgWarehouse,
         dry_run: bool = False,
+        usertabpreference: str = "github",
     ) -> dict:
         """
         Run the migration within a transaction.
@@ -164,7 +175,10 @@ class Command(BaseCommand):
                 orgdbt.transform_type = TransformType.GIT.value
                 orgdbt.save()
 
-                # Step 4: Rollback if dry-run
+                # Step 4: Save user tab preference for all org users
+                self._save_user_tab_preference(org, usertabpreference)
+
+                # Step 5: Rollback if dry-run
                 if dry_run:
                     transaction.set_rollback(True)
 
@@ -185,3 +199,27 @@ class Command(BaseCommand):
         self.stdout.write(f"  CanvasEdges deleted: {stats.get('edges_deleted', 0)}")
         self.stdout.write(f"  OrgDbtModels created: {stats.get('orgdbtmodels_created', 0)}")
         self.stdout.write(f"  OrgDbtModels updated: {stats.get('orgdbtmodels_updated', 0)}")
+
+    def _save_user_tab_preference(self, org: Org, preference: str):
+        """Save user tab preference for all OrgUsers in the organization."""
+        self.stdout.write(f"  Setting user tab preference to '{preference}' for all org users...")
+
+        org_users = OrgUser.objects.filter(org=org)
+        total_users = org_users.count()
+        updated_count = 0
+
+        self.stdout.write(f"  Found {total_users} user(s) in organization")
+
+        for org_user in org_users:
+            user_pref, created = UserPreferences.objects.get_or_create(orguser=org_user)
+            user_pref.last_visited_transform_tab = preference
+            user_pref.save()
+            updated_count += 1
+            action = "Created" if created else "Updated"
+            self.stdout.write(f"    {action} preference for user: {org_user.user.email}")
+
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"  Updated tab preference for {updated_count}/{total_users} user(s)"
+            )
+        )
