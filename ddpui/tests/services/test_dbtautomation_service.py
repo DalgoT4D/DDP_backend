@@ -213,16 +213,12 @@ def test_delete_dbt_source_in_project_success(
 
 # Integration tests for delete_dbt_source_in_project with actual YAML files
 def test_delete_dbt_source_integration_update_yaml(orgdbt_source, tmp_path):
-    """Test that deleting a source calls generate_source_definitions_yaml correctly
-
-    NOTE: This test reveals that generate_source_definitions_yaml doesn't properly
-    handle source deletion - it merges the existing YAML with new definitions rather
-    than replacing them. This is a known issue with the underlying function.
+    """Test that deleting a source updates the YAML file correctly
 
     The test validates that:
     1. The function executes without errors
-    2. The YAML file is not deleted (since multiple tables exist)
-    3. generate_source_definitions_yaml is called with correct parameters
+    2. The YAML file is properly updated with remaining sources
+    3. upsert_multiple_sources_to_a_yaml is called with correct parameters
     """
 
     # Create temporary DBT project structure
@@ -272,7 +268,7 @@ def test_delete_dbt_source_integration_update_yaml(orgdbt_source, tmp_path):
         assert sources_yaml_path.exists()
 
         # Verify the function executed the update path
-        # (The actual source deletion doesn't work due to generate_source_definitions_yaml merging behavior)
+        # (Source deletion now works correctly with the new upsert function)
 
 
 def test_delete_dbt_source_integration_delete_yaml_file(orgdbt_source, tmp_path):

@@ -5,7 +5,6 @@ from ninja import Schema
 
 from django.db.models import Q
 from ninja.errors import HttpError
-from django.forms.models import model_to_dict
 from ddpui.dbt_automation.operations.arithmetic import arithmetic, arithmetic_dbt_sql
 from ddpui.dbt_automation.operations.castdatatypes import cast_datatypes, cast_datatypes_sql
 from ddpui.dbt_automation.operations.coalescecolumns import (
@@ -34,11 +33,7 @@ from ddpui.dbt_automation.operations.regexextraction import (
 from ddpui.dbt_automation.operations.mergeoperations import (
     merge_operations,
     merge_operations_sql,
-    merge_operations_sql_v2,
     merge_operations_v2,
-)
-from ddpui.dbt_automation.operations.syncsources import (
-    sync_sources,
 )
 from ddpui.dbt_automation.operations.joins import join, joins_sql
 from ddpui.dbt_automation.operations.groupby import groupby, groupby_dbt_sql
@@ -463,23 +458,6 @@ def update_dbt_model_in_project(
 ):
     """Wrapper function to update a dbt model in the project."""
     create_or_update_dbt_model_in_project(org_warehouse, orgdbt_model, is_create=False)
-
-
-def sync_sources_in_schema(
-    schema_name: str, source_name: str, org: Org, org_warehouse: OrgWarehouse
-):
-    """
-    Sync sources from a given schema to dbt.
-    """
-    warehouse_client = _get_wclient(org_warehouse)
-
-    sources_file_path = sync_sources(
-        config={"source_schema": schema_name, "source_name": source_name},
-        warehouse=warehouse_client,
-        dbtproject=dbtProject(Path(DbtProjectManager.get_dbt_project_dir(org.dbt))),
-    )
-
-    return str(sources_file_path), None
 
 
 def read_dbt_sources_in_project(orgdbt: OrgDbt):

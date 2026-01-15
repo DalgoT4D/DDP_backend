@@ -4,64 +4,19 @@ import os
 import argparse
 from logging import basicConfig, getLogger, INFO
 from pathlib import Path
-import yaml
 
 from dotenv import load_dotenv
 
 load_dotenv("dbconnection.env")
 
 # pylint:disable=wrong-import-position
-from ddpui.dbt_automation.utils.sourceschemas import mksourcedefinition
 from ddpui.dbt_automation.utils.warehouseclient import get_client
 from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
-from ddpui.dbt_automation.utils.dbtsources import (
-    readsourcedefinitions,
-    merge_sourcedefinitions_v2,
-)
 from ddpui.dbt_automation.utils.dbtproject import dbtProject
+from ddpui.core.dbtautomation_service import upsert_multiple_sources_to_a_yaml
 
 basicConfig(level=INFO)
 logger = getLogger()
-
-
-def generate_source_definitions_yaml(
-    source_name: str,
-    input_schema: str,
-    tablenames: list,
-    dbtproject: dbtProject,
-    rel_dir_to_models: str = None,
-):
-    """
-    Generate the sources.yml file. Or merge if one already exists
-    """
-    if rel_dir_to_models:
-        source_dir: Path = dbtproject.models_dir(rel_dir_to_models)
-        sources_file: Path = dbtproject.sources_filename(rel_dir_to_models)
-    else:
-        source_dir: Path = dbtproject.models_dir(input_schema)
-        sources_file: Path = dbtproject.sources_filename(input_schema)
-
-    dbsourcedefinitions = mksourcedefinition(source_name, input_schema, tablenames)
-    logger.info("read sources from database schema %s", input_schema)
-
-    if not source_dir.exists():
-        source_dir.mkdir(parents=True)
-        logger.info("created source directory %s", source_dir)
-
-    if sources_file.exists():
-        filesourcedefinitions = readsourcedefinitions(sources_file)
-        logger.info("read existing source defs from %s", sources_file)
-
-    else:
-        filesourcedefinitions = {"version": 2, "sources": []}
-
-    merged_definitions = merge_sourcedefinitions_v2(filesourcedefinitions, dbsourcedefinitions)
-    logger.info("created (new) source definitions")
-    with open(sources_file, "w", encoding="utf-8") as outfile:
-        yaml.safe_dump(merged_definitions, outfile, sort_keys=False)
-        logger.info("wrote source definitions to %s", sources_file)
-
-    return dbtproject.strip_project_dir(sources_file)
 
 
 def sync_sources(config, warehouse: WarehouseInterface, dbtproject: dbtProject):
@@ -74,7 +29,13 @@ def sync_sources(config, warehouse: WarehouseInterface, dbtproject: dbtProject):
 
     tablenames = warehouse.get_tables(input_schema)
 
-    return generate_source_definitions_yaml(source_name, input_schema, tablenames, dbtproject)
+    # Convert to the new format expected by upsert function
+    sources_groups = {source_name: {input_schema: tablenames}}
+
+    # Use the new upsert function with the schema as the rel_dir_to_models
+    return upsert_multiple_sources_to_a_yaml(
+        sources_groups=sources_groups, dbt_project=dbtproject, rel_dir_to_models=input_schema
+    )
 
 
 if __name__ == "__main__":
@@ -84,22 +45,20 @@ if __name__ == "__main__":
     projectdir = os.getenv("DBT_PROJECT_DIR")
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--warehouse", required=True, choices=["postgres", "bigquery"])
-    parser.add_argument("--source-schema", required=True)
+    parser.add_argument("--project-dir", required=True)
     parser.add_argument("--source-name", required=True)
+    parser.add_argument("--source-schema", required=True)
+
     args = parser.parse_args()
 
-    conn_info = {
-        "host": os.getenv("DBHOST"),
-        "port": os.getenv("DBPORT"),
-        "username": os.getenv("DBUSER"),
-        "password": os.getenv("DBPASSWORD"),
-        "database": os.getenv("DBNAME"),
-    }
-    warehouse_client = get_client(args.warehouse, conn_info)
+    dbtproject = dbtProject(Path(args.project_dir))
+
+    config = {"source_schema": args.source_schema, "source_name": args.source_name}
+
+    warehouse = get_client()
 
     sync_sources(
-        config={"source_schema": args.source_schema, "source_name": "Sheets"},
-        warehouse=warehouse_client,
-        dbtproject=dbtProject(projectdir),
+        config,
+        warehouse,
+        dbtproject,
     )
