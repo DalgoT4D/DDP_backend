@@ -400,10 +400,21 @@ def delete_orgdbtmodel(request, model_uuid, canvas_lock_id: str = None, cascade:
     if not orgdbt_model:
         raise HttpError(404, "model not found")
 
-    if orgdbt_model.type == OrgDbtModelType.SOURCE:
-        raise HttpError(422, "Cannot delete source model")
+    # Check if the model is being used in any canvas nodes
+    canvas_nodes = CanvasNode.objects.filter(dbtmodel=orgdbt_model, orgdbt=orgdbt)
+    if canvas_nodes.exists():
+        node_names = [node.name for node in canvas_nodes[:3]]  # Show first 3
+        raise HttpError(422, f"Cannot delete: being used in the workflow ({', '.join(node_names)})")
 
-    dbtautomation_service.delete_org_dbt_model_v2(orgdbt_model, cascade)
+    if orgdbt_model.type == OrgDbtModelType.SOURCE:
+        # For sources, ensure that the source definition is removed from the project files
+        dbtautomation_service.delete_dbt_source_in_project(orgdbt_model)
+    elif orgdbt_model.type == OrgDbtModelType.MODEL:
+        # Delete the model file from disk
+        dbtautomation_service.delete_dbt_model_in_project(orgdbt_model)
+
+    # Delete the database record
+    orgdbt_model.delete()
 
     return {"success": 1}
 
