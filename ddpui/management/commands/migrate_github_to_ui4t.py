@@ -1,12 +1,18 @@
 """
-Django management command to migrate GitHub DBT users to UI4T canvas.
+Django management command to migrate DBT users (both GitHub and UI4T) to UI4T canvas.
 Creates CanvasNode and CanvasEdge records from manifest.json.
 
 Features:
-- Fixes git remote URL if it contains OAuth tokens (replaces with clean URL from orgdbt.gitrepo_url)
-- User tab preference is automatically derived from OrgDbt.transform_type:
-  - If transform_type is 'github' or 'dbtcloud' → preference = 'github'
-  - If transform_type is 'ui' → preference = 'ui'
+- For GitHub/dbtcloud orgs (transform_type = 'github' or 'dbtcloud'):
+  - Fixes git remote URL if it contains OAuth tokens
+  - Syncs .gitignore with required entries
+  - User tab preference set to 'github'
+
+- For UI4T orgs (transform_type = 'ui'):
+  - Initializes git repository (git init)
+  - Syncs .gitignore with required entries
+  - Creates initial commit
+  - User tab preference set to 'ui'
 
 Usage:
     # Dry run (no DB changes, but shows what would happen)
@@ -27,11 +33,11 @@ from ddpui.models.canvas_models import CanvasNode, CanvasEdge
 from ddpui.models.org_user import OrgUser
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.ddpdbt import dbt_service
-from ddpui.ddpdbt.dbt_service import DbtProjectManager
+from ddpui.ddpdbt.dbt_service import DbtProjectManager, sync_gitignore_contents
 
 
 class Command(BaseCommand):
-    help = "Migrate GitHub DBT users to UI4T canvas"
+    help = "Migrate DBT users (GitHub and UI4T) to UI4T canvas"
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -50,7 +56,7 @@ class Command(BaseCommand):
         org_slug = options["org"]
         dry_run = options["dry_run"]
 
-        self.stdout.write(f"Starting GitHub to UI4T migration for: {org_slug}")
+        self.stdout.write(f"Starting UI4T canvas migration for: {org_slug}")
         if dry_run:
             self.stdout.write(self.style.WARNING("DRY-RUN MODE - No changes will be saved"))
 
@@ -65,9 +71,9 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("Migration skipped - already done"))
             return
 
-        # Step 3: Fix git remote URL if needed (outside transaction - can't be rolled back)
-        self.stdout.write("\n=== CHECKING GIT REMOTE ===")
-        self._fix_git_remote_url(orgdbt, dry_run)
+        # Step 3: Setup git based on transform_type (outside transaction - can't be rolled back)
+        self.stdout.write("\n=== GIT SETUP ===")
+        self._setup_git_for_migration(orgdbt, dry_run)
 
         # Step 4: Run migration
         self.stdout.write("\n=== RUNNING MIGRATION ===")
@@ -103,10 +109,10 @@ class Command(BaseCommand):
             raise CommandError(f"No DBT workspace configured for '{org_slug}'")
         self.stdout.write(f"  OrgDbt: {orgdbt.project_dir}")
 
-        # 3. Check gitrepo_url exists (confirms it's a GitHub DBT setup)
-        if not orgdbt.gitrepo_url:
-            raise CommandError(f"No Git repo URL found. Is this a GitHub DBT org?")
-        self.stdout.write(f"  Git repo: {orgdbt.gitrepo_url}")
+        # 3. Log transform_type and gitrepo_url
+        self.stdout.write(f"  Transform type: {orgdbt.transform_type}")
+        if orgdbt.gitrepo_url:
+            self.stdout.write(f"  Git repo: {orgdbt.gitrepo_url}")
 
         # 4. Check OrgWarehouse exists
         warehouse = OrgWarehouse.objects.filter(org=org).first()
@@ -187,6 +193,85 @@ class Command(BaseCommand):
             self.stdout.write(
                 self.style.WARNING(f"  Failed to check/update git remote: {e.stderr}")
             )
+
+    def _setup_git_for_migration(self, orgdbt: OrgDbt, dry_run: bool = False):
+        """
+        Setup git based on transform_type:
+        - For GitHub/dbtcloud users: fix git remote URL + sync gitignore
+        - For UI4T users: git init + sync gitignore + initial commit
+        """
+        dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+        is_git_org = orgdbt.transform_type in (TransformType.GIT.value, "dbtcloud")
+
+        if is_git_org:
+            self.stdout.write("  Detected GitHub/dbtcloud org")
+
+            # Fix git remote URL if needed
+            self._fix_git_remote_url(orgdbt, dry_run)
+
+            # Sync gitignore
+            self.stdout.write("  Syncing .gitignore...")
+            if not dry_run:
+                sync_gitignore_contents(str(dbt_repo_dir))
+                self.stdout.write(self.style.SUCCESS("  .gitignore synced"))
+            else:
+                self.stdout.write(self.style.WARNING("  DRY-RUN: Would sync .gitignore"))
+
+        else:
+            self.stdout.write("  Detected UI4T org")
+
+            # Step 1: Git init
+            self.stdout.write("  Initializing git repository...")
+            if not dry_run:
+                try:
+                    subprocess.run(
+                        ["git", "init"],
+                        cwd=dbt_repo_dir,
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
+                    self.stdout.write(self.style.SUCCESS("  Git repository initialized"))
+                except subprocess.CalledProcessError as e:
+                    self.stdout.write(
+                        self.style.WARNING(f"  Git init failed (may already exist): {e.stderr}")
+                    )
+            else:
+                self.stdout.write(self.style.WARNING("  DRY-RUN: Would run git init"))
+
+            # Step 2: Sync gitignore
+            self.stdout.write("  Syncing .gitignore...")
+            if not dry_run:
+                sync_gitignore_contents(str(dbt_repo_dir))
+                self.stdout.write(self.style.SUCCESS("  .gitignore synced"))
+            else:
+                self.stdout.write(self.style.WARNING("  DRY-RUN: Would sync .gitignore"))
+
+            # Step 3: Initial commit
+            self.stdout.write("  Creating initial commit...")
+            if not dry_run:
+                try:
+                    # Add all files
+                    subprocess.run(
+                        ["git", "add", "."],
+                        cwd=dbt_repo_dir,
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
+                    # Commit
+                    subprocess.run(
+                        ["git", "commit", "-m", "Initial commit - UI4T migration"],
+                        cwd=dbt_repo_dir,
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
+                    self.stdout.write(self.style.SUCCESS("  Initial commit created"))
+                except subprocess.CalledProcessError as e:
+                    self.stdout.write(self.style.WARNING(f"  Initial commit failed: {e.stderr}"))
+            else:
+                self.stdout.write(self.style.WARNING("  DRY-RUN: Would create initial commit"))
 
     def _run_migration(
         self,
