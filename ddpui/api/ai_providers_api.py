@@ -129,7 +129,7 @@ def chat_completions(request, payload: ChatCompletionRequest):
                     if response.metadata
                     else "chatcmpl-unknown",
                     "object": "chat.completion",
-                    "created": int(timezone.now().timestamp() * 1000),
+                    "created": int(timezone.now().timestamp()),
                     "model": response.model,
                     "provider": response.provider,
                     "choices": [
@@ -308,7 +308,7 @@ def provider_health(request, provider_type: str):
             {
                 "provider": provider_type,
                 "healthy": is_healthy,
-                "timestamp": int(asyncio.get_event_loop().time()),
+                "timestamp": int(timezone.now().timestamp()),
             }
         )
 

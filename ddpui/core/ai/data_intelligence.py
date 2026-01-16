@@ -14,10 +14,14 @@ import json
 from django.db import models
 from django.utils import timezone
 
+from sqlalchemy import text
+from sqlalchemy import func, column, distinct, cast, Float, Date
+
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.visualization import Chart
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
+from ddpui.datainsights.query_builder import AggQueryBuilder
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.ai.data_intelligence")
@@ -284,19 +288,27 @@ class DataIntelligenceService:
     ) -> List[Any]:
         """Safely get sample values from a column"""
         try:
-            from sqlalchemy import text
+            # Updated this query to AggQueryBuilder
 
-            # Use parameterized query for safety
-            query = text(
-                f"""
-                SELECT DISTINCT "{column_name}" 
-                FROM "{schema_name}"."{table_name}" 
-                WHERE "{column_name}" IS NOT NULL 
-                LIMIT :limit_val
-            """
-            )
+            # query = text(
+            #     f"""
+            #     SELECT DISTINCT "{column_name}"
+            #     FROM "{schema_name}"."{table_name}"
+            #     WHERE "{column_name}" IS NOT NULL
+            #     LIMIT :limit_val
+            # """
+            # )
 
-            results = warehouse_client.execute(query, {"limit_val": limit})
+            # Build query using AggQueryBuilder
+            query_builder = AggQueryBuilder()
+            query_builder.fetch_from(table_name, schema_name)
+            query_builder.add_column(column(column_name))
+            query_builder.limit_rows(limit)
+            query_builder.offset_rows(0)
+            query_builder.where_clause(column(column_name).isnot(None))
+            query_builder.build()
+
+            results = warehouse_client.execute(query_builder)
 
             sample_values = []
             for row in results[:limit]:
@@ -325,10 +337,18 @@ class DataIntelligenceService:
     ) -> Optional[int]:
         """Get estimated row count for a table"""
         try:
-            from sqlalchemy import text
+            # Moved the below query to AggQueryBuilder
+            # query = text(f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}" LIMIT 1000000')
+            # results = warehouse_client.execute(query)
 
-            query = text(f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}" LIMIT 1000000')
-            results = warehouse_client.execute(query)
+            # Build query using AggQueryBuilder
+            query_builder = AggQueryBuilder()
+            query_builder.fetch_from(table_name, schema_name)
+            query_builder.add_column(func.count())
+            query_builder.limit_rows(1000000)
+            query_builder.build()
+
+            results = warehouse_client.execute(query_builder)
 
             if results and len(results) > 0:
                 if isinstance(results[0], dict):
