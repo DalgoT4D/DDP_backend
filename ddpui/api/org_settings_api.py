@@ -111,6 +111,8 @@ def test_org_settings_route(request):
 def _build_org_settings_response(org_settings):
     """Build the organization settings response schema"""
     return OrgSettingsSchema(
+        organization_name=org_settings.org.name,
+        website=org_settings.org.website,
         ai_data_sharing_enabled=org_settings.ai_data_sharing_enabled,
         ai_logging_acknowledged=org_settings.ai_logging_acknowledged,
         ai_settings_accepted_by_email=org_settings.ai_settings_accepted_by.email
@@ -186,6 +188,30 @@ def get_org_settings(request):
         raise HttpError(500, f"Failed to retrieve organization settings: {str(e)}")
 
 
+def _apply_org_settings_updates(org_settings, payload, orguser):
+    """Apply updates to org_settings and return (ai_settings_changed, ai_chat_being_enabled)"""
+    ai_settings_changed = False
+    ai_chat_being_enabled = False
+
+    if payload.ai_data_sharing_enabled is not None:
+        if not org_settings.ai_data_sharing_enabled and payload.ai_data_sharing_enabled:
+            ai_chat_being_enabled = True
+        if org_settings.ai_data_sharing_enabled != payload.ai_data_sharing_enabled:
+            ai_settings_changed = True
+        org_settings.ai_data_sharing_enabled = payload.ai_data_sharing_enabled
+
+    if payload.ai_logging_acknowledged is not None:
+        if org_settings.ai_logging_acknowledged != payload.ai_logging_acknowledged:
+            ai_settings_changed = True
+        org_settings.ai_logging_acknowledged = payload.ai_logging_acknowledged
+
+    if ai_settings_changed:
+        org_settings.ai_settings_accepted_by = orguser.user
+        org_settings.ai_settings_accepted_at = timezone.now()
+
+    return ai_settings_changed, ai_chat_being_enabled
+
+
 @router.put("/", response=dict)
 @has_permission(["can_manage_org_settings"])
 @transaction.atomic
@@ -209,29 +235,9 @@ def update_org_settings(request, payload: UpdateOrgSettingsSchema):
         )
 
         # Track if any AI settings are being changed and if AI chat is being enabled
-        ai_settings_changed = False
-        ai_chat_being_enabled = False
-
-        # Update only AI settings fields (organization_name and website are read-only)
-        if payload.ai_data_sharing_enabled is not None:
-            # Check if AI chat is being enabled (changing from False to True)
-            if not org_settings.ai_data_sharing_enabled and payload.ai_data_sharing_enabled:
-                ai_chat_being_enabled = True
-
-            if org_settings.ai_data_sharing_enabled != payload.ai_data_sharing_enabled:
-                ai_settings_changed = True
-            org_settings.ai_data_sharing_enabled = payload.ai_data_sharing_enabled
-
-        if payload.ai_logging_acknowledged is not None:
-            if org_settings.ai_logging_acknowledged != payload.ai_logging_acknowledged:
-                ai_settings_changed = True
-            org_settings.ai_logging_acknowledged = payload.ai_logging_acknowledged
-
-        # Update tracking fields if AI settings changed
-        if ai_settings_changed:
-            org_settings.ai_settings_accepted_by = orguser.user
-            org_settings.ai_settings_accepted_at = timezone.now()
-
+        ai_settings_changed, ai_chat_being_enabled = _apply_org_settings_updates(
+            org_settings, payload, orguser
+        )
         org_settings.save()
 
         # Send notification if AI chat feature was enabled
@@ -242,7 +248,6 @@ def update_org_settings(request, payload: UpdateOrgSettingsSchema):
         logger.info(f"Updated org settings for org {orguser.org.slug} by user {orguser.user.email}")
 
         update_org_data = OrgSettingsSchema(
-            organization_logo_filename=org_settings.organization_logo_filename,
             ai_data_sharing_enabled=org_settings.ai_data_sharing_enabled,
             ai_logging_acknowledged=org_settings.ai_logging_acknowledged,
             ai_settings_accepted_by_email=org_settings.ai_settings_accepted_by.email
@@ -271,35 +276,9 @@ def update_org_settings(request, payload: UpdateOrgSettingsSchema):
                     )
 
                     # Apply the updates
-                    ai_settings_changed = False
-                    ai_chat_being_enabled = False
-
-                    if payload.organization_name is not None:
-                        org_settings.organization_name = payload.organization_name
-
-                    if payload.website is not None:
-                        org_settings.website = payload.website
-
-                    if payload.ai_data_sharing_enabled is not None:
-                        # Check if AI chat is being enabled (changing from False to True)
-                        if (
-                            not org_settings.ai_data_sharing_enabled
-                            and payload.ai_data_sharing_enabled
-                        ):
-                            ai_chat_being_enabled = True
-
-                        if org_settings.ai_data_sharing_enabled != payload.ai_data_sharing_enabled:
-                            ai_settings_changed = True
-                        org_settings.ai_data_sharing_enabled = payload.ai_data_sharing_enabled
-
-                    if payload.ai_logging_acknowledged is not None:
-                        if org_settings.ai_logging_acknowledged != payload.ai_logging_acknowledged:
-                            ai_settings_changed = True
-                        org_settings.ai_logging_acknowledged = payload.ai_logging_acknowledged
-
-                    if ai_settings_changed:
-                        org_settings.ai_settings_accepted_by = orguser.user
-                        org_settings.ai_settings_accepted_at = timezone.now()
+                    ai_settings_changed, ai_chat_being_enabled = _apply_org_settings_updates(
+                        org_settings, payload, orguser
+                    )
 
                     org_settings.save()
 
@@ -311,7 +290,6 @@ def update_org_settings(request, payload: UpdateOrgSettingsSchema):
                         )
 
                     retry_update_org_data = OrgSettingsSchema(
-                        organization_logo_filename=org_settings.organization_logo_filename,
                         ai_data_sharing_enabled=org_settings.ai_data_sharing_enabled,
                         ai_logging_acknowledged=org_settings.ai_logging_acknowledged,
                         ai_settings_accepted_by_email=org_settings.ai_settings_accepted_by.email
@@ -368,17 +346,7 @@ def create_org_settings(request, payload: CreateOrgSettingsSchema):
 
         logger.info(f"Created org settings for org {orguser.org.slug} by user {orguser.user.email}")
 
-        create_org_data = OrgSettingsSchema(
-            organization_logo_filename=org_settings.organization_logo_filename,
-            ai_data_sharing_enabled=org_settings.ai_data_sharing_enabled,
-            ai_logging_acknowledged=org_settings.ai_logging_acknowledged,
-            ai_settings_accepted_by_email=org_settings.ai_settings_accepted_by.email
-            if org_settings.ai_settings_accepted_by
-            else None,
-            ai_settings_accepted_at=org_settings.ai_settings_accepted_at.isoformat()
-            if org_settings.ai_settings_accepted_at
-            else None,
-        )
+        create_org_data = _build_org_settings_response(org_settings)
 
         return {"success": True, "res": create_org_data.dict()}
 
@@ -419,138 +387,13 @@ def update_ai_data_sharing(request):
             f"for org {orguser.org.slug} by user {orguser.user.email}"
         )
 
-        patch_org_data = OrgSettingsSchema(
-            organization_logo_filename=org_settings.organization_logo_filename,
-            ai_data_sharing_enabled=org_settings.ai_data_sharing_enabled,
-            ai_logging_acknowledged=org_settings.ai_logging_acknowledged,
-            ai_settings_accepted_by_email=org_settings.ai_settings_accepted_by.email
-            if org_settings.ai_settings_accepted_by
-            else None,
-            ai_settings_accepted_at=org_settings.ai_settings_accepted_at.isoformat()
-            if org_settings.ai_settings_accepted_at
-            else None,
-        )
+        patch_org_data = _build_org_settings_response(org_settings)
 
         return {"success": True, "res": patch_org_data.dict()}
 
     except Exception as e:
         logger.error(f"Error toggling AI data sharing: {e}")
         raise HttpError(500, "Failed to update AI data sharing setting")
-
-
-@router.post("/upload-logo", response=dict)
-@has_permission(["can_manage_org_settings"])
-@transaction.atomic
-def upload_organization_logo(request, logo_file: UploadedFile = File(...)):
-    """
-    Upload organization logo file.
-    Only Account Managers can upload logos.
-    """
-    try:
-        orguser = request.orguser
-        if not orguser or not orguser.org:
-            raise HttpError(400, "Organization not found")
-
-        logger.info(
-            f"Logo upload request from user {orguser.user.email} for org {orguser.org.slug}"
-        )
-        logger.info(
-            f"File details: name={logo_file.name}, size={logo_file.size}, type={logo_file.content_type}"
-        )
-
-        # Validate file type
-        allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"]
-        if logo_file.content_type not in allowed_types:
-            raise HttpError(400, f"Invalid file type. Allowed types: {', '.join(allowed_types)}")
-
-        # Validate file size (limit to 10MB)
-        max_size = 10 * 1024 * 1024  # 10MB
-        if logo_file.size > max_size:
-            raise HttpError(400, "File size too large. Maximum size is 10MB.")
-
-        # Get or create org settings (with auto-table creation)
-        try:
-            org_settings, created = OrgSettings.objects.get_or_create(
-                org=orguser.org,
-                defaults={
-                    "ai_data_sharing_enabled": False,
-                    "ai_logging_acknowledged": False,
-                },
-            )
-        except ProgrammingError as e:
-            if 'relation "ddpui_org_settings" does not exist' in str(e):
-                logger.info(
-                    "OrgSettings table does not exist. Attempting to create it for upload..."
-                )
-                if ensure_org_settings_table_exists():
-                    # Retry after creating table
-                    org_settings, created = OrgSettings.objects.get_or_create(
-                        org=orguser.org,
-                        defaults={
-                            "ai_data_sharing_enabled": False,
-                            "ai_logging_acknowledged": False,
-                        },
-                    )
-                else:
-                    raise HttpError(500, "Unable to create required database table")
-            else:
-                raise
-
-        # Save the file data
-        org_settings.organization_logo = logo_file.read()
-        org_settings.organization_logo_filename = logo_file.name
-        org_settings.organization_logo_content_type = logo_file.content_type
-        org_settings.save()
-
-        logger.info(
-            f"Successfully uploaded logo for org {orguser.org.slug} by user {orguser.user.email}"
-        )
-
-        return {
-            "success": True,
-            "message": "Logo uploaded successfully",
-            "filename": org_settings.organization_logo_filename,
-        }
-
-    except HttpError:
-        # Re-raise HTTP errors as-is
-        raise
-    except Exception as e:
-        logger.error(f"Error uploading organization logo: {e}")
-        logger.exception("Full traceback for logo upload error:")
-        raise HttpError(500, f"Failed to upload organization logo: {str(e)}")
-
-
-@router.get("/logo")
-@has_permission(["can_manage_org_settings"])
-def get_organization_logo(request):
-    """
-    Get organization logo file.
-    Only Account Managers can access logos.
-    """
-    try:
-        orguser = request.orguser
-        if not orguser or not orguser.org:
-            raise HttpError(400, "Organization not found")
-
-        org_settings = OrgSettings.objects.filter(org=orguser.org).first()
-
-        if not org_settings or not org_settings.organization_logo:
-            raise HttpError(404, "Organization logo not found")
-
-        # Return the image file
-        response = HttpResponse(
-            org_settings.organization_logo,
-            content_type=org_settings.organization_logo_content_type or "image/png",
-        )
-        response[
-            "Content-Disposition"
-        ] = f'inline; filename="{org_settings.organization_logo_filename or "logo"}"'
-        return response
-
-    except Exception as e:
-        logger.error(f"Error retrieving organization logo: {e}")
-        raise HttpError(500, "Failed to retrieve organization logo")
 
 
 @router.get("/ai-status", response=dict)
