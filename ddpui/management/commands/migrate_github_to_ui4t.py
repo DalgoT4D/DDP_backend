@@ -264,7 +264,7 @@ class Command(BaseCommand):
                     )
                     # Commit
                     subprocess.run(
-                        ["git", "commit", "-m", "Initial commit - UI4T migration"],
+                        ["git", "commit", "-m", "System: Initial commit - UI4T migration"],
                         cwd=dbt_repo_dir,
                         capture_output=True,
                         text=True,
