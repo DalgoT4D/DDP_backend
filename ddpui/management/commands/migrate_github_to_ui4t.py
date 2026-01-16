@@ -2,6 +2,10 @@
 Django management command to migrate GitHub DBT users to UI4T canvas.
 Creates CanvasNode and CanvasEdge records from manifest.json.
 
+User tab preference is automatically derived from OrgDbt.transform_type:
+- If transform_type is 'github' or 'dbtcloud' → preference = 'github'
+- If transform_type is 'ui' → preference = 'ui'
+
 Usage:
     # Dry run (no DB changes)
     python manage.py migrate_github_to_ui4t --org {slug} --dry-run
@@ -38,18 +42,10 @@ class Command(BaseCommand):
             action="store_true",
             help="Run migration without saving changes",
         )
-        parser.add_argument(
-            "--usertabpreference",
-            type=str,
-            required=True,
-            choices=["github", "ui"],
-            help="User tab preference to set for all org users (github or ui)",
-        )
 
     def handle(self, *args, **options):
         org_slug = options["org"]
         dry_run = options["dry_run"]
-        usertabpreference = options["usertabpreference"]
 
         self.stdout.write(f"Starting GitHub to UI4T migration for: {org_slug}")
         if dry_run:
@@ -69,7 +65,7 @@ class Command(BaseCommand):
         # Step 3: Run migration
         self.stdout.write("\n=== RUNNING MIGRATION ===")
         try:
-            stats = self._run_migration(org, orgdbt, warehouse, dry_run, usertabpreference)
+            stats = self._run_migration(org, orgdbt, warehouse, dry_run)
         except Exception as e:
             self.stdout.write(self.style.ERROR(f"Migration failed: {e}"))
             raise CommandError(str(e))
@@ -143,7 +139,6 @@ class Command(BaseCommand):
         orgdbt: OrgDbt,
         warehouse: OrgWarehouse,
         dry_run: bool = False,
-        usertabpreference: str = "github",
     ) -> dict:
         """
         Run the migration within a transaction.
@@ -170,15 +165,30 @@ class Command(BaseCommand):
                     refresh=False,  # Don't regenerate, we just did
                 )
 
-                # Step 3: Set transform_type to github
+                # Step 3: Determine user tab preference from original transform_type
+                # If transform_type is 'github' or 'dbtcloud' → preference = 'github'
+                # If transform_type is 'ui' → preference = 'ui'
+                original_transform_type = orgdbt.transform_type
+                if original_transform_type in (TransformType.GIT.value, "dbtcloud"):
+                    usertabpreference = TransformType.GIT.value
+                    self.stdout.write(
+                        f"  transform_type is '{original_transform_type}' - using 'github' preference"
+                    )
+                else:
+                    usertabpreference = TransformType.UI.value
+                    self.stdout.write(
+                        f"  transform_type is '{original_transform_type}' - using 'ui' preference"
+                    )
+
+                # Step 4: Set transform_type to github
                 self.stdout.write("  Setting transform_type to 'github'...")
                 orgdbt.transform_type = TransformType.GIT.value
                 orgdbt.save()
 
-                # Step 4: Save user tab preference for all org users
+                # Step 5: Save user tab preference for all org users
                 self._save_user_tab_preference(org, usertabpreference)
 
-                # Step 5: Rollback if dry-run
+                # Step 6: Rollback if dry-run
                 if dry_run:
                     transaction.set_rollback(True)
 
