@@ -109,9 +109,12 @@ class Command(BaseCommand):
             raise CommandError(f"No DBT workspace configured for '{org_slug}'")
         self.stdout.write(f"  OrgDbt: {orgdbt.project_dir}")
 
-        # 3. Log transform_type and gitrepo_url
+        # 3. Check transform_type and gitrepo_url
         self.stdout.write(f"  Transform type: {orgdbt.transform_type}")
-        if orgdbt.gitrepo_url:
+        is_git_org = orgdbt.transform_type in (TransformType.GIT.value, "dbtcloud")
+        if is_git_org:
+            if not orgdbt.gitrepo_url:
+                raise CommandError("GitHub/dbtcloud org must have gitrepo_url set")
             self.stdout.write(f"  Git repo: {orgdbt.gitrepo_url}")
 
         # 4. Check OrgWarehouse exists
