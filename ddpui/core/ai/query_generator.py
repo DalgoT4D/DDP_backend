@@ -250,16 +250,15 @@ class QuerySecurityValidator:
         unauthorized_tables = []
 
         for table_ref in referenced_tables:
-            # Normalize table reference (handle schema.table or just table)
             normalized_ref = table_ref.strip('"').strip("'")
+            normalized_ref_lower = normalized_ref.lower()
 
-            # Check if this table is in our allowed set
-            found_match = False
             for allowed_table in available_tables:
+                allowed_lower = allowed_table.lower()
                 if (
-                    normalized_ref == allowed_table
-                    or normalized_ref.endswith("." + allowed_table.split(".")[-1])
-                    or allowed_table.endswith("." + normalized_ref)
+                    normalized_ref_lower == allowed_lower
+                    or normalized_ref_lower.endswith("." + allowed_lower.split(".")[-1])
+                    or allowed_lower.endswith("." + normalized_ref_lower)
                 ):
                     tables_accessed.append(allowed_table)
                     found_match = True

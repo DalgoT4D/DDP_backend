@@ -108,6 +108,20 @@ def test_org_settings_route(request):
     }
 
 
+def _build_org_settings_response(org_settings):
+    """Build the organization settings response schema"""
+    return OrgSettingsSchema(
+        ai_data_sharing_enabled=org_settings.ai_data_sharing_enabled,
+        ai_logging_acknowledged=org_settings.ai_logging_acknowledged,
+        ai_settings_accepted_by_email=org_settings.ai_settings_accepted_by.email
+        if org_settings.ai_settings_accepted_by
+        else None,
+        ai_settings_accepted_at=org_settings.ai_settings_accepted_at.isoformat()
+        if org_settings.ai_settings_accepted_at
+        else None,
+    )
+
+
 @router.get("/", response=dict)
 @has_permission(["can_manage_org_settings"])
 def get_org_settings(request):
@@ -134,19 +148,7 @@ def get_org_settings(request):
         else:
             logger.info(f"Found existing org settings for org {orguser.org.slug}")
 
-        org_data = OrgSettingsSchema(
-            organization_name=org_settings.org.name,  # Reference from org model
-            website=org_settings.org.website,  # Reference from org model
-            organization_logo_filename=org_settings.organization_logo_filename,
-            ai_data_sharing_enabled=org_settings.ai_data_sharing_enabled,
-            ai_logging_acknowledged=org_settings.ai_logging_acknowledged,
-            ai_settings_accepted_by_email=org_settings.ai_settings_accepted_by.email
-            if org_settings.ai_settings_accepted_by
-            else None,
-            ai_settings_accepted_at=org_settings.ai_settings_accepted_at.isoformat()
-            if org_settings.ai_settings_accepted_at
-            else None,
-        )
+        org_data = _build_org_settings_response(org_settings)
 
         return {"success": True, "res": org_data.dict()}
 
@@ -164,17 +166,7 @@ def get_org_settings(request):
                         },
                     )
 
-                    retry_org_data = OrgSettingsSchema(
-                        organization_logo_filename=org_settings.organization_logo_filename,
-                        ai_data_sharing_enabled=org_settings.ai_data_sharing_enabled,
-                        ai_logging_acknowledged=org_settings.ai_logging_acknowledged,
-                        ai_settings_accepted_by_email=org_settings.ai_settings_accepted_by.email
-                        if org_settings.ai_settings_accepted_by
-                        else None,
-                        ai_settings_accepted_at=org_settings.ai_settings_accepted_at.isoformat()
-                        if org_settings.ai_settings_accepted_at
-                        else None,
-                    )
+                    retry_org_data = _build_org_settings_response(org_settings)
 
                     return {"success": True, "res": retry_org_data.dict()}
                 except Exception as retry_error:
