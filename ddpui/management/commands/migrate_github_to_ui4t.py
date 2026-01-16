@@ -180,11 +180,6 @@ class Command(BaseCommand):
                         f"  transform_type is '{original_transform_type}' - using 'ui' preference"
                     )
 
-                # Step 4: Set transform_type to github
-                self.stdout.write("  Setting transform_type to 'github'...")
-                orgdbt.transform_type = TransformType.GIT.value
-                orgdbt.save()
-
                 # Step 5: Save user tab preference for all org users
                 self._save_user_tab_preference(org, usertabpreference)
 
