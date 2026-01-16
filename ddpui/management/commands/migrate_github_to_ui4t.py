@@ -2,18 +2,21 @@
 Django management command to migrate GitHub DBT users to UI4T canvas.
 Creates CanvasNode and CanvasEdge records from manifest.json.
 
-User tab preference is automatically derived from OrgDbt.transform_type:
-- If transform_type is 'github' or 'dbtcloud' → preference = 'github'
-- If transform_type is 'ui' → preference = 'ui'
+Features:
+- Fixes git remote URL if it contains OAuth tokens (replaces with clean URL from orgdbt.gitrepo_url)
+- User tab preference is automatically derived from OrgDbt.transform_type:
+  - If transform_type is 'github' or 'dbtcloud' → preference = 'github'
+  - If transform_type is 'ui' → preference = 'ui'
 
 Usage:
-    # Dry run (no DB changes)
+    # Dry run (no DB changes, but shows what would happen)
     python manage.py migrate_github_to_ui4t --org {slug} --dry-run
 
     # Actual migration
     python manage.py migrate_github_to_ui4t --org {slug}
 """
 
+import subprocess
 from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
@@ -62,7 +65,11 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("Migration skipped - already done"))
             return
 
-        # Step 3: Run migration
+        # Step 3: Fix git remote URL if needed (outside transaction - can't be rolled back)
+        self.stdout.write("\n=== CHECKING GIT REMOTE ===")
+        self._fix_git_remote_url(orgdbt, dry_run)
+
+        # Step 4: Run migration
         self.stdout.write("\n=== RUNNING MIGRATION ===")
         try:
             stats = self._run_migration(org, orgdbt, warehouse, dry_run)
@@ -70,7 +77,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR(f"Migration failed: {e}"))
             raise CommandError(str(e))
 
-        # Step 4: Report stats
+        # Step 5: Report stats
         self.stdout.write("\n=== MIGRATION COMPLETE ===")
         self._print_stats(stats)
 
@@ -132,6 +139,54 @@ class Command(BaseCommand):
 
         self.stdout.write("  No existing canvas data found - proceeding with migration")
         return False
+
+    def _fix_git_remote_url(self, orgdbt: OrgDbt, dry_run: bool = False):
+        """
+        Check git remote URL and fix if it contains OAuth tokens.
+        Replaces URLs like https://oauth2:<pat>@github.com/... with clean URL from orgdbt.gitrepo_url.
+        """
+        dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+        expected_url = orgdbt.gitrepo_url
+
+        try:
+            # Get current git remote URL
+            result = subprocess.run(
+                ["git", "remote", "get-url", "origin"],
+                cwd=dbt_repo_dir,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            current_url = result.stdout.strip()
+
+            self.stdout.write(f"  Current git remote: {current_url}")
+            self.stdout.write(f"  Expected git remote: {expected_url}")
+
+            # Compare URLs - if different, update
+            if current_url != expected_url:
+                self.stdout.write(self.style.WARNING("  Git remote URL mismatch - needs update"))
+
+                if dry_run:
+                    self.stdout.write(self.style.WARNING("  DRY-RUN: Would update git remote URL"))
+                else:
+                    # Update git remote URL
+                    subprocess.run(
+                        ["git", "remote", "set-url", "origin", expected_url],
+                        cwd=dbt_repo_dir,
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
+                    self.stdout.write(
+                        self.style.SUCCESS(f"  Updated git remote to: {expected_url}")
+                    )
+            else:
+                self.stdout.write(self.style.SUCCESS("  Git remote URL is correct"))
+
+        except subprocess.CalledProcessError as e:
+            self.stdout.write(
+                self.style.WARNING(f"  Failed to check/update git remote: {e.stderr}")
+            )
 
     def _run_migration(
         self,
