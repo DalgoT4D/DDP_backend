@@ -33,7 +33,11 @@ from ddpui.models.canvas_models import CanvasNode, CanvasEdge
 from ddpui.models.org_user import OrgUser
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.ddpdbt import dbt_service
-from ddpui.ddpdbt.dbt_service import DbtProjectManager, sync_gitignore_contents
+from ddpui.ddpdbt.dbt_service import (
+    DbtProjectManager,
+    sync_gitignore_contents,
+    cleanup_unused_sources,
+)
 
 from ddpui.core.git_manager import GitManager, GitManagerError
 
@@ -300,6 +304,45 @@ class Command(BaseCommand):
                 refresh=False,  # Don't regenerate, we just did
             )
 
+            # Step 2.5: Clean up unused sources for UI4T organizations only
+            if orgdbt.transform_type == TransformType.UI.value:
+                self.stdout.write("  Cleaning up unused sources for UI4T org...")
+                cleanup_stats = cleanup_unused_sources(org, orgdbt, manifest_json)
+
+                if cleanup_stats["sources_removed"]:
+                    self.stdout.write(
+                        f"    Removed {len(cleanup_stats['sources_removed'])} unused sources: "
+                        f"{', '.join(cleanup_stats['sources_removed'])}"
+                    )
+
+                if cleanup_stats["sources_with_edges_skipped"]:
+                    self.stdout.write(
+                        f"    Skipped {len(cleanup_stats['sources_with_edges_skipped'])} sources with canvas connections: "
+                        f"{', '.join(cleanup_stats['sources_with_edges_skipped'])}"
+                    )
+
+                if cleanup_stats["errors"]:
+                    self.stdout.write(
+                        self.style.WARNING(
+                            f"    Cleanup errors: {', '.join(cleanup_stats['errors'])}"
+                        )
+                    )
+
+                if (
+                    not cleanup_stats["sources_removed"]
+                    and not cleanup_stats["sources_with_edges_skipped"]
+                ):
+                    self.stdout.write("    No unused sources found to clean up")
+
+                # Add cleanup stats to overall stats
+                stats["cleanup_sources_removed"] = len(cleanup_stats["sources_removed"])
+                stats["cleanup_sources_skipped"] = len(cleanup_stats["sources_with_edges_skipped"])
+                stats["cleanup_errors"] = len(cleanup_stats["errors"])
+            else:
+                self.stdout.write(
+                    f"  Skipping cleanup - not a UI4T org (transform_type: {orgdbt.transform_type})"
+                )
+
             # Step 3: Determine user tab preference from original transform_type
             # If transform_type is 'github' or 'dbtcloud' → preference = 'github'
             # If transform_type is 'ui' → preference = 'ui'
@@ -335,3 +378,13 @@ class Command(BaseCommand):
         self.stdout.write(f"  CanvasEdges deleted: {stats.get('edges_deleted', 0)}")
         self.stdout.write(f"  OrgDbtModels created: {stats.get('orgdbtmodels_created', 0)}")
         self.stdout.write(f"  OrgDbtModels updated: {stats.get('orgdbtmodels_updated', 0)}")
+
+        # Print cleanup statistics if they exist (UI4T orgs only)
+        if "cleanup_sources_removed" in stats:
+            self.stdout.write(
+                f"  Cleanup: Sources removed: {stats.get('cleanup_sources_removed', 0)}"
+            )
+            self.stdout.write(
+                f"  Cleanup: Sources skipped (with edges): {stats.get('cleanup_sources_skipped', 0)}"
+            )
+            self.stdout.write(f"  Cleanup: Errors: {stats.get('cleanup_errors', 0)}")

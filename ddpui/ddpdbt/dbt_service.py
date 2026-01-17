@@ -770,3 +770,129 @@ def sync_remote_dbtproject_to_canvas(org: Org, orgdbt: OrgDbt, warehouse_obj: Or
 
     logger.info(f"Sync complete. Stats: {manifest_stats}")
     return manifest_stats
+
+
+def cleanup_unused_sources(org: Org, orgdbt: OrgDbt, manifest_json=None):
+    """
+    Clean up sources that are not being used by any models.
+    Checks manifest.json for dependencies, removes unused sources from .yml files,
+    and removes corresponding CanvasNode entries if they have no edges.
+
+    Args:
+        org: The organization instance
+        orgdbt: The organization's dbt instance
+        manifest_json: Optional manifest data, if None will be generated
+
+    Returns:
+        Dict with cleanup results
+    """
+    from ddpui.core.dbtautomation_service import delete_dbt_source_in_project
+
+    results = {"sources_removed": [], "sources_with_edges_skipped": [], "errors": []}
+
+    try:
+        # Get manifest data
+        if manifest_json is None:
+            manifest = generate_manifest_json_for_dbt_project(org, orgdbt)
+        else:
+            manifest = manifest_json
+
+        # Get all sources from manifest
+        manifest_sources = manifest.get("sources", {})
+
+        # Get all models and their dependencies from manifest
+        manifest_models = manifest.get("nodes", {})
+
+        # Build dependency map - which sources are used by models
+        used_sources = set()
+
+        # Check direct dependencies in models
+        for model_key, model_data in manifest_models.items():
+            if model_data.get("resource_type") == "model":
+                depends_on = model_data.get("depends_on", {})
+                source_nodes = depends_on.get("nodes", [])
+
+                # Add source dependencies
+                for dep in source_nodes:
+                    if dep.startswith("source."):
+                        used_sources.add(dep)
+
+        # Check child_map for indirect dependencies
+        child_map = manifest.get("child_map", {})
+        for source_key in manifest_sources.keys():
+            children = child_map.get(source_key, [])
+            if any(child.startswith("model.") for child in children):
+                used_sources.add(source_key)
+
+        # Find unused sources
+        all_sources = set(manifest_sources.keys())
+        unused_sources = all_sources - used_sources
+
+        # Process unused sources
+        for unused_source_key in unused_sources:
+            try:
+                source_data = manifest_sources[unused_source_key]
+                source_name = source_data.get("source_name")
+                table_name = source_data.get("name")
+                source_schema = source_data.get("schema")
+
+                # Find corresponding unique OrgDbtModel using name and schema
+                try:
+                    orgdbt_model = OrgDbtModel.objects.get(
+                        orgdbt=orgdbt,
+                        type=OrgDbtModelType.SOURCE,
+                        name=table_name,
+                        schema=source_schema,
+                    )
+
+                    # Find corresponding unique CanvasNode using the orgdbt_model
+                    try:
+                        canvas_node = CanvasNode.objects.get(dbtmodel=orgdbt_model)
+
+                        # Check if there are any edges (incoming or outgoing)
+                        has_incoming_edges = CanvasEdge.objects.filter(to_node=canvas_node).exists()
+                        has_outgoing_edges = CanvasEdge.objects.filter(
+                            from_node=canvas_node
+                        ).exists()
+
+                        if has_incoming_edges or has_outgoing_edges:
+                            # Skip deletion if the node has edges
+                            results["sources_with_edges_skipped"].append(
+                                f"{source_schema}.{table_name}"
+                            )
+                        else:
+                            # No edges, safe to delete
+                            # Delete the CanvasNode
+                            canvas_node.delete()
+
+                            # Remove from yml file using existing function
+                            delete_dbt_source_in_project(orgdbt_model)
+
+                            results["sources_removed"].append(f"{source_schema}.{table_name}")
+
+                    except CanvasNode.DoesNotExist:
+                        # No CanvasNode found, just remove from yml
+                        delete_dbt_source_in_project(orgdbt_model)
+                        results["sources_removed"].append(f"{source_schema}.{table_name}")
+
+                    except CanvasNode.MultipleObjectsReturned:
+                        results["errors"].append(
+                            f"Multiple CanvasNodes found for {source_schema}.{table_name}"
+                        )
+
+                except OrgDbtModel.DoesNotExist:
+                    # No OrgDbtModel found, skip
+                    continue
+
+                except OrgDbtModel.MultipleObjectsReturned:
+                    results["errors"].append(
+                        f"Multiple OrgDbtModels found for {source_schema}.{table_name}"
+                    )
+
+            except Exception as e:
+                results["errors"].append(f"Error processing source {unused_source_key}: {str(e)}")
+
+    except Exception as e:
+        results["errors"].append(f"Error during cleanup: {str(e)}")
+
+    return results
