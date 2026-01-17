@@ -1006,6 +1006,17 @@ def test_cleanup_unused_sources_with_manifest_provided():
         dbtmodel=unused_source_model,
     )
 
+    # Create a model node that depends on the used source
+    model_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        name="my_model",
+        node_type=CanvasNodeType.MODEL,
+        output_cols=["id", "name", "processed"],
+    )
+
+    # Create edge from used source to model (this should prevent used_canvas_node from being deleted)
+    CanvasEdge.objects.create(from_node=used_canvas_node, to_node=model_node)
+
     # Mock manifest with used and unused sources
     mock_manifest = {
         "sources": {
@@ -1252,6 +1263,17 @@ def test_cleanup_unused_sources_child_map_dependencies():
         dbtmodel=used_source_model,
     )
 
+    # Create a model node that depends on the source via child_map
+    model_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        name="my_model",
+        node_type=CanvasNodeType.MODEL,
+        output_cols=["id", "name", "processed"],
+    )
+
+    # Create edge from used source to model (this should prevent used_canvas_node from being deleted)
+    CanvasEdge.objects.create(from_node=used_canvas_node, to_node=model_node)
+
     # Mock manifest where source is used via child_map (indirect dependency)
     mock_manifest = {
         "sources": {
@@ -1313,3 +1335,67 @@ def test_cleanup_unused_sources_error_handling():
     assert len(result["sources_with_edges_skipped"]) == 0
     assert len(result["errors"]) == 1
     assert "Manifest generation failed" in result["errors"][0]
+
+
+def test_cleanup_unused_sources_canvas_only_cleanup():
+    """Test cleanup of canvas source nodes that have no edges and aren't in manifest"""
+    # Create test organization and dbt setup
+    org = Org.objects.create(name="test-canvas-cleanup", slug="test-canvas-cleanup")
+    warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres")
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/test/repo",
+        project_dir="/tmp/test",
+        default_schema="public",
+    )
+    org.dbt = orgdbt
+    org.save()
+
+    # Create OrgDbtModel for orphaned source
+    orphaned_source_model = OrgDbtModel.objects.create(
+        orgdbt=orgdbt,
+        name="orphaned_table",
+        type=OrgDbtModelType.SOURCE,
+        display_name="orphaned_table",
+        schema="raw_data",
+        source_name="test_source",
+        output_cols=["id", "data"],
+    )
+
+    # Create CanvasNode for orphaned source (not in manifest, no edges)
+    orphaned_canvas_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        name="test_source.orphaned_table",
+        node_type=CanvasNodeType.SOURCE,
+        output_cols=["id", "data"],
+        dbtmodel=orphaned_source_model,
+    )
+
+    # Create CanvasNode without dbtmodel (should also be cleaned up)
+    no_model_canvas_node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        name="no_model_source",
+        node_type=CanvasNodeType.SOURCE,
+        output_cols=[],
+        dbtmodel=None,
+    )
+
+    # Mock manifest with no sources (so orphaned source won't be found in manifest)
+    mock_manifest = {"sources": {}, "nodes": {}, "child_map": {}}
+
+    # Mock the delete function
+    with patch("ddpui.core.dbtautomation_service.delete_dbt_source_in_project") as mock_delete:
+        result = cleanup_unused_sources(org, orgdbt, mock_manifest)
+
+    # Should find and remove the orphaned canvas node
+    assert "raw_data.orphaned_table" in result["sources_removed"]
+    assert len(result["sources_with_edges_skipped"]) == 0
+    assert len(result["errors"]) == 0
+
+    # Verify cleanup happened
+    mock_delete.assert_called_once_with(orphaned_source_model)
+
+    # Verify nodes were deleted
+    with pytest.raises(CanvasNode.DoesNotExist):
+        CanvasNode.objects.get(id=orphaned_canvas_node.id)
+    with pytest.raises(CanvasNode.DoesNotExist):
+        CanvasNode.objects.get(id=no_model_canvas_node.id)
