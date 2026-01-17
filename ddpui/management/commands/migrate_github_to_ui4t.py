@@ -333,7 +333,7 @@ class Command(BaseCommand):
                 org=org,
                 orgdbt=orgdbt,
                 org_warehouse=warehouse,
-                manifest_json=manifest_json,
+                manifest_json=None,
                 refresh=True,  # regenerate since we cleaned up the project
             )
 
