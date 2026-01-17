@@ -117,7 +117,7 @@ class Command(BaseCommand):
 
         # 3. Check transform_type and gitrepo_url
         self.stdout.write(f"  Transform type: {orgdbt.transform_type}")
-        is_git_org = orgdbt.transform_type in (TransformType.GIT.value, "dbtcloud")
+        is_git_org = orgdbt.transform_type in (TransformType.GIT, "dbtcloud")
         if is_git_org:
             if not orgdbt.gitrepo_url:
                 raise CommandError("GitHub/dbtcloud org must have gitrepo_url set")
@@ -197,7 +197,7 @@ class Command(BaseCommand):
         - For UI4T users: git init + sync gitignore + initial commit
         """
         dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
-        is_git_org = orgdbt.transform_type in (TransformType.GIT.value, "dbtcloud")
+        is_git_org = orgdbt.transform_type in (TransformType.GIT, "dbtcloud")
         git_manager = GitManager(dbt_repo_dir)
 
         if is_git_org:
@@ -287,7 +287,7 @@ class Command(BaseCommand):
         try:
             # Step 1: Clean up unused sources for UI4T organizations only (before canvas creation)
             cleanup_stats = {"sources_removed": [], "sources_with_edges_skipped": [], "errors": []}
-            if orgdbt.transform_type == TransformType.UI.value:
+            if orgdbt.transform_type == TransformType.UI:
                 self.stdout.write("  Generating manifest.json (dbt deps + dbt compile)...")
                 manifest_json = dbt_service.generate_manifest_json_for_dbt_project(org, orgdbt)
 
@@ -346,13 +346,13 @@ class Command(BaseCommand):
             # If transform_type is 'github' or 'dbtcloud' → preference = 'github'
             # If transform_type is 'ui' → preference = 'ui'
             original_transform_type = orgdbt.transform_type
-            if original_transform_type in (TransformType.GIT.value, "dbtcloud"):
-                usertabpreference = TransformType.GIT.value
+            if original_transform_type in (TransformType.GIT, "dbtcloud"):
+                usertabpreference = TransformType.GIT
                 self.stdout.write(
                     f"  transform_type is '{original_transform_type}' - using 'github' preference"
                 )
             else:
-                usertabpreference = TransformType.UI.value
+                usertabpreference = TransformType.UI
                 self.stdout.write(
                     f"  transform_type is '{original_transform_type}' - using 'ui' preference"
                 )
