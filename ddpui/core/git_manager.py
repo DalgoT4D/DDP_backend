@@ -234,6 +234,24 @@ class GitManager:
             result = self._run_command(["git", "remote", "add", remote_name, remote_url])
             return result.stdout.strip()
 
+    def get_remote_url(self, remote_name: str = "origin") -> str:
+        """
+        Return the URL for the named remote (defaults to 'origin').
+        Runs: git remote get-url <remote_name>
+        """
+        try:
+            res = self._run_command(["git", "remote", "get-url", remote_name], check=False)
+            if res.returncode != 0:
+                raise GitManagerError(
+                    message=f"Failed to get URL for remote '{remote_name}'",
+                    error=(res.stderr or res.stdout or "").strip(),
+                )
+            return res.stdout.strip()
+        except GitManagerError:
+            raise
+        except Exception as e:
+            raise GitManagerError(message="Error getting remote url", error=str(e)) from e
+
     def set_branch_upstream(self, remote: str = "origin", branch: str = None) -> str:
         """
         Set the upstream tracking branch for the current local branch.

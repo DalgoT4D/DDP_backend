@@ -35,6 +35,8 @@ from ddpui.models.userpreferences import UserPreferences
 from ddpui.ddpdbt import dbt_service
 from ddpui.ddpdbt.dbt_service import DbtProjectManager, sync_gitignore_contents
 
+from ddpui.core.git_manager import GitManager, GitManagerError
+
 
 class Command(BaseCommand):
     help = "Migrate DBT users (GitHub and UI4T) to UI4T canvas"
@@ -157,16 +159,11 @@ class Command(BaseCommand):
         dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
         expected_url = orgdbt.gitrepo_url
 
+        git_manager = GitManager(dbt_repo_dir)
+
         try:
             # Get current git remote URL
-            result = subprocess.run(
-                ["git", "remote", "get-url", "origin"],
-                cwd=dbt_repo_dir,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            current_url = result.stdout.strip()
+            current_url = git_manager.get_remote_url()
 
             self.stdout.write(f"  Current git remote: {current_url}")
             self.stdout.write(f"  Expected git remote: {expected_url}")
@@ -179,23 +176,15 @@ class Command(BaseCommand):
                     self.stdout.write(self.style.WARNING("  DRY-RUN: Would update git remote URL"))
                 else:
                     # Update git remote URL
-                    subprocess.run(
-                        ["git", "remote", "set-url", "origin", expected_url],
-                        cwd=dbt_repo_dir,
-                        capture_output=True,
-                        text=True,
-                        check=True,
-                    )
+                    git_manager.set_remote(expected_url)
                     self.stdout.write(
                         self.style.SUCCESS(f"  Updated git remote to: {expected_url}")
                     )
             else:
                 self.stdout.write(self.style.SUCCESS("  Git remote URL is correct"))
 
-        except subprocess.CalledProcessError as e:
-            self.stdout.write(
-                self.style.WARNING(f"  Failed to check/update git remote: {e.stderr}")
-            )
+        except GitManagerError as e:
+            self.stdout.write(self.style.WARNING(f"  Failed to check/update git remote: {e.error}"))
 
     def _setup_git_for_migration(self, orgdbt: OrgDbt, dry_run: bool = False):
         """
@@ -205,6 +194,7 @@ class Command(BaseCommand):
         """
         dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
         is_git_org = orgdbt.transform_type in (TransformType.GIT.value, "dbtcloud")
+        git_manager = GitManager(dbt_repo_dir)
 
         if is_git_org:
             self.stdout.write("  Detected GitHub/dbtcloud org")
@@ -227,17 +217,11 @@ class Command(BaseCommand):
             self.stdout.write("  Initializing git repository...")
             if not dry_run:
                 try:
-                    subprocess.run(
-                        ["git", "init"],
-                        cwd=dbt_repo_dir,
-                        capture_output=True,
-                        text=True,
-                        check=True,
-                    )
+                    git_manager.init_repo()
                     self.stdout.write(self.style.SUCCESS("  Git repository initialized"))
-                except subprocess.CalledProcessError as e:
+                except GitManagerError as e:
                     self.stdout.write(
-                        self.style.WARNING(f"  Git init failed (may already exist): {e.stderr}")
+                        self.style.WARNING(f"  Git init failed (may already exist): {e.error}")
                     )
             else:
                 self.stdout.write(self.style.WARNING("  DRY-RUN: Would run git init"))
@@ -254,99 +238,12 @@ class Command(BaseCommand):
             self.stdout.write("  Creating initial commit...")
             if not dry_run:
                 try:
-                    # Add all files
-                    subprocess.run(
-                        ["git", "add", "."],
-                        cwd=dbt_repo_dir,
-                        capture_output=True,
-                        text=True,
-                        check=True,
-                    )
-                    # Commit
-                    subprocess.run(
-                        ["git", "commit", "-m", "System: Initial commit - UI4T migration"],
-                        cwd=dbt_repo_dir,
-                        capture_output=True,
-                        text=True,
-                        check=True,
-                    )
+                    git_manager.commit_changes("System: Initial commit - UI4T migration")
                     self.stdout.write(self.style.SUCCESS("  Initial commit created"))
-                except subprocess.CalledProcessError as e:
-                    self.stdout.write(self.style.WARNING(f"  Initial commit failed: {e.stderr}"))
+                except GitManagerError as e:
+                    self.stdout.write(self.style.WARNING(f"  Initial commit failed: {e.error}"))
             else:
                 self.stdout.write(self.style.WARNING("  DRY-RUN: Would create initial commit"))
-
-    def _run_migration(
-        self,
-        org: Org,
-        orgdbt: OrgDbt,
-        warehouse: OrgWarehouse,
-        dry_run: bool = False,
-    ) -> dict:
-        """
-        Run the migration within a transaction.
-        Uses existing parse_dbt_manifest_to_canvas() function.
-        """
-        try:
-            with transaction.atomic():
-                # Step 1: Generate manifest.json
-                self.stdout.write("  Generating manifest.json (dbt deps + dbt compile)...")
-                manifest_json = dbt_service.generate_manifest_json_for_dbt_project(org, orgdbt)
-
-                if not manifest_json:
-                    raise Exception("Failed to generate manifest.json")
-
-                self.stdout.write(self.style.SUCCESS("  Manifest generated successfully"))
-
-                # Step 2: Parse manifest to canvas
-                self.stdout.write("  Parsing manifest and creating canvas nodes/edges...")
-                stats = dbt_service.parse_dbt_manifest_to_canvas(
-                    org=org,
-                    orgdbt=orgdbt,
-                    org_warehouse=warehouse,
-                    manifest_json=manifest_json,
-                    refresh=False,  # Don't regenerate, we just did
-                )
-
-                # Step 3: Determine user tab preference from original transform_type
-                # If transform_type is 'github' or 'dbtcloud' → preference = 'github'
-                # If transform_type is 'ui' → preference = 'ui'
-                original_transform_type = orgdbt.transform_type
-                if original_transform_type in (TransformType.GIT.value, "dbtcloud"):
-                    usertabpreference = TransformType.GIT.value
-                    self.stdout.write(
-                        f"  transform_type is '{original_transform_type}' - using 'github' preference"
-                    )
-                else:
-                    usertabpreference = TransformType.UI.value
-                    self.stdout.write(
-                        f"  transform_type is '{original_transform_type}' - using 'ui' preference"
-                    )
-
-                # Step 5: Save user tab preference for all org users
-                self._save_user_tab_preference(org, usertabpreference)
-
-                # Step 6: Rollback if dry-run
-                if dry_run:
-                    transaction.set_rollback(True)
-
-                return stats
-
-        except Exception as e:
-            # Transaction will auto-rollback
-            raise Exception(f"Migration failed: {e}")
-
-    def _print_stats(self, stats: dict):
-        """Print migration statistics."""
-        self.stdout.write(f"  Sources processed: {stats.get('sources_processed', 0)}")
-        self.stdout.write(f"  Models processed: {stats.get('models_processed', 0)}")
-        self.stdout.write(f"  CanvasNodes created: {stats.get('nodes_created', 0)}")
-        self.stdout.write(f"  CanvasNodes updated: {stats.get('nodes_updated', 0)}")
-        self.stdout.write(f"  CanvasEdges created: {stats.get('edges_created', 0)}")
-        self.stdout.write(f"  CanvasEdges skipped: {stats.get('edges_skipped', 0)}")
-        self.stdout.write(f"  CanvasEdges deleted: {stats.get('edges_deleted', 0)}")
-        self.stdout.write(f"  OrgDbtModels created: {stats.get('orgdbtmodels_created', 0)}")
-        self.stdout.write(f"  OrgDbtModels updated: {stats.get('orgdbtmodels_updated', 0)}")
 
     def _save_user_tab_preference(self, org: Org, preference: str):
         """Save user tab preference for all OrgUsers in the organization."""
@@ -371,3 +268,70 @@ class Command(BaseCommand):
                 f"  Updated tab preference for {updated_count}/{total_users} user(s)"
             )
         )
+
+    def _run_migration(
+        self,
+        org: Org,
+        orgdbt: OrgDbt,
+        warehouse: OrgWarehouse,
+        dry_run: bool = False,
+    ) -> dict:
+        """
+        Run the migration within a transaction.
+        Uses existing parse_dbt_manifest_to_canvas() function.
+        """
+        try:
+            # Step 1: Generate manifest.json
+            self.stdout.write("  Generating manifest.json (dbt deps + dbt compile)...")
+            manifest_json = dbt_service.generate_manifest_json_for_dbt_project(org, orgdbt)
+
+            if not manifest_json:
+                raise Exception("Failed to generate manifest.json")
+
+            self.stdout.write(self.style.SUCCESS("  Manifest generated successfully"))
+
+            # Step 2: Parse manifest to canvas
+            self.stdout.write("  Parsing manifest and creating canvas nodes/edges...")
+            stats = dbt_service.parse_dbt_manifest_to_canvas(
+                org=org,
+                orgdbt=orgdbt,
+                org_warehouse=warehouse,
+                manifest_json=manifest_json,
+                refresh=False,  # Don't regenerate, we just did
+            )
+
+            # Step 3: Determine user tab preference from original transform_type
+            # If transform_type is 'github' or 'dbtcloud' → preference = 'github'
+            # If transform_type is 'ui' → preference = 'ui'
+            original_transform_type = orgdbt.transform_type
+            if original_transform_type in (TransformType.GIT.value, "dbtcloud"):
+                usertabpreference = TransformType.GIT.value
+                self.stdout.write(
+                    f"  transform_type is '{original_transform_type}' - using 'github' preference"
+                )
+            else:
+                usertabpreference = TransformType.UI.value
+                self.stdout.write(
+                    f"  transform_type is '{original_transform_type}' - using 'ui' preference"
+                )
+
+            # Step 5: Save user tab preference for all org users
+            self._save_user_tab_preference(org, usertabpreference)
+
+            return stats
+
+        except Exception as e:
+            # Transaction will auto-rollback
+            raise Exception(f"Migration failed: {e}")
+
+    def _print_stats(self, stats: dict):
+        """Print migration statistics."""
+        self.stdout.write(f"  Sources processed: {stats.get('sources_processed', 0)}")
+        self.stdout.write(f"  Models processed: {stats.get('models_processed', 0)}")
+        self.stdout.write(f"  CanvasNodes created: {stats.get('nodes_created', 0)}")
+        self.stdout.write(f"  CanvasNodes updated: {stats.get('nodes_updated', 0)}")
+        self.stdout.write(f"  CanvasEdges created: {stats.get('edges_created', 0)}")
+        self.stdout.write(f"  CanvasEdges skipped: {stats.get('edges_skipped', 0)}")
+        self.stdout.write(f"  CanvasEdges deleted: {stats.get('edges_deleted', 0)}")
+        self.stdout.write(f"  OrgDbtModels created: {stats.get('orgdbtmodels_created', 0)}")
+        self.stdout.write(f"  OrgDbtModels updated: {stats.get('orgdbtmodels_updated', 0)}")
