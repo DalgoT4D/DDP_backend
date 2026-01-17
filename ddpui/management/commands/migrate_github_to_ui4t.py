@@ -336,7 +336,7 @@ class Command(BaseCommand):
                 orgdbt=orgdbt,
                 org_warehouse=warehouse,
                 manifest_json=manifest_json,
-                refresh=False,  # Don't regenerate, we just did
+                refresh=True,  # regenerate since we cleaned up the project
             )
 
             # Add cleanup stats to overall stats
