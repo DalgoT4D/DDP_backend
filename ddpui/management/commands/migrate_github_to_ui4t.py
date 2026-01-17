@@ -68,10 +68,10 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("All prerequisites validated"))
 
         # Step 2: Check if already migrated
-        self.stdout.write("\n=== CHECKING EXISTING DATA ===")
-        if self._check_existing_migration(orgdbt):
-            self.stdout.write(self.style.WARNING("Migration skipped - already done"))
-            return
+        # self.stdout.write("\n=== CHECKING EXISTING DATA ===")
+        # if self._check_existing_migration(orgdbt):
+        #     self.stdout.write(self.style.WARNING("Migration skipped - already done"))
+        #     return
 
         # Step 3: Setup git based on transform_type (outside transaction - can't be rolled back)
         self.stdout.write("\n=== GIT SETUP ===")
