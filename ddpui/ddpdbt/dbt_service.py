@@ -777,6 +777,7 @@ def cleanup_unused_sources(org: Org, orgdbt: OrgDbt, manifest_json=None):
     Clean up sources that are not being used by any models.
     Checks manifest.json for dependencies, removes unused sources from .yml files,
     and removes corresponding CanvasNode entries if they have no edges.
+    Also checks existing canvas source nodes for any without edges and cleans them up.
 
     Args:
         org: The organization instance
@@ -828,7 +829,7 @@ def cleanup_unused_sources(org: Org, orgdbt: OrgDbt, manifest_json=None):
         all_sources = set(manifest_sources.keys())
         unused_sources = all_sources - used_sources
 
-        # Process unused sources
+        # Process unused sources from manifest
         for unused_source_key in unused_sources:
             try:
                 source_data = manifest_sources[unused_source_key]
@@ -891,6 +892,46 @@ def cleanup_unused_sources(org: Org, orgdbt: OrgDbt, manifest_json=None):
 
             except Exception as e:
                 results["errors"].append(f"Error processing source {unused_source_key}: {str(e)}")
+
+        # Additional cleanup: Check all existing canvas source nodes without edges
+        try:
+            # Get all source CanvasNodes for this orgdbt
+            source_canvas_nodes = CanvasNode.objects.filter(
+                orgdbt=orgdbt, node_type=CanvasNodeType.SOURCE
+            )
+
+            for canvas_node in source_canvas_nodes:
+                try:
+                    # Check if there are any edges (incoming or outgoing)
+                    has_incoming_edges = CanvasEdge.objects.filter(to_node=canvas_node).exists()
+                    has_outgoing_edges = CanvasEdge.objects.filter(from_node=canvas_node).exists()
+
+                    if not has_incoming_edges and not has_outgoing_edges:
+                        # No edges, check if this source has an OrgDbtModel
+                        if canvas_node.dbtmodel:
+                            orgdbt_model = canvas_node.dbtmodel
+                            source_identifier = f"{orgdbt_model.schema}.{orgdbt_model.name}"
+
+                            # Check if we haven't already processed this source
+                            if source_identifier not in results["sources_removed"]:
+                                # Delete the CanvasNode
+                                canvas_node.delete()
+
+                                # Remove from yml file using existing function
+                                delete_dbt_source_in_project(orgdbt_model)
+
+                                results["sources_removed"].append(source_identifier)
+                        else:
+                            # CanvasNode without dbtmodel, just delete the canvas node
+                            canvas_node.delete()
+
+                except Exception as e:
+                    results["errors"].append(
+                        f"Error processing canvas node {canvas_node.id}: {str(e)}"
+                    )
+
+        except Exception as e:
+            results["errors"].append(f"Error during canvas cleanup: {str(e)}")
 
     except Exception as e:
         results["errors"].append(f"Error during cleanup: {str(e)}")
