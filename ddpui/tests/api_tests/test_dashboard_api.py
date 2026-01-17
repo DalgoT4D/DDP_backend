@@ -10,7 +10,7 @@ django.setup()
 
 from ddpui.models.org import Org
 from ddpui.models.org_user import User, OrgUser
-from ddpui.models.tasks import Task, DataflowOrgTask, TaskLock, OrgTask, OrgDataFlowv1
+from ddpui.models.tasks import Task, DataflowOrgTask, TaskLock, OrgTask, OrgDataFlowv1, TaskType
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.api.dashboard_api import get_dashboard_v1
@@ -40,7 +40,9 @@ def test_get_dashboard_v1():
     )
     request = mock_request(orguser)
 
-    task = Task.objects.create(type="dbt", slug="dbt-clean", label="DBT clean", command="clean")
+    task = Task.objects.create(
+        type=TaskType.DBT, slug="dbt-clean", label="DBT clean", command="clean"
+    )
     orgtask = OrgTask.objects.create(org=org, task=task)
     odf = OrgDataFlowv1.objects.create(
         org=org,

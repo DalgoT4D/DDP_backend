@@ -25,6 +25,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteConnectionSchemaUpdateSchedule,
 )
 from ddpui.models.role_based_access import Role
+from ddpui.models.tasks import TaskType
 from ddpui.models.org import (
     Org,
     OrgPrefectBlockv1,
@@ -367,7 +368,7 @@ def test_get_job_info_for_connection_job_dne(
 ):
     """tests get_job_info_for_connection"""
     org = Org.objects.create(name="org", slug="org")
-    task = Task.objects.create(type="airbyte", slug="airbyte-sync", label="AIRBYTE sync")
+    task = Task.objects.create(type=TaskType.AIRBYTE, slug="airbyte-sync", label="AIRBYTE sync")
     OrgTask.objects.create(org=org, task=task, connection_id="connection_id")
 
     mock_get_jobs_for_connection.return_value = {"jobs": []}
@@ -396,7 +397,7 @@ def test_get_job_info_for_connection(
 ):
     """tests get_job_info_for_connection"""
     org = Org.objects.create(name="org", slug="org")
-    task = Task.objects.create(type="airbyte", slug="airbyte-sync", label="AIRBYTE sync")
+    task = Task.objects.create(type=TaskType.AIRBYTE, slug="airbyte-sync", label="AIRBYTE sync")
     OrgTask.objects.create(org=org, task=task, connection_id="connection_id")
 
     mock_get_jobs_for_connection.return_value = {
@@ -448,7 +449,7 @@ def test_get_job_info_for_connection(
 def test_get_sync_history_for_connection_no_jobs():
     """tests get_sync_job_history_for_connection for success"""
     org = Org.objects.create(name="org", slug="org")
-    synctask = Task.objects.create(type="airbyte", slug="airbyte-sync", label="AIRBYTE sync")
+    synctask = Task.objects.create(type=TaskType.AIRBYTE, slug="airbyte-sync", label="AIRBYTE sync")
     OrgTask.objects.create(org=org, task=synctask, connection_id="connection_id")
 
     result, error = get_sync_job_history_for_connection(org, "connection_id")
@@ -459,7 +460,7 @@ def test_get_sync_history_for_connection_no_jobs():
 def test_get_sync_history_for_connection_success():
     """tests get_sync_job_history_for_connection for the case when the connection has no syncs created yet"""
     org = Org.objects.create(name="org", slug="org")
-    synctask = Task.objects.create(type="airbyte", slug="airbyte-sync", label="AIRBYTE sync")
+    synctask = Task.objects.create(type=TaskType.AIRBYTE, slug="airbyte-sync", label="AIRBYTE sync")
     OrgTask.objects.create(org=org, task=synctask, connection_id="connection_id")
     started_at = datetime(2025, 1, 1, 0, 0, 0, tzinfo=pytz.UTC)
     ended_at = datetime(2025, 1, 1, 0, 10, 0, tzinfo=pytz.UTC)
@@ -981,7 +982,7 @@ def test_delete_source(
 
     mock_get_connections.return_value = {"connections": connections}
 
-    synctask = Task.objects.create(type="airbyte", slug="airbyte-sync", label="AIRBYTE sync")
+    synctask = Task.objects.create(type=TaskType.AIRBYTE, slug="airbyte-sync", label="AIRBYTE sync")
     orgtask = OrgTask.objects.create(org=org, task=synctask, connection_id="connection_id")
     OrgTask.objects.create(org=org, task=synctask, connection_id="connection_id2")
 
@@ -1255,7 +1256,7 @@ def test_fetch_and_update_airbyte_jobs_for_all_connections(
 ):
     """tests fetch_and_update_airbyte_jobs_for_all_connections"""
     org = Org.objects.create(name="org", slug="org")
-    synctask = Task.objects.create(type="airbyte", slug="airbyte-sync", label="AIRBYTE sync")
+    synctask = Task.objects.create(type=TaskType.AIRBYTE, slug="airbyte-sync", label="AIRBYTE sync")
     OrgTask.objects.create(org=org, task=synctask, connection_id="connection_id")
 
     mock_get_jobs_for_connection.return_value = {

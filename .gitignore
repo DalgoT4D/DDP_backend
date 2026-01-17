@@ -26,6 +26,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+clients_dbt/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -136,8 +137,7 @@ dmypy.json
 # mac stuff
 .DS_Store
 
-celeryworker.pid
-celerybeat.pid
+*.pid
 
 secrets/
 data/

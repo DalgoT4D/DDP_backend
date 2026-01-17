@@ -23,15 +23,22 @@ from ddpui.utils.constants import (
     TASK_DBTDEPS,
 )
 from ddpui.ddpdbt import dbt_service, elementary_service
-from ddpui.ddpprefect import DBTCLIPROFILE, SECRET, prefect_service
-from ddpui.ddpprefect.schema import OrgDbtGitHub, OrgDbtSchema, OrgDbtTarget, PrefectSecretBlockEdit
-from ddpui.models.org import OrgPrefectBlockv1, Org, OrgWarehouse
+from ddpui.ddpprefect import SECRET, prefect_service
+from ddpui.ddpprefect.schema import (
+    OrgDbtGitHub,
+    OrgDbtSchema,
+    OrgDbtTarget,
+    OrgDbtConnectGitRemote,
+    OrgDbtChangesPublish,
+    PrefectSecretBlockEdit,
+)
+from ddpui.models.org import OrgPrefectBlockv1, Org, OrgWarehouse, OrgDbt, TransformType
 from ddpui.models.org_user import OrgUser, OrgUserResponse
 from ddpui.core.orgdbt_manager import DbtProjectManager
+from ddpui.core.git_manager import GitManager, GitManagerError, GitStatusSummary
 from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.dbtdocs import create_single_html
-from ddpui.utils.helpers import runcmd
 from ddpui.utils.orguserhelpers import from_orguser
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils import secretsmanager
@@ -42,7 +49,7 @@ dbt_router = Router()
 logger = CustomLogger("ddpui")
 
 
-@dbt_router.post("/workspace/")
+@dbt_router.post("/workspace/", deprecated=True)
 @has_permission(["can_create_dbt_workspace"])
 def post_dbt_workspace(request, payload: OrgDbtSchema):
     """Setup the client git repo and install a virtual env inside it to run dbt"""
@@ -63,7 +70,7 @@ def post_dbt_workspace(request, payload: OrgDbtSchema):
     return {"task_id": task.id}
 
 
-@dbt_router.put("/github/")
+@dbt_router.put("/github/", deprecated=True)
 @has_permission(["can_edit_dbt_workspace"])
 def put_dbt_github(request, payload: OrgDbtGitHub):
     """Setup the client git repo and install a virtual env inside it to run dbt"""
@@ -152,6 +159,251 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
     return {"task_id": task.id}
 
 
+@dbt_router.put("/connect_git_remote/")
+@has_permission(["can_edit_dbt_workspace"])
+def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
+    """
+    Connect an existing local git repository to a remote GitHub URL.
+
+    This endpoint is for users who have already set up their local DBT workspace
+    and initialized git locally. It allows them to connect to a remote GitHub
+    repository without cloning.
+
+    Actions:
+    1. Validates the OrgDbt workspace exists and git is initialized locally
+    2. Verifies the remote URL is accessible with the provided PAT
+    3. Sets/updates the remote origin in the local git repository
+    4. Stores/updates the PAT token in secrets manager
+    5. Updates OrgDbt.gitrepo_url in database
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    orgdbt = org.dbt
+
+    if orgdbt is None:
+        raise HttpError(400, "Create a dbt workspace first")
+    # Get the dbt repo directory (get_dbt_project_dir already returns the full path including dbtrepo)
+    dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+    if not dbt_repo_dir.exists():
+        raise HttpError(400, "DBT repo directory does not exist")
+
+    # Check if token is masked (user only wants to update URL, not PAT)
+    is_token_masked = set(payload.gitrepoAccessToken.strip()) == set("*")
+
+    # Determine which PAT to use for verification
+    if is_token_masked:
+        # Token is masked, retrieve the actual PAT from secrets manager
+        if not orgdbt.gitrepo_access_token_secret:
+            raise HttpError(
+                400, "Cannot use masked token - no existing PAT found. Please provide a valid PAT."
+            )
+        actual_pat = secretsmanager.retrieve_github_pat(orgdbt.gitrepo_access_token_secret)
+        if not actual_pat:
+            raise HttpError(400, "Failed to retrieve existing PAT from secrets manager")
+    else:
+        actual_pat = payload.gitrepoAccessToken
+
+    # Validate git is initialized locally
+    try:
+        git_manager = GitManager(
+            repo_local_path=str(dbt_repo_dir), pat=actual_pat, validate_git=True
+        )
+    except GitManagerError as e:
+        logger.error(f"GitManagerError during git init validation: {e.message}")
+        raise HttpError(
+            400, f"Git is not initialized in the DBT project folder: {e.message}"
+        ) from e
+
+    # Verify remote URL is accessible with the PAT
+    try:
+        git_manager.verify_remote_url(payload.gitrepoUrl)
+    except GitManagerError as e:
+        logger.error(f"GitManagerError during remote URL verification: {e.message}")
+        raise HttpError(400, f"{e.message}: {e.error}") from e
+
+    # Set or update the remote origin
+    try:
+        git_manager.set_remote(payload.gitrepoUrl)
+    except GitManagerError as e:
+        raise HttpError(500, f"Failed to set remote: {e.message}") from e
+
+    # sync local default to remote
+    try:
+        git_manager.sync_local_default_to_remote()
+    except GitManagerError as e:
+        raise HttpError(500, f"Failed to sync local branch with remote: {e.error}") from e
+
+    # Handle PAT token storage (only if not masked)
+    if not is_token_masked:
+        # Create oauth URL for prefect secret block
+        gitrepo_url_with_token = GitManager.generate_oauth_url_static(
+            payload.gitrepoUrl, payload.gitrepoAccessToken
+        )
+
+        # Create or update the prefect secret block
+        secret_block_edit_params = PrefectSecretBlockEdit(
+            block_name=f"{org.slug}-git-pull-url",
+            secret=gitrepo_url_with_token,
+        )
+
+        response = prefect_service.upsert_secret_block(secret_block_edit_params)
+        if not OrgPrefectBlockv1.objects.filter(
+            org=org, block_type=SECRET, block_name=secret_block_edit_params.block_name
+        ).exists():
+            OrgPrefectBlockv1.objects.create(
+                org=org,
+                block_type=SECRET,
+                block_name=secret_block_edit_params.block_name,
+                block_id=response["block_id"],
+            )
+
+        # Update or create PAT in secrets manager
+        if orgdbt.gitrepo_access_token_secret:
+            secretsmanager.update_github_pat(
+                orgdbt.gitrepo_access_token_secret, payload.gitrepoAccessToken
+            )
+        else:
+            pat_secret_key = secretsmanager.save_github_pat(payload.gitrepoAccessToken)
+            orgdbt.gitrepo_access_token_secret = pat_secret_key
+
+    # Update OrgDbt with the new gitrepo_url
+    # mark the state of transform type to GIT
+    orgdbt.gitrepo_url = payload.gitrepoUrl
+    orgdbt.transform_type = TransformType.GIT
+    orgdbt.save()
+
+    logger.info(f"Connected git remote for org {org.slug}: {payload.gitrepoUrl}")
+
+    # sync gitignore contents
+    try:
+        dbt_service.sync_gitignore_contents(dbt_repo_dir)
+    except Exception as err:
+        logger.error(f"Failed to sync .gitignore contents: {err}")
+        raise HttpError(500, f"Failed to sync .gitignore contents: {err}") from err
+
+    return {
+        "success": True,
+        "gitrepo_url": payload.gitrepoUrl,
+        "message": "Successfully connected to remote git repository",
+    }
+
+
+@dbt_router.post("/publish_changes/")
+@has_permission(["can_edit_dbt_workspace"])
+def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
+    """
+    Commit and push local changes to remote git repo.
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    orgdbt = org.dbt
+
+    if orgdbt is None:
+        raise HttpError(400, "dbt workspace is not configured for this organization")
+
+    dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+    if not dbt_repo_dir.exists():
+        raise HttpError(400, "DBT repo directory does not exist")
+
+    if payload.commit_message.strip() == "":
+        raise HttpError(400, "Commit message cannot be empty")
+
+    # Retrieve PAT if available
+    actual_pat = None
+    if orgdbt.gitrepo_access_token_secret:
+        actual_pat = secretsmanager.retrieve_github_pat(orgdbt.gitrepo_access_token_secret)
+
+    try:
+        git_manager = GitManager(
+            repo_local_path=str(dbt_repo_dir), pat=actual_pat, validate_git=True
+        )
+    except GitManagerError as e:
+        raise HttpError(400, f"Git is not initialized in the DBT repo: {e.message}") from e
+
+    committed = False
+    commit_result = None
+    pushed = False
+
+    # Step 1: Commit changes
+    try:
+        user = orguser.user
+        user_name = f"{user.first_name} {user.last_name}".strip() or user.email
+        commit_result = git_manager.commit_changes(
+            message=payload.commit_message,
+            user_name=user_name,
+            user_email=user.email,
+        )
+        committed = True
+    except GitManagerError as e:
+        return {
+            "success": False,
+            "message": f"Commit failed: {e.message}",
+            "committed": False,
+            "pushed": False,
+        }
+
+    # Step 2: Push changes
+    # only if we are connected to git
+    if orgdbt.transform_type == TransformType.GIT:
+        try:
+            git_manager.push_changes()
+            pushed = True
+            logger.info(f"Pushed changes for org {org.slug}")
+        except GitManagerError as e:
+            error_detail = e.error if e.error else e.message
+            logger.error(f"Failed to push changes for org {org.slug}: {error_detail}")
+            return {
+                "success": False,
+                "message": f"Push failed: {error_detail}",
+                "committed": committed,
+                "pushed": False,
+                "commit_result": commit_result,
+            }
+
+    return {
+        "success": True,
+        "message": "Changes published successfully",
+        "committed": committed,
+        "pushed": pushed,
+        "commit_result": commit_result,
+    }
+
+
+@dbt_router.get("/git_status/", response=GitStatusSummary)
+@has_permission(["can_view_dbt_workspace"])
+def get_dbt_git_status(request):
+    """
+    Get current git status summary for the canvas publish section.
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    orgdbt = org.dbt
+
+    if orgdbt is None:
+        raise HttpError(400, "dbt workspace is not configured for this organization")
+
+    dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+    if not dbt_repo_dir.exists():
+        raise HttpError(400, "DBT repo directory does not exist")
+
+    # Retrieve PAT if available
+    actual_pat = None
+    if orgdbt.gitrepo_access_token_secret:
+        actual_pat = secretsmanager.retrieve_github_pat(orgdbt.gitrepo_access_token_secret)
+
+    try:
+        git_manager = GitManager(
+            repo_local_path=str(dbt_repo_dir), pat=actual_pat, validate_git=True
+        )
+    except GitManagerError as e:
+        raise HttpError(400, f"Git is not initialized in the DBT repo: {e.message}") from e
+
+    try:
+        return git_manager.get_changes_summary()
+    except GitManagerError as e:
+        raise HttpError(500, f"Failed to get git status: {e.message}") from e
+
+
 @dbt_router.delete("/workspace/", response=OrgUserResponse)
 @has_permission(["can_delete_dbt_workspace"])
 def dbt_delete(request):
@@ -171,7 +423,8 @@ def dbt_delete(request):
 def get_dbt_workspace(request):
     """return details of the dbt workspace for this org"""
     orguser: OrgUser = request.orguser
-    if orguser.org.dbt is None:
+    orgdbt = orguser.org.dbt
+    if orgdbt is None:
         return {"error": "no dbt workspace has been configured"}
 
     secret_block_exists = OrgPrefectBlockv1.objects.filter(
@@ -179,10 +432,11 @@ def get_dbt_workspace(request):
     ).exists()
 
     return {
-        "gitrepo_url": orguser.org.dbt.gitrepo_url,
+        "gitrepo_url": orgdbt.gitrepo_url,
         "gitrepo_access_token": "*********" if secret_block_exists else None,
-        "target_type": orguser.org.dbt.target_type,
-        "default_schema": orguser.org.dbt.default_schema,
+        "target_type": orgdbt.target_type,
+        "default_schema": orgdbt.default_schema,
+        "transform_type": orgdbt.transform_type,
     }
 
 
@@ -200,9 +454,10 @@ def post_dbt_git_pull(request):
         raise HttpError(400, "create the dbt env first")
 
     try:
-        runcmd("git pull", project_dir)
+        git_manager = GitManager(repo_local_path=project_dir)
+        git_manager.pull_changes()
     except Exception as error:
-        raise HttpError(500, f"git pull failed in {str(project_dir)}") from error
+        raise HttpError(500, str(error)) from error
 
     return {"success": True}
 
@@ -257,7 +512,7 @@ def put_dbt_schema_v1(request, payload: OrgDbtTarget):
     org.dbt.save()
     logger.info("updated orgdbt")
 
-    cli_profile_block = OrgPrefectBlockv1.objects.filter(org=org, block_type=DBTCLIPROFILE).first()
+    cli_profile_block: OrgPrefectBlockv1 = org.dbt.cli_profile_block
 
     if cli_profile_block:
         logger.info(f"Updating the cli profile block's schema : {cli_profile_block.block_name}")
@@ -295,34 +550,18 @@ def post_run_dbt_commands(request, payload: TaskParameters = None):
     orguser: OrgUser = request.orguser
     org: Org = orguser.org
 
+    orgdbt: OrgDbt = org.dbt
+
+    if orgdbt is None:
+        raise HttpError(400, "transform not setup for the client")
+
     task_id = str(uuid4())
 
     taskprogress = TaskProgress(task_id, f"{TaskProgressHashPrefix.RUNDBTCMDS.value}-{org.slug}")
 
     taskprogress.add({"message": "Added dbt commands in queue", "status": "queued"})
 
-    try:
-        task_locks: list[TaskLock] = []
-
-        # acquire locks for clean, deps and run
-        org_tasks = OrgTask.objects.filter(
-            org=org,
-            task__slug__in=[TASK_DBTCLEAN, TASK_DBTDEPS, TASK_DBTRUN],
-            generated_by="system",
-        ).all()
-        for org_task in org_tasks:
-            task_lock = TaskLock.objects.create(
-                orgtask=org_task, locked_by=orguser, celery_task_id=task_id
-            )
-            task_locks.append(task_lock)
-
-        # executes clean, deps, run
-        run_dbt_commands.delay(org.id, task_id, payload.dict() if payload else None)
-
-    finally:
-        # clear all locks
-        for lock in task_locks:
-            lock.delete()
+    run_dbt_commands.delay(org.id, orgdbt.id, task_id, payload.dict() if payload else None)
 
     return {"task_id": task_id}
 
