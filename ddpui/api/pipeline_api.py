@@ -10,7 +10,7 @@ from ddpui import auth
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service
 
-from ddpui.ddpprefect import DBTCLIPROFILE, AIRBYTESERVER, DBTCLOUDCREDS
+from ddpui.ddpprefect import DBTCLIPROFILE, AIRBYTESERVER, DBTCLOUDCREDS, SCHEDULED_PIPELINE_QUEUE
 from ddpui.models.org import OrgDataFlowv1, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import DataflowOrgTask, OrgTask, TaskLockStatus, TaskType
@@ -175,7 +175,10 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
                 orgslug=orguser.org.slug,
                 deployment_params={"config": {"tasks": tasks, "org_slug": orguser.org.slug}},
                 cron=payload.cron,
-            )
+            ),
+            orguser.org.get_queue_config()[
+                SCHEDULED_PIPELINE_QUEUE
+            ],  # We use single queue -ddp, for running scheduled pipelines (new & old both orgs).
         )
     except Exception as error:
         logger.exception(error)

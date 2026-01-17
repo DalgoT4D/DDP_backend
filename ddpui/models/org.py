@@ -6,6 +6,8 @@ from django.db import models
 from django.utils import timezone
 from ninja import Schema
 
+from ddpui.ddpprefect import default_queue_config
+
 
 class OrgType(str, Enum):
     """an enum representing the type of organization"""
@@ -89,11 +91,21 @@ class Org(models.Model):
     ses_whitelisted_email = models.TextField(max_length=100, null=True)
     dalgouser_superset_creds_key = models.TextField(null=True)
     website = models.CharField(max_length=1000, null=True)
+    queue_config = models.JSONField(
+        default=default_queue_config,
+        help_text="Queue configuration for different task types (scheduled_pipeline_queue, connection_sync_queue, transform_task_queue)",
+    )
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
         return f"Org[{self.slug}|{self.name}|{self.airbyte_workspace_id}]"
+
+    def get_queue_config(self) -> dict:
+        """Returns queue config with defaults for any missing keys"""
+        defaults = default_queue_config()
+        config = self.queue_config or {}
+        return {**defaults, **config}
 
     def base_plan(self):
         """returns the base plan of the organization"""
